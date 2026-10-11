@@ -153,5 +153,9 @@
   "common.chat_route_wait_mode": "Wait and continue with the same model",
   "common.chat_route_combined_mode": "Try fallbacks first, then wait for a reported reset",
   "common.chat_route_priority_help": "Fallbacks are tried first. Waiting resumes an agent only after its reported reset. Returning to the preferred model happens on the next turn and never interrupts active work.",
-  "common.chat_route_waiting_for": "Reset for {0}: {1}"
+  "common.chat_route_waiting_for": "Reset for {0}: {1}",
+  "common.chat_routing_intro": "Choose what happens when an agent reaches a limit.",
+  "common.chat_agent_behavior": "Agent & behavior",
+  "common.chat_working_style": "Working style",
+  "common.chat_route_reset_options": "After a reset"
 }

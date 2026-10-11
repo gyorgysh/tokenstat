@@ -67,7 +67,7 @@ struct ChatSetupHeader: View {
     }
 
     private var agentForm: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
+        ChatSetupSection(title: L10n.text("common.chat_agent_behavior"), icon: .run) {
             if showsIntro {
                 Text(L10n.text("apple.chatsetupheader.how_this_chat_should_work.b5eec3c8"))
                     .font(Theme.callout.weight(.semibold))
@@ -80,6 +80,9 @@ struct ChatSetupHeader: View {
             if !model.personas.isEmpty {
                 personaRow
             }
+            ThemeRule()
+            Text(L10n.text("common.chat_working_style"))
+                .font(Theme.callout.weight(.semibold))
             SegmentedCapsulePicker(
                 options: [
                     (value: "plan", label: L10n.text("apple.chatsetupheader.plan.fa8ed0bd"), symbol: ActionIcon.plan.symbol),
@@ -95,13 +98,6 @@ struct ChatSetupHeader: View {
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
         }
     }
 
@@ -986,5 +982,44 @@ struct ChatAgentAvailabilityNotice: View {
             ChatAgentPanel(model: model, chat: chat, locked: chat.running,
                            onDone: { showingOptions = false })
         }
+    }
+}
+
+/// One hierarchy for the setup cards on Mac and iPhone: a visible header,
+/// a dividing rule, and a consistently spaced form body.
+struct ChatSetupSection<Content: View>: View {
+    let title: String
+    let icon: ActionIcon
+    var subtitle: String? = nil
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: Theme.Space.s) {
+                Image(systemName: icon.symbol)
+                    .font(Theme.callout.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 30, height: 30)
+                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(Theme.callout.weight(.semibold))
+                    if let subtitle {
+                        Text(subtitle).font(Theme.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.rowHighlight)
+            ThemeRule()
+            VStack(alignment: .leading, spacing: Theme.Space.m) { content }
+                .padding(Theme.Space.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(Theme.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border))
     }
 }

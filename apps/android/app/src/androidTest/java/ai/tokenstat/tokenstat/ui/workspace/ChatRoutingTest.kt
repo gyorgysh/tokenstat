@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
@@ -90,7 +91,13 @@ class ChatRoutingTest {
     private fun screenshot(name: String) {
         compose.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val image = instrumentation.uiAutomation.takeScreenshot() ?: error("No routing screenshot")
+        // Capture the initial rendered activity directly to avoid its blank
+        // startup frame. Modal sheets use a separate window, so capture the
+        // composed system surface once their controls have been asserted.
+        val image =
+            if (name == "routing-limit-preview" || name == "routing-section-preview")
+                compose.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap()
+            else instrumentation.uiAutomation.takeScreenshot() ?: error("No routing screenshot")
         val resolver = instrumentation.targetContext.contentResolver
         val uri =
             resolver.insert(
@@ -137,6 +144,8 @@ class ChatRoutingTest {
         }
         compose.onNodeWithText("high").performScrollTo().assertIsDisplayed()
         screenshot("routing-settings-preview")
+        compose.onNodeWithText(text("common.chat_wait_reset")).performScrollTo().assertIsDisplayed()
+        screenshot("routing-reset-preview")
         compose.onNodeWithText(text("common.save")).performClick()
         compose.waitUntil { calls.isNotEmpty() }
         val saved = calls.last()["routing"]!!.jsonObject

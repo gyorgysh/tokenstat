@@ -5,12 +5,18 @@ struct ChatRoutingControls: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     var title: String? = nil
+    var prominent = false
     @State private var showing = false
     var body: some View {
-        Button(title ?? L10n.text("common.chat_routing"), .settings) { showing = true }
-            .buttonStyle(SecondaryButtonStyle(small: true))
+        Group {
+            if prominent { action.buttonStyle(AccentButtonStyle()) }
+            else { action.buttonStyle(SecondaryButtonStyle(small: true)) }
+        }
             .disabled(model.savedCopy != nil)
             .sheet(isPresented: $showing) { ChatRoutingSheet(model: model, chat: chat) }
+    }
+    private var action: some View {
+        Button(title ?? L10n.text("common.chat_routing"), .settings) { showing = true }
     }
 }
 struct ChatRoutingSection: View {
@@ -18,8 +24,8 @@ struct ChatRoutingSection: View {
     let chat: ChatConversation
     private var policy: ChatRoutingPolicy { chat.routing?.policy ?? ChatRoutingPolicy() }
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text(L10n.text("common.chat_routing")).font(Theme.callout.weight(.semibold))
+        ChatSetupSection(title: L10n.text("common.chat_routing"), icon: .settings,
+                         subtitle: L10n.text("common.chat_routing_intro")) {
             Text(policy.enabled ? (policy.waitForReset ? L10n.text("common.chat_route_combined_mode") : L10n.text("common.chat_route_fallback_mode")) : (policy.waitForReset ? L10n.text("common.chat_route_wait_mode") : L10n.text("common.chat_route_manual")))
                 .font(Theme.caption).foregroundStyle(.secondary)
             if !policy.routes.isEmpty {
@@ -30,11 +36,9 @@ struct ChatRoutingSection: View {
                 Text(L10n.text("common.chat_route_preferred", model.backend(for: policy.preferred?.backend ?? chat.routing?.preferred?.backend ?? chat.backend)?.label ?? chat.backend))
                     .font(Theme.caption).foregroundStyle(.secondary)
             }
-            ChatRoutingControls(model: model, chat: chat, title: L10n.text("common.chat_route_setup"))
+            ChatRoutingControls(model: model, chat: chat, title: L10n.text("common.chat_route_setup"), prominent: true)
         }
-        .padding(Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
+
     }
 }
 struct ChatRoutingNotice: View {

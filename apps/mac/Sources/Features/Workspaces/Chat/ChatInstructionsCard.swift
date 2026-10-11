@@ -24,10 +24,7 @@ struct ChatInstructionsCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text(L10n.text("apple.chatinstructionscard.instructions.934652dc"))
-                .font(Theme.caption)
-                .foregroundStyle(.tertiary)
+        ChatSetupSection(title: L10n.text("apple.chatinstructionscard.instructions.934652dc"), icon: .docs) {
 
             ThemedEditor(text: $draft, font: Theme.callout, minHeight: 76, maxHeight: 220)
                 .disabled(model.savedCopy != nil)
@@ -94,13 +91,6 @@ struct ChatInstructionsCard: View {
                 }
                 .transition(.opacity)
             }
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
         }
         .onAppear { draft = chat.systemPrompt }
         .onChange(of: chat.id) { _, _ in draft = chat.systemPrompt }

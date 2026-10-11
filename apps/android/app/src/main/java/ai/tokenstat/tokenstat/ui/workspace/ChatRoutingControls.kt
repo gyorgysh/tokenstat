@@ -5,11 +5,13 @@ import ai.tokenstat.tokenstat.ui.components.*
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.theme.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import java.text.DateFormat
 import java.util.Date
@@ -72,120 +74,151 @@ internal fun ChatRoutingControls(
                 .onFailure { error = it.message }
         }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
         if (limit != null)
             TsCard {
-                Text(
-                    if (limit.routeText("kind") == "usage")
-                        L10n.text(
-                            "common.chat_limit_reached",
-                            agentLabel(limit.routeText("provider")),
-                        )
-                    else if (limit.routeText("kind") == "throttle")
-                        L10n.text("common.chat_throttled", agentLabel(limit.routeText("provider")))
-                    else
-                        L10n.text(
-                            "common.chat_route_failure",
-                            agentLabel(limit.routeText("provider")),
-                        ),
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Text(limit.routeText("reason"))
-                val reset = (limit["resetsAtMs"] as? JsonPrimitive)?.longOrNull
-                Text(
-                    if (reset == null) L10n.text("common.chat_reset_unknown")
-                    else
-                        L10n.text(
-                            "common.chat_resets_at",
-                            DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-                                .format(Date(reset)),
-                        )
-                )
-                state?.routeText("note")?.takeIf { it.isNotBlank() }?.let { Text(it) }
-                if (state?.bol("needsDeliveryCheck") == true)
-                    Text(L10n.text("common.chat_route_delivery"))
-                val nextReset = state?.get("nextReset") as? JsonObject
-                (nextReset?.get("atMs") as? JsonPrimitive)?.longOrNull?.let { at ->
-                    val destination = nextReset["destination"] as? JsonObject
-                    if (destination?.routeText("backend") != limit.routeText("provider"))
-                        Text(
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Text(
+                        if (limit.routeText("kind") == "usage")
                             L10n.text(
-                                "common.chat_route_waiting_for",
-                                destination?.routeText("backend").orEmpty(),
-                                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-                                    .format(Date(at)),
+                                "common.chat_limit_reached",
+                                agentLabel(limit.routeText("provider")),
                             )
-                        )
-                }
-                if (reset != null || nextReset != null)
-                    BrandCheckbox(
-                        checked = policy?.bol("waitForReset") == true,
-                        onToggle = {
-                            val changed =
-                                JsonObject(
-                                    policy.orEmpty() +
-                                        ("waitForReset" to
-                                            JsonPrimitive(policy?.bol("waitForReset") != true))
-                                )
-                            apply("chat.routing", buildJsonObject { put("routing", changed) })
-                        },
-                        label = L10n.text("common.chat_wait_reset"),
+                        else if (limit.routeText("kind") == "throttle")
+                            L10n.text(
+                                "common.chat_throttled",
+                                agentLabel(limit.routeText("provider")),
+                            )
+                        else
+                            L10n.text(
+                                "common.chat_route_failure",
+                                agentLabel(limit.routeText("provider")),
+                            ),
+                        style = TsType.headline,
                     )
-                Row {
-                    TextButton(
-                        enabled = !chat.bol("running") && state?.bol("needsDeliveryCheck") != true,
-                        onClick = {
-                            apply("chat.routeAction", buildJsonObject { put("choice", "resume") })
-                        },
-                    ) {
-                        Text(L10n.text("common.chat_route_retry"))
+                    Text(
+                        limit.routeText("reason"),
+                        style = TsType.footnote,
+                        color = LocalTsColors.current.textSecondary,
+                    )
+                    val reset = (limit["resetsAtMs"] as? JsonPrimitive)?.longOrNull
+                    Text(
+                        if (reset == null) L10n.text("common.chat_reset_unknown")
+                        else
+                            L10n.text(
+                                "common.chat_resets_at",
+                                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                                    .format(Date(reset)),
+                            )
+                    )
+                    state?.routeText("note")?.takeIf { it.isNotBlank() }?.let { Text(it) }
+                    if (state?.bol("needsDeliveryCheck") == true)
+                        Text(L10n.text("common.chat_route_delivery"))
+                    val nextReset = state?.get("nextReset") as? JsonObject
+                    (nextReset?.get("atMs") as? JsonPrimitive)?.longOrNull?.let { at ->
+                        val destination = nextReset["destination"] as? JsonObject
+                        if (destination?.routeText("backend") != limit.routeText("provider"))
+                            Text(
+                                L10n.text(
+                                    "common.chat_route_waiting_for",
+                                    destination?.routeText("backend").orEmpty(),
+                                    DateFormat.getDateTimeInstance(
+                                            DateFormat.MEDIUM,
+                                            DateFormat.SHORT,
+                                        )
+                                        .format(Date(at)),
+                                )
+                            )
                     }
-                    TextButton(
-                        onClick = {
-                            apply("chat.routeAction", buildJsonObject { put("choice", "cancel") })
-                        }
-                    ) {
-                        Text(L10n.text("common.cancel"))
+                    if (reset != null || nextReset != null)
+                        BrandCheckbox(
+                            checked = policy?.bol("waitForReset") == true,
+                            onToggle = {
+                                val changed =
+                                    JsonObject(
+                                        policy.orEmpty() +
+                                            ("waitForReset" to
+                                                JsonPrimitive(policy?.bol("waitForReset") != true))
+                                    )
+                                apply("chat.routing", buildJsonObject { put("routing", changed) })
+                            },
+                            label = L10n.text("common.chat_wait_reset"),
+                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        TsAccentButton(
+                            label = L10n.text("common.chat_route_retry"),
+                            icon = ActionIcon.Refresh.vector,
+                            small = true,
+                            enabled =
+                                !chat.bol("running") && state?.bol("needsDeliveryCheck") != true,
+                            onClick = {
+                                apply(
+                                    "chat.routeAction",
+                                    buildJsonObject { put("choice", "resume") },
+                                )
+                            },
+                        )
+                        TsSecondaryButton(
+                            label = L10n.text("common.cancel"),
+                            icon = ActionIcon.Stop.vector,
+                            small = true,
+                            onClick = {
+                                apply(
+                                    "chat.routeAction",
+                                    buildJsonObject { put("choice", "cancel") },
+                                )
+                            },
+                        )
                     }
                 }
             }
-        TsCard {
-            Text(L10n.text("common.chat_routing"), style = MaterialTheme.typography.titleSmall)
-            Text(
-                if (policy?.bol("enabled") == true) {
-                    if (policy.bol("waitForReset")) L10n.text("common.chat_route_combined_mode")
-                    else L10n.text("common.chat_route_fallback_mode")
-                } else {
-                    if (policy?.bol("waitForReset") == true)
-                        L10n.text("common.chat_route_wait_mode")
-                    else L10n.text("common.chat_route_manual")
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
-            val destinations =
-                (policy?.get("routes") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
-            if (destinations.isNotEmpty())
+        TsCard(
+            title = L10n.text("common.chat_routing"),
+            subtitle = L10n.text("common.chat_routing_intro"),
+            mark = "mark_workflow",
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text(
-                    destinations.joinToString(" → ") { agentLabel(it.routeText("backend")) },
-                    style = MaterialTheme.typography.bodySmall,
+                    if (policy?.bol("enabled") == true) {
+                        if (policy.bol("waitForReset")) L10n.text("common.chat_route_combined_mode")
+                        else L10n.text("common.chat_route_fallback_mode")
+                    } else {
+                        if (policy?.bol("waitForReset") == true)
+                            L10n.text("common.chat_route_wait_mode")
+                        else L10n.text("common.chat_route_manual")
+                    },
+                    style = TsType.footnote,
                 )
-            if (policy?.bol("returnPreferred") == true)
-                Text(
-                    L10n.text(
-                        "common.chat_route_preferred",
-                        ((policy["preferred"] as? JsonObject)
-                                ?: (state?.get("preferred") as? JsonObject))
-                            ?.routeText("backend") ?: chat.routeText("backend"),
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
+                val destinations =
+                    (policy?.get("routes") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+                if (destinations.isNotEmpty())
+                    Text(
+                        destinations.joinToString(" → ") { agentLabel(it.routeText("backend")) },
+                        style = TsType.footnote,
+                    )
+                if (policy?.bol("returnPreferred") == true)
+                    Text(
+                        L10n.text(
+                            "common.chat_route_preferred",
+                            ((policy["preferred"] as? JsonObject)
+                                    ?: (state?.get("preferred") as? JsonObject))
+                                ?.routeText("backend") ?: chat.routeText("backend"),
+                        ),
+                        style = TsType.footnote,
+                    )
+                TsAccentButton(
+                    label = L10n.text("common.chat_route_setup"),
+                    icon = ActionIcon.Settings.vector,
+                    onClick = { showing = true },
                 )
-            TextButton(onClick = { showing = true }) { Text(L10n.text("common.chat_route_setup")) }
+            }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     if (showing) ChatRoutingDialog(chat, backends, call, { showing = false }, onChanged)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatRoutingDialog(
     chat: JsonObject,
@@ -277,15 +310,37 @@ private fun ChatRoutingDialog(
         if (preferred == old) preferred = updated
         routes = routes.mapIndexed { i, route -> if (i == index) updated else route }
     }
-    AlertDialog(
+    val colors = LocalTsColors.current
+    ModalBottomSheet(
         onDismissRequest = dismiss,
-        title = { Text(L10n.text("common.chat_routing")) },
-        text = {
-            Column(
-                Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(Space.s),
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = colors.background,
+    ) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
+            Row(
+                Modifier.fillMaxWidth().background(colors.accentSoft).padding(Space.m),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
-                Text(L10n.text("common.chat_route_explanation"))
+                Icon(ActionIcon.Settings.vector, null, tint = colors.accent)
+                Column {
+                    Text(
+                        L10n.text("common.chat_routing"),
+                        style = TsType.headline,
+                        color = colors.textPrimary,
+                    )
+                    Text(
+                        L10n.text("common.chat_routing_intro"),
+                        style = TsType.footnote,
+                        color = colors.textSecondary,
+                    )
+                }
+            }
+            HorizontalDivider(color = colors.border)
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.m),
+                verticalArrangement = Arrangement.spacedBy(Space.m),
+            ) {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 if (loaded) {
                     BrandCheckbox(
@@ -293,9 +348,166 @@ private fun ChatRoutingDialog(
                         { enabled = !enabled },
                         L10n.text("common.chat_routing_enabled"),
                     )
+                    Text(L10n.text("common.chat_route_order"), style = TsType.headline)
+                    routes.forEachIndexed { index, route ->
+                        TsCard {
+                            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                                Text(
+                                    "${index+1}. ${agentLabel(route.routeText("backend"))}",
+                                    style = TsType.headline,
+                                )
+                                if (
+                                    route.routeText("backend") == "muse" &&
+                                        chat.routeText("autonomy") != "bypass"
+                                )
+                                    Text(
+                                        L10n.text("common.chat_route_permissions"),
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = TsType.footnote,
+                                    )
+                                val models =
+                                    (backends
+                                            .firstOrNull {
+                                                it.routeText("id") == route.routeText("backend")
+                                            }
+                                            ?.get("models") as? JsonArray)
+                                        ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                                        .orEmpty()
+                                var menu by remember(route, index) { mutableStateOf(false) }
+                                Box {
+                                    TsPickerFieldRow(
+                                        label = L10n.text("android.chatagentpanel.model.5e2c614c"),
+                                        summary =
+                                            route.routeText("model").ifBlank {
+                                                L10n.text("android.chatagentpanel.default.21b111cb")
+                                            },
+                                        onOpen = { menu = true },
+                                    )
+                                    DropdownMenu(menu, { menu = false }) {
+                                        (listOf("") + models).forEach { model ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        model.ifBlank {
+                                                            L10n.text(
+                                                                "android.chatagentpanel.default.21b111cb"
+                                                            )
+                                                        }
+                                                    )
+                                                },
+                                                onClick = {
+                                                    updateRoute(index, "model", model)
+                                                    menu = false
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                                val efforts =
+                                    (backends
+                                            .firstOrNull {
+                                                it.routeText("id") == route.routeText("backend")
+                                            }
+                                            ?.get("efforts") as? JsonArray)
+                                        ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                                        .orEmpty()
+                                if (efforts.isNotEmpty()) {
+                                    var effortMenu by
+                                        remember(route, index) { mutableStateOf(false) }
+                                    Box {
+                                        TsPickerFieldRow(
+                                            label =
+                                                L10n.text("android.chatagentpanel.effort.4387e5d3"),
+                                            summary =
+                                                route.routeText("effort").ifBlank {
+                                                    L10n.text(
+                                                        "android.chatagentpanel.default.21b111cb"
+                                                    )
+                                                },
+                                            onOpen = { effortMenu = true },
+                                        )
+                                        DropdownMenu(effortMenu, { effortMenu = false }) {
+                                            (listOf("") + efforts).forEach { effort ->
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            effort.ifBlank {
+                                                                L10n.text(
+                                                                    "android.chatagentpanel.default.21b111cb"
+                                                                )
+                                                            }
+                                                        )
+                                                    },
+                                                    onClick = {
+                                                        updateRoute(index, "effort", effort)
+                                                        effortMenu = false
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                                    TsSecondaryButton(
+                                        label = L10n.text("common.move_up"),
+                                        icon = ActionIcon.Move.vector,
+                                        small = true,
+                                        enabled = index > 0,
+                                        onClick = {
+                                            routes =
+                                                routes.toMutableList().also {
+                                                    java.util.Collections.swap(it, index, index - 1)
+                                                }
+                                        },
+                                    )
+                                    TsSecondaryButton(
+                                        label = L10n.text("common.remove"),
+                                        icon = ActionIcon.Delete.vector,
+                                        small = true,
+                                        onClick = {
+                                            if (preferred == routes[index]) preferred = null
+                                            routes = routes.filterIndexed { i, _ -> i != index }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    var addMenu by remember { mutableStateOf(false) }
+                    Box {
+                        TsSecondaryButton(
+                            label = L10n.text("common.add"),
+                            icon = ActionIcon.Create.vector,
+                            small = true,
+                            enabled = routes.size < 8,
+                            onClick = { addMenu = true },
+                        )
+                        DropdownMenu(addMenu, { addMenu = false }) {
+                            backends
+                                .filter {
+                                    it.routeText("id") != "sh" &&
+                                        it["installed"] != JsonPrimitive(false)
+                                }
+                                .forEach { backend ->
+                                    DropdownMenuItem(
+                                        text = { Text(backend.routeText("label")) },
+                                        onClick = {
+                                            routes =
+                                                routes +
+                                                    buildJsonObject {
+                                                        put("backend", backend.routeText("id"))
+                                                    }
+                                            addMenu = false
+                                        },
+                                    )
+                                }
+                        }
+                    }
+                    HorizontalDivider(color = LocalTsColors.current.border)
+                    Text(L10n.text("common.chat_route_reset_options"), style = TsType.headline)
                     Text(
                         L10n.text("common.chat_route_priority_help"),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = TsType.footnote,
                     )
                     BrandCheckbox(wait, { wait = !wait }, L10n.text("common.chat_wait_reset"))
                     BrandCheckbox(
@@ -303,61 +515,23 @@ private fun ChatRoutingDialog(
                         { returns = !returns },
                         L10n.text("common.chat_return_preferred"),
                     )
-                    BrandCheckbox(
-                        defaults,
-                        { defaults = !defaults },
-                        L10n.text("common.chat_route_default"),
-                    )
-                    TextButton(onClick = { advanced = !advanced }) {
-                        Text(L10n.text("common.settings"))
-                    }
-                    if (advanced) {
-                        BrandCheckbox(
-                            throttles,
-                            { throttles = !throttles },
-                            L10n.text("common.chat_route_throttle"),
-                        )
-                        BrandCheckbox(
-                            outages,
-                            { outages = !outages },
-                            L10n.text("common.chat_route_errors"),
-                        )
-                        BrandCheckbox(
-                            notifies,
-                            { notifies = !notifies },
-                            L10n.text("common.chat_route_notify"),
-                        )
-                        BrandCheckbox(auth, { auth = !auth }, L10n.text("common.chat_route_auth"))
-                        BrandCheckbox(
-                            failures,
-                            { failures = !failures },
-                            L10n.text("common.chat_route_agent_errors"),
-                        )
-                    }
-                    Text(
-                        L10n.text("common.chat_route_policy_help"),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
                     if (returns) {
                         var preferredMenu by remember { mutableStateOf(false) }
-                        Text(
-                            L10n.text("common.chat_route_preferred_picker"),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
                         Box {
-                            TextButton(onClick = { preferredMenu = true }) {
-                                Text(
+                            TsPickerFieldRow(
+                                label = L10n.text("common.chat_route_preferred_picker"),
+                                summary =
                                     preferred?.let {
                                         listOf(
-                                                it.routeText("backend"),
+                                                agentLabel(it.routeText("backend")),
                                                 it.routeText("model"),
                                                 it.routeText("effort"),
                                             )
                                             .filter { value -> value.isNotBlank() }
                                             .joinToString(" · ")
-                                    } ?: L10n.text("common.chat_route_current_preferred")
-                                )
-                            }
+                                    } ?: L10n.text("common.chat_route_current_preferred"),
+                                onOpen = { preferredMenu = true },
+                            )
                             DropdownMenu(preferredMenu, { preferredMenu = false }) {
                                 DropdownMenuItem(
                                     text = {
@@ -399,141 +573,54 @@ private fun ChatRoutingDialog(
                                     .orEmpty()
                                     .ifBlank { chat.routeText("backend") },
                             ),
-                            style = MaterialTheme.typography.bodySmall,
+                            style = TsType.footnote,
                         )
 
-                    Text(L10n.text("common.chat_route_order"))
-                    routes.forEachIndexed { index, route ->
-                        TsCard {
-                            Text(
-                                "${index+1}. ${agentLabel(route.routeText("backend"))}",
-                                style = MaterialTheme.typography.titleSmall,
-                            )
-                            if (
-                                route.routeText("backend") == "muse" &&
-                                    chat.routeText("autonomy") != "bypass"
-                            )
-                                Text(
-                                    L10n.text("common.chat_route_permissions"),
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            val models =
-                                (backends
-                                        .firstOrNull {
-                                            it.routeText("id") == route.routeText("backend")
-                                        }
-                                        ?.get("models") as? JsonArray)
-                                    ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
-                                    .orEmpty()
-                            Text(
-                                L10n.text("android.chatagentpanel.model.5e2c614c"),
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                            var menu by remember(route, index) { mutableStateOf(false) }
-                            Box {
-                                TextButton(onClick = { menu = true }) {
-                                    Text(
-                                        route.routeText("model").ifBlank {
-                                            L10n.text("android.chatagentpanel.default.21b111cb")
-                                        }
-                                    )
-                                }
-                                DropdownMenu(menu, { menu = false }) {
-                                    (listOf("") + models).forEach { model ->
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    model.ifBlank {
-                                                        L10n.text(
-                                                            "android.chatagentpanel.default.21b111cb"
-                                                        )
-                                                    }
-                                                )
-                                            },
-                                            onClick = {
-                                                updateRoute(index, "model", model)
-                                                menu = false
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                            val efforts =
-                                (backends
-                                        .firstOrNull {
-                                            it.routeText("id") == route.routeText("backend")
-                                        }
-                                        ?.get("efforts") as? JsonArray)
-                                    ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
-                                    .orEmpty()
-                            if (efforts.isNotEmpty()) {
-                                var effortMenu by remember(route, index) { mutableStateOf(false) }
-                                Text(
-                                    L10n.text("android.chatagentpanel.effort.4387e5d3"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                                Box {
-                                    TextButton(onClick = { effortMenu = true }) {
-                                        Text(
-                                            route.routeText("effort").ifBlank {
-                                                L10n.text("android.chatagentpanel.default.21b111cb")
-                                            }
-                                        )
-                                    }
-                                    DropdownMenu(effortMenu, { effortMenu = false }) {
-                                        (listOf("") + efforts).forEach { effort ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        effort.ifBlank {
-                                                            L10n.text(
-                                                                "android.chatagentpanel.default.21b111cb"
-                                                            )
-                                                        }
-                                                    )
-                                                },
-                                                onClick = {
-                                                    updateRoute(index, "effort", effort)
-                                                    effortMenu = false
-                                                },
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            Row {
-                                TextButton(
-                                    enabled = index > 0,
-                                    onClick = {
-                                        routes =
-                                            routes.toMutableList().also {
-                                                java.util.Collections.swap(it, index, index - 1)
-                                            }
-                                    },
-                                ) {
-                                    Text(L10n.text("common.move_up"))
-                                }
-                                TextButton(
-                                    onClick = {
-                                        if (preferred == routes[index]) preferred = null
-                                        routes = routes.filterIndexed { i, _ -> i != index }
-                                    }
-                                ) {
-                                    Text(L10n.text("common.remove"))
-                                }
-                            }
-                        }
+                    HorizontalDivider(color = colors.border)
+                    BrandCheckbox(
+                        defaults,
+                        { defaults = !defaults },
+                        L10n.text("common.chat_route_default"),
+                    )
+                    TsSecondaryButton(
+                        label = L10n.text("common.settings"),
+                        icon = ActionIcon.Settings.vector,
+                        small = true,
+                        onClick = { advanced = !advanced },
+                    )
+                    if (advanced) {
+                        BrandCheckbox(
+                            throttles,
+                            { throttles = !throttles },
+                            L10n.text("common.chat_route_throttle"),
+                        )
+                        BrandCheckbox(
+                            outages,
+                            { outages = !outages },
+                            L10n.text("common.chat_route_errors"),
+                        )
+                        BrandCheckbox(
+                            notifies,
+                            { notifies = !notifies },
+                            L10n.text("common.chat_route_notify"),
+                        )
+                        BrandCheckbox(auth, { auth = !auth }, L10n.text("common.chat_route_auth"))
+                        BrandCheckbox(
+                            failures,
+                            { failures = !failures },
+                            L10n.text("common.chat_route_agent_errors"),
+                        )
                     }
                     var history by remember { mutableStateOf(false) }
-                    TextButton(
+                    TsSecondaryButton(
+                        label = L10n.text("common.chat_route_history"),
+                        icon = ActionIcon.History.vector,
+                        small = true,
                         onClick = {
                             history = !history
                             if (history) loadHistory()
-                        }
-                    ) {
-                        Text(L10n.text("common.chat_route_history"))
-                    }
+                        },
+                    )
                     if (history) {
                         val activity =
                             historyPage
@@ -553,7 +640,7 @@ private fun ChatRoutingDialog(
                                         .format(
                                             Date((entry["atMs"] as? JsonPrimitive)?.longOrNull ?: 0)
                                         ),
-                                style = MaterialTheme.typography.labelMedium,
+                                style = TsType.caption,
                             )
                             (entry["source"] as? JsonObject)?.let { Text(it.routeText("backend")) }
                             (entry["target"] as? JsonObject)?.let {
@@ -568,96 +655,85 @@ private fun ChatRoutingDialog(
                             }
                             Text(
                                 entry.routeText("reason"),
-                                style = MaterialTheme.typography.bodySmall,
+                                style = TsType.footnote,
                             )
                         }
                     }
                     if (history)
-                        Row {
-                            TextButton(enabled = !historyLoading, onClick = { loadHistory() }) {
-                                Text(L10n.text("common.refresh"))
-                            }
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                            TsSecondaryButton(
+                                label = L10n.text("common.refresh"),
+                                icon = ActionIcon.Refresh.vector,
+                                small = true,
+                                enabled = !historyLoading,
+                                onClick = { loadHistory() },
+                            )
                             historyCursor?.let { cursor ->
-                                TextButton(
+                                TsSecondaryButton(
+                                    label = L10n.text("common.chat_route_older"),
+                                    icon = ActionIcon.History.vector,
+                                    small = true,
                                     enabled = !historyLoading,
                                     onClick = { loadHistory(cursor) },
-                                ) {
-                                    Text(L10n.text("common.chat_route_older"))
-                                }
+                                )
                             }
                         }
-                    var addMenu by remember { mutableStateOf(false) }
-                    Box {
-                        TextButton(enabled = routes.size < 8, onClick = { addMenu = true }) {
-                            Text(L10n.text("common.add"))
-                        }
-                        DropdownMenu(addMenu, { addMenu = false }) {
-                            backends
-                                .filter {
-                                    it.routeText("id") != "sh" &&
-                                        it["installed"] != JsonPrimitive(false)
-                                }
-                                .forEach { backend ->
-                                    DropdownMenuItem(
-                                        text = { Text(backend.routeText("label")) },
-                                        onClick = {
-                                            routes =
-                                                routes +
-                                                    buildJsonObject {
-                                                        put("backend", backend.routeText("id"))
-                                                    }
-                                            addMenu = false
-                                        },
-                                    )
-                                }
-                        }
-                    }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = loaded && !saving,
-                onClick = {
-                    saving = true
-                    scope.launch {
-                        runCatching {
-                            call(
-                                "chat.routing",
-                                buildJsonObject {
-                                    put("id", chat.routeText("id"))
-                                    chat["sendRevision"]?.let { put("expectedRevision", it) }
-                                    put(
-                                        "routing",
-                                        buildJsonObject {
-                                            put("enabled", enabled)
-                                            put("waitForReset", wait)
-                                            put("returnPreferred", returns)
-                                            put("useAsDefault", defaults)
-                                            put("failoverOnThrottle", throttles)
-                                            put("failoverOnErrors", outages)
-                                            put("failoverOnAuth", auth)
-                                            put("failoverOnFailures", failures)
-                                            put("notify", notifies)
-                                            put("preferred", preferred ?: JsonNull)
-                                            put("routes", JsonArray(routes))
-                                        },
-                                    )
-                                },
-                            )
-                        }
-                            .onSuccess {
-                                changed()
-                                dismiss()
-                            }
-                            .onFailure { error = it.message }
-                        saving = false
-                    }
-                },
+            HorizontalDivider(color = colors.border)
+            Row(
+                Modifier.fillMaxWidth().padding(Space.m),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
-                Text(L10n.text("common.save"))
+                TsSecondaryButton(
+                    label = L10n.text("common.cancel"),
+                    icon = ActionIcon.Stop.vector,
+                    modifier = Modifier.weight(1f),
+                    onClick = dismiss,
+                )
+                TsAccentButton(
+                    label = L10n.text("common.save"),
+                    icon = ActionIcon.Save.vector,
+                    modifier = Modifier.weight(1f),
+                    enabled = loaded && !saving,
+                    onClick = {
+                        saving = true
+                        scope.launch {
+                            runCatching {
+                                call(
+                                    "chat.routing",
+                                    buildJsonObject {
+                                        put("id", chat.routeText("id"))
+                                        chat["sendRevision"]?.let { put("expectedRevision", it) }
+                                        put(
+                                            "routing",
+                                            buildJsonObject {
+                                                put("enabled", enabled)
+                                                put("waitForReset", wait)
+                                                put("returnPreferred", returns)
+                                                put("useAsDefault", defaults)
+                                                put("failoverOnThrottle", throttles)
+                                                put("failoverOnErrors", outages)
+                                                put("failoverOnAuth", auth)
+                                                put("failoverOnFailures", failures)
+                                                put("notify", notifies)
+                                                put("preferred", preferred ?: JsonNull)
+                                                put("routes", JsonArray(routes))
+                                            },
+                                        )
+                                    },
+                                )
+                            }
+                                .onSuccess {
+                                    changed()
+                                    dismiss()
+                                }
+                                .onFailure { error = it.message }
+                            saving = false
+                        }
+                    },
+                )
             }
-        },
-        dismissButton = { TextButton(onClick = dismiss) { Text(L10n.text("common.cancel")) } },
-    )
+        }
+    }
 }
