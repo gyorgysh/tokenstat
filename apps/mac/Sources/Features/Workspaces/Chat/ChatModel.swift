@@ -591,6 +591,26 @@ final class ChatModel {
     }
 
     private(set) var unconfirmedSend: UnconfirmedSend?
+
+    /// Leave the uncertain original in Pending and give the composer a new
+    /// delivery identity. This never resends or discards the original writing.
+    func startNewMessage() {
+        guard let pending = unconfirmedSend, let reference = currentReference,
+              reference.itemID == pending.conversationID, !pending.checking, !sending,
+              let original = queued.first(where: { $0.id == pending.messageID && $0.needsReceipt }) else { return }
+        if draft == (original.sourceDraftText ?? original.text), attachments == original.attachments {
+            clearDraft()
+            attachments = []
+            attachmentPreviews = [:]
+            missingDraftAttachments = []
+        } else {
+            // Writing typed after the refused/uncertain send is already a new
+            // intent. Keep it exactly as written, under a fresh message id.
+            ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference, newMessage: true)
+        }
+        unconfirmedSend = nil
+        error = L10n.text("common.chat_original_pending")
+    }
     /// Probe when acting. An unavailable computer is not an older host, and
     /// a failed probe must not remain cached after reconnection or an update.
     private func machineConfirmsSends(peer: String?, checkingReceipt: Bool) async throws -> Bool {
@@ -1813,6 +1833,8 @@ final class ChatModel {
                 peer: peer
             )
             guard selectionMatches(id: selected.id, generation: generation) else { return }
+            contextRevision = ChatSendContext.afterOwnEdit(contextRevision,
+                previous: selected.sendRevision, updated: updated.sendRevision)
             replace(updated)
             // The backend decides whether the rules travel on a flag or ahead
             // of the turn, and the brief is half of what they say. Either
@@ -1856,9 +1878,15 @@ final class ChatModel {
     /// Sidebar mutations route through the row's project, including unopened projects.
     func rename(_ conversation: ChatConversation, in folderID: String, to title: String, peer: String? = nil) async throws {
         let scope = WorkSessionContext.shared.scope
+        let generation = selectionGeneration
+        let ownRevision = self.folderID == folderID && selected?.id == conversation.id ? selected?.sendRevision : nil
         let updated = try await Bridge.updateChat(id: conversation.id, title: title,
                                                   peer: Bridge.chatRoute(workspaceID: folderID, peer: peer).peer)
         guard scope == WorkSessionContext.shared.scope else { return }
+        if self.folderID == folderID, selectionMatches(id: conversation.id, generation: generation) {
+            contextRevision = ChatSendContext.afterOwnEdit(contextRevision,
+                previous: ownRevision, updated: updated.sendRevision)
+        }
         publishSidebarConversation(updated, in: folderID)
         if let reference = draftReference(for: updated.id, in: folderID),
            PinnedWorkStore.shared.isPinned(reference) {
@@ -2112,7 +2140,7 @@ final class ChatModel {
         guard let owner, owner == queuedReference, ownsQueue, let reference = queuedReference else { return }
         do {
             queued = try ChatOutboxStore.shared.update(reference) { items in
-                guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item,
+                guard let index = items.firstIndex(where: { $0.id == item.id }), items[index].hasSameWriting(as: item),
                       items[index].canEdit else { throw ChatOutboxStore.Failure.conflict }
                 guard items[index].text != text else { return }
                 // The row keeps its id while it is edited: re-identifying it
@@ -2141,6 +2169,17 @@ final class ChatModel {
                 items.removeAll { $0.id == item.id }
             }
             authorizedQueueItems.remove(item.id)
+            if unconfirmedSend?.messageID == item.id {
+                if draft == (item.sourceDraftText ?? item.text), attachments == item.attachments {
+                    clearDraft()
+                    attachments = []
+                    attachmentPreviews = [:]
+                    missingDraftAttachments = []
+                } else {
+                    ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference, newMessage: true)
+                }
+                unconfirmedSend = nil
+            }
             Task { await drainQueue() }
         } catch { self.error = L10n.text("apple.chatmodel.the_queued_copy_could_not_be_removed_check.dc44397e") }
     }
@@ -2180,27 +2219,27 @@ final class ChatModel {
             error = L10n.text("apple.chatmodel.check_for_updates_to_return_to_the_live_co.3b041e43")
             return
         }
-        if item.delivery == .needsReview {
-            guard let revision = contextRevision else {
-                error = L10n.text("apple.chatmodel.check_for_updates_before_using_the_latest.71504043")
-                return
-            }
-            do {
-                queued = try ChatOutboxStore.shared.update(owner) { items in
-                    guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item else {
-                        throw ChatOutboxStore.Failure.conflict
-                    }
-                    items[index].expectedRevision = revision
-                    items[index].delivery = .ready
-                }
-                error = L10n.text("apple.chatmodel.the_message_is_ready_with_the_conversation.a1db2644")
-            } catch { self.error = L10n.text("apple.chatmodel.the_pending_message_changed_reopen_it_befo.3d158d7b") }
-            return
-        }
         guard !sendingNow else { return }
         sendingNow = true
         defer { sendingNow = false }
-        _ = await deliverQueued(item, stopCurrent: true)
+        var candidate = item
+        if item.delivery == .needsReview {
+            let generation = selectionGeneration
+            guard let selected else { return }
+            let id = selected.id
+            do {
+                let answer = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
+                guard selectionMatches(id: id, generation: generation), owner == currentReference,
+                      let latest = answer.first(where: { $0.id == id }), let revision = latest.sendRevision else { return }
+                replace(latest)
+                contextRevision = latest.sendRevision
+                await loadEvents(id: id, reset: false, generation: generation)
+                guard selectionMatches(id: id, generation: generation), owner == currentReference else { return }
+                candidate = try ChatOutboxStore.shared.prepare(item, revision: revision, for: owner)
+                queued = try ChatOutboxStore.shared.items(for: owner)
+            } catch { self.error = L10n.text("apple.chatmodel.the_pending_message_changed_reopen_it_befo.3d158d7b"); return }
+        }
+        _ = await deliverQueued(candidate, stopCurrent: true)
     }
 
     func drainQueue() async {
@@ -2255,7 +2294,8 @@ final class ChatModel {
             }
             guard current() else { return false }
             let stored = try ChatOutboxStore.shared.items(for: reference)
-            guard let item = stored.first(where: { $0.id == candidate.id }), item == candidate else {
+            guard let item = stored.first(where: { $0.id == candidate.id }), item.hasSameWriting(as: candidate),
+                  item.expectedRevision == candidate.expectedRevision else {
                 publish(stored)
                 authorizedQueueItems.remove(candidate.id)
                 error = L10n.text("apple.chatmodel.the_pending_message_changed_review_its_cur.51debf03")
@@ -2338,7 +2378,9 @@ final class ChatModel {
                 ? Date()
                 : (item.firstAttemptAt ?? item.attemptedAt ?? Date())
             publish(try ChatOutboxStore.shared.update(reference) { items in
-                guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item else {
+                guard let index = items.firstIndex(where: { $0.id == item.id }),
+                      items[index].hasSameWriting(as: item), items[index].canEdit,
+                      items[index].expectedRevision == item.expectedRevision else {
                     throw ChatOutboxStore.Failure.conflict
                 }
                 items[index].id = deliveryItem.id
@@ -2510,7 +2552,7 @@ final class ChatModel {
         let mutation = reference.flatMap { steerMutationSnapshot($0) }
         var removedNote = false
         do {
-            try await Bridge.stopChat(id: selected.id, peer: peer)
+            try await Bridge.stopChat(id: selected.id, expectedRevision: selected.sendRevision, peer: peer)
             if let reference, let mutation,
                currentReference != reference || self.selected?.pendingSteer == nil
                    || self.selected?.pendingSteer == selected.pendingSteer {

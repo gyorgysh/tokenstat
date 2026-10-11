@@ -14,6 +14,7 @@ struct ChatDraftNotice: View {
     /// The machine had the message and did not answer for it.
     var unconfirmed: ChatModel.UnconfirmedSend?
     var checkAgain: (() -> Void)?
+    var startNewMessage: (() -> Void)?
 
     var body: some View {
         if let retrySave {
@@ -35,6 +36,10 @@ struct ChatDraftNotice: View {
             ) {
                 if !unconfirmed.checking, let checkAgain {
                     Button(L10n.text("apple.chatdraftnotice.check_again.fb7099ad"), .refresh, action: checkAgain)
+                        .buttonStyle(NoticeActionButtonStyle())
+                }
+                if !unconfirmed.checking, let startNewMessage {
+                    Button(L10n.text("common.chat_new_message"), .create, action: startNewMessage)
                         .buttonStyle(NoticeActionButtonStyle())
                 }
             }

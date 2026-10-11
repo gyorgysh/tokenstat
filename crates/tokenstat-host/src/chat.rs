@@ -184,6 +184,22 @@ pub struct RecentConversation {
     pub branch: Option<String>,
 }
 
+/// Authoritative runner state after an explicit, revision-checked recovery.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recovery {
+    pub conversation: Conversation,
+    pub runner_active: bool,
+    pub stopping: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StopRequest {
+    run_revision: u64,
+    requested_at_ms: i64,
+}
+
 /// A voice, not a launcher.
 ///
 /// A persona used to carry a backend, a model, an effort, a mode and an
@@ -3274,6 +3290,27 @@ impl Store {
         if self.follow_up_should_skip(id, follow_up) {
             return Ok(SendOutcome::Suppressed(chat));
         }
+        // A failed drainer write can leave a running bit without a runner.
+        // Acceptance is locked by the caller, and the kernel lease proves
+        // this is idle. Repair it here rather than requiring a daemon restart.
+        if chat.running
+            && !self
+                .active
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(id)
+            && let Some(_lease) = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
+        {
+            self.record_events(
+                id,
+                &chat.backend,
+                vec![Event::Done {
+                    status: "interrupted".into(),
+                    exit_code: None,
+                }],
+            );
+            chat = self.set_running(id, false)?;
+        }
         if chat.running
             || self
                 .active
@@ -3790,6 +3827,69 @@ impl Store {
         validate_record_id(id)?;
         let branch = self.folder_branch(id);
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        self.stop_locked(id, branch, false)
+    }
+
+    pub fn recover(
+        &self,
+        id: &str,
+        expected_revision: u64,
+        stop_active: bool,
+    ) -> Result<Recovery, DispatchError> {
+        validate_record_id(id)?;
+        let branch = self.folder_branch(id);
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access()?;
+        let chat = self.current_send_conversation(id)?;
+        if chat.send_revision != expected_revision {
+            return Err(DispatchError::new(
+                "conversation_changed",
+                "The conversation changed. Refresh it before recovering this turn.",
+            ));
+        }
+        let local = self
+            .active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(id);
+        let idle_lease = if local {
+            None
+        } else {
+            crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
+        };
+        let runner_active = local || idle_lease.is_none();
+        if runner_active && !stop_active {
+            return Ok(Recovery {
+                conversation: chat,
+                runner_active: true,
+                stopping: false,
+            });
+        }
+        // Acceptance remains locked while the stop path takes its own lease.
+        // A live owner releases ownership itself after its cleanup.
+        drop(idle_lease);
+        let has_note = self
+            .steers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(id);
+        if runner_active || chat.running || has_note {
+            self.stop_locked(id, branch, true)?;
+        }
+        let conversation = self.current_send_conversation(id)?;
+        Ok(Recovery {
+            conversation,
+            runner_active,
+            stopping: runner_active,
+        })
+    }
+
+    fn stop_locked(
+        &self,
+        id: &str,
+        branch: Option<Option<String>>,
+        request_foreign: bool,
+    ) -> Result<(), String> {
         crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
         let pty = self
             .active
@@ -3846,6 +3946,21 @@ impl Store {
             }
         } else {
             if crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?.is_none() {
+                if request_foreign {
+                    let chat = self.current_send_conversation(id)?;
+                    let request = StopRequest {
+                        run_revision: chat.run_revision.unwrap_or(chat.send_revision),
+                        requested_at_ms: now_ms(),
+                    };
+                    let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+                    let directory = self.verified_append_directory(id)?;
+                    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+                    let path = directory.join("stop-request.json");
+                    return write_private_file(
+                        &path,
+                        &serde_json::to_vec(&request).map_err(|e| e.to_string())?,
+                    );
+                }
                 return Err(
                     "Another instance of tokenstat is running this conversation. Stop it there."
                         .into(),
@@ -3905,6 +4020,25 @@ impl Store {
             None => events,
         };
         loop {
+            let stop_path = self.root.join(safe_file_name(id)).join("stop-request.json");
+            if let Ok(meta) = fs::symlink_metadata(&stop_path)
+                && meta.file_type().is_file()
+                && meta.len() <= 1024
+                && let Ok(bytes) = fs::read(&stop_path)
+                && let Ok(request) = serde_json::from_slice::<StopRequest>(&bytes)
+                && request.run_revision == activity_revision
+                && request.requested_at_ms
+                    >= self
+                        .get(id)
+                        .ok()
+                        .and_then(|chat| chat.run_started_at_ms)
+                        .unwrap_or(0)
+            {
+                // This runner alone owns its process and cleanup. Never unlink
+                // another owner's lease or let a replacement race the drainer.
+                let _ = self.stop(id);
+                let _ = fs::remove_file(&stop_path);
+            }
             if activity_tick.is_none_or(|tick| tick.elapsed() >= Duration::from_secs(60)) {
                 let phase = if self.approvals(Some(id)).is_empty() {
                     "working"
@@ -8040,6 +8174,148 @@ mod tests {
     }
 
     #[test]
+    fn recovery_repairs_idle_state_and_refuses_a_changed_revision() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "recover");
+        store.set_running("recover", true).unwrap();
+        let error = store.recover("recover", 1, true).unwrap_err();
+        assert_eq!(error.code, "conversation_changed");
+        assert!(store.get("recover").unwrap().running);
+        let result = store.recover("recover", 0, false).unwrap();
+        assert!(!result.runner_active && !result.stopping && !result.conversation.running);
+        assert_eq!(result.conversation.send_revision, 0);
+        assert!(store.receipt("recover", "missing-send").unwrap().is_none());
+    }
+
+    #[test]
+    fn recovery_requests_a_foreign_stop_without_stealing_ownership() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "foreign-recover");
+        store.set_running("foreign-recover", true).unwrap();
+        let lease = crate::chat_receipts::RunnerLease::try_acquire(&store.root, "foreign-recover")
+            .unwrap()
+            .unwrap();
+        let status = store.recover("foreign-recover", 0, false).unwrap();
+        assert!(status.runner_active && !status.stopping);
+        let result = store.recover("foreign-recover", 0, true).unwrap();
+        assert!(result.runner_active && result.stopping && result.conversation.running);
+        let request: StopRequest = serde_json::from_slice(
+            &fs::read(store.root.join("foreign-recover/stop-request.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(request.run_revision, 0);
+        assert!(
+            crate::chat_receipts::RunnerLease::try_acquire(&store.root, "foreign-recover")
+                .unwrap()
+                .is_none()
+        );
+        drop(lease);
+        assert!(
+            !store
+                .recover("foreign-recover", 0, false)
+                .unwrap()
+                .conversation
+                .running
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_live_drainer_acknowledges_another_helpers_recovery_request() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = Arc::new(Store::at(root.path().join("chat")));
+        conversation_for_receipts(&owner, "cooperative-stop");
+        owner.set_running("cooperative-stop", true).unwrap();
+        let lease = crate::chat_receipts::RunnerLease::try_acquire(&owner.root, "cooperative-stop")
+            .unwrap()
+            .unwrap();
+        let manager = tokenstat_pty::manager();
+        let process = manager
+            .spawn(&tokenstat_pty::Spawn {
+                command: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 30".into()],
+                cwd: root.path().into(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: Vec::new(),
+            })
+            .unwrap();
+        owner
+            .active
+            .lock()
+            .unwrap()
+            .insert("cooperative-stop".into(), process.id.clone());
+        let foreign = Store::load_at(owner.root.clone());
+        let (done, ending) = std::sync::mpsc::channel();
+        let drain_owner = Arc::clone(&owner);
+        let pty = process.id.clone();
+        let raw = root.path().join("raw.ndjson");
+        let output = root.path().join("output");
+        let thread = std::thread::spawn(move || {
+            Arc::clone(&drain_owner).drain("cooperative-stop", "codex", &pty, &raw, &output, None);
+            let result =
+                drain_owner.finish_turn("cooperative-stop", &pty, Some(lease), || {}, || {});
+            done.send(result).unwrap();
+        });
+        assert!(
+            foreign
+                .recover("cooperative-stop", 0, true)
+                .unwrap()
+                .stopping
+        );
+        ending
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+            .unwrap();
+        thread.join().unwrap();
+        assert!(!owner.get("cooperative-stop").unwrap().running);
+        assert!(
+            !foreign
+                .recover("cooperative-stop", 0, false)
+                .unwrap()
+                .runner_active
+        );
+        assert!(
+            fs::read_to_string(owner.events_path("cooperative-stop"))
+                .unwrap()
+                .contains("stopped")
+        );
+    }
+
+    #[test]
+    fn an_idle_send_reconciles_an_orphaned_running_bit_before_starting() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        conversation_for_receipts(&store, "idle-send");
+        store.set_running("idle-send", true).unwrap();
+        // Missing workspace prevents a launch; reaching that check demonstrates
+        // that this send has repaired the idle guard without a restart.
+        let error = store
+            .send(
+                "idle-send",
+                "new words",
+                &[],
+                Some("idle-send-intent"),
+                Some(now_ms()),
+                Some(0),
+            )
+            .unwrap_err();
+        assert!(!error.message.contains("already responding"));
+        assert!(!store.get("idle-send").unwrap().running);
+        assert!(
+            fs::read_to_string(store.events_path("idle-send"))
+                .unwrap()
+                .contains("interrupted")
+        );
+    }
+
+    #[test]
     fn legacy_codex_usage_is_recovered_once_and_survives_forking() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -10073,6 +10349,9 @@ mod tests {
         let store = Arc::new(Store::at(root.path().join("chat")));
         conversation_for_receipts(&store, "chat-running");
         store.set_running("chat-running", true).unwrap();
+        let _runner = crate::chat_receipts::RunnerLease::try_acquire(&store.root, "chat-running")
+            .unwrap()
+            .unwrap();
         // Without a receipt this is the ordinary refusal.
         let busy = store
             .send("chat-running", "hello", &[], None, None, None)

@@ -378,7 +378,7 @@ private struct ChatQueueRow: View {
                 Spacer(minLength: 0)
                 Group {
                     if item.delivery == .needsReview {
-                        Button(L10n.text("apple.chatqueuestrip.use_latest_context.a29959ec"), .refresh, action: onSendNow)
+                        Button(L10n.text("common.chat_send_latest"), .refresh, action: onSendNow)
                     } else {
                         Button(item.needsReceipt ? L10n.text("apple.chatqueuestrip.check_delivery.b8e3662d") : L10n.text("apple.chatqueuestrip.send_now.58803287"), .send, action: onSendNow)
                     }

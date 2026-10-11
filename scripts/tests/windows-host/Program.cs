@@ -64,11 +64,20 @@ try
     try { reopened.Stage(key, first, 1235); } catch (InvalidOperationException) { duplicateRefused = true; }
     Check(duplicateRefused, "A second window must not send a claimed message");
     Check(reopened.Read(key)[0].AttemptedAt == 1234, "Uncertain delivery must survive restart");
+    outbox.Refuse(key, attempted.Id, "timeout");
+    Check(outbox.Read(key)[0].AttemptedAt.HasValue, "Timeout preserves uncertain delivery");
     var remaining = reopened.Accept(key, attempted, 5);
     Check(remaining.Count == 1 && remaining[0].Revision == 5, "Accepted turn must advance only its waiting successors");
     outbox.Update(key, rows => rows.Add(new QueuedChatMessage("different", "new context", [], 9)));
     remaining = outbox.Accept(key, remaining[0], null);
     Check(remaining.Single().Revision == 9, "Receipt recovery must not authorize a different context");
+    var recoveryKey = ChatOutbox.Key("account", "workspace", "recovery");
+    outbox.Update(recoveryKey, rows => { rows.Add(first); rows.Add(second); });
+    var claimed = outbox.Stage(recoveryKey, first, 1237);
+    outbox.Refuse(recoveryKey, claimed.Id, "conversation_changed");
+    Check(outbox.Read(recoveryKey)[0].AttemptedAt is null && outbox.Read(recoveryKey)[0].State == "needsReview", "A known revision refusal is reviewable");
+    var next = outbox.Stage(recoveryKey, second, 1238);
+    Check(next.Id == second.Id && outbox.Read(recoveryKey)[0].Id == first.Id, "Explicit new intent keeps the earlier pending writing");
     try { outbox.Update(key, rows => { rows.Clear(); throw new IOException("interrupted"); }); }
     catch (IOException) { }
     Check(reopened.Read(key).Count == 1, "A failed mutation must preserve the previous queue");

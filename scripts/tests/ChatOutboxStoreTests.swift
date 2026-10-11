@@ -127,6 +127,23 @@ struct ChatAttachment: Codable, Equatable, Sendable { let id: String; let name: 
         try first.update(sequence) { $0 = [accepted, successor] }
         let unrelated = try first.accept(accepted, revision: 8, for: sequence)
         assert(unrelated[0].expectedRevision == 5)
+        var refused = successor
+        refused.delivery = .needsReview
+        try first.update(sequence) { $0 = [refused] }
+        // Metadata changed during an await is not a human text edit.
+        try second.update(sequence) { $0[0].whenConnected = true }
+        let prepared = try first.prepare(refused, revision: 9, for: sequence)
+        assert(prepared.expectedRevision == 9 && prepared.delivery == .ready && prepared.whenConnected)
+        try second.update(sequence) { $0[0].delivery = .deliveryUnknown }
+        do {
+            _ = try first.prepare(refused, revision: 10, for: sequence)
+            assertionFailure("Review cannot override an uncertain delivery")
+        } catch ChatOutboxStore.Failure.conflict {}
+        try second.update(sequence) { $0[0].delivery = .needsReview; $0[0].text = "New writing" }
+        do {
+            _ = try first.prepare(refused, revision: 10, for: sequence)
+            assertionFailure("Review cannot overwrite a concurrent text edit")
+        } catch ChatOutboxStore.Failure.conflict {}
         let mode = try FileManager.default.attributesOfItem(atPath: root.appendingPathComponent("outbox.v1.json").path)[.posixPermissions] as? NSNumber
         assert(mode?.intValue == 0o600)
         print("Outbox: durable delivery state, host/account isolation, merged window edits, delivery ownership, failed-write preservation and private files passed")

@@ -244,4 +244,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 32 adds host-driven terminal Live Activity updates.
 /// Version 33 adds `pulls.commitAvatars`, the public author pictures a
 /// history list draws for everyone who has one.
-pub const PROTOCOL_VERSION: &str = "33";
+/// Version 34 adds revision-checked chat recovery and cooperative runner stop.
+pub const PROTOCOL_VERSION: &str = "34";

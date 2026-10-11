@@ -624,6 +624,7 @@ struct ChatParams {
     client_message_id: Option<String>,
     client_message_created_at_ms: Option<i64>,
     expected_revision: Option<u64>,
+    stop_active: Option<bool>,
     attachment_id: Option<String>,
     name: Option<String>,
     data: Option<String>,
@@ -2225,6 +2226,15 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             store.stop(&p.id.ok_or("chat.stop needs id")?)?;
             Ok(json!({ "stopped": true }))
         }
+        "chat.recover" => serde_json::to_value(
+            store.recover(
+                &p.id.ok_or("chat.recover needs id")?,
+                p.expected_revision
+                    .ok_or("chat.recover needs expectedRevision")?,
+                p.stop_active.unwrap_or(false),
+            )?,
+        )
+        .envelope(),
         "chat.steer" => {
             store.steer(
                 &p.id.ok_or("chat.steer needs id")?,

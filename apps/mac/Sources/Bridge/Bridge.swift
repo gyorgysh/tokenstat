@@ -1392,7 +1392,12 @@ extension Bridge {
         )
     }
 
-    static func stopChat(id: String, peer: String? = nil) async throws {
+    static func stopChat(id: String, expectedRevision: UInt64? = nil, peer: String? = nil) async throws {
+        if let expectedRevision, await RemoteHostFeature.chatRecovery.isSupported(peer: peer) {
+            _ = try await chatInvoke(peer: peer, "chat.recover",
+                ["id": id, "expectedRevision": expectedRevision, "stopActive": true], as: Ack.self)
+            return
+        }
         _ = try await chatInvoke(peer: peer, "chat.stop", ["id": id], as: Ack.self)
     }
 

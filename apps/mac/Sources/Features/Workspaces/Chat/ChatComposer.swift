@@ -158,7 +158,8 @@ struct ChatComposer: View {
                 ChatDraftNotice(retrySave: { model.retryDraftSave() })
             } else if let unconfirmed = model.unconfirmedSend {
                 ChatDraftNotice(unconfirmed: unconfirmed,
-                                checkAgain: { Task { await model.checkUnconfirmedSend() } })
+                                checkAgain: { Task { await model.checkUnconfirmedSend() } },
+                                startNewMessage: { model.startNewMessage() })
             }
             if !attachments.isEmpty {
                 strip

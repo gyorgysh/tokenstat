@@ -60,15 +60,25 @@ internal sealed class ChatOutbox(string directory)
         var staged = expected with { State = "sending", AttemptedAt = now };
         Update(key, items =>
         {
-            var current = items.FirstOrDefault();
+            var index = items.FindIndex(item => item.Id == expected.Id);
+            var current = index >= 0 ? items[index] : null;
             if (current is null || current.Id != expected.Id || current.AttemptedAt.HasValue ||
                 current.Text != expected.Text || current.Revision != expected.Revision ||
                 !current.Attachments.SequenceEqual(expected.Attachments))
                 throw new InvalidOperationException(L10n.Text("windows.chatoutbox.the_pending_message_changed_in_another_win.a82490bc"));
-            items[0] = staged;
+            items[index] = staged;
         });
         return staged;
     }
+
+    public void Refuse(string key, string id, string code) => Update(key, items =>
+    {
+        // Transport failures and uncertain host delivery keep the receipt hold.
+        if (code is "delivery_unknown" or "timeout" or "io" or "eof" or "decode" or "connect") return;
+        var index = items.FindIndex(item => item.Id == id);
+        if (index >= 0 && items[index].State == "sending")
+            items[index] = items[index] with { AttemptedAt = null, State = code == "conversation_changed" ? "needsReview" : "failed" };
+    });
 
     public List<QueuedChatMessage> Accept(string key, QueuedChatMessage accepted, long? revision) => Update(key, items =>
     {

@@ -496,7 +496,6 @@
   "android.chatqueuestrip.that_computer_has_not_confirmed_this_messa.143c63eb": "That computer has not confirmed this message. Check delivery, or copy its text after reviewing the conversation. Removing this copy does not cancel a message already sent.",
   "android.chatqueuestrip.the_last_attempt_was_refused_your_message.4ef87f5b": "The last attempt was refused. Your message is still here.",
   "android.chatqueuestrip.these_wait_for_this_turn_messages_marked_s.dbd6b117": "These wait for this turn. Messages marked Send when connected keep that choice.",
-  "android.chatqueuestrip.use_latest_context.a29959ec": "Use latest context",
   "android.chatqueuestrip.view_pending.ed59515e": "View pending",
   "android.chatseat.always_allow_answers_this_request_only_not.a067a2b7": "Always allow answers this request only. Nothing is saved for later.",
   "android.chatseat.always_allow_remembers_0_for_this_chat_onl.394a9e6d": "Always allow remembers {0} for this chat only.",

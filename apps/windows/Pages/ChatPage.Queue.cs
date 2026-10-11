@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
+using Tokenstat.Host;
 
 namespace Tokenstat.Pages;
 
@@ -61,7 +62,7 @@ internal sealed partial class ChatPage
                 }
                 else
                 {
-                    actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage_queue.use_latest_context.a29959ec"), ActionIcon.Run, async (_, _) =>
+                    actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chat_send_latest"), ActionIcon.Run, async (_, _) =>
                     {
                         try
                         {
@@ -69,14 +70,17 @@ internal sealed partial class ChatPage
                             await RefreshCatalogAsync();
                             if (!Current()) return;
                             _openChat = FindChat(chat);
+                            if (_openChat?["sendRevision"] is null) throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.this_conversation_is_no_longer_available.07f8c47b"));
                             var revision = Format.Long(_openChat, "sendRevision");
                             ChatOutbox.Shared.Update(key, rows =>
                             {
                                 var index = rows.FindIndex(row => row.Id == item.Id);
-                                if (index >= 0 && !rows[index].AttemptedAt.HasValue) rows[index] = rows[index] with { Revision = revision, State = "waiting" };
+                                if (index < 0 || rows[index].AttemptedAt.HasValue || rows[index].Text != item.Text || !rows[index].Attachments.SequenceEqual(item.Attachments))
+                                    throw new InvalidOperationException(L10n.Text("windows.chatoutbox.the_pending_message_changed_in_another_win.a82490bc"));
+                                rows[index] = rows[index] with { Revision = revision, State = "waiting" };
                             });
                             _authorizedQueue.Add(item.Id);
-                            await DrainQueueAsync();
+                            await DrainQueueAsync(messageId: item.Id);
                             if (Current()) { PaintConversation(); StartPoll(); }
                         }
                         catch (Exception ex) { if (Current()) Banner(ex.Message); }
@@ -146,13 +150,13 @@ internal sealed partial class ChatPage
         return true;
     }
 
-    private async Task DrainQueueAsync(bool deliverNote = true)
+    private async Task DrainQueueAsync(bool deliverNote = true, string? messageId = null)
     {
         // A parked note does not need the outbox key, and it goes out before
         // any queued message. The flag is set by the delivery itself so a
         // poll tick cannot start a second one.
         if (_sending || _deliveringSteer || _clearingSteer || _openId is not string chat || !IsLoaded) return;
-        if (PendingSteerText(_openChat).Length > 0)
+        if (messageId is null && PendingSteerText(_openChat).Length > 0)
         {
             if (!deliverNote || Busy()) return;
             await DeliverParkedSteerAsync(chat);
@@ -161,7 +165,8 @@ internal sealed partial class ChatPage
         if (Busy() || _outboxKey is not string key) return;
         var generation = _openGeneration;
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && _outboxKey == key;
-        var candidate = ChatOutbox.Shared.Read(key).FirstOrDefault();
+        var candidates = ChatOutbox.Shared.Read(key);
+        var candidate = messageId is null ? candidates.FirstOrDefault() : candidates.FirstOrDefault(row => row.Id == messageId);
         if (candidate is null || candidate.AttemptedAt.HasValue || !_authorizedQueue.Contains(candidate.Id)) return;
         _sending = true;
         try
@@ -196,6 +201,7 @@ internal sealed partial class ChatPage
         }
         catch (Exception ex)
         {
+            if (ex is HostException hostError) ChatOutbox.Shared.Refuse(key, candidate.Id, hostError.Code);
             _authorizedQueue.Remove(candidate.Id);
             if (Current()) Banner(L10n.Text("windows.chatpage_queue.the_pending_copy_is_saved_0.215c8440", $"{ex.Message}"));
         }

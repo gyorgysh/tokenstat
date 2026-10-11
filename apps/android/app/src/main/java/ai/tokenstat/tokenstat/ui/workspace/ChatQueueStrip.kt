@@ -292,7 +292,7 @@ private fun ChatQueueRow(
             TsAccentButton(
                 label = when {
                     item.needsReceipt -> L10n.text("android.chatqueuestrip.check_delivery.b8e3662d")
-                    item.delivery == ChatDelivery.NeedsReview -> L10n.text("android.chatqueuestrip.use_latest_context.a29959ec")
+                    item.delivery == ChatDelivery.NeedsReview -> L10n.text("common.chat_send_latest")
                     else -> L10n.text("android.chatqueuestrip.send_now.58803287")
                 },
                 icon = if (item.delivery == ChatDelivery.NeedsReview) {

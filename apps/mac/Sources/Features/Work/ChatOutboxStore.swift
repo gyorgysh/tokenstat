@@ -21,6 +21,10 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
 
     var needsReceipt: Bool { delivery == .sending || delivery == .deliveryUnknown }
     var canEdit: Bool { !needsReceipt }
+
+    func hasSameWriting(as other: ChatQueuedMessage) -> Bool {
+        id == other.id && text == other.text && attachments == other.attachments
+    }
 }
 
 /// Queued messages are durable user writing, separate from reconstructible
@@ -72,6 +76,20 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
     func items(for reference: WorkReference) throws -> [ChatQueuedMessage] {
         guard let key = WorkReferenceKey.conversation(reference) else { throw Failure.invalid }
         return try locked { try read().queues[key]?.items ?? [] }
+    }
+
+    /// An explicit send with current context changes delivery metadata, never
+    /// the writing. A receipt hold discovered since the view was drawn wins.
+    func prepare(_ expected: ChatQueuedMessage, revision: UInt64, for reference: WorkReference) throws -> ChatQueuedMessage {
+        let items = try update(reference) { items in
+            guard let index = items.firstIndex(where: { $0.id == expected.id }),
+                  items[index].hasSameWriting(as: expected), items[index].canEdit,
+                  items[index].signInBackend == nil else { throw Failure.conflict }
+            items[index].expectedRevision = revision
+            items[index].delivery = .ready
+        }
+        guard let item = items.first(where: { $0.id == expected.id }) else { throw Failure.conflict }
+        return item
     }
 
     func queues(in scope: WorkReference.Scope) throws -> [Queue] {

@@ -14,6 +14,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Fixed
 
 - Usage scans include Codex chats started by tokenstat in private homes, so their usage appears alongside ordinary Codex sessions without manually scanning each chat.
+- Changing a chat's model or speed on Apple devices no longer causes a false conversation conflict on the next message. Reviewed messages can be sent with the latest chat in one action.
+- Chat recovery reconciles an idle runner and can request a cooperative stop from another helper. Unconfirmed deliveries keep their saved copy while you write a new message; Windows distinguishes a refused message from an uncertain delivery.
 
 ## [1.4.1] - 2026-10-09
 

@@ -495,16 +495,25 @@ fun ChatSection(
     // its `running` flag (and the thinking indicator reading it) stays live.
     // `loadChats` would do, but it flashes the spinner and clears a sticky
     // list error on every pass.
-    suspend fun refreshChats() {
+    suspend fun refreshChats(): Boolean {
         val listRequest = listRequests.incrementAndGet()
-        runCatching {
+        return runCatching {
             model.workspaceSection(peer, "chat.list", buildJsonObject { put("workspaceId", workspace) })
         }.onSuccess {
             applyChatRows((it as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList(), listRequest)
             hostReachable = true
         }.onFailure {
             hostReachable = false
-        }
+        }.isSuccess
+    }
+
+    suspend fun stopChat(id: String) {
+        val revision = chats.firstOrNull { it.str("id") == id }?.long("sendRevision")
+        val recover = HostContracts.supportsChatRecovery(protocol) && revision != null
+        model.workspaceSection(peer, if (recover) "chat.recover" else "chat.stop", buildJsonObject {
+            put("id", id)
+            if (recover) { put("expectedRevision", revision!!); put("stopActive", true) }
+        })
     }
     suspend fun newestPage(id: String): JsonObject = model.workspaceSection(peer, "chat.eventPage", buildJsonObject {
         put("id", id); put("limit", 160); put("stablePositions", true)
@@ -761,7 +770,7 @@ fun ChatSection(
                 val noteVersion = steerVersions.version(id)
                 var stopped = false
                 try {
-                    model.workspaceSection(peer, "chat.stop", buildJsonObject { put("id", id) })
+                    stopChat(id)
                     stopped = true
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -1105,7 +1114,9 @@ fun ChatSection(
         // message appears the moment it really is pending.
         deliveringFromComposer = item.id
         try {
-            drainQueue()
+            // This explicit new intent can proceed while an older, uncertain
+            // delivery remains available for review in Pending.
+            if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) deliver(item, stopCurrent = false)
         } finally {
             deliveringFromComposer = null
         }
@@ -1119,18 +1130,21 @@ fun ChatSection(
             checkReceipt(id, item)
             return
         }
+        var candidate = item
         if (item.delivery == ChatDelivery.NeedsReview) {
+            if (!refreshChats()) return
+            if (openId != id || !ownsProject()) return
             val revision = chats.firstOrNull { it.str("id") == id }?.long("sendRevision")
-            writeQueue(id) { list ->
+                ?: return
+            if (!writeQueue(id) { list ->
                 val at = list.indexOfFirst { it.id == item.id }
-                if (at >= 0) {
-                    list[at] = list[at].copy(delivery = ChatDelivery.Ready, expectedRevision = revision)
-                }
-            }
-            return
+                check(at >= 0 && list[at].text == item.text && list[at].attachments == item.attachments && !list[at].needsReceipt)
+                candidate = list[at].copy(delivery = ChatDelivery.Ready, expectedRevision = revision)
+                list[at] = candidate
+            }) return
         }
         authorized = authorized + item.id
-        deliver(item, stopCurrent = true)
+        deliver(candidate, stopCurrent = true)
     }
     LaunchedEffect(projectOwner) { loadChats() }
     // A navigation that named a conversation: open exactly it, even when
@@ -1797,14 +1811,15 @@ fun ChatSection(
                     scope.launch {
                         val noteVersion = steerVersions.version(id)
                         try {
-                            model.workspaceSection(peer, "chat.stop", buildJsonObject { put("id", id) })
+                            stopChat(id)
                             if (steerVersions.current(id, noteVersion)) {
                                 clearLocalSteer(id)
                                 retireSteer(id)
                             }
                         } catch (cancelled: CancellationException) {
                             throw cancelled
-                        } catch (_: Exception) {
+                        } catch (failure: Exception) {
+                            sendError = failure.message
                         } finally {
                             sendingIds = sendingIds - id
                         }

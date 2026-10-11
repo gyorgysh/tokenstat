@@ -2115,7 +2115,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _outboxKey = key; _authorizedQueue.Add(item.Id);
             if (_draft.Text.Trim() == text) _draft.Text = "";
             _attachments.RemoveAll(file => attachmentIds.Contains(file.Id));
-            await DrainQueueAsync();
+            await DrainQueueAsync(messageId: item.Id);
             if (Current()) { PaintConversation(); StartPoll(); }
         }
         catch (Exception ex) { if (Current()) Banner(ex.Message); }
@@ -2125,19 +2125,26 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private async Task StopAsync()
     {
         if (_openId is not string chat) return;
+        var generation = _openGeneration;
+        var revision = _openChat?["sendRevision"] is null ? (long?)null : Format.Long(_openChat, "sendRevision");
         var noteRevision = _steerOverlay.Revision(chat);
         try
         {
-            await CallChatAsync("chat.stop", new JsonObject { ["id"] = chat });
+            var protocol = RemoteFeatureGate.ProtocolOf(await CallChatAsync("protocol", new JsonObject()));
+            if (!OpenChatIs(chat) || generation != _openGeneration) return;
+            if (protocol >= 34 && revision.HasValue)
+                await CallChatAsync("chat.recover", new JsonObject { ["id"] = chat,
+                    ["expectedRevision"] = revision.Value, ["stopActive"] = true });
+            else await CallChatAsync("chat.stop", new JsonObject { ["id"] = chat });
             var cleared = _steerOverlay.RememberIfCurrent(chat, null, noteRevision);
-            if (!OpenChatIs(chat)) return;
+            if (!OpenChatIs(chat) || generation != _openGeneration) return;
             if (cleared) ClearLocalSteer();
             PaintConversation();
             StartPoll();
         }
         catch (Exception ex)
         {
-            Banner(ex.Message);
+            if (OpenChatIs(chat) && generation == _openGeneration) Banner(ex.Message);
         }
     }
 

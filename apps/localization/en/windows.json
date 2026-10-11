@@ -494,7 +494,6 @@
   "windows.chatpage_queue.the_pending_copy_is_saved_0.215c8440": "The pending copy is saved. {0}",
   "windows.chatpage_queue.the_signed_in_account_changed_pending_mess.54c18f45": "The signed-in account changed. Pending messages remain with the original account.",
   "windows.chatpage_queue.this_conversation_is_no_longer_available.07f8c47b": "This conversation is no longer available.",
-  "windows.chatpage_queue.use_latest_context.a29959ec": "Use latest context",
   "windows.chatpage_steer.add_a_note_for_the_next_step.4778177a": "Add a note for the next step",
   "windows.chatpage_steer.ask_about_this_folder.33b8b41b": "Ask about this folder",
   "windows.chatpage_steer.new_chat.db18382a": "New chat",
