@@ -20,7 +20,7 @@ struct ChatRoutingSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(L10n.text("common.chat_routing")).font(Theme.callout.weight(.semibold))
-            Text(policy.enabled ? L10n.text(policy.waitForReset ? "common.chat_route_combined_mode" : "common.chat_route_fallback_mode") : L10n.text(policy.waitForReset ? "common.chat_route_wait_mode" : "common.chat_route_manual"))
+            Text(policy.enabled ? (policy.waitForReset ? L10n.text("common.chat_route_combined_mode") : L10n.text("common.chat_route_fallback_mode")) : (policy.waitForReset ? L10n.text("common.chat_route_wait_mode") : L10n.text("common.chat_route_manual")))
                 .font(Theme.caption).foregroundStyle(.secondary)
             if !policy.routes.isEmpty {
                 Text(policy.routes.map { model.backend(for: $0.backend)?.label ?? $0.backend }.joined(separator: " → "))

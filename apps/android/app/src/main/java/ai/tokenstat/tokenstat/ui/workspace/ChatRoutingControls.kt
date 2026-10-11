@@ -152,15 +152,14 @@ internal fun ChatRoutingControls(
         TsCard {
             Text(L10n.text("common.chat_routing"), style = MaterialTheme.typography.titleSmall)
             Text(
-                L10n.text(
-                    if (policy?.bol("enabled") == true) {
-                        if (policy.bol("waitForReset")) "common.chat_route_combined_mode"
-                        else "common.chat_route_fallback_mode"
-                    } else {
-                        if (policy?.bol("waitForReset") == true) "common.chat_route_wait_mode"
-                        else "common.chat_route_manual"
-                    }
-                ),
+                if (policy?.bol("enabled") == true) {
+                    if (policy.bol("waitForReset")) L10n.text("common.chat_route_combined_mode")
+                    else L10n.text("common.chat_route_fallback_mode")
+                } else {
+                    if (policy?.bol("waitForReset") == true)
+                        L10n.text("common.chat_route_wait_mode")
+                    else L10n.text("common.chat_route_manual")
+                },
                 style = MaterialTheme.typography.bodySmall,
             )
             val destinations =
