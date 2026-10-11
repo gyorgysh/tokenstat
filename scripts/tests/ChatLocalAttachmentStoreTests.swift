@@ -12,6 +12,11 @@ actor UploadCounter {
         return .init(id: "host-file", name: "draft.txt", mediaType: "text/plain", size: UInt64(bytes.count))
     }
 }
+private final class CopyResults: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var count = 0
+    func succeeded() { lock.withLock { count += 1 } }
+}
 @main struct ChatLocalAttachmentStoreTests {
     @MainActor static func main() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -33,6 +38,16 @@ actor UploadCounter {
         FileManager.default.createFile(atPath: largeURL.path, contents: Data())
         let largeHandle = try FileHandle(forWritingTo: largeURL)
         try largeHandle.truncate(atOffset: 20 * 1024 * 1024); try largeHandle.close()
+        let sharedCopy = root.appendingPathComponent("shared-copy.mov")
+        let attempts = CopyResults()
+        DispatchQueue.concurrentPerform(iterations: 16) { _ in
+            do { try ChatFileIO.copy(largeURL, to: sharedCopy); attempts.succeeded() } catch {}
+        }
+        assert(attempts.count == 1, "Only one concurrent original copy may create the destination")
+        let copiedHash = try ChatFileIO.hash(sharedCopy)
+        let sourceHash = try ChatFileIO.hash(largeURL)
+        assert(copiedHash == sourceHash, "Refused concurrent copies preserve the winning original")
+        try FileManager.default.removeItem(at: sharedCopy)
         let video = try await store.stage(file: largeURL, name: "video.mov", mediaType: "video/quicktime", reference: ref())
         let videoPresent = await reopened.contains(video, reference: ref())
         assert(videoPresent)

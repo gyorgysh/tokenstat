@@ -65,7 +65,11 @@ final class RoutingUITests: XCTestCase {
         XCTAssertTrue(draft.isHittable, "Limit notice must leave the composer reachable")
         draft.tap()
         draft.typeText("QA draft remains writable")
-        XCTAssertTrue(app.buttons["Send"].isHittable, app.debugDescription)
+        // The keyboard also exposes a Send key. Target the composer action.
+        let send = app.buttons.matching(identifier: "paperplane").firstMatch
+        expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: send)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(send.isEnabled && send.isHittable, app.debugDescription)
         capture(app, "iphone17-limit-composer-keyboard")
     }
 }

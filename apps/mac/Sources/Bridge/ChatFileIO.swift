@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 import CryptoKit
+import Darwin
 
 enum ChatFileIO {
     static let maximumBytes: UInt64 = 256 * 1024 * 1024
@@ -10,11 +11,14 @@ enum ChatFileIO {
         let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard values.isRegularFile == true, let expected = values.fileSize, expected > 0,
               UInt64(expected) <= maximumBytes else { throw CocoaError(.fileReadTooLarge) }
-        guard !FileManager.default.fileExists(atPath: destination.path),
-              FileManager.default.createFile(atPath: destination.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw CocoaError(.fileWriteFileExists) }
+        // The existence check and creation must be one operation: another
+        // store/process may retain this same original at the same time.
+        let descriptor = Darwin.open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let output = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? output.close() }
         do {
             let input = try FileHandle(forReadingFrom: source); defer { try? input.close() }
-            let output = try FileHandle(forWritingTo: destination); defer { try? output.close() }
             var count: UInt64 = 0
             while let chunk = try input.read(upToCount: chunkBytes), !chunk.isEmpty {
                 try Task.checkCancellation()

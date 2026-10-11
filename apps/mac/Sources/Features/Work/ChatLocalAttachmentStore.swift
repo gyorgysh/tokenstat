@@ -103,7 +103,11 @@ actor ChatLocalAttachmentStore {
             try metadata.synchronize()
             try Self.synchronizeDirectory(directory)
             return attachment
-        } catch { try? FileManager.default.removeItem(at: bytes); throw error }
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: bytes)
+            throw error
+        }
     }
     func resolveStream(_ attachment: ChatAttachment, reference: WorkReference,
         upload: @escaping @Sendable (URL) async throws -> ChatAttachment) async throws -> ChatAttachment {

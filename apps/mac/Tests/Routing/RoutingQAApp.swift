@@ -8,6 +8,7 @@ import SwiftUI
     #if os(iOS)
     @State private var account = AccountModel()
     @State private var navigation = ClientNavigationModel()
+    @State private var connectivity = ConnectivityModel()
     #endif
     init() { AppFonts.register(); Bridge.connect() }
     private func limitNotice(_ chat: ChatConversation) -> some View {
@@ -31,7 +32,7 @@ import SwiftUI
                         #if os(iOS)
                         if screen == "Conversation" {
                             ClientChatThread(model: model, chatID: chat.id, folderName: "Routing QA", hostName: "Disposable host")
-                                .environment(account).environment(navigation)
+                                .environment(account).environment(navigation).environment(connectivity)
                         } else { limitNotice(chat) }
                         #else
                         limitNotice(chat)
