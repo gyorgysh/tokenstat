@@ -1666,6 +1666,16 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private UIElement Composer()
     {
+        try { return ComposerContent(); }
+        catch (Exception error)
+        {
+            Program.LogStartup($"Chat composer construction failed: {error}");
+            throw;
+        }
+    }
+
+    private UIElement ComposerContent()
+    {
         var well = _composerWell = new StackPanel { Spacing = Theme.SpaceS };
         // Setup and notices can grow independently of the draft. Keep their
         // combined height bounded so Send stays reachable on short windows.
