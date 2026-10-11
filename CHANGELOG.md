@@ -26,6 +26,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
+- Windows keeps Send visible when chat setup, routing and agent notices are open together.
 - Claude sign-in refusals apply the routing setting for authentication failures.
 - Usage scans include Codex chats started by tokenstat in private homes, so their usage appears alongside ordinary Codex sessions without manually scanning each chat.
 - Changing a chat's model or speed on Apple devices no longer causes a false conversation conflict on the next message. Reviewed messages can be sent with the latest chat in one action.

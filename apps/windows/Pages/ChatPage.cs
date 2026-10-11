@@ -1667,27 +1667,32 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private UIElement Composer()
     {
         var well = _composerWell = new StackPanel { Spacing = Theme.SpaceS };
+        // Setup and notices can grow independently of the draft. Keep their
+        // combined height bounded so Send stays reachable on short windows.
+        var context = new StackPanel { Spacing = Theme.SpaceS };
+        Detach(_gitStrip);
         RenderGitStrip();
-        well.Children.Add(_gitStrip);
+        context.Children.Add(_gitStrip);
         if (_setupExpanded)
         {
-            _setupScroll.Content = SetupCard();
-            FitSetupViewport();
-            well.Children.Add(_setupScroll);
+            context.Children.Add(SetupCard());
         }
         _draft.Background = Theme.PanelBrush;
         _draft.BorderThickness = new Thickness(0);
         _draft.MinHeight = 76;
         var steerNote = PendingSteerText(_openChat);
-        if (steerNote.Length > 0) well.Children.Add(SteerNoteBanner(steerNote));
-        well.Children.Add(PendingMessages());
-        well.Children.Add(RoutingControls());
-        if (OpenBackendMissing()) well.Children.Add(MissingAgentNotice());
+        if (steerNote.Length > 0) context.Children.Add(SteerNoteBanner(steerNote));
+        context.Children.Add(PendingMessages());
+        context.Children.Add(RoutingControls());
+        if (OpenBackendMissing()) context.Children.Add(MissingAgentNotice());
         var setupBackend = Backend(Format.Text(_openChat, "backend"));
         if (setupBackend is not null && Installed(setupBackend) && Format.Text(setupBackend, "id") != "sh"
             // Only a state with a next step. Agents whose login nothing can
             // read are always "unknown", and a notice on all of them is noise.
-            && Format.Text(setupBackend, "readiness") is "needsSignIn" or "expired") well.Children.Add(AgentSetupNotice(setupBackend));
+            && Format.Text(setupBackend, "readiness") is "needsSignIn" or "expired") context.Children.Add(AgentSetupNotice(setupBackend));
+        _setupScroll.Content = context;
+        FitSetupViewport();
+        well.Children.Add(_setupScroll);
         well.Children.Add(_draft);
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
@@ -1740,8 +1745,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private void FitSetupViewport()
     {
         // Leave room for the draft, wrapped controls and transcript even on a
-        // short window. Setup has its own scrollbar rather than growing the
-        // auto-sized composer row beyond the page's visible bounds.
+        // short window. Bound setup and all notices together rather than
+        // allowing their combined height to push Send outside the page.
         _setupScroll.MaxHeight = Math.Max(0, Math.Min(280, ActualHeight - 280));
     }
 
