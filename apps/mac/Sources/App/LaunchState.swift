@@ -91,12 +91,23 @@ final class LaunchState {
 /// view is not in the tree yet, so the system cannot install a sidebar
 /// toggle on the window toolbar during splash.
 struct LaunchSplashView: View {
+    var isFullScreen = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
-            Theme.background
-                .ignoresSafeArea()
+            #if os(macOS)
+            if #available(macOS 26, *) {
+                // Local AppStorage is ready before the host handshake. The
+                // sidebar surface supplies its persisted appearance or defaults.
+                SidebarGlassSurface(isFullScreen: isFullScreen, cornerRadius: 0)
+                    .ignoresSafeArea()
+            } else {
+                Theme.sidebar.ignoresSafeArea()
+            }
+            #else
+            Theme.background.ignoresSafeArea()
+            #endif
             LogoMark(size: 44, animated: !reduceMotion)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

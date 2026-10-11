@@ -435,7 +435,7 @@ struct RootView: View {
                 // Both modes use the system content safe area for every column.
                 mainChrome
             } else {
-                LaunchSplashView()
+                LaunchSplashView(isFullScreen: isFullScreen)
             }
         }
         .environment(\.hostReady, launch.hostReady)

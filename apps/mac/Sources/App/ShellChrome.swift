@@ -105,8 +105,9 @@ extension View {
 }
 
 @available(macOS 26, *)
-private struct SidebarGlassSurface: View {
+struct SidebarGlassSurface: View {
     let isFullScreen: Bool
+    var cornerRadius: CGFloat = ShellMetrics.panelRadius
     @AppStorage(SidebarAppearancePreferences.enabledKey) private var enabled = true
     @AppStorage(SidebarAppearancePreferences.washKey) private var wash = SidebarAppearancePreferences.defaultWash
     @Environment(\.colorScheme) private var colorScheme
@@ -114,14 +115,14 @@ private struct SidebarGlassSurface: View {
 
     var body: some View {
         if !enabled || isFullScreen || reduceTransparency || wash >= 1 {
-            RoundedRectangle(cornerRadius: ShellMetrics.panelRadius, style: .continuous).fill(Theme.sidebar)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Theme.sidebar)
         } else {
             // Keep native glass's depth and edge while the backing softens
             // background detail and this neutral wash protects row contrast.
             // Match the app's theme, even when it differs from macOS.
-            SidebarBackdrop()
+            SidebarBackdrop(cornerRadius: cornerRadius)
                 .overlay {
-                    RoundedRectangle(cornerRadius: ShellMetrics.panelRadius, style: .continuous)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .fill((colorScheme == .dark ? Color.black : Color.white)
                             .opacity(SidebarAppearancePreferences.normalized(wash)))
                 }
@@ -133,8 +134,10 @@ private struct SidebarGlassSurface: View {
 /// the visual effect inside the glass's content view would cover the glass.
 @available(macOS 26, *)
 private struct SidebarBackdrop: NSViewRepresentable {
+    let cornerRadius: CGFloat
+
     func makeNSView(context: Context) -> FrostedGlassView {
-        let view = FrostedGlassView()
+        let view = FrostedGlassView(cornerRadius: cornerRadius)
         updateNSView(view, context: context)
         return view
     }
@@ -148,8 +151,8 @@ private struct SidebarBackdrop: NSViewRepresentable {
 private final class FrostedGlassView: NSView {
     private let glass = NSGlassEffectView()
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    init(cornerRadius: CGFloat) {
+        super.init(frame: .zero)
         let frost = NSVisualEffectView(frame: bounds)
         frost.material = .underWindowBackground
         frost.blendingMode = .behindWindow
@@ -157,13 +160,13 @@ private final class FrostedGlassView: NSView {
         // A full-strength legacy material flattens the native glass. Use it
         // only to soften detail; the glass and wash carry the appearance.
         frost.alphaValue = 0.35
-        frost.maskImage = Self.mask(radius: ShellMetrics.panelRadius)
+        frost.maskImage = Self.mask(radius: cornerRadius)
         frost.autoresizingMask = [.width, .height]
         addSubview(frost)
 
         glass.frame = bounds
         glass.style = .clear
-        glass.cornerRadius = ShellMetrics.panelRadius
+        glass.cornerRadius = cornerRadius
         glass.autoresizingMask = [.width, .height]
         addSubview(glass)
     }

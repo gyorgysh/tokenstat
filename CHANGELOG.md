@@ -20,6 +20,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Changed
 
+- The Mac startup logo inherits the sidebar's glass appearance and tint strength, using the default Liquid Glass appearance before any preference is saved.
 - Chat settings have clearer section headers and a prominent Routing action. On Apple devices, Chat Detail follows the conversation name. Routing settings and activity expand from the whole row; narrow phones give model and effort their own rows.
 - Pending Push counts appear in an accent badge. Successful Git notices and success toasts dismiss after ten seconds; errors remain available for review.
 
