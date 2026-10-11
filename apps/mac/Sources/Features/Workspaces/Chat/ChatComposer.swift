@@ -146,7 +146,6 @@ struct ChatComposer: View {
 
     private var well: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            ChatRoutingNotice(model: model, chat: chat)
             ChatFileProgressNotice(model: model)
             if model.savedCopy != nil {
                 Button(L10n.text("apple.chatcomposer.send_when_connected.c2aae57a"), .scheduled) { model.queueDraftWhenConnected() }

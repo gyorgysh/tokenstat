@@ -5,7 +5,14 @@ import SwiftUI
 @main struct RoutingQAApp: App {
     @State private var model = ChatModel()
     @State private var screen = "Settings"
+    #if os(iOS)
+    @State private var account = AccountModel()
+    @State private var navigation = ClientNavigationModel()
+    #endif
     init() { AppFonts.register(); Bridge.connect() }
+    private func limitNotice(_ chat: ChatConversation) -> some View {
+        ScrollView { ChatRoutingNotice(model: model, chat: chat).padding(Theme.Space.m) }
+    }
     var body: some Scene {
         WindowGroup {
             VStack(spacing: 0) {
@@ -13,14 +20,22 @@ import SwiftUI
                 Picker("QA screen", selection: $screen) {
                     Text("Settings").tag("Settings")
                     Text("Limit").tag("Limit")
+                    #if os(iOS)
+                    Text("Conversation").tag("Conversation")
+                    #endif
                 }.pickerStyle(.segmented).padding(Theme.Space.m)
                 if let chat = model.selected {
                     if screen == "Settings" {
                         ChatInspector(model: model, folder: nil, onClose: {}, showsHeader: false)
                     } else {
-                        ScrollView {
-                            ChatRoutingNotice(model: model, chat: chat).padding(Theme.Space.m)
-                        }
+                        #if os(iOS)
+                        if screen == "Conversation" {
+                            ClientChatThread(model: model, chatID: chat.id, folderName: "Routing QA", hostName: "Disposable host")
+                                .environment(account).environment(navigation)
+                        } else { limitNotice(chat) }
+                        #else
+                        limitNotice(chat)
+                        #endif
                     }
                 } else {
                     Text(model.error ?? "Loading disposable host…")

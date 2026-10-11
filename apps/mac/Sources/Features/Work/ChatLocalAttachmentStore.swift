@@ -79,10 +79,16 @@ actor ChatLocalAttachmentStore {
     private func saveExternal(file: URL, attachment: ChatAttachment, reference: WorkReference, uploaded: ChatAttachment?) throws -> ChatAttachment {
         var owner = reference; owner.anchor = nil
         let url = try location(attachment.id, reference: owner)
+        guard !removals.contains(url), uploads[url] == nil,
+              !FileManager.default.fileExists(atPath: url.path) else { throw Failure.inUse }
+        let activity = OriginalFileCoordination.use(try originalAccess.get(), file: url)
+        defer { withExtendedLifetime(activity) {} }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let bytes = url.appendingPathExtension("bytes")
+        // Copy refuses an existing destination. Only clean up bytes this
+        // invocation created, never an original retained by an earlier import.
+        try ChatFileIO.copy(file, to: bytes)
         do {
-            try ChatFileIO.copy(file, to: bytes)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bytes.path)
             #if !os(macOS)
             try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: bytes.path)
@@ -92,6 +98,9 @@ actor ChatLocalAttachmentStore {
             let encoded = try JSONEncoder().encode(File(reference: owner, attachment: attachment, data: Data(), uploaded: uploaded, external: true))
             try encoded.write(to: url, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            let metadata = try FileHandle(forWritingTo: url)
+            defer { try? metadata.close() }
+            try metadata.synchronize()
             try Self.synchronizeDirectory(directory)
             return attachment
         } catch { try? FileManager.default.removeItem(at: bytes); throw error }

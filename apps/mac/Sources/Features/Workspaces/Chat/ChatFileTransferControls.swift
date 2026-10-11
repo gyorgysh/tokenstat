@@ -54,7 +54,7 @@ struct ChatFileProgressNotice: View {
                 Text(name).lineLimit(1).truncationMode(.middle)
                 ProgressView(value: model.fileTransferProgress).frame(maxWidth: 120)
                 Text(model.fileTransferProgress, format: .percent.precision(.fractionLength(0)))
-                Button(L10n.text("common.cancel"), .stop) { model.fileTransferCancelled = true; model.answerFileRelay(false) }
+                Button(L10n.text("common.cancel"), .dismiss) { model.fileTransferCancelled = true; model.answerFileRelay(false) }
             }.font(Theme.caption).padding(Theme.Space.s)
         }
     }

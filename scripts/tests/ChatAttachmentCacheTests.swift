@@ -39,6 +39,13 @@ struct ChatAttachmentCacheTests {
         require(await cache.read(reference: reference(folder: "other"), attachment: "file") == nil, "Folder isolation")
         let reopened = ChatAttachmentCache(directory: root)
         require(await reopened.read(reference: reference(), attachment: "file") == bytes, "Persistent reuse")
+        let resumed = root.appendingPathComponent("resumed.mov")
+        try bytes.write(to: resumed)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -86400 * 30)], ofItemAtPath: resumed.path)
+        let completed = try await reopened.writeFile(resumed, reference: reference(), attachment: "video", epoch: await reopened.epoch())
+        require(try Data(contentsOf: completed) == bytes, "Completed resumed download starts a fresh retention period")
+        let cachedVideo = await reopened.readFile(reference: reference(), attachment: "video", size: UInt64(bytes.count))
+        require(cachedVideo?.standardizedFileURL == completed.standardizedFileURL, "Resumed download remains reusable")
         let expired = ChatAttachmentCache(directory: root, lifetime: 0)
         require(await expired.read(reference: reference(), attachment: "file") == nil, "Expired cache miss")
 

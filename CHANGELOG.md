@@ -27,6 +27,9 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Fixed
 
 - Windows keeps Send visible when chat setup, routing and agent notices are open together.
+- Limit notices scroll with the conversation on Apple and Android devices, keeping the message field available. Android routing setup lives in its own section near the top of chat settings.
+- A failed duplicate import of a large original file on Apple devices preserves the retained original. Cached file results respect a cache purge, resumed downloads begin a fresh retention period, and changing a success toast into an error cancels its dismissal timer.
+- Damaged routing metadata cannot prevent stopping a chat turn. Windows uploads recover from an interrupted local transfer receipt.
 - Claude sign-in refusals apply the routing setting for authentication failures.
 - Usage scans include Codex chats started by tokenstat in private homes, so their usage appears alongside ordinary Codex sessions without manually scanning each chat.
 - Changing a chat's model or speed on Apple devices no longer causes a false conversation conflict on the next message. Reviewed messages can be sent with the latest chat in one action.

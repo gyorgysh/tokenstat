@@ -546,7 +546,11 @@ actor ChatAttachmentCache {
         let destination = root.appendingPathComponent(source.lastPathComponent)
         if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
         try FileManager.default.moveItem(at: source, to: destination)
+        // A resumed transfer can carry an old modification date. Retention
+        // starts when the completed download enters this cache.
+        try FileManager.default.setAttributes([.modificationDate: Date(), .posixPermissions: 0o600], ofItemAtPath: destination.path)
         try prune()
+        guard FileManager.default.fileExists(atPath: destination.path) else { throw CocoaError(.fileNoSuchFile) }
         return destination
     }
     func purge() throws {

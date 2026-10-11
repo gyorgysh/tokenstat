@@ -49,6 +49,20 @@ actor UploadCounter {
         let originalDigest = try ChatFileIO.hash(largeURL).1
         assert(exportedDigest == originalDigest)
         try FileManager.default.removeItem(at: exported)
+        let retainedVideo = ChatAttachment(id: "retained-video", name: "video.mov", mediaType: "video/quicktime", size: video.size)
+        try await reopened.keep(retainedVideo, file: largeURL, reference: ref())
+        do {
+            try await reopened.keep(retainedVideo, file: largeURL, reference: ref())
+            assertionFailure("Duplicate sidecar must not overwrite the original")
+        } catch {}
+        let stillRetained = await reopened.contains(retainedVideo, reference: ref())
+        assert(stillRetained, "Failed duplicate import must preserve existing original bytes")
+        let retainedExport = try await reopened.exportURL(retainedVideo, reference: ref())
+        let retainedDigest = try ChatFileIO.hash(retainedExport).1
+        assert(retainedDigest == originalDigest)
+        try FileManager.default.removeItem(at: retainedExport)
+        let retainedVideoEntry = try await reopened.retained(in: ref().scope).files.first { $0.attachment.id == retainedVideo.id }!
+        try await reopened.remove(retainedVideoEntry, ifUnused: { true })
         let videoListing = try await reopened.retained(in: ref().scope)
         let videoEntry = videoListing.files.first { $0.attachment.id == video.id }!
         assert(videoEntry.bytes > 20 * 1024 * 1024)

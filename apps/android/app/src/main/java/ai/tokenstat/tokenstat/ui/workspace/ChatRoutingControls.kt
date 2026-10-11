@@ -43,6 +43,8 @@ internal fun ChatRoutingControls(
     backends: List<JsonObject>,
     call: suspend (String, JsonObject) -> JsonElement,
     onChanged: () -> Unit,
+    showNotice: Boolean = true,
+    showSection: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
     fun agentLabel(id: String): String =
@@ -75,7 +77,7 @@ internal fun ChatRoutingControls(
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-        if (limit != null)
+        if (showNotice && limit != null)
             TsCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     Text(
@@ -172,7 +174,7 @@ internal fun ChatRoutingControls(
                     }
                 }
             }
-        TsCard(
+        if (showSection) TsCard(
             title = L10n.text("common.chat_routing"),
             subtitle = L10n.text("common.chat_routing_intro"),
             mark = "mark_workflow",
@@ -568,7 +570,7 @@ private fun ChatRoutingDialog(
                         Text(
                             L10n.text(
                                 "common.chat_route_preferred",
-                                ((chat["routing"] as? JsonObject)?.get("preferred") as? JsonObject)
+                                (preferred ?: ((chat["routing"] as? JsonObject)?.get("preferred") as? JsonObject))
                                     ?.routeText("backend")
                                     .orEmpty()
                                     .ifBlank { chat.routeText("backend") },

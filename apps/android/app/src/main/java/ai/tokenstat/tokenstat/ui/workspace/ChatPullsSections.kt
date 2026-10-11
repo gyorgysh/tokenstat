@@ -1648,7 +1648,7 @@ fun ChatSection(
                 // thinking indicator is its own row below the last turn, and
                 // without this the list never scrolls it into view when a
                 // turn starts with no new events yet.
-                LaunchedEffect(transcript, openChat?.bol("running")) {
+                LaunchedEffect(transcript, openChat?.bol("running"), openChat?.get("routing")) {
                     if (transcript.isNotEmpty() && follow.pinned &&
                         !(listState.isScrollInProgress && !autoScrolling)
                     ) {
@@ -1685,6 +1685,13 @@ fun ChatSection(
                                 },
                             )
                         }
+                        if (openChat != null && (openChat["routing"] as? JsonObject)?.get("limit") is JsonObject) {
+                            item(key = "routing-limit") {
+                                ChatRoutingControls(openChat, backends,
+                                    { method, params -> model.workspaceSection(peer, method, params) },
+                                    { scope.launch { refreshChats() } }, showSection = false)
+                            }
+                        }
                         // The turn in progress, with the conversation's own
                         // face at the same left edge as an agent reply, the
                         // way the Apple transcript keeps its character moving
@@ -1713,9 +1720,6 @@ fun ChatSection(
                         )
                     }
                 }
-            }
-            chats.firstOrNull { it.str("id") == openId }?.let { currentChat ->
-                ChatRoutingControls(currentChat, backends, { method, params -> model.workspaceSection(peer, method, params) }, { scope.launch { refreshChats() } })
             }
             fileProgress?.let { (name, value) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2346,6 +2350,11 @@ private fun ChatSetupDialog(
                 TsSecondaryButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, small = true, onClick = onDismiss)
             }
             if (error != null) Banner(error!!, BannerSeverity.DANGER)
+            if (chat != null) {
+                ChatRoutingControls(chat, backends,
+                    { method, params -> model.workspaceSection(peer, method, params) },
+                    onChanged, showNotice = false)
+            }
             if (loading) {
                 Text(L10n.text("android.chatpullssections.loading.ba3bbbe1"), color = colors.textSecondary)
             } else {

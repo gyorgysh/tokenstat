@@ -125,24 +125,28 @@ pub(super) fn copy_attachment(source: &Path, destination: &Path) -> Result<u64, 
 
 fn save_upload(path: &Path, upload: &Upload) -> Result<(), String> {
     let temporary = path.with_extension(format!("{}.tmp", rand::random::<u64>()));
-    write_private_file(
-        &temporary,
-        &serde_json::to_vec(upload).map_err(|e| e.to_string())?,
-    )?;
-    // FlushFileBuffers on Windows requires a writable handle.
-    OpenOptions::new()
-        .write(true)
-        .open(&temporary)
-        .and_then(|file| file.sync_all())
-        .map_err(|e| e.to_string())?;
-    fs::rename(&temporary, path).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    {
-        fs::File::open(path.parent().ok_or("invalid file transfer path")?)
-            .and_then(|dir| dir.sync_all())
+    let result = (|| {
+        write_private_file(
+            &temporary,
+            &serde_json::to_vec(upload).map_err(|e| e.to_string())?,
+        )?;
+        // FlushFileBuffers on Windows requires a writable handle.
+        OpenOptions::new()
+            .write(true)
+            .open(&temporary)
+            .and_then(|file| file.sync_all())
             .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+        fs::rename(&temporary, path).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            fs::File::open(path.parent().ok_or("invalid file transfer path")?)
+                .and_then(|dir| dir.sync_all())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+    let _ = fs::remove_file(temporary);
+    result
 }
 fn stored_bytes(chat: &Path) -> Result<u64, String> {
     let files = chat.join("files");
@@ -533,6 +537,28 @@ mod tests {
             .as_str()
             .unwrap()
             .into()
+    }
+    #[test]
+    fn failed_metadata_save_does_not_leak_temporary_transfer_records() {
+        let (_temp, store) = fixture();
+        let transfer = start(&store, b"file");
+        let (path, upload) = store.upload_load("file-test", &transfer).unwrap();
+        let directory = path.parent().unwrap();
+        let blocked = directory.join("blocked.json");
+        fs::create_dir(&blocked).unwrap();
+        assert!(save_upload(&blocked, &upload).is_err());
+        assert!(fs::read_dir(directory).unwrap().all(|entry| {
+            entry
+                .unwrap()
+                .path()
+                .extension()
+                .and_then(|value| value.to_str())
+                != Some("tmp")
+        }));
+        assert_eq!(
+            store.file_upload_status("file-test", &transfer).unwrap()["offset"],
+            0
+        );
     }
     #[test]
     fn resumes_after_reload_repeats_exact_chunk_and_downloads_identical_bytes() {

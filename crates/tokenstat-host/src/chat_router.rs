@@ -1166,6 +1166,18 @@ mod tests {
         }
     }
     #[test]
+    fn damaged_routing_storage_cannot_prevent_stopping_a_turn() {
+        let (_temp, store) = fixture();
+        store.set_running("route-test", true).unwrap();
+        let directory = store.verified_append_directory("route-test").unwrap();
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("routing.json"), b"{damaged").unwrap();
+        let error = store.stop("route-test").unwrap_err();
+        assert!(error.starts_with("The turn stopped"));
+        assert!(!store.get("route-test").unwrap().running);
+        assert!(store.router_load("route-test").is_err());
+    }
+    #[test]
     fn interrupted_activity_append_does_not_block_future_complete_records() {
         let (_temp, store) = fixture();
         let mut state = State::default();

@@ -3878,8 +3878,12 @@ impl Store {
         validate_record_id(id)?;
         let branch = self.folder_branch(id);
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
-        self.router_cancel_locked(id)?;
-        self.stop_locked(id, branch, false)
+        // Routing storage must never prevent the person from stopping a
+        // process. Acceptance excludes the scheduler throughout both steps.
+        self.stop_locked(id, branch, false)?;
+        self.router_cancel_locked(id).map_err(|error| {
+            format!("The turn stopped, but routing cancellation could not be saved: {error}")
+        })
     }
 
     pub fn recover(

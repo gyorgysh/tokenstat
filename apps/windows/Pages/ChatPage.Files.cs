@@ -83,6 +83,7 @@ internal sealed partial class ChatPage
             if (File.Exists(journal) && new FileInfo(journal).Length < 8192)
             {
                 try { var saved = JsonNode.Parse(await File.ReadAllTextAsync(journal)); previous = await CallChatAsync("chat.fileUploadStatus", new JsonObject { ["id"] = chat, ["transferId"] = Format.Text(saved, "transferId") }); } catch (HostException) { }
+                catch (System.Text.Json.JsonException) { File.Delete(journal); }
             }
             if (!current()) throw new OperationCanceledException();
             if (Format.Flag(previous, "finished") && previous?["attachment"] is JsonNode completed) { File.Delete(journal); return completed.DeepClone(); }

@@ -51,7 +51,6 @@ struct ClientChatComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ChatRoutingNotice(model: model, chat: chat)
             ChatFileProgressNotice(model: model)
             if model.savedCopy != nil {
                 Button(L10n.text("apple.clientchatcomposer.send_when_connected.c2aae57a"), .scheduled) { model.queueDraftWhenConnected() }

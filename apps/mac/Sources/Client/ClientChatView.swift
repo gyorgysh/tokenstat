@@ -1207,6 +1207,9 @@ struct ClientChatThread: View {
                         )
                     }
                     if sliceOffset == 0 {
+                        if !model.isShowingCachedTranscript, let chat = model.selected {
+                            ChatRoutingNotice(model: model, chat: chat)
+                        }
                         if !model.isShowingCachedTranscript, let mood = liveMood {
                             ChatWorkingIndicator(
                                 seed: model.faceSeed,

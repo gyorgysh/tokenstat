@@ -4127,7 +4127,7 @@ final class ChatModel {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
                   currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
         if let cachedFile = await ChatAttachmentCache.shared.readFile(reference: previewReference, attachment: attachment.id, size: attachment.size) {
-            guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference, WorkCacheAccess.canRead(previewReference), memoryGeneration == attachmentCacheGeneration else { return }
             responseAttachmentFiles[attachment.id] = cachedFile
             return
         }
