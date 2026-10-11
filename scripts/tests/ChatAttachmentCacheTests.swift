@@ -24,7 +24,7 @@ struct ChatAttachmentCacheTests {
         guard case let .attachment(imported)? = ChatInbox.drop(from: importFile) else {
             fatalError("Oversized import must reach the size-limit explanation")
         }
-        require(imported.data.count == ChatInbox.maxBytes + 1, "Large import read is bounded with an oversize marker")
+        require(imported.data.isEmpty && imported.importFailure != nil, "Oversized import carries a refusal without reading bytes")
         require(imported.name == "large.heic", "Oversized image is not converted")
         require(try importFile.resourceValues(forKeys: [.fileSizeKey]).fileSize == 4 * 1024 * 1024 * 1024, "Original file is unchanged")
         require(ChatInbox.boundedFileData(from: root) == nil, "Directory is not a file")

@@ -1043,7 +1043,7 @@ extension Bridge {
         let generation: UInt64
     }
 
-    private static func chatInvoke<T: Decodable & Sendable>(
+    static func chatInvoke<T: Decodable & Sendable>(
         peer: String?,
         _ method: String,
         _ params: [String: Any] = [:],
@@ -1629,18 +1629,16 @@ extension Bridge {
         }
     }
 
-    static func chatAttachment(
-        id: String,
-        attachmentID: String,
-        peer: String? = nil
-    ) async throws -> ChatAttachmentData {
-        try await chatInvoke(
-            peer: peer,
-            "chat.attachment",
-            ["id": id, "attachmentId": attachmentID],
-            patience: Patience.long,
-            as: ChatAttachmentData.self
-        )
+    static func chatAttachment(id: String, attachmentID: String, peer: String? = nil,
+        confirmRelay: @escaping @Sendable () async -> Bool = { false }) async throws -> ChatAttachmentData {
+        let (scope, generation) = await MainActor.run { (WorkSessionContext.shared.scope, WorkSessionContext.shared.generation) }
+        var params: [String: Any] = ["id":id,"attachmentId":attachmentID,"allowRelay":false]
+        do { return try await chatInvoke(peer:peer,"chat.attachment",params,patience:Patience.long,expectedScope:scope,expectedGeneration:generation,as:ChatAttachmentData.self) }
+        catch {
+            guard case let BridgeError.core(code, _) = error, code == "relay_consent_required", await confirmRelay() else { throw error }
+            params["allowRelay"] = true
+            return try await chatInvoke(peer:peer,"chat.attachment",params,patience:Patience.long,expectedScope:scope,expectedGeneration:generation,as:ChatAttachmentData.self)
+        }
     }
 
     /// What this conversation tells its agent before it hears the person.
@@ -1745,22 +1743,7 @@ extension Bridge {
     }
 
     static func attachToChat(id: String, file: URL, peer: String? = nil) async throws -> ChatAttachment {
-        let access = file.startAccessingSecurityScopedResource()
-        defer { if access { file.stopAccessingSecurityScopedResource() } }
-        // Bound before decoding: `Data(contentsOf:)` reads the whole file, and
-        // an attachment must fit in one request in any case.
-        if let values = try? file.resourceValues(forKeys: [.fileSizeKey]),
-           let size = values.fileSize, size > 25 * 1024 * 1024 {
-            throw BridgeError.core(code: "attachment_too_large", message: L10n.text("apple.bridge.this_file_is_too_large_to_attach_0_mb_file.f594c26b", "\(size / 1_048_576)"))
-        }
-        let data = try Data(contentsOf: file)
-        return try await attachToChat(
-            id: id,
-            name: file.lastPathComponent,
-            data: data,
-            mediaType: nil,
-            peer: peer
-        )
+        try await uploadChatFile(id: id, file: file, peer: peer)
     }
 
     static func attachToChat(
@@ -1770,6 +1753,7 @@ extension Bridge {
         mediaType: String?,
         peer: String? = nil
     ) async throws -> ChatAttachment {
+        guard data.count <= 12 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
         var params: [String: Any] = [
             "id": id,
             "name": name,

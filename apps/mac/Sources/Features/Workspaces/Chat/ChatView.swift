@@ -563,6 +563,7 @@ struct ChatView: View {
             guard !Task.isCancelled else { return }
             await model.refillBackendsIfIncomplete()
         }
+        .modifier(ChatFileTransferControls(model: model))
         .alert(L10n.text("apple.chatview.chat_unavailable.a45aae80"), isPresented: Binding(
             get: { isActive && model.error != nil },
             set: { if !$0 && isActive { model.error = nil } }
@@ -636,6 +637,7 @@ struct ChatView: View {
                                         let owner = model.currentReference
                                         Task { await model.resolve(approval, choice: choice, owner: owner) }
                                     },
+                                    attachmentFile: model.responseAttachmentFiles[attachmentID(for: item)],
                                     attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
                                     attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
                                     downloadAttachment: { attachment in

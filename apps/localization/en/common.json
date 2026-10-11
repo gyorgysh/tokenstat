@@ -109,5 +109,15 @@
   "common.chat_route_delivery": "Continuation delivery needs checking. You can write a new message.",
   "common.chat_route_explanation": "The next agent receives the conversation and workspace context. Routing keeps this chat’s permissions.",
   "common.move_up": "Move up",
-  "common.chat_route_default": "Use for new chats"
+  "common.chat_route_default": "Use for new chats",
+  "common.chat_files_relay_title": "Use relay allowance?",
+  "common.chat_files_relay_message": "Transfer %1$@ (%2$@) through the relay? Uploads, downloads and retries use your account’s shared allowance. Direct connections do not use it.",
+  "common.chat_files_too_large": "This file exceeds the limit for this connection. Use a direct connection or split the file.",
+  "common.chat_files_import_failed": "%1$@ could not be imported. Choose a non-empty file up to 256 MB.",
+  "common.chat_files_busy": "Finish or cancel the current file transfer first.",
+  "common.chat_files_saved": "File saved.",
+  "common.continue": "Continue",
+  "common.download": "Download",
+  "common.file": "File",
+  "common.chat_files_remaining": "About %1$@ of relay allowance remains. The server checks the allowance throughout the transfer."
 }

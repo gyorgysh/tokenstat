@@ -956,6 +956,7 @@ struct ClientChatThread: View {
         // is about to erase is a popup, not information: the strip says
         // reconnecting, the foreground refresh retries, and anything still
         // broken once back online raises its own error then.
+        .modifier(ChatFileTransferControls(model: model))
         .alert(L10n.text("apple.clientchatview.chat_unavailable.a45aae80"), isPresented: Binding(
             get: { isActive && model.error != nil && connectivity.status != .offline },
             set: { if !$0 { model.error = nil } }
@@ -1163,6 +1164,8 @@ struct ClientChatThread: View {
                                         let owner = model.currentReference
                                         Task { await model.resolve(approval, choice: choice, owner: owner) }
                                     },
+                                    attachmentFile: model.responseAttachmentFiles[attachmentID(for: item)],
+                                    openAttachmentFile: { attachment, url in previewFile = ChatPreviewedFile(id: attachment.id, url: url, name: attachment.name) },
                                     attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
                                     attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
                                     downloadAttachment: { attachment in

@@ -34,6 +34,7 @@ for path in ['apps/mac/Sources/Features/Workspaces/Chat/ChatView.swift', 'apps/m
     assert 'await model.watchPolls()' in view and 'ChatPollWatchIdentity(owner: model.pollingIdentity' in view
 swift = r'''import Foundation
 @MainActor final class Context { static let shared = Context(); var scope = "A" }
+typealias WorkReference = Reference
 struct Reference: Hashable, Sendable { let scope: String; let workspaceID = "work"; let itemID: String? = "chat" }
 struct ChatConversation: Equatable { let id: String; var running: Bool }
 struct ChatAttachment { let id: String; let name: String; let mediaType: String?; let size: UInt64? }
@@ -45,6 +46,7 @@ struct Event { var kind: String; var id: String?; var name: String?; var mediaTy
 struct Usage { let isValid = true }
 struct Page { let usage: Usage? = Usage(); let events: [ChatTimelineEvent] = [] }
 struct Payload { let data: String }
+enum BridgeError: Error { case core(code: String, message: String) }
 @MainActor final class Wire {
     var calls = 0
     var held: [CheckedContinuation<Void, Error>?] = []
@@ -62,7 +64,14 @@ struct Payload { let data: String }
     static func chats(workspaceID: String, peer: String?) async throws -> [ChatConversation] { try await status.read(); return statusReply }
     static func chatApprovals(id: String, peer: String?) async throws -> [String] { try await approvals.read(); return approvalReply }
     static func chatEventPage(id: String, cursor: String?, limit: Int, peer: String?) async throws -> Page { try await usage.read(); return Page() }
-    static func chatAttachment(id: String, attachmentID: String, peer: String?) async throws -> Payload { try await attachments.read(); return Payload(data: Data("file".utf8).base64EncodedString()) }
+    static func chatAttachment(id: String, attachmentID: String, peer: String?, confirmRelay: @escaping @Sendable () async -> Bool = { false }) async throws -> Payload { try await attachments.read(); return Payload(data: Data("file".utf8).base64EncodedString()) }
+    static func downloadChatFile(id: String, attachmentID: String, peer: String?, confirmRelay: @escaping @Sendable (UInt64?) async -> Bool, progress: @escaping @Sendable (Double) async throws -> Void) async throws -> URL {
+        try await attachments.read()
+        try await progress(1)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("file".utf8).write(to: file)
+        return file
+    }
 }
 @MainActor enum WorkCacheAccess { static func canRead(_ r: Reference) -> Bool { r.scope == Context.shared.scope }; static func canSave(_ r: Reference) -> Bool { canRead(r) } }
 @MainActor enum WorkSavedPreview {
@@ -72,10 +81,17 @@ struct Payload { let data: String }
 @MainActor final class ChatAttachmentCache {
     static let shared = ChatAttachmentCache()
     func epoch() async -> UInt64 { 0 }
+    func readFile(reference: Reference, attachment: String, size: UInt64?) async -> URL? { nil }
+    func writeFile(_ file: URL, reference: Reference, attachment: String, epoch: UInt64) async throws -> URL {
+        guard WorkCacheAccess.canSave(reference) else { throw CancellationError() }; return file
+    }
     func read(reference: Reference, attachment: String) async -> Data? { nil }
     func write(_ data: Data, reference: Reference, attachment: String, epoch: UInt64) async -> Bool { WorkCacheAccess.canSave(reference) }
 }
-enum RemoteHostFeature { case steer; var minimumProtocol: Int { 1 } }
+enum RemoteHostFeature { case steer, chatRecovery; var minimumProtocol: Int { 1 }
+    @MainActor static var modernFiles = false
+    @MainActor func isSupported(peer: String?) async -> Bool { Self.modernFiles }
+}
 enum ChatInbox { static let maxBytes = 100 }
 enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: UInt64?) -> Bool { true } }
 @MainActor enum ClientChatReadState { static let shared = SelfHolder(); final class SelfHolder { func markRead(peer: String?, chat: ChatConversation) {} } }
@@ -93,6 +109,12 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
     var attachmentDescriptorRevision: UInt64?, attachmentDescriptors: [ChatAttachment] = []; var descriptorScans = 0
     var attemptedResponseAttachments: Set<String> = [], loadingResponseAttachments: Set<String> = []
     var responseAttachmentData: [String: Data] = [:], responseAttachmentErrors: [String: String] = [:]
+    var responseAttachmentFiles: [String: URL] = [:]
+    var fileTransferInFlight = false, fileTransferCancelled = false, fileTransferName: String?
+    func confirmFileRelay(name: String, size: UInt64?, remaining: UInt64? = nil) async -> Bool { false }
+    func updateFileProgress(_ value: Double, name: String, reference: Reference, generation: UInt64? = nil) throws {
+        guard !fileTransferCancelled, currentReference == reference, WorkCacheAccess.canSave(reference), generation == nil || selectionGeneration == generation else { throw CancellationError() }
+    }
     var conversationUsage: Usage?, usageThrough: UInt64?
     var deliveringSteer: String?, deliveringSteerToken: UInt64?
     let eventWire = Wire(); var fresh: [ChatTimelineEvent] = []
@@ -232,6 +254,14 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
         await until { Bridge.capability.calls == 6 }; canceledStatus.cancel()
         Bridge.capability.finish(5); await canceledStatus.value
         precondition(canceledReservation.deliveries.isEmpty && canceledReservation.finishes == [1] && canceledReservation.deliveringSteerToken == nil)
+        // The real modern branch keeps large replies on disk and clears its transfer state.
+        RemoteHostFeature.modernFiles = true
+        let modern = Model()
+        let modernFile = ChatAttachment(id: "video", name: "video.mov", mediaType: "video/quicktime", size: 200)
+        let download = Task { await modern.loadResponseAttachment(modernFile, id: "chat", generation: 1, userInitiated: true) }
+        await until { Bridge.attachments.calls == 3 }; Bridge.attachments.finish(2); await download.value
+        precondition(modern.responseAttachmentData.isEmpty && modern.responseAttachmentFiles["video"] != nil && !modern.fileTransferInFlight)
+        try? FileManager.default.removeItem(at: modern.responseAttachmentFiles["video"]!)
         print("ChatModel: held events allow metadata, terminal wake, scoped late replies, usage fences, cached descriptor scans, attachment retry")
     }
 }

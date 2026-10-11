@@ -314,7 +314,7 @@ impl Store {
         state.tried.clear();
         self.router_save(id, &state)
     }
-    fn router_owner(&self) -> Result<String, String> {
+    pub(super) fn router_owner(&self) -> Result<String, String> {
         let epoch = match fs::read(self.root.join("routing-owner-epoch")) {
             Ok(bytes) if bytes.len() == 32 => {
                 String::from_utf8(bytes).map_err(|e| e.to_string())?
@@ -472,7 +472,7 @@ impl Store {
             }
             if event["event"]["kind"].as_str() == Some("attachment")
                 && let Some(file) = event["event"]["id"].as_str()
-                && attachments.len() < 16
+                && attachments.len() < 20
                 && !attachments.iter().any(|id| id == file)
             {
                 attachments.push(file.to_string());
@@ -495,6 +495,9 @@ impl Store {
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         let chat = self.current_send_conversation(id)?;
         let state = self.router_load(id)?;
+        if state.pending.is_none() {
+            return Ok(());
+        }
         let snapshot = crate::account_session::AccountSnapshot::capture()?;
         crate::account_session::with_snapshot(Some(snapshot), || {
             if let Some(peer) = state.peer.clone() {

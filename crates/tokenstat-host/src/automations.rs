@@ -782,6 +782,7 @@ pub fn chat_agent_command(
         let flags = launch
             .attachments
             .iter()
+            .filter(|path| crate::chat_turn::native_attachment(backend, path))
             .flat_map(|path| [flag.to_string(), path.display().to_string()]);
         argv.splice(at..at, flags);
     }
@@ -3736,7 +3737,9 @@ mod tests {
 
     #[test]
     fn chat_uses_native_image_flags_when_a_backend_has_them() {
-        let attachment = std::path::PathBuf::from("/private/tmp/diagram.png");
+        let temp = tempfile::tempdir().unwrap();
+        let attachment = temp.path().join("diagram.png");
+        std::fs::write(&attachment, b"\x89PNG\r\n\x1a\n").unwrap();
         let codex = chat_agent_command(
             "codex",
             "look",
@@ -3759,7 +3762,7 @@ mod tests {
         assert!(
             codex
                 .windows(2)
-                .any(|pair| pair == ["-i", "/private/tmp/diagram.png"])
+                .any(|pair| pair == ["-i", attachment.to_str().unwrap()])
         );
         let opencode = chat_agent_command(
             "opencode",
@@ -3783,7 +3786,7 @@ mod tests {
         assert!(
             opencode
                 .windows(2)
-                .any(|pair| pair == ["-f", "/private/tmp/diagram.png"])
+                .any(|pair| pair == ["-f", attachment.to_str().unwrap()])
         );
     }
 

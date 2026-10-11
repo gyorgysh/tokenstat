@@ -91,6 +91,31 @@ pub fn accepts_attachment_flags(backend: &str) -> bool {
     matches!(backend, "codex" | "opencode" | "opencode2")
 }
 
+/// Codex's -i is an image argument. Archives and video are ordinary tool paths.
+/// Inspect a bounded header rather than trusting a filename or client MIME.
+pub fn native_attachment(backend: &str, path: &Path) -> bool {
+    if matches!(backend, "opencode" | "opencode2") {
+        return true;
+    }
+    if backend != "codex" {
+        return false;
+    }
+    use std::io::Read;
+    let mut header = [0u8; 16];
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(count) = file.read(&mut header) else {
+        return false;
+    };
+    let header = &header[..count];
+    header.starts_with(b"\x89PNG\r\n\x1a\n")
+        || header.starts_with(&[0xff, 0xd8, 0xff])
+        || header.starts_with(b"GIF87a")
+        || header.starts_with(b"GIF89a")
+        || (header.starts_with(b"RIFF") && header.get(8..12) == Some(b"WEBP"))
+}
+
 pub struct Inputs<'a> {
     /// Exactly what the person typed, already trimmed.
     pub prompt: &'a str,
@@ -220,7 +245,11 @@ pub fn file_rule(output_dir: &Path) -> String {
 /// the same file twice, once natively and once in prose, is how a model ends
 /// up describing its own attachments back to you.
 fn user_text(prompt: &str, attachments: &[PathBuf], backend: &str) -> String {
-    if attachments.is_empty() || accepts_attachment_flags(backend) {
+    let attachments: Vec<_> = attachments
+        .iter()
+        .filter(|path| !native_attachment(backend, path))
+        .collect();
+    if attachments.is_empty() {
         return prompt.to_string();
     }
     let paths = attachments
@@ -429,7 +458,10 @@ mod tests {
 
     #[test]
     fn attachments_are_named_only_where_a_flag_cannot_carry_them() {
-        let files = vec![PathBuf::from("/data/chat-1/files/a/diagram.png")];
+        let temp = tempfile::tempdir().unwrap();
+        let image = temp.path().join("diagram.png");
+        std::fs::write(&image, b"\x89PNG\r\n\x1a\n").unwrap();
+        let files = vec![image];
         let spoken = compose(Inputs {
             prompt: "What is this?",
             persona_name: "",

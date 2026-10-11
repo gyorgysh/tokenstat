@@ -16,6 +16,8 @@ struct ChatInboxItem: Sendable {
     var data: Data
     var name: String
     var mediaType: String?
+    var file: URL? = nil
+    var importFailure: String? = nil
 }
 
 /// What a drop means before the chat decides how to present it.
@@ -145,6 +147,16 @@ enum ChatInbox {
             return nil
         }
         if isDirectory.boolValue { return .folder }
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > maxBytes {
+            guard size <= 256 * 1024 * 1024 else { return .attachment(ChatInboxItem(data: Data(), name: usableName(url.lastPathComponent), mediaType: nil, importFailure: L10n.text("common.chat_files_import_failed", url.lastPathComponent))) }
+            let snapshot = FileManager.default.temporaryDirectory.appendingPathComponent("chat-import-" + UUID().uuidString)
+            do {
+                try FileManager.default.copyItem(at: url, to: snapshot)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: snapshot.path)
+                return .attachment(ChatInboxItem(data: Data(), name: usableName(url.lastPathComponent),
+                    mediaType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType, file: snapshot))
+            } catch { return nil }
+        }
         guard let data = boundedFileData(from: url), !data.isEmpty else { return nil }
         return .attachment(prepared(
             ChatInboxItem(
@@ -174,7 +186,7 @@ enum ChatInbox {
     }
 
     static func prepared(_ item: ChatInboxItem) -> ChatInboxItem {
-        guard item.data.count <= maxBytes else { return item }
+        guard item.file == nil, item.data.count <= maxBytes else { return item }
         let type = (item.mediaType ?? "").lowercased()
         let ext = (item.name as NSString).pathExtension.lowercased()
         let needsPNG = type.contains("heic")
@@ -519,6 +531,24 @@ actor ChatAttachmentCache {
         return true
     }
 
+    func readFile(reference: WorkReference, attachment: String, size: UInt64?) -> URL? {
+        guard let root = file(reference: reference, attachment: attachment)?.appendingPathExtension("file"),
+              let urls = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]), urls.count == 1,
+              let url = urls.first, let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]),
+              values.isRegularFile == true, values.fileSize.map(UInt64.init) == size,
+              let date = values.contentModificationDate, Date().timeIntervalSince(date) < lifetime else { return nil }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        return url
+    }
+    func writeFile(_ source: URL, reference: WorkReference, attachment: String, epoch: UInt64) throws -> URL {
+        guard epoch == generation, let root = file(reference: reference, attachment: attachment)?.appendingPathExtension("file") else { throw CancellationError() }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let destination = root.appendingPathComponent(source.lastPathComponent)
+        if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+        try FileManager.default.moveItem(at: source, to: destination)
+        try prune()
+        return destination
+    }
     func purge() throws {
         generation &+= 1
         var failure: Error?

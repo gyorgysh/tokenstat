@@ -17,6 +17,7 @@ struct ChatEventRow: View {
     let resolve: (ChatApproval, String) -> Void
     /// The conversation's face, used when a turn fails so the same character
     /// that was thinking is the one that droops.
+    var attachmentFile: URL? = nil
     var attachmentIsLoading = false
     var attachmentError: String?
     var downloadAttachment: (ChatAttachment) -> Void = { _ in }
@@ -212,7 +213,7 @@ struct ChatEventRow: View {
             // recreating the row here restarted the decode and collapsed and
             // regrew its height on every poll.
             ChatResponseAttachment(
-                attachment: attachment, data: attachmentData,
+                attachment: attachment, data: attachmentData, file: attachmentFile,
                 isLoading: attachmentIsLoading, downloadError: attachmentError,
                 onDownload: { downloadAttachment(attachment) }
             )
@@ -350,14 +351,16 @@ private enum ChatImageDims {
 private struct ChatResponseAttachment: View {
     let attachment: ChatAttachment
     let data: Data?
+    let file: URL?
     var isLoading: Bool
     var downloadError: String?
     var onDownload: () -> Void
     @State private var hovering = false
 
     var body: some View {
-        Button(action: data == nil ? onDownload : open) {
+        Button(action: data == nil && file == nil ? onDownload : open) {
             VStack(alignment: .leading, spacing: 0) {
+                if let file, attachment.mediaType?.hasPrefix("video/") == true { ChatVideoPreview(file: file) }
                 if let aspect = imageAspect {
                     Color.clear
                         .aspectRatio(aspect, contentMode: .fit)
@@ -388,7 +391,7 @@ private struct ChatResponseAttachment: View {
                     Spacer(minLength: Theme.Space.s)
                     if isLoading {
                         ProgressView().controlSize(.small)
-                    } else if data == nil {
+                    } else if data == nil && file == nil {
                         ActionIcon.download.label(downloadError == nil ? L10n.text("apple.chateventrow.download.d6eafe82") : L10n.text("common.retry"))
                             .font(Theme.callout)
                             .foregroundStyle(Theme.accent)
@@ -414,7 +417,7 @@ private struct ChatResponseAttachment: View {
         // storm, the same gate the copy buttons use. Hover comes back 0.35s
         // after the last moved frame.
         .onHover { hovering = $0 }
-        .help(data == nil ? L10n.text("apple.chateventrow.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.chateventrow.open_0.e71b4013", "\(attachment.name)"))
+        .help(data == nil && file == nil ? L10n.text("apple.chateventrow.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.chateventrow.open_0.e71b4013", "\(attachment.name)"))
         .task(id: data) {
             guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
             // SwiftUI restarts a row's task when it re-enters the viewport.
@@ -464,6 +467,9 @@ private struct ChatResponseAttachment: View {
     }
 
     private func open() {
+        #if os(macOS)
+        if let file { NSWorkspace.shared.open(file); return }
+        #endif
         guard let data else { return }
         #if os(macOS)
         do {
@@ -774,6 +780,7 @@ extension ChatEventRow: Equatable {
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading
                 && lhs.attachmentError == rhs.attachmentError
                 && (lhs.attachmentData == nil) == (rhs.attachmentData == nil)
+                && lhs.attachmentFile == rhs.attachmentFile
         }
         return true
     }

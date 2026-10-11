@@ -1359,7 +1359,7 @@ fn serve_peer(
         return;
     }
     let line = String::from_utf8_lossy_owned(first);
-    let response = respond_remote(&line, session, &tokenstat_identity::hex(&peer));
+    let response = respond_remote(&line, session, &tokenstat_identity::hex(&peer), route);
     if connection.send(response.as_bytes()).is_err() {
         return;
     }
@@ -1376,7 +1376,7 @@ fn serve_peer(
             return;
         }
         let line = String::from_utf8_lossy_owned(request);
-        let response = respond_remote(&line, session, &tokenstat_identity::hex(&peer));
+        let response = respond_remote(&line, session, &tokenstat_identity::hex(&peer), route);
         if connection.send(response.as_bytes()).is_err() {
             return;
         }
@@ -1388,7 +1388,7 @@ fn serve_peer(
 /// The method table is still only in `dispatch`. This is the one place a
 /// remote request is known to be inbound, which is the only time the Mac
 /// should stay awake for a closed app.
-fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str) -> String {
+fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str, route: Route) -> String {
     if crate::host_policy::should_refuse_inbound(line) {
         return crate::host_policy::refuse_inbound(line);
     }
@@ -1401,7 +1401,9 @@ fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str) -> String {
         return refusal;
     }
     crate::keep_awake::note_inbound(line);
-    crate::request_context::with_remote_peer(peer, || crate::server::respond(line, session))
+    crate::request_context::with_relay(matches!(route, Route::Relay), || {
+        crate::request_context::with_remote_peer(peer, || crate::server::respond(line, session))
+    })
 }
 
 // MARK: - Reaching another machine
@@ -2526,20 +2528,57 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
 
     // Attachment payloads must not borrow an unlabelled pooled RPC channel:
     // the relay meters file bytes against the account's shared allowance, so a
-    // Files channel must never be checked back into the pool for ordinary
-    // calls to reuse. This still uses the same authenticated direct-first
+    // Files channel has its own pool, which ordinary calls never reuse. This still uses the same authenticated direct-first
     // dial ladder.
     if is_attachment_transfer(method) {
-        let mut connection = dial_peer_as(peer_hex, ChannelPurpose::Files)?;
+        let pooled = checkout(peer_hex, ChannelPurpose::Files);
+        let mut connection = match pooled {
+            Some(connection) if method != "chat.fileCapabilities" || !connection.is_relay() => {
+                connection
+            }
+            _ => {
+                // A new transfer gets another direct-first chance. Chunks keep
+                // their channel; they do not pay a new handshake per frame.
+                if method == "chat.fileCapabilities" {
+                    clear_direct_miss(peer_hex);
+                }
+                dial_peer_as(peer_hex, ChannelPurpose::Files)?
+            }
+        };
+        if connection.is_relay()
+            && is_file_payload(method)
+            && !parse_params(params)
+                .get("allowRelay")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            return Ok(relay_file_refusal());
+        }
         match round_trip(&mut connection, request.as_bytes()) {
-            Ok(answer) => return Ok(answer),
+            Ok(answer) => {
+                let answer = file_capability_answer(method, &connection, answer);
+                checkin(peer_hex, ChannelPurpose::Files, connection);
+                return Ok(answer);
+            }
             // The same one-redial rule as below: a freshly dialled connection
             // closing before the first answer is usually the far daemon
             // replacing its listener, not a real failure.
             Err(tokenstat_remote::RemoteError::Closed) => {
                 let mut redialled = dial_peer_as(peer_hex, ChannelPurpose::Files)?;
-                return round_trip(&mut redialled, request.as_bytes())
-                    .map_err(|error| error.to_string());
+                if redialled.is_relay()
+                    && is_file_payload(method)
+                    && !parse_params(params)
+                        .get("allowRelay")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                {
+                    return Ok(relay_file_refusal());
+                }
+                let answer = round_trip(&mut redialled, request.as_bytes())
+                    .map_err(|error| error.to_string())?;
+                let answer = file_capability_answer(method, &redialled, answer);
+                checkin(peer_hex, ChannelPurpose::Files, redialled);
+                return Ok(answer);
             }
             Err(error) => return Err(error.to_string()),
         }
@@ -2584,8 +2623,48 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     Ok(answer)
 }
 
+// The initiating device's account pays for this channel. A host's account
+// cannot supply the caller's allowance when manually paired across accounts.
+fn file_capability_answer(
+    method: &str,
+    connection: &tokenstat_remote::Connection,
+    answer: String,
+) -> String {
+    if method != "chat.fileCapabilities" || !connection.is_relay() {
+        return answer;
+    }
+    let Ok(mut envelope) = serde_json::from_str::<Value>(&answer) else {
+        return answer;
+    };
+    if envelope.get("ok").and_then(Value::as_bool) != Some(true) {
+        return answer;
+    }
+    if let Some(result) = envelope.get_mut("result").and_then(Value::as_object_mut)
+        && let Ok(snapshot) = crate::account_session::AccountSnapshot::capture()
+        && let Ok(status) = snapshot.status(false)
+        && let Some(remaining) = status
+            .raw
+            .get("relayUsage")
+            .and_then(|v| v.get("remainingBytes"))
+            .and_then(Value::as_u64)
+    {
+        result.insert("relayRemainingBytes".into(), Value::from(remaining));
+    }
+    envelope.to_string()
+}
+
+fn relay_file_refusal() -> String {
+    json!({"ok":false,"error":{"code":"relay_consent_required","message":"This file uses your relay allowance. Confirm the transfer to continue."}}).to_string()
+}
+
+fn is_file_payload(method: &str) -> bool {
+    matches!(
+        method,
+        "chat.attach" | "chat.attachment" | "chat.fileUploadChunk" | "chat.fileDownloadChunk"
+    )
+}
 fn is_attachment_transfer(method: &str) -> bool {
-    matches!(method, "chat.attach" | "chat.attachment")
+    is_file_payload(method) || method.starts_with("chat.file")
 }
 
 /// The relay label for one forwarded call.
@@ -3611,6 +3690,27 @@ mod tests {
 
     #[test]
     fn attachment_payloads_use_metered_file_channels() {
+        for method in [
+            "chat.fileCapabilities",
+            "chat.fileUploadStart",
+            "chat.fileUploadStatus",
+            "chat.fileUploadFinish",
+            "chat.fileUploadCancel",
+            "chat.fileDownloadInfo",
+        ] {
+            assert!(is_attachment_transfer(method));
+            assert!(!is_file_payload(method));
+        }
+        for method in ["chat.fileUploadChunk", "chat.fileDownloadChunk"] {
+            assert!(is_attachment_transfer(method));
+            assert!(is_file_payload(method));
+            assert_eq!(
+                forwarded_result(method, Ok(relay_file_refusal()))
+                    .unwrap_err()
+                    .code,
+                "relay_consent_required"
+            );
+        }
         assert!(is_attachment_transfer("chat.attach"));
         assert!(is_attachment_transfer("chat.attachment"));
         assert!(!is_attachment_transfer("chat.send"));

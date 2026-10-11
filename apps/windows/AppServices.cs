@@ -18,7 +18,9 @@ internal static class AppServices
 
     public static HostClient Host { get; } = new(HostProcess.RecoverIfMissing);
     public static event Action? AccountChanged;
-    public static void NotifyAccountChanged() => AccountChanged?.Invoke();
+    private static long _accountGeneration;
+    public static long AccountGeneration => Interlocked.Read(ref _accountGeneration);
+    public static void NotifyAccountChanged() { Interlocked.Increment(ref _accountGeneration); AccountChanged?.Invoke(); }
     public static event Action? ConversationsChanged;
     public static void NotifyConversationsChanged() => ConversationsChanged?.Invoke();
 

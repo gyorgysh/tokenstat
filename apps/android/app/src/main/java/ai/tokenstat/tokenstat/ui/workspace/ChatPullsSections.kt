@@ -334,6 +334,25 @@ fun ChatSection(
     /// refused or unconfirmed send clears the filter on its way out, so it
     /// appears the moment it really is pending. Twin of
     /// `ChatModel.pendingQueue`.
+    var fileRelayRemaining by remember(projectOwner) { mutableStateOf<Long?>(null) }
+    var fileRelayPrompt by remember(projectOwner) { mutableStateOf<Pair<String, Long>?>(null) }
+    var fileRelayAnswer by remember(projectOwner) { mutableStateOf<kotlinx.coroutines.CompletableDeferred<Boolean>?>(null) }
+    var fileTransferJob by remember(projectOwner) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var fileProgress by remember(projectOwner) { mutableStateOf<Pair<String, Float>?>(null) }
+    suspend fun confirmFileRelay(name: String, size: Long, remaining: Long? = null): Boolean {
+        if (fileRelayAnswer != null) return false
+        val answer = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        fileRelayRemaining = remaining
+        fileRelayPrompt = name to size; fileRelayAnswer = answer
+        return try { answer.await() } finally { fileRelayPrompt = null; fileRelayAnswer = null }
+    }
+    DisposableEffect(projectOwner) { onDispose { fileRelayAnswer?.complete(false) } }
+    fileRelayPrompt?.let { (name, size) ->
+        androidx.compose.material3.AlertDialog(onDismissRequest = { fileRelayAnswer?.complete(false) },
+            title = { Text(L10n.text("common.chat_files_relay_title")) }, text = { Column { Text(L10n.text("common.chat_files_relay_message", name, "${size / 1048576} MB")); fileRelayRemaining?.let { Text(L10n.text("common.chat_files_remaining", "${it / 1048576} MB")) } } },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { fileRelayAnswer?.complete(true) }) { Text(L10n.text("common.continue")) } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { fileRelayAnswer?.complete(false) }) { Text(L10n.text("common.cancel")) } })
+    }
     val pendingQueue = ChatOutboxRules.pending(queued, deliveringFromComposer)
     // The document picker, which needs no storage permission: the user hands
     // us one file at a time and nothing else on the device is readable.
@@ -345,19 +364,23 @@ fun ChatSection(
         scope.launch {
             attachError = null
             for (uri in uris) {
-                val remaining = 24 * 1024 * 1024 - staged.sumOf { it.bytes }
+                val remaining = FILE_MAX - staged.sumOf { it.bytes }
                 if (remaining <= 0) {
                     attachError = L10n.text("android.chatpullssections.send_or_remove_the_staged_files_before_add.40e8ba5e")
                     break
                 }
                 val read = withContext(Dispatchers.IO) {
-                    readAttachment(context, uri, minOf(ATTACHMENT_CAP, remaining))
+                    readAttachment(context, uri, minOf(FILE_MAX, remaining))
                 }
-                if (openId != conversation || !ownsProject()) return@launch
+                if (openId != conversation || !ownsProject()) {
+                    (read as? AttachmentRead.Ok)?.attachment?.filePath?.let { java.io.File(it).delete() }
+                    return@launch
+                }
                 when (read) {
                     is AttachmentRead.Ok -> {
                         // Another picker result may have completed while this read suspended.
-                        if (staged.sumOf { it.bytes } + read.attachment.bytes > 24 * 1024 * 1024) {
+                        if (staged.size >= 20 || staged.sumOf { it.bytes } + read.attachment.bytes > FILE_MAX) {
+                            read.attachment.filePath?.let { java.io.File(it).delete() }
                             attachError = L10n.text("android.chatpullssections.send_or_remove_the_staged_files_before_add.40e8ba5e")
                             break
                         }
@@ -1086,16 +1109,16 @@ fun ChatSection(
         val files = mutableListOf<QueuedAttachment>()
         for (attachment in sent.attachments) {
             val uploaded = runCatching {
-                model.workspaceSection(peer, "chat.attach", buildJsonObject {
-                    put("id", id)
-                    put("name", attachment.name)
-                    put("data", attachment.data)
-                    attachment.mediaType?.let { put("mediaType", it) }
-                }) as? JsonObject
+                fileTransferJob = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
+                uploadChatFile(attachment, id, sentOwner,
+                    call = { method, request -> check(ownsProject() && openId == id); model.workspaceSection(peer, method, request) },
+                    confirm = { remaining -> confirmFileRelay(attachment.name, attachment.bytes.toLong(), remaining) },
+                    progress = { value -> check(ownsProject() && openId == id); fileProgress = attachment.name to value })
             }
             val file = uploaded.getOrNull()
             if (!ownsProject()) return
             if (uploaded.isFailure || file?.str("id") == null) {
+                fileProgress = null
                 attachError = TunnelCopy.display(
                     uploaded.exceptionOrNull()?.message ?: L10n.text("android.chatpullssections.the_attachment_could_not_be_sent.deaa903b"),
                     hostLabel.ifBlank { L10n.text("android.chatpullssections.that_computer.2b209061") },
@@ -1104,6 +1127,7 @@ fun ChatSection(
             }
             files.add(QueuedAttachment(file.str("id").orEmpty(), file.str("name") ?: attachment.name))
         }
+        fileProgress = null
         val item = enqueue(id, clean, files, whenConnected = false) ?: return
         model.chatComposers.clearIfUnchanged(sentOwner, sentDraft)
         if (!ownsProject()) return
@@ -1692,6 +1716,12 @@ fun ChatSection(
             }
             chats.firstOrNull { it.str("id") == openId }?.let { currentChat ->
                 ChatRoutingControls(currentChat, backends, { method, params -> model.workspaceSection(peer, method, params) }, { scope.launch { refreshChats() } })
+            }
+            fileProgress?.let { (name, value) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("$name · ${(value * 100).toInt()}%", modifier = Modifier.weight(1f), maxLines = 1)
+                    TextButton(onClick = { fileTransferJob?.cancel(); fileProgress = null; fileRelayAnswer?.complete(false) }) { Text(L10n.text("common.cancel")) }
+                }
             }
             if (sendError != null) {
                 // One baseline for every action: a bordered chip beside a
@@ -2733,6 +2763,7 @@ data class StagedAttachment(
     val data: String,
     val mediaType: String?,
     val bytes: Int,
+    val filePath: String? = null,
 )
 
 /// What reading a picked file produced. A failure carries a sentence rather
@@ -2752,35 +2783,38 @@ private const val ATTACHMENT_CAP = 12 * 1024 * 1024
 ///
 /// Off the main thread: a picked file can be megabytes, and both the read and
 /// the base64 pass are long enough to drop frames.
-internal fun readAttachment(context: android.content.Context, uri: android.net.Uri, byteLimit: Int = ATTACHMENT_CAP): AttachmentRead {
+internal fun readAttachment(context: android.content.Context, uri: android.net.Uri, byteLimit: Int = FILE_MAX): AttachmentRead {
     val resolver = context.contentResolver
     val name = runCatching {
         resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         }
     }.getOrNull() ?: uri.lastPathSegment ?: L10n.text("android.chatpullssections.attachment.040d2b36")
-    val bytes = try {
-        resolver.openInputStream(uri)?.use { it.readBounded(byteLimit) }
-            ?: return AttachmentRead.Failed(L10n.text("android.chatpullssections.0_could_not_be_read.f70f8efc", "${name}"))
-    } catch (_: InputLimitExceeded) {
-        return AttachmentRead.Failed(if (byteLimit < ATTACHMENT_CAP)
-            L10n.text("android.chatpullssections.send_or_remove_the_staged_files_before_add.ee3166e5", "${name}")
-        else L10n.text("android.chatpullssections.0_is_larger_than_12_mb_which_is_the_most_a.d4a315eb", "${name}"))
+    val folder = java.io.File(context.filesDir, "chat-draft-files").apply { mkdirs() }
+    val target = java.io.File(folder, java.util.UUID.randomUUID().toString())
+    try {
+        val used = folder.listFiles()?.sumOf { if (it.isFile) it.length() else 0L } ?: 0L
+        val available = minOf(byteLimit.toLong(), 2L * 1024 * 1024 * 1024 - used)
+        require(available > 0)
+        var size = 0L
+        resolver.openInputStream(uri)?.use { input ->
+            target.outputStream().use { output ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    size += count
+                    if (size > available) throw InputLimitExceeded()
+                    output.write(buffer, 0, count)
+                }
+            }
+        } ?: throw java.io.IOException()
+        if (size == 0L) throw java.io.IOException()
+        return AttachmentRead.Ok(StagedAttachment(name, "", runCatching { resolver.getType(uri) }.getOrNull(), size.toInt(), target.absolutePath))
     } catch (_: Exception) {
-        return AttachmentRead.Failed(L10n.text("android.chatpullssections.0_could_not_be_read.f70f8efc", "${name}"))
+        target.delete()
+        return AttachmentRead.Failed(L10n.text("common.chat_files_import_failed", name))
     }
-    if (bytes.isEmpty()) return AttachmentRead.Failed(L10n.text("android.chatpullssections.0_is_empty.d4d13926", "${name}"))
-    if (bytes.size > ATTACHMENT_CAP) {
-        return AttachmentRead.Failed(L10n.text("android.chatpullssections.0_is_larger_than_12_mb_which_is_the_most_a.d4a315eb", "${name}"))
-    }
-    return AttachmentRead.Ok(
-        StagedAttachment(
-            name = name,
-            data = Base64.encodeToString(bytes, Base64.NO_WRAP),
-            mediaType = runCatching { resolver.getType(uri) }.getOrNull(),
-            bytes = bytes.size,
-        ),
-    )
 }
 
 /// The newest running tool or edit, in the words the seat shows.

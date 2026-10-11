@@ -66,6 +66,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -791,9 +792,31 @@ private fun AttachmentRow(
 ) {
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
-    var downloaded by remember(item.attachmentId) { mutableStateOf(false) }
-    var busy by remember(item.attachmentId) { mutableStateOf(false) }
-    var failure by remember(item.attachmentId) { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val accountState by model.state.collectAsStateWithLifecycle()
+    val fileOwner = ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(accountState.account, peer, chatId)
+    var downloadedFile by remember(item.attachmentId, fileOwner) { mutableStateOf<java.io.File?>(null) }
+    var busy by remember(item.attachmentId, fileOwner) { mutableStateOf(false) }
+    var failure by remember(item.attachmentId, fileOwner) { mutableStateOf<String?>(null) }
+    var progress by remember(item.attachmentId, fileOwner) { mutableStateOf(0f) }
+    var job by remember(item.attachmentId, fileOwner) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var relayRemaining by remember(item.attachmentId, fileOwner) { mutableStateOf<Long?>(null) }
+    var relayAnswer by remember(item.attachmentId, fileOwner) { mutableStateOf<kotlinx.coroutines.CompletableDeferred<Boolean>?>(null) }
+    val save = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument(item.mediaType ?: "application/octet-stream")) { uri ->
+        val file = downloadedFile
+        if (uri != null && file != null && fileOwner != null && ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == fileOwner) scope.launch {
+            runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                context.contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } } ?: error("The file could not be saved")
+            } }.onFailure { failure = it.message }
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(item.attachmentId, fileOwner) { onDispose { relayAnswer?.complete(false); job?.cancel() } }
+    relayAnswer?.let { answer ->
+        androidx.compose.material3.AlertDialog(onDismissRequest = { answer.complete(false) },
+            title = { Text(L10n.text("common.chat_files_relay_title")) }, text = { Column { Text(L10n.text("common.chat_files_relay_message", item.name, "${(item.size ?: 0) / 1048576} MB")); relayRemaining?.let { Text(L10n.text("common.chat_files_remaining", "${it / 1048576} MB")) } } },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { answer.complete(true) }) { Text(L10n.text("common.continue")) } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { answer.complete(false) }) { Text(L10n.text("common.cancel")) } })
+    }
     Card {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             Text(
@@ -813,33 +836,29 @@ private fun AttachmentRow(
             if (failure != null) {
                 Text(failure!!, style = TextStyle(fontSize = 12.sp), color = colors.danger)
             }
-            if (downloaded) {
-                Text(L10n.text("android.transcriptrows.downloaded.f0b0738f"), style = TextStyle(fontSize = 12.sp), color = colors.accent)
-            } else {
-                TsSecondaryButton(
-                    label = if (busy) "…" else if (failure == null) L10n.text("android.transcriptrows.download.d6eafe82") else L10n.text("common.retry"),
-                    small = true,
-                    enabled = !busy && item.attachmentId.isNotBlank(),
-                    onClick = {
+            TsSecondaryButton(label = if (downloadedFile != null) L10n.text("common.save") else if (busy) "${(progress * 100).toInt()}%" else L10n.text("android.transcriptrows.download.d6eafe82"),
+                small = true, enabled = !busy, onClick = {
+                    if (downloadedFile != null) { save.launch(item.name) }
+                    else {
                         busy = true
-                        scope.launch {
-                            runCatching {
-                                model.workspaceSection(peer, "chat.attachment", buildJsonObject {
-                                    put("id", chatId); put("attachmentId", item.attachmentId)
-                                }) as? JsonObject
-                            }.onSuccess {
-                                downloaded = (it?.get("data")?.let { el ->
-                                    (el as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.length
-                                } ?: 0) > 0
+                        job = scope.launch {
+                            try {
+                                val owner = ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId)
+                                    ?: error("Sign in before downloading this file")
+                                downloadedFile = downloadChatFile(java.io.File(context.cacheDir, "chat-downloads"), chatId, item.attachmentId, owner.key,
+                                    call = { method, request -> check(ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == owner); model.workspaceSection(peer, method, request) },
+                                    confirm = { remaining -> relayRemaining = remaining; val answer = kotlinx.coroutines.CompletableDeferred<Boolean>(); relayAnswer = answer; try { answer.await() } finally { relayAnswer = null } },
+                                    progress = { progress = it })
+                                check(ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == owner)
                                 failure = null
-                            }.onFailure {
-                                failure = TunnelCopy.display(it.message ?: L10n.text("android.transcriptrows.the_request_failed.db4fb447"), hostLabel)
-                            }
-                            busy = false
+                                save.launch(item.name)
+                            } catch (error: Exception) { if (error !is kotlinx.coroutines.CancellationException) failure = TunnelCopy.display(error.message ?: "", hostLabel) }
+                            finally { busy = false }
                         }
-                    },
-                )
-            }
+                    }
+                })
+            if (busy) androidx.compose.material3.TextButton(onClick = { job?.cancel(); relayAnswer?.complete(false) }) { Text(L10n.text("common.cancel")) }
+
         }
     }
 }

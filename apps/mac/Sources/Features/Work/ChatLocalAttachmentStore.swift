@@ -15,6 +15,7 @@ actor ChatLocalAttachmentStore {
         let attachment: ChatAttachment
         let data: Data
         var uploaded: ChatAttachment? = nil
+        var external: Bool? = nil
     }
     private var uploads: [URL: Task<ChatAttachment, Error>] = [:]
     private var removals: Set<URL> = []
@@ -61,6 +62,72 @@ actor ChatLocalAttachmentStore {
         try handle.synchronize()
         try Self.synchronizeDirectory(directory)
         return attachment
+    }
+    /// Originals larger than the inline limit use a private binary sidecar.
+    func stage(file: URL, name: String, mediaType: String?, reference: WorkReference) throws -> ChatAttachment {
+        let access = file.startAccessingSecurityScopedResource()
+        defer { if access { file.stopAccessingSecurityScopedResource() } }
+        let (size, _) = try ChatFileIO.hash(file)
+        let attachment = ChatAttachment(id: "local-draft:" + UUID().uuidString, name: name, mediaType: mediaType, size: size)
+        return try saveExternal(file: file, attachment: attachment, reference: reference, uploaded: nil)
+    }
+    func keep(_ attachment: ChatAttachment, file: URL, reference: WorkReference) throws {
+        let (size, _) = try ChatFileIO.hash(file)
+        guard !Self.isLocal(attachment), size == attachment.size else { throw Failure.invalid }
+        _ = try saveExternal(file: file, attachment: attachment, reference: reference, uploaded: attachment)
+    }
+    private func saveExternal(file: URL, attachment: ChatAttachment, reference: WorkReference, uploaded: ChatAttachment?) throws -> ChatAttachment {
+        var owner = reference; owner.anchor = nil
+        let url = try location(attachment.id, reference: owner)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let bytes = url.appendingPathExtension("bytes")
+        do {
+            try ChatFileIO.copy(file, to: bytes)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bytes.path)
+            #if !os(macOS)
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: bytes.path)
+            #endif
+            let handle = try FileHandle(forWritingTo: bytes)
+            try handle.synchronize(); try handle.close()
+            let encoded = try JSONEncoder().encode(File(reference: owner, attachment: attachment, data: Data(), uploaded: uploaded, external: true))
+            try encoded.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            try Self.synchronizeDirectory(directory)
+            return attachment
+        } catch { try? FileManager.default.removeItem(at: bytes); throw error }
+    }
+    func resolveStream(_ attachment: ChatAttachment, reference: WorkReference,
+        upload: @escaping @Sendable (URL) async throws -> ChatAttachment) async throws -> ChatAttachment {
+        let url = try location(attachment.id, reference: reference)
+        guard !removals.contains(url) else { throw Failure.invalid }
+        if let existing = uploads[url] { return try await existing.value }
+        let activity = OriginalFileCoordination.use(try originalAccess.get(), file: url)
+        defer { withExtendedLifetime(activity) {} }
+        let file = try load(attachment, reference: reference)
+        if let uploaded = file.uploaded { return uploaded }
+        let bytes: URL
+        let temporary: Bool
+        if file.external == true { bytes = url.appendingPathExtension("bytes"); temporary = false }
+        else {
+            bytes = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try file.data.write(to: bytes, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bytes.path)
+            temporary = true
+        }
+        let task = Task {
+            defer { if temporary { try? FileManager.default.removeItem(at: bytes) } }
+            let uploaded = try await upload(bytes)
+            try Task.checkCancellation()
+            guard !Self.isLocal(uploaded) else { throw Failure.invalid }
+            var updated = file; updated.uploaded = uploaded
+            try JSONEncoder().encode(updated).write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            try Self.synchronizeDirectory(directory)
+            return uploaded
+        }
+        uploads[url] = task
+        defer { uploads[url] = nil }
+        return try await task.value
     }
     /// Keep an explicitly imported host file under the same descriptor. It
     /// remains usable offline, and sharing it again needs no second upload.
@@ -146,7 +213,7 @@ actor ChatLocalAttachmentStore {
                 continue
             }
             guard file.reference.scope == scope, try location(file.attachment.id, reference: file.reference).resolvingSymlinksInPath().path == url.resolvingSymlinksInPath().path else { continue }
-            result.files.append(RetainedFile(reference: file.reference, attachment: file.attachment, bytes: encoded.count,
+            result.files.append(RetainedFile(reference: file.reference, attachment: file.attachment, bytes: encoded.count + (file.external == true ? Int(file.attachment.size ?? 0) : 0),
                                        fingerprint: Data(SHA256.hash(data: encoded))))
         }
         result.files.sort { $0.attachment.name.localizedStandardCompare($1.attachment.name) == .orderedAscending }
@@ -172,6 +239,7 @@ actor ChatLocalAttachmentStore {
                 guard encoded.count < 17 * 1024 * 1024,
                       Data(SHA256.hash(data: encoded)) == retained.fingerprint else { throw Failure.invalid }
                 try FileManager.default.removeItem(at: url)
+                try? FileManager.default.removeItem(at: url.appendingPathExtension("bytes"))
                 do { try Self.synchronizeDirectory(url.deletingLastPathComponent()) }
                 catch { throw Failure.removalUnconfirmed }
             }
@@ -185,7 +253,25 @@ actor ChatLocalAttachmentStore {
     }
 
     func read(_ attachment: ChatAttachment, reference: WorkReference) throws -> Data {
-        try load(attachment, reference: reference).data
+        let file = try load(attachment, reference: reference)
+        guard file.external != true else { throw Failure.invalid }
+        return file.data
+    }
+    func exportURL(_ attachment: ChatAttachment, reference: WorkReference) throws -> URL {
+        let metadata = try location(attachment.id, reference: reference)
+        let activity = OriginalFileCoordination.use(try originalAccess.get(), file: metadata)
+        defer { withExtendedLifetime(activity) {} }
+        let file = try load(attachment, reference: reference)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tokenstat-chat-files/" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions:0o700])
+        let destination = folder.appendingPathComponent(ChatFileStaging.sanitized(attachment.name))
+        if file.external == true { try ChatFileIO.copy(metadata.appendingPathExtension("bytes"), to: destination) }
+        else { try file.data.write(to: destination) }
+        try FileManager.default.setAttributes([.posixPermissions:0o600], ofItemAtPath: destination.path)
+        return destination
+    }
+    func contains(_ attachment: ChatAttachment, reference: WorkReference) -> Bool {
+        (try? load(attachment, reference: reference)) != nil
     }
     private func load(_ attachment: ChatAttachment, reference: WorkReference) throws -> File {
         let url = try location(attachment.id, reference: reference)
@@ -194,8 +280,13 @@ actor ChatLocalAttachmentStore {
         let encoded = try handle.read(upToCount: 17 * 1024 * 1024) ?? Data()
         guard encoded.count < 17 * 1024 * 1024, let file = try? JSONDecoder().decode(File.self, from: encoded),
               WorkReferenceKey.conversation(file.reference) == WorkReferenceKey.conversation(reference),
-              file.attachment == attachment, !file.data.isEmpty, file.data.count <= Self.maximumBytes,
-              UInt64(file.data.count) == attachment.size else { throw Failure.missing }
+              file.attachment == attachment,
+              (file.external == true || (!file.data.isEmpty && file.data.count <= Self.maximumBytes && UInt64(file.data.count) == attachment.size)) else { throw Failure.missing }
+        if file.external == true {
+            let values = try url.appendingPathExtension("bytes").resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true,
+                  values.fileSize.map(UInt64.init) == attachment.size else { throw Failure.missing }
+        }
         return file
     }
 }

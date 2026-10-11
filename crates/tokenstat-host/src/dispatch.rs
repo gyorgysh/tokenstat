@@ -630,6 +630,10 @@ struct ChatParams {
     name: Option<String>,
     data: Option<String>,
     media_type: Option<String>,
+    size: Option<u64>,
+    sha256: Option<String>,
+    transfer_id: Option<String>,
+    allow_relay: Option<bool>,
     persona_id: Option<String>,
     system_prompt: Option<String>,
     persona: Option<crate::chat::Persona>,
@@ -2213,6 +2217,54 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 None => json!({ "state": "unknown" }),
             })
         }
+        "chat.fileCapabilities" => store
+            .file_capabilities(&p.id.ok_or("id required")?)
+            .envelope(),
+        "chat.fileUploadStart" => store
+            .file_upload_start(
+                &p.id.ok_or("id required")?,
+                &p.name.ok_or("name required")?,
+                p.size.ok_or("size required")?,
+                &p.sha256.ok_or("sha256 required")?,
+                p.media_type,
+            )
+            .envelope(),
+        "chat.fileUploadStatus" => store
+            .file_upload_status(
+                &p.id.ok_or("id required")?,
+                &p.transfer_id.ok_or("transferId required")?,
+            )
+            .envelope(),
+        "chat.fileUploadChunk" => store.file_upload_chunk(
+            &p.id.ok_or("id required")?,
+            &p.transfer_id.ok_or("transferId required")?,
+            p.offset.ok_or("offset required")?,
+            &p.data.ok_or("data required")?,
+            p.allow_relay.unwrap_or(false),
+        ),
+        "chat.fileUploadFinish" => serde_json::to_value(store.file_upload_finish(
+            &p.id.ok_or("id required")?,
+            &p.transfer_id.ok_or("transferId required")?,
+        )?)
+        .envelope(),
+        "chat.fileUploadCancel" => store
+            .file_upload_cancel(
+                &p.id.ok_or("id required")?,
+                &p.transfer_id.ok_or("transferId required")?,
+            )
+            .envelope(),
+        "chat.fileDownloadInfo" => store
+            .file_download_info(
+                &p.id.ok_or("id required")?,
+                &p.attachment_id.ok_or("attachmentId required")?,
+            )
+            .envelope(),
+        "chat.fileDownloadChunk" => store.file_download_chunk(
+            &p.id.ok_or("id required")?,
+            &p.attachment_id.ok_or("attachmentId required")?,
+            p.offset.ok_or("offset required")?,
+            p.allow_relay.unwrap_or(false),
+        ),
         "chat.attach" => serde_json::to_value(store.attach(
             &p.id.ok_or("chat.attach needs id")?,
             &p.name.ok_or("chat.attach needs name")?,

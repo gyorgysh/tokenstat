@@ -22,6 +22,8 @@ use serde_json::{Value, json};
 
 use crate::error::DispatchError;
 use crate::transcript::{Event, Parser};
+#[path = "chat_files.rs"]
+pub mod files;
 #[path = "chat_router.rs"]
 pub mod router;
 
@@ -2526,6 +2528,7 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         self.handoff_conversation(workspace_id, id, &chats)?;
+        drop(chats);
         ids.iter()
             .map(|attachment_id| {
                 validate_record_id(attachment_id)?;
@@ -2573,6 +2576,7 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let directory = self.handoff_conversation(workspace_id, id, &chats)?;
+        drop(chats);
         if let Some(draft) = &request.draft {
             self.attachment_paths(id, &draft.attachment_ids)?;
         }
@@ -3031,6 +3035,11 @@ impl Store {
         media_type: Option<String>,
     ) -> Result<Attachment, String> {
         self.get(id)?;
+        if data.len() > ATTACHMENT_CAP.div_ceil(3) * 4 {
+            return Err("an attachment is limited to 12 MB".into());
+        }
+        let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let chat = self.verified_append_directory(id)?;
         let bytes = crate::base64::decode(data)?;
         if bytes.is_empty() {
             return Err("an attachment cannot be empty".into());
@@ -3045,16 +3054,16 @@ impl Store {
             size: Some(bytes.len() as u64),
         };
         let path = self.attachment_path(id, &attachment.id, &attachment.name);
-        fs::create_dir_all(path.parent().ok_or("invalid attachment path")?)
-            .map_err(|e| e.to_string())?;
-        fs::write(path, bytes).map_err(|e| e.to_string())?;
+        files::ensure_storage(&chat, bytes.len() as u64)?;
+        files::create_attachment_directory(&chat, &attachment.id)?;
+        write_private_file(&path, &bytes)?;
         Ok(attachment)
     }
 
     pub fn attachment_data(&self, id: &str, attachment_id: &str) -> Result<AttachmentData, String> {
         self.get(id)?;
         let path = self.single_attachment_path(id, attachment_id)?;
-        let bytes = fs::read(&path).map_err(|_| "the attachment is no longer available")?;
+        let bytes = read_fork_file(&path, ATTACHMENT_CAP as u64, false)?;
         if bytes.len() > ATTACHMENT_CAP {
             return Err("the attachment is too large to transfer".into());
         }
@@ -3360,6 +3369,9 @@ impl Store {
         }
         if !routing_continuation {
             chat = self.router_return_locked(id, chat)?;
+        }
+        if attachment_ids.len() > 20 {
+            return Err("a message can include up to 20 files".into());
         }
         let attachments = self.attachment_paths(id, attachment_ids)?;
         let response_output_dir = self.prepare_response_output_dir(id)?;
@@ -4300,7 +4312,11 @@ impl Store {
         let Ok(output_root) = fs::canonicalize(response_output_dir) else {
             return;
         };
-        for (index, source) in response_file_paths(text).into_iter().enumerate() {
+        let output_paths = response_file_paths(text);
+        if output_paths.len() > 20 {
+            let _ = self.append_with_lifecycle(&lifecycle, id, &StoredEvent::Agent { event: Event::Failed { text: "A reply can attach up to 20 files. Ask the agent to combine or split the remaining files.".into() }, at_ms: now_ms(), backend: backend.into() });
+        }
+        for (index, source) in output_paths.into_iter().take(20).enumerate() {
             let Ok(source) = fs::canonicalize(&source) else {
                 continue;
             };
@@ -4316,8 +4332,10 @@ impl Store {
             let Ok(metadata) = fs::metadata(&source) else {
                 continue;
             };
-            if !metadata.is_file() || metadata.len() == 0 || metadata.len() > ATTACHMENT_CAP as u64
-            {
+            if !metadata.is_file() || metadata.len() == 0 || metadata.len() > files::FILE_BYTES {
+                if metadata.len() > files::FILE_BYTES {
+                    let _ = self.append_with_lifecycle(&lifecycle, id, &StoredEvent::Agent { event: Event::Failed { text: "An output file exceeds the 256 MB limit. Ask the agent to split or compress it.".into() }, at_ms: now_ms(), backend: backend.into() });
+                }
                 continue;
             }
             let Some(source_name) = source.file_name().and_then(|value| value.to_str()) else {
@@ -4332,7 +4350,20 @@ impl Store {
             if fs::create_dir_all(parent).is_err() {
                 continue;
             }
-            if fs::copy(&source, &destination).is_err() {
+            if let Err(error) = files::ensure_storage(&self.root.join(id), metadata.len()) {
+                let _ = self.append_with_lifecycle(
+                    &lifecycle,
+                    id,
+                    &StoredEvent::Agent {
+                        event: Event::Failed { text: error },
+                        at_ms: now_ms(),
+                        backend: backend.into(),
+                    },
+                );
+                let _ = fs::remove_dir(parent);
+                continue;
+            }
+            if files::copy_attachment(&source, &destination).is_err() {
                 let _ = fs::remove_file(&destination);
                 let _ = fs::remove_dir(parent);
                 continue;
@@ -4672,7 +4703,17 @@ impl Store {
     fn single_attachment_path(&self, chat_id: &str, id: &str) -> Result<PathBuf, String> {
         validate_record_id(chat_id)?;
         validate_record_id(id)?;
-        let directory = self.root.join(chat_id).join("files").join(id);
+        let chat = self.verified_append_directory(chat_id)?;
+        let files_root = chat.join("files");
+        let directory = files_root.join(id);
+        for path in [&chat, &files_root, &directory] {
+            if !fs::symlink_metadata(path)
+                .map_err(|e| e.to_string())?
+                .is_dir()
+            {
+                return Err("invalid attachment directory".into());
+            }
+        }
         let mut files =
             fs::read_dir(&directory).map_err(|_| "an attachment is no longer available")?;
         let file = files
@@ -4680,7 +4721,11 @@ impl Store {
             .ok_or("an attachment is no longer available")?
             .map_err(|e| e.to_string())?
             .path();
-        if files.next().is_some() || !file.is_file() {
+        if files.next().is_some()
+            || !fs::symlink_metadata(&file)
+                .map_err(|e| e.to_string())?
+                .is_file()
+        {
             return Err("invalid attachment directory".into());
         }
         Ok(file)
@@ -4988,8 +5033,19 @@ fn copy_fork_files(source: &Path, destination: &Path) -> Result<(), String> {
         fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
         for file in fs::read_dir(attachment.path()).map_err(|error| error.to_string())? {
             let file = file.map_err(|error| error.to_string())?;
-            let bytes = read_fork_file(&file.path(), ATTACHMENT_CAP as u64, false)?;
-            write_private_file(&directory.join(file.file_name()), &bytes)?;
+            let path = file.path();
+            let metadata = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+            if !metadata.is_file() || metadata.len() > files::FILE_BYTES {
+                return Err("invalid attachment file".into());
+            }
+            let target = directory.join(file.file_name());
+            files::copy_attachment(&path, &target)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o600))
+                    .map_err(|e| e.to_string())?;
+            }
         }
     }
     Ok(())
@@ -5043,14 +5099,32 @@ fn safe_file_name(name: &str) -> String {
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("attachment");
-    let cleaned: String = leaf
-        .chars()
-        .filter(|character| !character.is_control())
-        .collect();
-    if cleaned.trim().is_empty() {
-        "attachment".into()
+    let mut cleaned = String::new();
+    for character in leaf.chars().filter(|c| !c.is_control()) {
+        let character = if "<>:\"/\\|?*".contains(character) {
+            '_'
+        } else {
+            character
+        };
+        if cleaned.len() + character.len_utf8() > 240 {
+            break;
+        }
+        cleaned.push(character);
+    }
+    let cleaned = cleaned.trim().trim_end_matches('.');
+    if cleaned.is_empty() {
+        return "attachment".into();
+    }
+    // Files travel between Unix and Windows, including from agents' outputs.
+    let stem = cleaned.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+    {
+        format!("_{cleaned}")
     } else {
-        cleaned
+        cleaned.into()
     }
 }
 
@@ -5187,6 +5261,19 @@ fn media_type_for_path(path: &Path) -> Option<String> {
             "mp4" => "video/mp4",
             "mov" => "video/quicktime",
             "zip" => "application/zip",
+            "gz" | "tgz" => "application/gzip",
+            "tar" => "application/x-tar",
+            "7z" => "application/x-7z-compressed",
+            "webm" => "video/webm",
+            "mkv" => "video/x-matroska",
+            "ogg" => "audio/ogg",
+            "flac" => "audio/flac",
+            "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "xml" => "application/xml",
+            "rs" | "py" | "js" | "ts" | "swift" | "kt" | "c" | "h" | "cpp" | "cs" | "sh"
+            | "yaml" | "yml" => "text/plain",
             _ => "application/octet-stream",
         }
         .into(),
@@ -8128,6 +8215,14 @@ mod tests {
     }
 
     #[test]
+    fn attachment_names_are_usable_on_every_file_system() {
+        assert_eq!(safe_file_name("../report:final?.zip"), "report_final_.zip");
+        assert_eq!(safe_file_name("CON.txt"), "_CON.txt");
+        assert_eq!(safe_file_name("LPT9.mov. "), "_LPT9.mov");
+        assert_eq!(safe_file_name(".."), "attachment");
+        assert!(safe_file_name(&"é".repeat(200)).len() <= 240);
+    }
+    #[test]
     fn attachments_are_staged_inside_the_chat_not_the_workspace() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -8159,6 +8254,7 @@ mod tests {
             running: false,
             branch: None,
         });
+        store.save().unwrap();
         let attachment = store
             .attach(
                 "chat-test",

@@ -116,6 +116,15 @@ final class ChatModel {
     /// The transcript only persists descriptors, so remote files work exactly
     /// like local ones without exposing a host filesystem path to SwiftUI.
     var responseAttachmentData: [String: Data] = [:]
+    var responseAttachmentFiles: [String: URL] = [:]
+    var fileRelayName: String?
+    var fileRelayRemaining: UInt64?
+    var fileRelaySize: UInt64?
+    @ObservationIgnored var fileRelayAnswer: CheckedContinuation<Bool, Never>?
+    var fileTransferName: String?
+    var fileTransferProgress: Double = 0
+    var fileTransferCancelled = false
+    @ObservationIgnored var fileTransferInFlight = false
     var backends: [ChatBackend] = []
     var backendRefreshError: String?
     /// A failed authentication attempt is useful evidence even when the CLI's
@@ -489,12 +498,13 @@ final class ChatModel {
             Task { [weak self] in
                 guard let self else { return }
                 for attachment in stored.attachments {
-                    let data = try? await ChatLocalAttachmentStore.shared.read(attachment, reference: reference)
+                    let available = await ChatLocalAttachmentStore.shared.contains(attachment, reference: reference)
+                    let data = (attachment.size ?? 0) <= UInt64(ChatInbox.maxBytes) ? try? await ChatLocalAttachmentStore.shared.read(attachment, reference: reference) : nil
                     guard self.draftAttachmentLoadGeneration == attachmentLoadGeneration,
                           self.draftReference == reference, self.attachments.contains(attachment) else { return }
                     if let data {
                         if let preview = ChatThumbnail.make(from: data) { self.attachmentPreviews[attachment.id] = preview }
-                    } else { self.missingDraftAttachments.insert(attachment.id) }
+                    } else if !available { self.missingDraftAttachments.insert(attachment.id) }
                 }
             }
         }
@@ -1261,6 +1271,7 @@ final class ChatModel {
                 instructions = nil
                 instructionsLoaded = false
                 responseAttachmentData = [:]
+        responseAttachmentFiles = [:]
                 attemptedResponseAttachments = []
                 loadingResponseAttachments = []
                 responseAttachmentErrors = [:]
@@ -1488,6 +1499,7 @@ final class ChatModel {
             rememberLastSelected(chatID: chat.id, folderID: folderID)
         }
         responseAttachmentData = [:]
+        responseAttachmentFiles = [:]
         attemptedResponseAttachments = []
         loadingResponseAttachments = []
         responseAttachmentErrors = [:]
@@ -2451,13 +2463,20 @@ final class ChatModel {
 
     private func resolveDraftAttachments(_ files: [ChatAttachment], reference: WorkReference, peer: String?) async throws -> [ChatAttachment] {
         guard let conversationID = reference.itemID else { throw CancellationError() }
+        guard !fileTransferInFlight else { throw BridgeError.core(code: "file_transfer_busy", message: L10n.text("common.chat_files_busy")) }
+        fileTransferInFlight = true
+        fileTransferCancelled = false
+        defer { fileTransferName = nil; fileTransferInFlight = false }
         var resolved: [ChatAttachment] = []
         for file in files {
             guard currentReference == reference, WorkCacheAccess.canSave(reference), savedCopy == nil else { throw CancellationError() }
             if ChatLocalAttachmentStore.isLocal(file) {
-                let uploaded = try await ChatLocalAttachmentStore.shared.resolve(file, reference: reference) { data in
+                let uploaded = try await ChatLocalAttachmentStore.shared.resolveStream(file, reference: reference) { [weak self] url in
                     guard await MainActor.run(body: { WorkCacheAccess.canSave(reference) }) else { throw CancellationError() }
-                    return try await Bridge.attachToChat(id: conversationID, name: file.name, data: data, mediaType: file.mediaType, peer: peer)
+                    return try await Bridge.uploadChatFile(id: conversationID, file: url, name: file.name, mediaType: file.mediaType, peer: peer, confirmRelay: { [weak self] remaining in await self?.confirmFileRelay(name: file.name, size: file.size, remaining: remaining) ?? false }, progress: { [weak self] value in
+                        guard let self else { throw CancellationError() }
+                        try await self.updateFileProgress(value, name: file.name, reference: reference)
+                    })
                 }
                 resolved.append(uploaded)
             } else { resolved.append(file) }
@@ -2471,11 +2490,19 @@ final class ChatModel {
         let targetPeer = peer
         for file in files {
             guard currentReference == reference, handoffDraft == expected, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
-            if (try? await ChatLocalAttachmentStore.shared.read(file, reference: reference)) != nil { continue }
-            let payload = try await Bridge.chatAttachment(id: conversationID, attachmentID: file.id, peer: targetPeer)
-            guard payload.attachment == file, let data = Data(base64Encoded: payload.data) else { throw ChatLocalAttachmentStore.Failure.missing }
-            guard currentReference == reference, handoffDraft == expected, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
-            try await ChatLocalAttachmentStore.shared.keep(file, data: data, reference: reference)
+            if await ChatLocalAttachmentStore.shared.contains(file, reference: reference) { continue }
+            if (file.size ?? 0) > UInt64(ChatInbox.maxBytes) {
+                let url = try await Bridge.downloadChatFile(id: conversationID, attachmentID: file.id, peer: targetPeer,
+                    confirmRelay: { [weak self] remaining in await self?.confirmFileRelay(name: file.name, size: file.size, remaining: remaining) ?? false })
+                defer { try? FileManager.default.removeItem(at: url) }
+                guard currentReference == reference, handoffDraft == expected, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
+                try await ChatLocalAttachmentStore.shared.keep(file, file: url, reference: reference)
+            } else {
+                let payload = try await Bridge.chatAttachment(id: conversationID, attachmentID: file.id, peer: targetPeer, confirmRelay: { [weak self] in await self?.confirmFileRelay(name: file.name, size: file.size) ?? false })
+                guard payload.attachment == file, let data = Data(base64Encoded: payload.data) else { throw ChatLocalAttachmentStore.Failure.missing }
+                guard currentReference == reference, handoffDraft == expected, WorkCacheAccess.canSave(reference) else { throw CancellationError() }
+                try await ChatLocalAttachmentStore.shared.keep(file, data: data, reference: reference)
+            }
         }
     }
 
@@ -2495,15 +2522,20 @@ final class ChatModel {
     }
 
     func attach(_ item: ChatInboxItem) async {
-        guard let reference = currentReference else { return }
+        guard let reference = currentReference else {
+            if let file = item.file { try? FileManager.default.removeItem(at: file) }
+            return
+        }
         await attach(item, to: reference)
     }
 
     /// Imports retain the conversation chosen before file preparation begins.
     /// Later files in a batch must not follow navigation to another draft.
     func attach(_ item: ChatInboxItem, to reference: WorkReference) async {
+        defer { if let file = item.file { try? FileManager.default.removeItem(at: file) } }
         guard WorkReferenceKey.conversation(reference) != nil,
               WorkCacheAccess.canRead(reference) else { return }
+        if let failure = item.importFailure { error = failure; return }
         let isCurrent = currentReference == reference
         guard !isCurrent || !sending else { return }
         let existing = isCurrent ? attachments : (ChatDraftStore.shared.draft(for: reference)?.attachments ?? [])
@@ -2519,8 +2551,12 @@ final class ChatModel {
         stagingAttachments += 1
         defer { stagingAttachments -= 1 }
         do {
-            let attachment = try await ChatLocalAttachmentStore.shared.stage(data: item.data,
-                name: item.name, mediaType: item.mediaType, reference: reference)
+            let attachment: ChatAttachment
+            if let file = item.file {
+                attachment = try await ChatLocalAttachmentStore.shared.stage(file: file, name: item.name, mediaType: item.mediaType, reference: reference)
+            } else {
+                attachment = try await ChatLocalAttachmentStore.shared.stage(data: item.data, name: item.name, mediaType: item.mediaType, reference: reference)
+            }
             guard currentReference == reference, WorkCacheAccess.canRead(reference) else {
                 // Keep an import that completed after navigation in its own
                 // draft, alongside any writing saved while it was loading.
@@ -3999,6 +4035,7 @@ final class ChatModel {
     func clearCachedAttachmentMemory() {
         attachmentCacheGeneration &+= 1
         responseAttachmentData = [:]
+        responseAttachmentFiles = [:]
         attachmentPreviews = [:]
         loadingResponseAttachments = []
         responseAttachmentErrors = [:]
@@ -4062,7 +4099,7 @@ final class ChatModel {
         _ attachment: ChatAttachment, id: String, generation: UInt64, userInitiated: Bool
     ) async {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation),
-              responseAttachmentData[attachment.id] == nil,
+              responseAttachmentData[attachment.id] == nil, responseAttachmentFiles[attachment.id] == nil,
               !loadingResponseAttachments.contains(attachment.id),
               userInitiated || !attemptedResponseAttachments.contains(attachment.id)
         else { return }
@@ -4089,6 +4126,11 @@ final class ChatModel {
         let cacheEpoch = await ChatAttachmentCache.shared.epoch()
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
                   currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
+        if let cachedFile = await ChatAttachmentCache.shared.readFile(reference: previewReference, attachment: attachment.id, size: attachment.size) {
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
+            responseAttachmentFiles[attachment.id] = cachedFile
+            return
+        }
         if let cached = await ChatAttachmentCache.shared.read(reference: previewReference, attachment: attachment.id) {
             guard !Task.isCancelled, selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
                   currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
@@ -4104,10 +4146,31 @@ final class ChatModel {
               userInitiated || ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: attachment.size)
         else { return }
         do {
-            let payload = try await Bridge.chatAttachment(id: id, attachmentID: attachment.id, peer: targetPeer)
-            guard let data = Data(base64Encoded: payload.data), !data.isEmpty,
-                  data.count <= ChatInbox.maxBytes else {
-                throw CocoaError(.fileReadCorruptFile)
+            let data: Data
+            if await RemoteHostFeature.chatRecovery.isSupported(peer: targetPeer) {
+                guard !fileTransferInFlight else { throw BridgeError.core(code: "file_transfer_busy", message: L10n.text("common.chat_files_busy")) }
+                fileTransferInFlight = true
+                fileTransferCancelled = false
+                defer { fileTransferName = nil; fileTransferInFlight = false }
+                let url = try await Bridge.downloadChatFile(id: id, attachmentID: attachment.id, peer: targetPeer,
+                    confirmRelay: { [weak self] remaining in guard userInitiated else { return false }; return await self?.confirmFileRelay(name: attachment.name, size: attachment.size, remaining: remaining) ?? false },
+                    progress: { [weak self] value in
+                        guard let self else { throw CancellationError() }
+                        try await self.updateFileProgress(value, name: attachment.name, reference: previewReference, generation: generation)
+                    })
+                guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference, WorkCacheAccess.canSave(previewReference), memoryGeneration == attachmentCacheGeneration else {
+                    try? FileManager.default.removeItem(at: url); return
+                }
+                if (attachment.size ?? 0) > UInt64(ChatInbox.maxBytes) {
+                    responseAttachmentFiles[attachment.id] = try await ChatAttachmentCache.shared.writeFile(url, reference: previewReference, attachment: attachment.id, epoch: cacheEpoch)
+                    return
+                }
+                defer { try? FileManager.default.removeItem(at: url) }
+                data = try Data(contentsOf: url)
+            } else {
+                let payload = try await Bridge.chatAttachment(id: id, attachmentID: attachment.id, peer: targetPeer, confirmRelay: { [weak self] in guard userInitiated else { return false }; return await self?.confirmFileRelay(name: attachment.name, size: attachment.size) ?? false })
+                guard let decoded = Data(base64Encoded: payload.data), !decoded.isEmpty, decoded.count <= ChatInbox.maxBytes else { throw CocoaError(.fileReadCorruptFile) }
+                data = decoded
             }
             guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference,
                   WorkCacheAccess.canSave(previewReference), memoryGeneration == attachmentCacheGeneration else { return }

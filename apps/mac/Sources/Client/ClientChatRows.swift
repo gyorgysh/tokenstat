@@ -16,6 +16,8 @@ struct ClientChatEventRow: View {
     let agentLabel: (String) -> String
     let isPending: Bool
     let resolve: (ChatApproval, String) -> Void
+    var attachmentFile: URL? = nil
+    var openAttachmentFile: (ChatAttachment, URL) -> Void = { _, _ in }
     var attachmentIsLoading = false
     var attachmentError: String?
     var downloadAttachment: (ChatAttachment) -> Void = { _ in }
@@ -157,10 +159,11 @@ struct ClientChatEventRow: View {
             // Same as the Mac: stable identity across polls. The revision
             // still redraws through Equatable; recreating collapsed the row.
             ClientChatResponseAttachment(
-                attachment: attachment, data: attachmentData,
+                attachment: attachment, data: attachmentData, file: attachmentFile,
                 isLoading: attachmentIsLoading, downloadError: attachmentError,
                 onDownload: { downloadAttachment(attachment) },
-                onOpen: { data in openAttachment(attachment, data) }
+                onOpen: { data in openAttachment(attachment, data) },
+                onOpenFile: { file in openAttachmentFile(attachment, file) }
             )
                 .id(attachment.id)
         case let .handoff(to, brief):
@@ -201,10 +204,12 @@ struct ClientChatEventRow: View {
 private struct ClientChatResponseAttachment: View {
     let attachment: ChatAttachment
     let data: Data?
+    let file: URL?
     var isLoading: Bool
     var downloadError: String?
     var onDownload: () -> Void
     var onOpen: (Data) -> Void
+    var onOpenFile: (URL) -> Void
 
     var body: some View {
         // One tappable card in every state, and it presents nothing itself.
@@ -214,11 +219,11 @@ private struct ClientChatResponseAttachment: View {
         // arrived. A downloaded file was a grey rectangle, then a card that
         // did nothing at all. Opening is the chat view's job now; this is a
         // button.
-        Button { if let data { onOpen(data) } else { onDownload() } } label: { content }
+        Button { if let file { onOpenFile(file) } else if let data { onOpen(data) } else { onDownload() } } label: { content }
             .buttonStyle(.plain)
             .disabled(isLoading)
             .accessibilityLabel(
-                data == nil ? L10n.text("apple.clientchatrows.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.clientchatrows.open_0.e71b4013", "\(attachment.name)")
+                data == nil && file == nil ? L10n.text("apple.clientchatrows.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.clientchatrows.open_0.e71b4013", "\(attachment.name)")
             )
             .task(id: data) {
                 guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
@@ -236,6 +241,7 @@ private struct ClientChatResponseAttachment: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let file, attachment.mediaType?.hasPrefix("video/") == true { ChatVideoPreview(file: file) }
             if let aspect = imageAspect {
                 Color.clear
                     .aspectRatio(aspect, contentMode: .fit)
@@ -264,7 +270,7 @@ private struct ClientChatResponseAttachment: View {
                 Spacer()
                 if isLoading {
                     ProgressView().controlSize(.small)
-                } else if data == nil {
+                } else if data == nil && file == nil {
                     ActionIcon.download.label(downloadError == nil ? L10n.text("apple.clientchatrows.download.d6eafe82") : L10n.text("common.retry"))
                         .font(ClientType.label)
                         .foregroundStyle(Theme.accent)
@@ -505,6 +511,7 @@ extension ClientChatEventRow: Equatable {
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading
                 && lhs.attachmentError == rhs.attachmentError
                 && (lhs.attachmentData == nil) == (rhs.attachmentData == nil)
+                && lhs.attachmentFile == rhs.attachmentFile
         }
         return true
     }

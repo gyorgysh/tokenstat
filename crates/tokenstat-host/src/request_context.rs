@@ -9,6 +9,7 @@
 use std::cell::RefCell;
 
 thread_local! {
+    static RELAY: RefCell<bool> = const { RefCell::new(false) };
     static REMOTE_PEER: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
@@ -37,6 +38,21 @@ pub(crate) fn with_remote_peer<T>(peer: &str, work: impl FnOnce() -> T) -> T {
 
     let previous = REMOTE_PEER.with(|slot| slot.borrow_mut().replace(peer.to_string()));
     let _restore = Restore(previous);
+    work()
+}
+
+#[cfg(feature = "local-host")]
+pub(crate) fn is_relay() -> bool {
+    RELAY.with(|slot| *slot.borrow())
+}
+pub(crate) fn with_relay<T>(relay: bool, work: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            RELAY.with(|slot| *slot.borrow_mut() = self.0);
+        }
+    }
+    let _restore = Restore(RELAY.with(|slot| slot.replace(relay)));
     work()
 }
 

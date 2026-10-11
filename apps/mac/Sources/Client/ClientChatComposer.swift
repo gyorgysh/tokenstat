@@ -3,6 +3,7 @@
 #if !os(macOS)
 import Observation
 import PhotosUI
+import CoreTransferable
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -50,6 +51,8 @@ struct ClientChatComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ChatRoutingNotice(model: model, chat: chat)
+            ChatFileProgressNotice(model: model)
             if model.savedCopy != nil {
                 Button(L10n.text("apple.clientchatcomposer.send_when_connected.c2aae57a"), .scheduled) { model.queueDraftWhenConnected() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
@@ -163,7 +166,7 @@ struct ClientChatComposer: View {
             isPresented: $pickingPhotos,
             selection: $photos,
             maxSelectionCount: 8,
-            matching: .images
+            matching: .any(of: [.images, .videos])
         )
         .onChange(of: photos) { _, items in
             guard !items.isEmpty, let owner = photoOwner else { return }
@@ -318,20 +321,17 @@ struct ClientChatComposer: View {
     }
 
     private func ingest(photos items: [PhotosPickerItem], owner: WorkReference) async {
-        var staged: [ChatInboxItem] = []
-        for item in items {
-            guard let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty else {
-                continue
+        for picked in items {
+            do {
+                guard let media = try await picked.loadTransferable(type: ChatPickedMedia.self) else { throw CocoaError(.fileReadUnknown) }
+                defer { try? FileManager.default.removeItem(at: media.file) }
+                guard let item = ChatInbox.item(from: media.file) else { throw CocoaError(.fileReadUnknown) }
+                await model.attach(item, to: owner)
+            } catch {
+                model.error = L10n.text("common.chat_files_import_failed", picked.supportedContentTypes.first?.preferredFilenameExtension ?? "media")
+                break
             }
-            let type = item.supportedContentTypes.first ?? .png
-            let name = "image.\(type.preferredFilenameExtension ?? "png")"
-            staged.append(
-                ChatInbox.prepared(
-                    ChatInboxItem(data: data, name: name, mediaType: type.preferredMIMEType)
-                )
-            )
         }
-        ingest(items: staged, owner: owner)
     }
 
     private func ingest(items: [ChatInboxItem]) {
@@ -377,4 +377,24 @@ private struct ComposerChromeButton: ViewModifier {
     }
 }
 
+#endif
+
+#if !os(macOS)
+private struct ChatPickedMedia: Transferable {
+    let file: URL
+    private static func receive(_ received: ReceivedTransferredFile) throws -> ChatPickedMedia {
+        let values = try received.file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true, let size = values.fileSize, size > 0, UInt64(size) <= ChatFileIO.maximumBytes else { throw CocoaError(.fileReadTooLarge) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions:0o700])
+        let destination = directory.appendingPathComponent(received.file.lastPathComponent)
+        try FileManager.default.copyItem(at: received.file, to: destination)
+        try FileManager.default.setAttributes([.posixPermissions:0o600, .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: destination.path)
+        return ChatPickedMedia(file: destination)
+    }
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { value in SentTransferredFile(value.file) } importing: { try receive($0) }
+        FileRepresentation(contentType: .image) { value in SentTransferredFile(value.file) } importing: { try receive($0) }
+    }
+}
 #endif

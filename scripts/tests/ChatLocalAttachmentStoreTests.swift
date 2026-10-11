@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with WorkReference.swift ChatLocalAttachmentStore.swift ChatDraftStore.swift. OriginalFileCoordination.swift.
+// Compile with WorkReference.swift ChatLocalAttachmentStore.swift ChatFileIO.swift ChatFileStaging.swift ChatDraftStore.swift. OriginalFileCoordination.swift.
 import Foundation
 struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
     var id: String; var name: String; var mediaType: String?; var size: UInt64?
@@ -29,6 +29,32 @@ actor UploadCounter {
         for other in [ref("two"), ref(host: "other"), ref(folder: "other")] {
             do { _ = try await reopened.read(attachment, reference: other); assertionFailure("Wrong owner read original") } catch {}
         }
+        let largeURL = root.appendingPathComponent("video.mov")
+        FileManager.default.createFile(atPath: largeURL.path, contents: Data())
+        let largeHandle = try FileHandle(forWritingTo: largeURL)
+        try largeHandle.truncate(atOffset: 20 * 1024 * 1024); try largeHandle.close()
+        let video = try await store.stage(file: largeURL, name: "video.mov", mediaType: "video/quicktime", reference: ref())
+        let videoPresent = await reopened.contains(video, reference: ref())
+        assert(videoPresent)
+        do { _ = try await reopened.read(video, reference: ref()); assertionFailure("Large originals must not become whole-file Data") } catch {}
+        let streamed = try await reopened.resolveStream(video, reference: ref()) { url in
+            let (size, _) = try ChatFileIO.hash(url)
+            return ChatAttachment(id: "uploaded-video", name: "video.mov", mediaType: "video/quicktime", size: size)
+        }
+        assert(streamed.size == 20 * 1024 * 1024)
+        let exported = try await reopened.exportURL(video, reference: ref())
+        let exportedSize = try exported.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        assert(exportedSize == 20 * 1024 * 1024)
+        let exportedDigest = try ChatFileIO.hash(exported).1
+        let originalDigest = try ChatFileIO.hash(largeURL).1
+        assert(exportedDigest == originalDigest)
+        try FileManager.default.removeItem(at: exported)
+        let videoListing = try await reopened.retained(in: ref().scope)
+        let videoEntry = videoListing.files.first { $0.attachment.id == video.id }!
+        assert(videoEntry.bytes > 20 * 1024 * 1024)
+        try await reopened.remove(videoEntry, ifUnused: { true })
+        let removedVideo = await reopened.contains(video, reference: ref())
+        assert(!removedVideo)
         let counter = UploadCounter()
         async let first = reopened.resolve(attachment, reference: ref()) { try await counter.upload($0) }
         async let second = reopened.resolve(attachment, reference: ref()) { try await counter.upload($0) }

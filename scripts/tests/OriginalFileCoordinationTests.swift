@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with OriginalFileCoordination.swift WorkReference.swift ChatDraftStore.swift ChatLocalAttachmentStore.swift.
+// Compile with OriginalFileCoordination.swift WorkReference.swift ChatDraftStore.swift ChatLocalAttachmentStore.swift ChatFileIO.swift ChatFileStaging.swift.
 import Foundation
 import Darwin
 

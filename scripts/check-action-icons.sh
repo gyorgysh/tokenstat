@@ -74,7 +74,7 @@ ALLOWED = [
     ("Design/SearchablePicker.swift", "Button { pick(choice.value) } label:"),
     # The attachment card. Its whole surface is the file: a type glyph, the
     # name, and a Download or Open label that already carries an ActionIcon.
-    ("Client/ClientChatRows.swift", "Button { if let data { onOpen(data) } else { onDownload() } } label:"),
+    ("Client/ClientChatRows.swift", "Button { if let file { onOpenFile(file) } else if let data { onOpen(data) } else { onDownload() } } label:"),
     # The section chips above the list. Each one is a filter whose whole
     # surface is its own name, and the selected one is already marked by its
     # fill: a glyph on every chip would repeat one symbol across the row.

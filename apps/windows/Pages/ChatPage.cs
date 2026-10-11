@@ -1452,7 +1452,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return border;
     }
 
-    private static UIElement AttachmentRow(DisplayItem item)
+    private UIElement AttachmentRow(DisplayItem item)
     {
         var detail = item.MediaType;
         if (item.Size > 0)
@@ -1489,6 +1489,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             });
         }
         body.Children.Add(text);
+        body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.download"), ActionIcon.Download, async (_, _) => await DownloadFileAsync(item)));
         return Card(L10n.Text("windows.chatpage.attachment.040d2b36"), body);
     }
 
@@ -1978,6 +1979,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void RebuildComposerActions()
     {
+        if (_fileTransfer is not null) {
+            _composerActions.Children.Clear();
+            _composerActions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Stop, (_, _) => _fileTransfer?.Cancel()));
+            return;
+        }
+
         RefreshFastModeButton();
         RefreshComposerHint();
         _composerActions.Children.Clear();
@@ -2022,7 +2029,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task AttachAsync()
     {
-        if (_openId is null) return;
+        if (_openId is not string chat) return;
+        var generation = _openGeneration;
+        var accountGeneration = AppServices.AccountGeneration;
+        bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
         var picker = new FileOpenPicker();
         picker.FileTypeFilter.Add("*");
         if (App.CurrentWindow is { } window)
@@ -2030,26 +2040,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
         }
         var file = await picker.PickSingleFileAsync();
-        if (file is null) return;
-        var buffer = await Windows.Storage.FileIO.ReadBufferAsync(file);
-        var data = new byte[buffer.Length];
-        using (var reader = Windows.Storage.Streams.DataReader.FromBuffer(buffer))
-        {
-            reader.ReadBytes(data);
-        }
-        if (data.Length > AttachmentCap)
-        {
-            Banner(L10n.Text("windows.chatpage.an_attachment_is_limited_to_12_mb.a0b63b0d"));
-            return;
-        }
+        if (file is null || !Current()) return;
         try
         {
-            var attached = await CallChatAsync("chat.attach", new JsonObject
-            {
-                ["id"] = _openId,
-                ["name"] = file.Name,
-                ["data"] = Convert.ToBase64String(data),
-            });
+            var attached = await UploadFileAsync(chat, file, Current);
+            if (!Current()) return;
             // An id-less reply stages nothing: without it the send-guard
             // below would count an empty chip as content and fire a turn
             // with no content at all.

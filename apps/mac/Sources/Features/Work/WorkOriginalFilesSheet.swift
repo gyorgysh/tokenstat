@@ -25,6 +25,9 @@ struct WorkOriginalFilesSheet: View {
     @State private var document: WorkOriginalFileDocument?
     @State private var exportName = "attachment"
     @State private var exporting = false
+    #if !os(macOS)
+    @State private var previewFile: ChatPreviewedFile?
+    #endif
     @State private var limit = 30
 
     var body: some View {
@@ -59,6 +62,9 @@ struct WorkOriginalFilesSheet: View {
             }
             .disabled(busy)
         }
+        #if !os(macOS)
+        .fullScreenCover(item: $previewFile) { file in ClientFilePreview(file: file) { previewFile = nil } }
+        #endif
         .modalFrame(width: 620, height: 660)
         .presentationBackground(Theme.background)
         .presentationDetents([.large])
@@ -91,6 +97,29 @@ struct WorkOriginalFilesSheet: View {
                 defer { busy = false }
                 do {
                     guard scope == WorkSessionContext.shared.readingScope else { return }
+                    if (file.attachment.size ?? 0) > UInt64(ChatInbox.maxBytes) {
+                        let url = try await ChatLocalAttachmentStore.shared.exportURL(file.attachment, reference: file.reference)
+                        guard scope == WorkSessionContext.shared.readingScope else { try? FileManager.default.removeItem(at: url); return }
+                        #if os(macOS)
+                        let panel = NSSavePanel(); panel.nameFieldStringValue = ChatFileStaging.sanitized(file.attachment.name)
+                        let accepted = await withCheckedContinuation { answer in panel.begin { answer.resume(returning: $0 == .OK) } }
+                        if accepted, let destination = panel.url, scope == WorkSessionContext.shared.readingScope {
+                            try await Task.detached {
+                                let access = destination.startAccessingSecurityScopedResource(); defer { if access { destination.stopAccessingSecurityScopedResource() } }
+                                let temporary = destination.deletingLastPathComponent().appendingPathComponent(".tokenstat-export-" + UUID().uuidString)
+                                defer { try? FileManager.default.removeItem(at: temporary) }
+                                try ChatFileIO.copy(url, to: temporary)
+                                if FileManager.default.fileExists(atPath: destination.path) {
+                                    _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+                                } else { try FileManager.default.moveItem(at: temporary, to: destination) }
+                            }.value
+                        }
+                        try? FileManager.default.removeItem(at: url)
+                        #else
+                        previewFile = ChatPreviewedFile(id: file.attachment.id, url: url, name: file.attachment.name)
+                        #endif
+                        return
+                    }
                     let data = try await ChatLocalAttachmentStore.shared.read(file.attachment, reference: file.reference)
                     guard scope == WorkSessionContext.shared.readingScope else { return }
                     document = WorkOriginalFileDocument(data: data)

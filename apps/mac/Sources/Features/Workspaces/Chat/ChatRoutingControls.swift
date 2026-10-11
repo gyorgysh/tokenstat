@@ -56,9 +56,9 @@ private struct ChatRoutingSheet: View {
     @State private var saving = false
     @State private var adding = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text(L10n.text("common.chat_routing")).font(Theme.title)
-            Text(L10n.text("common.chat_route_explanation")).font(Theme.caption).foregroundStyle(.secondary).lineLimit(nil).fixedSize(horizontal: false, vertical: true)
+        ThemedSheet(title: L10n.text("common.chat_routing"), subtitle: L10n.text("common.chat_route_explanation"), icon: .settings,
+                    scrolls: true, onClose: { dismiss() }) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
             Toggle(L10n.text("common.chat_routing_enabled"), isOn: $policy.enabled)
             Toggle(L10n.text("common.chat_wait_reset"), isOn: $policy.waitForReset)
             Toggle(L10n.text("common.chat_return_preferred"), isOn: $policy.returnPreferred)
@@ -91,9 +91,11 @@ private struct ChatRoutingSheet: View {
                     .disabled(!loaded || saving)
             }
         }
+        }
         .toggleStyle(.brandCheckbox)
-        .padding(Theme.Space.l)
-        .frame(minWidth: 320, idealWidth: 560)
+        .modalFrame(width: 560, height: 680)
+        .presentationBackground(Theme.background)
+        .presentationDetents([.large])
         .task { if await model.routing() { policy = model.selected?.routing?.policy ?? ChatRoutingPolicy(); loaded = true } }
     }
 }

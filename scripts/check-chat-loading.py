@@ -63,6 +63,7 @@ struct Bag { mutating func removeAll() {}; func retain(_ keys: Set<String>, in p
     var steerOverlay = Bag(), listMutations = Bag(), recentMessages = Bag()
     var events: [String] = [], outgoing: [String] = [], approvals: [String] = []
     var outgoingWatermark: [String: Int] = [:], responseAttachmentData: [String: Data] = [:]
+    var responseAttachmentFiles: [String: URL] = [:]
     var attemptedResponseAttachments = Set<String>(), loadingResponseAttachments = Set<String>()
     var responseAttachmentErrors: [String: String] = [:], instructions: String?
     var approvalsLoaded = false, instructionsLoaded = false

@@ -15,6 +15,9 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - Chat routing settings on Apple, Android and Windows let you choose ordered fallback agents, wait for a reported usage reset, and return to your preferred agent. Automatic continuation is opt-in, keeps the chat history and files, and pauses when delivery cannot be confirmed.
 
+- Chat files use resumable transfers with integrity checks, progress and cancellation: up to 256 MiB locally or over a direct connection, and 64 MiB through relay. Relay uploads and downloads ask first and show the remaining allowance when available.
+- Chat attachments include videos, archives and documents, with Save/Open actions on every client. Apple devices keep large draft originals on disk and show a poster and duration for downloaded videos. Agents can return files through their existing output-file links.
+
 ### Fixed
 
 - Usage scans include Codex chats started by tokenstat in private homes, so their usage appears alongside ordinary Codex sessions without manually scanning each chat.
