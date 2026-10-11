@@ -315,8 +315,13 @@ impl Store {
         self.router_save(id, &state)
     }
     pub(super) fn router_owner(&self) -> Result<String, String> {
-        let epoch = match fs::read(self.root.join("routing-owner-epoch")) {
-            Ok(bytes) if bytes.len() == 32 => {
+        let path = self.root.join("routing-owner-epoch");
+        let epoch = match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_file() && metadata.len() == 32 => {
+                let bytes = read_fork_file(&path, 32, false)?;
+                if bytes.len() != 32 {
+                    return Err("Routing account ownership could not be verified.".into());
+                }
                 String::from_utf8(bytes).map_err(|e| e.to_string())?
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => "initial".into(),

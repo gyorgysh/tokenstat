@@ -129,7 +129,10 @@ fn save_upload(path: &Path, upload: &Upload) -> Result<(), String> {
         &temporary,
         &serde_json::to_vec(upload).map_err(|e| e.to_string())?,
     )?;
-    fs::File::open(&temporary)
+    // FlushFileBuffers on Windows requires a writable handle.
+    OpenOptions::new()
+        .write(true)
+        .open(&temporary)
         .and_then(|file| file.sync_all())
         .map_err(|e| e.to_string())?;
     fs::rename(&temporary, path).map_err(|e| e.to_string())?;
