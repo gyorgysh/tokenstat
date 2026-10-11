@@ -73,4 +73,19 @@ fn scans_private_homes_with_repeats_copies_and_appended_usage() {
     unsafe { std::env::set_var("CODEX_HOME", private.parent().unwrap().parent().unwrap()) };
     assert_eq!(scan::scan(&mut store, &tz).unwrap().files_read, 0);
     assert_eq!(store.events(&Query::default()).unwrap().len(), 4);
+    // Equivalent spellings share watermarks on Unix and Windows alike.
+    unsafe {
+        std::env::set_var(
+            "CODEX_HOME",
+            private
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("..")
+                .join("codex-hook"),
+        )
+    };
+    assert_eq!(scan::scan(&mut store, &tz).unwrap().files_read, 0);
+    assert_eq!(store.events(&Query::default()).unwrap().len(), 4);
 }

@@ -66,10 +66,16 @@ fn session_dirs(primary: Option<PathBuf>, data: Option<&Path>) -> Vec<PathBuf> {
         }
     }
     let mut seen = std::collections::HashSet::new();
-    candidates
-        .retain(|path| seen.insert(std::fs::canonicalize(path).unwrap_or_else(|_| path.clone())));
-    candidates.sort();
-    candidates
+    // The chosen spelling must be stable too: watermark keys use the path.
+    // An override, dot segment or Windows verbatim prefix must not rename a
+    // previously discovered shard just because it becomes the primary home.
+    let mut roots: Vec<_> = candidates
+        .into_iter()
+        .map(|path| std::fs::canonicalize(&path).unwrap_or(path))
+        .filter(|path| seen.insert(path.clone()))
+        .collect();
+    roots.sort();
+    roots
 }
 
 pub fn shards(sessions: &Path) -> Vec<PathBuf> {
@@ -390,12 +396,18 @@ mod tests {
         }
         assert_eq!(
             session_dirs(None, Some(data)),
-            vec![first.clone(), second.clone()]
+            vec![
+                std::fs::canonicalize(&first).unwrap(),
+                std::fs::canonicalize(&second).unwrap()
+            ]
         );
         // CODEX_HOME can itself name one of these private homes.
         assert_eq!(
             session_dirs(Some(first.clone()), Some(data)),
-            vec![first, second]
+            vec![
+                std::fs::canonicalize(first).unwrap(),
+                std::fs::canonicalize(second).unwrap()
+            ]
         );
         assert!(session_dirs(None, Some(&data.join("missing"))).is_empty());
     }
@@ -409,7 +421,10 @@ mod tests {
         std::fs::create_dir_all(&private).unwrap();
         assert_eq!(
             session_dirs(Some(primary.clone()), Some(&dir.path().join("data"))),
-            vec![primary, private]
+            vec![
+                std::fs::canonicalize(primary).unwrap(),
+                std::fs::canonicalize(private).unwrap()
+            ]
         );
     }
 

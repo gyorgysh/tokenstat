@@ -14,6 +14,7 @@ internal sealed partial class ChatPage
     private const int FileChunkBytes = 512 * 1024;
     private const long FileMaximumBytes = 256L * 1024 * 1024;
     private CancellationTokenSource? _fileTransfer;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> FileClaims = new();
 
     private async Task<bool> ConfirmFileRelayAsync(string name, long size, long? remaining = null)
     {
@@ -47,6 +48,7 @@ internal sealed partial class ChatPage
         if (_fileTransfer is not null) throw new IOException(L10n.Text("common.chat_files_busy"));
         using var cancel = new CancellationTokenSource(); _fileTransfer = cancel;
         RebuildComposerActions();
+        string? claim = null;
         try
         {
             var expectedSize = stream.Length;
@@ -72,7 +74,9 @@ internal sealed partial class ChatPage
             var account = await AppServices.Host.CallAsync("account.status", new JsonObject());
             if (!current()) throw new OperationCanceledException();
             var owner = Format.Text(account, "host") + "|" + Format.Text(account, "accountId") + "|" + Format.Text(account, "handle");
-            var key = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(owner + "|" + _workspaceId + "|" + chat + "|" + hash)));
+            var key = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(owner + "|" + _workspaceId + "|" + chat + "|" + hash + "|" + file.Name)));
+            if (!FileClaims.TryAdd(key, 0)) throw new IOException(L10n.Text("common.chat_files_busy"));
+            claim = key;
             var journal = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "file-transfers", key + ".json");
             JsonNode? previous = null;
             if (File.Exists(journal) && new FileInfo(journal).Length < 8192)
@@ -127,7 +131,7 @@ internal sealed partial class ChatPage
                 File.Delete(journal); throw;
             }
         }
-        finally { _fileTransfer = null; if (current()) RebuildComposerActions(); }
+        finally { if (claim is not null) FileClaims.TryRemove(claim, out _); _fileTransfer = null; if (current()) RebuildComposerActions(); }
     }
     private async Task DownloadFileAsync(DisplayItem item)
     {
@@ -191,12 +195,12 @@ internal sealed partial class ChatPage
                         try { chunk = await CallChatAsync("chat.fileDownloadChunk", request); }
                         catch (HostException error) when (error.Code == "relay_consent_required" && !relay)
                         { if (!await ConfirmFileRelayAsync(item.Name, size, caps?["relayRemainingBytes"] is null ? null : Format.Long(caps, "relayRemainingBytes")) || !Current()) throw new OperationCanceledException(); relay = true; request["allowRelay"] = true; chunk = await CallChatAsync("chat.fileDownloadChunk", request); }
-                        var encoded = Format.Text(chunk, "data"); if (encoded.Length > 699052) throw new IOException("Invalid file chunk");
+                        var encoded = Format.Text(chunk, "data"); if (encoded.Length > 699052) throw new InvalidDataException("Invalid file chunk");
                         var bytes = Convert.FromBase64String(encoded);
-                        if (bytes.Length == 0 || bytes.Length > FileChunkBytes || Format.Long(chunk, "offset") != offset || Format.Long(chunk, "nextOffset") != offset + bytes.Length || offset + bytes.Length > size) throw new IOException("Invalid file chunk");
+                        if (bytes.Length == 0 || bytes.Length > FileChunkBytes || Format.Long(chunk, "offset") != offset || Format.Long(chunk, "nextOffset") != offset + bytes.Length || offset + bytes.Length > size) throw new InvalidDataException("Invalid file chunk");
                         await output.WriteAsync(bytes, cancel.Token); hash.AppendData(bytes); offset += bytes.Length; Banner($"{item.Name} · {offset * 100 / size}%");
                     }
-                    if (Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant() != Format.Text(info, "sha256")) throw new IOException("File integrity check failed");
+                    if (Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant() != Format.Text(info, "sha256")) throw new InvalidDataException("File integrity check failed");
                 }
                 await output.FlushAsync(cancel.Token);
             }
@@ -207,7 +211,9 @@ internal sealed partial class ChatPage
             if (Current()) Banner(L10n.Text("common.chat_files_saved"));
         }
         catch (OperationCanceledException) { keepPartial = false; }
+        catch (InvalidDataException error) { keepPartial = false; if (Current()) Banner(error.Message); }
+        catch (FormatException error) { keepPartial = false; if (Current()) Banner(error.Message); }
         catch (Exception error) { if (Current()) Banner(error.Message); }
-        finally { _fileTransfer = null; if (!keepPartial) File.Delete(temporary); if (Current()) RebuildComposerActions(); }
+        finally { _fileTransfer = null; if (!keepPartial) { try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { } } if (Current()) RebuildComposerActions(); }
     }
 }

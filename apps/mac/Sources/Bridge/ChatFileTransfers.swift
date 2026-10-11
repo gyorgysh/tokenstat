@@ -141,7 +141,9 @@ extension Bridge {
         } catch {
             struct Cancelled: Decodable, Sendable { let cancelled: Bool }
             if error is CancellationError {
-                _ = try? await chatInvoke(peer: peer,"chat.fileUploadCancel",["id":id,"transferId":upload.transferId],expectedScope:scope,expectedGeneration:generation,as:Cancelled.self)
+                _ = try? await Task.detached {
+                    try await chatInvoke(peer: peer,"chat.fileUploadCancel",["id":id,"transferId":upload.transferId],expectedScope:scope,expectedGeneration:generation,as:Cancelled.self)
+                }.value
                 try? await ChatUploadJournal.shared.set(journalKey, transfer:nil)
             }
             throw error

@@ -117,7 +117,11 @@ internal suspend fun uploadChatFile(
         val receipt = File(file.parentFile, file.name + ".$key.upload")
         val old =
             withContext(Dispatchers.IO) {
-                runCatching { Json.parseToJsonElement(receipt.readText()).jsonObject }.getOrNull()
+                runCatching {
+                        require(receipt.length() in 1..8192)
+                        Json.parseToJsonElement(receipt.readText()).jsonObject
+                    }
+                    .getOrNull()
             }
         val previous =
             old?.text("transferId")
@@ -231,14 +235,18 @@ internal suspend fun uploadChatFile(
             return result
         } catch (error: Exception) {
             if (error is kotlinx.coroutines.CancellationException) {
-                runCatching {
-                    call(
-                        "chat.fileUploadCancel",
-                        buildJsonObject {
-                            put("id", chat)
-                            put("transferId", transfer)
-                        },
-                    )
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    kotlinx.coroutines.withTimeoutOrNull(5000) {
+                        runCatching {
+                            call(
+                                "chat.fileUploadCancel",
+                                buildJsonObject {
+                                    put("id", chat)
+                                    put("transferId", transfer)
+                                },
+                            )
+                        }
+                    }
                 }
                 receipt.delete()
             }

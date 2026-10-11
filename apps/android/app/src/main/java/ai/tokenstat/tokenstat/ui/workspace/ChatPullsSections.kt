@@ -346,7 +346,7 @@ fun ChatSection(
         fileRelayPrompt = name to size; fileRelayAnswer = answer
         return try { answer.await() } finally { fileRelayPrompt = null; fileRelayAnswer = null }
     }
-    DisposableEffect(projectOwner) { onDispose { fileRelayAnswer?.complete(false) } }
+    DisposableEffect(projectOwner) { onDispose { fileRelayAnswer?.complete(false); fileTransferJob?.cancel() } }
     fileRelayPrompt?.let { (name, size) ->
         androidx.compose.material3.AlertDialog(onDismissRequest = { fileRelayAnswer?.complete(false) },
             title = { Text(L10n.text("common.chat_files_relay_title")) }, text = { Column { Text(L10n.text("common.chat_files_relay_message", name, "${size / 1048576} MB")); fileRelayRemaining?.let { Text(L10n.text("common.chat_files_remaining", "${it / 1048576} MB")) } } },
@@ -1111,7 +1111,7 @@ fun ChatSection(
             val uploaded = runCatching {
                 fileTransferJob = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
                 uploadChatFile(attachment, id, sentOwner,
-                    call = { method, request -> check(ownsProject() && openId == id); model.workspaceSection(peer, method, request) },
+                    call = { method, request -> check(ownsProject() && (openId == id || method == "chat.fileUploadCancel")); model.workspaceSection(peer, method, request) },
                     confirm = { remaining -> confirmFileRelay(attachment.name, attachment.bytes.toLong(), remaining) },
                     progress = { value -> check(ownsProject() && openId == id); fileProgress = attachment.name to value })
             }
