@@ -565,13 +565,13 @@ pub(crate) fn can_meter(command: &str) -> bool {
     let Some(harness) = harness_name(command) else {
         return false;
     };
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+    let Some(home) = tokenstat_paths::home_dir() else {
         return false;
     };
     match harness {
         "claude" => claude_code::discover(&home).is_some(),
         "grok" => grok::discover(&home).is_some(),
-        "codex" => codex::discover(&home).is_some(),
+        "codex" => !codex::discover_all(&home).is_empty(),
         "opencode" => opencode::discover(&home).is_some(),
         "kilo" => kilo::discover(&home).is_some(),
         "hermes" => hermes::discover(&home).is_some(),
@@ -625,18 +625,22 @@ pub(crate) fn harness_name(command: &str) -> Option<&'static str> {
 /// them. See `resolve_logs`.
 fn codex_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let path = resolve_logs("codex", cwd, spawn, || {
-        let home = std::env::var_os("HOME").map(PathBuf::from)?;
-        let sessions = codex::discover(&home)?;
+        let home = tokenstat_paths::home_dir()?;
         Some(
-            newest_first(codex::shards(&sessions))
-                .into_iter()
-                .filter_map(|path| {
-                    let head = read_head(&path)?;
-                    let dir = codex::session_cwd(&head)?;
-                    (dir == cwd).then(|| (file_born_ms(&path, Some(&head)), path))
-                })
-                .take(SCAN_LIMIT)
-                .collect(),
+            newest_first(
+                codex::discover_all(&home)
+                    .iter()
+                    .flat_map(|sessions| codex::shards(sessions))
+                    .collect(),
+            )
+            .into_iter()
+            .filter_map(|path| {
+                let head = read_head(&path)?;
+                let dir = codex::session_cwd(&head)?;
+                (dir == cwd).then(|| (file_born_ms(&path, Some(&head)), path))
+            })
+            .take(SCAN_LIMIT)
+            .collect(),
         )
     })?;
     cached_events(&path, |contents| codex::parse_file(&path, contents).events)

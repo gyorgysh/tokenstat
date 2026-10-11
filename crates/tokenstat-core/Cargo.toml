@@ -29,3 +29,4 @@ hmac = { workspace = true }
 
 [dev-dependencies]
 walkdir.workspace = true
+tempfile.workspace = true

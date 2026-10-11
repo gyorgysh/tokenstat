@@ -294,7 +294,11 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
     // Codex: JSONL, but session_meta / turn_context live at the start of the
     // file. An append-only reparse of the tail would lose that context and
     // reset ordinals, so any change re-reads the whole rollout.
-    if let Some(sessions) = codex::discover(&home) {
+    let files: Vec<_> = codex::discover_all(&home)
+        .iter()
+        .flat_map(|sessions| codex::shards(sessions))
+        .collect();
+    if !files.is_empty() {
         // Version the watermark so existing logs are repaired once, including
         // sessions that have stopped growing. Failed reads remain retryable.
         let codex_marks = marks
@@ -304,7 +308,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
                     .map(|path| (path.to_string(), mark.clone()))
             })
             .collect();
-        let files = codex::shards(&sessions);
         report.files_found += files.len() as u64;
         let mut outcomes: Vec<_> = files
             .par_iter()
@@ -986,7 +989,7 @@ pub fn reconcile(store: &Store) -> Result<Option<Reconciliation>, CoreError> {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
+    tokenstat_paths::home_dir()
 }
 
 fn now_ms() -> i64 {

@@ -5,11 +5,15 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Android is in review on Google Play. Newest first.
 
-Collect the complete, person-facing delta for the next release under Unreleased.
-When preparing a release, close that delta under its version and release date,
-then begin the next one. Do not reconstruct release notes from commits at the end.
+Collect the complete, person-facing delta under the next version number, without
+a date until it is released. Add the release date when preparing that release,
+then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [Unreleased]
+## [1.5.0]
+
+### Fixed
+
+- Usage scans include Codex chats started by tokenstat in private homes, so their usage appears alongside ordinary Codex sessions without manually scanning each chat.
 
 ## [1.4.1] - 2026-10-09
 

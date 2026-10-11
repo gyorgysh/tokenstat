@@ -42,6 +42,36 @@ pub fn discover(home: &Path) -> Option<PathBuf> {
     sessions.is_dir().then_some(sessions)
 }
 
+/// Ordinary Codex logs and the private homes tokenstat creates for its chats.
+/// Keep CODEX_HOME's override semantics for the ordinary CLI home, while always
+/// including this install's chats. Use the host's shared data-root resolver so
+/// portable installs and every desktop platform discover the same locations.
+pub fn discover_all(home: &Path) -> Vec<PathBuf> {
+    session_dirs(discover(home), tokenstat_paths::data_dir().as_deref())
+}
+
+fn session_dirs(primary: Option<PathBuf>, data: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates: Vec<_> = primary.into_iter().collect();
+    if let Some(data) = data
+        && let Ok(chats) = std::fs::read_dir(data.join("chat"))
+    {
+        // Only inspect the known layout, never walk arbitrary project folders.
+        for chat in chats.filter_map(Result::ok) {
+            if chat.file_type().is_ok_and(|kind| kind.is_dir()) {
+                let sessions = chat.path().join("codex-hook").join("sessions");
+                if sessions.is_dir() {
+                    candidates.push(sessions);
+                }
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    candidates
+        .retain(|path| seen.insert(std::fs::canonicalize(path).unwrap_or_else(|_| path.clone())));
+    candidates.sort();
+    candidates
+}
+
 pub fn shards(sessions: &Path) -> Vec<PathBuf> {
     walkdir::WalkDir::new(sessions)
         .follow_links(false)
@@ -343,6 +373,45 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovers_private_chats_even_without_an_ordinary_codex_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        let first = data.join("chat/first/codex-hook/sessions");
+        let second = data.join("chat/second/codex-hook/sessions");
+        for path in [
+            &first,
+            &second,
+            &data.join("chat/empty"),
+            &data.join("other/codex-hook/sessions"),
+        ] {
+            std::fs::create_dir_all(path).unwrap();
+        }
+        assert_eq!(
+            session_dirs(None, Some(data)),
+            vec![first.clone(), second.clone()]
+        );
+        // CODEX_HOME can itself name one of these private homes.
+        assert_eq!(
+            session_dirs(Some(first.clone()), Some(data)),
+            vec![first, second]
+        );
+        assert!(session_dirs(None, Some(&data.join("missing"))).is_empty());
+    }
+
+    #[test]
+    fn ordinary_and_private_homes_are_both_discovered() {
+        let dir = tempfile::tempdir().unwrap();
+        let primary = dir.path().join("custom/sessions");
+        let private = dir.path().join("data/chat/one/codex-hook/sessions");
+        std::fs::create_dir_all(&primary).unwrap();
+        std::fs::create_dir_all(&private).unwrap();
+        assert_eq!(
+            session_dirs(Some(primary.clone()), Some(&dir.path().join("data"))),
+            vec![primary, private]
+        );
+    }
 
     fn p() -> PathBuf {
         PathBuf::from("/h/.codex/sessions/2026/07/02/rollout-x.jsonl")
