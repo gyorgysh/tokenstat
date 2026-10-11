@@ -118,9 +118,9 @@ internal suspend fun uploadChatFile(
         val old =
             withContext(Dispatchers.IO) {
                 runCatching {
-                        require(receipt.length() in 1..8192)
-                        Json.parseToJsonElement(receipt.readText()).jsonObject
-                    }
+                    require(receipt.length() in 1..8192)
+                    Json.parseToJsonElement(receipt.readText()).jsonObject
+                }
                     .getOrNull()
             }
         val previous =
@@ -140,7 +140,8 @@ internal suspend fun uploadChatFile(
                         .getOrNull()
                 }
         if (previous?.get("finished")?.jsonPrimitive?.booleanOrNull == true) {
-            receipt.delete()
+            // Keep the completed receipt until the host's staging expiry:
+            // another attachment can fail before the message is queued.
             return previous["attachment"] as JsonObject
         }
         val start =
@@ -231,7 +232,6 @@ internal suspend fun uploadChatFile(
                     },
                 )
                     as JsonObject
-            receipt.delete()
             return result
         } catch (error: Exception) {
             if (error is kotlinx.coroutines.CancellationException) {

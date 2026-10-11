@@ -342,6 +342,9 @@ impl Store {
     pub fn file_upload_status(&self, id: &str, transfer: &str) -> Result<Value, String> {
         let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         let (_, upload) = self.upload_load(id, transfer)?;
+        if upload.finished {
+            self.single_attachment_path(id, &upload.attachment.id)?;
+        }
         Ok(
             json!({"transferId":transfer,"offset":upload.offset,"finished":upload.finished,"attachment":if upload.finished {Some(upload.attachment)} else {None}}),
         )
@@ -416,6 +419,7 @@ impl Store {
         let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         let (path, mut upload) = self.upload_load(id, transfer)?;
         if upload.finished {
+            self.single_attachment_path(id, &upload.attachment.id)?;
             return Ok(upload.attachment);
         }
         if upload.offset != upload.attachment.size.unwrap_or(0) {
@@ -590,6 +594,10 @@ mod tests {
             downloaded.extend(crate::base64::decode(value["data"].as_str().unwrap()).unwrap());
         }
         assert_eq!(downloaded, bytes);
+        fs::remove_file(store.attachment_path("file-test", &attachment.id, &attachment.name))
+            .unwrap();
+        assert!(store.file_upload_status("file-test", &transfer).is_err());
+        assert!(store.file_upload_finish("file-test", &transfer).is_err());
     }
     #[test]
     fn large_file_round_trip_uses_only_one_chunk_at_a_time() {

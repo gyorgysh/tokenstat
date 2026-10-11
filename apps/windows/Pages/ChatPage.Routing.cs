@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
 using Tokenstat.Host;
+using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 internal sealed partial class ChatPage
