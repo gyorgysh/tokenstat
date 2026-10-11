@@ -2,6 +2,7 @@
 //! Durable continuation policy. All decisions share chat's acceptance lock.
 use super::*;
 use crate::provider_limit::Limit;
+use std::fs::File;
 use tokenstat_sync::vault::{VaultClient, VaultError};
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
