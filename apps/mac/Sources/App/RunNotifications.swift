@@ -361,6 +361,9 @@ final class RunNotifications {
         let running: Bool
         let pending: Bool
         let doneStatus: String?
+        let routingActivity: ChatRoutingActivity?
+        let routingNotifies: Bool
+        let hasRoutingLimit: Bool
     }
 
     /// Chat state has its own shape: waiting is an approval, while completion
@@ -450,7 +453,10 @@ final class RunNotifications {
                         workspaceID: chat.workspaceID,
                         running: chat.running,
                         pending: pending.contains(chat.id),
-                        doneStatus: chat.id == selectedID ? selectedDoneStatus : nil
+                        doneStatus: chat.id == selectedID ? selectedDoneStatus : nil,
+                        routingActivity: chat.routing?.activity?.last,
+                        routingNotifies: chat.routing?.policy.notify != false,
+                        hasRoutingLimit: chat.routing?.limit != nil
                     )
                 )
             },
@@ -467,6 +473,13 @@ final class RunNotifications {
             // reading it watched the card appear and the reply land, so a
             // banner about either only repeats what they are looking at.
             let watching = UserPresence.shared.isWatching(conversation: id)
+            if let entry = chat.routingActivity, entry != before.routingActivity,
+               chat.routingNotifies, !watching, entry.kind != "settings" {
+                post("chat.\(id)", title: entry.label, identifierTitle: "Chat routing",
+                     body: "\(chat.title): \(entry.reason)",
+                     extras: chatExtras(id: id, workspaceID: chat.workspaceID, waiting: false))
+                continue
+            }
             if !before.pending, chat.pending, !watching {
                 post(
                     "chat.\(id)",
@@ -487,6 +500,7 @@ final class RunNotifications {
                     extras: chatExtras(id: id, workspaceID: chat.workspaceID, waiting: false)
                 )
             case "error":
+                if chat.hasRoutingLimit && !chat.routingNotifies { continue }
                 post(
                     "chat.\(id)",
                     title: L10n.text("apple.runnotifications.chat_did_not_finish.45962bbc"),

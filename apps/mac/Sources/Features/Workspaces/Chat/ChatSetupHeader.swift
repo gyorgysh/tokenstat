@@ -428,7 +428,10 @@ struct ChatComposerControls<Chrome: View>: View {
     }
 
     private var agentField: some View {
-        ChatAgentField(model: model, chat: chat, locked: locked) { pickingAgent = true }
+        HStack(spacing: Theme.Space.s) {
+            ChatAgentField(model: model, chat: chat, locked: locked) { pickingAgent = true }
+            ChatRoutingControls(model: model, chat: chat)
+        }
     }
 
     @ViewBuilder

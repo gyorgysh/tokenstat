@@ -52,7 +52,20 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
                 || lower.starts_with("usage limit reached")));
     let throttle = matches!(code, "rate_limit_error" | "rate_limit_exceeded")
         || (!exhausted && lower.starts_with("rate limit exceeded"));
-    if !exhausted && !throttle {
+    let unavailable = matches!(
+        code,
+        "overloaded_error"
+            | "api_error"
+            | "internal_server_error"
+            | "service_unavailable"
+            | "server_error"
+    );
+    let authentication = matches!(
+        code,
+        "authentication_error" | "invalid_api_key" | "unauthorized"
+    );
+    // Other provider-owned errors are visible in routing history but stay manual.
+    if !exhausted && !throttle && !unavailable && !authentication && text.is_empty() {
         return None;
     }
     let reset = error
@@ -77,9 +90,52 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
         .filter(|n| *n > now && *n < now.saturating_add(366 * 86400 * 1000));
     Some(Limit {
         provider: provider.into(),
-        kind: if exhausted { "usage" } else { "throttle" }.into(),
-        reason: text.chars().take(1000).collect(),
+        kind: if exhausted {
+            "usage"
+        } else if throttle {
+            "throttle"
+        } else if unavailable {
+            "error"
+        } else if authentication {
+            "auth"
+        } else {
+            "failure"
+        }
+        .into(),
+        reason: if text.is_empty() { code } else { text }
+            .chars()
+            .take(1000)
+            .collect(),
         resets_at_ms: reset,
+        observed_at_ms: now,
+    })
+}
+
+/// A proven terminal process failure is distinct from a provider quota reading.
+/// It is only eligible for failover under a separate explicit policy switch.
+pub fn from_exit(
+    provider: &str,
+    exit: Option<i32>,
+    stopped: bool,
+    sign_in: bool,
+    now: i64,
+) -> Option<Limit> {
+    if stopped || (!sign_in && exit == Some(0)) {
+        return None;
+    }
+    Some(Limit {
+        provider: provider.into(),
+        kind: if sign_in { "auth" } else { "failure" }.into(),
+        reason: if sign_in {
+            "This agent needs sign-in on this computer.".into()
+        } else {
+            format!(
+                "Agent turn ended unsuccessfully (exit {}). See this turn’s error output for details.",
+                exit.map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".into())
+            )
+        },
+        resets_at_ms: None,
         observed_at_ms: now,
     })
 }
@@ -88,6 +144,42 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn terminal_failures_are_manual_by_default_and_stop_is_never_a_failure() {
+        assert!(from_exit("muse", Some(0), false, false, 1).is_none());
+        assert!(from_exit("muse", Some(1), true, true, 1).is_none());
+        assert_eq!(
+            from_exit("muse", Some(1), false, true, 1).unwrap().kind,
+            "auth"
+        );
+        assert_eq!(
+            from_exit("opencode", Some(1), false, false, 1)
+                .unwrap()
+                .kind,
+            "failure"
+        );
+        assert!(
+            from_exit("opencode", None, false, false, 1)
+                .unwrap()
+                .resets_at_ms
+                .is_none()
+        );
+    }
+    #[test]
+    fn service_auth_and_unknown_errors_have_distinct_manual_or_opt_in_kinds() {
+        for (code, kind) in [
+            ("overloaded_error", "error"),
+            ("api_error", "error"),
+            ("authentication_error", "auth"),
+            ("invalid_request_error", "failure"),
+        ] {
+            let record = json!({"type":"error","error":{"type":code,"message":"Provider refused this request"}});
+            assert_eq!(from_record("claude", &record, 1000).unwrap().kind, kind);
+            assert!(
+                from_record("claude", &json!({"type":"assistant","error":record}), 1000).is_none()
+            );
+        }
+    }
     #[test]
     fn only_provider_error_envelopes_trigger_routes() {
         let text = "You've hit your usage limit. Try again at 8:00 AM.";
@@ -108,7 +200,7 @@ mod tests {
                 &json!({"type":"error","message":"Codex tool rejected: usage limit reached"}),
                 1000
             )
-            .is_none()
+            .is_some_and(|error| error.kind == "failure")
         );
         assert!(
             from_record(
@@ -141,7 +233,7 @@ mod tests {
                 &json!({"type":"error","error":{"type":"authentication_error"}}),
                 1000
             )
-            .is_none()
+            .is_some_and(|error| error.kind == "auth")
         );
     }
 }

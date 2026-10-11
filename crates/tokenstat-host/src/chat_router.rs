@@ -9,6 +9,16 @@ use tokenstat_sync::vault::{VaultClient, VaultError};
 pub struct Destination {
     pub backend: String,
     pub model: Option<String>,
+    pub effort: Option<String>,
+}
+impl Destination {
+    fn apply(&self, chat: &mut Conversation) {
+        chat.backend = self.backend.clone();
+        chat.model = self.model.clone();
+        chat.effort = self.effort.clone();
+        chat.fast_mode = false;
+        chat.resume_token = chat.resume_tokens.get(&chat.backend).cloned();
+    }
 }
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -18,6 +28,28 @@ pub struct Policy {
     pub wait_for_reset: bool,
     pub return_preferred: bool,
     pub use_as_default: bool,
+    pub failover_on_throttle: bool,
+    pub failover_on_errors: bool,
+    pub failover_on_auth: bool,
+    pub failover_on_failures: bool,
+    pub notify: Option<bool>,
+    pub preferred: Option<Destination>,
+}
+impl Policy {
+    fn handles(&self, limit: &Limit) -> bool {
+        (self.enabled
+            && match limit.kind.as_str() {
+                "usage" => true,
+                "throttle" => self.failover_on_throttle,
+                "error" => self.failover_on_errors,
+                "auth" => self.failover_on_auth,
+                "failure" => self.failover_on_failures,
+                _ => false,
+            })
+            || (self.wait_for_reset
+                && matches!(limit.kind.as_str(), "usage" | "throttle")
+                && limit.resets_at_ms.is_some())
+    }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +60,18 @@ struct Pending {
     claimed: bool,
     #[serde(default)]
     attachments: Vec<String>,
+}
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", default)]
+struct Activity {
+    #[serde(default)]
+    id: String,
+    at_ms: i64,
+    kind: String,
+    source: Option<Destination>,
+    target: Option<Destination>,
+    reason: String,
+    resets_at_ms: Option<i64>,
 }
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -43,17 +87,57 @@ struct State {
     note: Option<String>,
     cancelled_run: Option<u64>,
     attachments: Vec<String>,
+    activity: Vec<Activity>,
 }
 impl State {
+    fn record(
+        &mut self,
+        kind: &str,
+        source: Option<Destination>,
+        target: Option<Destination>,
+        reason: &str,
+        resets_at_ms: Option<i64>,
+    ) {
+        self.activity.push(Activity {
+            id: format!("{:032x}", rand::random::<u128>()),
+            at_ms: now_ms(),
+            kind: kind.into(),
+            source: source.map(|mut d| {
+                d.model = d.model.map(|v| v.chars().take(40).collect());
+                d.effort = d.effort.map(|v| v.chars().take(40).collect());
+                d.backend = d.backend.chars().take(40).collect();
+                d
+            }),
+            target: target.map(|mut d| {
+                d.model = d.model.map(|v| v.chars().take(40).collect());
+                d.effort = d.effort.map(|v| v.chars().take(40).collect());
+                d.backend = d.backend.chars().take(40).collect();
+                d
+            }),
+            reason: reason.chars().take(160).collect(),
+            resets_at_ms,
+        });
+        if self.activity.len() > 32 {
+            self.activity.drain(..self.activity.len() - 32);
+        }
+    }
     fn destination(&self, chat: &Conversation, now: i64) -> Option<Destination> {
         if self.note.as_deref() == Some("manual") {
             return Some(Destination {
                 backend: chat.backend.clone(),
                 model: chat.model.clone(),
+                effort: chat.effort.clone(),
             });
         }
-        let next = if self.policy.enabled && self.limit.as_ref().is_some_and(|l| l.kind == "usage")
-        {
+        let next = if self.policy.enabled
+            && self.limit.as_ref().is_some_and(|l| match l.kind.as_str() {
+                "usage" => true,
+                "throttle" => self.policy.failover_on_throttle,
+                "error" => self.policy.failover_on_errors,
+                "auth" => self.policy.failover_on_auth,
+                "failure" => self.policy.failover_on_failures,
+                _ => false,
+            }) {
             self.policy
                 .routes
                 .iter()
@@ -67,12 +151,14 @@ impl State {
                 && self
                     .limit
                     .as_ref()
+                    .filter(|l| matches!(l.kind.as_str(), "usage" | "throttle"))
                     .and_then(|l| l.resets_at_ms)
                     .is_some_and(|t| now >= t)
             {
                 Some(Destination {
                     backend: chat.backend.clone(),
                     model: chat.model.clone(),
+                    effort: chat.effort.clone(),
                 })
             } else {
                 None
@@ -82,7 +168,7 @@ impl State {
     fn view(&self) -> Value {
         json!({"policy":self.policy,"limit":self.limit,"waiting":self.pending.as_ref().is_some_and(|p|!p.claimed),
             "needsDeliveryCheck":self.pending.as_ref().is_some_and(|p|p.claimed),"note":self.note,
-            "tried":self.tried})
+            "tried":self.tried,"preferred":self.preferred,"activity":self.activity})
     }
 }
 fn owner() -> Result<String, String> {
@@ -126,6 +212,158 @@ fn save_document(directory: &Path, name: &str, state: &State) -> Result<(), Stri
     result
 }
 
+const ACTIVITY_MAX: u64 = 8 * 1024 * 1024;
+fn activity_file(path: &Path, append: bool) -> Result<File, String> {
+    if let Ok(meta) = fs::symlink_metadata(path)
+        && (!meta.file_type().is_file() || meta.len() > ACTIVITY_MAX)
+    {
+        return Err("Routing activity is not a bounded regular file.".into());
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    if append {
+        options.write(true).append(true).create(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options.open(path).map_err(|e| e.to_string())?;
+    let meta = file.metadata().map_err(|e| e.to_string())?;
+    if !meta.is_file() || meta.len() > ACTIVITY_MAX {
+        return Err("Routing activity cannot be read safely.".into());
+    }
+    Ok(file)
+}
+fn read_activity(
+    path: &Path,
+    cursor: Option<&str>,
+    limit: usize,
+) -> Result<(Vec<Activity>, Option<String>), String> {
+    use sha2::{Digest, Sha256};
+    use std::io::{BufRead, Read, Seek, SeekFrom};
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((Vec::new(), None));
+        }
+        Err(error) => return Err(error.to_string()),
+        Ok(_) => {}
+    }
+    let mut file = activity_file(path, false)?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    let mut first = Vec::new();
+    BufReader::new((&mut file).take(256))
+        .read_until(b'\n', &mut first)
+        .map_err(|e| e.to_string())?;
+    let digest = Sha256::digest(&first);
+    let generation = u64::from_le_bytes(digest[..8].try_into().unwrap());
+    let end = match cursor {
+        Some(cursor) => parse_cursor(cursor, len, generation)
+            .ok_or("Older routing history expired. Refresh activity.")?,
+        None => len,
+    };
+    file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(file);
+    let mut rows = std::collections::VecDeque::new();
+    let mut offset = 0;
+    while offset < end {
+        let mut line = Vec::new();
+        (&mut reader)
+            .take(4097)
+            .read_until(b'\n', &mut line)
+            .map_err(|e| e.to_string())?;
+        if line.is_empty()
+            || line.len() > 4096
+            || line.last() != Some(&b'\n')
+            || offset + line.len() as u64 > end
+        {
+            return Err("Routing activity changed or is incomplete. Refresh it.".into());
+        }
+        let entry: Activity = serde_json::from_slice(&line).map_err(|e| e.to_string())?;
+        rows.push_back((offset, entry));
+        if rows.len() > limit {
+            rows.pop_front();
+        }
+        offset += line.len() as u64;
+    }
+    let cursor = rows
+        .front()
+        .filter(|(start, _)| *start > 0)
+        .map(|(start, _)| make_cursor(*start, len, generation));
+    Ok((rows.into_iter().map(|(_, entry)| entry).collect(), cursor))
+}
+fn append_activity<'a>(
+    directory: &Path,
+    entries: impl Iterator<Item = &'a Activity>,
+) -> Result<(), String> {
+    let entries = entries.collect::<Vec<_>>();
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let path = directory.join("routing-activity.ndjson");
+    let mut file = activity_file(&path, true)?;
+    // Retire an interrupted last append before writing another complete row.
+    // The durable state is saved only after this journal is flushed.
+    {
+        use std::io::{Read, Seek, SeekFrom};
+        let len = file.metadata().map_err(|e| e.to_string())?.len();
+        let count = len.min(4096);
+        if count > 0 {
+            file.seek(SeekFrom::End(-(count as i64)))
+                .map_err(|e| e.to_string())?;
+            let mut tail = vec![0; count as usize];
+            file.read_exact(&mut tail).map_err(|e| e.to_string())?;
+            if tail.last() != Some(&b'\n') {
+                let retained = match tail.iter().rposition(|b| *b == b'\n') {
+                    Some(index) => len - count + index as u64 + 1,
+                    None if count == len => 0,
+                    None => {
+                        return Err("Routing activity has an oversized incomplete record.".into());
+                    }
+                };
+                file.set_len(retained)
+                    .and_then(|_| file.sync_all())
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    let mut bytes = Vec::new();
+    for entry in entries {
+        serde_json::to_writer(&mut bytes, entry).map_err(|e| e.to_string())?;
+        bytes.push(b'\n');
+    }
+    if file.metadata().map_err(|e| e.to_string())?.len() + bytes.len() as u64 > ACTIVITY_MAX {
+        drop(file);
+        let (retained, _) = read_activity(&path, None, 1024)?;
+        let mut saved = Vec::new();
+        for entry in retained {
+            serde_json::to_writer(&mut saved, &entry).map_err(|e| e.to_string())?;
+            saved.push(b'\n');
+        }
+        let temporary = directory.join(format!(
+            ".routing-activity-{:032x}.tmp",
+            rand::random::<u128>()
+        ));
+        let result = (|| {
+            write_private_file(&temporary, &saved)?;
+            OpenOptions::new()
+                .write(true)
+                .open(&temporary)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| e.to_string())?;
+            fs::rename(&temporary, &path).map_err(|e| e.to_string())?;
+            Ok::<_, String>(())
+        })();
+        let _ = fs::remove_file(&temporary);
+        result?;
+        file = activity_file(&path, true)?;
+    }
+    file.write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|e| e.to_string())
+}
+
 impl Store {
     fn router_load(&self, id: &str) -> Result<State, String> {
         let directory = self.verified_append_directory(id)?;
@@ -159,9 +397,60 @@ impl Store {
         let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         let directory = self.verified_append_directory(id)?;
         fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
-        save_document(&directory, "routing.json", state)
+        let previous = self.router_load(id)?;
+        let mut next = state.clone();
+        if next.limit != previous.limit
+            && let Some(limit) = next.limit.clone()
+        {
+            next.record(
+                &limit.kind,
+                next.tried.last().cloned(),
+                None,
+                &limit.reason,
+                limit.resets_at_ms,
+            );
+        }
+        if next.note != previous.note
+            && let Some(note) = next.note.clone()
+            && !note.starts_with("Continuing with")
+            && note != "manual"
+        {
+            let kind = if note.starts_with("Continuing with") {
+                "continued"
+            } else if note.contains("cancelled") {
+                "cancelled"
+            } else if note.contains("Trying the next") || note.contains("unavailable") {
+                "skipped"
+            } else {
+                "paused"
+            };
+            next.record(kind, next.tried.last().cloned(), None, &note, None);
+        }
+        append_activity(
+            &directory,
+            next.activity
+                .iter()
+                .filter(|entry| !previous.activity.iter().any(|old| old.id == entry.id)),
+        )?;
+        save_document(&directory, "routing.json", &next)
     }
 
+    pub fn routing_history(&self, id: &str, cursor: Option<&str>) -> Result<Value, String> {
+        validate_record_id(id)?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access().map_err(|e| e.to_string())?;
+        self.current_send_conversation(id)?;
+        let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let directory = self.verified_append_directory(id)?;
+        let (entries, cursor) =
+            read_activity(&directory.join("routing-activity.ndjson"), cursor, 32)?;
+        Ok(json!({"activity":entries,"cursor":cursor}))
+    }
+    pub(super) fn routing_notifications_enabled(&self, id: &str) -> bool {
+        self.router_load(id)
+            .map(|state| state.limit.is_none() || state.policy.notify != Some(false))
+            .unwrap_or(true)
+    }
     pub fn routing(&self, id: &str) -> Result<Value, String> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
@@ -180,14 +469,32 @@ impl Store {
             }
         }
     }
-    pub fn routing_update(&self, id: &str, revision: u64, policy: Policy) -> Result<Value, String> {
+    pub fn routing_update(
+        &self,
+        id: &str,
+        revision: u64,
+        mut policy: Policy,
+    ) -> Result<Value, String> {
         validate_record_id(id)?;
+        for destination in policy.routes.iter_mut().chain(policy.preferred.iter_mut()) {
+            if destination.model.as_deref() == Some("") {
+                destination.model = None;
+            }
+            if destination.effort.as_deref() == Some("") {
+                destination.effort = None;
+            }
+        }
         if policy.routes.len() > 8 {
             return Err("Choose up to eight routing destinations.".into());
         }
         let known = crate::automations::backends(false);
         let mut unique = Vec::new();
-        for destination in &policy.routes {
+        for (index, destination) in policy
+            .routes
+            .iter()
+            .chain(policy.preferred.iter())
+            .enumerate()
+        {
             if !known
                 .iter()
                 .any(|b| b["id"].as_str() == Some(&destination.backend))
@@ -199,9 +506,20 @@ impl Store {
                 .model
                 .as_ref()
                 .is_some_and(|m| m.len() > 256 || m.contains(['\n', '\r', '\0']))
-                || unique.contains(destination)
+                || (index < policy.routes.len() && unique.contains(destination))
             {
                 return Err("Choose distinct valid routing destinations.".into());
+            }
+            if let Some(effort) = &destination.effort
+                && (effort.is_empty()
+                    || !known.iter().any(|backend| {
+                        backend["id"].as_str() == Some(&destination.backend)
+                            && backend["efforts"].as_array().is_some_and(|values| {
+                                values.iter().any(|value| value.as_str() == Some(effort))
+                            })
+                    }))
+            {
+                return Err("Choose an effort supported by this chat agent.".into());
             }
             unique.push(destination.clone());
         }
@@ -213,20 +531,34 @@ impl Store {
         }
         let mut state = self.router_load(id)?;
         state.policy = policy;
+        state.record("settings", None, None, "Routing settings saved.", None);
         let claimed = state.pending.as_ref().is_some_and(|p| p.claimed);
         if !claimed {
             state.owner = self.router_owner()?;
             state.peer = crate::request_context::remote_peer();
         }
-        if state.preferred.is_none() {
+        let previous_preferred = state.preferred.clone();
+        if state.policy.preferred.is_some() {
+            state.preferred = state.policy.preferred.clone();
+        } else if state.preferred.is_none() {
             state.preferred = Some(Destination {
                 backend: chat.backend,
                 model: chat.model,
+                effort: chat.effort.clone(),
             });
         }
-        if !claimed && !state.policy.enabled && !state.policy.wait_for_reset {
+        if previous_preferred.as_ref().map(|d| &d.backend)
+            != state.preferred.as_ref().map(|d| &d.backend)
+        {
+            state.preferred_reset_at_ms = None;
+        }
+        let handles = state
+            .limit
+            .as_ref()
+            .is_some_and(|limit| state.policy.handles(limit));
+        if !claimed && !handles {
             state.pending = None;
-        } else if state.pending.is_none() && state.limit.is_some() {
+        } else if state.pending.is_none() && handles {
             state.pending = Some(Pending {
                 operation_id: format!("route-{}", rand::random::<u64>()),
                 expected_revision: revision,
@@ -264,6 +596,13 @@ impl Store {
         let mut state = self.router_load(id)?;
         match action {
             "cancel" => {
+                state.record(
+                    "cancelled",
+                    None,
+                    None,
+                    "Automatic continuation cancelled by you.",
+                    None,
+                );
                 if !state.pending.as_ref().is_some_and(|p| p.claimed) {
                     state.pending = None;
                 }
@@ -306,10 +645,11 @@ impl Store {
     pub(super) fn router_prefer_locked(&self, id: &str) -> Result<(), String> {
         let chat = self.current_send_conversation(id)?;
         let mut state = self.router_load(id)?;
-        state.preferred = Some(Destination {
+        state.preferred = state.policy.preferred.clone().or(Some(Destination {
             backend: chat.backend,
             model: chat.model,
-        });
+            effort: chat.effort.clone(),
+        }));
         state.preferred_reset_at_ms = None;
         state.tried.clear();
         self.router_save(id, &state)
@@ -363,16 +703,19 @@ impl Store {
         id: &str,
         chat: Conversation,
     ) -> Result<Conversation, String> {
-        let state = self.router_load(id)?;
+        let mut state = self.router_load(id)?;
         if !state.policy.return_preferred
             || !state.preferred_reset_at_ms.is_some_and(|t| now_ms() >= t)
         {
             return Ok(chat);
         }
-        let Some(preferred) = state.preferred else {
+        let Some(preferred) = state.preferred.clone() else {
             return Ok(chat);
         };
-        if chat.backend == preferred.backend && chat.model == preferred.model {
+        if chat.backend == preferred.backend
+            && chat.model == preferred.model
+            && chat.effort == preferred.effort
+        {
             return Ok(chat);
         }
         if crate::launcher::profile_installed(launcher_profile_id(&preferred.backend))
@@ -381,16 +724,25 @@ impl Store {
         {
             return Ok(chat);
         }
+        state.record(
+            "returned",
+            Some(Destination {
+                backend: chat.backend.clone(),
+                model: chat.model.clone(),
+                effort: chat.effort.clone(),
+            }),
+            Some(preferred.clone()),
+            "Returned to the preferred agent at the next turn boundary after its usage reset.",
+            None,
+        );
         // The next reservation advances the revision. Do not add a second
         // revision here after validating the client's accepted context.
-        self.edit_conversation(id, |current| {
-            current.backend = preferred.backend;
-            current.model = preferred.model;
-            current.effort = None;
-            current.fast_mode = false;
-            current.resume_token = current.resume_tokens.get(&current.backend).cloned();
+        let result = self.edit_conversation(id, |current| {
+            preferred.apply(current);
             Ok(current.clone())
-        })
+        })?;
+        self.router_save(id, &state)?;
+        Ok(result)
     }
     pub(super) fn router_arm_locked(
         &self,
@@ -414,10 +766,11 @@ impl Store {
             state.tried.clear();
             state.note = None;
             if state.preferred.is_none() {
-                state.preferred = Some(Destination {
+                state.preferred = state.policy.preferred.clone().or(Some(Destination {
                     backend: chat.backend.clone(),
                     model: chat.model.clone(),
-                });
+                    effort: chat.effort.clone(),
+                }));
             }
         }
         self.router_save(id, &state)
@@ -462,11 +815,16 @@ impl Store {
         let current = Destination {
             backend: chat.backend,
             model: chat.model,
+            effort: chat.effort.clone(),
         };
         if !state.tried.contains(&current) {
             state.tried.push(current.clone());
         }
-        if state.preferred.as_ref() == Some(&current) {
+        if state
+            .preferred
+            .as_ref()
+            .is_some_and(|preferred| preferred.backend == current.backend)
+        {
             state.preferred_reset_at_ms = limit.resets_at_ms;
         }
         let (events, _) = self.events(id, 0)?;
@@ -485,8 +843,9 @@ impl Store {
         }
         attachments.reverse();
         state.attachments = attachments.clone();
+        let handles = state.policy.handles(&limit);
         state.limit = Some(limit);
-        state.pending = Some(Pending {
+        state.pending = handles.then_some(Pending {
             operation_id: format!("route-{revision}-{}", rand::random::<u64>()),
             expected_revision: chat.send_revision,
             created_at_ms: now_ms(),
@@ -562,11 +921,17 @@ impl Store {
         let manual = state.note.as_deref() == Some("manual");
         let destination = state.destination(&chat, now);
         let Some(destination) = destination else {
-            if state.policy.enabled
-                && state.limit.as_ref().is_some_and(|l| l.kind == "usage")
-                && state.note.is_none()
-            {
-                state.note=Some("No routing destination is available. Choose a model, or continue when the limit resets.".into());
+            let waiting_reset = state.policy.wait_for_reset
+                && state.limit.as_ref().is_some_and(|limit| {
+                    matches!(limit.kind.as_str(), "usage" | "throttle")
+                        && limit.resets_at_ms.is_some_and(|reset| reset > now)
+                });
+            if !waiting_reset {
+                state.pending = None;
+                state.note = Some(
+                    "No eligible routing destination remains. Choose a model or retry manually."
+                        .into(),
+                );
                 self.router_save(id, &state)?;
             }
             return Ok(());
@@ -594,13 +959,12 @@ impl Store {
             return self.router_save(id, &state);
         }
         let mut selected = chat;
-        if destination.backend != selected.backend || destination.model != selected.model {
+        if destination.backend != selected.backend
+            || destination.model != selected.model
+            || destination.effort != selected.effort
+        {
             selected = self.edit_conversation(id, |c| {
-                c.backend = destination.backend.clone();
-                c.model = destination.model.clone();
-                c.effort = None;
-                c.fast_mode = false;
-                c.resume_token = c.resume_tokens.get(&c.backend).cloned();
+                destination.apply(c);
                 c.send_revision = next_send_revision(c.send_revision)?;
                 Ok(c.clone())
             })?;
@@ -613,6 +977,17 @@ impl Store {
             claimed: true,
             ..pending.clone()
         });
+        state.record(
+            if destination == state.preferred.clone().unwrap_or_default() {
+                "resumed"
+            } else {
+                "switched"
+            },
+            state.tried.last().cloned(),
+            Some(destination.clone()),
+            "Starting one continuation with the accepted history and permissions.",
+            None,
+        );
         state.note = Some(format!("Continuing with {}", selected.backend));
         self.router_save(id, &state)?;
         match self.send_under_acceptance(
@@ -709,6 +1084,170 @@ mod tests {
         }
     }
     #[test]
+    fn interrupted_activity_append_does_not_block_future_complete_records() {
+        let (_temp, store) = fixture();
+        let mut state = State::default();
+        state.record("paused", None, None, "first", None);
+        store.router_save("route-test", &state).unwrap();
+        let path = store
+            .verified_append_directory("route-test")
+            .unwrap()
+            .join("routing-activity.ndjson");
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"{\"partial\":")
+            .unwrap();
+        state.record("paused", None, None, "second", None);
+        store.router_save("route-test", &state).unwrap();
+        let result = store.routing_history("route-test", None).unwrap();
+        assert_eq!(result["activity"].as_array().unwrap().len(), 2);
+        assert_eq!(result["activity"][1]["reason"], "second");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn activity_symlinks_are_refused_without_touching_the_target() {
+        let (_temp, store) = fixture();
+        let directory = store.verified_append_directory("route-test").unwrap();
+        fs::create_dir_all(&directory).unwrap();
+        let outside = store.root.join("outside");
+        fs::write(&outside, b"do not touch").unwrap();
+        std::os::unix::fs::symlink(&outside, directory.join("routing-activity.ndjson")).unwrap();
+        assert!(store.routing_history("route-test", None).is_err());
+        let mut state = State::default();
+        state.record("paused", None, None, "new", None);
+        assert!(store.router_save("route-test", &state).is_err());
+        assert_eq!(fs::read(outside).unwrap(), b"do not touch");
+    }
+    #[test]
+    fn activity_retention_bounds_the_archive_and_keeps_recent_records() {
+        let (_temp, store) = fixture();
+        let directory = store.verified_append_directory("route-test").unwrap();
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("routing-activity.ndjson");
+        let mut state = State::default();
+        state.record("paused", None, None, &"x".repeat(160), None);
+        let mut line = serde_json::to_vec(&state.activity[0]).unwrap();
+        line.push(b'\n');
+        let count = ACTIVITY_MAX / line.len() as u64;
+        let mut file = File::create(&path).unwrap();
+        for _ in 0..count {
+            file.write_all(&line).unwrap();
+        }
+        drop(file);
+        state.record("paused", None, None, &"y".repeat(160), None);
+        append_activity(&directory, state.activity.iter()).unwrap();
+        let (rows, _) = read_activity(&path, None, 2000).unwrap();
+        assert_eq!(rows.len(), 1026);
+        assert_eq!(rows.last().unwrap().id, state.activity.last().unwrap().id);
+        assert!(fs::metadata(path).unwrap().len() < ACTIVITY_MAX);
+    }
+    #[test]
+    fn activity_pages_survive_growth_and_reject_replaced_generations() {
+        let (_temp, store) = fixture();
+        let mut state = State::default();
+        for i in 0..70 {
+            state.record("paused", None, None, &format!("event {i}"), None);
+            store.router_save("route-test", &state).unwrap();
+        }
+        let first = store.routing_history("route-test", None).unwrap();
+        assert_eq!(first["activity"].as_array().unwrap().len(), 32);
+        let cursor = first["cursor"].as_str().unwrap().to_owned();
+        state.record("paused", None, None, "new event", None);
+        store.router_save("route-test", &state).unwrap();
+        let second = store.routing_history("route-test", Some(&cursor)).unwrap();
+        assert_eq!(second["activity"][31]["reason"], "event 37");
+        let third = store
+            .routing_history("route-test", second["cursor"].as_str())
+            .unwrap();
+        assert_eq!(third["activity"].as_array().unwrap().len(), 6);
+        assert!(third["cursor"].is_null());
+        let path = store
+            .verified_append_directory("route-test")
+            .unwrap()
+            .join("routing-activity.ndjson");
+        fs::write(&path, b"replaced archive\n").unwrap();
+        assert!(store.routing_history("route-test", Some(&cursor)).is_err());
+    }
+    #[test]
+    fn opt_out_records_errors_without_arming_automatic_work() {
+        let (_temp, store) = fixture();
+        let chat = store.get("route-test").unwrap();
+        store.router_arm_locked("route-test", &chat, false).unwrap();
+        store.router_observe("route-test", 1, refusal()).unwrap();
+        let state = store.router_load("route-test").unwrap();
+        assert!(state.pending.is_none());
+        assert!(state.limit.is_some());
+        assert_eq!(state.activity.last().unwrap().kind, "usage");
+    }
+    #[test]
+    fn route_effort_is_validated_persisted_and_source_effort_is_preserved() {
+        let (_temp, store) = fixture();
+        store
+            .edit_conversation("route-test", |c| {
+                c.effort = Some("high".into());
+                Ok(())
+            })
+            .unwrap();
+        let policy = Policy {
+            enabled: true,
+            routes: vec![Destination {
+                backend: "codex".into(),
+                model: None,
+                effort: Some("low".into()),
+            }],
+            ..Policy::default()
+        };
+        store
+            .routing_update("route-test", 1, policy.clone())
+            .unwrap();
+        store.router_observe("route-test", 1, refusal()).unwrap();
+        let state = store.router_load("route-test").unwrap();
+        assert_eq!(
+            state.preferred.as_ref().unwrap().effort.as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            state
+                .destination(
+                    &store.current_send_conversation("route-test").unwrap(),
+                    now_ms()
+                )
+                .unwrap()
+                .effort
+                .as_deref(),
+            Some("low")
+        );
+        assert_eq!(state.activity.last().unwrap().kind, "usage");
+        let mut invalid = policy;
+        invalid.routes[0].effort = Some("unsupported".into());
+        assert!(store.routing_update("route-test", 1, invalid).is_err());
+        let restored = Store::load_at(store.root.clone());
+        assert_eq!(
+            restored
+                .router_load("route-test")
+                .unwrap()
+                .activity
+                .last()
+                .unwrap()
+                .reason,
+            refusal().reason
+        );
+    }
+    #[test]
+    fn audit_history_is_bounded_and_survives_private_state_reload() {
+        let (_temp, store) = fixture();
+        let mut state = State::default();
+        for _ in 0..100 {
+            state.record("paused", None, None, &"x".repeat(10000), None);
+        }
+        store.router_save("route-test", &state).unwrap();
+        let state = store.router_load("route-test").unwrap();
+        assert_eq!(state.activity.len(), 32);
+        assert!(state.activity.iter().all(|e| e.reason.len() == 160));
+    }
+    #[test]
     fn continuation_cannot_adopt_another_account_or_peer() {
         let (_temp, store) = fixture();
         let chat = store.current_send_conversation("route-test").unwrap();
@@ -740,6 +1279,7 @@ mod tests {
             routes: vec![Destination {
                 backend: "claude".into(),
                 model: None,
+                effort: None,
             }],
             ..Policy::default()
         };
@@ -765,6 +1305,16 @@ mod tests {
     #[test]
     fn changed_account_or_revision_cancels_and_live_lease_prevents_routing() {
         let (_temp, store) = fixture();
+        store
+            .routing_update(
+                "route-test",
+                1,
+                Policy {
+                    wait_for_reset: true,
+                    ..Policy::default()
+                },
+            )
+            .unwrap();
         let chat = store.get("route-test").unwrap();
         store.router_arm_locked("route-test", &chat, false).unwrap();
         store.router_observe("route-test", 1, refusal()).unwrap();
@@ -808,6 +1358,16 @@ mod tests {
     #[test]
     fn claimed_unknown_delivery_is_never_launched_by_a_restarted_helper() {
         let (_temp, store) = fixture();
+        store
+            .routing_update(
+                "route-test",
+                1,
+                Policy {
+                    wait_for_reset: true,
+                    ..Policy::default()
+                },
+            )
+            .unwrap();
         let chat = store.get("route-test").unwrap();
         store.router_arm_locked("route-test", &chat, false).unwrap();
         store.router_observe("route-test", 1, refusal()).unwrap();
@@ -830,6 +1390,7 @@ mod tests {
         let d = Destination {
             backend: "codex".into(),
             model: None,
+            effort: None,
         };
         assert!(
             store
@@ -858,15 +1419,79 @@ mod decision_tests {
         serde_json::from_value(json!({"id":"test","workspaceId":"test","backend":"codex","title":"Task","createdAtMs":1,"updatedAtMs":1})).unwrap()
     }
     #[test]
+    fn destination_applies_model_and_effort_without_changing_permissions_or_history() {
+        let mut c = chat();
+        c.autonomy = "standard".into();
+        c.mode = "plan".into();
+        c.system_prompt = "existing instructions".into();
+        c.resume_tokens
+            .insert("codex".into(), "existing-session".into());
+        c.fast_mode = true;
+        Destination {
+            backend: "codex".into(),
+            model: Some("gpt-6.1-sol".into()),
+            effort: Some("high".into()),
+        }
+        .apply(&mut c);
+        assert_eq!(c.effort.as_deref(), Some("high"));
+        assert_eq!(c.model.as_deref(), Some("gpt-6.1-sol"));
+        assert_eq!(c.resume_token.as_deref(), Some("existing-session"));
+        assert_eq!(c.autonomy, "standard");
+        assert_eq!(c.mode, "plan");
+        assert_eq!(c.system_prompt, "existing instructions");
+        assert!(!c.fast_mode);
+    }
+    #[test]
+    fn error_categories_fail_over_only_under_their_explicit_policy() {
+        let mut state = State {
+            policy: Policy {
+                enabled: true,
+                routes: vec![Destination {
+                    backend: "claude".into(),
+                    model: None,
+                    effort: Some("low".into()),
+                }],
+                ..Policy::default()
+            },
+            limit: Some(Limit {
+                provider: "codex".into(),
+                kind: "error".into(),
+                reason: "unavailable".into(),
+                resets_at_ms: None,
+                observed_at_ms: 1,
+            }),
+            ..State::default()
+        };
+        assert!(state.destination(&chat(), 1000).is_none());
+        state.policy.failover_on_errors = true;
+        assert!(state.destination(&chat(), 1000).is_some());
+        state.limit.as_mut().unwrap().kind = "throttle".into();
+        assert!(state.destination(&chat(), 1000).is_none());
+        state.policy.failover_on_throttle = true;
+        assert!(state.destination(&chat(), 1000).is_some());
+        state.limit.as_mut().unwrap().kind = "auth".into();
+        state.limit.as_mut().unwrap().resets_at_ms = Some(500);
+        state.policy.wait_for_reset = true;
+        assert!(state.destination(&chat(), 1000).is_none());
+        state.policy.failover_on_auth = true;
+        assert!(state.destination(&chat(), 1000).is_some());
+        state.limit.as_mut().unwrap().kind = "failure".into();
+        assert!(state.destination(&chat(), 1000).is_none());
+        state.policy.failover_on_failures = true;
+        assert!(state.destination(&chat(), 1000).is_some());
+    }
+    #[test]
     fn order_is_bounded_and_only_a_trusted_reset_retries_the_source() {
         let chat = chat();
         let source = Destination {
             backend: "codex".into(),
             model: None,
+            effort: None,
         };
         let fallback = Destination {
             backend: "claude".into(),
             model: Some("sonnet".into()),
+            effort: None,
         };
         let mut state = State {
             policy: Policy {
@@ -901,6 +1526,7 @@ mod decision_tests {
                 routes: vec![Destination {
                     backend: "claude".into(),
                     model: None,
+                    effort: None,
                 }],
                 ..Policy::default()
             },
@@ -947,6 +1573,7 @@ mod retirement_tests {
                     routes: vec![Destination {
                         backend: "claude".into(),
                         model: None,
+                        effort: None,
                     }],
                     ..Policy::default()
                 },
@@ -1014,6 +1641,16 @@ mod retirement_tests {
     #[test]
     fn continuation_keeps_files_from_the_failed_turn_only() {
         let (_temp, store) = fixture();
+        store
+            .routing_update(
+                "original",
+                1,
+                Policy {
+                    enabled: true,
+                    ..Policy::default()
+                },
+            )
+            .unwrap();
         let chat = store.get("original").unwrap();
         store.router_arm_locked("original", &chat, false).unwrap();
         store

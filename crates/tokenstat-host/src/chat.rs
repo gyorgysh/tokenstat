@@ -2286,7 +2286,8 @@ impl Store {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
-        let model_edited = changes.backend.is_some() || changes.model.is_some();
+        let model_edited =
+            changes.backend.is_some() || changes.model.is_some() || changes.effort.is_some();
         let mut switched_pty = None;
         if let Some(fast) = changes.fast_mode {
             // The per-conversation acceptance lock serializes setup changes,
@@ -3358,6 +3359,9 @@ impl Store {
         // not have this backend on PATH, and CI runners often have none.
         let runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
             .ok_or("This conversation is already running in another instance of tokenstat.")?;
+        if !routing_continuation {
+            chat = self.router_return_locked(id, chat)?;
+        }
         if crate::launcher::profile_installed(launcher_profile_id(&chat.backend)) == Some(false) {
             return Err(DispatchError::new(
                 "agent_not_installed",
@@ -3366,9 +3370,6 @@ impl Store {
                     chat.backend
                 ),
             ));
-        }
-        if !routing_continuation {
-            chat = self.router_return_locked(id, chat)?;
         }
         if attachment_ids.len() > 20 {
             return Err("a message can include up to 20 files".into());
@@ -4174,7 +4175,15 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
-        let limit = parser.take_limit();
+        let limit = parser.take_limit().or_else(|| {
+            crate::provider_limit::from_exit(
+                backend,
+                exit,
+                stopped,
+                muse_sign_in_required,
+                now_ms(),
+            )
+        });
         let limited = limit.is_some();
         if !stopped && let Some(limit) = limit {
             let _ = self.router_observe(id, activity_revision, limit);
@@ -4204,7 +4213,8 @@ impl Store {
         let _ = self.mark_last_message(id, now_ms(), "agent");
         // Same rule as the approval above: a turn that ended in front of
         // somebody has already told them.
-        if let Some(reason) = chat_notification(status).filter(|_| !crate::presence::is_watched(id))
+        if let Some(reason) = chat_notification(status)
+            .filter(|_| !crate::presence::is_watched(id) && self.routing_notifications_enabled(id))
         {
             tokenstat_sync::push::notify_in_background(reason);
         }

@@ -2295,6 +2295,12 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 store.routing(&id).envelope()
             }
         }
+        "chat.routingHistory" => store
+            .routing_history(
+                &p.id.ok_or("chat.routingHistory needs id")?,
+                p.cursor.as_deref(),
+            )
+            .envelope(),
         "chat.routeAction" => store
             .routing_action(
                 &p.id.ok_or("chat.routeAction needs id")?,
