@@ -18,8 +18,14 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Chat files use resumable transfers with integrity checks, progress and cancellation: up to 256 MiB locally or over a direct connection, and 64 MiB through relay. Relay uploads and downloads ask first and show the remaining allowance when available.
 - Chat attachments include videos, archives and documents, with Save/Open actions on every client. Apple devices keep large draft originals on disk and show a poster and duration for downloaded videos. Agents can return files through their existing output-file links.
 
+### Changed
+
+- Chat settings have clearer section headers and a prominent Routing action. On Apple devices, Chat Detail follows the conversation name. Routing settings and activity expand from the whole row; narrow phones give model and effort their own rows.
+- Pending Push counts appear in an accent badge. Successful Git notices and success toasts dismiss after ten seconds; errors remain available for review.
+
 ### Fixed
 
+- Claude sign-in refusals apply the routing setting for authentication failures.
 - Usage scans include Codex chats started by tokenstat in private homes, so their usage appears alongside ordinary Codex sessions without manually scanning each chat.
 - Changing a chat's model or speed on Apple devices no longer causes a false conversation conflict on the next message. Reviewed messages can be sent with the latest chat in one action.
 - Chat recovery reconciles an idle runner and can request a cooperative stop from another helper. Unconfirmed deliveries keep their saved copy while you write a new message; Windows distinguishes a refused message from an uncertain delivery.

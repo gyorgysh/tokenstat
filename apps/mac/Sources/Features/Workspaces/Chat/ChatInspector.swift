@@ -35,12 +35,12 @@ struct ChatInspector: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: Theme.Space.m) {
                             identity(chat)
+                            ChatDetailSettings(model: model)
                             ChatSetupHeader(model: model, chat: chat, collapsed: false, showsIntro: false)
                             ChatInstructionsCard(model: model, chat: chat)
                             folderCard
                             allowlist(chat)
                             ChatCostMeter(totals: model.turnUsage)
-                            ChatDetailSettings(model: model)
                             Button(L10n.text("apple.chatinspector.delete_chat.93291d9c"), .delete, role: .destructive) {
                                 guard let owner = model.currentReference else { return }
                                 deletionTarget = DeletionTarget(chat: chat, owner: owner)
@@ -198,19 +198,7 @@ struct ChatInspector: View {
     }
 
     private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text(title)
-                .font(Theme.caption)
-                .foregroundStyle(.tertiary)
-            content()
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
-        }
+        ChatSetupSection(title: title, icon: .settings) { content() }
     }
 
     private func change(_ chat: ChatConversation, operation: @escaping @MainActor () async -> Void) {

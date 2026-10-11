@@ -14,9 +14,19 @@ struct GitPushControl: View {
     @State private var presenting = false
 
     var body: some View {
-        Button(session?.draft.submitted == nil ? (outgoing > 0 ? L10n.text("apple.gitpushview.push_0.a738ad29", "\(outgoing)") : L10n.text("apple.gitpushview.push.92363252")) : L10n.text("apple.gitpushview.check_push.c821c305"), .upload) {
-            presenting = true
+        Button { presenting = true } label: {
+            HStack(spacing: Theme.Space.s) {
+                Label(session?.draft.submitted == nil ? L10n.text("apple.gitpushview.push.92363252") : L10n.text("apple.gitpushview.check_push.c821c305"), systemImage: ActionIcon.upload.symbol)
+                if outgoing > 0 && session?.draft.submitted == nil {
+                    Text("\(outgoing)")
+                        .font(Theme.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Theme.accentSoft, in: Capsule())
+                }
+            }
         }
+        .accessibilityLabel(session?.draft.submitted == nil ? (outgoing > 0 ? L10n.text("apple.gitpushview.push_0.a738ad29", "\(outgoing)") : L10n.text("apple.gitpushview.push.92363252")) : L10n.text("apple.gitpushview.check_push.c821c305"))
         .buttonStyle(SecondaryButtonStyle(comfortable: true))
         .disabled(session == nil)
         .task(id: target) {

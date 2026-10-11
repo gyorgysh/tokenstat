@@ -70,7 +70,7 @@ struct ChatRoutingNotice: View {
                         .disabled(chat.running || state.needsDeliveryCheck)
                     ChatRoutingControls(model: model, chat: chat)
                     if state.waiting {
-                        Button(L10n.text("common.cancel"), .stop) { Task { _ = await model.routing(action: "cancel") } }
+                        Button(L10n.text("common.cancel"), .dismiss) { Task { _ = await model.routing(action: "cancel") } }
                     }
                 }.buttonStyle(SecondaryButtonStyle(small: true))
             }
@@ -93,6 +93,17 @@ private struct ChatRoutingSheet: View {
     @State private var activityPage: ChatRoutingActivityPage?
     @State private var activityLoading = false
     @State private var activityError: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
+    private var stackRouteChoices: Bool {
+        #if os(iOS)
+        sizeClass == .compact || typeSize.isAccessibilitySize
+        #else
+        typeSize.isAccessibilitySize
+        #endif
+    }
 
     var body: some View {
         ThemedSheet(title: L10n.text("common.chat_routing"), subtitle: L10n.text("common.chat_route_explanation"), icon: .settings,
@@ -141,7 +152,7 @@ private struct ChatRoutingSheet: View {
             .disabled(!loaded || saving)
         } actions: {
             if loadFailed { Button(L10n.text("common.retry"), .refresh) { Task { await loadPolicy() } } }
-            Button(L10n.text("common.cancel"), .stop) { dismiss() }
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
             Button(L10n.text("common.save"), .save) {
                 saving = true
                 Task { if await model.routing(policy: policy) { dismiss() }; saving = false }
@@ -150,6 +161,7 @@ private struct ChatRoutingSheet: View {
             .disabled(!loaded || saving)
         }
         .toggleStyle(.brandCheckbox)
+        .disclosureGroupStyle(ChatRoutingDisclosureStyle())
         .modalFrame(width: 600, height: min(760, 500 + CGFloat(policy.routes.count) * 110))
         .presentationBackground(Theme.background)
         .presentationDetents([.large])
@@ -229,9 +241,13 @@ private struct ChatRoutingSheet: View {
                 Text(L10n.text("common.chat_route_permissions")).font(Theme.caption).foregroundStyle(Theme.warning)
             }
             if let backend = model.backend(for: policy.routes[index].backend) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: Theme.Space.l) { routeChoices(index, backend) }
+                if stackRouteChoices {
                     VStack(alignment: .leading, spacing: Theme.Space.s) { routeChoices(index, backend) }
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: Theme.Space.l) { routeChoices(index, backend) }
+                        VStack(alignment: .leading, spacing: Theme.Space.s) { routeChoices(index, backend) }
+                    }
                 }
             }
         }
@@ -260,6 +276,30 @@ private struct ChatRoutingSheet: View {
                 options: [(value: "", label: L10n.text("apple.chatsetupheader.default.21b111cb"))] + backend.efforts.map { (value: $0, label: $0) },
                 selection: Binding(get: { policy.routes.indices.contains(index) ? policy.routes[index].effort ?? "" : "" },
                                    set: { setRoute(index, effort: $0) }))
+        }
+    }
+}
+
+/// The full header is the expansion target, including its empty space.
+private struct ChatRoutingDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Button { configuration.isExpanded.toggle() } label: {
+                HStack(spacing: Theme.Space.s) {
+                    configuration.label.font(Theme.callout.weight(.semibold))
+                    Spacer(minLength: 0)
+                    Image(systemName: configuration.isExpanded ? "chevron.up" : "chevron.down")
+                        .font(Theme.caption.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(configuration.isExpanded ? L10n.text("common.collapse") : L10n.text("common.expand"))
+            if configuration.isExpanded { configuration.content }
         }
     }
 }

@@ -1269,6 +1269,13 @@ struct TransientToast: View {
                 .shadow(color: Theme.shadow(0.2), radius: 14, y: 6)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
                 .animation(.snappy(duration: 0.25), value: message)
+                .task(id: message) {
+                    guard case .success = severity else { return }
+                    do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                    guard !Task.isCancelled, self.message == message else { return }
+                    self.message = nil
+                    onDismiss?()
+                }
         }
     }
 }

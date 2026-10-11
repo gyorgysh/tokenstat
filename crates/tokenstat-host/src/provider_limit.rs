@@ -63,7 +63,8 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
     let authentication = matches!(
         code,
         "authentication_error" | "invalid_api_key" | "unauthorized"
-    );
+    ) || (provider == "claude"
+        && lower.starts_with("not logged in · please run /login"));
     // Other provider-owned errors are visible in routing history but stay manual.
     if !exhausted && !throttle && !unavailable && !authentication && text.is_empty() {
         return None;
@@ -144,6 +145,18 @@ pub fn from_exit(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn observed_claude_login_refusal_is_authentication() {
+        let record = json!({"type":"result", "is_error":true,
+            "result":"Not logged in · Please run /login"});
+        assert_eq!(from_record("claude", &record, 1).unwrap().kind, "auth");
+        let prose = json!({"type":"assistant", "message":"Not logged in · Please run /login"});
+        assert!(from_record("claude", &prose, 1).is_none());
+        let success = json!({"type":"result", "is_error":false,
+            "result":"Not logged in · Please run /login"});
+        assert!(from_record("claude", &success, 1).is_none());
+    }
+
     #[test]
     fn terminal_failures_are_manual_by_default_and_stop_is_never_a_failure() {
         assert!(from_exit("muse", Some(0), false, false, 1).is_none());

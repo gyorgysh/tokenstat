@@ -816,6 +816,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 includeDefault: true)));
         }
 
+        body.Children.Add(new Border { Height = 1, Background = Theme.BorderBrush });
+        body.Children.Add(Chrome.SectionLabel(L10n.Text("common.chat_working_style")));
         body.Children.Add(ModePills(Format.Text(chat, "mode", "plan"), !running));
         var bypass = new CheckBox
         {
@@ -836,11 +838,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             _ = UpdateAsync(new JsonObject { ["autonomy"] = "bypass" });
         }
-        body.Children.Add(InstructionsCard(
+        var setup = new StackPanel { Spacing = Theme.SpaceM };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(setup, L10n.Text("windows.chatpage.setup.7013af4c"));
+        setup.Children.Add(SetupSection(L10n.Text("common.chat_agent_behavior"), body, ActionIcon.Run));
+        setup.Children.Add(InstructionsCard(
             Format.Text(chat, "systemPrompt"),
             Format.Text(backend, "label", L10n.Text("windows.chatpage.this_agent.15af7e1b")),
             running));
-        return Card(L10n.Text("windows.chatpage.setup.7013af4c"), body);
+        return setup;
     }
 
     /// <summary>
@@ -852,7 +857,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         var chatId = _openId;
         var stack = new StackPanel { Spacing = Theme.SpaceS };
-        stack.Children.Add(Chrome.SectionLabel(L10n.Text("windows.chatpage.instructions.934652dc")));
+
         var brief = new TextBox
         {
             PlaceholderText = L10n.Text("windows.chatpage.how_should_this_agent_behave.6cee0aaf"),
@@ -902,7 +907,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             _ = LoadInstructionsAsync(chatId, agent, note, added);
         }
-        return stack;
+        return SetupSection(L10n.Text("windows.chatpage.instructions.934652dc"), stack, ActionIcon.Docs);
     }
 
     private async Task LoadInstructionsAsync(string chatId, string agent, TextBlock note, TextBlock added)
@@ -2842,6 +2847,28 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Opacity = 0.7,
         TextWrapping = TextWrapping.Wrap,
     };
+
+    /// Setup cards share a tinted, marked header and a separate form gutter.
+    private static Border SetupSection(string title, UIElement body, ActionIcon icon, string? subtitle = null)
+    {
+        var card = Chrome.Card(title, body, subtitle, mark: Chrome.CardMark(icon));
+        var content = (StackPanel)card.Child;
+        var heading = content.Children[0];
+        content.Children.Clear();
+        content.Spacing = 0;
+        content.Children.Add(new Border
+        {
+            Background = Theme.AccentSoftBrush,
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            CornerRadius = new CornerRadius(Theme.CardRadius, Theme.CardRadius, 0, 0),
+            Padding = new Thickness(Theme.CardPadding),
+            Child = heading,
+        });
+        content.Children.Add(new Border { Padding = new Thickness(Theme.CardPadding), Child = body });
+        card.Padding = new Thickness(0);
+        return card;
+    }
 
     private static Border Card(string title, UIElement body) => Chrome.Card(title, body);
 

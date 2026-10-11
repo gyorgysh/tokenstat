@@ -64,7 +64,7 @@ internal sealed partial class ChatPage
             var retry = ActionIconGlyph.Button(L10n.Text("common.chat_route_retry"), ActionIcon.Refresh, async (_, _) => await ApplyAsync("chat.routeAction", new JsonObject { ["choice"] = "resume" }));
             retry.IsEnabled = !Format.Flag(snapshot, "running") && !Format.Flag(state, "needsDeliveryCheck");
             actions.Children.Add(retry);
-            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Stop, async (_, _) => await ApplyAsync("chat.routeAction", new JsonObject { ["choice"] = "cancel" })));
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Dismiss, async (_, _) => await ApplyAsync("chat.routeAction", new JsonObject { ["choice"] = "cancel" })));
             body.Children.Add(actions);
         }
         var routing = new StackPanel { Spacing = Theme.SpaceS };
@@ -72,8 +72,8 @@ internal sealed partial class ChatPage
         routing.Children.Add(Muted(Format.Flag(routePolicy, "enabled") ? Format.Flag(routePolicy, "waitForReset") ? L10n.Text("common.chat_route_combined_mode") : L10n.Text("common.chat_route_fallback_mode") : Format.Flag(routePolicy, "waitForReset") ? L10n.Text("common.chat_route_wait_mode") : L10n.Text("common.chat_route_manual")));
         if (routePolicy?["routes"] is JsonArray destinations && destinations.Count > 0) routing.Children.Add(Muted(string.Join(" → ", destinations.Select(d => Format.Text(d, "backend")))));
         if (Format.Flag(routePolicy, "returnPreferred")) routing.Children.Add(Muted(L10n.Text("common.chat_route_preferred", Format.Text(routePolicy?["preferred"] ?? snapshot?["routing"]?["preferred"], "backend", Format.Text(snapshot, "backend")))));
-        routing.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chat_route_setup"), ActionIcon.Settings, async (_, _) => await ShowRoutingAsync()));
-        body.Children.Add(Card(L10n.Text("common.chat_routing"), routing));
+        routing.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("common.chat_route_setup"), ActionIcon.Settings, async (_, _) => await ShowRoutingAsync()));
+        body.Children.Add(SetupSection(L10n.Text("common.chat_routing"), routing, ActionIcon.Settings, L10n.Text("common.chat_routing_intro")));
         return body;
     }
 
@@ -107,7 +107,7 @@ internal sealed partial class ChatPage
             body.Children.Add(enabled); body.Children.Add(wait); body.Children.Add(returns); body.Children.Add(defaults);
             var advanced = new StackPanel { Spacing = Theme.SpaceS };
             advanced.Children.Add(throttles); advanced.Children.Add(outages); advanced.Children.Add(auth); advanced.Children.Add(failures); advanced.Children.Add(notifies);
-            body.Children.Add(new Expander { Header = L10n.Text("common.settings"), Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch });
+            body.Children.Add(new Expander { Header = L10n.Text("common.settings"), Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
             body.Children.Add(Muted(L10n.Text("common.chat_route_policy_help")));
             body.Children.Add(Muted(L10n.Text("common.chat_route_priority_help")));
             body.Children.Add(Muted(L10n.Text("common.chat_route_preferred", Format.Text(state["preferred"], "backend") is { Length: > 0 } preferred ? preferred : Format.Text(_openChat, "backend"))));
@@ -210,7 +210,7 @@ internal sealed partial class ChatPage
                 finally { historyLoading = false; }
             }
             PaintHistory(state["activity"] as JsonArray);
-            var historyExpander = new Expander { Header = L10n.Text("common.chat_route_history"), Content = history, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var historyExpander = new Expander { Header = L10n.Text("common.chat_route_history"), Content = history, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
             historyExpander.Expanding += async (_, _) => await LoadHistory(null);
             body.Children.Add(historyExpander);
             var dialog = new ContentDialog { Title = L10n.Text("common.chat_routing"), Content = new ScrollViewer { Content = body, MaxHeight = 500 }, PrimaryButtonText = L10n.Text("common.save"), CloseButtonText = L10n.Text("common.cancel") };

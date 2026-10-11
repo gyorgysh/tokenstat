@@ -279,6 +279,7 @@ final class WorkspacesModel {
     /// github.com:owner/repo.git" is a true thing to print and not an answer
     /// to "did it push".
     private(set) var gitOutcomeAction: [String: GitOutcomeAction] = [:]
+    @ObservationIgnored private var gitOutcomeDismissTasks: [String: Task<Void, Never>] = [:]
     var isCommitting = false
 
     /// What each workspace has open beside its terminals, in the order opened.
@@ -1555,11 +1556,20 @@ final class WorkspacesModel {
     }
 
     private func report(_ workspaceID: String, _ action: GitOutcomeAction, _ outcome: GitOutcome) {
+        gitOutcomeDismissTasks.removeValue(forKey: workspaceID)?.cancel()
         gitOutcomeAction[workspaceID] = action
         gitOutcome[workspaceID] = outcome
+        if outcome.ok {
+            gitOutcomeDismissTasks[workspaceID] = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                guard !Task.isCancelled else { return }
+                self?.dismissGitOutcome(for: workspaceID)
+            }
+        }
     }
 
     func dismissGitOutcome(for workspaceID: String) {
+        gitOutcomeDismissTasks.removeValue(forKey: workspaceID)?.cancel()
         gitOutcome.removeValue(forKey: workspaceID)
         gitOutcomeAction.removeValue(forKey: workspaceID)
     }

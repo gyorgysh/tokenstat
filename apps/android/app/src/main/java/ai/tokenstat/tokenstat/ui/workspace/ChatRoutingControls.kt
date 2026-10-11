@@ -160,7 +160,7 @@ internal fun ChatRoutingControls(
                         )
                         TsSecondaryButton(
                             label = L10n.text("common.cancel"),
-                            icon = ActionIcon.Stop.vector,
+                            icon = ActionIcon.Dismiss.vector,
                             small = true,
                             onClick = {
                                 apply(
@@ -584,6 +584,7 @@ private fun ChatRoutingDialog(
                     )
                     TsSecondaryButton(
                         label = L10n.text("common.settings"),
+                        modifier = Modifier.fillMaxWidth(),
                         icon = ActionIcon.Settings.vector,
                         small = true,
                         onClick = { advanced = !advanced },
@@ -614,6 +615,7 @@ private fun ChatRoutingDialog(
                     var history by remember { mutableStateOf(false) }
                     TsSecondaryButton(
                         label = L10n.text("common.chat_route_history"),
+                        modifier = Modifier.fillMaxWidth(),
                         icon = ActionIcon.History.vector,
                         small = true,
                         onClick = {
@@ -687,7 +689,7 @@ private fun ChatRoutingDialog(
             ) {
                 TsSecondaryButton(
                     label = L10n.text("common.cancel"),
-                    icon = ActionIcon.Stop.vector,
+                    icon = ActionIcon.Dismiss.vector,
                     modifier = Modifier.weight(1f),
                     onClick = dismiss,
                 )
