@@ -223,7 +223,9 @@ fn activity_file(path: &Path, append: bool) -> Result<File, String> {
     let mut options = OpenOptions::new();
     options.read(true);
     if append {
-        options.write(true).append(true).create(true);
+        // The caller holds the lifecycle lock. Windows append-only access
+        // cannot truncate an interrupted record, even with write(true).
+        options.write(true).create(true);
     }
     #[cfg(unix)]
     {
@@ -298,6 +300,7 @@ fn append_activity<'a>(
     directory: &Path,
     entries: impl Iterator<Item = &'a Activity>,
 ) -> Result<(), String> {
+    use std::io::{Read, Seek, SeekFrom};
     let entries = entries.collect::<Vec<_>>();
     if entries.is_empty() {
         return Ok(());
@@ -307,7 +310,6 @@ fn append_activity<'a>(
     // Retire an interrupted last append before writing another complete row.
     // The durable state is saved only after this journal is flushed.
     {
-        use std::io::{Read, Seek, SeekFrom};
         let len = file.metadata().map_err(|e| e.to_string())?.len();
         let count = len.min(4096);
         if count > 0 {
@@ -360,6 +362,7 @@ fn append_activity<'a>(
         result?;
         file = activity_file(&path, true)?;
     }
+    file.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
     file.write_all(&bytes)
         .and_then(|_| file.sync_all())
         .map_err(|e| e.to_string())
