@@ -94,5 +94,20 @@
   "common.chat.fast_mode_next_turn_help": "This CLI version applies speed when the next turn starts. Update the CLI to switch during a turn.",
   "common.chat_new_message": "New message",
   "common.chat_original_pending": "The original message stays in Pending for a delivery check. You can write a new message.",
-  "common.chat_send_latest": "Send with latest chat"
+  "common.chat_send_latest": "Send with latest chat",
+  "common.chat_routing": "Routing",
+  "common.chat_routing_enabled": "Continue with another agent when usage runs out",
+  "common.chat_wait_reset": "Continue when this limit resets",
+  "common.chat_return_preferred": "Return to the preferred model after reset",
+  "common.chat_route_order": "Try agents in this order",
+  "common.chat_reset_unknown": "Reset time is unavailable.",
+  "common.chat_resets_at": "Resets {0}",
+  "common.chat_limit_reached": "{0} usage limit reached",
+  "common.chat_throttled": "{0} is temporarily rate limited",
+  "common.chat_route_retry": "Try again",
+  "common.chat_route_unavailable": "Update the project’s computer to use routing.",
+  "common.chat_route_delivery": "Continuation delivery needs checking. You can write a new message.",
+  "common.chat_route_explanation": "The next agent receives the conversation and workspace context. Routing keeps this chat’s permissions.",
+  "common.move_up": "Move up",
+  "common.chat_route_default": "Use for new chats"
 }

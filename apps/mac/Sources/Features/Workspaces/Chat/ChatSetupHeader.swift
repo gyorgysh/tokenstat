@@ -70,6 +70,7 @@ struct ChatSetupHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             agentRow
+            ChatRoutingControls(model: model, chat: chat)
             if !model.personas.isEmpty {
                 personaRow
             }

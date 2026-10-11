@@ -2707,6 +2707,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     /// A note the host will hand to the next tool step. Injected on `chat.list`
     /// only, so a restart cannot send words the person no longer sees.
     var pendingSteer: String?
+    var routing: ChatRoutingState? = nil
     /// The branch the conversation's last turn started or ended on, and
     /// the pull request the host last saw for it. Both absent on a host
     /// older than protocol 30.
@@ -2739,7 +2740,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case model, effort, fastMode, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
         case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, runRevision, runStartedAtMs, pendingSteer
-        case branch, pull
+        case branch, pull, routing
     }
 
     init(from decoder: Decoder) throws {
@@ -2767,6 +2768,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         lastMessageAtMs = try c.decodeIfPresent(Int64.self, forKey: .lastMessageAtMs)
         lastMessageAuthor = try c.decodeIfPresent(String.self, forKey: .lastMessageAuthor)
         running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? false
+        routing = try? c.decodeIfPresent(ChatRoutingState.self, forKey: .routing)
         pendingSteer = try c.decodeIfPresent(String.self, forKey: .pendingSteer)
         branch = try c.decodeIfPresent(String.self, forKey: .branch)
         // Decoration: a pull request shape this client cannot read must not
@@ -2799,6 +2801,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         try c.encodeIfPresent(lastMessageAtMs, forKey: .lastMessageAtMs)
         try c.encodeIfPresent(lastMessageAuthor, forKey: .lastMessageAuthor)
         try c.encode(running, forKey: .running)
+        try c.encodeIfPresent(routing, forKey: .routing)
         try c.encodeIfPresent(pendingSteer, forKey: .pendingSteer)
         try c.encodeIfPresent(branch, forKey: .branch)
         try c.encodeIfPresent(pull, forKey: .pull)

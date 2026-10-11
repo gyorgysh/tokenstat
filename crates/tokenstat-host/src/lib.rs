@@ -136,6 +136,8 @@ pub mod workspace_policy;
 
 pub(crate) mod account_session;
 #[cfg(feature = "local-host")]
+pub(crate) mod provider_limit;
+#[cfg(feature = "local-host")]
 mod todo;
 #[cfg(feature = "local-host")]
 pub(crate) mod transcript;

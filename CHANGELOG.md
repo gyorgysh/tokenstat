@@ -11,6 +11,10 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ## [1.5.0]
 
+### Added
+
+- Chat routing settings on Apple, Android and Windows let you choose ordered fallback agents, wait for a reported usage reset, and return to your preferred agent. Automatic continuation is opt-in, keeps the chat history and files, and pauses when delivery cannot be confirmed.
+
 ### Fixed
 
 - Usage scans include Codex chats started by tokenstat in private homes, so their usage appears alongside ordinary Codex sessions without manually scanning each chat.

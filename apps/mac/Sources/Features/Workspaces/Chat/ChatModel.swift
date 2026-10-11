@@ -1800,6 +1800,22 @@ final class ChatModel {
         }
     }
 
+    func routing(policy: ChatRoutingPolicy? = nil, action: String? = nil) async -> Bool {
+        guard savedCopy == nil, let selected, let revision = selected.sendRevision else { return false }
+        let generation = selectionGeneration
+        do {
+            let state = try await Bridge.chatRouting(id: selected.id, revision: revision, policy: policy, action: action, peer: peer)
+            guard selectionMatches(id: selected.id, generation: generation) else { return false }
+            var updated = self.selected ?? selected
+            updated.routing = state
+            replace(updated)
+            return true
+        } catch {
+            if selectionMatches(id: selected.id, generation: generation) { self.error = error.localizedDescription }
+            return false
+        }
+    }
+
     func update(
         title: String? = nil,
         backend: String? = nil,

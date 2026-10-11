@@ -1392,6 +1392,17 @@ extension Bridge {
         )
     }
 
+    static func chatRouting(id: String, revision: UInt64? = nil, policy: ChatRoutingPolicy? = nil, action: String? = nil, peer: String? = nil) async throws -> ChatRoutingState {
+        guard await RemoteHostFeature.chatRecovery.isSupported(peer: peer) else {
+            throw NSError(domain: "Chat", code: 34, userInfo: [NSLocalizedDescriptionKey: L10n.text("common.chat_route_unavailable")])
+        }
+        var params: [String: Any] = ["id": id]
+        if let revision { params["expectedRevision"] = revision }
+        if let policy { params["routing"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(policy)) }
+        if let action { params["choice"] = action }
+        return try await chatInvoke(peer: peer, action == nil ? "chat.routing" : "chat.routeAction", params, as: ChatRoutingState.self)
+    }
+
     static func stopChat(id: String, expectedRevision: UInt64? = nil, peer: String? = nil) async throws {
         if let expectedRevision, await RemoteHostFeature.chatRecovery.isSupported(peer: peer) {
             _ = try await chatInvoke(peer: peer, "chat.recover",

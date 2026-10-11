@@ -184,6 +184,7 @@ pub struct Parser {
     /// A plain device login challenge can precede Muse's JSON stream and
     /// wait forever for terminal input. Keep its URL/code out of chat.
     muse_auth: MuseAuthState,
+    limit: Option<crate::provider_limit::Limit>,
 }
 
 impl Parser {
@@ -205,7 +206,12 @@ impl Parser {
             muse_tasks: HashMap::new(),
             muse_calls: HashMap::new(),
             muse_auth: MuseAuthState::Startup,
+            limit: None,
         }
+    }
+
+    pub(crate) fn take_limit(&mut self) -> Option<crate::provider_limit::Limit> {
+        self.limit.take()
     }
 
     // Decode only complete records, so a pipe read splitting an emoji or
@@ -450,6 +456,11 @@ impl Parser {
         let Ok(value) = serde_json::from_str(&cleaned) else {
             return Vec::new();
         };
+        if let Some(limit) =
+            crate::provider_limit::from_record(&self.backend, &value, crate::chat::now_ms())
+        {
+            self.limit = Some(limit);
+        }
         let mut events = if self.backend == "muse" {
             self.events_muse(&value)
         } else {
@@ -1647,6 +1658,9 @@ fn events_codex(value: &Value) -> Vec<Event> {
         }
         events.push(done("done", None));
         return events;
+    }
+    if kind == "turn.failed" {
+        return event_failed(value.pointer("/error/message").and_then(Value::as_str));
     }
     if kind == "error" {
         return event_failed(value.get("message").and_then(Value::as_str));

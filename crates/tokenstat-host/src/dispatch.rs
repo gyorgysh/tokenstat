@@ -625,6 +625,7 @@ struct ChatParams {
     client_message_created_at_ms: Option<i64>,
     expected_revision: Option<u64>,
     stop_active: Option<bool>,
+    routing: Option<crate::chat::router::Policy>,
     attachment_id: Option<String>,
     name: Option<String>,
     data: Option<String>,
@@ -1771,6 +1772,10 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         "account.logout" => {
             let host = crate::vault::with_retired_session(|| {
                 crate::remote::stop_tunnel();
+                #[cfg(feature = "local-host")]
+                crate::chat::shared()
+                    .routing_cancel_all()
+                    .map_err(tokenstat_sync::ProfileError::Message)?;
                 tokenstat_sync::logout(None)
             })
             .envelope()?;
@@ -2156,6 +2161,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             )
             .envelope()?;
             store.attach_pending_steers(&mut value);
+            store.attach_routing(&mut value);
             attach_branch_pulls(&mut value);
             Ok(value)
         }
@@ -2222,6 +2228,29 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             )?,
         )
         .envelope(),
+        "chat.routing" => {
+            let id = p.id.ok_or("chat.routing needs id")?;
+            if let Some(policy) = p.routing {
+                store
+                    .routing_update(
+                        &id,
+                        p.expected_revision
+                            .ok_or("chat.routing needs expectedRevision")?,
+                        policy,
+                    )
+                    .envelope()
+            } else {
+                store.routing(&id).envelope()
+            }
+        }
+        "chat.routeAction" => store
+            .routing_action(
+                &p.id.ok_or("chat.routeAction needs id")?,
+                p.expected_revision
+                    .ok_or("chat.routeAction needs expectedRevision")?,
+                &p.choice.ok_or("chat.routeAction needs choice")?,
+            )
+            .envelope(),
         "chat.stop" => {
             store.stop(&p.id.ok_or("chat.stop needs id")?)?;
             Ok(json!({ "stopped": true }))

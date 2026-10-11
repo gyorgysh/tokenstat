@@ -22,6 +22,8 @@ use serde_json::{Value, json};
 
 use crate::error::DispatchError;
 use crate::transcript::{Event, Parser};
+#[path = "chat_router.rs"]
+pub mod router;
 
 const EVENTS_CAP: u64 = 1024 * 1024;
 /// How many events one page carries when the client does not say.
@@ -652,7 +654,11 @@ fn private_codex_home(has_hooks: bool) -> bool {
 
 pub fn shared() -> Arc<Store> {
     static STORE: OnceLock<Arc<Store>> = OnceLock::new();
-    Arc::clone(STORE.get_or_init(|| Arc::new(Store::load())))
+    Arc::clone(STORE.get_or_init(|| {
+        let store = Arc::new(Store::load());
+        router::start(&store);
+        store
+    }))
 }
 
 impl Store {
@@ -1309,8 +1315,17 @@ impl Store {
         // question open, so the person can try again.
         // Keep acceptance through launch and recording the answer. Otherwise
         // a second device can accept the same question between those steps.
-        let outcome =
-            self.send_under_acceptance(id, &note, &[], None, None, None, false, Some(question_id))?;
+        let outcome = self.send_under_acceptance(
+            id,
+            &note,
+            &[],
+            None,
+            None,
+            None,
+            false,
+            Some(question_id),
+            false,
+        )?;
         self.append(
             id,
             &StoredEvent::Answer {
@@ -1406,7 +1421,7 @@ impl Store {
         // Keep finalization with the send. A hook or another device must not
         // park a new answer between launch and forgetting the delivered ones.
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
-        match self.send_under_acceptance(id, &note, &[], None, None, None, true, None) {
+        match self.send_under_acceptance(id, &note, &[], None, None, None, true, None, false) {
             Ok(SendOutcome::Started(chat)) => {
                 self.take_parked_answers(id);
                 Ok(json!({
@@ -2269,6 +2284,7 @@ impl Store {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
+        let model_edited = changes.backend.is_some() || changes.model.is_some();
         let mut switched_pty = None;
         if let Some(fast) = changes.fast_mode {
             // The per-conversation acceptance lock serializes setup changes,
@@ -2383,6 +2399,12 @@ impl Store {
             chat.updated_at_ms = now_ms();
             Ok(chat.clone())
         });
+        if result.is_ok() {
+            self.router_cancel_locked(id)?;
+            if model_edited {
+                self.router_prefer_locked(id)?;
+            }
+        }
         if result.is_err()
             && let Some((pty, _)) = switched_pty
         {
@@ -3183,6 +3205,7 @@ impl Store {
             expected_revision,
             follow_up,
             None,
+            false,
         )
     }
 
@@ -3199,6 +3222,7 @@ impl Store {
         expected_revision: Option<u64>,
         follow_up: bool,
         question_id: Option<&str>,
+        routing_continuation: bool,
     ) -> Result<SendOutcome, DispatchError> {
         crate::workspace_policy::require_current_access()?;
         let typed = text.trim();
@@ -3333,6 +3357,9 @@ impl Store {
                     chat.backend
                 ),
             ));
+        }
+        if !routing_continuation {
+            chat = self.router_return_locked(id, chat)?;
         }
         let attachments = self.attachment_paths(id, attachment_ids)?;
         let response_output_dir = self.prepare_response_output_dir(id)?;
@@ -3581,6 +3608,8 @@ impl Store {
         // Reserve a new revision durably before launch. Even a failed spawn
         // consumes it: another client must review the changed launch intent.
         let branch = tokenstat_workspace::git::current_branch(&workspace.path);
+        crate::account_session::check_current()?;
+        self.router_arm_locked(id, &chat, routing_continuation)?;
         let activity_revision = self.edit_conversation(id, |current| {
             current.send_revision = next_send_revision(current.send_revision)?;
             current.run_revision = Some(current.send_revision);
@@ -3605,6 +3634,15 @@ impl Store {
         // this snapshot in the drainer races the agent's first patch.
         let measure = (chat.backend == "codex")
             .then(|| crate::chat_edit_measure::EditMeasure::start(Path::new(&workspace.path)));
+        if let Err(error) = crate::account_session::check_current()
+            .map_err(crate::error::DispatchError::from)
+            .and_then(|()| crate::workspace_policy::require_current_access())
+        {
+            if let Some(key) = &receipt_key {
+                let _ = self.drop_receipt(id, key);
+            }
+            return Err(error);
+        }
         let spawn_argv = live_speed.as_ref().map_or(&argv, |live| &live.argv);
         tokenstat_sync::push::begin_activity(id, activity_revision);
         let info = match tokenstat_pty::manager()
@@ -3827,6 +3865,7 @@ impl Store {
         validate_record_id(id)?;
         let branch = self.folder_branch(id);
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        self.router_cancel_locked(id)?;
         self.stop_locked(id, branch, false)
     }
 
@@ -3875,6 +3914,9 @@ impl Store {
             .contains_key(id);
         if runner_active || chat.running || has_note {
             self.stop_locked(id, branch, true)?;
+        }
+        if stop_active {
+            self.router_cancel_locked(id)?;
         }
         let conversation = self.current_send_conversation(id)?;
         Ok(Recovery {
@@ -4120,7 +4162,12 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
-        let status = if muse_sign_in_required {
+        let limit = parser.take_limit();
+        let limited = limit.is_some();
+        if !stopped && let Some(limit) = limit {
+            let _ = self.router_observe(id, activity_revision, limit);
+        }
+        let status = if muse_sign_in_required || (limited && !stopped) {
             "error"
         } else {
             turn_status(exit, stopped)
@@ -5374,7 +5421,7 @@ fn face_seed(id: &str) -> u64 {
     crate::chat_turn::stable_hash(id) | 1
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)

@@ -1690,6 +1690,9 @@ fun ChatSection(
                     }
                 }
             }
+            chats.firstOrNull { it.str("id") == openId }?.let { currentChat ->
+                ChatRoutingControls(currentChat, backends, { method, params -> model.workspaceSection(peer, method, params) }, { scope.launch { refreshChats() } })
+            }
             if (sendError != null) {
                 // One baseline for every action: a bordered chip beside a
                 // bare text link sat at two heights, and Check delivery on

@@ -342,6 +342,27 @@ pub fn codex_limits() -> ProviderLimits {
     }
 }
 
+/// Read only one active Codex home's reported windows. Chat uses this after
+/// a real refusal, and requires a reading from the current run before using
+/// its reset time. Never borrow a widget reading from another account/home.
+pub fn codex_limits_for_home(home: &Path) -> Option<ProviderLimits> {
+    let mut files = Vec::new();
+    collect_rollouts(&home.join("sessions"), 3, RECENT_ROLLOUTS, &mut files);
+    let mut scan = CodexLimitScan::default();
+    for (_, file) in files {
+        absorb_rollout(&mut scan, &file);
+    }
+    let (windows, observed_at_ms, plan) = scan.finish(now_ms())?;
+    Some(ProviderLimits {
+        source: "codex".into(),
+        plan,
+        windows,
+        observed_at_ms,
+        note: None,
+        stale: false,
+    })
+}
+
 /// How many recent session files to look through. Enough to get past a run of
 /// short sessions, few enough that this stays a disk read rather than a scan.
 const RECENT_ROLLOUTS: usize = 25;
@@ -794,6 +815,21 @@ fn collect_rollouts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_codex_home_reads_only_its_own_reported_reset() {
+        let temp = tempfile::tempdir().unwrap();
+        let sessions = temp.path().join("sessions/2026/10/11");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let timestamp = jiff::Timestamp::now();
+        let reset = timestamp.as_second() + 3600;
+        let record = serde_json::json!({"timestamp":timestamp.to_string(),"payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":100.0,"window_minutes":300,"resets_at":reset},"plan_type":"pro"}}});
+        std::fs::write(sessions.join("rollout-limit.jsonl"), format!("{record}\n")).unwrap();
+        let found = codex_limits_for_home(temp.path()).unwrap();
+        assert_eq!(found.windows.len(), 1);
+        assert_eq!(found.windows[0].resets_at_ms, Some(reset * 1000));
+        assert!(codex_limits_for_home(&temp.path().join("other-home")).is_none());
+    }
 
     #[test]
     fn window_names_match_what_people_call_them() {

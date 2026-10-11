@@ -1675,6 +1675,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var steerNote = PendingSteerText(_openChat);
         if (steerNote.Length > 0) well.Children.Add(SteerNoteBanner(steerNote));
         well.Children.Add(PendingMessages());
+        well.Children.Add(RoutingControls());
         if (OpenBackendMissing()) well.Children.Add(MissingAgentNotice());
         var setupBackend = Backend(Format.Text(_openChat, "backend"));
         if (setupBackend is not null && Installed(setupBackend) && Format.Text(setupBackend, "id") != "sh"
