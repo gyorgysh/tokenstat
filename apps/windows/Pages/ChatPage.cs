@@ -57,6 +57,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     // Keep the logical owners so a rebuild can release controls even after
     // the old composer has been removed from the visual tree.
     private StackPanel _composerWell = new();
+    private StackPanel _composerContext = new();
     private Grid _composerRow = new();
     private readonly TextBox _draft = new()
     {
@@ -1679,8 +1680,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var well = _composerWell = new StackPanel { Spacing = Theme.SpaceS };
         // Setup and notices can grow independently of the draft. Keep their
         // combined height bounded so Send stays reachable on short windows.
-        var context = new StackPanel { Spacing = Theme.SpaceS };
-        Detach(_gitStrip);
+        // Once the dock is unmounted, WinUI may no longer report the strip's
+        // parent. Release it through its logical owner before moving it.
+        _setupScroll.Content = null;
+        _composerContext.Children.Clear();
+        var context = _composerContext = new StackPanel { Spacing = Theme.SpaceS };
         RenderGitStrip();
         context.Children.Add(_gitStrip);
         if (_setupExpanded)
