@@ -73,6 +73,10 @@ struct ChatRoutingActivity: Codable, Sendable, Hashable {
         }
     }
 }
+struct ChatRoutingReset: Codable, Sendable, Hashable {
+    var destination: ChatRouteDestination
+    var atMs: Int64
+}
 struct ChatRoutingState: Codable, Sendable, Hashable {
     var policy: ChatRoutingPolicy
     var limit: ChatProviderLimit?
@@ -82,4 +86,5 @@ struct ChatRoutingState: Codable, Sendable, Hashable {
     var tried: [ChatRouteDestination]
     var preferred: ChatRouteDestination?
     var activity: [ChatRoutingActivity]?
+    var nextReset: ChatRoutingReset? = nil
 }

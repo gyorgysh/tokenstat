@@ -4,12 +4,37 @@ import SwiftUI
 struct ChatRoutingControls: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
+    var title: String? = nil
     @State private var showing = false
     var body: some View {
-        Button(L10n.text("common.chat_routing"), .settings) { showing = true }
+        Button(title ?? L10n.text("common.chat_routing"), .settings) { showing = true }
             .buttonStyle(SecondaryButtonStyle(small: true))
             .disabled(model.savedCopy != nil)
             .sheet(isPresented: $showing) { ChatRoutingSheet(model: model, chat: chat) }
+    }
+}
+struct ChatRoutingSection: View {
+    @Bindable var model: ChatModel
+    let chat: ChatConversation
+    private var policy: ChatRoutingPolicy { chat.routing?.policy ?? ChatRoutingPolicy() }
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text(L10n.text("common.chat_routing")).font(Theme.callout.weight(.semibold))
+            Text(policy.enabled ? L10n.text(policy.waitForReset ? "common.chat_route_combined_mode" : "common.chat_route_fallback_mode") : L10n.text(policy.waitForReset ? "common.chat_route_wait_mode" : "common.chat_route_manual"))
+                .font(Theme.caption).foregroundStyle(.secondary)
+            if !policy.routes.isEmpty {
+                Text(policy.routes.map { model.backend(for: $0.backend)?.label ?? $0.backend }.joined(separator: " → "))
+                    .font(Theme.caption).fixedSize(horizontal: false, vertical: true)
+            }
+            if policy.returnPreferred {
+                Text(L10n.text("common.chat_route_preferred", model.backend(for: policy.preferred?.backend ?? chat.routing?.preferred?.backend ?? chat.backend)?.label ?? chat.backend))
+                    .font(Theme.caption).foregroundStyle(.secondary)
+            }
+            ChatRoutingControls(model: model, chat: chat, title: L10n.text("common.chat_route_setup"))
+        }
+        .padding(Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
     }
 }
 struct ChatRoutingNotice: View {
@@ -23,6 +48,9 @@ struct ChatRoutingNotice: View {
                 if let instant = limit.resetsAtMs {
                     Text(L10n.text("common.chat_resets_at", Date(timeIntervalSince1970: Double(instant) / 1000).formatted(date: .abbreviated, time: .shortened)))
                 } else { Text(L10n.text("common.chat_reset_unknown")) }
+                if let reset = state.nextReset, reset.destination.backend != limit.provider {
+                    Text(L10n.text("common.chat_route_waiting_for", reset.destination.backend.capitalized, Date(timeIntervalSince1970: Double(reset.atMs) / 1000).formatted(date: .abbreviated, time: .shortened)))
+                }
                 Text(limit.reason).textSelection(.enabled)
                 if state.needsDeliveryCheck { Text(L10n.text("common.chat_route_delivery")) }
                 if let note = state.note { Text(note).font(Theme.caption) }
@@ -32,7 +60,7 @@ struct ChatRoutingNotice: View {
                         Task { _ = await model.routing(policy: policy) }
                     }))
                     .toggleStyle(.brandCheckbox)
-                    .disabled(limit.resetsAtMs == nil || state.needsDeliveryCheck)
+                    .disabled((limit.resetsAtMs == nil && state.nextReset == nil) || state.needsDeliveryCheck)
                 HStack(spacing: Theme.Space.s) {
                     Button(L10n.text("common.chat_route_retry"), .refresh) { Task { _ = await model.routing(action: "resume") } }
                         .disabled(chat.running || state.needsDeliveryCheck)
@@ -82,6 +110,7 @@ private struct ChatRoutingSheet: View {
                 Text(L10n.text("common.chat_route_policy_help")).font(Theme.caption).foregroundStyle(.secondary)
                 ThemeRule()
                 Toggle(L10n.text("common.chat_wait_reset"), isOn: $policy.waitForReset)
+                Text(L10n.text("common.chat_route_priority_help")).font(Theme.caption).foregroundStyle(.secondary)
                 Toggle(L10n.text("common.chat_return_preferred"), isOn: $policy.returnPreferred)
                 if policy.returnPreferred {
                     AppMenuPicker(title: L10n.text("common.chat_route_preferred_picker"),

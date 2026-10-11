@@ -52,10 +52,12 @@ internal sealed partial class ChatPage
             body.Children.Add(Muted(Format.Text(limit, "reason")));
             var reset = limit["resetsAtMs"] is null ? (long?)null : Format.Long(limit, "resetsAtMs");
             body.Children.Add(Muted(reset.HasValue ? L10n.Text("common.chat_resets_at", DateTimeOffset.FromUnixTimeMilliseconds(reset.Value).LocalDateTime.ToString("g")) : L10n.Text("common.chat_reset_unknown")));
+            var nextReset = state["nextReset"] as JsonObject;
+            if(nextReset is not null && Format.Text(nextReset["destination"], "backend") != Format.Text(limit, "provider")) body.Children.Add(Muted(L10n.Text("common.chat_route_waiting_for", Format.Text(nextReset["destination"], "backend"), DateTimeOffset.FromUnixTimeMilliseconds(Format.Long(nextReset, "atMs")).ToLocalTime().ToString("g"))));
             if (Format.Flag(state, "needsDeliveryCheck")) body.Children.Add(Muted(L10n.Text("common.chat_route_delivery")));
             if (Format.Text(state, "note") is string note && note.Length > 0) body.Children.Add(Muted(note));
             var policy = state["policy"] as JsonObject;
-            var wait = new CheckBox { Content = L10n.Text("common.chat_wait_reset"), IsChecked = Format.Flag(policy, "waitForReset"), IsEnabled = reset.HasValue && !Format.Flag(state, "needsDeliveryCheck") };
+            var wait = new CheckBox { Content = L10n.Text("common.chat_wait_reset"), IsChecked = Format.Flag(policy, "waitForReset"), IsEnabled = (reset.HasValue || nextReset is not null) && !Format.Flag(state, "needsDeliveryCheck") };
             wait.Click += async (_, _) => { var changed = (JsonObject?)policy?.DeepClone() ?? new JsonObject(); changed["waitForReset"] = wait.IsChecked == true; await ApplyAsync("chat.routing", new JsonObject { ["routing"] = changed }); };
             body.Children.Add(wait);
             var actions = new FlowPanel { Spacing = Theme.SpaceS };
@@ -65,7 +67,13 @@ internal sealed partial class ChatPage
             actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Stop, async (_, _) => await ApplyAsync("chat.routeAction", new JsonObject { ["choice"] = "cancel" })));
             body.Children.Add(actions);
         }
-        body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chat_routing"), ActionIcon.Settings, async (_, _) => await ShowRoutingAsync()));
+        var routing = new StackPanel { Spacing = Theme.SpaceS };
+        var routePolicy = snapshot?["routing"]?["policy"];
+        routing.Children.Add(Muted(L10n.Text(Format.Flag(routePolicy, "enabled") ? Format.Flag(routePolicy, "waitForReset") ? "common.chat_route_combined_mode" : "common.chat_route_fallback_mode" : Format.Flag(routePolicy, "waitForReset") ? "common.chat_route_wait_mode" : "common.chat_route_manual")));
+        if (routePolicy?["routes"] is JsonArray destinations && destinations.Count > 0) routing.Children.Add(Muted(string.Join(" → ", destinations.Select(d => Format.Text(d, "backend")))));
+        if (Format.Flag(routePolicy, "returnPreferred")) routing.Children.Add(Muted(L10n.Text("common.chat_route_preferred", Format.Text(routePolicy?["preferred"] ?? snapshot?["routing"]?["preferred"], "backend", Format.Text(snapshot, "backend")))));
+        routing.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chat_route_setup"), ActionIcon.Settings, async (_, _) => await ShowRoutingAsync()));
+        body.Children.Add(Card(L10n.Text("common.chat_routing"), routing));
         return body;
     }
 
@@ -101,6 +109,7 @@ internal sealed partial class ChatPage
             advanced.Children.Add(throttles); advanced.Children.Add(outages); advanced.Children.Add(auth); advanced.Children.Add(failures); advanced.Children.Add(notifies);
             body.Children.Add(new Expander { Header = L10n.Text("common.settings"), Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch });
             body.Children.Add(Muted(L10n.Text("common.chat_route_policy_help")));
+            body.Children.Add(Muted(L10n.Text("common.chat_route_priority_help")));
             body.Children.Add(Muted(L10n.Text("common.chat_route_preferred", Format.Text(state["preferred"], "backend") is { Length: > 0 } preferred ? preferred : Format.Text(_openChat, "backend"))));
             body.Children.Add(Chrome.SectionLabel(L10n.Text("common.chat_route_order")));
             var rows = new StackPanel { Spacing = Theme.SpaceS }; body.Children.Add(rows);

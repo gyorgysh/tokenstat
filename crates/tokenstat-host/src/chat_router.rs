@@ -74,6 +74,12 @@ struct Activity {
     reason: String,
     resets_at_ms: Option<i64>,
 }
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResetDestination {
+    destination: Destination,
+    at_ms: i64,
+}
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 struct State {
@@ -89,8 +95,28 @@ struct State {
     cancelled_run: Option<u64>,
     attachments: Vec<String>,
     activity: Vec<Activity>,
+    resets: Vec<ResetDestination>,
 }
 impl State {
+    fn can_wait(&self) -> bool {
+        self.policy.wait_for_reset
+            && (!self.resets.is_empty()
+                || self.limit.as_ref().is_some_and(|limit| {
+                    matches!(limit.kind.as_str(), "usage" | "throttle")
+                        && limit.resets_at_ms.is_some()
+                }))
+    }
+    fn forget_reset(&mut self, backend: &str) {
+        self.resets
+            .retain(|reset| reset.destination.backend != backend);
+        if let Some(limit) = self
+            .limit
+            .as_mut()
+            .filter(|limit| limit.provider == backend)
+        {
+            limit.resets_at_ms = None;
+        }
+    }
     fn record(
         &mut self,
         kind: &str,
@@ -142,13 +168,28 @@ impl State {
             self.policy
                 .routes
                 .iter()
-                .find(|d| !self.tried.contains(d))
+                .find(|d| {
+                    !self.tried.contains(d)
+                        && !self.resets.iter().any(|reset| {
+                            reset.destination.backend == d.backend && reset.at_ms > now
+                        })
+                })
                 .cloned()
         } else {
             None
         };
         next.or_else(|| {
             if self.policy.wait_for_reset
+                && let Some(reset) = self
+                    .resets
+                    .iter()
+                    .filter(|reset| reset.at_ms <= now)
+                    .min_by_key(|reset| reset.at_ms)
+            {
+                return Some(reset.destination.clone());
+            }
+            if self.policy.wait_for_reset
+                && self.resets.is_empty()
                 && self
                     .limit
                     .as_ref()
@@ -169,7 +210,8 @@ impl State {
     fn view(&self) -> Value {
         json!({"policy":self.policy,"limit":self.limit,"waiting":self.pending.as_ref().is_some_and(|p|!p.claimed),
             "needsDeliveryCheck":self.pending.as_ref().is_some_and(|p|p.claimed),"note":self.note,
-            "tried":self.tried,"preferred":self.preferred,"activity":self.activity})
+            "tried":self.tried,"preferred":self.preferred,"activity":self.activity,
+            "nextReset":if self.can_wait() && self.pending.is_some() { self.resets.iter().min_by_key(|reset|reset.at_ms) } else { None }})
     }
 }
 fn owner() -> Result<String, String> {
@@ -405,6 +447,12 @@ impl Store {
         let mut next = state.clone();
         if next.limit != previous.limit
             && let Some(limit) = next.limit.clone()
+            && previous.limit.as_ref().is_none_or(|old| {
+                old.observed_at_ms != limit.observed_at_ms
+                    || old.provider != limit.provider
+                    || old.kind != limit.kind
+                    || old.reason != limit.reason
+            })
         {
             next.record(
                 &limit.kind,
@@ -559,7 +607,7 @@ impl Store {
         let handles = state
             .limit
             .as_ref()
-            .is_some_and(|limit| state.policy.handles(limit));
+            .is_some_and(|limit| state.policy.handles(limit) || state.can_wait());
         if !claimed && !handles {
             state.pending = None;
         } else if state.pending.is_none() && handles {
@@ -642,6 +690,7 @@ impl Store {
         let mut state = self.router_load(id)?;
         state.pending = None;
         state.limit = None;
+        state.resets.clear();
         state.note = None;
         state.cancelled_run = self.current_send_conversation(id)?.run_revision;
         self.router_save(id, &state)
@@ -649,12 +698,23 @@ impl Store {
     pub(super) fn router_prefer_locked(&self, id: &str) -> Result<(), String> {
         let chat = self.current_send_conversation(id)?;
         let mut state = self.router_load(id)?;
+        let previous_backend = state
+            .preferred
+            .as_ref()
+            .map(|destination| destination.backend.clone());
         state.preferred = state.policy.preferred.clone().or(Some(Destination {
             backend: chat.backend,
             model: chat.model,
             effort: chat.effort.clone(),
         }));
-        state.preferred_reset_at_ms = None;
+        if previous_backend.as_deref()
+            != state
+                .preferred
+                .as_ref()
+                .map(|destination| destination.backend.as_str())
+        {
+            state.preferred_reset_at_ms = None;
+        }
         state.tried.clear();
         self.router_save(id, &state)
     }
@@ -768,6 +828,7 @@ impl Store {
             state.pending = None;
             state.limit = None;
             state.tried.clear();
+            state.resets.clear();
             state.note = None;
             if state.preferred.is_none() {
                 state.preferred = state.policy.preferred.clone().or(Some(Destination {
@@ -824,6 +885,18 @@ impl Store {
         if !state.tried.contains(&current) {
             state.tried.push(current.clone());
         }
+        if matches!(limit.kind.as_str(), "usage" | "throttle")
+            && let Some(reset) = limit.resets_at_ms
+        {
+            state.forget_reset(&current.backend);
+            state.resets.push(ResetDestination {
+                destination: current.clone(),
+                at_ms: reset,
+            });
+            if state.resets.len() > 9 {
+                state.resets.remove(0);
+            }
+        }
         if state
             .preferred
             .as_ref()
@@ -847,7 +920,8 @@ impl Store {
         }
         attachments.reverse();
         state.attachments = attachments.clone();
-        let handles = state.policy.handles(&limit);
+        let handles = state.policy.handles(&limit)
+            || (state.policy.wait_for_reset && !state.resets.is_empty());
         state.limit = Some(limit);
         state.pending = handles.then_some(Pending {
             operation_id: format!("route-{revision}-{}", rand::random::<u64>()),
@@ -926,10 +1000,11 @@ impl Store {
         let destination = state.destination(&chat, now);
         let Some(destination) = destination else {
             let waiting_reset = state.policy.wait_for_reset
-                && state.limit.as_ref().is_some_and(|limit| {
-                    matches!(limit.kind.as_str(), "usage" | "throttle")
-                        && limit.resets_at_ms.is_some_and(|reset| reset > now)
-                });
+                && (state.resets.iter().any(|reset| reset.at_ms > now)
+                    || state.limit.as_ref().is_some_and(|limit| {
+                        matches!(limit.kind.as_str(), "usage" | "throttle")
+                            && limit.resets_at_ms.is_some_and(|reset| reset > now)
+                    }));
             if !waiting_reset {
                 state.pending = None;
                 state.note = Some(
@@ -943,6 +1018,7 @@ impl Store {
         let readiness =
             crate::agent_readiness::describe(launcher_profile_id(&destination.backend), true);
         if !manual && readiness["readiness"] == "needsSignIn" {
+            state.forget_reset(&destination.backend);
             state.tried.push(destination.clone());
             state.note = Some(format!(
                 "{} needs sign-in on this computer. Trying the next destination.",
@@ -955,6 +1031,7 @@ impl Store {
             || crate::launcher::profile_installed(launcher_profile_id(&destination.backend))
                 == Some(false)
         {
+            state.forget_reset(&destination.backend);
             state.tried.push(destination.clone());
             state.note = Some(format!(
                 "{} is unavailable or cannot keep this chat's permissions.",
@@ -976,6 +1053,7 @@ impl Store {
         // Durable claim BEFORE spawning: after a crash, uncertain delivery is
         // held for review instead of replayed by a second helper/scheduler.
         pending.created_at_ms = now_ms();
+        state.forget_reset(&destination.backend);
         state.pending = Some(Pending {
             expected_revision: selected.send_revision,
             claimed: true,
@@ -1216,7 +1294,7 @@ mod tests {
             state
                 .destination(
                     &store.current_send_conversation("route-test").unwrap(),
-                    now_ms()
+                    refusal().resets_at_ms.unwrap()
                 )
                 .unwrap()
                 .effort
@@ -1238,6 +1316,42 @@ mod tests {
                 .reason,
             refusal().reason
         );
+    }
+    #[test]
+    fn editing_a_fallback_keeps_an_explicit_preferred_provider_reset() {
+        let (_temp, store) = fixture();
+        let preferred = Destination {
+            backend: "codex".into(),
+            effort: Some("high".into()),
+            ..Destination::default()
+        };
+        let mut state = State {
+            preferred: Some(preferred.clone()),
+            preferred_reset_at_ms: Some(5000),
+            policy: Policy {
+                preferred: Some(preferred),
+                ..Policy::default()
+            },
+            ..State::default()
+        };
+        store.router_save("route-test", &state).unwrap();
+        store
+            .edit_conversation("route-test", |chat| {
+                chat.backend = "muse".into();
+                chat.effort = None;
+                Ok(())
+            })
+            .unwrap();
+        store.router_prefer_locked("route-test").unwrap();
+        state = store.router_load("route-test").unwrap();
+        assert_eq!(state.preferred_reset_at_ms, Some(5000));
+        assert_eq!(state.preferred.as_ref().unwrap().backend, "codex");
+        state.policy.preferred = None;
+        store.router_save("route-test", &state).unwrap();
+        store.router_prefer_locked("route-test").unwrap();
+        let state = store.router_load("route-test").unwrap();
+        assert_eq!(state.preferred.as_ref().unwrap().backend, "muse");
+        assert_eq!(state.preferred_reset_at_ms, None);
     }
     #[test]
     fn audit_history_is_bounded_and_survives_private_state_reload() {
@@ -1421,6 +1535,55 @@ mod decision_tests {
     use super::*;
     fn chat() -> Conversation {
         serde_json::from_value(json!({"id":"test","workspaceId":"test","backend":"codex","title":"Task","createdAtMs":1,"updatedAtMs":1})).unwrap()
+    }
+    #[test]
+    fn fallback_failure_keeps_the_original_reset_without_retrying_early_or_looping() {
+        let source = Destination {
+            backend: "codex".into(),
+            model: Some("gpt-6.1-sol".into()),
+            effort: Some("high".into()),
+        };
+        let fallback = Destination {
+            backend: "muse".into(),
+            ..Destination::default()
+        };
+        let mut state = State {
+            policy: Policy {
+                enabled: true,
+                wait_for_reset: true,
+                routes: vec![source.clone(), fallback.clone()],
+                ..Policy::default()
+            },
+            tried: vec![source.clone()],
+            resets: vec![ResetDestination {
+                destination: source.clone(),
+                at_ms: 5000,
+            }],
+            limit: Some(Limit {
+                provider: "codex".into(),
+                kind: "usage".into(),
+                reason: "limit".into(),
+                resets_at_ms: Some(5000),
+                observed_at_ms: 1000,
+            }),
+            ..State::default()
+        };
+        assert_eq!(state.destination(&chat(), 1000), Some(fallback.clone()));
+        state.tried.push(fallback);
+        state.limit = Some(Limit {
+            provider: "muse".into(),
+            kind: "failure".into(),
+            reason: "failed".into(),
+            resets_at_ms: None,
+            observed_at_ms: 2000,
+        });
+        state = serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+        assert!(state.can_wait());
+        assert_eq!(state.destination(&chat(), 4999), None);
+        assert_eq!(state.destination(&chat(), 5000), Some(source.clone()));
+        state.forget_reset(&source.backend);
+        assert_eq!(state.destination(&chat(), 5001), None);
+        assert!(!state.can_wait());
     }
     #[test]
     fn destination_applies_model_and_effort_without_changing_permissions_or_history() {

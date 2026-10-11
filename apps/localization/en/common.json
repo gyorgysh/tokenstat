@@ -146,5 +146,12 @@
   "common.chat_route_permissions": "This agent cannot keep this chat’s approval settings and will be skipped.",
   "common.chat_route_auth": "Use fallbacks when an agent needs sign-in",
   "common.chat_route_agent_errors": "Use fallbacks if an agent turn fails",
-  "common.chat_route_load_failed": "Routing settings could not be loaded. Try again."
+  "common.chat_route_load_failed": "Routing settings could not be loaded. Try again.",
+  "common.chat_route_setup": "Set up routing",
+  "common.chat_route_manual": "Manual retry",
+  "common.chat_route_fallback_mode": "Continue with fallback agents",
+  "common.chat_route_wait_mode": "Wait and continue with the same model",
+  "common.chat_route_combined_mode": "Try fallbacks first, then wait for a reported reset",
+  "common.chat_route_priority_help": "Fallbacks are tried first. Waiting resumes an agent only after its reported reset. Returning to the preferred model happens on the next turn and never interrupts active work.",
+  "common.chat_route_waiting_for": "Reset for {0}: {1}"
 }

@@ -61,6 +61,13 @@ struct ChatSetupHeader: View {
 
     private var form: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
+            ChatRoutingSection(model: model, chat: chat)
+            agentForm
+        }
+    }
+
+    private var agentForm: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             if showsIntro {
                 Text(L10n.text("apple.chatsetupheader.how_this_chat_should_work.b5eec3c8"))
                     .font(Theme.callout.weight(.semibold))
@@ -70,7 +77,6 @@ struct ChatSetupHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             agentRow
-            ChatRoutingControls(model: model, chat: chat)
             if !model.personas.isEmpty {
                 personaRow
             }

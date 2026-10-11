@@ -13,7 +13,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Added
 
-- Routing is available directly in the chat composer. Choose fallback agents, models and effort, wait for a reported usage reset, or return to a preferred model on the next turn after reset. Separate settings cover throttling, service outages, sign-in and failed turns. Routing activity keeps the reasons, switches and errors for review. Automatic continuation is opt-in, preserves history, files and permissions, and pauses when delivery cannot be confirmed.
+- Routing has its own section with a mode summary and setup action, plus a shortcut beside the chat agent selector on Apple devices. Choose fallback agents, models and effort, wait for a reported usage reset, or return to a preferred model on the next turn after reset. Fallbacks take priority over waiting; a reported reset remains available if another agent fails. Separate settings cover throttling, service outages, sign-in and failed turns. Routing activity keeps the reasons, switches and errors for review. Automatic continuation is opt-in, preserves history, files and permissions, and pauses when delivery cannot be confirmed.
 
 - Chat files use resumable transfers with integrity checks, progress and cancellation: up to 256 MiB locally or over a direct connection, and 64 MiB through relay. Relay uploads and downloads ask first and show the remaining allowance when available.
 - Chat attachments include videos, archives and documents, with Save/Open actions on every client. Apple devices keep large draft originals on disk and show a poster and duration for downloaded videos. Agents can return files through their existing output-file links.

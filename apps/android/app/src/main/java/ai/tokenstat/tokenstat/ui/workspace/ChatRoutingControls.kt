@@ -43,6 +43,11 @@ internal fun ChatRoutingControls(
     onChanged: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    fun agentLabel(id: String): String =
+        backends
+            .firstOrNull { it.routeText("id") == id }
+            ?.routeText("label")
+            ?.takeIf { it.isNotBlank() } ?: id
     var showing by remember(chat.routeText("id")) { mutableStateOf(false) }
     var error by remember(chat.routeText("id")) { mutableStateOf<String?>(null) }
     val state = chat["routing"] as? JsonObject
@@ -72,10 +77,17 @@ internal fun ChatRoutingControls(
             TsCard {
                 Text(
                     if (limit.routeText("kind") == "usage")
-                        L10n.text("common.chat_limit_reached", limit.routeText("provider"))
+                        L10n.text(
+                            "common.chat_limit_reached",
+                            agentLabel(limit.routeText("provider")),
+                        )
                     else if (limit.routeText("kind") == "throttle")
-                        L10n.text("common.chat_throttled", limit.routeText("provider"))
-                    else L10n.text("common.chat_route_failure", limit.routeText("provider")),
+                        L10n.text("common.chat_throttled", agentLabel(limit.routeText("provider")))
+                    else
+                        L10n.text(
+                            "common.chat_route_failure",
+                            agentLabel(limit.routeText("provider")),
+                        ),
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Text(limit.routeText("reason"))
@@ -92,7 +104,20 @@ internal fun ChatRoutingControls(
                 state?.routeText("note")?.takeIf { it.isNotBlank() }?.let { Text(it) }
                 if (state?.bol("needsDeliveryCheck") == true)
                     Text(L10n.text("common.chat_route_delivery"))
-                if (reset != null)
+                val nextReset = state?.get("nextReset") as? JsonObject
+                (nextReset?.get("atMs") as? JsonPrimitive)?.longOrNull?.let { at ->
+                    val destination = nextReset["destination"] as? JsonObject
+                    if (destination?.routeText("backend") != limit.routeText("provider"))
+                        Text(
+                            L10n.text(
+                                "common.chat_route_waiting_for",
+                                destination?.routeText("backend").orEmpty(),
+                                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                                    .format(Date(at)),
+                            )
+                        )
+                }
+                if (reset != null || nextReset != null)
                     BrandCheckbox(
                         checked = policy?.bol("waitForReset") == true,
                         onToggle = {
@@ -124,7 +149,39 @@ internal fun ChatRoutingControls(
                     }
                 }
             }
-        TextButton(onClick = { showing = true }) { Text(L10n.text("common.chat_routing")) }
+        TsCard {
+            Text(L10n.text("common.chat_routing"), style = MaterialTheme.typography.titleSmall)
+            Text(
+                L10n.text(
+                    if (policy?.bol("enabled") == true) {
+                        if (policy.bol("waitForReset")) "common.chat_route_combined_mode"
+                        else "common.chat_route_fallback_mode"
+                    } else {
+                        if (policy?.bol("waitForReset") == true) "common.chat_route_wait_mode"
+                        else "common.chat_route_manual"
+                    }
+                ),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            val destinations =
+                (policy?.get("routes") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+            if (destinations.isNotEmpty())
+                Text(
+                    destinations.joinToString(" → ") { agentLabel(it.routeText("backend")) },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            if (policy?.bol("returnPreferred") == true)
+                Text(
+                    L10n.text(
+                        "common.chat_route_preferred",
+                        ((policy["preferred"] as? JsonObject)
+                                ?: (state?.get("preferred") as? JsonObject))
+                            ?.routeText("backend") ?: chat.routeText("backend"),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            TextButton(onClick = { showing = true }) { Text(L10n.text("common.chat_route_setup")) }
+        }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     if (showing) ChatRoutingDialog(chat, backends, call, { showing = false }, onChanged)
@@ -139,6 +196,11 @@ private fun ChatRoutingDialog(
     changed: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    fun agentLabel(id: String): String =
+        backends
+            .firstOrNull { it.routeText("id") == id }
+            ?.routeText("label")
+            ?.takeIf { it.isNotBlank() } ?: id
     var enabled by remember { mutableStateOf(false) }
     var wait by remember { mutableStateOf(false) }
     var returns by remember { mutableStateOf(false) }
@@ -231,6 +293,10 @@ private fun ChatRoutingDialog(
                         enabled,
                         { enabled = !enabled },
                         L10n.text("common.chat_routing_enabled"),
+                    )
+                    Text(
+                        L10n.text("common.chat_route_priority_help"),
+                        style = MaterialTheme.typography.bodySmall,
                     )
                     BrandCheckbox(wait, { wait = !wait }, L10n.text("common.chat_wait_reset"))
                     BrandCheckbox(
@@ -339,8 +405,11 @@ private fun ChatRoutingDialog(
 
                     Text(L10n.text("common.chat_route_order"))
                     routes.forEachIndexed { index, route ->
-                        Column {
-                            Text("${index+1}. ${route.routeText("backend")}")
+                        TsCard {
+                            Text(
+                                "${index+1}. ${agentLabel(route.routeText("backend"))}",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
                             if (
                                 route.routeText("backend") == "muse" &&
                                     chat.routeText("autonomy") != "bypass"
@@ -358,6 +427,10 @@ private fun ChatRoutingDialog(
                                         ?.get("models") as? JsonArray)
                                     ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
                                     .orEmpty()
+                            Text(
+                                L10n.text("android.chatagentpanel.model.5e2c614c"),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
                             var menu by remember(route, index) { mutableStateOf(false) }
                             Box {
                                 TextButton(onClick = { menu = true }) {
