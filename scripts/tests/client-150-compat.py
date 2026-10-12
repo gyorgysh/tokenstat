@@ -33,6 +33,19 @@ def main():
         endpoint = root / "host.sock"
         environment = os.environ.copy()
         environment["TOKENSTAT_DATA_DIR"] = str(data)
+        # Exercise quota decoding without contacting vendors or using the
+        # developer's installed OAuth login. Muse falls back to a dated cache.
+        environment["XDG_CONFIG_HOME"] = str(root / "config")
+        (data / "limits-cache.json").write_text(json.dumps({"muse": {
+            "source": "muse", "plan": "Muse Code Everyday Usage",
+            "windows": [
+                {"label": "5-hour", "scope": None, "percent": 4.0,
+                 "resetsAtMs": 1791847496000, "severity": "normal"},
+                {"label": "weekly", "scope": None, "percent": 1.0,
+                 "resetsAtMs": 1792368000000, "severity": "normal"},
+            ],
+            "observedAtMs": 1791829616048, "note": None, "stale": False,
+        }}))
         process = subprocess.Popen(
             [str(hostd), "--socket", str(endpoint)],
             env=environment,
@@ -108,7 +121,23 @@ def main():
                     for row in chats:
                         require_fields(row, required_chat, "chat.list")
                     assert isinstance(call("chat.recent", {"limit": 50}), list)
-            print("1.5.0 client wire compatibility: protocol, info, workspaces, chats OK")
+                    call("config.limitsSync", {"enabled": False, "skip": [
+                        "codex", "claude_code", "cursor", "grok", "opencode", "antigravity",
+                    ]})
+                    limits = call("usage.limits", {})
+                    assert isinstance(limits, list) and len(limits) == 1, limits
+                    muse = limits[0]
+                    require_fields(muse, [
+                        "source", "plan", "windows", "observedAtMs", "note", "stale",
+                    ], "usage.limits")
+                    assert muse["source"] == "muse" and muse["stale"] is True, muse
+                    assert len(muse["windows"]) == 2
+                    for window in muse["windows"]:
+                        require_fields(window, [
+                            "label", "scope", "percent", "resetsAtMs", "severity",
+                        ], "usage.limits window")
+                        assert window["severity"] == "normal"
+            print("1.5.0 client wire compatibility: protocol, info, workspaces, chats, limits OK")
         finally:
             process.terminate()
             try:

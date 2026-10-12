@@ -20,12 +20,15 @@ internal sealed class TerminalSurface : Grid
     private int _generation;
     private bool _starting;
     private bool _closed;
+    internal string InitializationState { get; private set; } = "waiting for Loaded";
     public int Rows { get; private set; } = 30;
     public int Cols { get; private set; } = 100;
     public Func<byte[], Task>? Input { get; set; }
     public Func<int, int, Task>? Resized { get; set; }
     public event Action<string>? Failed;
-    public Task Ready => _ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+    // A cold WebView2 runtime can take longer than an already-running browser,
+    // especially while the machine is busy starting the rest of the app.
+    public Task Ready => _ready.Task.WaitAsync(TimeSpan.FromSeconds(45));
 
     public TerminalSurface()
     {
@@ -47,6 +50,7 @@ internal sealed class TerminalSurface : Grid
         _ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _starting = false;
         _closed = false;
+        InitializationState = "waiting for controller";
         Children.Clear();
         Children.Add(_web);
         _ = InitializeAsync();
@@ -65,13 +69,40 @@ internal sealed class TerminalSurface : Grid
             _starting = true;
             claimed = true;
             var web = _web;
-            await web.EnsureCoreWebView2Async(await WebViewEnvironment.GetAsync());
+            InitializationState = "creating browser environment";
+            var environment = await WebViewEnvironment.GetAsync();
+            if (_closed || generation != _generation || !ReferenceEquals(web, _web)) return;
+            InitializationState = "creating WebView controller";
+            await web.EnsureCoreWebView2Async(environment);
             if (_closed || generation != _generation || !ReferenceEquals(web, _web))
             {
                 try { web.Close(); } catch { /* Closed while the runtime was starting. */ }
                 return;
             }
             var core = web.CoreWebView2;
+            core.NavigationCompleted += (_, e) =>
+            {
+                if (_closed || generation != _generation || !ReferenceEquals(web, _web)) return;
+                if (e.IsSuccess)
+                {
+                    if (!ready.Task.IsCompleted) InitializationState = "waiting for terminal ready message";
+                }
+                else
+                {
+                    InitializationState = "navigation failed: " + e.WebErrorStatus;
+                    var error = new InvalidOperationException("The terminal page could not load: " + e.WebErrorStatus);
+                    ready.TrySetException(error);
+                    Failed?.Invoke(error.Message);
+                }
+            };
+            core.ProcessFailed += (_, e) =>
+            {
+                if (_closed || generation != _generation || !ReferenceEquals(web, _web)) return;
+                InitializationState = "browser process failed: " + e.ProcessFailedKind;
+                var error = new InvalidOperationException("The terminal browser stopped: " + e.ProcessFailedKind);
+                ready.TrySetException(error);
+                Failed?.Invoke(error.Message);
+            };
             core.SetVirtualHostNameToFolderMapping("terminal.tokenstat.invalid", Path.Combine(AppContext.BaseDirectory, "Assets"), CoreWebView2HostResourceAccessKind.DenyCors);
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.AreBrowserAcceleratorKeysEnabled = false;
@@ -93,7 +124,7 @@ internal sealed class TerminalSurface : Grid
                     {
                         Rows = Math.Clamp(message.GetProperty("rows").GetInt32(), 5, 200);
                         Cols = Math.Clamp(message.GetProperty("cols").GetInt32(), 20, 400);
-                        if (type == "ready") { ready.TrySetResult(); SendTheme(); }
+                        if (type == "ready") { InitializationState = "ready"; ready.TrySetResult(); SendTheme(); }
                         var rows = Rows; var cols = Cols;
                         await _resizeGate.WaitAsync();
                         try
@@ -160,13 +191,18 @@ internal sealed class TerminalSurface : Grid
                 }
                 catch (Exception ex) { if (!_closed && generation == _generation) Failed?.Invoke(ex.Message); }
             };
+            InitializationState = "loading terminal page";
             web.Source = new Uri("https://terminal.tokenstat.invalid/Terminal/terminal.html");
             started = true;
         }
         catch (Exception ex)
         {
             ready.TrySetException(ex);
-            if (!_closed && generation == _generation) Failed?.Invoke(ex.Message);
+            if (!_closed && generation == _generation)
+            {
+                InitializationState = "initialization failed";
+                Failed?.Invoke(ex.Message);
+            }
         }
         finally
         {
@@ -208,6 +244,7 @@ internal sealed class TerminalSurface : Grid
     {
         if (_closed) return;
         _closed = true;
+        InitializationState = "closed";
         _generation++;
         _ready.TrySetCanceled();
         try { _web.Close(); }

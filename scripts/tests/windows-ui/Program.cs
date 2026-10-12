@@ -67,6 +67,7 @@ public sealed partial class SmokeApp : Application
         var editor = new RichEditBox { AcceptsReturn = true, Height = 160 };
         var video = new MediaPlayerElement { AutoPlay = true, Width = 320, Height = 180 };
         var terminal = new TerminalSurface { Height = 200, Width = 640 };
+        terminal.Failed += message => Program.Log("Terminal failure: " + message);
         var body = new StackPanel { Children = { editor, video, terminal } };
         _window = new Window { Content = body };
         body.Loaded += async (_, _) =>
@@ -122,7 +123,12 @@ public sealed partial class SmokeApp : Application
                     throw new Exception("Closing a document did not return to the remaining workspace surface");
                 body.Children.Remove(tabView);
                 Program.Log("PASS: workspace tabs retain unsaved documents, deduplicate surfaces, and close cleanly");
-                await terminal.Ready;
+                try { await terminal.Ready; }
+                catch (TimeoutException)
+                {
+                    Program.Log($"Terminal startup timeout: stage={terminal.InitializationState}, loaded={terminal.IsLoaded}, size={terminal.ActualWidth:F1}×{terminal.ActualHeight:F1}");
+                    throw;
+                }
                 terminal.Write(System.Text.Encoding.UTF8.GetBytes("\u001b[2J\u001b[H\u001b[31mred\u001b[0m\r\n"));
                 // A UTF-8 scalar split across host reads must remain intact.
                 terminal.Write(new byte[] { 0xf0, 0x9f });

@@ -4391,6 +4391,7 @@ fn usage_limits() -> Value {
                 .then(|| scope.spawn(tokenstat_sync::claude_limits::fetch));
             let cursor = (!skipped("cursor")).then(|| scope.spawn(tokenstat_sync::cursor::limits));
             let grok = (!skipped("grok")).then(|| scope.spawn(tokenstat_sync::grok_limits::fetch));
+            let muse = (!skipped("muse")).then(|| scope.spawn(tokenstat_sync::muse_limits::fetch));
             let opencode =
                 (!skipped("opencode")).then(|| scope.spawn(tokenstat_sync::opencode_limits::fetch));
             let antigravity = (!skipped("antigravity"))
@@ -4425,6 +4426,9 @@ fn usage_limits() -> Value {
                 out.push(p);
             }
             if let Some(p) = take(grok, "grok", "Reading the Grok limits failed unexpectedly.") {
+                out.push(p);
+            }
+            if let Some(p) = take(muse, "muse", "Reading the Muse limits failed unexpectedly.") {
                 out.push(p);
             }
             if let Some(p) = take(

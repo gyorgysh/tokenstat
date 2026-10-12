@@ -798,10 +798,6 @@ fn install_delivered(profile: &Profile, path: &[String], home: &Path) -> bool {
 /// with the login environment so `npm`, `brew` and friends resolve, and its
 /// output is captured so the calling app can say what happened.
 pub(crate) fn install(id: &str) -> Result<Value, String> {
-    static INSTALLING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _installing = INSTALLING
-        .try_lock()
-        .map_err(|_| "An agent installation is already running")?;
     let profile = PROFILES
         .iter()
         .find(|p| p.id == id)
@@ -809,6 +805,10 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
     let command = profile
         .installer()
         .ok_or_else(|| format!("{id} has no installer for this platform"))?;
+    static INSTALLING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _installing = INSTALLING
+        .try_lock()
+        .map_err(|_| "An agent installation is already running")?;
 
     // Refuse when the tool is already where the catalog looks for it. The
     // front end never offers this, so the guard is for a stale tile or a
@@ -1447,6 +1447,12 @@ fn search_path() -> Vec<String> {
 }
 
 fn conventional_paths(home: &str) -> Vec<String> {
+    let login = tokenstat_pty::login_env();
+    let npm_paths = npm_bin_paths_with(home, |name| {
+        std::env::var(name)
+            .ok()
+            .or_else(|| login.as_ref()?.vars.get(name).cloned())
+    });
     #[cfg(windows)]
     {
         let local =
@@ -1454,9 +1460,11 @@ fn conventional_paths(home: &str) -> Vec<String> {
         let mut paths = vec![
             format!(r"{local}\Programs\OpenAI\Codex\bin"),
             format!(r"{home}\.local\bin"),
-            format!(r"{home}\AppData\Roaming\npm"),
-            format!(r"{home}\scoop\shims"),
         ];
+        paths.extend(npm_paths);
+        let roaming =
+            std::env::var("APPDATA").unwrap_or_else(|_| format!(r"{home}\AppData\Roaming"));
+        paths.extend([format!(r"{roaming}\npm"), format!(r"{home}\scoop\shims")]);
         if let Ok(dir) = std::env::var("CODEX_INSTALL_DIR") {
             paths.push(dir);
         }
@@ -1464,8 +1472,9 @@ fn conventional_paths(home: &str) -> Vec<String> {
     }
     #[cfg(not(windows))]
     {
-        let mut paths = vec![
-            format!("{home}/.local/bin"),
+        let mut paths = vec![format!("{home}/.local/bin")];
+        paths.extend(npm_paths);
+        paths.extend([
             format!("{home}/.npm-global/bin"),
             format!("{home}/.volta/bin"),
             format!("{home}/.opencode/bin"),
@@ -1476,10 +1485,84 @@ fn conventional_paths(home: &str) -> Vec<String> {
             "/usr/local/bin".into(),
             "/usr/bin".into(),
             "/bin".into(),
-        ];
+        ]);
         paths.extend(nvm_bin_paths(home));
         paths
     }
+}
+
+/// npm can install global commands under a user-selected prefix that is absent
+/// from a desktop helper's PATH. Use only the prefix setting, never credentials,
+/// and give the launched CLI the same directory used for discovery.
+fn npm_bin_paths_with(home: &str, env: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    let setting = |upper, lower| env(upper).or_else(|| env(lower));
+    let configured = setting("NPM_CONFIG_PREFIX", "npm_config_prefix").or_else(|| {
+        let config = setting("NPM_CONFIG_USERCONFIG", "npm_config_userconfig")
+            .and_then(|raw| npm_path(&raw, home, &env))
+            .or_else(|| (!home.is_empty()).then(|| Path::new(home).join(".npmrc")))?;
+        let mut raw = String::new();
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let file = options.open(config).ok()?;
+        if !file.metadata().ok()?.is_file() {
+            return None;
+        }
+        file.take(64 * 1024 + 1).read_to_string(&mut raw).ok()?;
+        if raw.len() > 64 * 1024 {
+            return None;
+        }
+        raw.lines()
+            .filter_map(|line| {
+                let (key, value) = line.split_once('=')?;
+                key.trim()
+                    .eq_ignore_ascii_case("prefix")
+                    .then(|| value.trim().to_string())
+            })
+            .next_back()
+    });
+    let Some(prefix) = configured.and_then(|raw| npm_path(&raw, home, &env)) else {
+        return Vec::new();
+    };
+    let bin = if cfg!(windows) {
+        prefix
+    } else {
+        prefix.join("bin")
+    };
+    vec![bin.display().to_string()]
+}
+
+fn npm_path(raw: &str, home: &str, env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let raw = raw.trim();
+    let raw = raw
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .or_else(|| raw.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+        .unwrap_or(raw);
+    let mut expanded = String::new();
+    let mut rest = raw;
+    while let Some(start) = rest.find("${") {
+        expanded.push_str(&rest[..start]);
+        let variable = &rest[start + 2..];
+        let end = variable.find('}')?;
+        let name = &variable[..end];
+        let value = env(name)
+            .or_else(|| matches!(name, "HOME" | "USERPROFILE").then(|| home.to_string()))?;
+        expanded.push_str(&value);
+        rest = &variable[end + 1..];
+    }
+    expanded.push_str(rest);
+    if expanded == "~" {
+        expanded = home.to_string();
+    } else if expanded.starts_with("~/") || expanded.starts_with("~\\") {
+        expanded = Path::new(home).join(&expanded[2..]).display().to_string();
+    }
+    let path = PathBuf::from(&expanded);
+    (path.is_absolute() && !expanded.contains('\0')).then_some(path)
 }
 
 #[cfg(not(windows))]
@@ -1577,8 +1660,8 @@ mod tests {
 
     use super::{
         PROFILES, Profile, catalog, command_names, hide_in, install, load_prefs_in,
-        model_arguments, model_environment, resolve_profile, show_in, sign_in, split_path_var,
-        strip_ansi,
+        model_arguments, model_environment, npm_bin_paths_with, npm_path, resolve_on_path,
+        resolve_profile, show_in, sign_in, split_path_var, strip_ansi,
     };
     #[cfg(unix)]
     use super::{home_from, install_delivered};
@@ -1617,6 +1700,51 @@ mod tests {
             install_dirs,
             open_url: None,
         }
+    }
+
+    #[test]
+    fn npm_codex_under_a_configured_user_prefix_is_found_without_path_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().to_str().unwrap();
+        std::fs::write(
+            root.path().join(".npmrc"),
+            "registry=https://registry.npmjs.org/\n//registry.example/:_authToken=fixture-secret\nprefix=${HOME}/my-npm\n",
+        )
+        .unwrap();
+        let paths = npm_bin_paths_with(home, |_| None);
+        assert_eq!(paths.len(), 1);
+        let bin = Path::new(&paths[0]);
+        std::fs::create_dir_all(bin).unwrap();
+        let command = bin.join(if cfg!(windows) { "codex.cmd" } else { "codex" });
+        std::fs::write(&command, "fixture").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        assert_eq!(
+            resolve_on_path("codex", &paths),
+            Some(command.display().to_string())
+        );
+    }
+
+    #[test]
+    fn npm_environment_prefix_wins_and_unknown_expansions_are_rejected() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().to_str().unwrap();
+        std::fs::write(root.path().join(".npmrc"), "prefix=~/old-npm\n").unwrap();
+        let paths = npm_bin_paths_with(home, |name| {
+            (name == "NPM_CONFIG_PREFIX").then(|| "~/new-npm".into())
+        });
+        let expected = root.path().join("new-npm");
+        let expected = if cfg!(windows) {
+            expected
+        } else {
+            expected.join("bin")
+        };
+        assert_eq!(paths, [expected.display().to_string()]);
+        assert!(npm_path("${MISSING}/npm", home, &|_| None).is_none());
+        assert!(npm_path("relative/npm", home, &|_| None).is_none());
     }
 
     /// The reported bug: `~/.opencode/bin/opencode` exists, the machine's

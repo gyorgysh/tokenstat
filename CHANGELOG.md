@@ -15,9 +15,11 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - Windows chat routing settings and status live in the inspector alongside conversation details, keeping the composer focused on writing messages.
 - Muse model choices refresh from the installed agent's catalog, including Muse Wonder 1.0, while retaining the existing Spark Contributor choices.
+- Muse subscription limits show the account's 5-hour and weekly usage, reset times and plan without starting a model turn.
 
 ### Fixed
 
+- npm-installed agents are discovered under configured user prefixes even when those directories are missing from the desktop helper's PATH.
 - Starting the app and helper together keeps one stable pairing identity.
 - Remote connections recover when a peer stalls partway through the first encrypted frame, instead of leaving reads and writes stuck.
 - Windows routing settings preserve a preferred destination outside the fallback list, distinguish models and effort in the preferred picker, and tolerate invalid reset timestamps.

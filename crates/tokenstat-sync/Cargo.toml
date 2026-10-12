@@ -31,5 +31,8 @@ atomicwrites = "0.4.4"
 tempfile.workspace = true
 zeroize = "1.9"
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true

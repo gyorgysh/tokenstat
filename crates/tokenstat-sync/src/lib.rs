@@ -37,6 +37,7 @@ pub mod forge;
 pub mod grok_limits;
 pub mod host;
 pub mod keychain;
+pub mod muse_limits;
 pub mod opencode_limits;
 mod power;
 pub mod pricing;
