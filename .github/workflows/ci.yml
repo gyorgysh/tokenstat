@@ -315,6 +315,10 @@ jobs:
         if: runner.os == 'macOS'
         run: python3 scripts/tests/chat-routing-e2e.py
 
+      - name: 1.5.0 client wire compatibility
+        if: runner.os != 'Windows'
+        run: python3 scripts/tests/client-150-compat.py
+
       - uses: actions/setup-dotnet@v6
         if: runner.os == 'Windows'
         with:
