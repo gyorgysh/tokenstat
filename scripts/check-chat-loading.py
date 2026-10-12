@@ -59,6 +59,7 @@ struct Bag { mutating func removeAll() {}; func retain(_ keys: Set<String>, in p
     var isCreating = false
     var workspaceID: String?, peer: String?, folderID: String?, continuityScope: WorkReference.Scope?
     var chatListCache: [String: [ChatConversation]] = [:]
+    var sidebarListErrors: [String: (scope: WorkReference.Scope, message: String)] = [:]
     var chats: [ChatConversation] = [], selected: ChatConversation?
     var backends: [ChatBackend] = [], backendRefreshError: String?, personas: [String] = [], defaultPersonaID: String?
     var pendingRevealID: String?, pendingRevealFolderID: String?, error: String?
@@ -90,9 +91,11 @@ struct Bag { mutating func removeAll() {}; func retain(_ keys: Set<String>, in p
 @main struct Check {
     @MainActor static func main() async {
         let m = Model()
+        m.sidebarListErrors["old-folder"] = (.init(identity: "old-account"), "Unavailable")
         let opening = Task { await m.load(workspaceID: "p", peer: "mac", selectFirst: false) }
         await until { Bridge.list.replies.count == 1 && Bridge.backend.replies.count == 1 && Bridge.voices.replies.count == 1 }
         Bridge.list.finish(0, [.init(id: "history")]); await opening.value
+        precondition(m.sidebarListErrors.isEmpty, "Scope adoption retained another account's sidebar error")
         precondition(m.chats.count == 1 && !m.isLoading && m.error == nil,
                      "Held auxiliary requests hid successful history")
         Bridge.backend.fail(0); Bridge.voices.fail(0)
