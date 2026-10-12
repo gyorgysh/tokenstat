@@ -544,7 +544,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private string SelectedBackendId()
     {
         var index = _agentFilter.SelectedIndex;
-        if (box?.Tag is string[] ids && index >= 1 && index - 1 < ids.Length) return ids[index - 1];
+        if (index >= 1 && index - 1 < _backends.Count) return _backends[index - 1].Id;
         return "";
     }
 
