@@ -154,6 +154,9 @@ struct ClientTerminalKeys: View {
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, 6)
         }
+        // A horizontal scroll view otherwise shares the terminal's flexible
+        // height and changes that split as keyboard layout is recalculated.
+        .fixedSize(horizontal: false, vertical: true)
         .scrollIndicators(.hidden)
         // The keys stay above the home indicator, the terminal surface
         // carries on past it. Container only: when the keyboard is up this

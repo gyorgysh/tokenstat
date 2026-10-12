@@ -188,6 +188,12 @@ final class WorkspacesModel {
     var selectedID: String?
     var isLoading = false
     var errorMessage: String?
+    private(set) var hasLoadedDirectory = false
+    private(set) var directoryError: String?
+    var directoryPresentation: WorkspaceDirectoryPresentation {
+        .resolve(hasContent: !folders.isEmpty, hasLoaded: hasLoadedDirectory,
+                 isLoading: isLoading, error: directoryError)
+    }
 
     /// Which inspector tab is open.
     ///
@@ -962,6 +968,8 @@ final class WorkspacesModel {
             }
             localFolders = loaded
             publishFolders()
+            hasLoadedDirectory = true
+            directoryError = nil
             errorMessage = nil
             if let counts = try? await Bridge.workspaceSummaries() {
                 let localIDs = Set(loaded.map(\.id))
@@ -974,6 +982,8 @@ final class WorkspacesModel {
             }
             return true
         } catch {
+            guard WorkSessionContext.shared.scope == scope else { return false }
+            directoryError = error.localizedDescription
             errorMessage = error.localizedDescription
             return false
         }

@@ -591,6 +591,20 @@ struct ClientTerminalScreen: View {
 
     @State private var confirmClose = false
     @State private var showingWorkspace = false
+    @State private var showingTransportDetails = false
+
+    private var statusText: String {
+        if let error = session.transportError { return ClientTunnelCopy.display(error, host: hostName) }
+        if session.outputPaused { return L10n.text("apple.clientterminalsession.output_paused_while_the_terminal_catches_u.c3cbbc1c") }
+        return session.alive ? session.cwd : (session.exitCode.map { L10n.text("apple.clientterminalsession.exited_0.39ec5073", "\($0)") } ?? L10n.text("apple.clientterminalsession.stopped.8322e87d"))
+    }
+
+    private var statusColor: SwiftUI.Color {
+        if let error = session.transportError {
+            return ClientTunnelCopy.isAbsent(error) ? Theme.warning : Theme.danger
+        }
+        return session.outputPaused ? Theme.warning : SwiftUI.Color.secondary
+    }
 
     private func rememberTerminal() {
         guard session.ownerScope != nil, session.ownerScope == WorkSessionContext.shared.scope,
@@ -615,11 +629,22 @@ struct ClientTerminalScreen: View {
                     Text(SidebarTerminalNames.shared.name(for: session.workReference) ?? URL(fileURLWithPath: session.command).lastPathComponent)
                         .font(ClientType.label.weight(.semibold))
                         .lineLimit(1)
-                    Text(session.alive ? session.cwd : (session.exitCode.map { L10n.text("apple.clientterminalsession.exited_0.39ec5073", "\($0)") } ?? L10n.text("apple.clientterminalsession.stopped.8322e87d")))
+                    // Write failures and catch-up status can change on each
+                    // typed key. Keep them in the existing fixed header line
+                    // so they never resize the terminal or its remote PTY.
+                    Button { showingTransportDetails = true } label: {
+                        HStack(spacing: Theme.Space.xs) {
+                            Text(statusText).lineLimit(1).truncationMode(.middle)
+                            Image(systemName: ActionIcon.help.symbol)
+                        }
                         .font(ClientType.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                        .foregroundStyle(statusColor)
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showingTransportDetails) {
+                        Text(statusText).font(Theme.body).padding(Theme.Space.m)
+                            .presentationCompactAdaptation(.popover)
+                    }
                 }
                 Spacer()
                 if session.droppedOutput {
@@ -649,26 +674,6 @@ struct ClientTerminalScreen: View {
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)
             .background(Theme.background)
-
-            if session.outputPaused {
-                Text(L10n.text("apple.clientterminalsession.output_paused_while_the_terminal_catches_u.c3cbbc1c"))
-                    .font(ClientType.caption)
-                    .foregroundStyle(Theme.warning)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.bottom, Theme.Space.xs)
-            }
-
-            if let error = session.transportError {
-                Text(ClientTunnelCopy.display(error, host: hostName))
-                    .font(ClientType.caption)
-                    .foregroundStyle(
-                        ClientTunnelCopy.isAbsent(error) ? Theme.warning : Theme.danger
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.bottom, Theme.Space.xs)
-            }
 
             ClientTerminalRepresentable(session: session)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

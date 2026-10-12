@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.KeyboardHide
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /// One glyph per action. Case names match `ActionIcon.swift` and
@@ -88,7 +89,7 @@ enum class ActionIcon {
             AutoRenew, Refresh -> Icons.Default.Refresh
             Downgrade, Move -> Icons.AutoMirrored.Filled.ArrowForward
             CancelPlan, Dismiss, Disconnect -> Icons.Default.Close
-            HideKeyboard -> Icons.Default.KeyboardArrowDown
+            HideKeyboard -> Icons.Outlined.KeyboardHide
             Token, Pair -> Icons.Default.Key
             Preview, Visibility -> Icons.Default.Visibility
             Theme -> Icons.Default.Palette

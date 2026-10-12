@@ -2,6 +2,54 @@
 import XCTest
 
 final class RoutingUITests: XCTestCase {
+    func testTerminalFrameStaysStillWhileTyping() {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Terminal"].tap()
+        let terminal = app.descendants(matching: .any).matching(identifier: "terminal.qa").firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10), app.debugDescription)
+        terminal.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        capture(app, "iphone17-terminal-before-typing")
+        // Tap real software keys: hardware injection can hide the simulated
+        // keyboard and legitimately change the terminal's available height.
+        for letter in ["a", "b", "c", "d", "e", "f"] {
+            app.keyboards.keys[letter].tap()
+        }
+        XCTAssertEqual(app.staticTexts["terminal.frameChanges"].label, "Frame changes: 0")
+        capture(app, "iphone17-terminal-typing")
+        app.buttons["Hide keyboard"].tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.keyboards.firstMatch)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(terminal.exists)
+    }
+    func testKeyboardDismissalKeepsSearchAndNumericInput() {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Inputs"].tap()
+        let search = app.textFields["keyboard.searchField"]
+        XCTAssertTrue(search.waitForExistence(timeout: 30), app.debugDescription)
+        search.tap()
+        search.typeText("routing")
+        let hide = app.buttons["keyboard.hide"]
+        XCTAssertTrue(hide.waitForExistence(timeout: 5))
+        capture(app, "iphone17-search-keyboard")
+        hide.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.keyboards.firstMatch)
+        waitForExpectations(timeout: 5)
+        XCTAssertEqual(search.value as? String, "routing")
+        let code = app.textFields["keyboard.codeField"]
+        code.tap()
+        code.typeText("12345")
+        XCTAssertTrue(hide.waitForExistence(timeout: 5))
+        capture(app, "iphone17-numeric-keyboard")
+        hide.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.keyboards.firstMatch)
+        waitForExpectations(timeout: 5)
+        XCTAssertEqual(code.value as? String, "12345")
+        XCTAssertTrue(app.staticTexts["Keyboard QA"].exists)
+    }
+
     func capture(_ app: XCUIApplication, _ name: String) {
         let screenshot = app.screenshot()
         let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!

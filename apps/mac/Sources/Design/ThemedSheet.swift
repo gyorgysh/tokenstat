@@ -169,6 +169,9 @@ struct ModalHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            #if os(iOS)
+            ClientKeyboardDismissButton()
+            #endif
             InspectorCloseButton(
                 action: onClose,
                 help: L10n.text("common.close"),

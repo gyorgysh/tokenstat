@@ -874,7 +874,15 @@ final class ChatModel {
                     continue
                 }
             }
-        } catch { /* A preview failure leaves normal opening available. */ }
+        } catch {
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
+                  previewCacheEpoch == epoch, chatListCache[folder] == nil else { return }
+            sidebarListErrors[folder] = (scope, error.localizedDescription)
+            if sidebarListErrors.count > Self.chatListCacheCap,
+               let drop = sidebarListErrors.keys.first(where: { $0 != folder }) {
+                sidebarListErrors.removeValue(forKey: drop)
+            }
+        }
         #endif
     }
 
@@ -1078,6 +1086,7 @@ final class ChatModel {
     /// Small records only, never transcripts. Refreshed on every open, so a
     /// stale entry lasts until its folder is opened again.
     private var chatListCache: [String: [ChatConversation]] = [:]
+    private var sidebarListErrors: [String: (scope: WorkReference.Scope, message: String)] = [:]
     private static let chatListCacheCap = 30
 
     /// The conversations to draw under this folder in the sidebar. The live
@@ -1116,10 +1125,25 @@ final class ChatModel {
         return chatListCache[folderID] ?? []
     }
 
+    func sidebarDirectoryPresentation(in folderID: String) -> WorkspaceDirectoryPresentation {
+        let scopedError = sidebarListErrors[folderID].flatMap {
+            $0.scope == WorkSessionContext.shared.scope ? $0.message : nil
+        }
+        guard continuityScope == WorkSessionContext.shared.scope else {
+            return .resolve(hasContent: false, hasLoaded: false, isLoading: false, error: scopedError)
+        }
+        return .resolve(hasContent: !sidebarChats(in: folderID).isEmpty,
+                        hasLoaded: chatListCache[folderID] != nil,
+                        isLoading: self.folderID == folderID && isLoading,
+                        error: chatListCache[folderID] == nil
+                            ? (scopedError ?? (self.folderID == folderID ? error : nil)) : nil)
+    }
+
     /// Written only when it changed. The cache is observed as one value, so
     /// any write redraws every folder's rows in the sidebar, and a reload that
     /// returns the same list is the usual case.
     private func storeChatListCache(_ list: [ChatConversation], folderID: String) {
+        sidebarListErrors[folderID] = nil
         guard chatListCache[folderID] != list else { return }
         chatListCache[folderID] = list
         if chatListCache.count > Self.chatListCacheCap,
@@ -1213,6 +1237,7 @@ final class ChatModel {
                 loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
             }
             chatListCache = [:]
+            sidebarListErrors = [:]
             backends = []
             personas = []
             defaultPersonaID = nil

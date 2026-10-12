@@ -2897,7 +2897,7 @@ private fun ChatWorkingIndicator(
 /// hunting for.
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun ChatComposer(
+internal fun ChatComposer(
     chat: JsonObject?,
     draft: String,
     onDraft: (String) -> Unit,

@@ -13,7 +13,15 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Changed
 
-- iPhone, iPad and Android chat composers use a compact routing icon beside the agent picker, with the same active tint and rounded shape as Fast mode.
+- Mac, iPhone, iPad and Android chat composers use a compact routing icon beside the agent picker, with the same active tint and rounded shape as Fast mode.
+- Mobile search and form headers offer a keyboard-hide icon while typing, without clearing the entered text or closing the screen.
+
+### Fixed
+
+- Mac project views and sidebar chats show loading placeholders while the host starts, and distinguish failed reads from confirmed empty lists.
+- iOS terminal key bars keep their content height, and changing connection or catch-up status stays in the header without resizing the terminal while typing.
+- Active relay connections periodically retry authenticated direct routes, and network changes clear discovery cooldowns so a reachable LAN route can recover.
+- The Mac host helper associates local-network permission with the signed app in System Settings.
 
 ## [1.6.0] - 2026-10-12
 

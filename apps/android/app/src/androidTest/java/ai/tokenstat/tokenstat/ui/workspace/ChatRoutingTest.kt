@@ -10,6 +10,7 @@ import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
@@ -37,7 +38,7 @@ class ChatRoutingTest {
     private val backends =
         listOf(
             obj(
-                """{"id":"codex","label":"Codex","installed":true,"models":["gpt-6.1-sol"],"efforts":["low","high"]}"""
+                """{"id":"codex","label":"Codex","installed":true,"models":["gpt-6.1-sol"],"efforts":["low","high"],"fastModeModels":["gpt-6.1-sol"]}"""
             ),
             obj("""{"id":"muse","label":"Muse","installed":true,"models":[],"efforts":[]}"""),
         )
@@ -53,6 +54,10 @@ class ChatRoutingTest {
         val chat = buildJsonObject {
             put("id", "routing-preview")
             put("backend", "codex")
+            put("model", "gpt-6.1-sol")
+            put("effort", "high")
+            put("mode", "execute")
+            put("fastMode", true)
             put("autonomy", "standard")
             put("sendRevision", 1)
             put("running", false)
@@ -66,7 +71,7 @@ class ChatRoutingTest {
                 ) {
                     Surface(Modifier.fillMaxSize()) {
                         Column(Modifier.padding(16.dp)) {
-                            ChatRoutingControls(
+                            val controls: @Composable () -> Unit = { ChatRoutingControls(
                                 chat,
                                 backends,
                                 { method, params ->
@@ -83,7 +88,30 @@ class ChatRoutingTest {
                                 showNotice = !shortcut,
                                 showSection = !shortcut,
                                 showShortcut = shortcut,
-                            )
+                            ) }
+                            if (shortcut) {
+                                Text("Routing QA · composer preview", style = TsType.caption)
+                                Spacer(Modifier.height(16.dp))
+                                ChatComposer(
+                                    chat = chat,
+                                    draft = "QA draft",
+                                    onDraft = {},
+                                    hint = "Ask about Routing QA",
+                                    sending = false,
+                                    staged = emptyList(),
+                                    onPick = {},
+                                    onRemove = {},
+                                    onSend = {},
+                                    onStop = {},
+                                    onChange = { _, _ -> },
+                                    backends = backends,
+                                    onAgent = {},
+                                    routing = controls,
+                                    launchMode = "execute",
+                                )
+                            } else {
+                                controls()
+                            }
                         }
                     }
                 }

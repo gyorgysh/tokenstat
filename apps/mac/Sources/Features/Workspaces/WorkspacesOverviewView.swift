@@ -21,6 +21,9 @@ import SwiftUI
 struct WorkspacesOverviewView: View {
     var folders: [WorkspaceFolder]
     var summaries: [String: WorkspaceSummary]
+    var directoryPresentation: WorkspaceDirectoryPresentation = .empty
+    var directoryError: String? = nil
+    var onRetry: () -> Void = {}
     /// Live local sessions per folder id. Remote counts ride the summaries.
     var sessionsIn: (String) -> Int
     var onOpenFolder: (String) -> Void
@@ -103,7 +106,12 @@ struct WorkspacesOverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if folders.isEmpty {
-                    emptyState
+                    if directoryPresentation == .empty {
+                        emptyState
+                    } else {
+                        WorkspaceDirectoryPlaceholder(presentation: directoryPresentation,
+                            error: directoryError, retry: onRetry)
+                    }
                 } else if shown.isEmpty {
                     ContentUnavailableView.search(text: search)
                 } else if !gridLayout {

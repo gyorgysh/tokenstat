@@ -78,6 +78,7 @@ internal fun TsModalScreen(
                                 Text(title, style = TsType.title3, color = colors.textPrimary)
                                 if (subtitle.isNotBlank()) Text(subtitle, style = TsType.caption, color = colors.textSecondary)
                             }
+                            KeyboardDismissButton()
                             IconButton(onClick = onDismiss, enabled = dismissEnabled) {
                                 Icon(ActionIcon.Dismiss.vector, L10n.text("common.close"), tint = if (dismissEnabled) colors.textPrimary else colors.textTertiary)
                             }
@@ -97,8 +98,11 @@ internal fun TsModalScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(Space.s),
                         ) {
-                            if (compact) IconButton(onClick = onDismiss, enabled = dismissEnabled) {
-                                Icon(ActionIcon.Dismiss.vector, L10n.text("common.close"), tint = if (dismissEnabled) colors.textPrimary else colors.textTertiary)
+                            if (compact) {
+                                KeyboardDismissButton()
+                                IconButton(onClick = onDismiss, enabled = dismissEnabled) {
+                                    Icon(ActionIcon.Dismiss.vector, L10n.text("common.close"), tint = if (dismissEnabled) colors.textPrimary else colors.textTertiary)
+                                }
                             }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.s), content = footer)
                         }

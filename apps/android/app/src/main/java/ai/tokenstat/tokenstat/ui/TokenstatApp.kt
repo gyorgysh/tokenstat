@@ -153,6 +153,7 @@ import ai.tokenstat.tokenstat.ui.workspace.WorkspaceHub
 import ai.tokenstat.tokenstat.ui.workspace.WorkspacesEditor
 import ai.tokenstat.tokenstat.ui.chrome.ConnectionChip
 import ai.tokenstat.tokenstat.ui.components.TsSearchField
+import ai.tokenstat.tokenstat.ui.components.KeyboardDismissButton
 import ai.tokenstat.tokenstat.ui.chrome.FloatingTabBar
 import ai.tokenstat.tokenstat.ui.chrome.LocalTabBarPresence
 import ai.tokenstat.tokenstat.ui.chrome.TabBarPresence
@@ -729,6 +730,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     )
                 },
                 actions = {
+                    KeyboardDismissButton()
                     // A chip, not a naked glyph. On iPhone this is a circular
                     // raised surface and it reads as a control; the bare icon
                     // beside a wordmark read as part of the decoration.

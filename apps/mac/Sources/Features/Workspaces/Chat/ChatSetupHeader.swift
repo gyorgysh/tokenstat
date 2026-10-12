@@ -432,11 +432,7 @@ struct ChatComposerControls<Chrome: View>: View {
     private var agentField: some View {
         HStack(spacing: Theme.Space.s) {
             ChatAgentField(model: model, chat: chat, locked: locked) { pickingAgent = true }
-            #if os(iOS)
             ChatRoutingControls(model: model, chat: chat, compact: true)
-            #else
-            ChatRoutingControls(model: model, chat: chat)
-            #endif
         }
     }
 

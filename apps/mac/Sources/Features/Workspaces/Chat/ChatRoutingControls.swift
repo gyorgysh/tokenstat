@@ -24,7 +24,11 @@ struct ChatRoutingControls: View {
                     .environment(\.compactActions, true)
                     .buttonStyle(.plain)
                     .font(Theme.callout)
+                    #if os(macOS)
+                    .frame(width: 28, height: 28)
+                    #else
                     .frame(width: 44, height: 44)
+                    #endif
                     .foregroundStyle(automatic ? Theme.accent : .secondary)
                     .background(automatic ? Theme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 8))
                     .contentShape(.rect)

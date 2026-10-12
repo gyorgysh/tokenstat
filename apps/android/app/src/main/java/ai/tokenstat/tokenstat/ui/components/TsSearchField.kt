@@ -19,9 +19,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
@@ -42,6 +46,7 @@ fun TsSearchField(
     onSubmit: () -> Unit = {},
 ) {
     val colors = LocalTsColors.current
+    var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(Space.s)
     Row(
         modifier
@@ -57,7 +62,7 @@ fun TsSearchField(
             BasicTextField(
                 value = query,
                 onValueChange = onQueryChange,
-                modifier = Modifier,
+                modifier = Modifier.onFocusChanged { focused = it.isFocused },
                 textStyle = TsType.body.copy(color = colors.textPrimary),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
@@ -73,6 +78,7 @@ fun TsSearchField(
                 },
             )
         }
+        if (focused) KeyboardDismissButton()
         if (query.isNotEmpty()) {
             Icon(
                 ActionIcon.Dismiss.vector,

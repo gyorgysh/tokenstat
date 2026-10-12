@@ -108,6 +108,11 @@ extension View {
                     .navigationTitle(title)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
+                        if ClientKeyboardPresence.shared.isVisible {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                ClientKeyboardDismissButton()
+                            }
+                        }
                         ToolbarItem(placement: .topBarTrailing) {
                             Button(L10n.text("common.done")) { isPresented.wrappedValue = false }
                         }

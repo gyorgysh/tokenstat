@@ -121,6 +121,8 @@ enum HostAgentInstaller {
         let contents: [String: Any] = [
             "Label": label,
             "ProgramArguments": [helper.path],
+            // Attribute the LaunchAgent's LAN permission to the signed app.
+            "AssociatedBundleIdentifiers": ["ai.tokenstat.tokenstat"],
             "KeepAlive": alwaysOn,
             "RunAtLoad": alwaysOn,
             "ProcessType": "Interactive",

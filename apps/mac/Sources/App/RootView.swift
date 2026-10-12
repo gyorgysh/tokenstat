@@ -2301,7 +2301,14 @@ struct RootView: View {
 
         if expandedSidebarSections.contains("projects") {
             if workspaces.folders.isEmpty {
-                FirstProjectPrompt(compact: true) { workspaces.requestAdd() }
+                if workspaces.directoryPresentation == .empty {
+                    FirstProjectPrompt(compact: true) { workspaces.requestAdd() }
+                } else {
+                    WorkspaceDirectoryPlaceholder(presentation: workspaces.directoryPresentation,
+                        error: workspaces.directoryError, compact: true) {
+                        Task { await workspaces.loadLocal() }
+                    }
+                }
             } else {
                 ForEach(workspaces.folders) { folder in
                     projectRow(folder)
@@ -2523,11 +2530,28 @@ struct RootView: View {
                 }
             }
             if chat.sidebarChats(in: folder.id).isEmpty, terminals.workspaceTerminals(in: folder.id).isEmpty {
-                Text(L10n.text("apple.rootview.no_chats_yet.269208e4"))
-                    .font(Theme.fit(12))
-                    .foregroundStyle(.tertiary)
-                    .padding(.leading, Theme.Space.xl + Theme.Space.s)
-                    .padding(.vertical, 5)
+                Group {
+                    switch chat.sidebarDirectoryPresentation(in: folder.id) {
+                    case .loading:
+                        Skeleton.Rows(count: 2, showsValue: false)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(L10n.text("apple.pullsview.loading.ba3bbbe1"))
+                            .allowsHitTesting(false)
+                    case .failed:
+                        Button(L10n.text("common.retry"), .refresh) {
+                            Task { await chat.warmWorkspacePreviews(folder.id, includeMessages: false) }
+                        }.buttonStyle(.plain)
+                    case .empty:
+                        Text(L10n.text("apple.rootview.no_chats_yet.269208e4"))
+                            .foregroundStyle(.tertiary)
+                    case .content:
+                        EmptyView()
+                    }
+                }
+                .font(Theme.fit(12))
+                .padding(.leading, Theme.Space.xl + Theme.Space.s)
+                .padding(.trailing, Theme.Space.m)
+                .padding(.vertical, 5)
             }
         }
         // A folder that has not been opened this session has no chat list
@@ -2916,6 +2940,9 @@ struct RootView: View {
             WorkspacesOverviewView(
                 folders: workspaces.folders,
                 summaries: workspaces.summaries,
+                directoryPresentation: workspaces.directoryPresentation,
+                directoryError: workspaces.directoryError,
+                onRetry: { Task { await workspaces.loadLocal() } },
                 sessionsIn: { id in terminals.sessions(in: id).filter(\.alive).count },
                 onOpenFolder: { selectWorkspace($0) },
                 onAdd: { workspaces.requestAdd() }

@@ -101,6 +101,11 @@ struct ClientSidebarRoot: View {
                         // the way the tab layout draws them. On the root
                         // content, so pushed screens bring their own bar.
                         .toolbar {
+                            if ClientKeyboardPresence.shared.isVisible {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    ClientKeyboardDismissButton()
+                                }
+                            }
                             ToolbarItem(placement: .topBarTrailing) {
                                 ClientWorkSearchButton()
                             }

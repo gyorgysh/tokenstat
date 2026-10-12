@@ -81,7 +81,18 @@ struct WorkspacesView: View {
                 terminalPlaceholder(folder)
                 #endif
             } else {
+                #if os(macOS)
+                if model.directoryPresentation == .loading || model.directoryPresentation == .failed {
+                    WorkspaceDirectoryPlaceholder(presentation: model.directoryPresentation,
+                        error: model.directoryError) { Task { await model.loadLocal() } }
+                        .padding(Theme.Space.m)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else {
+                    empty
+                }
+                #else
                 empty
+                #endif
             }
         }
         .background(Theme.background)

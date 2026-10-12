@@ -755,6 +755,11 @@ private extension View {
                 ToolbarItem(placement: .topBarTrailing) {
                     ClientWorkSearchButton()
                 }
+                if ClientKeyboardPresence.shared.isVisible {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ClientKeyboardDismissButton()
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     ClientConnectionChip()
                 }

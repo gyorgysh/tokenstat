@@ -1819,6 +1819,12 @@ fn clear_all_unreachable() {
     if let Ok(mut offered) = offered_direct_candidates().lock() {
         offered.clear();
     }
+    if let Ok(mut asked) = last_candidate_refresh().lock() {
+        asked.clear();
+    }
+    if let Ok(mut checked) = last_relay_direct_check().lock() {
+        checked.clear();
+    }
 }
 
 /// Addresses this host can honestly offer for a direct connection right now.
@@ -2323,6 +2329,10 @@ fn refresh_peer_direct_candidates(peer_hex: &str, remembered: Option<&str>) {
     if !should_refresh_peer_direct_candidates(peer_hex, remembered) {
         return;
     }
+    refresh_peer_candidate_list(peer_hex);
+}
+
+fn refresh_peer_candidate_list(peer_hex: &str) {
     // The probe itself is relayed traffic, and during a cooldown its answer
     // cannot be used yet. One per minute per peer, not one per dial.
     if !claim_candidate_refresh(peer_hex) {
@@ -2726,55 +2736,95 @@ pub(crate) fn dial_peer_for(
     peer_hex: &str,
     purpose: ChannelPurpose,
 ) -> Result<(tokenstat_remote::Connection, &'static str), String> {
-    crate::request_context::refuse_remote("outbound peer connections")?;
-    crate::account_session::check_current()?;
-    let key = public_key_from_hex(peer_hex).map_err(|e| e.to_string())?;
-    let store = PeerStore::load().map_err(|e| e.to_string())?;
-    let peer = store
-        .get(&key)
-        .ok_or("that machine is not in this one's peer list")?;
-    // Refused here as well as by the far end. Calling a revoked peer would
-    // otherwise dial, handshake, and be turned away, which is slower and reads
-    // as a network problem rather than as the decision it is.
-    if !store.is_approved(&key) {
-        return Err(format!(
-            "{} is not approved on this machine, so nothing is sent to it",
-            peer.label
-        ));
+    let context = PeerDialContext::load(peer_hex)?;
+    match context.direct(peer_hex, false) {
+        Ok(connection) => Ok((connection, "direct")),
+        Err(error) => tunnel_dial(
+            &settings(),
+            context.key,
+            &context.identity,
+            &context.label,
+            purpose,
+            error,
+        )
+        .map(|connection| {
+            // This fresh dial already checked direct. Pooled reuse waits for
+            // the next interval, or a network nudge, before checking again.
+            if let Ok(mut checked) = last_relay_direct_check().lock() {
+                checked.insert(peer_hex.to_string(), Instant::now());
+            }
+            remember_route(peer_hex, Route::Relay);
+            (connection, "relay")
+        }),
     }
-    let label = peer.label.clone();
-    let address = peer.address.clone();
-    drop(store);
+}
 
-    let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    let peer_hex = tokenstat_identity::hex(&key);
-    // Discovery can use the hosted service even when the payload later goes
-    // direct: ask the peer for current listen addresses, try those, then the
-    // relay. Screen used to be the only caller that did this.
-    refresh_peer_direct_candidates(&peer_hex, address.as_deref());
-    let mut candidates = candidates_for_peer(&peer_hex, address.as_deref());
-    // Filter before measuring: backoff counts failed attempts, and an offer of
-    // loopback-only addresses that nothing dials is not an attempt. The race
-    // below re-checks, since an offer can land between here and the dial.
-    candidates.retain(|candidate| direct_candidate_address_is_usable(&candidate.address));
-    let direct = try_direct_with_backoff(&peer_hex, !candidates.is_empty(), || {
-        dial_direct_candidates(&peer_hex, candidates, &identity, key, &label)
-    });
-    match direct {
-        Ok((connection, address)) => {
-            clear_direct_miss(&peer_hex);
-            remember_route(&peer_hex, Route::Direct);
-            // Persistence follows proof: TCP connected and the pinned key
-            // completed Noise. Merely advertising a candidate never writes it.
-            let _ = remember_direct_address(&peer_hex, &address);
-            Ok((connection, "direct"))
+struct PeerDialContext {
+    key: tokenstat_identity::PublicKey,
+    label: String,
+    address: Option<String>,
+    identity: MachineIdentity,
+}
+
+impl PeerDialContext {
+    fn load(peer_hex: &str) -> Result<Self, String> {
+        crate::request_context::refuse_remote("outbound peer connections")?;
+        crate::account_session::check_current()?;
+        let key = public_key_from_hex(peer_hex).map_err(|e| e.to_string())?;
+        let store = PeerStore::load().map_err(|e| e.to_string())?;
+        let peer = store
+            .get(&key)
+            .ok_or("that machine is not in this one's peer list")?;
+        // Refused here as well as by the far end. Calling a revoked peer would
+        // otherwise dial, handshake, and be turned away, which is slower and reads
+        // as a network problem rather than as the decision it is.
+        if !store.is_approved(&key) {
+            return Err(format!(
+                "{} is not approved on this machine, so nothing is sent to it",
+                peer.label
+            ));
         }
-        Err(error) => {
-            tunnel_dial(&settings(), key, &identity, &label, purpose, error).map(|connection| {
-                remember_route(&peer_hex, Route::Relay);
-                (connection, "relay")
-            })
+        let label = peer.label.clone();
+        let address = peer.address.clone();
+        drop(store);
+
+        Ok(Self {
+            key,
+            label,
+            address,
+            identity: MachineIdentity::load_or_create().map_err(|e| e.to_string())?,
+        })
+    }
+
+    fn direct(
+        &self,
+        peer_hex: &str,
+        refresh: bool,
+    ) -> Result<tokenstat_remote::Connection, String> {
+        // Discovery can use the hosted service even when the payload later goes
+        // direct: ask the peer for current listen addresses, try those, then the
+        // relay. Screen used to be the only caller that did this.
+        if refresh {
+            refresh_peer_candidate_list(peer_hex);
+        } else {
+            refresh_peer_direct_candidates(peer_hex, self.address.as_deref());
         }
+        let mut candidates = candidates_for_peer(peer_hex, self.address.as_deref());
+        // Filter before measuring: backoff counts failed attempts, and an offer of
+        // loopback-only addresses that nothing dials is not an attempt. The race
+        // below re-checks, since an offer can land between here and the dial.
+        candidates.retain(|candidate| direct_candidate_address_is_usable(&candidate.address));
+        let (connection, address) =
+            try_direct_with_backoff(peer_hex, !candidates.is_empty(), || {
+                dial_direct_candidates(peer_hex, candidates, &self.identity, self.key, &self.label)
+            })?;
+        crate::account_session::check_current()?;
+        clear_direct_miss(peer_hex);
+        // Persistence follows proof: TCP connected and the pinned key
+        // completed Noise. Merely advertising a candidate never writes it.
+        let _ = remember_direct_address(peer_hex, &address);
+        remember_route(peer_hex, Route::Direct);
+        Ok(connection)
     }
 }
 
@@ -3090,14 +3140,74 @@ fn checkout(peer: &str, purpose: ChannelPurpose) -> Option<tokenstat_remote::Con
     // the empty keys the reap above left behind were dropped.
     let taken = map
         .get_mut(&(peer.to_string(), purpose))
-        .and_then(Vec::pop)
+        .and_then(|idle| {
+            let preferred = idle.iter().rposition(|held| !held.connection.is_relay());
+            preferred
+                .map(|index| idle.swap_remove(index))
+                .or_else(|| idle.pop())
+        })
         .map(|idle| idle.connection);
     map.retain(|_, idle| !idle.is_empty());
     drop(map);
+    let taken = taken.map(|connection| {
+        prefer_pooled_direct(peer, connection, |peer| {
+            PeerDialContext::load(peer)?.direct(peer, true)
+        })
+    });
     if let Some(ref connection) = taken {
         remember_route(peer, Route::from_connection(connection));
     }
     taken
+}
+
+/// Frequent RPCs keep a relay socket alive indefinitely. Try direct again
+/// before the next request, without sending or replaying that request during
+/// discovery. A failed probe leaves the working relay available.
+fn prefer_pooled_direct(
+    peer: &str,
+    connection: tokenstat_remote::Connection,
+    dial: impl FnOnce(&str) -> Result<tokenstat_remote::Connection, String>,
+) -> tokenstat_remote::Connection {
+    if connection.is_relay() && claim_relay_direct_check(peer) {
+        match dial(peer) {
+            Ok(direct) => {
+                // Only idle channels are replaced. Calls already in flight
+                // finish on their existing connection.
+                if let Ok(mut held) = pool().lock() {
+                    for ((held_peer, _), idle) in held.iter_mut() {
+                        if held_peer == peer {
+                            idle.retain(|held| !held.connection.is_relay());
+                        }
+                    }
+                }
+                direct
+            }
+            Err(_) => connection,
+        }
+    } else {
+        connection
+    }
+}
+
+fn last_relay_direct_check() -> &'static Mutex<HashMap<String, Instant>> {
+    static STATE: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn claim_relay_direct_check(peer: &str) -> bool {
+    if is_refreshing_direct() || !direct_is_worth_trying(peer) {
+        return false;
+    }
+    let Ok(mut checked) = last_relay_direct_check().lock() else {
+        return false;
+    };
+    let now = Instant::now();
+    checked.retain(|_, previous| now.duration_since(*previous) < Duration::from_secs(60));
+    if checked.contains_key(peer) {
+        return false;
+    }
+    checked.insert(peer.to_string(), now);
+    true
 }
 
 fn checkin(peer: &str, purpose: ChannelPurpose, connection: tokenstat_remote::Connection) {
@@ -3474,6 +3584,122 @@ fn forwarded_result(
 
 #[cfg(test)]
 mod tests {
+    struct RelayTestSocket(std::net::TcpStream);
+    impl std::io::Read for RelayTestSocket {
+        fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+            std::io::Read::read(&mut self.0, bytes)
+        }
+    }
+    impl std::io::Write for RelayTestSocket {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            std::io::Write::write(&mut self.0, bytes)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            std::io::Write::flush(&mut self.0)
+        }
+    }
+    impl tokenstat_remote::Transport for RelayTestSocket {
+        fn close(&mut self) {
+            let _ = self.0.shutdown(std::net::Shutdown::Both);
+        }
+        fn set_deadline(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+            self.0.set_read_timeout(timeout)?;
+            self.0.set_write_timeout(timeout)
+        }
+        fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+            self.0.set_read_timeout(timeout)
+        }
+        fn is_relay(&self) -> bool {
+            true
+        }
+    }
+
+    fn route_test_pair(
+        relay: bool,
+    ) -> (tokenstat_remote::Connection, tokenstat_remote::Connection) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let local = MachineIdentity::from_secret([71; 32]);
+        let remote = MachineIdentity::from_secret([72; 32]);
+        let key = remote.public_key();
+        let worker = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            tokenstat_remote::handshake_responder(Box::new(socket), &remote).unwrap()
+        });
+        let socket = std::net::TcpStream::connect(address).unwrap();
+        let transport: Box<dyn tokenstat_remote::Transport> = if relay {
+            Box::new(RelayTestSocket(socket))
+        } else {
+            Box::new(socket)
+        };
+        let connection =
+            tokenstat_remote::handshake_initiator(transport, &local, Some(key), "QA peer").unwrap();
+        (connection, worker.join().unwrap())
+    }
+
+    #[test]
+    fn pooled_relay_upgrades_before_sending_and_keeps_relay_on_probe_failure() {
+        let (relay, mut relay_peer) = route_test_pair(true);
+        let (direct, mut direct_peer) = route_test_pair(false);
+        let mut chosen = prefer_pooled_direct("pooled-upgrade-success", relay, |_| Ok(direct));
+        assert!(!chosen.is_relay());
+        chosen.send(b"one request").unwrap();
+        assert_eq!(
+            direct_peer
+                .receive_within(4096, Duration::from_secs(2))
+                .unwrap(),
+            b"one request"
+        );
+        assert!(
+            relay_peer
+                .receive_within(4096, Duration::from_secs(2))
+                .is_err(),
+            "no request reached the discarded relay"
+        );
+        let chosen = prefer_pooled_direct("pooled-upgrade-success", chosen, |_| {
+            panic!("direct stays direct")
+        });
+        drop(chosen);
+
+        let (relay, mut relay_peer) = route_test_pair(true);
+        let mut chosen =
+            prefer_pooled_direct(
+                "pooled-upgrade-failure",
+                relay,
+                |_| Err("LAN denied".into()),
+            );
+        assert!(chosen.is_relay());
+        chosen.send(b"one request").unwrap();
+        assert_eq!(
+            relay_peer
+                .receive_within(4096, Duration::from_secs(2))
+                .unwrap(),
+            b"one request"
+        );
+        let chosen = prefer_pooled_direct("pooled-upgrade-failure", chosen, |_| {
+            panic!("no repeated probe per poll")
+        });
+        assert!(chosen.is_relay());
+    }
+
+    #[test]
+    fn relay_direct_checks_are_bounded_and_skip_nested_discovery() {
+        let peer = "pooled-upgrade-interval";
+        assert!(claim_relay_direct_check(peer));
+        assert!(!claim_relay_direct_check(peer));
+        last_relay_direct_check()
+            .lock()
+            .unwrap()
+            .insert(peer.into(), Instant::now() - Duration::from_secs(61));
+        assert!(claim_relay_direct_check(peer));
+        assert!(!with_refreshing_direct(|| claim_relay_direct_check(
+            "pooled-upgrade-nested"
+        )));
+        note_direct_miss("pooled-upgrade-cooldown");
+        assert!(!claim_relay_direct_check("pooled-upgrade-cooldown"));
+        clear_direct_miss("pooled-upgrade-cooldown");
+    }
+
     #[test]
     #[cfg(unix)]
     fn revocation_stops_requests_on_an_authenticated_pooled_connection() {

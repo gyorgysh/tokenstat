@@ -8,6 +8,7 @@ Run xcodegen with the emitted spec, then xcodebuild test on one booted simulator
 """
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +20,10 @@ OUT.mkdir(parents=True, exist_ok=True)
 fixture = ROOT / "target/routing-qa/native-fixture.json"
 if not fixture.is_file():
     raise SystemExit("Start chat-routing-e2e.py --serve before generating native QA.")
+# FFI builds replace Vendor in place. Keep this QA target's dependency stable
+# while other platform builds run, and avoid cached missing-framework lookups.
+qa_ffi = OUT / "RoutingQAFFI.xcframework"
+shutil.copytree(ROOT / "apps/mac/Vendor/TokenstatFFI.xcframework", qa_ffi, dirs_exist_ok=True)
 bridge = (ROOT / "apps/mac/Sources/Bridge/Bridge.swift").read_text()
 needle = "    static func connect() {"
 assert bridge.count(needle) == 1
@@ -48,7 +53,7 @@ project = {
         "RoutingQA": {
             "type": "application", "platform": platform, "sources": sources,
             "dependencies": [
-                {"framework": str(ROOT / "apps/mac/Vendor/TokenstatFFI.xcframework"), "embed": False},
+                {"framework": str(qa_ffi), "embed": False},
                 {"package": "SwiftTerm"},
             ],
             "settings": {"base": {"PRODUCT_BUNDLE_IDENTIFIER": "ai.tokenstat.routingqa",
