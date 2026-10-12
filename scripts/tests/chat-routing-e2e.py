@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -81,7 +82,7 @@ def main():
         control.write_text(json.dumps({"codex": [], "grok": []}))
         for backend in ("codex", "grok"):
             executable = root / "bin" / backend
-            executable.write_text(FAKE_PROVIDER)
+            executable.write_text(FAKE_PROVIDER.replace("#!/usr/bin/python3", f"#!{sys.executable}", 1))
             executable.chmod(0o700)
         socket_path = root / "host.sock"
         environment = dict(os.environ, TOKENSTAT_DATA_DIR=str(root / "data"),
@@ -218,6 +219,12 @@ def main():
                     while not stop.exists() and time.monotonic() < deadline:
                         time.sleep(0.5)
                     stop.unlink(missing_ok=True)
+            except Exception:
+                trace = root / "trace.ndjson"
+                print("QA control:", control.read_text(), file=sys.stderr)
+                print("QA trace:", trace.read_text()[-4000:] if trace.exists() else "<none>", file=sys.stderr)
+                print("QA host log:", (root / "host.log").read_text()[-4000:], file=sys.stderr)
+                raise
             finally:
                 host.terminate()
                 try:

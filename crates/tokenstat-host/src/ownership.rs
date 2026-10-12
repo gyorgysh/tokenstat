@@ -39,9 +39,9 @@
 //! way to run a development host beside a real one, and neither is asked to
 //! yield. Only a second daemon carrying the *same key* is a problem.
 
+use std::io::Write;
 #[cfg(unix)]
-use std::io::{BufRead, BufReader};
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::time::Duration;
 
