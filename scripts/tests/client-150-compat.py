@@ -42,15 +42,20 @@ def main():
         )
         try:
             deadline = time.monotonic() + 20
-            while not endpoint.exists():
+            while True:
                 if process.poll() is not None:
                     raise AssertionError(f"hostd exited: {process.stderr.read()}")
-                assert time.monotonic() < deadline, "hostd did not bind its socket"
-                time.sleep(0.05)
-
-            with socket.socket(socket.AF_UNIX) as connection:
+                connection = socket.socket(socket.AF_UNIX)
                 connection.settimeout(20)
-                connection.connect(str(endpoint))
+                try:
+                    connection.connect(str(endpoint))
+                    break
+                except (FileNotFoundError, ConnectionRefusedError):
+                    connection.close()
+                    assert time.monotonic() < deadline, "hostd did not listen on its socket"
+                    time.sleep(0.05)
+
+            with connection:
                 with connection.makefile("rwb", buffering=0) as stream:
                     request_id = 0
 

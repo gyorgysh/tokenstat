@@ -4189,19 +4189,16 @@ mod tests {
     }
 
     #[test]
-    fn muse_advertises_every_available_spark_model() {
-        let muse = backends(false)
-            .into_iter()
-            .find(|backend| backend.get("id").and_then(serde_json::Value::as_str) == Some("muse"))
-            .expect("Muse backend is advertised");
+    fn muse_fallback_includes_wonder_and_all_confirmed_spark_variants() {
         assert_eq!(
-            muse["models"],
-            serde_json::json!([
+            crate::agent_models::fallback_for("muse"),
+            &[
+                "muse-wonder-1.0",
                 "muse-spark-1.3",
                 "muse-spark-1.3-contributor",
                 "muse-spark-1.2",
                 "muse-spark-1.2-contributor",
-            ])
+            ]
         );
     }
 

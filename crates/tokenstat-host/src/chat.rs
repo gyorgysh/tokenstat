@@ -10898,10 +10898,10 @@ mod tests {
     }
 
     #[test]
-    fn chat_advertises_curated_models_where_enumeration_cannot_reach() {
-        // Muse and Claude have no list command. An installed one must offer
-        // its curated set (the Spark models, the haiku/sonnet aliases), not
-        // just the agent default; a missing one advertises nothing.
+    fn chat_keeps_model_choices_for_claude_and_muse() {
+        // Claude offers curated aliases. Muse offers its live catalog or the
+        // fallback while discovery is pending or fails. Neither installed
+        // agent is pinned to Default; a missing one advertises nothing.
         for backend in backends(false) {
             let id = backend["id"].as_str().unwrap();
             if !matches!(id, "claude" | "muse") {
@@ -10910,7 +10910,17 @@ mod tests {
             if backend["installed"] == false {
                 assert_eq!(backend["models"], json!([]), "{id}");
             } else {
-                assert_eq!(backend["modelListStatus"], json!("curated"), "{id}");
+                if id == "claude" {
+                    assert_eq!(backend["modelListStatus"], json!("curated"), "{id}");
+                } else {
+                    assert!(
+                        matches!(
+                            backend["modelListStatus"].as_str(),
+                            Some("loading" | "live" | "refreshFailed")
+                        ),
+                        "{id}: {backend}"
+                    );
+                }
                 assert!(
                     backend["models"]
                         .as_array()

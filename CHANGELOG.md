@@ -14,6 +14,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Changed
 
 - Windows chat routing settings and status live in the inspector alongside conversation details, keeping the composer focused on writing messages.
+- Muse model choices refresh from the installed agent's catalog, including Muse Wonder 1.0, while retaining the existing Spark Contributor choices.
 
 ### Fixed
 

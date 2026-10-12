@@ -66,10 +66,9 @@
 //!
 //! ## Billing
 //!
-//! Muse writes no cost, and its model catalogue lists `cost: null` for every
-//! `muse-spark` model. That is not the same as knowing the usage is covered by
-//! a plan, so this reports [`BillingMode::Unknown`] rather than inventing
-//! either answer.
+//! Muse session logs write no charged cost. Catalog token prices do not say
+//! whether a recorded turn was billed through the API or covered by a plan,
+//! so this reports [`BillingMode::Unknown`] rather than inventing either answer.
 
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};

@@ -31,15 +31,21 @@ enum Cached {
 }
 
 /// Backends whose CLI can enumerate its own models.
-const LISTABLE: &[&str] = &["grok", "cursor", "agy", "codex", "opencode", "opencode2"];
+const LISTABLE: &[&str] = &[
+    "grok",
+    "cursor",
+    "agy",
+    "codex",
+    "muse",
+    "opencode",
+    "opencode2",
+];
 
 /// The curated list when no probe answers.
 ///
 /// One table for every caller, so a backend cannot advertise models its
-/// status calls default-only, or the reverse. Claude and Muse have no
-/// list command, so these are the whole picker for them rather than a
-/// stopgap: dropping them pins chat to the agent default with nothing
-/// on screen saying why.
+/// status calls default-only, or the reverse. Claude has no list command,
+/// so its aliases are the whole picker rather than a stopgap.
 pub(crate) fn fallback_for(id: &str) -> &'static [&'static str] {
     match id {
         // Claude Code resolves these aliases itself ("fable", "opus", or
@@ -61,10 +67,11 @@ pub(crate) fn fallback_for(id: &str) -> &'static [&'static str] {
             "gpt-5.4",
             "gpt-5.4-mini",
         ],
-        // Muse does not expose a list-models command. Its built-in model
-        // picker currently offers this Spark set, so keep the complete
-        // choice visible rather than pinning chat to Contributor.
+        // Muse's MSP model/list replaces this snapshot after discovery.
+        // Keep the confirmed Contributor aliases: MSP lists base models,
+        // while the terminal picker also offers these discounted variants.
         "muse" => &[
+            "muse-wonder-1.0",
             "muse-spark-1.3",
             "muse-spark-1.3-contributor",
             "muse-spark-1.2",
@@ -219,6 +226,7 @@ fn probe_all(force: bool) {
         });
         scope.spawn(|| fill("agy", force, || list("agy", &["models"], parse_agy_models)));
         scope.spawn(|| fill("codex", force, codex_models));
+        scope.spawn(|| fill("muse", force, muse_models));
         scope.spawn(|| {
             fill("opencode", force, || {
                 list("opencode", &["models"], parse_opencode_models)
@@ -385,20 +393,22 @@ fn reap_list_child(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-/// Codex's model list, over its app server.
-///
-/// Every other CLI here answers a `models` subcommand. Codex does not: its
-/// picker is part of the interactive UI, `codex models` wants a terminal, and
-/// the list itself is served by `codex app-server` as a `model/list` request.
-/// So this is a three-line JSON-RPC conversation, not a command whose output
-/// gets parsed, and it is the reason a Codex chat had no model picker at all
-/// while every other agent had one.
-///
-/// The child is killed, not asked to stop. `app-server` is a server: it does
-/// not exit when its question has been answered, and there is nothing else we
-/// want from it.
 fn codex_models() -> Option<Vec<String>> {
-    let bin = crate::launcher::resolve_command("codex")?;
+    parse_codex_models(&model_list_rpc("codex", &["app-server"])?)
+}
+
+fn muse_models() -> Option<Vec<String>> {
+    parse_muse_models(&model_list_rpc(
+        "muse",
+        &["serve", "--provider", "meta", "--no-session-log"],
+    )?)
+}
+
+/// Codex and Muse enumerate through a stdio JSON-RPC server rather than a
+/// `models` command. Discovery opens no agent session and sends no prompt.
+/// Retire the server's process tree as soon as its catalog has been read.
+fn model_list_rpc(command_name: &str, args: &[&str]) -> Option<String> {
+    let bin = crate::launcher::resolve_command(command_name)?;
     let path_var = crate::launcher::search_path_var();
     let mut command = Command::new(bin);
     #[cfg(windows)]
@@ -407,7 +417,7 @@ fn codex_models() -> Option<Vec<String>> {
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
     command
-        .arg("app-server")
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -459,7 +469,7 @@ fn codex_models() -> Option<Vec<String>> {
         rx.recv_timeout(LIST_TIMEOUT).ok()
     })();
     reap_list_child(&mut child);
-    parse_codex_models(&answer?)
+    answer
 }
 
 /// The ids out of one `model/list` answer, in the order the server gave them,
@@ -475,6 +485,35 @@ pub(crate) fn parse_codex_models(line: &str) -> Option<Vec<String>> {
         .filter(|id| is_model_id(id))
         .map(str::to_string)
         .collect();
+    (!ids.is_empty()).then_some(ids)
+}
+
+/// Muse's catalog contains selectable base models, newest first. Keep that
+/// order and add only confirmed Contributor aliases whose base is present.
+/// Unknown future models arrive without needing a tokenstat release.
+fn parse_muse_models(line: &str) -> Option<Vec<String>> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let models = value.get("result")?.get("models")?.as_array()?;
+    let mut ids = Vec::new();
+    for model in models {
+        if model.get("hidden").and_then(serde_json::Value::as_bool) == Some(true) {
+            continue;
+        }
+        let Some(id) = model.get("modelId").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if !is_model_id(id) || id.starts_with('-') || ids.iter().any(|known| known == id) {
+            continue;
+        }
+        ids.push(id.to_string());
+        for alias in fallback_for("muse") {
+            if alias.strip_suffix("-contributor") == Some(id)
+                && !ids.iter().any(|known| known == alias)
+            {
+                ids.push((*alias).to_string());
+            }
+        }
+    }
     (!ids.is_empty()).then_some(ids)
 }
 
@@ -710,10 +749,9 @@ mod tests {
 
     #[test]
     fn unlistable_backends_report_curated_or_default_only() {
-        // Muse and Claude have no list command, so the curated table is the
-        // whole picker for them. The status must say so: "defaultOnly" while
+        // Claude has no list command, so the curated table is the
+        // whole picker for it. The status must say so: "defaultOnly" while
         // models are advertised is the picker contradicting itself.
-        assert_eq!(super::list_status("muse"), "curated");
         assert_eq!(super::list_status("claude"), "curated");
         assert_eq!(super::list_status("sh"), "defaultOnly");
         assert_eq!(super::list_status("no-such-backend"), "defaultOnly");
@@ -721,6 +759,85 @@ mod tests {
         assert!(!super::fallback_for("claude").is_empty());
         assert!(super::fallback_for("sh").is_empty());
         assert!(super::fallback_for("opencode").is_empty());
+    }
+
+    #[test]
+    fn muse_catalog_discovers_new_models_and_preserves_confirmed_variants() {
+        let line = r#"{"id":2,"result":{"models":[
+            {"modelId":"muse-wonder-1.0"},
+            {"modelId":"muse-spark-1.3","isDefault":true},
+            {"modelId":"muse-spark-1.3"},
+            {"modelId":"muse-future-2.0"},
+            {"modelId":"internal-eval","hidden":true},
+            {"modelId":"--unsafe-flag"},
+            {"modelId":"invalid model"},
+            {"displayLabel":"missing id"}
+        ]}}"#;
+        assert_eq!(
+            parse_muse_models(line),
+            Some(vec![
+                "muse-wonder-1.0".into(),
+                "muse-spark-1.3".into(),
+                "muse-spark-1.3-contributor".into(),
+                "muse-future-2.0".into(),
+            ])
+        );
+    }
+
+    #[test]
+    fn muse_catalog_errors_and_empty_results_keep_the_fallback() {
+        for line in [
+            "not json",
+            r#"{"method":"model/changed","params":{}}"#,
+            r#"{"id":2,"error":{"code":-32601}}"#,
+            r#"{"id":2,"result":{"models":[]}}"#,
+        ] {
+            assert_eq!(parse_muse_models(line), None);
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn muse_discovery_initializes_stdio_and_ignores_notifications() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("muse-fixture");
+        std::fs::write(
+            &executable,
+            r#"#!/bin/sh
+IFS= read -r line
+case "$line" in *'"method":"initialize"'*) ;; *) exit 1 ;; esac
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}'
+IFS= read -r line
+case "$line" in *'"method":"initialized"'*) ;; *) exit 1 ;; esac
+IFS= read -r line
+case "$line" in *'"method":"model/list"'*) ;; *) exit 1 ;; esac
+printf '%s\n' '{"jsonrpc":"2.0","method":"initialized","params":{"id":2}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"models":[{"modelId":"muse-wonder-1.0"}]}}'
+sleep 30
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let started = Instant::now();
+        let answer = model_list_rpc(executable.to_str().unwrap(), &[]).unwrap();
+        assert_eq!(
+            parse_muse_models(&answer),
+            Some(vec!["muse-wonder-1.0".into()])
+        );
+        assert!(started.elapsed() < LIST_TIMEOUT);
+    }
+
+    #[test]
+    #[ignore = "requires an installed Muse CLI and its live model catalog"]
+    fn installed_muse_catalog_is_discovered() {
+        let models = muse_models().expect("Muse MSP model/list answers");
+        assert!(
+            models.iter().any(|id| id.starts_with("muse-")),
+            "{models:?}"
+        );
+        eprintln!("Muse models: {models:?}");
     }
 
     #[test]
