@@ -60,6 +60,15 @@ final class RoutingUITests: XCTestCase {
         XCTAssertTrue(save.waitForExistence(timeout: 10))
         app.buttons.matching(identifier: "Cancel").firstMatch.tap()
         app.buttons["Conversation"].tap()
+        let routing = app.buttons["chat.routing"]
+        XCTAssertTrue(routing.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(routing.label, "Routing")
+        XCTAssertEqual(routing.frame.width, 44, accuracy: 1)
+        XCTAssertTrue(routing.isHittable)
+        capture(app, "iphone17-routing-composer")
+        routing.tap()
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        app.buttons.matching(identifier: "Cancel").firstMatch.tap()
         let draft = app.textFields.firstMatch
         XCTAssertTrue(draft.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(draft.isHittable, "Limit notice must leave the composer reachable")

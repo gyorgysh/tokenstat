@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.outlined.AltRoute
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.BarChart
@@ -63,7 +64,7 @@ enum class ActionIcon {
     Merge, Comment, Reopen, Checkout, Filter, EnterFullScreen, ExitFullScreen,
     Delete,
     External, Next, Latest, Back, More, Search, SearchAll, Reveal, Docs, Source, Profile, Home, Help,
-    Send, Attach, FastMode, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
+    Send, Attach, FastMode, Routing, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
     Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
     Disclosure,
     ;
@@ -131,6 +132,7 @@ enum class ActionIcon {
             // document sheet reads as "a file", not as "add a file".
             Attach -> Icons.Default.AttachFile
             FastMode -> Icons.Default.Bolt
+            Routing -> Icons.AutoMirrored.Outlined.AltRoute
             Persona -> Icons.Default.Person
             Plan -> Icons.Default.Description
             Allow -> Icons.Default.Check

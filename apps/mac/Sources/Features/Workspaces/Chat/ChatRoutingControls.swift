@@ -6,17 +6,42 @@ struct ChatRoutingControls: View {
     let chat: ChatConversation
     var title: String? = nil
     var prominent = false
+    var compact = false
     @State private var showing = false
+    private var automatic: Bool {
+        chat.routing?.policy.enabled == true || chat.routing?.policy.waitForReset == true
+    }
+    private var mode: String {
+        let policy = chat.routing?.policy ?? ChatRoutingPolicy()
+        return L10n.text(policy.enabled
+            ? (policy.waitForReset ? "common.chat_route_combined_mode" : "common.chat_route_fallback_mode")
+            : (policy.waitForReset ? "common.chat_route_wait_mode" : "common.chat_route_manual"))
+    }
     var body: some View {
         Group {
-            if prominent { action.buttonStyle(AccentButtonStyle()) }
+            if compact {
+                action
+                    .environment(\.compactActions, true)
+                    .buttonStyle(.plain)
+                    .font(Theme.callout)
+                    .frame(width: 44, height: 44)
+                    .foregroundStyle(automatic ? Theme.accent : .secondary)
+                    .background(automatic ? Theme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 8))
+                    .contentShape(.rect)
+                    .help(L10n.text("common.chat_routing_intro"))
+                    .accessibilityLabel(L10n.text("common.chat_routing"))
+                    .accessibilityHint(L10n.text("common.chat_routing_intro"))
+                    .accessibilityValue(mode)
+                    .accessibilityIdentifier("chat.routing")
+            }
+            else if prominent { action.buttonStyle(AccentButtonStyle()) }
             else { action.buttonStyle(SecondaryButtonStyle(small: true)) }
         }
             .disabled(model.savedCopy != nil)
             .sheet(isPresented: $showing) { ChatRoutingSheet(model: model, chat: chat) }
     }
     private var action: some View {
-        Button(title ?? L10n.text("common.chat_routing"), .settings) { showing = true }
+        Button(title ?? L10n.text("common.chat_routing"), compact ? .routing : .settings) { showing = true }
     }
 }
 struct ChatRoutingSection: View {

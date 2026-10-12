@@ -8,11 +8,15 @@ import ai.tokenstat.tokenstat.ui.theme.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -37,6 +41,7 @@ private fun routeActivityLabel(kind: String): String =
         else -> L10n.text("common.chat_route_event_paused")
     }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ChatRoutingControls(
     chat: JsonObject,
@@ -45,8 +50,10 @@ internal fun ChatRoutingControls(
     onChanged: () -> Unit,
     showNotice: Boolean = true,
     showSection: Boolean = true,
+    showShortcut: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
+    val colors = LocalTsColors.current
     fun agentLabel(id: String): String =
         backends
             .firstOrNull { it.routeText("id") == id }
@@ -81,6 +88,33 @@ internal fun ChatRoutingControls(
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        if (showShortcut) {
+            val automatic = policy?.bol("enabled") == true || policy?.bol("waitForReset") == true
+            val mode = L10n.text(if (policy?.bol("enabled") == true) {
+                if (policy.bol("waitForReset")) "common.chat_route_combined_mode" else "common.chat_route_fallback_mode"
+            } else {
+                if (policy?.bol("waitForReset") == true) "common.chat_route_wait_mode" else "common.chat_route_manual"
+            })
+            TooltipBox(
+                positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = { PlainTooltip { Text(L10n.text("common.chat_routing_intro")) } },
+                state = rememberTooltipState(),
+            ) {
+                IconButton(
+                    onClick = { showing = true },
+                    modifier = Modifier.semantics { stateDescription = mode }.background(
+                        if (automatic) colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent,
+                        RoundedCornerShape(8.dp),
+                    ),
+                ) {
+                    Icon(
+                        ActionIcon.Routing.vector,
+                        L10n.text("common.chat_routing"),
+                        tint = if (automatic) colors.accent else colors.textSecondary,
+                    )
+                }
+            }
+        }
         if (showNotice && limit != null)
             TsCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {

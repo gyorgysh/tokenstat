@@ -1860,6 +1860,16 @@ fun ChatSection(
                 },
                 backends = backends,
                 onAgent = { showingAgent = true },
+                routing = {
+                    if (!offline && openChat != null) {
+                        key(projectOwner, openChat.str("id")) {
+                            ChatRoutingControls(openChat, backends,
+                                { method, params -> model.workspaceSection(peer, method, params) },
+                                { scope.launch { refreshChats() } },
+                                showNotice = false, showSection = false, showShortcut = true)
+                        }
+                    }
+                },
                 launchMode = LaunchDefaults.mode(launchChoice.read()),
                 offline = offline,
                 fastModeSaving = fastModeSaveId != null,
@@ -2905,6 +2915,7 @@ private fun ChatComposer(
     onChange: (String, String) -> Unit,
     backends: List<JsonObject>,
     onAgent: () -> Unit,
+    routing: @Composable () -> Unit = {},
     /// What a new conversation would open in, for the moment before one is
     /// selected. See `LaunchDefaults`.
     launchMode: String,
@@ -2969,6 +2980,7 @@ private fun ChatComposer(
                     enabled = !sending,
                     modifier = Modifier.weight(1f),
                 )
+                routing()
                 IconButton(onClick = { expanded = !expanded }) {
                     Icon(
                         if (expanded) ActionIcon.ExitFullScreen.vector else ActionIcon.EnterFullScreen.vector,

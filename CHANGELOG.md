@@ -9,6 +9,12 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.6.1]
+
+### Changed
+
+- iPhone, iPad and Android chat composers use a compact routing icon beside the agent picker, with the same active tint and rounded shape as Fast mode.
+
 ## [1.6.0] - 2026-10-12
 
 ### Changed

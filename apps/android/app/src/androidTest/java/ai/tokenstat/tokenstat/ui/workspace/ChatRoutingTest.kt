@@ -42,7 +42,7 @@ class ChatRoutingTest {
             obj("""{"id":"muse","label":"Muse","installed":true,"models":[],"efforts":[]}"""),
         )
 
-    private fun show(policy: JsonObject, limit: JsonObject? = null) {
+    private fun show(policy: JsonObject, limit: JsonObject? = null, shortcut: Boolean = false) {
         val state = buildJsonObject {
             put("policy", policy)
             put("limit", limit ?: JsonNull)
@@ -80,6 +80,9 @@ class ChatRoutingTest {
                                     }
                                 },
                                 {},
+                                showNotice = !shortcut,
+                                showSection = !shortcut,
+                                showShortcut = shortcut,
                             )
                         }
                     }
@@ -95,7 +98,7 @@ class ChatRoutingTest {
         // startup frame. Modal sheets use a separate window, so capture the
         // composed system surface once their controls have been asserted.
         val image =
-            if (name == "routing-limit-preview" || name == "routing-section-preview")
+            if (name == "routing-limit-preview" || name == "routing-section-preview" || name == "routing-shortcut-preview")
                 compose.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap()
             else instrumentation.uiAutomation.takeScreenshot() ?: error("No routing screenshot")
         val resolver = instrumentation.targetContext.contentResolver
@@ -109,6 +112,22 @@ class ChatRoutingTest {
                 },
             ) ?: error("Cannot save routing screenshot")
         resolver.openOutputStream(uri)!!.use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    @Test
+    fun composerShortcutOpensRoutingAndPreservesWaitOnlyPolicy() {
+        show(obj("""{"enabled":false,"waitForReset":true,"routes":[]}"""), shortcut = true)
+        compose.onNodeWithText(text("common.chat_routing")).assertDoesNotExist()
+        val shortcut = compose.onNodeWithContentDescription(text("common.chat_routing"))
+            .assertIsDisplayed().assertHasClickAction()
+        screenshot("routing-shortcut-preview")
+        shortcut.performClick()
+        compose.onNodeWithText(text("common.save")).assertIsDisplayed().performClick()
+        compose.waitUntil { calls.isNotEmpty() }
+        val saved = calls.last()["routing"]!!.jsonObject
+        assertFalse(saved["enabled"]!!.jsonPrimitive.boolean)
+        assertTrue(saved["waitForReset"]!!.jsonPrimitive.boolean)
+        assertEquals(1, calls.last()["expectedRevision"]!!.jsonPrimitive.int)
     }
 
     @Test
