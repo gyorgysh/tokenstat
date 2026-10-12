@@ -248,13 +248,18 @@ mod tests {
     #[test]
     fn whitespace_in_a_filename_is_preserved() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join(" folder ")).unwrap();
-        std::fs::write(dir.path().join(" folder / file "), "correct").unwrap();
-        assert_eq!(
-            list(dir.path(), " folder ").unwrap()[0].path,
-            " folder / file "
-        );
-        assert_eq!(read_text(dir.path(), " folder / file ").unwrap(), "correct");
+        // Windows normalizes trailing spaces in path components. Leading and
+        // internal spaces still prove that the listing preserves whitespace.
+        let (folder, file) = if cfg!(windows) {
+            (" folder name", " file name")
+        } else {
+            (" folder ", " file ")
+        };
+        let relative = format!("{folder}/{file}");
+        std::fs::create_dir(dir.path().join(folder)).unwrap();
+        std::fs::write(dir.path().join(folder).join(file), "correct").unwrap();
+        assert_eq!(list(dir.path(), folder).unwrap()[0].path, relative);
+        assert_eq!(read_text(dir.path(), &relative).unwrap(), "correct");
     }
 
     #[test]

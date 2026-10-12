@@ -25,6 +25,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Chat, SSH, terminal and screen sessions reject late replies from an old host or account, retain final output, and cancel interrupted file transfers without sending data to a new destination.
 - Automation and workflow edits keep their drafts and run state across refreshes, account changes and delayed responses on desktop and mobile.
 - Installers and app updates preserve existing configuration and unrelated files during replacement or rollback. Windows archive and installer failures now stop packaging.
+- Concurrent workspace saves on Windows retry temporary file-sharing denials, keeping the registry readable and complete.
 - Android remote-screen gestures and keyboard shortcuts no longer turn pinches into clicks or lose modified letter keys. Apple and Windows client state fixes keep loading, navigation and saved work tied to the current view.
 
 ## [1.5.0] - 2026-10-11

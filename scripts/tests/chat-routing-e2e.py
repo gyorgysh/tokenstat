@@ -78,6 +78,10 @@ def main():
         root = Path(temporary)
         (root / "bin").mkdir()
         (root / "project").mkdir()
+        (root / "home" / ".grok").mkdir(parents=True)
+        (root / "home" / ".grok" / "auth.json").write_text("{}")
+        (root / "home" / ".codex").mkdir()
+        (root / "home" / ".codex" / "auth.json").write_text("{}")
         control = root / "control.json"
         control.write_text(json.dumps({"codex": [], "grok": []}))
         for backend in ("codex", "grok"):
@@ -87,7 +91,9 @@ def main():
         socket_path = root / "host.sock"
         environment = dict(os.environ, TOKENSTAT_DATA_DIR=str(root / "data"),
                            TOKENSTAT_IDENTITY_DIR=str(root / "identity"),
+                           HOME=str(root / "home"),
                            PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
+        environment.pop("CODEX_HOME", None)
         with (root / "host.log").open("w") as log:
             host = subprocess.Popen([str(args.host), "--socket", str(socket_path)],
                                     env=environment, stdout=log, stderr=log)
@@ -223,6 +229,11 @@ def main():
                 trace = root / "trace.ndjson"
                 print("QA control:", control.read_text(), file=sys.stderr)
                 print("QA trace:", trace.read_text()[-4000:] if trace.exists() else "<none>", file=sys.stderr)
+                if "workspace" in locals():
+                    try:
+                        print("QA conversations:", json.dumps(call("chat.list", {"workspaceId": workspace}))[-4000:], file=sys.stderr)
+                    except Exception as error:
+                        print("QA conversation read failed:", error, file=sys.stderr)
                 print("QA host log:", (root / "host.log").read_text()[-4000:], file=sys.stderr)
                 raise
             finally:

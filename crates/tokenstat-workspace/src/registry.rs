@@ -144,6 +144,10 @@ impl Registry {
     /// leave a half-written list where a whole one used to be.
     pub fn save_to(&self, path: &Path) -> Result<(), RegistryError> {
         use std::io::Write;
+        static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = WRITE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let parent = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -164,12 +168,30 @@ impl Registry {
                 path: tmp.path().to_path_buf(),
                 source,
             })?;
-        tmp.persist(path)
-            .map(|_| ())
-            .map_err(|error| RegistryError::Io {
-                path: path.to_path_buf(),
-                source: error.error,
-            })
+        let mut attempts = 0;
+        loop {
+            match tmp.persist(path) {
+                Ok(_) => return Ok(()),
+                Err(error)
+                    if cfg!(windows)
+                        && error.error.kind() == std::io::ErrorKind::PermissionDenied
+                        && attempts < 50 =>
+                {
+                    // Windows may briefly deny a replacement while another
+                    // reader or writer has the destination open. Keep the
+                    // complete temporary file and retry the atomic move.
+                    tmp = error.file;
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => {
+                    return Err(RegistryError::Io {
+                        path: path.to_path_buf(),
+                        source: error.error,
+                    });
+                }
+            }
+        }
     }
 
     pub fn save(&self) -> Result<(), RegistryError> {
