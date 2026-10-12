@@ -75,15 +75,7 @@ impl MachineIdentity {
     /// there: the `security` command line takes the secret on argv, where it
     /// is visible in the process table to every process on the machine.
     pub fn load_or_create() -> Result<Self, IdentityError> {
-        let path = key_path()?;
-        if let Some(bytes) = read_key(&path)? {
-            return Ok(Self::from_secret(bytes));
-        }
-
-        let mut seed = [0u8; 32];
-        getrandom::fill(&mut seed).map_err(|e| IdentityError::Random(e.to_string()))?;
-        write_key(&path, &seed)?;
-        Ok(Self::from_secret(seed))
+        Ok(Self::from_secret(load_or_create_key(&key_path()?)?))
     }
 
     /// The identity if this machine already has one, without creating it.
@@ -541,72 +533,132 @@ fn key_path() -> Result<PathBuf, IdentityError> {
     Ok(identity_dir()?.join("machine.key"))
 }
 
-fn read_key(path: &std::path::Path) -> Result<Option<[u8; 32]>, IdentityError> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let bytes = std::fs::read(path).map_err(|e| IdentityError::Io {
+fn read_seed(
+    file: &mut std::fs::File,
+    path: &std::path::Path,
+) -> Result<Option<[u8; 32]>, IdentityError> {
+    use std::io::Read;
+    let io_error = |source| IdentityError::Io {
         path: path.display().to_string(),
-        source: e,
-    })?;
-    // An interrupted create can leave a zero-length file behind. Treat it as
-    // "no identity yet" so the next load regenerates instead of failing, which
-    // would otherwise need a manual delete to recover from.
-    if bytes.is_empty() {
+        source,
+    };
+    let length = file.metadata().map_err(io_error)?.len();
+    // An interrupted first create may leave an empty file. All cooperating
+    // readers hold a lock, so an active writer cannot look like that case.
+    if length == 0 {
         return Ok(None);
     }
-    let seed: [u8; 32] = bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| IdentityError::Malformed(bytes.len()))?;
+    if length != 32 {
+        return Err(IdentityError::Malformed(
+            usize::try_from(length).unwrap_or(usize::MAX),
+        ));
+    }
+    let mut seed = [0u8; 32];
+    file.read_exact(&mut seed).map_err(io_error)?;
     Ok(Some(seed))
 }
 
-fn write_key(path: &std::path::Path, seed: &[u8; 32]) -> Result<(), IdentityError> {
-    // One open, created restricted, so there is never a window where the key
-    // exists with the process umask's permissions; a crash cannot leave a
-    // truncated empty file that blocks the next identity creation either.
+fn read_key(path: &std::path::Path) -> Result<Option<[u8; 32]>, IdentityError> {
+    let io_error = |source| IdentityError::Io {
+        path: path.display().to_string(),
+        source,
+    };
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(io_error(error)),
+    };
+    file.lock_shared().map_err(io_error)?;
+    read_seed(&mut file, path)
+}
+
+fn load_or_create_key(path: &std::path::Path) -> Result<[u8; 32], IdentityError> {
+    use std::io::Write;
+    if let Some(seed) = read_key(path)? {
+        return Ok(seed);
+    }
+    let io_error = |source| IdentityError::Io {
+        path: path.display().to_string(),
+        source,
+    };
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
     #[cfg(unix)]
     {
-        use std::io::Write;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|e| IdentityError::Io {
-                path: path.display().to_string(),
-                source: e,
-            })?;
-        file.write_all(seed).map_err(|e| IdentityError::Io {
-            path: path.display().to_string(),
-            source: e,
-        })?;
-        drop(file);
-        // `mode` only applies at creation, so an existing key created with a
-        // looser mode is tightened here, and a failure is worth surfacing.
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
-            IdentityError::Io {
-                path: path.display().to_string(),
-                source: e,
-            }
-        })?;
-        Ok(())
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
-    #[cfg(not(unix))]
+    let mut file = options.open(path).map_err(io_error)?;
+    // The app and helper can start together. Lock before deciding whether to
+    // generate a key, and never truncate an identity another process created.
+    file.lock().map_err(io_error)?;
+    if let Some(seed) = read_seed(&mut file, path)? {
+        return Ok(seed);
+    }
+    #[cfg(unix)]
     {
-        std::fs::write(path, seed).map_err(|e| IdentityError::Io {
-            path: path.display().to_string(),
-            source: e,
-        })
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(io_error)?;
     }
+    let mut seed = [0u8; 32];
+    getrandom::fill(&mut seed).map_err(|error| IdentityError::Random(error.to_string()))?;
+    file.write_all(&seed).map_err(io_error)?;
+    file.sync_all().map_err(io_error)?;
+    Ok(seed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_first_loads_keep_one_identity() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("machine.key");
+        let barrier = std::sync::Barrier::new(24);
+        let seeds = std::thread::scope(|scope| {
+            let tasks: Vec<_> = (0..24)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        let seed = load_or_create_key(&path).unwrap();
+                        assert_eq!(read_key(&path).unwrap(), Some(seed));
+                        seed
+                    })
+                })
+                .collect();
+            tasks
+                .into_iter()
+                .map(|task| task.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(seeds.iter().all(|seed| *seed == seeds[0]));
+        assert_eq!(std::fs::read(&path).unwrap(), seeds[0]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn empty_key_recovers_but_existing_or_damaged_identity_is_never_replaced() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("machine.key");
+        std::fs::write(&path, []).unwrap();
+        let seed = load_or_create_key(&path).unwrap();
+        assert_eq!(load_or_create_key(&path).unwrap(), seed);
+        std::fs::write(&path, [9; 12]).unwrap();
+        assert!(matches!(
+            load_or_create_key(&path),
+            Err(IdentityError::Malformed(12))
+        ));
+        assert_eq!(std::fs::read(path).unwrap(), vec![9; 12]);
+    }
 
     /// A stored seed must keep deriving the same public key, for ever.
     ///

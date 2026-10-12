@@ -7,6 +7,7 @@
     <NoWarn>$(NoWarn);CS0649</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../apps/windows/Pages/ChatRoutingChoices.cs" Link="ChatRoutingChoices.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatFastMode.cs" Link="ChatFastMode.cs" />
     <Compile Include="../../../apps/windows/Pages/MuseToolPresentation.cs" Link="MuseToolPresentation.cs" />
     <Compile Include="../../../apps/windows/Pages/DiffTextChunks.cs" Link="DiffTextChunks.cs" />

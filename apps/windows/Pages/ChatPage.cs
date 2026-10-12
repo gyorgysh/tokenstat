@@ -281,6 +281,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 L10n.Text("windows.chatpage.answer_them_in_the_transcript.fd152eae")));
         }
         _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.chatpage.spend.85f3d558"), InspectorSpend()));
+        _inspector.Children.Add(RoutingControls());
     }
 
     private string InspectorSpend()
@@ -1697,7 +1698,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var steerNote = PendingSteerText(_openChat);
         if (steerNote.Length > 0) context.Children.Add(SteerNoteBanner(steerNote));
         context.Children.Add(PendingMessages());
-        context.Children.Add(RoutingControls());
         if (OpenBackendMissing()) context.Children.Add(MissingAgentNotice());
         var setupBackend = Backend(Format.Text(_openChat, "backend"));
         if (setupBackend is not null && Installed(setupBackend) && Format.Text(setupBackend, "id") != "sh"

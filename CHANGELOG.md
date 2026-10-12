@@ -9,6 +9,18 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.6.0] - Unreleased
+
+### Changed
+
+- Windows chat routing settings and status live in the inspector alongside conversation details, keeping the composer focused on writing messages.
+
+### Fixed
+
+- Starting the app and helper together keeps one stable pairing identity.
+- Remote connections recover when a peer stalls partway through the first encrypted frame, instead of leaving reads and writes stuck.
+- Windows routing settings preserve a preferred destination outside the fallback list, distinguish models and effort in the preferred picker, and tolerate invalid reset timestamps.
+
 ## [1.5.0] - 2026-10-11
 
 ### Added

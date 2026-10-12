@@ -601,8 +601,8 @@ fn read_noise_frame(
 /// Read one length-prefixed frame.
 ///
 /// `idle_timeout` bounds the wait before the first byte of the frame. Once a
-/// byte has arrived the frame is read to completion with the timeout
-/// suspended, then the timeout is restored. This is what keeps a split stream
+/// byte has arrived the frame gets a longer stall timeout, then the idle
+/// timeout is restored. This is what keeps a split stream
 /// honest: the read half uses a short timeout so an idle reader hands the
 /// write half the shared lock, but a timeout in the *middle* of a frame would
 /// leave the stream misaligned and every later read corrupt — which a browser
@@ -629,7 +629,9 @@ fn read_framed(
                         if filled == 4 {
                             break Ok(());
                         }
-                        stream.set_read_timeout(None).map_err(RemoteError::Io)?;
+                        stream
+                            .set_read_timeout(Some(MESSAGE_STALL_TIMEOUT))
+                            .map_err(RemoteError::Io)?;
                     }
                     Err(e)
                         if e.kind() == std::io::ErrorKind::TimedOut
@@ -638,8 +640,9 @@ fn read_framed(
                         if filled == 0 {
                             break Err(RemoteError::Io(e));
                         }
-                        stream.set_read_timeout(None).map_err(RemoteError::Io)?;
+                        break Err(RemoteError::BrokenMessage);
                     }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(e) => break Err(RemoteError::Io(e)),
                 }
             };
@@ -663,14 +666,21 @@ fn read_framed(
     let mut bytes = vec![0u8; len];
     match idle_timeout {
         Some(timeout) => {
-            // The header is in; the payload must complete without an idle
-            // timeout, then the timeout is restored for the next message.
-            stream.set_read_timeout(None).map_err(RemoteError::Io)?;
+            // A stalled partial frame is terminal: retrying would interpret
+            // the remaining ciphertext as a new length header.
+            stream
+                .set_read_timeout(Some(MESSAGE_STALL_TIMEOUT))
+                .map_err(RemoteError::Io)?;
             let payload_result = stream.read_exact(&mut bytes);
             stream
                 .set_read_timeout(Some(timeout))
                 .map_err(RemoteError::Io)?;
-            payload_result.map_err(RemoteError::Io)?;
+            payload_result.map_err(|error| match error.kind() {
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
+                    RemoteError::BrokenMessage
+                }
+                _ => RemoteError::Io(error),
+            })?;
         }
         None => {
             stream.read_exact(&mut bytes)?;
@@ -1499,6 +1509,63 @@ mod tests {
         // And the deadline is handed back, so the next read still yields to
         // the writer rather than parking on the lock forever.
         assert_eq!(reader.timeout, Some(STREAM_READ_TIMEOUT));
+    }
+
+    /// A peer stopping anywhere in the first encrypted frame cannot retain
+    /// the shared transport lock indefinitely or leave a retryable read.
+    #[test]
+    fn a_stalled_first_frame_is_terminal_after_any_consumed_byte() {
+        struct StalledTransport(StutteringTransport);
+        impl Read for StalledTransport {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                if self.0.position == self.0.data.len() {
+                    assert_eq!(self.0.timeout, Some(MESSAGE_STALL_TIMEOUT));
+                    return Err(std::io::ErrorKind::TimedOut.into());
+                }
+                self.0.read(output)
+            }
+        }
+        impl Write for StalledTransport {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.write(bytes)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl Transport for StalledTransport {
+            fn close(&mut self) {}
+            fn set_deadline(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+                self.set_read_timeout(timeout)
+            }
+            fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+                self.0.set_read_timeout(timeout)
+            }
+        }
+        // Both a partial length prefix and a partial encrypted header must
+        // release the shared connection lock instead of waiting forever.
+        for cut in 1..24 {
+            let (mut sender, mut receiver) = transport_pair();
+            let mut wire = StutteringTransport {
+                data: Vec::new(),
+                position: 0,
+                timeout: None,
+                stall: false,
+            };
+            write_one(&mut sender, &mut wire, b"message").unwrap();
+            wire.data.truncate(cut);
+            wire.timeout = Some(STREAM_READ_TIMEOUT);
+            wire.stall = true;
+            let mut reader = StalledTransport(wire);
+            assert!(
+                matches!(
+                    read_one(&mut receiver, &mut reader, 1024, Some(STREAM_READ_TIMEOUT)),
+                    Err(RemoteError::BrokenMessage)
+                ),
+                "cut at {cut}"
+            );
+            assert_eq!(reader.0.timeout, Some(STREAM_READ_TIMEOUT));
+        }
     }
 
     /// Two Noise transport states that can talk to each other, without a

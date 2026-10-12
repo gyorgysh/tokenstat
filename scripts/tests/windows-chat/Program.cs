@@ -501,3 +501,23 @@ foreach (var sample in new[] { ("Grep", "/tmp/a.txt:1:match"), ("WebFetch", "[li
     Check(MuseToolPresentation.Refine("muse", sample.Item1, "", sample.Item2).Target == "", "output cannot invent a Muse tool subject");
 Check(MuseToolPresentation.Refine("muse", "Bash", "", new string('x', 5 * 1024 * 1024)).Target == "", "Muse parsing is bounded");
 Console.WriteLine("Windows Muse tools: recorded commands, file paths, skill names, queries and todo counts reach compact rows.");
+
+var fallbackRoute = (JsonObject)Json("""{"backend":"claude","model":"fallback"}""");
+var savedPreferred = (JsonObject)Json("""{"backend":"codex","model":"preferred","effort":"high"}""");
+var routingChoices = ChatRoutingChoices.Preferred([fallbackRoute], savedPreferred);
+Check(routingChoices.Count == 3 && ReferenceEquals(routingChoices[1], savedPreferred),
+    "Opening routing settings must preserve a preferred destination outside the fallback list");
+var matchingPreferred = (JsonObject)fallbackRoute.DeepClone();
+routingChoices = ChatRoutingChoices.Preferred([fallbackRoute], matchingPreferred);
+Check(routingChoices.Count == 2 && ReferenceEquals(routingChoices[1], fallbackRoute),
+    "A matching preferred choice must follow model and effort edits to its fallback");
+fallbackRoute["model"] = "changed";
+Check(routingChoices[1]!["model"]!.GetValue<string>() == "changed" && matchingPreferred["model"]!.GetValue<string>() == "fallback",
+    "Draft edits must follow the selected route without mutating the saved policy");
+Check(ChatRoutingChoices.Preferred([], savedPreferred).Count == 2,
+    "A preferred destination remains selectable without fallbacks");
+Check(ChatRoutingChoices.Moment(long.MaxValue) == DateTimeOffset.MaxValue.AddTicks(-9999)
+    && ChatRoutingChoices.Moment(long.MinValue) == DateTimeOffset.MinValue
+    && ChatRoutingChoices.Moment(0) == DateTimeOffset.UnixEpoch,
+    "Malformed provider reset timestamps must not crash the chat inspector");
+Console.WriteLine("Windows routing: independent preferred destinations, linked draft edits and bounded timestamps pass.");

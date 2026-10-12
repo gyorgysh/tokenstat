@@ -51,9 +51,9 @@ internal sealed partial class ChatPage
             body.Children.Add(new TextBlock { Text = (Format.Text(limit, "kind") == "usage" ? L10n.Text("common.chat_limit_reached", Format.Text(limit, "provider")) : Format.Text(limit, "kind") == "throttle" ? L10n.Text("common.chat_throttled", Format.Text(limit, "provider")) : L10n.Text("common.chat_route_failure", Format.Text(limit, "provider"))), TextWrapping = TextWrapping.Wrap, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
             body.Children.Add(Muted(Format.Text(limit, "reason")));
             var reset = limit["resetsAtMs"] is null ? (long?)null : Format.Long(limit, "resetsAtMs");
-            body.Children.Add(Muted(reset.HasValue ? L10n.Text("common.chat_resets_at", DateTimeOffset.FromUnixTimeMilliseconds(reset.Value).LocalDateTime.ToString("g")) : L10n.Text("common.chat_reset_unknown")));
+            body.Children.Add(Muted(reset.HasValue ? L10n.Text("common.chat_resets_at", ChatRoutingChoices.Moment(reset.Value).LocalDateTime.ToString("g")) : L10n.Text("common.chat_reset_unknown")));
             var nextReset = state["nextReset"] as JsonObject;
-            if(nextReset is not null && Format.Text(nextReset["destination"], "backend") != Format.Text(limit, "provider")) body.Children.Add(Muted(L10n.Text("common.chat_route_waiting_for", Format.Text(nextReset["destination"], "backend"), DateTimeOffset.FromUnixTimeMilliseconds(Format.Long(nextReset, "atMs")).ToLocalTime().ToString("g"))));
+            if(nextReset is not null && Format.Text(nextReset["destination"], "backend") != Format.Text(limit, "provider")) body.Children.Add(Muted(L10n.Text("common.chat_route_waiting_for", Format.Text(nextReset["destination"], "backend"), ChatRoutingChoices.Moment(Format.Long(nextReset, "atMs")).ToLocalTime().ToString("g"))));
             if (Format.Flag(state, "needsDeliveryCheck")) body.Children.Add(Muted(L10n.Text("common.chat_route_delivery")));
             if (Format.Text(state, "note") is string note && note.Length > 0) body.Children.Add(Muted(note));
             var policy = state["policy"] as JsonObject;
@@ -116,21 +116,26 @@ internal sealed partial class ChatPage
             var preferredPicker = new ComboBox { Header = L10n.Text("common.chat_route_preferred_picker"), HorizontalAlignment = HorizontalAlignment.Stretch };
             JsonObject? preferredRoute = policy["preferred"] as JsonObject;
             var repaintingPreferred = false;
-            void PaintRoutes()
+            void PaintPreferred()
             {
-                rows.Children.Clear();
                 repaintingPreferred = true;
                 preferredPicker.Items.Clear();
-                preferredPicker.Items.Add(new ComboBoxItem { Content = L10n.Text("common.chat_route_current_preferred") });
                 var preferredIndex = 0;
-                foreach (var candidate in routes)
+                foreach (var candidate in ChatRoutingChoices.Preferred(routes, preferredRoute))
                 {
-                    preferredPicker.Items.Add(new ComboBoxItem { Content = Format.Text(candidate, "backend"), Tag = candidate });
+                    var label = candidate is null ? L10n.Text("common.chat_route_current_preferred")
+                        : string.Join(" · ", new[] { Format.Text(candidate, "backend"), Format.Text(candidate, "model"), Format.Text(candidate, "effort") }.Where(value => value.Length > 0));
+                    preferredPicker.Items.Add(new ComboBoxItem { Content = label, Tag = candidate });
                     if (ReferenceEquals(candidate, preferredRoute) || JsonNode.DeepEquals(candidate, preferredRoute)) { preferredRoute = candidate; preferredIndex = preferredPicker.Items.Count - 1; }
                 }
                 preferredPicker.SelectedIndex = preferredIndex;
                 preferredRoute = (preferredPicker.SelectedItem as ComboBoxItem)?.Tag as JsonObject;
                 repaintingPreferred = false;
+            }
+            void PaintRoutes()
+            {
+                rows.Children.Clear();
+                PaintPreferred();
                 for (var i = 0; i < routes.Count; i++)
                 {
                     var index = i; var route = routes[i];
@@ -143,7 +148,7 @@ internal sealed partial class ChatPage
                     var selected = Format.Text(route, "model"); if (!choices.Contains(selected)) choices.Add(selected);
                     foreach (var model in choices) models.Items.Add(new ComboBoxItem { Content = model.Length == 0 ? L10n.Text("windows.chatpage.default.21b111cb") : model, Tag = model });
                     models.SelectedIndex = choices.IndexOf(selected);
-                    models.SelectionChanged += (_, _) => { if (models.SelectedItem is ComboBoxItem choice) route["model"] = (string?)choice.Tag; };
+                    models.SelectionChanged += (_, _) => { if (models.SelectedItem is ComboBoxItem choice) { route["model"] = (string?)choice.Tag; PaintPreferred(); } };
                     row.Children.Add(models);
                     if (Backend(Format.Text(route, "backend"))?["efforts"] is JsonArray effortList && effortList.Count > 0)
                     {
@@ -154,13 +159,13 @@ internal sealed partial class ChatPage
                         if (!effortChoices.Contains(selectedEffort)) effortChoices.Add(selectedEffort);
                         foreach (var value in effortChoices) effort.Items.Add(new ComboBoxItem { Content = value.Length == 0 ? L10n.Text("windows.chatpage.default.21b111cb") : value, Tag = value });
                         effort.SelectedIndex = effortChoices.IndexOf(selectedEffort);
-                        effort.SelectionChanged += (_, _) => { if (effort.SelectedItem is ComboBoxItem picked) route["effort"] = ((string?)picked.Tag)?.Length > 0 ? (string?)picked.Tag : null; };
+                        effort.SelectionChanged += (_, _) => { if (effort.SelectedItem is ComboBoxItem picked) { route["effort"] = ((string?)picked.Tag)?.Length > 0 ? (string?)picked.Tag : null; PaintPreferred(); } };
                         row.Children.Add(effort);
                     }
 
                     var actions = new FlowPanel { Spacing = Theme.SpaceS };
                     var up = ActionIconGlyph.Button(L10n.Text("common.move_up"), ActionIcon.Move, (_, _) => { (routes[index - 1], routes[index]) = (routes[index], routes[index - 1]); PaintRoutes(); }); up.IsEnabled = index > 0; actions.Children.Add(up);
-                    actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.remove"), ActionIcon.Delete, (_, _) => { routes.RemoveAt(index); PaintRoutes(); }));
+                    actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.remove"), ActionIcon.Delete, (_, _) => { if (ReferenceEquals(preferredRoute, routes[index])) preferredRoute = null; routes.RemoveAt(index); PaintRoutes(); }));
                     row.Children.Add(actions); rows.Children.Add(row);
                 }
             }
@@ -182,7 +187,7 @@ internal sealed partial class ChatPage
                 {
                     foreach (var entry in activity.Reverse())
                     {
-                        history.Children.Add(Muted($"{RoutingActivityLabel(Format.Text(entry, "kind"))} · {DateTimeOffset.FromUnixTimeMilliseconds(Math.Clamp(Format.Long(entry, "atMs"), 0, 253402300799999)).ToLocalTime():g}"));
+                        history.Children.Add(Muted($"{RoutingActivityLabel(Format.Text(entry, "kind"))} · {ChatRoutingChoices.Moment(Format.Long(entry, "atMs")).ToLocalTime():g}"));
                         if(entry?["target"] is JsonObject target) history.Children.Add(Muted($"{Format.Text(entry["source"], "backend")} → {Format.Text(target, "backend")} · {Format.Text(target, "model")} · {Format.Text(target, "effort")}"));
                         history.Children.Add(Muted(Format.Text(entry, "reason")));
                     }
