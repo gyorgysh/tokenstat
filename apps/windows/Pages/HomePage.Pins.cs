@@ -16,7 +16,10 @@ internal sealed partial class HomePage
     {
         _pinScope = null;
         _pinsHost.Children.Clear();
-        _ = RefreshPinsAsync();
+        InvalidateDayCaches();
+        _calendar = null;
+        _hasContent = false;
+        _ = LoadAsync(force: true);
     }
     private async Task RefreshPinsAsync()
     {

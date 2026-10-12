@@ -463,12 +463,12 @@ struct WorkflowsView: View {
     /// Seconds a run took, or has taken so far.
     private func seconds(of run: WorkflowRunRecord) -> Double {
         guard let ended = run.endedAtMs else { return 0 }
-        return max(0, Double(ended - run.startedAtMs) / 1000)
+        return max(0, (Double(ended) - Double(run.startedAtMs)) / 1000)
     }
 
     /// Scale for the duration bars, from the runs actually on screen.
     private var longestRunSeconds: Double {
-        model.runs.prefix(6).map { seconds(of: $0) }.max() ?? 0
+        model.scopedRuns.prefix(6).map { seconds(of: $0) }.max() ?? 0
     }
 
     static func statusTint(_ status: String) -> Color {

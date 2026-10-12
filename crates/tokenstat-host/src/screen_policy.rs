@@ -148,7 +148,11 @@ fn path() -> Result<PathBuf, String> {
         .map_err(|e| e.to_string())
 }
 fn load() -> Result<Store, String> {
-    let mut store: Store = match fs::read(path()?) {
+    load_at(&path()?)
+}
+
+fn load_at(path: &std::path::Path) -> Result<Store, String> {
+    let mut store: Store = match fs::read(path) {
         Ok(v) => serde_json::from_slice(&v).map_err(|e| e.to_string())?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Store::default(),
         Err(e) => return Err(e.to_string()),
@@ -174,16 +178,29 @@ pub(crate) fn prune_pending(pending: &mut Vec<PendingRequest>, now: u64) {
 pub(crate) fn now_secs() -> u64 {
     now()
 }
-fn save(store: &Store) -> Result<(), String> {
-    let path = path()?;
-    fs::create_dir_all(path.parent().ok_or("invalid policy path")?).map_err(|e| e.to_string())?;
-    let temp = path.with_extension("tmp");
-    fs::write(
-        &temp,
-        serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    fs::rename(temp, path).map_err(|e| e.to_string())
+// Serialize the entire read/modify/write, including requests and answers.
+// Atomic rename alone cannot keep a stale snapshot from restoring a grant.
+fn update_store<T>(edit: impl FnOnce(&mut Store) -> T) -> Result<T, String> {
+    update_store_at(&path()?, edit)
+}
+
+fn update_store_at<T>(
+    path: &std::path::Path,
+    edit: impl FnOnce(&mut Store) -> T,
+) -> Result<T, String> {
+    static WRITES: Mutex<()> = Mutex::new(());
+    let _write = WRITES.lock().map_err(|_| "screen policy lock poisoned")?;
+    let mut store = load_at(path)?;
+    let result = edit(&mut store);
+    save_at(path, &store)?;
+    #[cfg(feature = "local-host")]
+    invalidate_stream_cache();
+    Ok(result)
+}
+
+fn save_at(path: &std::path::Path, store: &Store) -> Result<(), String> {
+    let data = serde_json::to_string_pretty(store).map_err(|e| e.to_string())?;
+    tokenstat_sync::snapshot::write_private_atomically(path, &data).map_err(|e| e.to_string())
 }
 fn now() -> u64 {
     SystemTime::now()
@@ -214,8 +231,8 @@ fn verify_legend_account() -> Result<tokenstat_sync::profile::StatusResult, Stri
 ///
 /// Hot path (every frame/tick): served from a 1s in-memory mirror of the
 /// grants so live streams do not do file I/O per frame. `set_permission`
-/// refreshes the mirror on write; a transient I/O error keeps the last known
-/// grants rather than killing live streams. Only the grant row is rechecked
+/// invalidates the mirror on write. A failed refresh denies access rather than
+/// retaining grants whose current state cannot be checked. Only the grant row is rechecked
 /// here — Legend-tier revocation is enforced at capability issue, not per
 /// frame, by design.
 #[cfg(feature = "local-host")]
@@ -230,8 +247,11 @@ pub(crate) fn stream_allowed(peer: &str, control: bool) -> bool {
             .iter()
             .any(|(id, view, ctrl)| id == peer && *view && (!control || *ctrl));
     }
-    // Slow path: reload; on I/O error keep the last mirror (fail-open to the
-    // cached grants, fail-closed when there is no mirror yet).
+    // Hold the cache lock while reading and publishing. A writer's invalidation
+    // must happen after any read of the old file, never before its publication.
+    let Ok(mut guard) = stream_cache().lock() else {
+        return false;
+    };
     let grants: Option<Vec<(String, bool, bool)>> = load().ok().map(|store| {
         store
             .permissions
@@ -239,9 +259,6 @@ pub(crate) fn stream_allowed(peer: &str, control: bool) -> bool {
             .map(|grant| (grant.peer_id, grant.view, grant.control))
             .collect()
     });
-    let Ok(mut guard) = stream_cache().lock() else {
-        return false;
-    };
     match grants {
         Some(grants) => {
             let allowed = grants
@@ -253,12 +270,10 @@ pub(crate) fn stream_allowed(peer: &str, control: bool) -> bool {
             });
             allowed
         }
-        None => guard.as_ref().is_some_and(|entry| {
-            entry
-                .grants
-                .iter()
-                .any(|(id, view, ctrl)| id == peer && *view && (!control || *ctrl))
-        }),
+        None => {
+            *guard = None;
+            false
+        }
     }
 }
 
@@ -443,16 +458,15 @@ fn set_permission(peer_id: &str, view: bool, control: bool) -> Result<(), String
     if control && !view {
         return Err("control permission requires view permission".into());
     }
-    let mut store = load()?;
-    store.permissions.retain(|v| v.peer_id != peer_id);
-    store.permissions.push(ScreenPermission {
-        peer_id: peer_id.to_string(),
-        view,
-        control,
-    });
-    save(&store)?;
-    #[cfg(feature = "local-host")]
-    invalidate_stream_cache();
+    update_store(|store| {
+        store.permissions.retain(|v| v.peer_id != peer_id);
+        store.permissions.push(ScreenPermission {
+            peer_id: peer_id.to_string(),
+            view,
+            control,
+        });
+        store.pending.retain(|request| request.peer_id != peer_id);
+    })?;
     capabilities()
         .lock()
         .map_err(|_| "capability lock poisoned")?
@@ -493,30 +507,30 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             let peer = crate::request_context::remote_peer()
                 .ok_or("a screen access request must arrive from the device asking")?;
             let p: AskParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            let mut store = load()?;
-            if let Some(held) = store.permissions.iter().find(|v| v.peer_id == peer)
-                && held.view
-                && (!p.control || held.control)
-            {
+            let label = crate::remote::account_peer_label_hex(&peer);
+            let granted =
+                update_store(|store| {
+                    if store.permissions.iter().any(|held| {
+                        held.peer_id == peer && held.view && (!p.control || held.control)
+                    }) {
+                        return true;
+                    }
+                    let asked_at = now();
+                    store.pending.retain(|request| request.peer_id != peer);
+                    store.pending.push(PendingRequest {
+                        label,
+                        peer_id: peer.clone(),
+                        control: p.control,
+                        asked_at,
+                        expires_at: asked_at + PENDING_TTL,
+                    });
+                    false
+                })?;
+            if granted {
                 return Ok(json!({"pending": false, "granted": true}));
             }
-            // Recorded first, and only then upgraded to a grant. The demo
-            // check below asks the account server, which is a request that can
-            // take a minute to fail on a bad network, and a device whose ask
-            // is lost because a lookup hung has no way to know it should ask
-            // again. It also keeps the write short: `store` was read before
-            // any of that, and holding a snapshot across a network call is how
-            // a concurrent answer gets clobbered.
-            let asked_at = now();
-            store.pending.retain(|request| request.peer_id != peer);
-            store.pending.push(PendingRequest {
-                label: crate::remote::account_peer_label_hex(&peer),
-                peer_id: peer.clone(),
-                control: p.control,
-                asked_at,
-                expires_at: asked_at + PENDING_TTL,
-            });
-            save(&store)?;
+            // Record the request before the network check, without retaining
+            // a snapshot that could overwrite a concurrent local answer.
 
             // The one automatic grant in the product, and the reason it
             // exists: App Review signs into the website's demo account on a
@@ -547,9 +561,6 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 .unwrap_or(false);
             if review_demo {
                 set_permission(&peer, true, p.control)?;
-                let mut store = load()?;
-                store.pending.retain(|request| request.peer_id != peer);
-                save(&store)?;
                 return Ok(json!({"pending": false, "granted": true, "reviewDemo": true}));
             }
             Ok(json!({"pending": true}))
@@ -569,9 +580,6 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             let p: SetParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
             set_permission(&p.peer_id, p.view, p.control)?;
-            let mut store = load()?;
-            store.pending.retain(|request| request.peer_id != p.peer_id);
-            save(&store)?;
             Ok(json!({"saved":true}))
         }
         "screen.access.request" => {
@@ -689,6 +697,41 @@ fn verified_direct_candidates() -> Result<Vec<crate::remote::DirectCandidate>, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn concurrent_policy_edits_preserve_every_devices_answer() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("policy.json");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(16));
+        std::thread::scope(|scope| {
+            for index in 0..16 {
+                let barrier = barrier.clone();
+                let path = &path;
+                scope.spawn(move || {
+                    barrier.wait();
+                    update_store_at(path, |store| {
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                        store.permissions.push(ScreenPermission {
+                            peer_id: format!("peer-{index}"),
+                            view: index % 2 == 0,
+                            control: false,
+                        });
+                    })
+                    .unwrap();
+                });
+            }
+        });
+        let store = load_at(&path).unwrap();
+        assert_eq!(store.permissions.len(), 16);
+        for index in 0..16 {
+            let permission = store
+                .permissions
+                .iter()
+                .find(|p| p.peer_id == format!("peer-{index}"))
+                .unwrap();
+            assert_eq!(permission.view, index % 2 == 0);
+        }
+    }
+
     #[test]
     fn legend_and_explicit_permission_are_both_required() {
         assert!(legend("patron").is_err());

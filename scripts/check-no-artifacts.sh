@@ -59,9 +59,21 @@ fi
 
 # Checked against the committed blob rather than the working file, so a file
 # that is large in HEAD is caught even if it is small on disk right now.
-big="$(git ls-files -z \
-    | xargs -0 -I{} sh -c 'size=$(git cat-file -s "$(git rev-parse ":{}" 2>/dev/null)" 2>/dev/null || echo 0); [ "$size" -gt '"$MAX_BYTES"' ] && echo "$size {}"' \
-    2>/dev/null || true)"
+big="$(python3 - "$MAX_BYTES" <<'PYTHON'
+import subprocess, sys
+limit = int(sys.argv[1])
+# Pass paths as data, never splice a tracked filename into shell source.
+entries = subprocess.check_output(["git", "ls-files", "--stage", "-z"]).split(b"\0")
+for entry in entries:
+    if not entry:
+        continue
+    metadata, path = entry.split(b"\t", 1)
+    _, object_id, _ = metadata.split()
+    size = int(subprocess.check_output(["git", "cat-file", "-s", object_id]))
+    if size > limit:
+        print(f"{size} {path.decode(errors='replace')}")
+PYTHON
+)"
 if [ -n "$big" ]; then
     echo "error: files over $((MAX_BYTES / 1024)) KB are tracked:" >&2
     printf '%s\n' "$big" | while IFS= read -r line; do printf '  %s\n' "$line" >&2; done

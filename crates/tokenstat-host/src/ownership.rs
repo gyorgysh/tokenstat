@@ -39,7 +39,9 @@
 //! way to run a development host beside a real one, and neither is asked to
 //! yield. Only a second daemon carrying the *same key* is a problem.
 
-use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
+use std::io::{BufRead, BufReader};
+use std::io::{Read, Write};
 use std::path::Path;
 use std::time::Duration;
 
@@ -114,11 +116,19 @@ pub fn primary_key() -> Option<String> {
         .ok()?;
     stream.flush().ok()?;
     #[cfg(windows)]
-    if !wait_pipe_readable(&stream, PROBE_PATIENCE) {
-        return None;
-    }
-    let mut line = String::new();
-    BufReader::new(&mut stream).read_line(&mut line).ok()?;
+    let line = crate::server::read_response(&mut stream, PROBE_PATIENCE)?;
+    #[cfg(unix)]
+    let line = {
+        let mut line = String::new();
+        BufReader::new(&mut stream)
+            .take(64 * 1024)
+            .read_line(&mut line)
+            .ok()?;
+        if !line.ends_with('\n') {
+            return None;
+        }
+        line
+    };
     let answer: serde_json::Value = serde_json::from_str(&line).ok()?;
     answer
         .get("result")?
@@ -139,37 +149,6 @@ fn connect_primary(path: &Path) -> Option<UnixStream> {
 fn connect_primary(path: &Path) -> Option<std::fs::File> {
     let timeout = u32::try_from(PROBE_PATIENCE.as_millis()).unwrap_or(u32::MAX);
     crate::server::connect(path, timeout).ok()
-}
-
-/// `std::fs::File` on a named pipe has no read timeout. Peek until a line
-/// is waiting, or until the same two-second budget the unix path uses.
-#[cfg(windows)]
-fn wait_pipe_readable(file: &std::fs::File, budget: Duration) -> bool {
-    use std::os::windows::io::AsRawHandle;
-    let deadline = std::time::Instant::now() + budget;
-    let mut avail: u32 = 0;
-    loop {
-        let ok = unsafe {
-            crate::win32::PeekNamedPipe(
-                file.as_raw_handle(),
-                std::ptr::null_mut(),
-                0,
-                std::ptr::null_mut(),
-                &mut avail,
-                std::ptr::null_mut(),
-            )
-        };
-        if ok == 0 {
-            return false;
-        }
-        if avail > 0 {
-            return true;
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 
 /// Whether a primary daemon is already speaking for this key.

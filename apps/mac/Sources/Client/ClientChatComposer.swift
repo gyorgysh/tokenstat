@@ -307,7 +307,7 @@ struct ClientChatComposer: View {
         // above says why, and the field stays editable for those drafts.
         model.selectedBackendMissing || model.savedCopy != nil
             || model.stagingAttachments > 0
-            || model.sending
+            || model.sending || model.unconfirmedSend != nil
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
     }
 
@@ -321,12 +321,18 @@ struct ClientChatComposer: View {
 
     private func ingest(photos items: [PhotosPickerItem], owner: WorkReference) async {
         for picked in items {
+            guard !Task.isCancelled, model.currentReference == owner,
+                  WorkSessionContext.shared.scope == owner.scope else { return }
             do {
                 guard let media = try await picked.loadTransferable(type: ChatPickedMedia.self) else { throw CocoaError(.fileReadUnknown) }
-                defer { try? FileManager.default.removeItem(at: media.file) }
+                defer { try? FileManager.default.removeItem(at: media.file.deletingLastPathComponent()) }
+                guard !Task.isCancelled, model.currentReference == owner,
+                      WorkSessionContext.shared.scope == owner.scope else { return }
                 guard let item = ChatInbox.item(from: media.file) else { throw CocoaError(.fileReadUnknown) }
                 await model.attach(item, to: owner)
             } catch {
+                guard !Task.isCancelled, model.currentReference == owner,
+                      WorkSessionContext.shared.scope == owner.scope else { return }
                 model.error = L10n.text("common.chat_files_import_failed", picked.supportedContentTypes.first?.preferredFilenameExtension ?? "media")
                 break
             }
@@ -387,9 +393,14 @@ private struct ChatPickedMedia: Transferable {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions:0o700])
         let destination = directory.appendingPathComponent(received.file.lastPathComponent)
-        try FileManager.default.copyItem(at: received.file, to: destination)
-        try FileManager.default.setAttributes([.posixPermissions:0o600, .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: destination.path)
-        return ChatPickedMedia(file: destination)
+        do {
+            try FileManager.default.copyItem(at: received.file, to: destination)
+            try FileManager.default.setAttributes([.posixPermissions:0o600, .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: destination.path)
+            return ChatPickedMedia(file: destination)
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
     }
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(contentType: .movie) { value in SentTransferredFile(value.file) } importing: { try receive($0) }

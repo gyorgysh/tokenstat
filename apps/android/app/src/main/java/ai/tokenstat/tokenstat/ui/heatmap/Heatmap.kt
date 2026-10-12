@@ -63,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.core.CoreClient
+import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.SkeletonRows
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.tsPanel
@@ -78,6 +79,7 @@ import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -545,14 +547,24 @@ fun DayDetailSheet(day: JsonObject?, onDismiss: () -> Unit) {
     val locked = day["locked"]?.jsonPrimitive?.booleanOrNull == true
     var detail by remember(date) { mutableStateOf<JsonObject?>(null) }
     var isLoading by remember(date) { mutableStateOf(!locked) }
-    LaunchedEffect(date, locked) {
-        if (locked) return@LaunchedEffect
+    var failed by remember(date) { mutableStateOf(false) }
+    var reload by remember(date) { mutableStateOf(0) }
+    LaunchedEffect(date, locked, reload) {
+        if (locked) { isLoading = false; return@LaunchedEffect }
+        isLoading = true
+        failed = false
         // Account scope, because the grid this was tapped out of is the
         // account's. A local answer here would describe a machine whose
         // squares are not the ones on screen.
-        detail = runCatching { CoreClient.call("activity.day", dayDetailParams(date)) }
-            .getOrNull() as? JsonObject
-        isLoading = false
+        try {
+            detail = CoreClient.call("activity.day", dayDetailParams(date)) as? JsonObject
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failed = true
+        } finally {
+            isLoading = false
+        }
     }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.background) {
         Column(
@@ -573,6 +585,9 @@ fun DayDetailSheet(day: JsonObject?, onDismiss: () -> Unit) {
                 )
             } else if (isLoading) {
                 SkeletonRows(count = 2)
+            } else if (failed) {
+                Text(L10n.text("android.heatmap.detail_unavailable"), color = colors.danger)
+                TsSecondaryButton(label = L10n.text("common.retry"), onClick = { reload += 1 })
             } else {
                 val rows = dayPartRows(detail)
                 if (rows.isEmpty()) {

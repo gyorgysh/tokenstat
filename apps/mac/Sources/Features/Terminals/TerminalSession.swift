@@ -346,7 +346,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// trips a second instead of sixty, short enough that a connection is never
     /// parked for a noticeable time and a session that loses focus stops
     /// holding one almost at once.
-    private static let readHold = 250
+    nonisolated private static let readHold = 250
 
     /// Keystrokes and resizes land here in the order the UI produced them,
     /// then a single writer task sends them to the pty one at a time. Without
@@ -432,8 +432,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     func attach(info: PtySessionInfo) {
         // A session closed before the host answered must not come back: the
         // spawn still succeeded on the host, but nobody is watching it here.
-        // Also ignore a second attach (list reconcile and spawn completion can
-        // both try): the first one already owns the host id.
+        // A completed session already owns its confirmed host id.
         guard isPending, !removed else { return }
         hostID = info.id
         alive = info.alive
@@ -532,7 +531,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     func start() {
         // Pending sessions have no process behind them yet; attach() starts
         // polling once the host has answered.
-        guard !isPending else { return }
+        guard !isPending, !removed else { return }
         // Capture the host id once: it is stable after attach, and the writer
         // must not chase a changing value mid-stream.
         let bridgeID = hostID
@@ -558,6 +557,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
                 // changed without reading main-actor state.
                 var lastError: String?
                 for await event in events {
+                    guard !Task.isCancelled else { break }
                     switch event {
                     case let .write(bytes):
                         var failure: String?
@@ -577,12 +577,13 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
                         Task { @MainActor [weak self] in self?.wake() }
                         if failure != lastError {
                             lastError = failure
+                            let transportFailure = failure
                             Task { @MainActor [weak self] in
-                                self?.transportError = failure
+                                self?.transportError = transportFailure
                             }
                         }
                     case let .resize(rows, cols):
-                        try? await Bridge.ptyResize(id: bridgeID, rows: rows, cols: cols)
+                        _ = try? await Bridge.ptyResize(id: bridgeID, rows: rows, cols: cols)
                     }
                 }
             }
@@ -633,6 +634,10 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         endNap()
         writerTask?.cancel()
         writerTask = nil
+        eventStream.continuation.finish()
+        pendingFeed.removeAll()
+        pendingFeedHead = 0
+        pendingFeedBytes = 0
     }
 
     /// Detached read loop. Marked `nonisolated` so a `Task.detached` caller
@@ -817,6 +822,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         if sinceInfo >= infoInterval, Date() >= hotUntil {
             sinceInfo = 0
             if let info = try? await Bridge.ptyInfo(id: hostID) {
+                guard !removed, !Task.isCancelled else { return nil }
                 // Guarded. These are observed, this runs several times a
                 // second per session, and the values almost never change:
                 // an unguarded write is a sidebar rebuild for nothing.
@@ -844,12 +850,19 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
                     idleCheckTask?.cancel()
                     idleCheckTask = nil
                     state = .stopped
-                    // One last read in case output arrived right at exit.
-                    if let final = try? await Bridge.ptyRead(id: hostID, offset: offset) {
+                    // A final burst may span many host pages. Drain until
+                    // the cursor stops, rather than losing everything after
+                    // the first page when the process exits.
+                    while !removed, !Task.isCancelled {
+                        let previous = offset
+                        guard let final = try? await Bridge.ptyRead(id: hostID, offset: previous),
+                              !removed, !Task.isCancelled else { break }
                         if final.dropped > 0, !droppedOutput { droppedOutput = true }
-                        if !final.bytes.isEmpty {
-                            offset = final.nextOffset
-                            acceptBytes(final.bytes)
+                        offset = final.nextOffset
+                        if !final.bytes.isEmpty { acceptBytes(final.bytes) }
+                        if final.nextOffset <= previous { break }
+                        while pendingFeedBytes >= Self.renderHighWater, !removed, !Task.isCancelled {
+                            try? await Task.sleep(for: .milliseconds(10))
                         }
                     }
                     return nil
@@ -909,7 +922,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// its output. Accept is cheap; `pumpFeed` does the real work beside the
     /// next read.
     private func acceptBytes(_ bytes: Data) {
-        guard !bytes.isEmpty else { return }
+        guard !removed, !bytes.isEmpty else { return }
         if !hasOutput { hasOutput = true }
         lastOutputAt = Date()
         if alive, !hostReportedActivity {
@@ -935,7 +948,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         Self.frameScheduler.begin(id: id)
         defer { Self.frameScheduler.end(id: id) }
         defer { feedInFlight = false }
-        while pendingFeedHead < pendingFeed.count {
+        while !removed, pendingFeedHead < pendingFeed.count {
             let chunk = pendingFeed[pendingFeedHead]
             // Drop the queue's own reference to the bytes before feeding them.
             //
@@ -1003,6 +1016,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         var start = 0
         while start < all.count {
             await Self.frameScheduler.acquire(id: sessionID)
+            guard !removed, !Task.isCancelled else { return }
             let end = min(start + slice, all.count)
             let began = ContinuousClock.now
             view.feedOutput(all[start..<end])
@@ -1466,7 +1480,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     private static let hotWindow: TimeInterval = 0.4
     /// Under this, an empty read did not wait: the host answered at once, so
     /// it has no `waitMs` to hold the call with.
-    private static let heldFloor: Duration = .milliseconds(readHold / 4)
+    nonisolated private static let heldFloor: Duration = .milliseconds(readHold / 4)
 
     /// The current nap, if the loop is in one. Resumed early by `wake`.
     private var napper: CheckedContinuation<Void, Never>?
@@ -1483,7 +1497,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     nonisolated private func nap(_ milliseconds: Int) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             Task { @MainActor [weak self] in
-                guard let self else {
+                guard let self, !self.removed else {
                     continuation.resume()
                     return
                 }
@@ -1496,7 +1510,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
                 self.napper = continuation
                 Task { [weak self] in
                     try? await Task.sleep(for: .milliseconds(milliseconds))
-                    await self?.endNap()
+                    self?.endNap()
                 }
             }
         }

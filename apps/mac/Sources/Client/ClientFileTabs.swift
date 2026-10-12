@@ -104,6 +104,7 @@ struct ClientFileTabs<Files: View>: View {
     /// The find chords for the open tab, routed to the same session the bar
     /// drives. Hidden presses open the bar; open presses move the match.
     private var findShortcuts: [ClientShortcut] {
+        guard selected != nil else { return [] }
         let state = EditorShortcutState(
             canNavigate: find.canNavigate,
             findShowing: find.showing

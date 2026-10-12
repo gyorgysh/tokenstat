@@ -749,10 +749,11 @@ object WorkflowRecipes {
 
     private fun pickBuild(agents: List<AgentBackend>, used: List<String>): AgentPick? {
         val order = listOf("opencode", "opencode2", "cursor", "codex", "agy")
-        val agent = order.firstNotNullOfOrNull { id -> agents.firstOrNull { it.id == id } }
+        val agent = order.firstNotNullOfOrNull { id -> agents.firstOrNull { it.id == id && it.id !in used } }
             ?: agents.firstOrNull { it.id !in used }
+            ?: order.firstNotNullOfOrNull { id -> agents.firstOrNull { it.id == id } }
+            ?: agents.firstOrNull()
             ?: return null
-        if (agent.id in used) return null
         val mid = WorkflowModelPick.midModel(agent.models, null)
         val high = WorkflowModelPick.highestEffort(agent.efforts)
         val effort = agent.efforts.firstOrNull { it.equals("medium", ignoreCase = true) } ?: high
@@ -801,7 +802,7 @@ object WorkflowRecipes {
             previous = item.id
         }
         nodes.add(WorkflowNode(id = "done", kind = WorkflowNodeKind.COMMAND, title = L10n.text("common.done"),
-            command = "afplay /System/Library/Sounds/Glass.aiff"))
+            command = "echo Done"))
         edges.add(WorkflowEdge(previous, "done", WorkflowEdgeWhen.OK))
         val label = (listOf(L10n.text("common.start")) + stages.map {
             (listOf(it.verb, it.backend.label) + listOfNotNull(it.model, it.effort)).joinToString(" ")

@@ -573,7 +573,7 @@ internal sealed class PersonaEngine
                     double side = (int)(previous / 0.085) % 2 == 0 ? -1 : 1;
                     Body.Impulse(new PVector(side * 1.05, 0));
                 }
-                if (Crossed(0.34, previous, now))
+                if (previous < 0.34 && now >= 0.34)
                 {
                     Body.Slump(0.85);
                 }

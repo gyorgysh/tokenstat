@@ -69,6 +69,54 @@ import org.junit.Test
 /// client's Swift originals produce.
 class AuthoringLogicTest {
 
+    @Test
+    fun nonMinuteBudgetsSurviveUnrelatedEdits() {
+        val fields = BudgetFields.load(90)
+        assertEquals(90L, fields.budgetSeconds)
+        assertEquals(120L, fields.copy(budgetMinutes = "2").budgetSeconds)
+        assertEquals(0L, fields.copy(noTimeLimit = true).budgetSeconds)
+        val queue = AutomationQueue(defaultBudgetSeconds = 90, maxConcurrent = 2)
+        val draft = QueueDraft.fromQueue(queue)
+        assertTrue(draft.matches(queue))
+        assertEquals(90L, draft.copy(maxConcurrent = "3").budgetSeconds)
+    }
+
+    @Test
+    fun completedTranscriptDrainsAllReplyPages() = kotlinx.coroutines.runBlocking {
+        val offsets = mutableListOf<Long>()
+        var shown = ""
+        ai.tokenstat.tokenstat.ui.automations.readRunTranscript(
+            live = false,
+            read = { offset ->
+                offsets += offset
+                buildJsonObject {
+                    put("text", when (offset) { 0L -> "first"; 5L -> "last"; else -> "" })
+                    put("nextOffset", when (offset) { 0L -> 5L; else -> 9L })
+                }
+            },
+            running = { error("Completed run should not poll status") },
+            update = { shown = it },
+        )
+        assertEquals(listOf(0L, 5L, 9L), offsets)
+        assertEquals("firstlast", shown)
+    }
+
+    @Test
+    fun liveTranscriptDrainsFinalOutputAfterCompletion() = kotlinx.coroutines.runBlocking {
+        var completed = false
+        var shown = ""
+        ai.tokenstat.tokenstat.ui.automations.readRunTranscript(
+            live = true,
+            read = { offset -> buildJsonObject {
+                put("text", if (completed && offset == 0L) "last" else "")
+                put("nextOffset", if (completed) 4L else 0L)
+            } },
+            running = { completed = true; false },
+            update = { shown = it },
+        )
+        assertEquals("last", shown)
+    }
+
     private fun card(
         id: String = "c1",
         title: String = "Title",
@@ -289,6 +337,18 @@ class AuthoringLogicTest {
     }
 
     @Test
+    fun invalidIntervalsDoNotSilentlyBecomeRunnableSchedules() {
+        for (minutes in listOf("", "0", "-1", "invalid", Long.MAX_VALUE.toString())) {
+            val fields = ScheduleFields(scheduleKind = ScheduleKind.INTERVAL, intervalMinutes = minutes, intervalTouched = true)
+            assertTrue("Expected invalid interval: $minutes", fields.validation != null)
+            assertEquals(0L, fields.intervalCurrentSeconds)
+            assertEquals(JobScheduleCopy.intervalPresets, fields.intervalMenuMinutes)
+        }
+        val belowMinimum = ScheduleFields.load(AutomationSchedule(ScheduleKind.INTERVAL, everySeconds = 30))
+        assertTrue(belowMinimum.validation != null)
+    }
+
+    @Test
     fun intervalLabels() {
         assertEquals("90 seconds", JobScheduleCopy.intervalLabel(90))
         assertEquals("1 hour", JobScheduleCopy.intervalPresetLabel(60))
@@ -467,6 +527,12 @@ class AuthoringLogicTest {
         assertTrue(recipes[0].nodes.any { it.kind == WorkflowNodeKind.CONDITION } .not())
         assertTrue(WorkflowRecipes.designAgents(backends).isNotEmpty())
         assertTrue(recipes[0].label.contains("Start") && recipes[0].label.contains("Done"))
+        // A phone can author workflows on Windows and Linux as well as macOS.
+        recipes.forEach { recipe ->
+            assertEquals("echo Done", recipe.nodes.last().command)
+            assertEquals("done", recipe.edges.last().to)
+            assertTrue(!recipe.prompt.contains("sound"))
+        }
     }
 
     @Test
@@ -522,6 +588,28 @@ class AuthoringLogicTest {
         flood.refresh("a".repeat(3000))
         assertEquals(2000, flood.matchCount)
         assertEquals("1 of 2000+", flood.countLabel)
+    }
+
+    @Test
+    fun editorReplaceAllIncludesMatchesBeyondTheHighlightLimit() {
+        val find = EditorFind()
+        find.query = "a"
+        find.refresh("a".repeat(3000))
+        find.replaceText = "bb"
+        assertEquals("bb".repeat(3000), find.replaceAll("a".repeat(3000)))
+        find.replaceText = ""
+        assertEquals("", find.replaceAll("a".repeat(3000)))
+        assertNull(find.replaceCurrent("short"))
+    }
+
+    @Test
+    fun workflowRecipesAlwaysIncludeImplementation() {
+        val agents = listOf(AgentBackend("codex", "Codex"), AgentBackend("cursor", "Cursor"))
+        val single = WorkflowRecipes.recipes(agents.take(1))
+        assertTrue(single.isNotEmpty())
+        assertTrue(single.all { recipe -> recipe.nodes.any { it.id == "build" && it.backend == "codex" } })
+        val multiple = WorkflowRecipes.recipes(agents)
+        assertTrue(multiple.all { recipe -> recipe.nodes.any { it.id == "build" } })
     }
 
     @Test

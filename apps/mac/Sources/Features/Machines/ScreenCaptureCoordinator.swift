@@ -87,6 +87,7 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
             } catch {
                 // hostd may be restarting or no session may exist yet.
                 sessions = []
+                try? await adopt([])
             }
             let controlling = sessions.contains(where: \.control)
             let pause = sessions.isEmpty
@@ -123,6 +124,7 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
                 )
                 lock.withLock { encoders[id] = created }
             } catch {
+                created.stop()
                 await fail(id, error: error)
             }
         }
@@ -193,9 +195,21 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
     }
 }
 
+/// Serializes asynchronous reconfiguration, including its suspension points.
+private actor ScreenEncoderChanges {
+    private var tail: Task<Void, Never>?
+    func perform(_ operation: @escaping @Sendable () async throws -> Void) async throws {
+        let previous = tail
+        let next = Task { await previous?.value; try await operation() }
+        tail = Task { _ = try? await next.value }
+        try await next.value
+    }
+}
+
 private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private let output: @Sendable (Data) -> Void
     private let queue = DispatchQueue(label: "ai.tokenstat.screen.capture", qos: .userInteractive)
+    private let changes = ScreenEncoderChanges()
     private var stream: SCStream?
     private var compression: VTCompressionSession?
     private var sequence: UInt64 = 0
@@ -208,7 +222,8 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     /// keyframe. The first picture, and the first after a compression
     /// rebuild, must be one even if VideoToolbox would have waited.
     private var forceKey = true
-    private(set) var displayID: CGDirectDisplayID?
+    private var selectedDisplayID: CGDirectDisplayID?
+    var displayID: CGDirectDisplayID? { queue.sync { selectedDisplayID } }
     /// Whether this session carries mouse and keyboard.
     ///
     /// The only thing it changes is how often a picture is taken. See
@@ -247,62 +262,72 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         control: Bool? = nil,
         profile: ScreenQualityProfile? = nil
     ) async throws {
-        if let control { self.control = control }
-        if let profile { self.profile = profile }
+        queue.sync {
+            if let control { self.control = control }
+            if let profile { self.profile = profile }
+        }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
             throw ScreenCaptureError.permission
         }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = requestedID.flatMap({ id in content.displays.first { $0.displayID == id } }) ?? content.displays.first else { throw ScreenCaptureError.noDisplay }
-        displayID = display.displayID
+        queue.sync { selectedDisplayID = display.displayID }
         let displays = content.displays.enumerated().map { index, item in
             ["id": item.displayID, "name": item.displayID == CGMainDisplayID() ? L10n.text("apple.screencapturecoordinator.main_display.df3c4252") : L10n.text("apple.screencapturecoordinator.display_0.c82e7be8", "\(index + 1)"), "width": item.width, "height": item.height] as [String: Any]
         }
         if let metadata = try? JSONSerialization.data(withJSONObject: ["type": "displays", "selected": display.displayID, "displays": displays]) {
             output(ScreenWire.metadata(metadata))
         }
-        sourceWidth = display.width
-        sourceHeight = display.height
-        let scale = min(1, targetWidth / CGFloat(display.width))
-        width = Int32(max(2, Int(CGFloat(display.width) * scale) & ~1))
-        height = Int32(max(2, Int(CGFloat(display.height) * scale) & ~1))
+        let stream: SCStream = try queue.sync {
+            sourceWidth = display.width
+            sourceHeight = display.height
+            let scale = min(1, targetWidth / CGFloat(display.width))
+            width = Int32(max(2, Int(CGFloat(display.width) * scale) & ~1))
+            height = Int32(max(2, Int(CGFloat(display.height) * scale) & ~1))
 
-        let config = SCStreamConfiguration()
-        config.width = Int(width)
-        config.height = Int(height)
-        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
-        config.queueDepth = 3
-        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        config.showsCursor = true
-        config.capturesAudio = true
-        config.sampleRate = 48_000
-        config.channelCount = 2
-        config.excludesCurrentProcessAudio = true
-        configuration = config
+            let config = SCStreamConfiguration()
+            config.width = Int(width)
+            config.height = Int(height)
+            config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
+            config.queueDepth = 3
+            config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            config.showsCursor = true
+            config.capturesAudio = true
+            config.sampleRate = 48_000
+            config.channelCount = 2
+            config.excludesCurrentProcessAudio = true
+            configuration = config
 
-        forceKey = true
-        try makeCompression()
-        let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: config, delegate: self)
-        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
-        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
-        self.stream = stream
+            forceKey = true
+            try makeCompression()
+            let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: config, delegate: self)
+            try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+            self.stream = stream
+            return stream
+        }
         try await stream.startCapture()
     }
 
     func selectDisplay(_ id: CGDirectDisplayID) async throws {
-        guard id != displayID else { return }
-        stop()
-        try await start(displayID: id)
+        try await changes.perform { [self] in
+            guard id != displayID else { return }
+            stop()
+            try await start(displayID: id)
+        }
     }
 
     func stop() {
-        let stream = stream
-        self.stream = nil
-        displayID = nil
-        Task { try? await stream?.stopCapture() }
-        if let compression { VTCompressionSessionInvalidate(compression) }
-        compression = nil
-        forceKey = true
+        let previous: SCStream? = queue.sync {
+            let previous = stream
+            stream = nil
+            selectedDisplayID = nil
+            if let compression { VTCompressionSessionInvalidate(compression) }
+            compression = nil
+            forceKey = true
+            return previous
+        }
+        Task { try? await previous?.stopCapture() }
     }
 
     /// Follow a session that was handed the mouse, or had it taken back.
@@ -312,11 +337,16 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     /// changes here is the picture rate, so the stream is reconfigured in
     /// place instead of being torn down.
     func setControl(_ wanted: Bool) async {
-        guard wanted != control else { return }
-        control = wanted
-        guard let stream, let config = configuration else { return }
-        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
-        try? await stream.updateConfiguration(config)
+        try? await changes.perform { [self] in
+            let update: (SCStream, SCStreamConfiguration)? = queue.sync {
+                guard wanted != control else { return nil }
+                control = wanted
+                guard let stream, let config = configuration else { return nil }
+                config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
+                return (stream, config)
+            }
+            if let (stream, config) = update { try await stream.updateConfiguration(config) }
+        }
     }
 
     /// Back off, or come back, under congestion.
@@ -325,9 +355,14 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     /// route that turns out to be a poor Wi-Fi link still narrows and a relay
     /// session behaves exactly as it did.
     func setQuality(_ quality: CGFloat) async {
-        guard congestionScale != quality else { return }
-        congestionScale = quality
-        await reconfigure()
+        try? await changes.perform { [self] in
+            let changed = queue.sync {
+                guard congestionScale != quality else { return false }
+                congestionScale = quality
+                return true
+            }
+            if changed { await reconfigure() }
+        }
     }
 
     /// Move to a different budget on a session that is already running.
@@ -336,22 +371,32 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     /// reconfigure the stream, then rebuild the compression session with a
     /// keyframe forced, since the decoder cannot start again without SPS/PPS.
     func setProfile(_ next: ScreenQualityProfile) async {
-        guard next != profile else { return }
-        profile = next
-        await reconfigure()
+        try? await changes.perform { [self] in
+            let changed = queue.sync {
+                guard next != profile else { return false }
+                profile = next
+                return true
+            }
+            if changed { await reconfigure() }
+        }
     }
 
     private func reconfigure() async {
-        guard let stream, let config = configuration, sourceWidth > 0 else { return }
-        let scale = min(1, targetWidth / CGFloat(sourceWidth))
-        let newWidth = Int32(max(2, Int(CGFloat(sourceWidth) * scale) & ~1))
-        let newHeight = Int32(max(2, Int(CGFloat(sourceHeight) * scale) & ~1))
-        config.width = Int(newWidth)
-        config.height = Int(newHeight)
-        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
+        let update: (SCStream, SCStreamConfiguration, Int32, Int32)? = queue.sync {
+            guard let stream, let config = configuration, sourceWidth > 0 else { return nil }
+            let scale = min(1, targetWidth / CGFloat(sourceWidth))
+            let newWidth = Int32(max(2, Int(CGFloat(sourceWidth) * scale) & ~1))
+            let newHeight = Int32(max(2, Int(CGFloat(sourceHeight) * scale) & ~1))
+            config.width = Int(newWidth)
+            config.height = Int(newHeight)
+            config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
+            return (stream, config, newWidth, newHeight)
+        }
+        guard let (stream, config, newWidth, newHeight) = update else { return }
         do {
             try await stream.updateConfiguration(config)
             queue.sync {
+                guard self.stream === stream else { return }
                 if let compression { VTCompressionSessionInvalidate(compression) }
                 compression = nil; width = newWidth; height = newHeight
                 forceKey = true
@@ -372,7 +417,10 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
             compressedDataAllocator: nil,
             outputCallback: { refcon, _, status, _, sample in
                 guard status == noErr, let refcon, let sample else { return }
-                Unmanaged<ScreenVideoEncoder>.fromOpaque(refcon).takeUnretainedValue().encoded(sample)
+                let encoder = Unmanaged<ScreenVideoEncoder>.fromOpaque(refcon).takeUnretainedValue()
+                // VideoToolbox callbacks can use a different queue. Retain the
+                // encoder/sample and order them with capture, reconfigure and stop.
+                encoder.queue.async { encoder.encoded(sample) }
             },
             refcon: Unmanaged.passUnretained(self).toOpaque(),
             compressionSessionOut: &session
@@ -412,7 +460,8 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         VTCompressionSessionPrepareToEncodeFrames(session)
     }
 
-        func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard self.stream === stream else { return }
         if type == .audio {
             if let payload = ScreenAudioPCM.encode(sampleBuffer) { output(ScreenWire.audio(payload)) }
             return
@@ -453,7 +502,10 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     }
 
     private func encoded(_ sample: CMSampleBuffer) {
-        guard let block = CMSampleBufferGetDataBuffer(sample) else { return }
+        guard stream != nil, let block = CMSampleBufferGetDataBuffer(sample),
+              let format = CMSampleBufferGetFormatDescription(sample) else { return }
+        let dimensions = CMVideoFormatDescriptionGetDimensions(format)
+        guard dimensions.width == width, dimensions.height == height else { return }
         let keyframe = isKeyframe(sample)
         var payload = Data()
         if keyframe, let format = CMSampleBufferGetFormatDescription(sample) {
@@ -642,8 +694,8 @@ private enum ScreenInput {
         let display = displayID ?? CGMainDisplayID()
         let bounds = CGDisplayBounds(display)
         let point = CGPoint(
-            x: bounds.minX + (event.x ?? 0) * bounds.width,
-            y: bounds.minY + (event.y ?? 0) * bounds.height
+            x: bounds.minX + ScreenInputValues.coordinate(event.x) * bounds.width,
+            y: bounds.minY + ScreenInputValues.coordinate(event.y) * bounds.height
         )
         let source = CGEventSource(stateID: .hidSystemState)
         let cg: CGEvent?
@@ -659,7 +711,7 @@ private enum ScreenInput {
             let (type, button) = moveType()
             cg = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
         case "mouse":
-            let button = CGMouseButton(rawValue: UInt32(event.button ?? 0)) ?? .left
+            let button = CGMouseButton(rawValue: ScreenInputValues.button(event.button)) ?? .left
             let down = event.down == true
             if down { held.insert(button) } else { held.remove(button) }
             cg = CGEvent(mouseEventSource: source, mouseType: mouseType(button, down: down), mouseCursorPosition: point, mouseButton: button)
@@ -667,7 +719,7 @@ private enum ScreenInput {
         // means. A touch client cannot rely on two separate messages arriving
         // close enough together for macOS to read them as a double click.
         case "click":
-            let button = CGMouseButton(rawValue: UInt32(event.button ?? 0)) ?? .left
+            let button = CGMouseButton(rawValue: ScreenInputValues.button(event.button)) ?? .left
             // One pair, carrying the count. macOS reads the click count off the
             // event rather than timing the events, so posting the pair once per
             // click would make a double click arrive as three clicks: the first
@@ -689,8 +741,8 @@ private enum ScreenInput {
                 scrollWheelEvent2Source: source,
                 units: .pixel,
                 wheelCount: 2,
-                wheel1: Int32(clamping: Int(event.dy ?? 0)),
-                wheel2: Int32(clamping: Int(event.dx ?? 0)),
+                wheel1: ScreenInputValues.wheel(event.dy),
+                wheel2: ScreenInputValues.wheel(event.dx),
                 wheel3: 0
             )
         case "key": cg = CGEvent(keyboardEventSource: source, virtualKey: event.keyCode ?? 0, keyDown: event.down == true)

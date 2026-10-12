@@ -135,6 +135,16 @@ class PersonaModelsTest {
     }
 
     @Test
+    fun savePreservesTheFullUnsignedSeedRange() {
+        for (seed in listOf(0UL, Long.MAX_VALUE.toULong(), Long.MAX_VALUE.toULong() + 1UL, ULong.MAX_VALUE)) {
+            val params = personaSaveParams(ChatPersona("p1", null, "N", "S", seed), "w1")
+            val persona = params.getValue("persona").jsonObject
+            assertEquals(seed.toString(), persona.getValue("seed").toString())
+            assertEquals(seed, parseChatPersona(persona)!!.seed)
+        }
+    }
+
+    @Test
     fun draftParamsOmitBlankName() {
         val named = personaDraftParams("brief", "claude", "N")
         assertEquals("N", (named["name"] as JsonPrimitive).contentOrNull)

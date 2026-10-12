@@ -42,6 +42,7 @@
     <Compile Include="../../../apps/windows/Design/InspectorHost.cs" Link="InspectorHost.cs" />
     <Compile Include="../../../apps/windows/Design/ShellWidths.cs" Link="ShellWidths.cs" />
     <Compile Include="../../../apps/windows/Design/ResizeHandle.cs" Link="ResizeHandle.cs" />
+    <Compile Include="../../../apps/windows/Design/WrapPanel.cs" Link="WrapPanel.cs" />
     <Compile Include="../../../apps/windows/Design/FlowPanel.cs" Link="FlowPanel.cs" />
     <Compile Include="../../../apps/windows/Design/ActionIcon.cs" Link="ActionIcon.cs" />
     <Compile Include="../../../apps/windows/Design/FriendlyError.cs" Link="FriendlyError.cs" />

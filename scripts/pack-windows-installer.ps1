@@ -12,6 +12,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Version,
     [string]$Out = "dist",
+    [ValidateSet("x64", "arm64")]
     [string]$Arch = "x64"
 )
 
@@ -88,6 +89,7 @@ $fileVersion = "$($metadata.FileMajorPart).$($metadata.FileMinorPart).$($metadat
 
 & $iscc `
     "/DAppVersion=$appVersion" `
+    "/DAppArch=$Arch" `
     "/DFileVersion=$fileVersion" `
     "/DStageDir=$StageDir" `
     "/DOutputDir=$outDir" `

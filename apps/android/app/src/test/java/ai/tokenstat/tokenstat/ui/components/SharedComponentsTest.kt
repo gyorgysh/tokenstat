@@ -116,6 +116,8 @@ class SharedComponentsTest {
         // The first letters of the first two words, uppercased, like the
         // Apple `Avatar.initials`: one word gives one letter, blank gives nil.
         assertEquals("GY", avatarInitials("Gyorgy Yosh"))
+        assertEquals("😀A", avatarInitials("😀 Alice"))
+        assertEquals("𐐀J", avatarInitials("𐐨 Jane"))
         assertEquals("G", avatarInitials("gyorgy"))
         assertEquals("GY", avatarInitials("  gyorgy   yosh  "))
         assertNull(avatarInitials(""))

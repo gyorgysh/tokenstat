@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -118,11 +118,14 @@ fn salt_path() -> Result<PathBuf, ConfigError> {
 }
 
 pub fn load() -> Result<Config, ConfigError> {
-    let path = config_path()?;
+    load_from(&config_path()?)
+}
+
+fn load_from(path: &Path) -> Result<Config, ConfigError> {
     if !path.exists() {
         return Ok(Config::default());
     }
-    let text = fs::read_to_string(&path)?;
+    let text = fs::read_to_string(path)?;
     let cfg: Config = serde_json::from_str(&text)?;
     if let Some(m) = &cfg.machine
         && !is_valid_machine_id(m)
@@ -132,27 +135,65 @@ pub fn load() -> Result<Config, ConfigError> {
     Ok(cfg)
 }
 
-pub fn save(cfg: &Config) -> Result<(), ConfigError> {
-    let path = config_path()?;
+fn save_to(path: &Path, cfg: &Config) -> Result<(), ConfigError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(cfg)?;
-    crate::snapshot::write_private_atomically(&path, &json)
+    crate::snapshot::write_private_atomically(path, &json)
         .map_err(|e| ConfigError::Io(std::io::Error::other(e.to_string())))?;
     Ok(())
 }
 
+// Keep the stable lock separate from the atomically replaced JSON inode.
+fn lock(path: &Path) -> Result<fs::File, ConfigError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path.with_extension("lock"))?;
+    file.lock()?;
+    Ok(file)
+}
+
+fn update_at<T>(
+    path: &Path,
+    mutate: impl FnOnce(&mut Config) -> Result<T, ConfigError>,
+) -> Result<T, ConfigError> {
+    let _lock = lock(path)?;
+    let mut cfg = load_from(path)?;
+    let value = mutate(&mut cfg)?;
+    save_to(path, &cfg)?;
+    Ok(value)
+}
+
+fn update<T>(mutate: impl FnOnce(&mut Config) -> Result<T, ConfigError>) -> Result<T, ConfigError> {
+    update_at(&config_path()?, mutate)
+}
+
 /// Return the persisted machine id, creating one on first use.
 pub fn ensure_machine_id() -> Result<String, ConfigError> {
-    let mut cfg = load()?;
-    if let Some(m) = cfg.machine.clone() {
-        return Ok(m);
+    ensure_machine_id_at(&config_path()?)
+}
+
+fn ensure_machine_id_at(path: &Path) -> Result<String, ConfigError> {
+    if let Some(id) = load_from(path)?.machine {
+        return Ok(id);
     }
-    let id = generate_hex_id("m_", 8)?;
-    cfg.machine = Some(id.clone());
-    save(&cfg)?;
-    Ok(id)
+    update_at(path, |cfg| {
+        if let Some(id) = &cfg.machine {
+            return Ok(id.clone());
+        }
+        let id = generate_hex_id("m_", 8)?;
+        cfg.machine = Some(id.clone());
+        Ok(id)
+    })
 }
 
 /// Return the local project salt, creating one on first use.
@@ -160,9 +201,13 @@ pub fn ensure_machine_id() -> Result<String, ConfigError> {
 /// Rotating this file creates a new `salt_id` namespace on the server; old rows
 /// are not remapped.
 pub fn ensure_project_salt() -> Result<ProjectSalt, ConfigError> {
-    let path = salt_path()?;
+    ensure_project_salt_at(&salt_path()?)
+}
+
+fn ensure_project_salt_at(path: &Path) -> Result<ProjectSalt, ConfigError> {
+    let _lock = lock(path)?;
     if path.exists() {
-        let text = fs::read_to_string(&path)?;
+        let text = fs::read_to_string(path)?;
         let file: SaltFile = serde_json::from_str(&text)?;
         if !is_valid_salt_id(&file.id) {
             return Err(ConfigError::InvalidSaltId(file.id));
@@ -183,15 +228,16 @@ pub fn ensure_project_salt() -> Result<ProjectSalt, ConfigError> {
         key_hex: hex_encode(&key),
     };
     let json = serde_json::to_string_pretty(&file)?;
-    crate::snapshot::write_private_atomically(&path, &json)
+    crate::snapshot::write_private_atomically(path, &json)
         .map_err(|e| ConfigError::Io(std::io::Error::other(e.to_string())))?;
     Ok(ProjectSalt { id, key })
 }
 
 pub fn set_sync_host(host: &str) -> Result<(), ConfigError> {
-    let mut cfg = load()?;
-    cfg.sync.host = Some(host.to_string());
-    save(&cfg)
+    update(|cfg| {
+        cfg.sync.host = Some(host.to_string());
+        Ok(())
+    })
 }
 
 /// Whether this machine posts plan-limit readings after a sync (P2).
@@ -203,9 +249,10 @@ pub fn limits_sync_enabled() -> bool {
 
 /// Turn plan-limit posting on or off.
 pub fn set_limits_sync(on: bool) -> Result<(), ConfigError> {
-    let mut cfg = load()?;
-    cfg.sync.limits = Some(on);
-    save(&cfg)
+    update(|cfg| {
+        cfg.sync.limits = Some(on);
+        Ok(())
+    })
 }
 
 /// Source ids that must not be posted, even when limits sync is on.
@@ -215,20 +262,25 @@ pub fn limits_skip() -> Vec<String> {
 
 /// Replace the skip list. Empty ids and junk are dropped.
 pub fn set_limits_skip(skip: Vec<String>) -> Result<(), ConfigError> {
-    let mut cfg = load()?;
-    cfg.sync.limits_skip = clean_skip(skip);
-    save(&cfg)
+    update(|cfg| {
+        cfg.sync.limits_skip = clean_skip(skip);
+        Ok(())
+    })
 }
 
 /// Turn posting for one source on or off. Off adds it to the skip list.
 pub fn set_limits_source_shared(source: &str, shared: bool) -> Result<(), ConfigError> {
-    let mut skip = limits_skip();
-    if shared {
-        skip.retain(|s| s != source);
-    } else if is_skip_id(source) && !skip.iter().any(|s| s == source) {
-        skip.push(source.to_string());
-    }
-    set_limits_skip(skip)
+    update(|cfg| {
+        let skip = &mut cfg.sync.limits_skip;
+        if shared {
+            skip.retain(|s| s != source);
+        } else if is_skip_id(source) && !skip.iter().any(|s| s == source) {
+            skip.push(source.to_string());
+        }
+        skip.sort();
+        skip.dedup();
+        Ok(())
+    })
 }
 
 fn clean_skip(skip: Vec<String>) -> Vec<String> {
@@ -251,9 +303,10 @@ fn is_skip_id(id: &str) -> bool {
 /// Default is on. Persist an explicit value so a scheduler entry (which does
 /// not inherit shell env) matches the user's choice after `update --auto`.
 pub fn set_update_auto(on: bool) -> Result<(), ConfigError> {
-    let mut cfg = load()?;
-    cfg.update.auto = Some(on);
-    save(&cfg)
+    update(|cfg| {
+        cfg.update.auto = Some(on);
+        Ok(())
+    })
 }
 
 pub fn record_sync_cursor(
@@ -263,18 +316,19 @@ pub fn record_sync_cursor(
     last_sync_at: &str,
     pacing: SyncPacing,
 ) -> Result<(), ConfigError> {
-    let mut cfg = load()?;
-    cfg.sync.cursor.insert(
-        host.to_string(),
-        SyncCursor {
-            from: from.to_string(),
-            to: to.to_string(),
-            last_sync_at: last_sync_at.to_string(),
-            next_allowed_at: pacing.next_allowed_at,
-            min_interval: pacing.min_interval,
-        },
-    );
-    save(&cfg)
+    update(|cfg| {
+        cfg.sync.cursor.insert(
+            host.to_string(),
+            SyncCursor {
+                from: from.to_string(),
+                to: to.to_string(),
+                last_sync_at: last_sync_at.to_string(),
+                next_allowed_at: pacing.next_allowed_at,
+                min_interval: pacing.min_interval,
+            },
+        );
+        Ok(())
+    })
 }
 
 /// What the server said about when this machine may sync again.
@@ -291,29 +345,30 @@ pub struct SyncPacing {
 /// cursor yet (first sync refused before any accept), still persist pacing so
 /// `--scheduled` can skip without a request.
 pub fn record_sync_hold(host: &str, pacing: SyncPacing) -> Result<(), ConfigError> {
-    let mut cfg = load()?;
-    if let Some(cursor) = cfg.sync.cursor.get_mut(host) {
-        if pacing.next_allowed_at.is_some() {
-            cursor.next_allowed_at = pacing.next_allowed_at.clone();
+    update(|cfg| {
+        if let Some(cursor) = cfg.sync.cursor.get_mut(host) {
+            if pacing.next_allowed_at.is_some() {
+                cursor.next_allowed_at = pacing.next_allowed_at.clone();
+            }
+            if pacing.min_interval.is_some() {
+                cursor.min_interval = pacing.min_interval;
+            }
+        } else if pacing.next_allowed_at.is_some() || pacing.min_interval.is_some() {
+            cfg.sync.cursor.insert(
+                host.to_string(),
+                SyncCursor {
+                    from: String::new(),
+                    to: String::new(),
+                    last_sync_at: String::new(),
+                    next_allowed_at: pacing.next_allowed_at,
+                    min_interval: pacing.min_interval,
+                },
+            );
+        } else {
+            return Ok(());
         }
-        if pacing.min_interval.is_some() {
-            cursor.min_interval = pacing.min_interval;
-        }
-    } else if pacing.next_allowed_at.is_some() || pacing.min_interval.is_some() {
-        cfg.sync.cursor.insert(
-            host.to_string(),
-            SyncCursor {
-                from: String::new(),
-                to: String::new(),
-                last_sync_at: String::new(),
-                next_allowed_at: pacing.next_allowed_at,
-                min_interval: pacing.min_interval,
-            },
-        );
-    } else {
-        return Ok(());
-    }
-    save(&cfg)
+        Ok(())
+    })
 }
 
 pub fn cursor_for(host: &str) -> Result<Option<SyncCursor>, ConfigError> {
@@ -336,6 +391,9 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
+    if !s.is_ascii() {
+        return Err("non-ASCII hex value".into());
+    }
     if !s.len().is_multiple_of(2) {
         return Err("odd hex length".into());
     }
@@ -382,5 +440,71 @@ mod tests {
         );
         assert!(is_skip_id("antigravity_ide"));
         assert!(!is_skip_id("no spaces"));
+    }
+    #[test]
+    fn concurrent_initialization_keeps_one_machine_and_salt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let salt_path = dir.path().join("project.salt");
+        let values = std::thread::scope(|scope| {
+            let threads = (0..16)
+                .map(|_| {
+                    scope.spawn(|| {
+                        (
+                            ensure_machine_id_at(&path).unwrap(),
+                            ensure_project_salt_at(&salt_path).unwrap(),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            threads
+                .into_iter()
+                .map(|t| t.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        for (id, salt) in &values {
+            assert_eq!(id, &values[0].0);
+            assert_eq!(salt.id, values[0].1.id);
+            assert_eq!(salt.key, values[0].1.key);
+        }
+        assert_eq!(
+            load_from(&path).unwrap().machine.as_ref(),
+            Some(&values[0].0)
+        );
+    }
+
+    #[test]
+    fn concurrent_updates_preserve_independent_cursors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::thread::scope(|scope| {
+            for n in 0..16 {
+                let path = &path;
+                scope.spawn(move || {
+                    update_at(path, |cfg| {
+                        cfg.sync.cursor.insert(
+                            n.to_string(),
+                            SyncCursor {
+                                from: "2026-10-01".into(),
+                                to: "2026-10-12".into(),
+                                last_sync_at: String::new(),
+                                next_allowed_at: None,
+                                min_interval: None,
+                            },
+                        );
+                        Ok(())
+                    })
+                    .unwrap()
+                });
+            }
+        });
+        assert_eq!(load_from(&path).unwrap().sync.cursor.len(), 16);
+    }
+
+    #[test]
+    fn malformed_unicode_hex_is_an_error() {
+        for text in ["éaa", "aaaéa", "zz", "a"] {
+            assert!(hex_decode(text).is_err());
+        }
     }
 }

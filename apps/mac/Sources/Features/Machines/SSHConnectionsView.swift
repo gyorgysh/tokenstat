@@ -325,6 +325,7 @@ struct SSHVaultSetupSheet: View {
     @State private var enteredRecovery = ""
     @State private var forgot = false
     @State private var biometricAccount: String?
+    @State private var biometricTask: Task<Void, Never>?
     // Both answered by the device, not the host, so the first frame is already
     // the right shape. Asking the host which account is signed in takes a round
     // trip, and the sheet used to spend it showing the password form and then
@@ -441,6 +442,7 @@ struct SSHVaultSetupSheet: View {
         }
         .modalFrame(width: 520, height: sheetHeight)
         .onDisappear {
+            biometricTask?.cancel(); biometricTask = nil
             ownership.retire(); operation = nil
             password = ""; confirmPassword = ""; enteredRecovery = ""
         }
@@ -612,7 +614,11 @@ struct SSHVaultSetupSheet: View {
                 .buttonStyle(AccentButtonStyle())
         } else if biometricUnlock, let biometricName {
             Button(working ? L10n.text("apple.sshconnectionsview.unlocking.a4114da0") : L10n.text("apple.sshconnectionsview.unlock_with_0.20a41ad2", "\(biometricName)"), .security) {
-                Task { await unlockWithBiometrics() }
+                guard biometricTask == nil else { return }
+                biometricTask = Task {
+                    await unlockWithBiometrics()
+                    biometricTask = nil
+                }
             }
             .buttonStyle(AccentButtonStyle())
             // The panel can be up before the account key lands. Without this a

@@ -38,6 +38,8 @@ fi
 
 report="$(printf '%s' "$metadata" | python3 -c '
 import json, sys
+sys.path.insert(0, "scripts")
+from licence_rules import clean_license
 
 meta = json.load(sys.stdin)
 packages = {p["id"]: p for p in meta["packages"]}
@@ -57,29 +59,18 @@ def walk(pid):
 for r in roots:
     walk(r)
 
-# Blocks shipping a closed binary built on top.
-BLOCKING = ("GPL", "AGPL", "LGPL", "EUPL", "CDDL", "OSL", "SSPL", "CC-BY-SA")
-# Fine to link into a closed binary. MPL is per-file copyleft; see the header.
-ALLOWED_COPYLEFT = ("MPL-2.0",)
-
-def clean(alternative):
-    upper = alternative.upper()
-    if any(a.upper() in upper for a in ALLOWED_COPYLEFT):
-        return True
-    return not any(b in upper for b in BLOCKING)
-
 problems = []
 for pid in sorted(linked):
     p = packages[pid]
     # pueev owns these.
-    if p["name"].startswith("tokenstat-") or p["name"] == "xtask":
+    if pid in meta["workspace_members"]:
         continue
     lic = p.get("license") or ""
     if not lic:
         problems.append((p["name"], p.get("license_file") or "no licence declared"))
         continue
     # "A OR B" leaves the choice to us, so one clean alternative is enough.
-    if any(clean(alt) for alt in lic.split(" OR ")):
+    if clean_license(lic):
         continue
     problems.append((p["name"], lic))
 

@@ -44,7 +44,7 @@ fn open_regular(path: &Path) -> Result<fs::File, String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     options.open(path).map_err(|e| e.to_string())
 }
@@ -93,7 +93,7 @@ pub(super) fn copy_attachment(source: &Path, destination: &Path) -> Result<u64, 
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let input = options.open(source).map_err(|e| e.to_string())?;
     let expected = input.metadata().map_err(|e| e.to_string())?.len();
@@ -112,7 +112,11 @@ pub(super) fn copy_attachment(source: &Path, destination: &Path) -> Result<u64, 
         std::io::copy(&mut input.take(FILE_BYTES + 1), &mut output).map_err(|e| e.to_string());
     match result {
         Ok(count) if count == expected && count <= FILE_BYTES => {
-            output.sync_all().map_err(|e| e.to_string())?;
+            if let Err(error) = output.sync_all() {
+                drop(output);
+                let _ = fs::remove_file(destination);
+                return Err(error.to_string());
+            }
             Ok(count)
         }
         _ => {
@@ -148,6 +152,14 @@ fn save_upload(path: &Path, upload: &Upload) -> Result<(), String> {
     let _ = fs::remove_file(temporary);
     result
 }
+fn remove_partial(path: &Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 fn stored_bytes(chat: &Path) -> Result<u64, String> {
     let files = chat.join("files");
     if !files.exists() {
@@ -286,8 +298,8 @@ impl Store {
                 serde_json::from_slice::<Upload>(&read_fork_file(&path, 8192, false)?)
             {
                 if now_ms().saturating_sub(upload.touched_at_ms) > TTL_MS {
-                    let _ = fs::remove_file(path.with_extension("part"));
-                    let _ = fs::remove_file(path);
+                    remove_partial(&path.with_extension("part"))?;
+                    fs::remove_file(path).map_err(|e| e.to_string())?;
                 } else if !upload.finished {
                     if upload.owner == owner
                         && upload.peer == peer
@@ -390,7 +402,7 @@ impl Store {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.custom_flags(libc::O_NOFOLLOW);
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
         }
         let mut file = options.open(&part).map_err(|e| e.to_string())?;
         if offset < upload.offset {
@@ -462,7 +474,7 @@ impl Store {
         let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         let (path, upload) = self.upload_load(id, transfer)?;
         if !upload.finished {
-            let _ = fs::remove_file(path.with_extension("part"));
+            remove_partial(&path.with_extension("part"))?;
         }
         fs::remove_file(path).map_err(|e| e.to_string())?;
         Ok(json!({"cancelled":true}))
@@ -538,6 +550,21 @@ mod tests {
             .unwrap()
             .into()
     }
+    #[test]
+    fn failed_partial_cleanup_preserves_the_transfer_for_retry() {
+        let (_temp, store) = fixture();
+        let transfer = start(&store, b"file");
+        let (path, _) = store.upload_load("file-test", &transfer).unwrap();
+        let part = path.with_extension("part");
+        fs::remove_file(&part).unwrap();
+        fs::create_dir(&part).unwrap();
+        assert!(store.file_upload_cancel("file-test", &transfer).is_err());
+        assert!(path.exists());
+        fs::remove_dir(&part).unwrap();
+        store.file_upload_cancel("file-test", &transfer).unwrap();
+        assert!(!path.exists());
+    }
+
     #[test]
     fn failed_metadata_save_does_not_leak_temporary_transfer_records() {
         let (_temp, store) = fixture();

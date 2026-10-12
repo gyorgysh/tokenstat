@@ -264,7 +264,7 @@ fn plain(ch: char) -> bool {
 /// for them changes where their cursor means to be. A leading `~` is left
 /// bare, since escaping it turns the home directory into a filename.
 pub(crate) fn escape_path(path: &str) -> Option<String> {
-    if path.contains('\n') || path.contains('\r') || path.contains('\0') {
+    if path.chars().any(char::is_control) {
         return None;
     }
     let (lead, rest) = if path == "~" {
@@ -287,7 +287,13 @@ pub(crate) fn escape_path(path: &str) -> Option<String> {
 
 /// Join a listed name onto the part of the path already typed.
 fn joined(query: &PathQuery, entry: &Entry) -> String {
-    let mut path = format!("{}{}", query.head, entry.name);
+    let head =
+        if query.head.is_empty() && (entry.name.starts_with('-') || entry.name.starts_with('~')) {
+            "./"
+        } else {
+            &query.head
+        };
+    let mut path = format!("{head}{}", entry.name);
     if entry.directory {
         path.push('/');
     }
@@ -442,7 +448,10 @@ fn normalize(path: &str) -> String {
         match part {
             "" | "." => continue,
             ".." => {
-                if parts.last().is_some_and(|last| *last != "~") {
+                if parts
+                    .last()
+                    .is_some_and(|last| *last != "~" && *last != "..")
+                {
                     parts.pop();
                 } else if !rooted && !home {
                     parts.push("..");
@@ -714,6 +723,9 @@ fn single_quoted(text: &str) -> String {
 /// guessed at.
 pub(crate) fn parse_listing(output: &str, cap: usize) -> Vec<Entry> {
     let mut entries = Vec::new();
+    if cap == 0 {
+        return entries;
+    }
     for line in output.lines() {
         let line = line.trim_end_matches('\r');
         if line.is_empty() {
@@ -724,7 +736,7 @@ pub(crate) fn parse_listing(output: &str, cap: usize) -> Vec<Entry> {
         // not a filename anybody can use.
         let directory = line.ends_with('/');
         let name = line.trim_end_matches('/');
-        if name.is_empty() || name.contains('/') {
+        if name.is_empty() || name.contains('/') || name.chars().any(char::is_control) {
             continue;
         }
         entries.push(Entry {
@@ -744,6 +756,37 @@ mod tests {
 
     fn token(fragment: &str) -> Token {
         last_token(fragment)
+    }
+
+    #[test]
+    fn completion_never_inserts_terminal_controls_or_turns_names_into_options() {
+        for bad in ["bell\u{7}", "tab\tname", "escape\u{1b}[2J", "delete\u{7f}"] {
+            assert!(escape_path(bad).is_none());
+        }
+        assert!(parse_listing("a\n", 0).is_empty());
+        assert!(parse_listing("bad\u{1b}[2J\n", 10).is_empty());
+        let query = path_query(&token("cat "), Some("/tmp")).unwrap();
+        assert_eq!(
+            joined(
+                &query,
+                &Entry {
+                    name: "-rf".into(),
+                    directory: false
+                }
+            ),
+            "./-rf"
+        );
+        assert_eq!(
+            joined(
+                &query,
+                &Entry {
+                    name: "~".into(),
+                    directory: true
+                }
+            ),
+            "./~/"
+        );
+        assert_eq!(normalize("../../work"), "../../work");
     }
 
     #[test]

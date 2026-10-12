@@ -305,12 +305,14 @@ enum DiagnosticsLog {
     /// The kernel's free memory level, the figure `memory_pressure` prints,
     /// plus what the compressor holds. A freeze from memory shows as the level
     /// falling toward zero.
-    private static func systemMemory() -> String {
+    static func systemMemory() -> String {
         var stats = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
+        let host = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, host) }
         let result = withUnsafeMutablePointer(to: &stats) { pointer in
             pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                host_statistics64(host, HOST_VM_INFO64, $0, &count)
             }
         }
         guard result == KERN_SUCCESS else { return "sys=unknown" }
@@ -453,7 +455,7 @@ enum DiagnosticsLog {
     private static func openToday() {
         day = String(stamp.string(from: Date()).prefix(10))
         let path = directory.appendingPathComponent("app-\(day).log").path
-        let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
+        let fd = open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0o600)
         let previous = fatalFD
         fatalFD = fd
         if previous >= 0 { close(previous) }

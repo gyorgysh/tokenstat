@@ -164,7 +164,9 @@ internal sealed partial class ChatPage
         }
         if (Busy() || _outboxKey is not string key) return;
         var generation = _openGeneration;
-        bool Current() => OpenChatIs(chat) && generation == _openGeneration && _outboxKey == key;
+        var accountGeneration = AppServices.AccountGeneration;
+        bool Current() => OpenChatIs(chat) && generation == _openGeneration && _outboxKey == key
+            && accountGeneration == AppServices.AccountGeneration;
         var candidates = ChatOutbox.Shared.Read(key);
         var candidate = messageId is null ? candidates.FirstOrDefault() : candidates.FirstOrDefault(row => row.Id == messageId);
         if (candidate is null || candidate.AttemptedAt.HasValue || !_authorizedQueue.Contains(candidate.Id)) return;

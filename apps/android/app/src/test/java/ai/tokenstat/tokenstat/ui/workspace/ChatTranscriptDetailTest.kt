@@ -300,4 +300,21 @@ class ChatTranscriptDetailTest {
         val finished = fold(rows, ChatDetail.Minimal, running = false)
         assertEquals(listOf("/w/c.kt"), (finished.last() as ChatDisplayItem.Changes).files.map { it.path })
     }
+
+    @Test
+    fun markdownListsRetainWholeSentencesAndDeepHeadingsRemoveAllMarkers() {
+        val blocks = parseMarkdown("1. Fix the bug. Then test it.\n2. Keep all words.\n\n#### Deep heading")
+        assertEquals(MdBlock.Numbered(1, "Fix the bug. Then test it."), blocks[0])
+        assertEquals(MdBlock.Numbered(2, "Keep all words."), blocks[1])
+        assertEquals(MdBlock.Header(3, "Deep heading"), blocks[2])
+    }
+
+    @Test
+    fun markdownLinksAllowWebAndEmailButRejectAppCommandsAndMalformedDestinations() {
+        assertTrue(safeMarkdownLink("https://example.test/path"))
+        assertTrue(safeMarkdownLink("mailto:hello@example.test"))
+        for (target in listOf("javascript:alert(1)", "intent://command", "file:///etc/passwd", "/relative", "https://", "https://bad host")) {
+            assertFalse(target, safeMarkdownLink(target))
+        }
+    }
 }

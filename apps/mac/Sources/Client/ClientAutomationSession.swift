@@ -468,6 +468,7 @@ final class ClientAutomationSession {
     private func refreshRuns() async {
         do {
             let latest = try await service.automationRuns(peer: peer)
+            guard !Task.isCancelled, isVisible else { return }
             runs = latest.filter { $0.workspaceID == workspaceID }
             if let run = selectedRun, !run.isRunning {
                 stopPolling()
@@ -483,10 +484,7 @@ final class ClientAutomationSession {
     }
 
     private func fetchUntilCaughtUp(id: String) async {
-        var slices = 0
-        while slices < 8 {
-            guard !Task.isCancelled else { return }
-            slices += 1
+        while !Task.isCancelled {
             let before = transcriptOffset
             await fetchTranscript(id: id)
             if Task.isCancelled || !stillWatching(id) { return }

@@ -63,6 +63,7 @@ struct AvatarButton: View {
     /// picture on screen instead of flashing the monogram while a new fetch
     /// spins up. See `Avatar`, which reads the same cache for the same reason.
     @State private var pictureImage: Image?
+    @State private var pictureURL: String?
 
     private var tier: String? {
         guard signedIn, let value = account.account?.tier?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -159,6 +160,7 @@ struct AvatarButton: View {
             ?? (signedIn ? L10n.text("apple.avatarbutton.account_0.1342b321", "\(name)") : L10n.text("apple.avatarbutton.sign_in_to_tokenstat.9a950fc4")))
         .accessibilityHint(L10n.text("apple.avatarbutton.opens_your_account.bf04ed9e"))
         .task(id: pictureRaw) {
+            pictureURL = pictureRaw
             guard let raw = pictureRaw else {
                 pictureImage = nil
                 return
@@ -196,8 +198,8 @@ struct AvatarButton: View {
     /// runs after that frame, which is exactly the one-frame monogram flash
     /// this exists to prevent.
     private var displayImage: Image? {
-        if let pictureImage { return pictureImage }
         guard let raw = pictureRaw else { return nil }
+        if pictureURL == raw, let pictureImage { return pictureImage }
         return AvatarCache.shared.cached(raw)
     }
 

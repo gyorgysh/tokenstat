@@ -172,7 +172,6 @@ class PortedLogicTest {
     fun shortDateOmitsCurrentYear() {
         val now = java.time.LocalDate.now()
         val thisYear = now.withMonth(8).withDayOfMonth(11)
-            .let { if (it.isAfter(now)) it.minusYears(1) else it }
         val expectedDay = thisYear.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM"))
         assertEquals(expectedDay, shortDate(thisYear.toString()))
         val otherYear = thisYear.minusYears(1)
@@ -210,6 +209,17 @@ class PortedLogicTest {
         assertEquals(true, vaultPasswordProblems("lowercase12!").contains("An uppercase letter"))
         // Eastern Arabic digits must not count as a number: the host uses ASCII.
         assertEquals(true, vaultPasswordProblems("Correct-Horse١٢").contains("A number"))
+    }
+
+    @Test
+    fun vaultPasswordChecksUnicodeScalarsForEveryRule() {
+        // Deseret uppercase letters occupy two UTF-16 chars, but are one letter.
+        assertEquals(emptyList<String>(), vaultPasswordProblems("\uD801\uDC00abcdefghij9!"))
+        assertEquals(listOf("A special character"), vaultPasswordProblems("Abcdefghijk9\uD801\uDC00"))
+        assertEquals(listOf("A special character"), vaultPasswordProblems("Abcdefghijk9\uD835\uDFCE"))
+        assertEquals(listOf("A special character"), vaultPasswordProblems("Abcdefghijk9²"))
+        assertEquals(listOf("A special character"), vaultPasswordProblems("Abcdefghijk9\u00A0\u0085"))
+        assertEquals(emptyList<String>(), vaultPasswordProblems("Abcdefghijk9\uD83D\uDE00"))
     }
 
     @Test

@@ -300,6 +300,39 @@ fn trim_catalog(body: &str) -> anyhow::Result<TrimmedCatalog> {
     if wire.models.is_empty() {
         anyhow::bail!("invalid catalog snapshot: models must not be empty");
     }
+    let mut ids = std::collections::HashSet::new();
+    for model in &wire.models {
+        if model.id.trim().is_empty() || !ids.insert(&model.id) {
+            anyhow::bail!("invalid catalog snapshot: empty or duplicate model id");
+        }
+        for offer in &model.offers {
+            if [
+                offer.input,
+                offer.output,
+                offer.cache_read,
+                offer.cache_write,
+                offer.cache_write_5m,
+                offer.cache_write_1h,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|rate| !rate.is_finite() || rate < 0.0)
+            {
+                anyhow::bail!("invalid catalog snapshot: invalid price for {}", model.id);
+            }
+        }
+        if model.cheapest.as_ref().is_some_and(|offer| {
+            [offer.input, offer.output]
+                .into_iter()
+                .flatten()
+                .any(|rate| !rate.is_finite() || rate < 0.0)
+        }) {
+            anyhow::bail!(
+                "invalid catalog snapshot: invalid cheapest price for {}",
+                model.id
+            );
+        }
+    }
     let models: Vec<TrimmedModel> = wire.models.into_iter().map(trim_model).collect();
     Ok(TrimmedCatalog {
         effective_from: wire.effective_from,
@@ -416,6 +449,22 @@ fn parse_plans(body: &str) -> anyhow::Result<RawPlans> {
     validate_effective_from(&plans.effective_from, "plans")?;
     if plans.plans.is_empty() {
         anyhow::bail!("invalid plans snapshot: plans must not be empty");
+    }
+    let decoded = Plans::parse(body)
+        .ok_or_else(|| anyhow::anyhow!("invalid plans snapshot: invalid plan fields"))?;
+    let mut ids = std::collections::HashSet::new();
+    for plan in decoded.all() {
+        if plan.id.trim().is_empty()
+            || !ids.insert(&plan.id)
+            || plan.vendor.trim().is_empty()
+            || plan.name.trim().is_empty()
+            || [plan.price_usd_month, plan.price_usd_year]
+                .into_iter()
+                .flatten()
+                .any(|price| !price.is_finite() || price < 0.0)
+        {
+            anyhow::bail!("invalid plans snapshot: invalid plan identity or price");
+        }
     }
     Ok(plans)
 }
@@ -579,5 +628,23 @@ mod tests {
         // Whatever we accept must round-trip into the type core reads.
         let stored = serde_json::to_string(&parse_plans(good).unwrap()).unwrap();
         assert_eq!(Plans::parse(&stored).unwrap().len(), 1);
+    }
+    #[test]
+    fn malformed_plan_records_and_negative_catalog_prices_are_rejected() {
+        for row in [
+            "null",
+            "{}",
+            r#"{"id":"p","vendor":"v","name":"P","price_usd_month":-1}"#,
+            r#"{"id":"p","vendor":"v","name":"P","models":[{}]}"#,
+        ] {
+            assert!(
+                parse_plans(&format!(
+                    r#"{{"effective_from":"2026-10-12","plans":[{row}]}}"#
+                ))
+                .is_err()
+            );
+        }
+        assert!(trim_catalog(&CATALOG.replace("\"input\": 5.0", "\"input\": -5.0")).is_err());
+        assert!(trim_catalog(r#"{"effective_from":"2026-10-12","models":[{"id":""}]}"#).is_err());
     }
 }

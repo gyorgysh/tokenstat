@@ -123,7 +123,17 @@ pub fn unstage(dir: &Path, paths: &[String]) -> GitOutcome {
             return GitOutcome::failed(error.to_string());
         }
     }
-    let mut args = vec!["restore", "--staged", "--"];
+    let has_head = git_command(dir)
+        .args(["rev-parse", "--verify", "HEAD^{commit}"])
+        .output()
+        .is_ok_and(|output| output.status.success());
+    let mut args = if has_head {
+        vec!["restore", "--staged", "--"]
+    } else {
+        // An unborn branch has no tree to restore from. Remove only the
+        // selected index entries, retaining their current working files.
+        vec!["rm", "--cached", "-r", "-f", "--"]
+    };
     args.extend(paths.iter().map(String::as_str));
     git(dir, &args)
 }
@@ -281,6 +291,19 @@ mod tests {
         run(&["add", "-A"]);
         run(&["commit", "-qm", "init"]);
         dir
+    }
+
+    #[test]
+    fn unstaging_before_the_first_commit_preserves_unstaged_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(git(dir.path(), &["init", "-q"]).ok);
+        let file = dir.path().join("first.txt");
+        std::fs::write(&file, "staged").unwrap();
+        assert!(stage(dir.path(), &["first.txt".into()]).ok);
+        std::fs::write(&file, "newer edit").unwrap();
+        assert!(unstage(dir.path(), &["first.txt".into()]).ok);
+        assert_eq!(std::fs::read_to_string(file).unwrap(), "newer edit");
+        assert!(git(dir.path(), &["ls-files"]).message.is_empty());
     }
 
     #[test]

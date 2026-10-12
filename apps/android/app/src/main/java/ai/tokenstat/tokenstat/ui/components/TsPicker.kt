@@ -6,6 +6,8 @@ import ai.tokenstat.tokenstat.ui.localization.L10n
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -363,7 +365,7 @@ private fun <T> TsPickerRow(
             Modifier
                 .weight(1f)
                 .clip(RoundedCornerShape(Space.s))
-                .clickable(enabled = enabled, onClick = onPick)
+                .selectable(selected = isSelected, role = Role.RadioButton, enabled = enabled, onClick = onPick)
                 .padding(horizontal = Space.s, vertical = 6.dp)
                 .heightIn(min = 48.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -446,7 +448,7 @@ private fun TsPickerSectionTab(title: String, selected: Boolean, onSelect: () ->
             .clip(shape)
             .background(if (selected) colors.accentSoft else colors.background)
             .border(1.dp, if (selected) colors.accent.copy(alpha = 0.35f) else colors.border, shape)
-            .clickable(onClick = onSelect)
+            .selectable(selected = selected, role = Role.Tab, onClick = onSelect)
             .widthIn(min = 54.dp)
             .heightIn(min = 44.dp)
             .padding(horizontal = 9.dp),
@@ -481,7 +483,7 @@ fun TsPickerField(
             .clip(shape)
             .background(colors.panel)
             .border(1.dp, colors.border, shape)
-            .clickable(enabled = enabled, onClick = onOpen)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onOpen)
             .padding(horizontal = 10.dp, vertical = 6.dp)
             .heightIn(min = 44.dp),
         verticalAlignment = Alignment.CenterVertically,

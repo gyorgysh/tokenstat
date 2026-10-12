@@ -682,6 +682,7 @@ final class PushRegistrar {
     /// Whether a token has reached the account this launch.
     private(set) var isRegistered = false
     private(set) var isWorking = false
+    private let operations = PushRegistrationQueue()
 
     /// The token Apple last handed us, kept so switching off can name the
     /// device to remove rather than waiting for Apple to notice it is dead.
@@ -702,6 +703,7 @@ final class PushRegistrar {
     /// A refusal at the system prompt leaves the switch off, because a switch
     /// that says on while the system says no is a lie the app tells daily.
     func enable() async {
+        guard !isWorking else { return }
         isWorking = true
         defer { isWorking = false }
         errorMessage = nil
@@ -729,17 +731,22 @@ final class PushRegistrar {
     /// remembered rather than dropped: a switch that reads off while
     /// notifications keep arriving is the worst of the states this can be in.
     func disable() async {
+        guard !isWorking else { return }
+        isWorking = true
+        defer { isWorking = false }
         isOn = false
         UserDefaults.standard.set(false, forKey: Self.onKey)
         UIApplication.shared.unregisterForRemoteNotifications()
         isRegistered = false
         guard let token = deviceToken else { return }
-        do {
-            try await Bridge.pushUnregister(token: token)
-            UserDefaults.standard.removeObject(forKey: Self.pendingRemovalKey)
-        } catch {
-            UserDefaults.standard.set(token, forKey: Self.pendingRemovalKey)
-        }
+        await operations.enqueue {
+            do {
+                try await Bridge.pushUnregister(token: token)
+                UserDefaults.standard.removeObject(forKey: Self.pendingRemovalKey)
+            } catch {
+                UserDefaults.standard.set(token, forKey: Self.pendingRemovalKey)
+            }
+        }.value
     }
 
     /// Re-register at launch, and after signing in. Cheap, and it is the only
@@ -750,8 +757,11 @@ final class PushRegistrar {
     /// offline and switched back on would race its own removal.
     func refresh() {
         if let pending = UserDefaults.standard.string(forKey: Self.pendingRemovalKey) {
-            Task {
-                if (try? await Bridge.pushUnregister(token: pending)) != nil {
+            operations.enqueue { [self] in
+                // Enabling again makes an unstarted removal obsolete.
+                if UserDefaults.standard.string(forKey: Self.pendingRemovalKey) == pending,
+                   (try? await Bridge.pushUnregister(token: pending)) != nil,
+                   UserDefaults.standard.string(forKey: Self.pendingRemovalKey) == pending {
                     UserDefaults.standard.removeObject(forKey: Self.pendingRemovalKey)
                 }
                 if isOn {
@@ -768,12 +778,16 @@ final class PushRegistrar {
     func received(token: Data) {
         let hex = token.map { String(format: "%02x", $0) }.joined()
         deviceToken = hex
-        Task {
+        guard isOn else { return }
+        operations.enqueue { [self] in
+            guard isOn, deviceToken == hex else { return }
             do {
                 try await Bridge.pushRegister(token: hex, platform: Self.platform, environment: Self.environment)
+                guard isOn, deviceToken == hex else { return }
                 isRegistered = true
                 errorMessage = nil
             } catch {
+                guard isOn, deviceToken == hex else { return }
                 isRegistered = false
                 // Signed out is the ordinary case, not a fault worth shouting
                 // about: notifications need an account and the account screen
@@ -785,6 +799,7 @@ final class PushRegistrar {
 
     /// Apple refused. Usually a build with no push entitlement, or a simulator.
     func failed(_ error: Error) {
+        guard isOn else { return }
         isRegistered = false
         errorMessage = error.localizedDescription
     }

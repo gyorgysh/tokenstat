@@ -31,6 +31,8 @@ struct ClientFolderPicker: View {
     @State private var naming = false
     /// Guards against stale responses when rows are tapped in quick succession.
     @State private var generation = 0
+    @State private var visible = false
+    @State private var owner = WorkSessionContext.shared.scope
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,6 +79,14 @@ struct ClientFolderPicker: View {
                 .frame(maxWidth: .infinity)
                 .background(Theme.background)
             }
+        }
+        .onAppear { visible = true }
+        .onDisappear { visible = false; generation &+= 1; loading = false }
+        .onChange(of: WorkSessionContext.shared.scope) { _, _ in
+            generation &+= 1
+            listing = nil
+            naming = false
+            dismiss()
         }
         .task { await load(nil) }
     }
@@ -192,6 +202,7 @@ struct ClientFolderPicker: View {
     }
 
     private func load(_ path: String?) async {
+        guard visible, !Task.isCancelled, owner != nil, owner == WorkSessionContext.shared.scope else { return }
         generation &+= 1
         let current = generation
         loading = true
@@ -199,16 +210,17 @@ struct ClientFolderPicker: View {
         defer { if current == generation { loading = false } }
         do {
             let answer = try await Bridge.browse(peer: peer, path: path)
-            guard current == generation else { return }
+            guard visible, !Task.isCancelled, owner == WorkSessionContext.shared.scope, current == generation else { return }
             listing = answer
         }
         catch {
-            guard current == generation else { return }
+            guard visible, !Task.isCancelled, owner == WorkSessionContext.shared.scope, current == generation else { return }
             self.error = ClientSetupModel.readable(error)
         }
     }
 
     private func create() async {
+        guard visible, !loading, !Task.isCancelled, owner != nil, owner == WorkSessionContext.shared.scope else { return }
         let name = newFolder.trimmingCharacters(in: .whitespaces)
         newFolder = ""
         guard !name.isEmpty, let here = listing?.path else { return }
@@ -225,25 +237,32 @@ struct ClientFolderPicker: View {
         defer { if current == generation { loading = false } }
         do {
             let made = try await Bridge.makeDirectory(peer: peer, path: "\(here)/\(name)")
-            guard current == generation else { return }
+            guard visible, !Task.isCancelled, owner == WorkSessionContext.shared.scope, current == generation else { return }
             let answer = try await Bridge.browse(peer: peer, path: made)
-            guard current == generation else { return }
+            guard visible, !Task.isCancelled, owner == WorkSessionContext.shared.scope, current == generation else { return }
             listing = answer
         } catch {
-            guard current == generation else { return }
+            guard visible, !Task.isCancelled, owner == WorkSessionContext.shared.scope, current == generation else { return }
             self.error = ClientSetupModel.readable(error)
         }
     }
 
     private func add(path: String) async {
+        guard visible, !loading, !Task.isCancelled, owner != nil, owner == WorkSessionContext.shared.scope else { return }
+        generation &+= 1
+        let current = generation
         loading = true
         error = nil
-        defer { loading = false }
+        defer { if current == generation { loading = false } }
         do {
             let folder = try await Bridge.addWorkspace(peer: peer, path: path)
+            guard visible, !Task.isCancelled, owner == WorkSessionContext.shared.scope, current == generation else { return }
             onAdded?(folder)
             dismiss()
-        } catch { self.error = ClientSetupModel.readable(error) }
+        } catch {
+            guard visible, !Task.isCancelled, owner == WorkSessionContext.shared.scope, current == generation else { return }
+            self.error = ClientSetupModel.readable(error)
+        }
     }
 }
 

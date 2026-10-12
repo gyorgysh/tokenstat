@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
+use crate::render::sanitize_label;
 use crate::{host_install, host_rpc, host_service::Service};
 
 #[derive(Args)]
@@ -136,7 +137,7 @@ enum AccessCommand {
         /// List number, key prefix, full key, or device label. Omit to choose interactively.
         target: Option<String>,
         /// Approve every pending request
-        #[arg(long)]
+        #[arg(long, conflicts_with = "target")]
         all: bool,
         /// Do not ask for confirmation
         #[arg(long, short = 'y')]
@@ -466,8 +467,13 @@ fn access(
             } else {
                 label
             };
-            println!("  [{}] {name} ({})", index + 1, short(key));
-            println!("      {key}");
+            println!(
+                "  [{}] {} ({})",
+                index + 1,
+                sanitize_label(name),
+                short(key)
+            );
+            println!("      {}", sanitize_label(key));
         }
         if pending_list.is_empty() {
             println!("  None");
@@ -669,9 +675,9 @@ fn describe(key: &str, pending: &[Value]) -> String {
         .and_then(|request| request["label"].as_str())
         .unwrap_or("");
     if label.is_empty() {
-        format!("{} ({})", key, short(key))
+        format!("{} ({})", sanitize_label(key), short(key))
     } else {
-        format!("{label} ({})", short(key))
+        format!("{} ({})", sanitize_label(label), short(key))
     }
 }
 
@@ -772,11 +778,11 @@ fn log(socket: &std::path::Path, lines: u32, json_output: bool) -> Result<()> {
         let device = entry["device"].as_str().unwrap_or("");
         println!(
             "{}  {:<16}  {:<8}  {}",
-            when(text(&entry["at"])),
+            when(&text(&entry["at"])),
             text(&entry["event"]),
             text(&entry["by"]),
             match entry["label"].as_str() {
-                Some(label) => format!("{label} ({})", short(device)),
+                Some(label) => format!("{} ({})", sanitize_label(label), short(device)),
                 None if device.is_empty() => String::new(),
                 None => short(device),
             }
@@ -808,6 +814,7 @@ fn when(at: &str) -> String {
 
 /// Enough of a device key to recognise, not enough to retype by mistake.
 fn short(device: &str) -> String {
+    let device = sanitize_label(device);
     if device.chars().count() <= 16 {
         return device.to_owned();
     }
@@ -857,7 +864,7 @@ fn status(
                 println!("Host unavailable");
                 print_service(installed_service);
                 println!("  socket: {}", socket.display());
-                println!("\n{error}");
+                println!("\n{}", sanitize_label(&error.to_string()));
             }
             return Ok(());
         }
@@ -901,14 +908,14 @@ fn status(
     let account = &report["account"];
     println!(
         "  account: {}",
-        match account["signedIn"].as_bool() {
+        sanitize_label(match account["signedIn"].as_bool() {
             Some(false) => "signed out",
             Some(true) => account["handle"]
                 .as_str()
                 .or_else(|| account["displayName"].as_str())
                 .unwrap_or("signed in"),
             None => "unavailable",
-        }
+        })
     );
     println!(
         "  machine: {}\n  fingerprint: {}\n  always-on: {}",
@@ -931,7 +938,7 @@ fn status(
         }
     );
     if let Some(error) = remote["tunnelError"].as_str() {
-        println!("    {error}");
+        println!("    {}", sanitize_label(error));
     }
     for (field, label) in [
         ("allowed", "allowed devices"),
@@ -955,7 +962,7 @@ fn status(
                 if installed.is_empty() {
                     "none".into()
                 } else {
-                    installed.join(", ")
+                    sanitize_label(&installed.join(", "))
                 }
             );
         }
@@ -965,7 +972,7 @@ fn status(
         "identity", "policy", "account", "remote", "allowed", "pending", "folders", "agents",
     ] {
         if let Some(error) = report[field]["unavailable"].as_str() {
-            println!("\n{field}: {error}");
+            println!("\n{field}: {}", sanitize_label(error));
         }
     }
     Ok(())
@@ -993,8 +1000,13 @@ fn print_service(service: Option<&Service>) {
     );
 }
 
-fn text(value: &Value) -> &str {
-    value.as_str().unwrap_or("unavailable")
+fn text(value: &Value) -> String {
+    match value {
+        Value::String(value) => sanitize_label(value),
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        _ => "unavailable".into(),
+    }
 }
 
 #[cfg(test)]
@@ -1160,5 +1172,25 @@ mod tests {
         );
         assert_eq!(resolve_target("tablet", &pending).unwrap(), "bb".repeat(32));
         assert!(resolve_target("nope", &pending).is_err());
+    }
+
+    #[test]
+    fn host_labels_are_terminal_safe_and_protocol_numbers_remain_visible() {
+        let malicious = "phone\u{1b}]0;owned\u{7}\nother";
+        let pending = vec![json!({"peerId": "aa".repeat(32), "label": malicious})];
+        assert!(
+            !describe(&"aa".repeat(32), &pending)
+                .chars()
+                .any(char::is_control)
+        );
+        assert!(!short(malicious).chars().any(char::is_control));
+        assert!(!text(&json!(malicious)).chars().any(char::is_control));
+        assert_eq!(text(&json!(34)), "34");
+        assert_eq!(text(&Value::Null), "unavailable");
+        use clap::Parser;
+        assert!(
+            crate::Cli::try_parse_from(["tokenstat", "host", "access", "approve", "1", "--all"])
+                .is_err()
+        );
     }
 }

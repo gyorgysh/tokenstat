@@ -514,15 +514,87 @@ pub fn persona_draft_command(
 /// `--single` or after `--`. Inserting at `len - 1` used to land between
 /// `--output-format` and `streaming-json`, which is the clap error a grok
 /// Standard turn printed as its whole reply.
+fn command_word_positions(argv: &[String]) -> Vec<usize> {
+    let mut positions = Vec::new();
+    let mut index = 1;
+    while index < argv.len() {
+        positions.push(index);
+        let argument = argv[index].as_str();
+        if argument == "--" {
+            break;
+        }
+        // Values are opaque, even when the model, prompt or resume token is
+        // spelled like another flag or subcommand.
+        index += if matches!(
+            argument,
+            "--model"
+                | "--effort"
+                | "--reasoning-effort"
+                | "--variant"
+                | "-c"
+                | "--output-format"
+                | "--format"
+                | "--print-timeout"
+                | "--permission-mode"
+                | "-p"
+                | "--print"
+                | "--single"
+                | "--prompt-interactive"
+                | "--prompt"
+                | "--append-system-prompt"
+                | "--rules"
+                | "--settings"
+                | "--disallowedTools"
+                | "--allow"
+                | "--sandbox"
+                | "--mode"
+                | "--plugin-dir"
+                | "--add-dir"
+                | "--resume"
+                | "--conversation"
+                | "--session-id"
+                | "-s"
+                | "-i"
+                | "-f"
+                | "resume"
+        ) {
+            2
+        } else {
+            1
+        };
+    }
+    positions
+}
+
+fn command_word_at(argv: &[String], word: &str) -> Option<usize> {
+    command_word_positions(argv)
+        .into_iter()
+        .find(|&index| argv[index] == word)
+}
+
+fn remove_cli_options(argv: &mut Vec<String>, options: &[&str]) {
+    for index in command_word_positions(argv).into_iter().rev() {
+        if options.contains(&argv[index].as_str()) {
+            let count = if argv[index] == "--permission-mode" {
+                2
+            } else {
+                1
+            };
+            argv.drain(index..(index + count).min(argv.len()));
+        }
+    }
+}
+
 fn headless_flag_at(argv: &[String]) -> usize {
-    argv.iter()
-        .position(|arg| {
+    command_word_positions(argv)
+        .into_iter()
+        .find(|&index| {
             matches!(
-                arg.as_str(),
+                argv[index].as_str(),
                 "-p" | "--print" | "--single" | "--prompt-interactive" | "--"
             )
         })
-        .unwrap_or_else(|| argv.len().max(1))
+        .unwrap_or(argv.len())
 }
 
 fn insert_flags(argv: &mut Vec<String>, flags: impl IntoIterator<Item = String>) {
@@ -585,7 +657,7 @@ pub fn chat_agent_command(
         // plan-only chat turn instead: remove the full-bypass flag and make
         // the CLI's own write and shell tools unavailable. The UI exposes
         // Muse as Bypass-only, but retain this guard for older saved chats.
-        if let Some(index) = argv.iter().position(|value| value == "--yolo") {
+        if let Some(index) = command_word_at(&argv, "--yolo") {
             argv.remove(index);
         }
         if plan {
@@ -622,10 +694,12 @@ pub fn chat_agent_command(
         && launch.cursor_plugin_dir.is_some();
     if (!launch.bypass || plan) && !agy_gated && !cursor_gated {
         match backend {
-            "claude" | "agy" => argv.retain(|arg| arg != "--dangerously-skip-permissions"),
-            "codex" => argv.retain(|arg| arg != "--dangerously-bypass-approvals-and-sandbox"),
-            "cursor" => argv.retain(|arg| !matches!(arg.as_str(), "--trust" | "--force")),
-            "opencode" | "opencode2" => argv.retain(|arg| arg != "--auto"),
+            "claude" | "agy" => remove_cli_options(&mut argv, &["--dangerously-skip-permissions"]),
+            "codex" => {
+                remove_cli_options(&mut argv, &["--dangerously-bypass-approvals-and-sandbox"])
+            }
+            "cursor" => remove_cli_options(&mut argv, &["--trust", "--force"]),
+            "opencode" | "opencode2" => remove_cli_options(&mut argv, &["--auto"]),
             _ => {}
         }
     }
@@ -635,12 +709,10 @@ pub fn chat_agent_command(
         // splicing at `len - 1` used to leave `--output-format` without a
         // value, which is the error a Standard grok turn printed instead of
         // answering.
-        argv.retain(|arg| {
-            !matches!(
-                arg.as_str(),
-                "--permission-mode" | "bypassPermissions" | "--always-approve" | "--yolo"
-            )
-        });
+        remove_cli_options(
+            &mut argv,
+            &["--permission-mode", "--always-approve", "--yolo"],
+        );
         // A guarded turn runs grok's own permission layer wide open, because
         // the hook is the gate and grok's layer cannot be one here.
         //
@@ -744,10 +816,7 @@ pub fn chat_agent_command(
         // Codex otherwise silently skips an untrusted hook. The caller gives
         // it a private, tokenstat-owned CODEX_HOME, so this flag is safe only
         // beside that setup and must never be used for the user's home.
-        let at = argv
-            .iter()
-            .position(|arg| arg == "exec")
-            .unwrap_or(argv.len());
+        let at = command_word_at(&argv, "exec").unwrap_or(argv.len());
         argv.splice(at + 1..at + 1, ["--dangerously-bypass-hook-trust".into()]);
     }
     if cursor_gated
@@ -775,10 +844,7 @@ pub fn chat_agent_command(
     // exactly one of the two places, never both.
     if crate::chat_turn::accepts_attachment_flags(backend) {
         let flag = if backend == "codex" { "-i" } else { "-f" };
-        let at = argv
-            .iter()
-            .position(|arg| arg == "--")
-            .unwrap_or(argv.len());
+        let at = command_word_at(&argv, "--").unwrap_or(argv.len());
         let flags = launch
             .attachments
             .iter()
@@ -793,13 +859,13 @@ pub fn chat_agent_command(
             }
             "codex" => {
                 // `codex exec resume <thread>` is a different subcommand shape.
-                if let Some(at) = argv.iter().position(|arg| arg == "exec") {
+                if let Some(at) = command_word_at(&argv, "exec") {
                     argv.splice(at + 1..at + 1, ["resume".into(), token.into()]);
                 }
             }
             "agy" => extra.extend(["--conversation".into(), token.into()]),
             "opencode" | "opencode2" => {
-                if let Some(at) = argv.iter().position(|arg| arg == "run") {
+                if let Some(at) = command_word_at(&argv, "run") {
                     argv.splice(at + 1..at + 1, ["-s".into(), token.into()]);
                 }
             }
@@ -816,20 +882,17 @@ pub fn chat_agent_command(
         // `codex exec`, not its `resume` subcommand. `insert_flags` and the
         // resume splice can leave them after `resume <session>`; move both
         // back across the subcommand so resumed turns parse.
-        if let Some(exec) = argv.iter().position(|arg| arg == "exec") {
-            if let Some(at) = argv.iter().position(|arg| arg == "--sandbox")
+        if let Some(exec) = command_word_at(&argv, "exec") {
+            if let Some(at) = command_word_at(&argv, "--sandbox")
                 && let Some(value) = argv.get(at + 1).cloned()
             {
                 argv.drain(at..=at + 1);
-                let exec = argv.iter().position(|arg| arg == "exec").unwrap_or(exec);
+                let exec = command_word_at(&argv, "exec").unwrap_or(exec);
                 argv.splice(exec + 1..exec + 1, ["--sandbox".into(), value]);
             }
-            if let Some(at) = argv
-                .iter()
-                .position(|arg| arg == "--dangerously-bypass-hook-trust")
-            {
+            if let Some(at) = command_word_at(&argv, "--dangerously-bypass-hook-trust") {
                 argv.remove(at);
-                let exec = argv.iter().position(|arg| arg == "exec").unwrap_or(exec);
+                let exec = command_word_at(&argv, "exec").unwrap_or(exec);
                 argv.splice(
                     exec + 1..exec + 1,
                     ["--dangerously-bypass-hook-trust".into()],
@@ -1376,24 +1439,15 @@ impl Store {
             .map_or(Ok(()), |error| Err(error.clone()))
     }
 
-    fn save(&self) -> Result<(), String> {
-        let jobs = self
-            .jobs
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
+    /// Every jobs-file writer holds the jobs mutex until disk and memory agree.
+    fn save(&self, jobs: &[Automation]) -> Result<(), String> {
         let queue = *self.queue.lock().unwrap_or_else(PoisonError::into_inner);
         let creations = self
             .creations
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        let launches = self
-            .launches
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        self.write_jobs(&jobs, queue, &creations, &launches)
+            .unwrap_or_else(PoisonError::into_inner);
+        let launches = self.launches.lock().unwrap_or_else(PoisonError::into_inner);
+        self.write_jobs(jobs, queue, &creations, &launches)
     }
 
     fn write_jobs(
@@ -1424,8 +1478,15 @@ impl Store {
 
     pub fn set_queue_config(&self, mut next: QueueConfig) -> Result<QueueConfig, String> {
         next.max_concurrent = next.max_concurrent.min(32);
-        *self.queue.lock().unwrap_or_else(PoisonError::into_inner) = next;
-        self.save()?;
+        let jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
+        let creations = self
+            .creations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let launches = self.launches.lock().unwrap_or_else(PoisonError::into_inner);
+        self.write_jobs(&jobs, next, &creations, &launches)?;
+        *queue = next;
         Ok(next)
     }
 
@@ -1510,7 +1571,8 @@ impl Store {
         self.ensure_jobs_available()?;
         validate(&job)?;
         job.schedule.validate()?;
-        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut live = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = live.clone();
         if jobs
             .iter()
             .any(|existing| existing.id == job.id && !job.id.is_empty())
@@ -1538,20 +1600,24 @@ impl Store {
             }
             advance_revision(&mut job)?;
             jobs[idx] = job.clone();
-            drop(jobs);
-            self.save()?;
+            self.save(&jobs)?;
+            *live = jobs;
             return Ok(job);
         }
         if job.id.is_empty() {
-            job.id = format!("automation-{}", now_ms());
+            job.id = format!("automation-{:032x}", rand::random::<u128>());
         }
         job.revision = 1;
-        if job.enabled {
-            job.next_run_at_ms = job.schedule.next_run_ms(now_ms());
-        }
+        job.next_run_at_ms = if job.enabled {
+            job.schedule.next_run_ms(now_ms())
+        } else {
+            None
+        };
+        job.last_run_at_ms = None;
+        job.last_run_id = None;
         jobs.push(job.clone());
-        drop(jobs);
-        self.save()?;
+        self.save(&jobs)?;
+        *live = jobs;
         Ok(job)
     }
 
@@ -1573,7 +1639,8 @@ impl Store {
         self.ensure_jobs_available()?;
         validate(&job)?;
         job.schedule.validate()?;
-        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut live = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = live.clone();
         if is_auto_commit_name(&job.name)
             && jobs.iter().any(|other| {
                 other.id != job.id
@@ -1609,14 +1676,15 @@ impl Store {
         advance_revision(&mut job)?;
         *current = job;
         let result = current.clone();
-        drop(jobs);
-        self.save()?;
+        self.save(&jobs)?;
+        *live = jobs;
         Ok(result)
     }
 
     pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<Automation, String> {
         self.ensure_jobs_available()?;
-        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut live = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = live.clone();
         let job = jobs
             .iter_mut()
             .find(|job| job.id == id)
@@ -1629,20 +1697,21 @@ impl Store {
         };
         advance_revision(job)?;
         let result = job.clone();
-        drop(jobs);
-        self.save()?;
+        self.save(&jobs)?;
+        *live = jobs;
         Ok(result)
     }
 
     pub fn remove(&self, id: &str) -> Result<bool, String> {
         self.ensure_jobs_available()?;
-        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut live = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = live.clone();
         let old = jobs.len();
         jobs.retain(|job| job.id != id);
         let changed = old != jobs.len();
         if changed {
-            drop(jobs);
-            self.save()?;
+            self.save(&jobs)?;
+            *live = jobs;
         }
         Ok(changed)
     }
@@ -1711,21 +1780,33 @@ impl Store {
             transcript_path,
             parent_run_id: parent_run_id.map(str::to_string),
         };
+        self.push_run(RunRecord {
+            id: run_id.clone(),
+            job_id: snapshot.id.clone(),
+            name: snapshot.name.clone(),
+            backend: snapshot.backend.clone(),
+            workspace_id: workspace.id.clone(),
+            started_at_ms: now_ms(),
+            ended_at_ms: None,
+            exit_code: None,
+            status: "starting".into(),
+            transcript_path: pending.transcript_path.display().to_string(),
+            pty_id: None,
+            interactive: false,
+            parent_run_id: pending.parent_run_id.clone(),
+        })?;
         match self.spawn_pending(pending, workspace.id) {
             Ok((run, budget)) => {
                 let started = run.started_at_ms;
                 let started_id = run.id.clone();
-                let out = self.persist_and_drain(run, budget, |r| self.push_run(r), false)?;
-                let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
-                if let Some(job) = jobs.iter_mut().find(|job| job.id == id) {
-                    job.last_run_at_ms = Some(started);
-                    job.last_run_id = Some(started_id);
-                }
-                drop(jobs);
-                let _ = self.save();
+                let out = self.persist_and_drain(run, budget, |r| self.update_run(r), false)?;
+                let _ = self.note_started(id, started, &started_id, false);
                 Ok(out)
             }
-            Err(e) => Err(e),
+            Err(e) => {
+                self.finish_run(&run_id, None, "error");
+                Err(e)
+            }
         }
     }
 
@@ -2212,23 +2293,44 @@ impl Store {
                 .cloned()
                 .ok_or_else(|| format!("no automation with id {id}"))?
         };
-        let run = self.run_adhoc(snapshot)?;
-        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
-        let job = jobs
-            .iter_mut()
-            .find(|job| job.id == id)
-            .ok_or_else(|| format!("no automation with id {id}"))?;
-        job.last_run_at_ms = Some(run.started_at_ms);
-        job.last_run_id = Some(run.id.clone());
-        job.next_run_at_ms = if job.enabled {
-            job.schedule.next_run_ms(now_ms())
-        } else {
-            None
+        let run = self.run_adhoc(snapshot.clone())?;
+        // The process has already been accepted. A later metadata failure must
+        // not report a rejected launch that an older client would repeat.
+        let mut accepted = self
+            .note_started(id, run.started_at_ms, &run.id, true)
+            .ok()
+            .flatten()
+            .unwrap_or(snapshot);
+        accepted.last_run_at_ms = Some(run.started_at_ms);
+        accepted.last_run_id = Some(run.id);
+        Ok(accepted)
+    }
+
+    fn note_started(
+        &self,
+        id: &str,
+        started: i64,
+        run_id: &str,
+        advance_schedule: bool,
+    ) -> Result<Option<Automation>, String> {
+        let mut live = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = live.clone();
+        let Some(job) = jobs.iter_mut().find(|job| job.id == id) else {
+            return Ok(None);
         };
+        job.last_run_at_ms = Some(started);
+        job.last_run_id = Some(run_id.to_owned());
+        if advance_schedule {
+            job.next_run_at_ms = if job.enabled {
+                job.schedule.next_run_ms(now_ms())
+            } else {
+                None
+            };
+        }
         let result = job.clone();
-        drop(jobs);
-        self.save()?;
-        Ok(result)
+        self.save(&jobs)?;
+        *live = jobs;
+        Ok(Some(result))
     }
 
     /// Kill the pty behind a run, by its run id. The drain then records the
@@ -2285,11 +2387,8 @@ impl Store {
         owns_slot: bool,
     ) {
         let manager = tokenstat_pty::manager();
-        let deadline = if budget_seconds == 0 {
-            None
-        } else {
-            Some(Instant::now() + Duration::from_secs(budget_seconds))
-        };
+        let started = Instant::now();
+        let budget = (budget_seconds != 0).then(|| Duration::from_secs(budget_seconds));
         let mut file = std::fs::File::create(path).ok();
         let readable_path = transcript::readable_path(path);
         // Create the readable file immediately so a live tail never falls
@@ -2342,7 +2441,7 @@ impl Store {
                     take(&chunk.bytes, &mut file, &mut readable_body, &mut parser);
                 }
             }
-            if deadline.is_some_and(|d| Instant::now() >= d) {
+            if budget.is_some_and(|limit| started.elapsed() >= limit) {
                 let _ = manager.kill(pty_id);
                 stopped_by_budget = true;
             }
@@ -2419,16 +2518,32 @@ impl Store {
         }
     }
 
+    fn claim_due(&self, now: i64) -> Result<Vec<Automation>, String> {
+        let mut live = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut jobs = live.clone();
+        let mut due = Vec::new();
+        for job in &mut jobs {
+            if job.enabled && job.next_run_at_ms.is_some_and(|at| at <= now) {
+                due.push(job.clone());
+                job.next_run_at_ms = job.schedule.next_run_ms(now);
+            }
+        }
+        if !due.is_empty() {
+            self.save(&jobs)?;
+            *live = jobs;
+        }
+        Ok(due)
+    }
+
     pub fn run_due(self: &Arc<Store>) {
-        let now = now_ms();
-        let ids: Vec<String> = self
-            .list()
-            .into_iter()
-            .filter(|job| job.enabled && job.next_run_at_ms.is_some_and(|at| at <= now))
-            .map(|job| job.id)
-            .collect();
-        for id in ids {
-            let _ = self.run(&id);
+        let Ok(jobs) = self.claim_due(now_ms()) else {
+            return;
+        };
+        for job in jobs {
+            let id = job.id.clone();
+            if let Ok(run) = self.run_adhoc(job) {
+                let _ = self.note_started(&id, run.started_at_ms, &run.id, false);
+            }
         }
     }
 }
@@ -2490,18 +2605,8 @@ pub(crate) fn validate_task_run(job: &Automation, interactive: bool) -> Result<(
 }
 
 fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-    }
-    // A unique suffix keeps two savers from interleaving into one temporary.
-    static SAVE_SEQ: AtomicU64 = AtomicU64::new(0);
-    let tmp = path.with_extension(format!(
-        "json.tmp.{}.{}",
-        std::process::id(),
-        SAVE_SEQ.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::write(&tmp, body).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+    tokenstat_sync::snapshot::write_private_atomically(path, body)
+        .map_err(|error| error.to_string())
 }
 
 /// Process-wide counter that keeps two runs started in the same millisecond
@@ -2552,6 +2657,203 @@ mod tests {
             last_run_id: None,
             revision: 0,
         }
+    }
+
+    #[test]
+    fn failed_job_mutations_keep_memory_and_schedule_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jobs.json");
+        let store = Store::at(path.clone());
+        let first = store
+            .create(job("first", ScheduleSpec::default(), 60))
+            .unwrap();
+        let original_jobs = serde_json::to_value(store.list()).unwrap();
+        let original_queue = serde_json::to_value(store.queue_config()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap(); // Atomic replacement must fail.
+        let mut edited = first.clone();
+        edited.prompt = "must not apply".into();
+        assert!(store.edit(edited, first.revision).is_err());
+        assert!(store.set_enabled(&first.id, false).is_err());
+        assert!(store.remove(&first.id).is_err());
+        assert!(
+            store
+                .create(job("new", ScheduleSpec::default(), 60))
+                .is_err()
+        );
+        assert!(
+            store
+                .set_queue_config(QueueConfig {
+                    default_budget_seconds: 1,
+                    max_concurrent: 7
+                })
+                .is_err()
+        );
+        assert!(
+            store
+                .note_started(&first.id, 123, "uncommitted", true)
+                .is_err()
+        );
+        assert_eq!(serde_json::to_value(store.list()).unwrap(), original_jobs);
+        assert_eq!(
+            serde_json::to_value(store.queue_config()).unwrap(),
+            original_queue
+        );
+    }
+
+    #[test]
+    fn concurrent_job_receipt_and_queue_writes_keep_every_saved_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jobs.json");
+        let store = Arc::new(Store::at(path.clone()));
+        let handles: Vec<_> = (0..6)
+            .map(|worker| {
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    for index in 0..8 {
+                        if worker % 2 == 0 {
+                            store.create(job("", ScheduleSpec::default(), 60)).unwrap();
+                        } else {
+                            store
+                                .create_once(
+                                    &format!("fixture-operation-{worker}-{index}"),
+                                    job("", ScheduleSpec::default(), 60),
+                                )
+                                .unwrap();
+                        }
+                        store
+                            .set_queue_config(QueueConfig {
+                                default_budget_seconds: index,
+                                max_concurrent: worker + 1,
+                            })
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let current = store.list();
+        assert_eq!(current.len(), 48);
+        assert_eq!(
+            current
+                .iter()
+                .map(|job| &job.id)
+                .collect::<HashSet<_>>()
+                .len(),
+            48
+        );
+        let reopened = Store::load_at(path);
+        assert_eq!(
+            serde_json::to_value(reopened.list()).unwrap(),
+            serde_json::to_value(current).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(reopened.queue_config()).unwrap(),
+            serde_json::to_value(store.queue_config()).unwrap()
+        );
+        for worker in [1, 3, 5] {
+            for index in 0..8 {
+                assert!(
+                    reopened
+                        .creation_receipt(&format!("fixture-operation-{worker}-{index}"))
+                        .unwrap()
+                        .is_some()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scheduler_claims_a_due_occurrence_once_and_only_after_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jobs.json");
+        let store = Arc::new(Store::at(path.clone()));
+        let mut due = job("due", ScheduleSpec::default(), 60);
+        due.next_run_at_ms = Some(100);
+        store.seed(due.clone());
+        std::fs::create_dir(&path).unwrap();
+        assert!(store.claim_due(200).is_err());
+        assert_eq!(store.list()[0].next_run_at_ms, Some(100));
+        std::fs::remove_dir(&path).unwrap();
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let store = store.clone();
+                std::thread::spawn(move || store.claim_due(200).unwrap().len())
+            })
+            .collect();
+        assert_eq!(
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .sum::<usize>(),
+            1
+        );
+        assert_eq!(Store::load_at(path).list()[0].next_run_at_ms, None);
+    }
+
+    #[test]
+    fn flag_shaped_prompts_models_and_resume_tokens_remain_opaque_values() {
+        for (backend, prompt) in [
+            ("claude", "--dangerously-skip-permissions"),
+            ("grok", "bypassPermissions"),
+            ("grok", "--permission-mode"),
+            ("cursor", "--force"),
+            ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+            ("muse", "--yolo"),
+            ("opencode", "--auto"),
+            ("opencode2", "--auto"),
+            ("agy", "--dangerously-skip-permissions"),
+        ] {
+            let argv = chat_agent_command(
+                backend,
+                prompt,
+                None,
+                None,
+                60,
+                ChatLaunch {
+                    resume: None,
+                    bypass: false,
+                    mode: "execute",
+                    hook_helper: None,
+                    system_append: None,
+                    agy_customization_dir: None,
+                    cursor_plugin_dir: None,
+                    grok_allow_rules: &[],
+                    attachments: &[],
+                },
+            )
+            .unwrap();
+            let prompt_at = match backend {
+                "claude" | "grok" => command_word_at(&argv, "-p").unwrap() + 1,
+                "agy" => command_word_at(&argv, "--print").unwrap() + 1,
+                _ => command_word_at(&argv, "--").unwrap() + 1,
+            };
+            assert_eq!(argv[prompt_at], prompt, "{backend}: {argv:?}");
+        }
+        let argv = chat_agent_command(
+            "codex",
+            "--dangerously-bypass-hook-trust",
+            Some("exec"),
+            None,
+            60,
+            ChatLaunch {
+                resume: Some("--sandbox"),
+                bypass: false,
+                mode: "execute",
+                hook_helper: Some(Path::new("helper")),
+                system_append: None,
+                agy_customization_dir: None,
+                cursor_plugin_dir: None,
+                grok_allow_rules: &[],
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        assert!(argv.windows(2).any(|pair| pair == ["--model", "exec"]));
+        assert!(argv.windows(2).any(|pair| pair == ["resume", "--sandbox"]));
+        assert_eq!(argv.last().unwrap(), "--dangerously-bypass-hook-trust");
     }
 
     #[test]
@@ -3991,7 +4293,7 @@ mod tests {
         // A budget long enough for a shell to start and print, short enough
         // that a run which never ends fails the test quickly instead of
         // holding the suite for the whole allowance.
-        store.drain(&pty_id, &transcript_path, 10, run_id, "sh", true);
+        store.drain(&pty_id, &transcript_path, u64::MAX, run_id, "sh", true);
 
         let record = store
             .runs()
@@ -4359,7 +4661,12 @@ mod tests {
             model: None,
             effort: None,
             workspace_id: workspace_id.clone(),
-            prompt: "sleep 8".into(),
+            prompt: if cfg!(windows) {
+                "ping -n 9 127.0.0.1 > nul"
+            } else {
+                "sleep 8"
+            }
+            .into(),
             schedule: ScheduleSpec::default(),
             budget_seconds: 15,
             enabled: false,
@@ -4408,7 +4715,12 @@ mod tests {
             model: None,
             effort: None,
             workspace_id: workspace_id.clone(),
-            prompt: "sleep 8".into(),
+            prompt: if cfg!(windows) {
+                "ping -n 9 127.0.0.1 > nul"
+            } else {
+                "sleep 8"
+            }
+            .into(),
             schedule: ScheduleSpec::default(),
             budget_seconds: 15,
             enabled: false,

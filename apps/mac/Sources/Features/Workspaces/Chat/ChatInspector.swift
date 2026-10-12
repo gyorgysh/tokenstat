@@ -19,6 +19,7 @@ struct ChatInspector: View {
         let chat: ChatConversation
         let owner: WorkReference
     }
+    @State private var writingAllowlist = false
     @State private var titleDraft = ""
     @FocusState private var titleFocused: Bool
 
@@ -158,20 +159,12 @@ struct ChatInspector: View {
                     FlowLayout(spacing: 6, rowSpacing: 6) {
                         ForEach(chat.allowedTools, id: \.self) { tool in
                             allowChip(tool) {
-                                change(chat) {
-                                    await model.update(
-                                        allowedTools: chat.allowedTools.filter { $0 != tool }
-                                    )
-                                }
+                                removeAllowed(tool, shellPrefix: false, from: chat)
                             }
                         }
                         ForEach(chat.allowedShellPrefixes, id: \.self) { prefix in
                             allowChip(prefix) {
-                                change(chat) {
-                                    await model.update(
-                                        allowedShellPrefixes: chat.allowedShellPrefixes.filter { $0 != prefix }
-                                    )
-                                }
+                                removeAllowed(prefix, shellPrefix: true, from: chat)
                             }
                         }
                     }
@@ -186,7 +179,7 @@ struct ChatInspector: View {
                 .font(Theme.caption.weight(.medium))
                 .foregroundStyle(Theme.accent)
             Button(L10n.text("common.remove"), .dismiss) { remove() }
-                .disabled(model.savedCopy != nil)
+                .disabled(model.savedCopy != nil || writingAllowlist)
                 .buttonStyle(.plain)
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
@@ -195,6 +188,21 @@ struct ChatInspector: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(Theme.accentSoft, in: Capsule())
+    }
+
+    private func removeAllowed(_ value: String, shellPrefix: Bool, from chat: ChatConversation) {
+        guard !writingAllowlist, let owner = model.currentReference else { return }
+        writingAllowlist = true
+        Task {
+            defer { writingAllowlist = false }
+            guard model.currentReference == owner, model.savedCopy == nil,
+                  let current = model.selected, current.id == chat.id else { return }
+            if shellPrefix {
+                await model.update(allowedShellPrefixes: current.allowedShellPrefixes.filter { $0 != value })
+            } else {
+                await model.update(allowedTools: current.allowedTools.filter { $0 != value })
+            }
+        }
     }
 
     private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

@@ -240,9 +240,13 @@ private fun ChatQueueRow(
     val colors = LocalTsColors.current
     val context = LocalContext.current
     var draft by remember(item.id) { mutableStateOf(item.text) }
-    // The store is the truth: an edit that was refused, or a message another
-    // path rewrote, has to show what is actually saved.
-    LaunchedEffect(item.text) { if (draft != item.text) draft = item.text }
+    var savedText by remember(item.id) { mutableStateOf(item.text) }
+    // An older asynchronous save must not replace newer typing. Keep failed
+    // edits available to copy, and do not send until the visible text is saved.
+    LaunchedEffect(item.text) {
+        if (draft == savedText) draft = item.text
+        savedText = item.text
+    }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         OutlinedTextField(
             value = draft,
@@ -287,7 +291,7 @@ private fun ChatQueueRow(
                 label = L10n.text("common.copy"),
                 icon = ActionIcon.Copy.vector,
                 small = true,
-                onClick = { copyToClipboard(context, item.text) },
+                onClick = { copyToClipboard(context, draft) },
             )
             TsAccentButton(
                 label = when {
@@ -301,7 +305,7 @@ private fun ChatQueueRow(
                     ActionIcon.Send.vector
                 },
                 small = true,
-                enabled = !offline,
+                enabled = !offline && draft == item.text,
                 onClick = onSendNow,
             )
             TsDangerButton(

@@ -354,6 +354,27 @@ impl VaultClient {
         )
     }
 
+    /// Fetch usage using the same immutable account owner as the request.
+    pub fn account_series(
+        &self,
+        from: &str,
+        to: &str,
+        machine: Option<&str>,
+    ) -> Result<profile::SeriesResult, ProfileError> {
+        let mut query = vec![("from", from), ("to", to)];
+        if let Some(machine) = machine {
+            query.push(("machine", machine));
+        }
+        let url =
+            reqwest::Url::parse_with_params("https://account.invalid/api/v1/usage/series", query)
+                .map_err(|error| ProfileError::Message(error.to_string()))?;
+        let path = format!("{}?{}", url.path(), url.query().unwrap_or_default());
+        let (status, bytes) = self
+            .raw_response(Method::GET, &path, None)
+            .map_err(|error| ProfileError::Message(error.to_string()))?;
+        profile::decode_series_response(status, &String::from_utf8_lossy(&bytes))
+    }
+
     pub fn mint_tunnel_token(&self, machine: &str) -> Result<profile::TunnelToken, ProfileError> {
         let body = serde_json::to_vec(&serde_json::json!({"machine": machine}))?;
         let (status, bytes) = self
@@ -777,7 +798,7 @@ mod tests {
     #[test]
     fn profile_and_tunnel_routes_pin_held_success_and_failure_to_the_original_login() {
         use std::sync::atomic::Ordering;
-        for tunnel in [false, true] {
+        for route in 0..3 {
             for fail in [false, true] {
                 let (client, wire, current) = fixture();
                 let owner_id = client.authentication_id();
@@ -787,7 +808,11 @@ mod tests {
                 *wire.hold.lock().unwrap() = Some((started, held));
                 wire.fail.store(fail, Ordering::SeqCst);
                 let worker = std::thread::spawn(move || {
-                    if tunnel {
+                    if route == 2 {
+                        client
+                            .account_series("2026-01-01", "2026-12-31", Some("machine"))
+                            .map(|_| ())
+                    } else if route == 1 {
                         client.mint_tunnel_token("machine").map(|_| ())
                     } else {
                         client.account_status().map(|_| ())

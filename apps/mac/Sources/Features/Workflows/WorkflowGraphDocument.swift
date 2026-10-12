@@ -64,8 +64,16 @@ struct WorkflowGraphDocument {
     }
 
     /// Host just wrote this graph. Keep undo so a person can still go back.
-    mutating func markSaved(_ graph: WorkflowGraph) {
+    mutating func markSaved(_ graph: WorkflowGraph, preservingEdits: Bool = false) {
+        endGroupedEdit()
         guard var snapshot = current else { return }
+        if preservingEdits {
+            snapshot.graph.id = graph.id
+            snapshot.graph.revision = graph.revision
+            current = snapshot
+            isDirty = true
+            return
+        }
         var laid = graph
         laid.layoutIfNeeded()
         if let id = snapshot.selectedNodeID, !laid.nodes.contains(where: { $0.id == id }) {
@@ -139,16 +147,22 @@ struct WorkflowGraphDocument {
 
     mutating func undo() {
         endGroupedEdit()
-        guard let current, let previous = undoStack.popLast() else { return }
+        guard let current, var previous = undoStack.popLast() else { return }
         redoStack.append(current)
+        // Undo edits, not the host identity or revision confirmed by Save.
+        // Restoring a pre-create empty id would create a duplicate workflow.
+        previous.graph.id = current.graph.id
+        previous.graph.revision = current.graph.revision
         self.current = previous
         isDirty = true
     }
 
     mutating func redo() {
         endGroupedEdit()
-        guard let current, let next = redoStack.popLast() else { return }
+        guard let current, var next = redoStack.popLast() else { return }
         undoStack.append(current)
+        next.graph.id = current.graph.id
+        next.graph.revision = current.graph.revision
         self.current = next
         isDirty = true
     }

@@ -1187,6 +1187,7 @@ final class ChatModel {
             cancelPreviewWarmup()
         }
         loadGeneration &+= 1
+        isCreating = false
         let generation = loadGeneration
         let probe = Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
         probe.error("load start ws=\(workspaceID) gen=\(generation) scope=\(String(describing: WorkSessionContext.shared.scope?.identity)) selectFirst=\(selectFirst)")
@@ -1677,7 +1678,9 @@ final class ChatModel {
 
     /// One creation at a time: a second tap while the backend answers awaits
     /// the same conversation instead of doubling the sidebar.
-    private let createSingleflight = Singleflight<ChatConversation?>()
+    private var createSingleflight = Singleflight<ChatConversation?>()
+    private var createContext: UInt64?
+    private var createTicket = UUID()
 
     @discardableResult
     func create() async -> ChatConversation? {
@@ -1685,9 +1688,17 @@ final class ChatModel {
         // shared task does not inherit waiter cancellation, so check here
         // where the waiter's flag is visible.
         guard !Task.isCancelled else { return nil }
+        let context = loadGeneration
+        if createContext != context {
+            createSingleflight = Singleflight<ChatConversation?>()
+            createContext = context
+        }
+        let flight = createSingleflight
+        if !flight.isRunning { createTicket = UUID() }
+        let ticket = createTicket
         isCreating = true
-        defer { isCreating = false }
-        return await createSingleflight.run { await self.performCreate() }
+        defer { if createTicket == ticket, context == loadGeneration { isCreating = false } }
+        return await flight.run { await self.performCreate(expectedGeneration: context) }
     }
 
     /// True while a creation is reaching the backend. New-chat buttons read
@@ -1695,8 +1706,8 @@ final class ChatModel {
     /// read off the singleflight, which nothing observes.
     private(set) var isCreating = false
 
-    private func performCreate() async -> ChatConversation? {
-        guard !Task.isCancelled, let workspaceID, let scope = continuityScope,
+    private func performCreate(expectedGeneration: UInt64) async -> ChatConversation? {
+        guard !Task.isCancelled, expectedGeneration == loadGeneration, let workspaceID, let scope = continuityScope,
               scope == WorkSessionContext.shared.scope else { return nil }
         let context = loadGeneration
         let selection = selectionGeneration
@@ -2675,16 +2686,13 @@ final class ChatModel {
 
     /// Whether an approval record is still a question waiting for an answer.
     ///
-    /// The live list is authoritative once it has answered. Until then — an
-    /// open still in flight, or a read that has only ever failed — the
-    /// record's own deadline is the evidence, so a question with time left
-    /// is not reported as one nobody answered. A saved copy is a snapshot:
-    /// its rows stay text, never live controls.
+    /// The live list is authoritative. A transcript record with an unexpired
+    /// deadline can already have been answered on another device. Until the
+    /// list answers, and while viewing a saved copy, rows stay read-only.
     func approvalIsPending(_ approval: ChatApproval) -> Bool {
         guard savedCopy == nil, approval.decision == nil else { return false }
         guard approvalsLoaded else { return false }
-        if approvals.contains(where: { $0.id == approval.id }) { return true }
-        return Double(approval.expiresAtMs) / 1000 > Date().timeIntervalSince1970
+        return approvals.contains { $0.id == approval.id }
     }
 
     /// Workspace ownership does not require a selected conversation: personas
@@ -3416,7 +3424,7 @@ final class ChatModel {
             firstSeq: events.first?.seq,
             lastSeq: events.last?.seq,
             through: usageThrough,
-            hasBase: conversationUsage != nil
+            base: conversationUsage
         )
         if key == turnUsageKey { return turnUsageCache }
         var totals = conversationUsage ?? .zero
@@ -3453,7 +3461,7 @@ final class ChatModel {
         var firstSeq: UInt64?
         var lastSeq: UInt64?
         var through: UInt64?
-        var hasBase: Bool
+        var base: ChatUsageTotals?
     }
 
     @ObservationIgnored private var turnUsageCache: ChatUsageSummary = .empty
@@ -4162,7 +4170,11 @@ final class ChatModel {
                     try? FileManager.default.removeItem(at: url); return
                 }
                 if (attachment.size ?? 0) > UInt64(ChatInbox.maxBytes) {
-                    responseAttachmentFiles[attachment.id] = try await ChatAttachmentCache.shared.writeFile(url, reference: previewReference, attachment: attachment.id, epoch: cacheEpoch)
+                    let cached = try await ChatAttachmentCache.shared.writeFile(url, reference: previewReference, attachment: attachment.id, epoch: cacheEpoch)
+                    guard !Task.isCancelled, selectionMatches(id: id, generation: generation),
+                          currentReference == previewReference, WorkCacheAccess.canRead(previewReference),
+                          memoryGeneration == attachmentCacheGeneration else { return }
+                    responseAttachmentFiles[attachment.id] = cached
                     return
                 }
                 defer { try? FileManager.default.removeItem(at: url) }

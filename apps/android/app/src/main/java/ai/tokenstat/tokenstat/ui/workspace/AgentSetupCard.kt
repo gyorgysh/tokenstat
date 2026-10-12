@@ -50,6 +50,7 @@ fun AgentSetupCard(model: AppViewModel, peer: String, hostLabel: String, backend
     }
 
     suspend fun check() {
+        if (working) return
         working = true
         runCatching {
             if (backend["canCheckSignIn"]?.jsonPrimitive?.booleanOrNull == true)
@@ -81,13 +82,16 @@ fun AgentSetupCard(model: AppViewModel, peer: String, hostLabel: String, backend
                 if (signIn?.get("supported")?.jsonPrimitive?.booleanOrNull == true) {
                     TsSecondaryButton(label = L10n.text("android.agentsetup.open_terminal"), icon = ActionIcon.SignIn.vector, small = true, enabled = !working && !running, onClick = {
                         scope.launch {
+                            if (working) return@launch
                             working = true
                             withContext(NonCancellable) {
-                                runCatching { model.workspaceSection(peer, "launcher.signIn", buildJsonObject { put("id", id); put("rows", 24); put("cols", 80) }) as? JsonObject }
-                                    .onSuccess { info ->
-                                        info?.get("id")?.jsonPrimitive?.contentOrNull?.let { session ->
-                                            if (mounted) sessionId = session else close(session)
-                                        }
+                                runCatching {
+                                    val info = model.workspaceSection(peer, "launcher.signIn", buildJsonObject { put("id", id); put("rows", 24); put("cols", 80) }) as? JsonObject
+                                    requireNotNull(info?.get("id")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }) {
+                                        L10n.text("android.setupserversteps.the_session_opened_without_an_id.09911388")
+                                    }
+                                }.onSuccess { session ->
+                                    if (mounted) sessionId = session else close(session)
                                     }.onFailure { if (mounted) error = it.message }
                             }
                             working = false

@@ -279,7 +279,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, crate::error::Dispatc
     match method {
         "ssh.host.probe" => {
             let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            let fingerprint = runtime()?.block_on(probe(&p))?;
+            let fingerprint = runtime()?.block_on(connection_deadline(probe(&p)))?;
             Ok(json!({"fingerprint": fingerprint}))
         }
         "ssh.session.open" => {
@@ -301,7 +301,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, crate::error::Dispatc
                     .unwrap_or_else(|| format!("{}@{}", p.username, p.hostname)),
                 opened_ms: now_ms(),
             };
-            let live = runtime()?.block_on(open(p, id.clone(), meta))?;
+            let live = runtime()?.block_on(connection_deadline(open(p, id.clone(), meta)))?;
             let mut map = sessions().lock().map_err(|e| e.to_string())?;
             reap_closed(&mut map);
             map.insert(id.clone(), live);
@@ -591,6 +591,9 @@ fn start_listing(
         }
     }
     let Ok(runtime) = runtime() else {
+        if let Ok(mut guard) = cache.lock() {
+            guard.inflight.remove(&dir);
+        }
         return false;
     };
     runtime.spawn(async move {
@@ -911,6 +914,27 @@ fn provision_message(
     Ok(false)
 }
 
+async fn connection_deadline<T>(
+    work: impl std::future::Future<Output = Result<T, DispatchError>>,
+) -> Result<T, DispatchError> {
+    tokio::time::timeout(Duration::from_secs(30), work)
+        .await
+        .map_err(|_| {
+            DispatchError::new(
+                crate::error::SSH_UNREACHABLE,
+                "The SSH connection took too long. Check the server and try again.",
+            )
+        })?
+}
+
+fn shell_directory(directory: &str) -> String {
+    let quote = |part: &str| format!("'{}'", part.replace('\'', "'\"'\"'"));
+    match directory.strip_prefix("~/") {
+        Some(rest) => format!("\"$HOME\"/{}", quote(rest)),
+        None => quote(directory),
+    }
+}
+
 async fn probe(p: &OpenParams) -> Result<String, DispatchError> {
     let (handle, offered) = connect(p, true).await?;
     let _ = handle
@@ -965,9 +989,9 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
     let directory = p.initial_directory.trim();
     if !directory.is_empty() && directory != "~" {
         crate::ssh_records::validate_initial_directory(directory)?;
-        let quoted = directory.replace('\'', "'\"'\"'");
+        let target = shell_directory(directory);
         channel
-            .data(format!("cd -- '{quoted}'\r").as_bytes())
+            .data(format!("cd -- {target}\r").as_bytes())
             .await
             .map_err(|e| e.to_string())?;
     }
@@ -996,9 +1020,8 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
                     Some(Command::Close) | None => { let _ = channel.close().await; break; }
                 },
                 message = channel.wait() => match message {
-                    Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => append(&task_output, &data),
-                    Some(ChannelMsg::ExitStatus { .. }) | None => break,
-                    _ => {}
+                    Some(message) => { if terminal_message(message, &task_output) { break; } }
+                    None => break,
                 }
             }
         }
@@ -1033,6 +1056,16 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
         history: Arc::new(Mutex::new(history)),
         meta,
     })
+}
+
+/// An exit status can precede final data. Only closure ends the byte stream.
+fn terminal_message(message: ChannelMsg, output: &Mutex<Output>) -> bool {
+    match message {
+        ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => append(output, &data),
+        ChannelMsg::Close => return true,
+        _ => {}
+    }
+    false
 }
 
 #[cfg(unix)]
@@ -1190,6 +1223,49 @@ fn reap_closed(map: &mut HashMap<String, LiveSession>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shell_output_after_exit_status_is_retained() {
+        let output = Mutex::new(Output {
+            bytes: VecDeque::new(),
+            base: 0,
+            closed: false,
+            closed_at: None,
+            drained_at: None,
+            error: None,
+        });
+        assert!(!terminal_message(
+            ChannelMsg::ExitStatus { exit_status: 0 },
+            &output
+        ));
+        assert!(!terminal_message(
+            ChannelMsg::Data {
+                data: b"final output".to_vec().into()
+            },
+            &output
+        ));
+        assert!(terminal_message(ChannelMsg::Close, &output));
+        assert_eq!(
+            output
+                .lock()
+                .unwrap()
+                .bytes
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            b"final output"
+        );
+    }
+
+    #[test]
+    fn starting_under_home_expands_only_the_home_prefix() {
+        assert_eq!(shell_directory("~/my project"), "\"$HOME\"/'my project'");
+        assert_eq!(shell_directory("/tmp/it's"), "'/tmp/it'\"'\"'s'");
+        assert_eq!(
+            shell_directory("~/$(touch surprise)"),
+            "\"$HOME\"/'$(touch surprise)'"
+        );
+    }
 
     #[test]
     fn provisioning_requires_a_result_after_eof_and_rejects_truncation() {

@@ -876,7 +876,7 @@ struct Counters: Codable, Sendable, Hashable {
     /// out. They are the largest number in the archive by a wide margin and
     /// they measure how much context was re-sent, not how much was done.
     var workTokens: UInt64 {
-        (inputFresh ?? 0) + (output ?? 0)
+        (inputFresh ?? 0).saturatingAdd(output ?? 0)
     }
 }
 
@@ -1345,11 +1345,18 @@ extension Sequence where Element == Bucket {
     var totalValue: Money {
         reduce(Money(micros: 0, estimated: false, complete: true)) { acc, row in
             Money(
-                micros: acc.micros + row.valueMicros,
+                micros: acc.micros.saturatingAdd(row.valueMicros),
                 estimated: acc.estimated || row.estimated,
                 complete: acc.complete && row.unpricedModels.isEmpty
             )
         }
+    }
+}
+
+extension Int64 {
+    func saturatingAdd(_ other: Int64) -> Int64 {
+        let (sum, overflow) = addingReportingOverflow(other)
+        return overflow ? (other >= 0 ? .max : .min) : sum
     }
 }
 
@@ -1860,7 +1867,7 @@ struct LocalModel: Codable, Sendable, Hashable, Identifiable {
         guard let sizeBytes, sizeBytes > 0 else { return nil }
         let formatter = ByteCountFormatter()
         formatter.countStyle = .binary
-        return formatter.string(fromByteCount: Int64(sizeBytes))
+        return formatter.string(fromByteCount: Int64(clamping: sizeBytes))
     }
 }
 
@@ -3259,7 +3266,7 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
             ],
             "budgetSeconds": budgetSeconds, "enabled": enabled,
             "lastRunAtMs": lastRunAtMs as Any, "nextRunAtMs": nextRunAtMs as Any,
-            "lastRunID": lastRunID as Any,
+            "lastRunId": lastRunID as Any,
             "revision": revision,
         ]
     }
@@ -3333,7 +3340,7 @@ struct AutomationSchedule: Codable, Sendable, Hashable {
         switch kind {
         case .once: return L10n.text("apple.models.once_when_you_run_it.cbb9301d")
         case .interval:
-            let minutes = Int(everySeconds) / 60
+            let minutes = everySeconds / 60
             if minutes >= 60, minutes % 60 == 0 {
                 let hours = minutes / 60
                 return (hours == 1 ? L10n.text("apple.models.every_0_hour_1.ed193624.one", "\(hours)") : L10n.text("apple.models.every_0_hour_1.ed193624.other", "\(hours)"))
@@ -3582,39 +3589,7 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
         guard !nodes.isEmpty else { return }
         if nodes.contains(where: { $0.x != 0 || $0.y != 0 }) { return }
 
-        var incomingCount: [String: Int] = [:]
-        var outgoing: [String: [String]] = [:]
-        for node in nodes {
-            incomingCount[node.id] = 0
-        }
-        for edge in edges {
-            incomingCount[edge.to, default: 0] += 1
-            outgoing[edge.from, default: []].append(edge.to)
-        }
-
-        var layer: [String: Int] = [:]
-        var queue = nodes.filter { (incomingCount[$0.id] ?? 0) == 0 }.map(\.id)
-        if queue.isEmpty {
-            queue = nodes.map(\.id)
-        }
-        for id in queue {
-            layer[id] = 0
-        }
-
-        var i = 0
-        var seen = Set(queue)
-        while i < queue.count {
-            let id = queue[i]
-            i += 1
-            let current = layer[id] ?? 0
-            for next in outgoing[id] ?? [] {
-                layer[next] = max(layer[next] ?? 0, current + 1)
-                if !seen.contains(next) {
-                    seen.insert(next)
-                    queue.append(next)
-                }
-            }
-        }
+        let layer = WorkflowLayering.depths(nodes: nodes, edges: edges)
 
         var siblingInLayer: [Int: Int] = [:]
         for idx in nodes.indices {
@@ -4478,4 +4453,71 @@ struct ProjectWorktree: Codable, Sendable, Identifiable {
     var prunable: Bool
     var bare: Bool
     var id: String { path }
+}
+
+// Vault records are persisted client JSON, so host-side defaults cannot repair
+// an older record before this decoder sees it. Keep both the original acronym
+// spelling and the defaults introduced after those records were written.
+extension SSHHost {
+    private enum LegacyKeys: String, CodingKey { case credentialID, jumpHostID, folderID }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = try c.decode(String.self, forKey: .label)
+        hostname = try c.decode(String.self, forKey: .hostname)
+        port = try c.decode(Int.self, forKey: .port)
+        username = try c.decode(String.self, forKey: .username)
+        initialDirectory = try c.decodeIfPresent(String.self, forKey: .initialDirectory)
+        credentialID = try c.decodeIfPresent(String.self, forKey: .credentialID)
+            ?? legacy.decodeIfPresent(String.self, forKey: .credentialID)
+        jumpHostID = try c.decodeIfPresent(String.self, forKey: .jumpHostID)
+            ?? legacy.decodeIfPresent(String.self, forKey: .jumpHostID)
+        folderID = try c.decodeIfPresent(String.self, forKey: .folderID)
+            ?? legacy.decodeIfPresent(String.self, forKey: .folderID)
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        provider = try c.decodeIfPresent(SSHProviderReference.self, forKey: .provider)
+        hostKeys = try c.decodeIfPresent([String].self, forKey: .hostKeys) ?? []
+        color = try c.decodeIfPresent(String.self, forKey: .color)
+        keepaliveSeconds = try c.decodeIfPresent(Int.self, forKey: .keepaliveSeconds) ?? 0
+        env = try c.decodeIfPresent([SSHEnvPair].self, forKey: .env) ?? []
+        agentForwarding = try c.decodeIfPresent(Bool.self, forKey: .agentForwarding) ?? false
+        lastConnectedMs = try c.decodeIfPresent(Int64.self, forKey: .lastConnectedMs)
+        favorite = try c.decodeIfPresent(Bool.self, forKey: .favorite) ?? false
+        sort = try c.decodeIfPresent(Int.self, forKey: .sort) ?? 0
+        updatedMs = try c.decodeIfPresent(Int64.self, forKey: .updatedMs) ?? 0
+    }
+}
+
+extension SSHFolder {
+    private enum LegacyKeys: String, CodingKey { case parentID }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        parentID = try c.decodeIfPresent(String.self, forKey: .parentID)
+            ?? legacy.decodeIfPresent(String.self, forKey: .parentID)
+        color = try c.decodeIfPresent(String.self, forKey: .color)
+        sort = try c.decodeIfPresent(Int.self, forKey: .sort) ?? 0
+        updatedMs = try c.decodeIfPresent(Int64.self, forKey: .updatedMs) ?? 0
+    }
+}
+
+extension SSHProviderReference {
+    private enum LegacyKeys: String, CodingKey { case resourceID }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(String.self, forKey: .kind)
+        region = try c.decodeIfPresent(String.self, forKey: .region)
+        if c.contains(.resourceID) {
+            resourceID = try c.decode(String.self, forKey: .resourceID)
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            resourceID = try legacy.decode(String.self, forKey: .resourceID)
+        }
+    }
 }

@@ -27,6 +27,7 @@ struct HostUpdateCard: View {
     @State private var applied: HostUpdateResult?
     @State private var supported = true
     @State private var retry = 0
+    @State private var generation: UInt64 = 0
 
     /// What this card is doing, rather than several booleans that can disagree.
     private enum Phase: Equatable {
@@ -304,12 +305,18 @@ struct HostUpdateCard: View {
     }
 
     private func load() async {
+        generation &+= 1
+        let owner = generation
         phase = .checking
         applied = nil
+        state = nil
+        supported = true
         // A host older than these methods must not be discovered by showing
         // somebody its `unknown method` error.
         if !local, let target {
-            supported = await RemoteHostFeature.hostUpdate.isSupported(peer: target)
+            let available = await RemoteHostFeature.hostUpdate.isSupported(peer: target)
+            guard !Task.isCancelled, generation == owner else { return }
+            supported = available
             guard supported else { return }
         }
         guard local || target != nil else { return }
@@ -317,34 +324,28 @@ struct HostUpdateCard: View {
             let answer = local || target == nil
                 ? try await Bridge.hostUpdateCheck()
                 : try await Bridge.hostUpdateCheck(peer: target ?? "")
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == owner else { return }
             state = answer
             phase = .ready
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == owner else { return }
             phase = .failed(FriendlyError.from(error.localizedDescription).message)
         }
     }
 
     private func apply(restartNow: Bool) async {
+        guard phase != .installing else { return }
+        let owner = generation
         phase = .installing
         do {
             let result = local || target == nil
                 ? try await Bridge.hostUpdateApply(restartNow: restartNow)
                 : try await Bridge.hostUpdateApply(peer: target ?? "", restartNow: restartNow)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == owner else { return }
             applied = result
             phase = .done
         } catch {
-            guard !Task.isCancelled else { return }
-            // A restart the caller asked for takes the connection with it, and
-            // that is the update working. Saying it failed would be wrong, and
-            // would invite a second attempt at something already done.
-            if restartNow {
-                applied = HostUpdateResult(restarting: true)
-                phase = .done
-                return
-            }
+            guard !Task.isCancelled, generation == owner else { return }
             phase = .failed(FriendlyError.from(error.localizedDescription).message)
         }
     }

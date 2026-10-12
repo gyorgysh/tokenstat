@@ -141,7 +141,7 @@ fun NotesSection(
         }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacenotes.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
-    LaunchedEffect(workspace) { load() }
+    LaunchedEffect(peer, workspace) { load() }
 
     val place = folderName.ifBlank { L10n.text("android.workspacenotes.this_folder.9d6325c8") }
     val notes = NoteList.visible(cards, showingArchive, search, alphabetical)
@@ -175,7 +175,7 @@ fun NotesSection(
                 error = null
             }.onFailure {
                 cards = cards.filter { it.id != pending.id }
-                if (draft.trim().isEmpty()) draft = text
+                draft = restoreFailedNoteDraft(text, draft)
                 error = TunnelCopy.display(it.message ?: L10n.text("android.workspacenotes.the_request_failed.db4fb447"), hostLabel)
             }
         }
@@ -186,6 +186,7 @@ fun NotesSection(
             runCatching {
                 model.workspaceSection(peer, "todo.update", buildJsonObject {
                     put("id", note.id)
+                    note.revision?.let { put("expectedRevision", it) }
                     put("column", if (archived) NoteList.ARCHIVE_COLUMN else "backlog")
                 }) as JsonObject
             }.onSuccess { updated ->
@@ -228,6 +229,7 @@ fun NotesSection(
             runCatching {
                 model.workspaceSection(peer, "todo.update", buildJsonObject {
                     put("id", note.id)
+                    note.revision?.let { put("expectedRevision", it) }
                     put("column", "backlog")
                     put("kind", "task")
                     put("notes", note.body.ifBlank { note.title })
@@ -522,3 +524,6 @@ private fun NoteEditorDialog(
         }
     }
 }
+
+internal fun restoreFailedNoteDraft(failed: String, current: String): String =
+    if (current.isBlank()) failed else "$failed\n\n$current"

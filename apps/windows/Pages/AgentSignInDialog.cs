@@ -60,6 +60,7 @@ internal static class AgentSignInDialog
         }
         finally
         {
+            terminal.Release();
             try { await call("pty.close", new JsonObject { ["id"] = sessionId }); }
             catch { /* A disconnected host must not hide the sign-in result. */ }
         }

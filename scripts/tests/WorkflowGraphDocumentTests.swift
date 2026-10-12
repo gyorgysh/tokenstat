@@ -68,6 +68,7 @@ struct WorkflowEdge: Codable, Sendable, Hashable, Identifiable {
 struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
     var id: String = ""
     var name: String
+    var revision: UInt64 = 0
     var scope: WorkflowScope = .workspace
     var workspaceID: String? = nil
     var budgetSeconds: UInt64 = 10_800
@@ -99,6 +100,27 @@ struct WorkflowGraphDocumentTests {
     static func main() {
         func check(_ condition: Bool, _ message: String) {
             assert(condition, message)
+        }
+
+        do {
+            var document = WorkflowGraphDocument()
+            document.open(WorkflowGraph.blank(), dirty: true)
+            document.rename("Saved name")
+            var saved = document.graph!
+            saved.id = "host-assigned"
+            saved.revision = 7
+            document.markSaved(saved)
+            document.undo()
+            check(document.graph?.name == "Untitled", "undo content before first save")
+            check(document.graph?.id == "host-assigned", "undo cannot restore empty create id")
+            check(document.graph?.revision == 7, "undo uses latest confirmed revision")
+            var undone = document.graph!
+            undone.revision = 8
+            document.markSaved(undone)
+            document.redo()
+            check(document.graph?.name == "Saved name", "redo restores content")
+            check(document.graph?.id == "host-assigned" && document.graph?.revision == 8,
+                  "redo keeps identity and revision after another save")
         }
 
         check(WorkflowGraphRules.authorableKinds.count == 8, "every kind except MCP")

@@ -47,18 +47,16 @@ pub fn empty_range(json: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn scan_report_value(r: &ScanReport) -> serde_json::Value {
+    serde_json::json!({"files_found": r.files_found, "files_read": r.files_read,
+        "rows_seen": r.rows_seen, "events_new": r.events_new,
+        "duplicate_ratio": r.duplicate_ratio(), "warnings": r.warnings.len(),
+        "elapsed_ms": r.elapsed_ms})
+}
+
 pub fn scan_report(r: &ScanReport, json: bool) -> Result<()> {
     if json {
-        println!(
-            r#"{{"files_found":{},"files_read":{},"rows_seen":{},"events_new":{},"duplicate_ratio":{:.4},"warnings":{},"elapsed_ms":{}}}"#,
-            r.files_found,
-            r.files_read,
-            r.rows_seen,
-            r.events_new,
-            r.duplicate_ratio(),
-            r.warnings.len(),
-            r.elapsed_ms
-        );
+        println!("{}", scan_report_value(r));
         return Ok(());
     }
 
@@ -247,7 +245,11 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
     }
     match last_scan.as_deref().and_then(|s| s.parse::<i64>().ok()) {
         Some(ms) => {
-            let age = (jiff::Timestamp::now().as_millisecond() - ms).max(0) / 1000;
+            let age = jiff::Timestamp::now()
+                .as_millisecond()
+                .saturating_sub(ms)
+                .max(0)
+                / 1000;
             println!("  {DIM}scanned{DIM:#}  {} ago", format_age(age));
         }
         None => println!("  {DIM}scanned{DIM:#}  never"),
@@ -312,7 +314,7 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
                 let a = mine.get(&v.model).copied().unwrap_or((0, 0));
                 let out_gap = v.output.saturating_sub(a.0);
                 let cache_gap = v.cache_read.saturating_sub(a.1);
-                if out_gap + cache_gap < 1_000_000 {
+                if out_gap.saturating_add(cache_gap) < 1_000_000 {
                     continue;
                 }
                 rows.push((v.model.clone(), a.0, v.output, a.1, v.cache_read));
@@ -467,6 +469,8 @@ pub fn statusline(
     tz: &jiff::tz::TimeZone,
     format: &str,
     max_age_secs: u64,
+    db_path: &Path,
+    tz_name: Option<&str>,
 ) -> Result<()> {
     let today = jiff::Timestamp::now().to_zoned(tz.clone()).date();
     let month_start = today.first_of_month();
@@ -496,7 +500,13 @@ pub fn statusline(
         }
         if any { ui::usd(total) } else { String::new() }
     };
-    let in_out = |c: &Counters| ui::tokens(c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0));
+    let in_out = |c: &Counters| {
+        ui::tokens(
+            c.input_fresh
+                .unwrap_or(0)
+                .saturating_add(c.output.unwrap_or(0)),
+        )
+    };
 
     let stale = match max_age_secs {
         0 => String::new(),
@@ -507,18 +517,22 @@ pub fn statusline(
             .and_then(|s| s.parse::<i64>().ok())
         {
             Some(ms) => {
-                let age = (jiff::Timestamp::now().as_millisecond() - ms).max(0) / 1000;
+                let age = jiff::Timestamp::now()
+                    .as_millisecond()
+                    .saturating_sub(ms)
+                    .max(0)
+                    / 1000;
                 if age as u64 > limit {
                     // Kick a background scan so the next prompt is fresher.
                     // Never wait here: the statusline must stay archive-only.
-                    spawn_background_scan();
+                    spawn_background_scan(db_path, tz_name);
                     "*".into()
                 } else {
                     String::new()
                 }
             }
             None => {
-                spawn_background_scan();
+                spawn_background_scan(db_path, tz_name);
                 "*".into()
             }
         },
@@ -542,7 +556,7 @@ pub fn statusline(
 /// Start `tokenstat scan` in the background if no other refresh holds the lock.
 ///
 /// Failures are silent: a statusline must never print errors or block.
-fn spawn_background_scan() {
+fn spawn_background_scan(db_path: &Path, tz_name: Option<&str>) {
     let Ok(dirs) = tokenstat_paths::data_dir().ok_or(()) else {
         return;
     };
@@ -588,23 +602,47 @@ fn spawn_background_scan() {
         return;
     };
 
-    #[cfg(unix)]
-    {
-        let mut cmd = std::process::Command::new(exe);
-        cmd.arg("scan")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        // Lock file mtime prevents a stampede for up to 10 minutes.
-        let _ = cmd.spawn();
+    let mut cmd = background_scan_command(&exe, db_path, tz_name);
+    if cmd.spawn().is_err() {
+        let _ = std::fs::remove_file(&lock_path);
     }
-    #[cfg(not(unix))]
+}
+
+fn background_scan_command(
+    exe: &Path,
+    db_path: &Path,
+    tz_name: Option<&str>,
+) -> std::process::Command {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("scan").arg("--db").arg(db_path);
+    if let Some(tz) = tz_name {
+        cmd.arg("--tz").arg(tz);
+    }
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
     {
-        let _ = std::process::Command::new(exe)
-            .arg("scan")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    cmd
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn refresh_preserves_the_statusline_archive_and_timezone() {
+        let command = background_scan_command(
+            Path::new("tokenstat"),
+            Path::new("/tmp/custom.db"),
+            Some("UTC"),
+        );
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, ["scan", "--db", "/tmp/custom.db", "--tz", "UTC"]);
     }
 }

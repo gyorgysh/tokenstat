@@ -345,7 +345,12 @@ impl Manager {
         // started with the colour defaults (and no COLORFGBG), so a no-colour
         // request, or a light-window request that needs COLORFGBG=0;15, takes
         // the fresh path rather than inheriting the wrong setting.
-        if is_shell_profile(req) && !req.no_color && req.dark != Some(false) {
+        if is_shell_profile(req)
+            && !req.no_color
+            && req.dark.is_none()
+            && req.environment.is_empty()
+            && !req.hidden
+        {
             let pooled = self
                 .pool
                 .lock()
@@ -468,6 +473,7 @@ impl Manager {
                             *last_activity.lock().unwrap_or_else(PoisonError::into_inner) =
                                 Some(now_ms());
                         }
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                         Err(_) => break,
                     }
                 }
@@ -563,7 +569,7 @@ impl Manager {
             {
                 let mut writer = shell.writer.lock().unwrap_or_else(PoisonError::into_inner);
                 writer
-                    .write_all(format!("cd {quoted}\recho {marker}\r").as_bytes())
+                    .write_all(format!("cd -- {quoted} && {}", marker_command(&marker)).as_bytes())
                     .map_err(|e| PtyError::Spawn(e.to_string()))?;
                 writer.flush().map_err(|e| PtyError::Spawn(e.to_string()))?;
             }
@@ -1177,11 +1183,6 @@ fn spawn_session_process(
     let pair = native_pty_system()
         .openpty(size)
         .map_err(|e| PtyError::Spawn(e.to_string()))?;
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| PtyError::Spawn(e.to_string()))?;
-    drop(pair.slave);
     let reader = pair
         .master
         .try_clone_reader()
@@ -1190,6 +1191,13 @@ fn spawn_session_process(
         .master
         .take_writer()
         .map_err(|e| PtyError::Spawn(e.to_string()))?;
+    // Finish fallible I/O setup before spawning, so an allocation failure
+    // cannot leave a live child which no session owns.
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| PtyError::Spawn(e.to_string()))?;
+    drop(pair.slave);
     Ok((Some(pair.master), child, reader, writer))
 }
 
@@ -1502,6 +1510,18 @@ fn clear_session_buffer(session: &Session) {
         .unwrap_or_else(PoisonError::into_inner);
     buffer.data.clear();
     buffer.total = 0;
+    session.buffer_space.notify_all();
+}
+
+fn marker_command(marker: &str) -> String {
+    // Keep the complete marker out of the terminal's echoed input. Seeing
+    // keystrokes is not proof that the shell has executed the command.
+    let split = marker.len() / 2;
+    format!(
+        "printf '%s%s\\n' {} {}\r",
+        shell_quote(&marker[..split]),
+        shell_quote(&marker[split..])
+    )
 }
 
 /// Drive a freshly forked shell until it accepts input, then clear its buffer.
@@ -1519,7 +1539,7 @@ fn prove_shell_ready(session: &Session, timeout: std::time::Duration) -> bool {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         if writer
-            .write_all(format!("echo {marker}\r").as_bytes())
+            .write_all(marker_command(&marker).as_bytes())
             .is_err()
         {
             return false;
@@ -1896,18 +1916,9 @@ impl EnvCache {
 
     /// Wait for the resolve to finish and return its final answer.
     fn wait_ready(&self) -> Option<Arc<LoginEnv>> {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        loop {
-            match &*state {
-                EnvState::Done(env) => return env.clone(),
-                EnvState::Pending => {
-                    state = self
-                        .condvar
-                        .wait(state)
-                        .unwrap_or_else(PoisonError::into_inner);
-                }
-            }
-        }
+        // A login profile may wait on an unavailable service indefinitely.
+        // Callers can use their normal fallback while resolution continues.
+        self.wait_ready_timeout(std::time::Duration::from_secs(30))
     }
 
     /// Like [`Self::wait_ready`], but give up after `timeout` still pending.
@@ -2305,7 +2316,7 @@ mod tests {
         {
             let mut writer = shell.writer.lock().unwrap_or_else(PoisonError::into_inner);
             writer
-                .write_all(format!("echo {marker}\r").as_bytes())
+                .write_all(marker_command(&marker).as_bytes())
                 .expect("write prompt probe");
             writer.flush().expect("flush prompt probe");
         }
@@ -2326,6 +2337,65 @@ mod tests {
                 .unwrap_or_else(PoisonError::into_inner)
                 .kill();
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_readiness_marker_is_only_emitted_when_the_command_executes() {
+        let marker = "__TS_READY_123__";
+        let command = marker_command(marker);
+        assert!(!command.contains(marker));
+        let output = Command::new("/bin/sh")
+            .args(["-c", command.trim_end_matches('\r')])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), marker);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pooled_handoff_cannot_claim_a_directory_it_failed_to_enter() {
+        let m = Manager::new();
+        let mut req = shell_req(std::env::temp_dir());
+        req.command = "/bin/sh".into();
+        req.args = vec!["-i".into()];
+        let (shell, _) = m.build_session(&req, "probe".into()).unwrap();
+        assert!(prove_shell_ready(&shell, HANDOFF_READY_TIMEOUT));
+        req.cwd = std::env::temp_dir().join(format!(
+            "ts-missing-{}-{}",
+            std::process::id(),
+            next_marker()
+        ));
+        assert!(m.handoff_pooled(shell, &req).is_err());
+        assert!(m.list().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_environment_and_dark_mode_are_not_lost_to_a_pooled_shell() {
+        let m = Manager::new();
+        let mut req = shell_req(std::env::temp_dir());
+        let mut pool_req = req.clone();
+        pool_req.command = "/bin/sh".into();
+        pool_req.args = vec!["-i".into()];
+        let (shell, _) = m.build_session(&pool_req, "pool".into()).unwrap();
+        m.pool.lock().unwrap().push(shell);
+        req.environment
+            .push(("TOKENSTAT_TEST_ENV".into(), "configured".into()));
+        req.dark = Some(true);
+        let info = m.spawn(&req).unwrap();
+        assert_eq!(m.pool.lock().unwrap().len(), 1);
+        m.write(
+            &info.id,
+            b"printf 'RESULT:%s:%s\\n' \"$TOKENSTAT_TEST_ENV\" \"$COLORFGBG\"\r",
+        )
+        .unwrap();
+        assert!(wait_for(|| m.read(&info.id, 0).is_ok_and(|chunk| {
+            String::from_utf8_lossy(&chunk.bytes).contains("RESULT:configured:15;0")
+        })));
+        m.close(&info.id).unwrap();
+        close_pool(&m);
     }
 
     #[cfg(unix)]

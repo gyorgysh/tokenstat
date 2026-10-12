@@ -67,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -153,6 +154,7 @@ fun TerminalScreen(
     /// A fresh shell after a dead session or a failed spawn. The page
     /// reload re-runs the bind flow from the top.
     fun retryFreshShell() {
+        bridge.stopJobs()
         sessionId = null
         bridge.fatalError = null
         bridge.transportError = null
@@ -318,7 +320,12 @@ fun TerminalScreen(
                                     runCatching {
                                         model.workspaceSection(peer, "pty.spawn", buildJsonObject {
                                             put("workspaceId", workspaceId)
-                                            put("command", "/bin/bash")
+                                            put("command", terminalShell(
+                                                ((model.state.value.account?.get("machines") as? kotlinx.serialization.json.JsonArray).orEmpty())
+                                                    .filterIsInstance<JsonObject>()
+                                                    .firstOrNull { (it["publicIdentity"] as? kotlinx.serialization.json.JsonPrimitive)?.content == peer }
+                                                    ?.let { (it["platform"] as? kotlinx.serialization.json.JsonPrimitive)?.content },
+                                            ))
                                             put("args", kotlinx.serialization.json.JsonArray(emptyList()))
                                             put("rows", 30)
                                             put("cols", 90)
@@ -350,6 +357,7 @@ fun TerminalScreen(
             },
             onRelease = { view ->
                 val id = sessionId
+                bridge.stopJobs()
                 bridge.alive = false
                 if (id != null && !bridge.killed) {
                     // Stop showing a session without stopping its process on
@@ -369,6 +377,8 @@ fun TerminalScreen(
                 }
                 view.removeJavascriptInterface("TermBridge")
                 bridge.webView = null
+                view.stopLoading()
+                view.destroy()
             },
         )
         TerminalKeys(
@@ -393,13 +403,15 @@ fun TerminalScreen(
                     confirmClose = false
                     val id = sessionId
                     scope.launch {
-                        if (id != null) {
-                            runCatching {
-                                model.workspaceSection(peer, "pty.close", buildJsonObject { put("id", id) })
-                            }
+                        try {
+                            if (id != null) model.workspaceSection(peer, "pty.close", buildJsonObject { put("id", id) })
+                            bridge.killed = true
+                            onClose()
+                        } catch (failure: Exception) {
+                            if (failure is kotlinx.coroutines.CancellationException) throw failure
+                            bridge.transportError = failure.message ?: L10n.text("android.terminalscreen.the_request_failed.db4fb447")
+                            bridge.onProgress()
                         }
-                        bridge.killed = true
-                        onClose()
                     }
                 }) { Text(L10n.text("common.close")) }
             },
@@ -450,6 +462,7 @@ fun SshTerminalScreen(
     snippets: kotlinx.serialization.json.JsonArray = kotlinx.serialization.json.JsonArray(emptyList()),
     onClose: () -> Unit,
     startup: List<String> = emptyList(),
+    onStartupSent: () -> Unit = {},
     onEnded: () -> Unit = {},
 ) {
     // Its own header and its own way out, so the app chrome steps aside.
@@ -477,6 +490,7 @@ fun SshTerminalScreen(
     var readingOutput by remember { mutableStateOf(false) }
     bridge.onReadingChanged = { readingOutput = it }
     ReconcileKeyboard(keyboardUp) { keyboardUp = false; bridge.noteKeyboardHidden() }
+    LaunchedEffect(dark) { bridge.pushTheme(dark) }
     var confirmEnd by remember { mutableStateOf(false) }
     var filling by remember { mutableStateOf<JsonObject?>(null) }
     // On-connect commands, once the shell is there to hear them. The channel
@@ -485,6 +499,7 @@ fun SshTerminalScreen(
         if (startup.isNotEmpty()) {
             delay(600)
             startup.forEach { bridge.sendBytes(ai.tokenstat.tokenstat.ui.ssh.SnippetRun.runBytes(it)) }
+            onStartupSent()
         }
     }
 
@@ -603,6 +618,7 @@ fun SshTerminalScreen(
                 }
             },
             onRelease = { view ->
+                bridge.stopJobs()
                 bridge.alive = false
                 // Done only stops watching. Only an ended session closes.
                 //
@@ -619,6 +635,8 @@ fun SshTerminalScreen(
                 }
                 view.removeJavascriptInterface("TermBridge")
                 bridge.webView = null
+                view.stopLoading()
+                view.destroy()
             },
         )
         TerminalKeys(
@@ -647,12 +665,16 @@ fun SshTerminalScreen(
                 TextButton(onClick = {
                     confirmEnd = false
                     scope.launch {
-                        val ended = runCatching {
+                        try {
                             model.core("ssh.session.close", buildJsonObject { put("id", sessionId) })
-                        }.isSuccess
-                        bridge.killed = true
-                        if (ended) onEnded()
-                        onClose()
+                            bridge.killed = true
+                            onEnded()
+                            onClose()
+                        } catch (failure: Exception) {
+                            if (failure is kotlinx.coroutines.CancellationException) throw failure
+                            bridge.transportError = failure.message ?: L10n.text("android.terminalscreen.the_request_failed.db4fb447")
+                            bridge.onProgress()
+                        }
                     }
                 }) { Text(L10n.text("android.terminalscreen.end_session.f00b921f")) }
             },
@@ -725,8 +747,7 @@ private fun SnippetFillSheet(
 ) {
     val command = (item["command"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
     val names = remember(command) { ai.tokenstat.tokenstat.ui.ssh.SnippetRun.placeholders(command) }
-    val values = remember(command) { mutableMapOf<String, String>().apply { names.forEach { put(it, "") } } }
-    var tick by remember { mutableIntStateOf(0) }
+    val values = remember(command) { mutableStateMapOf<String, String>().apply { names.forEach { put(it, "") } } }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -735,18 +756,16 @@ private fun SnippetFillSheet(
             )
         },
         text = {
-            key(tick) {
-                Column {
+            Column {
                     names.forEach { name ->
                         androidx.compose.material3.OutlinedTextField(
                             value = values[name].orEmpty(),
-                            onValueChange = { values[name] = it; tick++ },
+                            onValueChange = { values[name] = it },
                             label = { Text(name) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                }
             }
         },
         confirmButton = {
@@ -789,6 +808,16 @@ class TerminalBridge {
     /// A selection in the emulator leaves for the system clipboard.
     var onCopy: (String) -> Unit = {}
     private val inbound = Channel<String>(capacity = 256)
+    private var readJob: kotlinx.coroutines.Job? = null
+    private var inputJob: kotlinx.coroutines.Job? = null
+
+    fun stopJobs() {
+        readJob?.cancel()
+        inputJob?.cancel()
+        readJob = null
+        inputJob = null
+        while (inbound.tryReceive().isSuccess) { /* Do not type an old session's input into a new shell. */ }
+    }
 
     val jsApi: JsApi by lazy { JsApi() }
 
@@ -955,7 +984,8 @@ class TerminalBridge {
     }
 
     fun startReadLoop(model: AppViewModel, peer: String, id: String, scope: CoroutineScope) {
-        scope.launch {
+        readJob?.cancel()
+        readJob = scope.launch {
             var offset = 0L
             var backoffMs = 50L
             var failures = 0
@@ -1022,7 +1052,8 @@ class TerminalBridge {
     }
 
     fun pumpInput(model: AppViewModel, peer: String, id: String, scope: CoroutineScope) {
-        scope.launch {
+        inputJob?.cancel()
+        inputJob = scope.launch {
             for (message in inbound) {
                 if (!alive) break
                 if (message.startsWith("__resize__:")) {
@@ -1070,7 +1101,7 @@ class TerminalBridge {
 
         @JavascriptInterface
         fun onCopy(text: String) {
-            onCopy(text)
+            main.post { this@TerminalBridge.onCopy(text) }
         }
 
         /// A tap on the emulator asks for the keyboard, the way a tap on any
@@ -1086,7 +1117,8 @@ class TerminalBridge {
     @Volatile var ended = false
 
     fun startSshLoop(model: AppViewModel, id: String, scope: CoroutineScope) {
-        scope.launch {
+        readJob?.cancel()
+        readJob = scope.launch {
             var offset = 0L
             var backoffMs = 50L
             while (alive) {
@@ -1113,24 +1145,26 @@ class TerminalBridge {
                     transportError = null
                     onProgress()
                 }
-                if ((obj["closed"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true") {
-                    ended = true
-                    onProgress()
-                    break
-                }
                 val data = obj["data"] as? kotlinx.serialization.json.JsonArray
                 if (data != null && data.size > 0) {
                     writeBase64(ai.tokenstat.tokenstat.ui.ssh.bytesToBase64(data))
                 }
                 val next = (obj["nextOffset"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull()
                 if (next != null && next > offset) offset = next
+                if ((obj["closed"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true") {
+                    ended = true
+                    alive = false
+                    onProgress()
+                    break
+                }
                 if (data == null || data.size == 0) delay(40)
             }
         }
     }
 
     fun pumpSshInput(model: AppViewModel, id: String, scope: CoroutineScope) {
-        scope.launch {
+        inputJob?.cancel()
+        inputJob = scope.launch {
             for (message in inbound) {
                 if (!alive) break
                 if (message.startsWith("__resize__:")) {

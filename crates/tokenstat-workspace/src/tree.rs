@@ -105,7 +105,6 @@ pub fn list(root: &Path, relative: &str) -> Result<Vec<TreeEntry>, TreeError> {
 /// [`resolve`] cannot canonicalize. Symlink escape is only fully blocked
 /// when the path exists and [`resolve`] is used.
 pub fn assert_relative_inside(relative: &str) -> Result<(), TreeError> {
-    let relative = relative.trim();
     if relative.is_empty() {
         return Ok(());
     }
@@ -121,7 +120,6 @@ pub fn assert_relative_inside(relative: &str) -> Result<(), TreeError> {
 }
 
 pub(crate) fn resolve(root: &Path, relative: &str) -> Result<PathBuf, TreeError> {
-    let relative = relative.trim();
     if relative.is_empty() {
         return Ok(root.to_path_buf());
     }
@@ -245,6 +243,18 @@ mod tests {
         std::fs::write(dir.join(".gitignore"), "target\n").unwrap();
         std::fs::write(dir.join("src/main.rs"), "fn main() {}\n").unwrap();
         dir
+    }
+
+    #[test]
+    fn whitespace_in_a_filename_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(" folder ")).unwrap();
+        std::fs::write(dir.path().join(" folder / file "), "correct").unwrap();
+        assert_eq!(
+            list(dir.path(), " folder ").unwrap()[0].path,
+            " folder / file "
+        );
+        assert_eq!(read_text(dir.path(), " folder / file ").unwrap(), "correct");
     }
 
     #[test]

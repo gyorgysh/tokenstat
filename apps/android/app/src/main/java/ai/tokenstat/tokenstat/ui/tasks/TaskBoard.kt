@@ -283,8 +283,8 @@ fun TaskBoardScreen(
     BackHandler {
         when {
             composing -> composing = false
-            editing != null -> editing = null
             viewingRun != null -> viewingRun = null
+            editing != null -> editing = null
             deleting != null -> deleting = null
             else -> onBack()
         }
@@ -307,6 +307,17 @@ fun TaskBoardScreen(
             onCreated = { scope.launch { load(includeOptions = false) } },
             onBack = { composing = false },
         )
+        run != null -> TaskRunScreen(
+            model = model,
+            peer = peer,
+            hostLabel = hostLabel,
+            runID = run.first,
+            workspaceID = run.second,
+            folderName = folders.firstOrNull { it.id == run.second }?.name ?: folderName,
+            onOpenTerminal = onOpenTerminal,
+            onOpenSection = { onOpenSection(it); viewingRun = null },
+            onBack = { viewingRun = null },
+        )
         editingCard != null -> TaskEditorScreen(
             model = model,
             peer = peer,
@@ -319,17 +330,6 @@ fun TaskBoardScreen(
             onOpenTerminal = onOpenTerminal,
             onSaved = { scope.launch { load(includeOptions = false) } },
             onBack = { editing = null },
-        )
-        run != null -> TaskRunScreen(
-            model = model,
-            peer = peer,
-            hostLabel = hostLabel,
-            runID = run.first,
-            workspaceID = run.second,
-            folderName = folders.firstOrNull { it.id == run.second }?.name ?: folderName,
-            onOpenTerminal = onOpenTerminal,
-            onOpenSection = { onOpenSection(it); viewingRun = null },
-            onBack = { viewingRun = null },
         )
         else -> Column(
             Modifier

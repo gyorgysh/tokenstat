@@ -17,9 +17,6 @@ use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
 use serde_json::{Map, Value, json};
 
 /// Read the allowlisted settings for a launcher profile.
@@ -33,7 +30,7 @@ pub fn get(id: &str) -> Result<Value, String> {
             "fields": [],
         }));
     };
-    let path = (schema.path)();
+    let path = config_path(&schema)?;
     let path_str = path.display().to_string();
     if !path.exists() {
         return Ok(json!({
@@ -44,9 +41,9 @@ pub fn get(id: &str) -> Result<Value, String> {
             "fields": [],
         }));
     }
-    let text = fs::read_to_string(&path).map_err(|e| format!("{path_str}: {e}"))?;
+    let text = read_config(&path)?;
     let fields = match schema.kind {
-        FileKind::Toml => read_toml(&text, schema.fields),
+        FileKind::Toml => read_toml(&text, schema.fields)?,
         FileKind::Json => match read_json(&text, schema.fields) {
             Ok(fields) => fields,
             Err(reason) => {
@@ -77,10 +74,10 @@ pub fn set(id: &str, values: &Map<String, Value>) -> Result<Value, String> {
             return Err(format!("refusing unknown setting {key}"));
         }
     }
-    let path = (schema.path)();
-    let path_str = path.display().to_string();
+    let path = config_path(&schema)?;
+    let _guard = config_lock(&path)?;
     let original = if path.exists() {
-        fs::read_to_string(&path).map_err(|e| format!("{path_str}: {e}"))?
+        read_config(&path)?
     } else {
         String::new()
     };
@@ -91,7 +88,9 @@ pub fn set(id: &str, values: &Map<String, Value>) -> Result<Value, String> {
         };
         let encoded = encode_field(field, value)?;
         next = match (schema.kind, field.loc) {
-            (FileKind::Toml, Loc::Toml { section, key }) => toml_set(&next, section, key, &encoded),
+            (FileKind::Toml, Loc::Toml { section, key }) => {
+                toml_set(&next, section, key, &encoded)?
+            }
             (FileKind::Json, Loc::Json { pointer }) => {
                 json_set(&next, pointer, &json_value(field, value)?)?
             }
@@ -122,29 +121,67 @@ fn backup_path(path: &Path) -> PathBuf {
 }
 
 fn write_private(path: &Path, text: &str) -> Result<(), String> {
+    tokenstat_sync::snapshot::write_private_atomically(path, text).map_err(|e| e.to_string())
+}
+
+fn config_path(schema: &Schema) -> Result<PathBuf, String> {
+    let path = (schema.path)();
+    if !path.is_absolute() {
+        return Err("The home directory is unavailable.".into());
+    }
+    match fs::symlink_metadata(&path) {
+        Ok(_) => fs::canonicalize(path).map_err(|e| e.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(path),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn read_config(path: &Path) -> Result<String, String> {
+    use std::io::Read;
     let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.read(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
     }
-    let mut file = options.open(path).map_err(|e| io_error(path, e))?;
-    #[cfg(unix)]
-    {
-        // The creation mode only covers a new file. An older one may still be
-        // world-readable, and these settings can name credentials.
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .map_err(|e| io_error(path, e))?;
+    let file = options.open(path).map_err(|e| e.to_string())?;
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err("Config must be a regular file".into());
     }
-    use std::io::Write;
-    file.write_all(text.as_bytes())
-        .map_err(|e| io_error(path, e))?;
-    Ok(())
+    const CAP: u64 = 4 * 1024 * 1024;
+    let mut contents = String::new();
+    file.take(CAP + 1)
+        .read_to_string(&mut contents)
+        .map_err(|e| e.to_string())?;
+    if contents.len() as u64 > CAP {
+        return Err("Config exceeds the size limit".into());
+    }
+    Ok(contents)
 }
 
-fn io_error(path: &Path, error: std::io::Error) -> String {
-    format!("{}: {error}", path.display())
+pub(crate) fn config_lock(path: &Path) -> Result<fs::File, String> {
+    let parent = path.parent().ok_or("Missing config directory")?;
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let mut name = path.as_os_str().to_owned();
+    name.push(".tokenstat.lock");
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(PathBuf::from(name))
+        .map_err(|e| e.to_string())?;
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err("Invalid config lock".into());
+    }
+    file.lock().map_err(|e| e.to_string())?;
+    Ok(file)
 }
 
 #[derive(Clone, Copy)]
@@ -221,7 +258,13 @@ fn schema(id: &str) -> Option<Schema> {
         }),
         "codex" => Some(Schema {
             id: "codex",
-            path: || home().join(".codex/config.toml"),
+            path: || {
+                std::env::var_os("CODEX_HOME")
+                    .filter(|s| !s.is_empty())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| home().join(".codex"))
+                    .join("config.toml")
+            },
             kind: FileKind::Toml,
             fields: CODEX,
         }),
@@ -609,17 +652,20 @@ fn field_json(field: &Field, value: Option<String>) -> Value {
     })
 }
 
-fn read_toml(text: &str, fields: &[Field]) -> Vec<Value> {
-    fields
+fn read_toml(text: &str, fields: &[Field]) -> Result<Vec<Value>, String> {
+    let document = text
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| e.to_string())?;
+    Ok(fields
         .iter()
         .map(|field| {
             let value = match field.loc {
-                Loc::Toml { section, key } => toml_get(text, section, key),
+                Loc::Toml { section, key } => toml_value(&document, section, key),
                 Loc::Json { .. } => None,
             };
             field_json(field, value)
         })
-        .collect()
+        .collect())
 }
 
 fn read_json(text: &str, fields: &[Field]) -> Result<Vec<Value>, String> {
@@ -686,9 +732,6 @@ fn encode_field(field: &Field, value: &Value) -> Result<String, String> {
 }
 
 fn toml_quote(value: &str) -> String {
-    if value.parse::<i64>().is_ok() || value == "true" || value == "false" {
-        return value.to_string();
-    }
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
@@ -711,160 +754,52 @@ fn json_value(field: &Field, value: &Value) -> Result<Value, String> {
     }
 }
 
+#[cfg(test)]
 fn toml_get(text: &str, section: Option<&str>, key: &str) -> Option<String> {
-    let range = section_range(text, section)?;
-    let body = &text[range];
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') || trimmed.is_empty() {
-            continue;
-        }
-        let (left, right) = match trimmed.split_once('=') {
-            Some(pair) => pair,
-            // A multi-line value or a stray line without an assignment must
-            // not stop the scan before the key this is looking for.
-            None => continue,
-        };
-        if left.trim() == key {
-            return Some(unquote(right.trim()));
-        }
-    }
-    None
+    toml_value(&text.parse::<toml_edit::DocumentMut>().ok()?, section, key)
 }
 
-fn section_range(text: &str, section: Option<&str>) -> Option<Range<usize>> {
-    match section {
-        None => Some(0..root_table_end(text)),
-        Some(name) => {
-            let header = format!("[{name}]");
-            let start = text.find(&header)?;
-            let after = start + header.len();
-            let rest = &text[after..];
-            let end = rest.find("\n[").map(|i| after + i).unwrap_or(text.len());
-            Some(after..end)
-        }
-    }
-}
-
-fn toml_set(text: &str, section: Option<&str>, key: &str, encoded: &str) -> String {
-    let assignment = format!("{key} = {encoded}");
-    if let Some(updated) = replace_key(text, section, key, &assignment) {
-        return updated;
-    }
-    insert_key(text, section, &assignment)
-}
-
-fn replace_key(text: &str, section: Option<&str>, key: &str, assignment: &str) -> Option<String> {
-    let range = section_range(text, section)?;
-    let body = &text[range.clone()];
-    let body_start = range.start;
-    let mut offset = 0;
-    for line in body.split_inclusive('\n') {
-        let trimmed = line.trim();
-        let matches = !trimmed.starts_with('#')
-            && trimmed
-                .split_once('=')
-                .is_some_and(|(left, _)| left.trim() == key);
-        if matches {
-            let start = body_start + offset;
-            let end = start + line.len();
-            let mut out = String::with_capacity(text.len() + assignment.len());
-            out.push_str(&text[..start]);
-            out.push_str(assignment);
-            if line.ends_with('\n') {
-                out.push('\n');
-            }
-            out.push_str(&text[end..]);
-            return Some(out);
-        }
-        offset += line.len();
-    }
-    None
-}
-
-fn insert_key(text: &str, section: Option<&str>, assignment: &str) -> String {
-    match section {
-        None => {
-            if text.is_empty() {
-                return format!("{assignment}\n");
-            }
-            let mut out = String::new();
-            out.push_str(assignment);
-            out.push('\n');
-            if !text.starts_with('\n') && !text.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(text);
-            out
-        }
-        Some(name) => {
-            let header = format!("[{name}]");
-            if let Some(pos) = text.find(&header) {
-                let insert_at = pos + header.len();
-                let mut out = String::with_capacity(text.len() + assignment.len() + 2);
-                out.push_str(&text[..insert_at]);
-                if !text[insert_at..].starts_with('\n') {
-                    out.push('\n');
-                }
-                out.push('\n');
-                out.push_str(assignment);
-                out.push('\n');
-                out.push_str(text[insert_at..].trim_start_matches('\n'));
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-                out
-            } else {
-                let mut out = text.to_string();
-                if !out.is_empty() && !out.ends_with('\n') {
-                    out.push('\n');
-                }
-                out.push('\n');
-                out.push_str(&header);
-                out.push('\n');
-                out.push_str(assignment);
-                out.push('\n');
-                out
-            }
-        }
-    }
-}
-
-/// End of the root table: the first table header, including one on line 1.
-fn root_table_end(text: &str) -> usize {
-    let mut offset = 0;
-    for line in text.split_inclusive('\n') {
-        if is_table_header(line.trim()) {
-            return offset;
-        }
-        offset += line.len();
-    }
-    text.len()
-}
-
-fn is_table_header(trimmed: &str) -> bool {
-    if trimmed.is_empty() || trimmed.starts_with('#') {
-        return false;
-    }
-    let rest = if let Some(rest) = trimmed.strip_prefix("[[") {
-        rest
-    } else if let Some(rest) = trimmed.strip_prefix('[') {
-        rest
-    } else {
-        return false;
+fn toml_value(
+    document: &toml_edit::DocumentMut,
+    section: Option<&str>,
+    key: &str,
+) -> Option<String> {
+    let item = match section {
+        Some(section) => document.get(section)?.get(key)?,
+        None => document.get(key)?,
     };
-    rest.contains(']')
+    item.as_str().map(str::to_owned).or_else(|| {
+        item.as_value().map(|v| {
+            let mut value = v.clone();
+            *value.decor_mut() = Default::default();
+            value.to_string()
+        })
+    })
 }
 
-fn unquote(value: &str) -> String {
-    let value = value.trim();
-    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
-        value[1..value.len() - 1]
-            .replace("\\\"", "\"")
-            .replace("\\\\", "\\")
+fn toml_set(text: &str, section: Option<&str>, key: &str, encoded: &str) -> Result<String, String> {
+    let mut document = text
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| e.to_string())?;
+    let mut value = encoded
+        .parse::<toml_edit::Value>()
+        .map_err(|e| e.to_string())?;
+    let table: &mut dyn toml_edit::TableLike = if let Some(section) = section {
+        if !document.contains_key(section) {
+            document.insert(section, toml_edit::table());
+        }
+        document
+            .get_mut(section)
+            .and_then(toml_edit::Item::as_table_like_mut)
+            .ok_or_else(|| format!("{section} is not a table"))?
     } else {
-        value.to_string()
+        document.as_table_mut()
+    };
+    if let Some(previous) = table.get(key).and_then(toml_edit::Item::as_value) {
+        *value.decor_mut() = previous.decor().clone();
     }
+    table.insert(key, toml_edit::Item::Value(value));
+    Ok(document.to_string())
 }
 
 fn strip_trailing_commas(text: &str) -> String {
@@ -941,6 +876,7 @@ fn strip_jsonc(text: &str) -> String {
             }
             '/' if chars.peek() == Some(&'*') => {
                 chars.next();
+                out.push(' ');
                 let mut prev = '\0';
                 for n in chars.by_ref() {
                     if prev == '*' && n == '/' {
@@ -969,6 +905,13 @@ fn json_to_string(value: &Value) -> String {
 }
 
 fn json_set(text: &str, pointer: &str, value: &Value) -> Result<String, String> {
+    if !text.trim().is_empty() {
+        let parsed: Value = serde_json::from_str(&strip_trailing_commas(&strip_jsonc(text)))
+            .map_err(|e| e.to_string())?;
+        if !parsed.is_object() {
+            return Err("Config must be an object".into());
+        }
+    }
     let encoded = serde_json::to_string(value).map_err(|e| e.to_string())?;
     let mut current = if text.trim().is_empty() {
         "{}\n".to_string()
@@ -1034,7 +977,7 @@ fn span_at(text: &str, from: usize, parts: &[&str]) -> Option<Range<usize>> {
             _ => return None,
         }
         let key_end = consume_string(text, i).ok()?;
-        let key = &text[i + 1..key_end - 1];
+        let key: String = serde_json::from_str(&text[i..key_end]).ok()?;
         i = key_end;
         skip_ws_and_comments(text, &mut i);
         if text.as_bytes().get(i) != Some(&b':') {
@@ -1079,25 +1022,16 @@ fn insert_member(
     }
     let end = consume_balanced(text, i, b'{', b'}')?;
     let close = end - 1;
-    let inner = text[i + 1..close].trim();
-    let quoted = json_quote_key(key);
-    let snippet = if inner.is_empty() {
-        format!("\n  {quoted}: {encoded}\n")
-    } else {
-        format!(",\n  {quoted}: {encoded}")
-    };
-    let insert_at = if inner.is_empty() {
-        close
-    } else {
-        text[..close].trim_end().len()
-    };
-    let mut out = String::with_capacity(text.len() + snippet.len() + 1);
-    out.push_str(&text[..insert_at]);
+    // Insert before the first member: trailing commas and comments at the
+    // closing brace then remain intact, including line comments.
+    let mut first = i + 1;
+    skip_ws_and_comments(text, &mut first);
+    let separator = if first == close { "" } else { "," };
+    let snippet = format!("\n  {}: {encoded}{separator}\n", json_quote_key(key));
+    let mut out = String::with_capacity(text.len() + snippet.len());
+    out.push_str(&text[..i + 1]);
     out.push_str(&snippet);
-    if !inner.is_empty() && !text[insert_at..close].contains('\n') {
-        out.push('\n');
-    }
-    out.push_str(&text[insert_at..]);
+    out.push_str(&text[i + 1..]);
     Ok(out)
 }
 
@@ -1219,10 +1153,51 @@ fn consume_value(text: &str, start: usize) -> Result<Range<usize>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Field, FieldKind, Loc, Span, encode_field, insert_key, json_set, read_json, strip_jsonc,
-        strip_trailing_commas, toml_get, toml_set, unquote,
+        Field, FieldKind, Loc, Span, encode_field, json_set, read_json, strip_jsonc,
+        strip_trailing_commas, toml_get, toml_set,
     };
     use serde_json::json;
+
+    #[test]
+    fn edits_preserve_commented_and_multiline_toml() {
+        let text = "# [models] is documented here\nnotes = \"\"\"\n[models]\ndefault = 'not a setting'\n\"\"\"\n  [models] # actual table\n  default = 'old' # keep\n  [ui]\ndefault = 'untouched'\n";
+        let next = toml_set(text, Some("models"), "default", "\"new\"").unwrap();
+        assert_eq!(
+            toml_get(&next, Some("models"), "default").as_deref(),
+            Some("new")
+        );
+        assert_eq!(
+            toml_get(&next, Some("ui"), "default").as_deref(),
+            Some("untouched")
+        );
+        assert!(next.contains("not a setting"));
+        assert!(next.contains("# keep"));
+        assert!(toml_set("model = [", None, "model", "\"new\"").is_err());
+        assert!(toml_set("models = false", Some("models"), "default", "\"new\"").is_err());
+        assert_eq!(super::toml_quote("true"), "\"true\"");
+        assert_eq!(super::toml_quote("123"), "\"123\"");
+    }
+
+    #[test]
+    fn jsonc_insertion_preserves_trailing_comments_and_commas() {
+        for text in [
+            "{\n// empty\n}",
+            "{\"model\":\"a\",}",
+            "{\"model\":\"a\" // final\n}",
+            "{/* comment */}",
+        ] {
+            let next = json_set(text, "/compaction/auto", &json!(true)).unwrap();
+            let parsed: serde_json::Value =
+                serde_json::from_str(&strip_trailing_commas(&strip_jsonc(&next))).unwrap();
+            assert_eq!(parsed["compaction"]["auto"], true);
+        }
+        assert!(json_set("{\"model\":", "/model", &json!("x")).is_err());
+        let next = json_set(r#"{"mo\u0064el":"old"}"#, "/model", &json!("new")).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&next).unwrap()["model"],
+            "new"
+        );
+    }
 
     #[test]
     fn toml_reads_a_sectioned_key_and_leaves_the_rest_alone() {
@@ -1232,7 +1207,7 @@ mod tests {
             Some("grok-4.6")
         );
         assert_eq!(toml_get(text, Some("ui"), "yolo").as_deref(), Some("true"));
-        let next = toml_set(text, Some("models"), "default", "\"grok-4.5\"");
+        let next = toml_set(text, Some("models"), "default", "\"grok-4.5\"").unwrap();
         assert!(next.contains("default = \"grok-4.5\""), "{next}");
         assert!(next.contains("yolo = true"), "{next}");
         assert!(next.contains("# keep me"), "{next}");
@@ -1240,7 +1215,7 @@ mod tests {
 
     #[test]
     fn toml_inserts_a_missing_section() {
-        let next = insert_key("", Some("session"), "auto_compact_threshold_percent = 80");
+        let next = toml_set("", Some("session"), "auto_compact_threshold_percent", "80").unwrap();
         assert!(next.contains("[session]"), "{next}");
         assert!(
             next.contains("auto_compact_threshold_percent = 80"),
@@ -1336,16 +1311,9 @@ mod tests {
     }
 
     #[test]
-    fn unquote_round_trips_a_plain_string() {
-        assert_eq!(unquote("\"grok-4.6\""), "grok-4.6");
-        assert_eq!(unquote("80"), "80");
-        assert_eq!(unquote("true"), "true");
-    }
-
-    #[test]
     fn toml_root_write_does_not_touch_the_first_table() {
         let text = "[features]\nmodel = \"inside\"\n";
-        let next = toml_set(text, None, "model", "\"root\"");
+        let next = toml_set(text, None, "model", "\"root\"").unwrap();
         assert!(
             next.contains("model = \"root\""),
             "root key should be inserted: {next}"

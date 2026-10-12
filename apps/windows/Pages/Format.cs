@@ -33,19 +33,27 @@ internal static class Format
         return n.ToString("N0", CultureInfo.InvariantCulture);
     }
 
-    public static long Long(JsonNode? node, string name) =>
-        (long)Math.Round(Number(node, name));
+    public static long Long(JsonNode? node, string name)
+    {
+        if ((node as JsonObject)?[name] is JsonValue raw && raw.TryGetValue<long>(out var integer)) return integer;
+        var value = Number(node, name);
+        return value >= long.MaxValue ? long.MaxValue : value <= long.MinValue ? long.MinValue : (long)Math.Round(value);
+    }
+
+    public static DateTimeOffset? Instant(long milliseconds) =>
+        milliseconds is >= -62135596800000 and <= 253402300799999
+            ? DateTimeOffset.FromUnixTimeMilliseconds(milliseconds) : null;
 
     public static double Number(JsonNode? node, string name)
     {
-        var value = node?[name];
+        var value = (node as JsonObject)?[name];
         if (value is null || value.GetValueKind() is JsonValueKind.Null or JsonValueKind.Undefined)
         {
             return 0;
         }
         try
         {
-            return value.GetValueKind() switch
+            var number = value.GetValueKind() switch
             {
                 JsonValueKind.Number => value.GetValue<double>(),
                 JsonValueKind.String => double.TryParse(
@@ -59,6 +67,7 @@ internal static class Format
                 JsonValueKind.False => 0,
                 _ => 0,
             };
+            return double.IsFinite(number) ? number : 0;
         }
         catch
         {
@@ -67,7 +76,7 @@ internal static class Format
     }
 
     public static bool Flag(JsonNode? node, string name) =>
-        node?[name] is JsonValue v && v.GetValueKind() == JsonValueKind.True;
+        (node as JsonObject)?[name] is JsonValue v && v.GetValueKind() == JsonValueKind.True;
 
     /// <summary>Binary units, matching the Mac Account card.</summary>
     public static string DataSize(long bytes)

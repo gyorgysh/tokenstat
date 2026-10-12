@@ -173,7 +173,7 @@ internal sealed class WorkspaceTerminalController
     }
     public async Task StartShellAsync()
     {
-        if (_startingShell) return;
+        if (_released || _startingShell) return;
         _startingShell = true;
         try
         {
@@ -181,6 +181,7 @@ internal sealed class WorkspaceTerminalController
                 ? await RemoteWorkspaces.CallOnPeerAsync(peer, "launcher.catalog") : await AppServices.Host.CallAsync("launcher.catalog");
             var shell = Format.Items(catalog)?.FirstOrDefault(item => Format.Text(item, "id") == "shell")
                 ?? throw new InvalidOperationException(L10n.Text("windows.terminalsession.the_host_did_not_advertise_an_available_sh.9e1e6520"));
+            if (_released) return;
             var opened = await AppServices.Host.CallAsync("pty.spawn", new JsonObject { ["workspaceId"] = _workspaceId,
                 ["command"] = Format.Text(shell, "command"), ["args"] = shell?["args"]?.DeepClone() ?? new JsonArray(), ["rows"] = 30, ["cols"] = 100, ["dark"] = Theme.IsDark });
             var id = Format.Text(opened, "id");

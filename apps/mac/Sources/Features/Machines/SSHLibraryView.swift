@@ -441,6 +441,7 @@ struct SSHLibraryView: View {
                 updated.runOnConnect.toggle()
                 Task { _ = await model.save(snippet: updated) }
             }
+            .disabled(!snippet.runOnConnect && (snippet.hostIDs.isEmpty || !SSHSnippet.placeholders(in: snippet.command).isEmpty))
             Button(L10n.text("common.delete"), role: .destructive) { Task { await model.delete(snippet: snippet) } }
         }
         .swipeActions(edge: .trailing) {

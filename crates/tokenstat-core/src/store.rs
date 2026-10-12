@@ -570,6 +570,19 @@ impl Store {
         let mut touched = 0u64;
         let mut stmt = tx.prepare(UPSERT_EVENT_SQL)?;
         for e in events {
+            // A later sessions.json update can arrive without a new
+            // trajectory line. Keep an already archived turn authoritative
+            // even when the incremental scanner skipped its unchanged file.
+            if e.source == crate::model::SourceId::OpenClaw
+                && e.id == EventId::derive(&["openclaw", "session", &e.session])
+                && tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM event WHERE source = 'openclaw' AND session = ?1 AND id <> ?2)",
+                    params![e.session, &e.id.0[..]],
+                    |row| row.get::<_, bool>(0),
+                )?
+            {
+                continue;
+            }
             let n = stmt.execute(params![
                 &e.id.0[..],
                 e.source.as_str(),
@@ -884,11 +897,17 @@ impl Store {
 
     /// Busiest local hour, used for the overview.
     pub fn peak_hour(&self) -> Result<Option<u8>, CoreError> {
+        self.peak_hour_for(&Query::default())
+    }
+
+    /// Busiest local hour within the same filter as the report it accompanies.
+    pub fn peak_hour_for(&self, q: &Query) -> Result<Option<u8>, CoreError> {
+        let (where_sql, args) = Self::where_clause(q);
         Ok(self
             .conn
             .query_row(
-                "SELECT local_hour FROM event GROUP BY local_hour ORDER BY COUNT(*) DESC LIMIT 1",
-                [],
+                &format!("SELECT local_hour FROM event{where_sql} GROUP BY local_hour ORDER BY COUNT(*) DESC, local_hour ASC LIMIT 1"),
+                rusqlite::params_from_iter(args.iter()),
                 |r| r.get::<_, i64>(0),
             )
             .optional()?
@@ -905,10 +924,37 @@ impl Store {
         self.fold_blocks(q, None, now_ms)
     }
 
-    /// The open 5 hour window, if any. Insights only needs this one row, not
-    /// a walk of every event in the archive.
+    /// The open 5 hour window, if any. Find the most recent quiet gap before
+    /// folding, so a long session keeps the same boundaries as `blocks`.
     pub fn active_block(&self, q: &Query, now_ms: i64) -> Result<Option<UsageBlock>, CoreError> {
-        let since = now_ms.saturating_sub(2 * BLOCK_DURATION_MS);
+        let (mut where_sql, mut args) = Self::where_clause(q);
+        where_sql.push_str(if where_sql.is_empty() {
+            " WHERE "
+        } else {
+            " AND "
+        });
+        where_sql.push_str("ts_ms <= ?");
+        args.push(Box::new(now_ms));
+        // Only timestamps are read while locating the start. Stop at a gap,
+        // rather than inventing a fresh block at an arbitrary lookback limit.
+        let sql = format!("SELECT DISTINCT ts_ms FROM event{where_sql} ORDER BY ts_ms DESC");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
+        let mut timestamps = stmt.query_map(params.as_slice(), |row| row.get::<_, i64>(0))?;
+        let Some(latest) = timestamps.next().transpose()? else {
+            return Ok(None);
+        };
+        if now_ms.saturating_sub(latest) >= BLOCK_DURATION_MS {
+            return Ok(None);
+        }
+        let mut since = latest;
+        for timestamp in timestamps {
+            let timestamp = timestamp?;
+            if since.saturating_sub(timestamp) >= BLOCK_DURATION_MS {
+                break;
+            }
+            since = timestamp;
+        }
         let blocks = self.fold_blocks(q, Some(since), now_ms)?;
         Ok(blocks.into_iter().find(|block| block.active))
     }
@@ -961,7 +1007,7 @@ impl Store {
                 blocks.push((
                     UsageBlock {
                         start_ms: ts_ms,
-                        end_ms: ts_ms + BLOCK_DURATION_MS,
+                        end_ms: ts_ms.saturating_add(BLOCK_DURATION_MS),
                         counters,
                         events: 1,
                         sessions: 1,
@@ -1027,6 +1073,25 @@ impl Store {
             [],
             |r| r.get::<_, i64>(0),
         )? as u64)
+    }
+
+    /// Claude-only figures comparable to Claude Code's vendor rollup.
+    pub(crate) fn claude_reconciliation_totals(
+        &self,
+    ) -> Result<(u64, u64, Option<String>), CoreError> {
+        Ok(self.conn.query_row(
+            "SELECT COALESCE(SUM(input_fresh),0)+COALESCE(SUM(output),0),
+                    COUNT(DISTINCT NULLIF(session, '')), MIN(local_date)
+             FROM event WHERE source IN ('claude_code', 'claude_code_rollup')",
+            [],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)? as u64,
+                    r.get::<_, i64>(1)? as u64,
+                    r.get(2)?,
+                ))
+            },
+        )?)
     }
 
     /// Every recorded file watermark, keyed by path.
@@ -1262,19 +1327,30 @@ impl Store {
         events: &[UsageEvent],
         tz: &jiff::tz::TimeZone,
     ) -> Result<u64, CoreError> {
+        self.replace_source_sessions(crate::model::SourceId::Codex, events, tz)
+    }
+
+    /// Replace successfully read source sessions, including derived remainder
+    /// rows which may shrink when individual requests become available.
+    pub(crate) fn replace_source_sessions(
+        &mut self,
+        source: crate::model::SourceId,
+        events: &[UsageEvent],
+        tz: &jiff::tz::TimeZone,
+    ) -> Result<u64, CoreError> {
         if events.is_empty() {
             return Ok(0);
         }
         let tx = self.conn.transaction()?;
         let sessions: HashSet<_> = events
             .iter()
-            .filter(|e| e.source == crate::model::SourceId::Codex)
+            .filter(|e| e.source == source)
             .map(|e| e.session.as_str())
             .collect();
         for session in sessions {
             tx.execute(
-                "DELETE FROM event WHERE source = 'codex' AND session = ?1",
-                [session],
+                "DELETE FROM event WHERE source = ?1 AND session = ?2",
+                [source.as_str(), session],
             )?;
         }
         let touched = Self::insert_events_in_tx(&tx, events, tz)?;
@@ -1553,6 +1629,69 @@ mod tests {
     }
 
     #[test]
+    fn peak_hour_respects_report_filters() {
+        let mut store = Store::open_in_memory().unwrap();
+        let mut events = vec![
+            ev("a", 0, "old", 1),
+            ev("b", 1, "old", 1),
+            ev("c", 86_400_000 + 12 * 3_600_000, "new", 1),
+        ];
+        events[2].project = "new-project".into();
+        events[2].billing = BillingMode::Metered;
+        store
+            .insert_events(&events, &jiff::tz::TimeZone::UTC)
+            .unwrap();
+        assert_eq!(store.peak_hour().unwrap(), Some(0));
+        for query in [
+            Query {
+                since: Some("1970-01-02".into()),
+                ..Query::default()
+            },
+            Query {
+                model: Some("new".into()),
+                ..Query::default()
+            },
+            Query {
+                project: Some("new-project".into()),
+                ..Query::default()
+            },
+            Query {
+                billing: Some(BillingMode::Metered),
+                ..Query::default()
+            },
+        ] {
+            assert_eq!(store.peak_hour_for(&query).unwrap(), Some(12));
+        }
+        assert_eq!(
+            store
+                .peak_hour_for(&Query {
+                    until: Some("1969-12-31".into()),
+                    ..Query::default()
+                })
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn claude_reconciliation_excludes_other_tools_and_empty_rollup_sessions() {
+        let mut store = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let live = ev("claude", 1_700_000_000_000, "m", 10);
+        let mut other = ev("codex", 1, "m", 900);
+        other.source = SourceId::Codex;
+        other.session = "other".into();
+        let mut recovered = ev("recovered", 1_700_100_000_000, "m", 20);
+        recovered.source = SourceId::ClaudeCodeRollup;
+        recovered.session.clear();
+        store.insert_events(&[live, other, recovered], &tz).unwrap();
+        assert_eq!(
+            store.claude_reconciliation_totals().unwrap(),
+            (32, 1, Some("2023-11-14".into()))
+        );
+    }
+
+    #[test]
     fn codex_reparse_replaces_old_attribution_without_doubling_history() {
         let mut s = Store::open_in_memory().unwrap();
         let tz = jiff::tz::TimeZone::UTC;
@@ -1779,6 +1918,42 @@ mod tests {
     }
 
     #[test]
+    fn extreme_log_timestamps_do_not_overflow_block_boundaries() {
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .insert_events(
+                &[ev("future", i64::MAX - 1, "m", 1)],
+                &jiff::tz::TimeZone::UTC,
+            )
+            .unwrap();
+        let blocks = store.blocks(&Query::default(), 0).unwrap();
+        assert_eq!(blocks[0].end_ms, i64::MAX);
+        assert!(!blocks[0].active);
+    }
+
+    #[test]
+    fn active_block_matches_history_after_more_than_ten_hours_of_continuous_work() {
+        let mut store = Store::open_in_memory().unwrap();
+        let start = 1_700_000_000_000;
+        let hour = 60 * 60 * 1000;
+        let events: Vec<_> = (0..=12)
+            .map(|n| ev(&format!("hour-{n}"), start + n * hour, "m", 1))
+            .collect();
+        store
+            .insert_events(&events, &jiff::tz::TimeZone::UTC)
+            .unwrap();
+        let now = start + 12 * hour;
+        let query = Query::default();
+        let history = store.blocks(&query, now).unwrap();
+        let expected = history.iter().find(|block| block.active).unwrap();
+        let active = store.active_block(&query, now).unwrap().unwrap();
+        assert_eq!(active.start_ms, expected.start_ms);
+        assert_eq!(active.end_ms, expected.end_ms);
+        assert_eq!(active.counters, expected.counters);
+        assert_eq!(active.events, expected.events);
+    }
+
+    #[test]
     fn unknown_counter_stays_unknown_through_aggregation() {
         let mut s = Store::open_in_memory().unwrap();
         let tz = jiff::tz::TimeZone::UTC;
@@ -1887,6 +2062,25 @@ mod tests {
         let t = s.totals(&Query::default()).unwrap();
         assert_eq!(t.events, 1);
         assert_eq!(t.counters.output, Some(3));
+    }
+
+    #[test]
+    fn openclaw_rollup_cannot_return_when_the_trajectory_is_unchanged() {
+        let mut store = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut turn = ev("turn", 1_700_000_000_000, "m", 3);
+        turn.source = SourceId::OpenClaw;
+        turn.session = "session".into();
+        turn.id = EventId::derive(&["openclaw", "turn", "session", "1"]);
+        store.insert_events(&[turn], &tz).unwrap();
+        let mut rollup = ev("rollup", 1_700_000_000_000, "m", 30);
+        rollup.source = SourceId::OpenClaw;
+        rollup.session = "session".into();
+        rollup.id = EventId::derive(&["openclaw", "session", "session"]);
+        assert_eq!(store.insert_events(&[rollup], &tz).unwrap(), 0);
+        let totals = store.totals(&Query::default()).unwrap();
+        assert_eq!(totals.events, 1);
+        assert_eq!(totals.counters.output, Some(3));
     }
 
     #[test]

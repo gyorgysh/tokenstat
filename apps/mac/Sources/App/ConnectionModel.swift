@@ -57,6 +57,10 @@ extension NetworkPlane {
     /// it. Only the calls that actually leave the device count.
     static func of(method: String) -> NetworkPlane? {
         if method == "remote.call" { return .peer }
+        // Sign-out must always reach local credential cleanup, even when its
+        // best-effort server revocation cannot connect. The other two calls
+        // only change/read local state and cannot prove service connectivity.
+        if ["account.logout", "account.cancelLogin", "sync.scheduleStatus"].contains(method) { return nil }
         if method.hasPrefix("account.") || method.hasPrefix("sync") { return .account }
         return nil
     }

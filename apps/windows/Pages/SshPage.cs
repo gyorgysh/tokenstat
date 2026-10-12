@@ -42,6 +42,7 @@ internal sealed class SshPage : Page, IToolbarItems
     private readonly Border _bodyHost = new();
     private readonly bool _terminalOnly;
     private bool _viewerReleased;
+    private bool _connecting;
     private JsonNode? _connectHost;
     internal bool ShouldFocus { get; set; } = true;
     internal bool RetainOnUnload { get; set; }
@@ -647,6 +648,14 @@ internal sealed class SshPage : Page, IToolbarItems
 
     private async Task ConnectAsync(JsonNode? host)
     {
+        if (_connecting || _viewerReleased) return;
+        _connecting = true;
+        try { await ConnectCoreAsync(host); }
+        finally { _connecting = false; }
+    }
+
+    private async Task ConnectCoreAsync(JsonNode? host)
+    {
         if (_viewerReleased) return;
         if (host is not JsonObject record)
         {
@@ -734,6 +743,7 @@ internal sealed class SshPage : Page, IToolbarItems
         {
             hostKeys = await EnsureHostKeysAsync(record, hostname, (int)port, username);
         }
+        catch (OperationCanceledException) { ConnectionCancelled?.Invoke(); return; }
         catch (Exception ex)
         {
             LibraryBanner(ex.Message);
@@ -979,6 +989,27 @@ internal sealed class SshPage : Page, IToolbarItems
             throw new InvalidOperationException(L10n.Text("windows.sshpage.the_server_did_not_offer_a_fingerprint.14e28318"));
         }
 
+        if (_viewerReleased || !IsLoaded) throw new OperationCanceledException();
+        var confirmation = new ContentDialog
+        {
+            Title = L10n.Text("windows.sshpage.verify_server_identity"),
+            Content = new StackPanel
+            {
+                Spacing = Theme.SpaceM,
+                Children =
+                {
+                    new TextBlock { Text = $"{hostname}:{port}", TextWrapping = TextWrapping.Wrap },
+                    new TextBlock { Text = fingerprint, FontFamily = Fonts.Mono, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
+                    new TextBlock { Text = L10n.Text("windows.sshpage.compare_fingerprint"), TextWrapping = TextWrapping.Wrap },
+                },
+            },
+            PrimaryButtonText = L10n.Text("windows.machinespage.trust.ade9248e"),
+            CloseButtonText = L10n.Text("common.cancel"),
+            DefaultButton = ContentDialogButton.Close,
+        };
+        if (await Chrome.ShowDialog(this, confirmation) != ContentDialogResult.Primary || _viewerReleased || !IsLoaded)
+            throw new OperationCanceledException();
+
         JsonObject save;
         try
         {
@@ -1140,6 +1171,7 @@ internal sealed class SshPage : Page, IToolbarItems
             SessionBanner(ex.Message);
             return;
         }
+        if (_viewerReleased || _sessionId != id) return;
         var rows = answer["rows"] as JsonArray;
         if (rows is null || rows.Count == 0)
         {
@@ -1466,10 +1498,8 @@ internal sealed class SshPage : Page, IToolbarItems
             {
                 return;
             }
-            foreach (var (name, box) in boxes)
-            {
-                command = command.Replace("{{" + name + "}}", box.Text, StringComparison.Ordinal);
-            }
+            command = System.Text.RegularExpressions.Regex.Replace(command, @"\{\{([^{}]+)\}\}", match =>
+                boxes.TryGetValue(match.Groups[1].Value.Trim(), out var box) ? box.Text : match.Value);
         }
         try
         {
@@ -1903,9 +1933,12 @@ internal sealed class SshPage : Page, IToolbarItems
             SessionBanner(FriendlyError.Display(ex.Message));
             return false;
         }
-        _poll?.Cancel();
         WorkspaceSshTabs.Remove(id);
-        _sessionId = _pendingSessionId = _sessionHostId = null;
+        if (_sessionId == id)
+        {
+            _poll?.Cancel();
+            _sessionId = _pendingSessionId = _sessionHostId = null;
+        }
         return true;
     }
 

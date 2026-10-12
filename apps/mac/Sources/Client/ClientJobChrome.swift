@@ -112,6 +112,8 @@ struct ClientWorkflowActions: View {
         } message: {
             Text(confirmMessage)
         }
+        .onChange(of: session.selectedGraph?.id) { _, _ in pending = nil }
+        .onChange(of: session.liveRun?.id) { _, _ in pending = nil }
         .onChange(of: session.working) { _, working in
             if !working { pending = nil }
         }
@@ -231,6 +233,8 @@ struct ClientAutomationActions: View {
         } message: {
             Text(confirmMessage)
         }
+        .onChange(of: session.selectedJob?.id) { _, _ in pending = nil }
+        .onChange(of: session.liveRun?.id) { _, _ in pending = nil }
         .onChange(of: session.working) { _, working in
             if !working { pending = nil }
         }

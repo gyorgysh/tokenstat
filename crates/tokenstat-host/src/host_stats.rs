@@ -60,11 +60,12 @@ fn cpu_fraction() -> Option<f64> {
     let system = now.system.saturating_sub(prev.system);
     let idle = now.idle.saturating_sub(prev.idle);
     let nice = now.nice.saturating_sub(prev.nice);
-    let total = user + system + idle + nice;
+    let busy = u128::from(user) + u128::from(system) + u128::from(nice);
+    let total = busy + u128::from(idle);
     if total == 0 {
         return None;
     }
-    Some(((user + system + nice) as f64 / total as f64).clamp(0.0, 1.0))
+    Some((busy as f64 / total as f64).clamp(0.0, 1.0))
 }
 
 fn memory() -> (u64, u64) {
@@ -289,12 +290,19 @@ mod platform {
         ) -> i32;
     }
 
+    // mach_host_self returns a send right. Keep one for the sampler's lifetime
+    // instead of acquiring another right on every CPU and memory read.
+    fn host_port() -> u32 {
+        static PORT: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+        *PORT.get_or_init(|| unsafe { mach_host_self() })
+    }
+
     fn macos_cpu() -> Option<CpuTicks> {
         let mut info = [0u32; 4];
         let mut count = HOST_CPU_LOAD_INFO_COUNT;
         let kr = unsafe {
             host_statistics(
-                mach_host_self(),
+                host_port(),
                 HOST_CPU_LOAD_INFO,
                 info.as_mut_ptr(),
                 &mut count,
@@ -361,7 +369,7 @@ mod platform {
         if sys != 0 || total == 0 {
             return (0, 0);
         }
-        let host = unsafe { mach_host_self() };
+        let host = host_port();
         let mut page: usize = 0;
         if unsafe { host_page_size(host, &mut page) } != 0 || page == 0 {
             return (0, total);
@@ -422,6 +430,34 @@ mod platform {
             .saturating_mul(page);
         (used.min(total), total)
     }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn parse_linux_cpu(text: &str) -> Option<CpuTicks> {
+    let mut parts = text.lines().next()?.split_whitespace();
+    if parts.next()? != "cpu" {
+        return None;
+    }
+    let user: u64 = parts.next()?.parse().ok()?;
+    let nice: u64 = parts.next()?.parse().ok()?;
+    let system: u64 = parts.next()?.parse().ok()?;
+    let idle: u64 = parts.next()?.parse().ok()?;
+    let mut optional = || parts.next().unwrap_or("0").parse::<u64>().ok();
+    let iowait = optional()?;
+    let irq = optional()?;
+    let softirq = optional()?;
+    let steal = optional()?;
+    // Guest time is already included in user/nice. I/O wait is idle time,
+    // while interrupts and stolen VM time belong in the busy denominator.
+    Some(CpuTicks {
+        user,
+        nice,
+        system: system
+            .saturating_add(irq)
+            .saturating_add(softirq)
+            .saturating_add(steal),
+        idle: idle.saturating_add(iowait),
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -493,21 +529,7 @@ mod platform {
 
     fn linux_cpu() -> Option<CpuTicks> {
         let text = fs::read_to_string("/proc/stat").ok()?;
-        let line = text.lines().next()?;
-        let mut parts = line.split_whitespace();
-        if parts.next()? != "cpu" {
-            return None;
-        }
-        let user = parts.next()?.parse().ok()?;
-        let nice = parts.next()?.parse().ok()?;
-        let system = parts.next()?.parse().ok()?;
-        let idle = parts.next()?.parse().ok()?;
-        Some(CpuTicks {
-            user,
-            system,
-            idle,
-            nice,
-        })
+        super::parse_linux_cpu(&text)
     }
 
     fn linux_memory() -> (u64, u64) {
@@ -657,6 +679,18 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linux_cpu_includes_wait_interrupts_and_steal_without_double_counting_guest() {
+        let ticks = parse_linux_cpu("cpu 10 2 3 40 5 6 7 8 9 1\ncpu0 1 2 3 4").unwrap();
+        assert_eq!(
+            (ticks.user, ticks.nice, ticks.system, ticks.idle),
+            (10, 2, 24, 45)
+        );
+        let old = parse_linux_cpu("cpu 1 2 3 4").unwrap();
+        assert_eq!((old.system, old.idle), (3, 4));
+        assert!(parse_linux_cpu("cpu0 1 2 3 4").is_none());
+    }
 
     #[test]
     fn sample_is_an_object_with_power() {

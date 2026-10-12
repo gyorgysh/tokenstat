@@ -402,7 +402,7 @@ pub fn device_start_kind(host_flag: Option<&str>, kind: &str) -> Result<DeviceLo
         )));
     }
 
-    let device: DeviceCodeResponse = resp.json()?;
+    let device: DeviceCodeResponse = serde_json::from_str(&limited_text(resp)?)?;
     // Refuse phishing / non-HTTPS schemes before any UI opens a browser.
     crate::host::assert_safe_verification_url(&device.verification_uri, &host)
         .map_err(|e| ProfileError::Message(e.to_string()))?;
@@ -505,11 +505,13 @@ pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
 
     let _ = open_browser(device.open_url());
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(device.expires_in);
+    let started = std::time::Instant::now();
+    let lifetime = Duration::from_secs(device.expires_in);
     let mut interval = Duration::from_secs(device.interval);
 
     loop {
-        if std::time::Instant::now() >= deadline {
+        let remaining = lifetime.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
             return Err(ProfileError::Message(
                 "device login timed out before confirmation".into(),
             ));
@@ -612,15 +614,15 @@ pub(crate) fn status_from_value(host: String, raw: Value) -> StatusResult {
     let schema_min_v = schema
         .and_then(|s| s.get("min_v"))
         .and_then(|v| v.as_u64())
-        .map(|n| n as u32);
+        .and_then(|n| u32::try_from(n).ok());
     let schema_max_v = schema
         .and_then(|s| s.get("max_v"))
         .and_then(|v| v.as_u64())
-        .map(|n| n as u32);
+        .and_then(|n| u32::try_from(n).ok());
     let schema_current = schema
         .and_then(|s| s.get("current"))
         .and_then(|v| v.as_u64())
-        .map(|n| n as u32);
+        .and_then(|n| u32::try_from(n).ok());
     let account_id = raw.get("id").and_then(Value::as_str).map(str::to_string);
     let review_demo = raw
         .get("review_demo")
@@ -958,7 +960,7 @@ pub fn mint_pairing_code(host_flag: Option<&str>) -> Result<PairingCode, Profile
             "could not create a pairing code ({status}): {text}"
         )));
     }
-    let minted: PairingCodeResponse = resp.json()?;
+    let minted: PairingCodeResponse = serde_json::from_str(&limited_text(resp)?)?;
     if minted.code.trim().is_empty() {
         return Err(ProfileError::Message(
             "the account server returned an empty pairing code".into(),
@@ -1075,7 +1077,7 @@ pub fn unlink_machine(host_flag: Option<&str>, machine_id: &str) -> Result<(), P
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
     }
     if !status.is_success() {
-        let text = resp.text().unwrap_or_default();
+        let text = limited_text(resp)?;
         return Err(ProfileError::Message(format!(
             "could not remove the machine from the account ({status}): {text}"
         )));
@@ -1157,34 +1159,29 @@ pub fn account_series(
     let token =
         keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
 
-    let mut url = format!("{host}/api/v1/usage/series");
-    let mut query: Vec<String> = Vec::new();
-    if let Some(from) = from {
-        query.push(format!("from={from}"));
-    }
-    if let Some(to) = to {
-        query.push(format!("to={to}"));
-    }
-    if let Some(machine) = machine {
-        query.push(format!("machine={machine}"));
-    }
-    if !query.is_empty() {
-        url.push('?');
-        url.push_str(&query.join("&"));
-    }
-
+    let url = query_url(
+        &format!("{host}/api/v1/usage/series"),
+        &[("from", from), ("to", to), ("machine", machine)],
+    )?;
     let client = http_client()?;
     let resp = client
         .get(url)
         .header("authorization", format!("Bearer {token}"))
         .send()?;
     let status = resp.status();
-    let text = limited_text(resp)?;
+    let text = text_with_limit(resp, 32 * 1024 * 1024)?;
+    decode_series_response(status, &text)
+}
+
+pub(crate) fn decode_series_response(
+    status: reqwest::StatusCode,
+    text: &str,
+) -> Result<SeriesResult, ProfileError> {
     if status.as_u16() == 401 {
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
     }
     if status.as_u16() == 403 {
-        return Err(refusal_error(&text, 403));
+        return Err(refusal_error(text, 403));
     }
     if status.as_u16() == 429 {
         return Err(ProfileError::Message(
@@ -1196,7 +1193,7 @@ pub fn account_series(
             "usage request failed ({status}): {text}"
         )));
     }
-    let raw: Value = serde_json::from_str(&text)?;
+    let raw: Value = serde_json::from_str(text)?;
     let rows = raw.get("rows").cloned().unwrap_or(Value::Array(vec![]));
     let window = raw.get("window");
     let field = |name: &str| {
@@ -1365,7 +1362,7 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
             .get("retry-after")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u64>().ok());
-        let text = resp.text().unwrap_or_default();
+        let text = limited_text(resp)?;
 
         if status.is_success() {
             break text;
@@ -1555,13 +1552,10 @@ pub fn fetch_account_limits(
     let host = resolve_api_host(host_flag)?;
     let token =
         keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
-    let mut url = format!("{host}/api/v1/limits");
-    if let Some(m) = machine {
-        url.push_str(&format!("?machine={m}"));
-    }
+    let url = query_url(&format!("{host}/api/v1/limits"), &[("machine", machine)])?;
     let client = http_client()?;
     let resp = client
-        .get(&url)
+        .get(url)
         .header("authorization", format!("Bearer {token}"))
         .send()?;
     let status = resp.status();
@@ -1595,11 +1589,10 @@ fn pacing_from_body(text: &str, retry_after: Option<u64>) -> config::SyncPacing 
         .map(|s| s.to_string())
         .or_else(|| {
             let secs = retry_after?;
-            Some(
-                (jiff::Timestamp::now() + Duration::from_secs(secs))
-                    .strftime("%Y-%m-%dT%H:%M:%SZ")
-                    .to_string(),
-            )
+            jiff::Timestamp::now()
+                .checked_add(Duration::from_secs(secs))
+                .ok()
+                .map(|at| at.strftime("%Y-%m-%dT%H:%M:%SZ").to_string())
         });
     config::SyncPacing {
         next_allowed_at,
@@ -1854,44 +1847,30 @@ pub fn cli_sync_schedule_active() -> bool {
 }
 
 struct SyncLock {
-    path: std::path::PathBuf,
+    _file: std::fs::File,
 }
-
-impl Drop for SyncLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
 fn try_sync_lock() -> Result<Option<SyncLock>, ProfileError> {
     let dir = tokenstat_paths::data_dir()
         .ok_or_else(|| ProfileError::Message("no tokenstat data directory".into()))?;
     std::fs::create_dir_all(&dir)?;
-    let path = dir.join("sync.lock");
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-    {
-        Ok(_) => Ok(Some(SyncLock { path })),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let stale = std::fs::metadata(&path)
-                .and_then(|meta| meta.modified())
-                .ok()
-                .and_then(|modified| modified.elapsed().ok())
-                .is_some_and(|age| age > Duration::from_secs(15 * 60));
-            if stale {
-                let _ = std::fs::remove_file(&path);
-                return try_sync_lock();
-            }
-            Ok(None)
-        }
-        Err(error) => Err(error.into()),
-    }
+    try_sync_lock_at(&dir.join("sync.lock"))
 }
 
-/// The tolerance the server applies to its own interval check (lib/sync.js
-/// SYNC_GRACE_SECS). Kept in step by hand; erring low only costs a retry.
+fn try_sync_lock_at(path: &std::path::Path) -> Result<Option<SyncLock>, ProfileError> {
+    // A stable OS lock releases on crash and never steals a slow live upload
+    // based on age. Do not unlink it: another process may already hold its inode.
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(SyncLock { _file: file })),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
+    }
+}
 const SERVER_GRACE_SECS: u64 = 60;
 
 fn map_sync_error(status: reqwest::StatusCode, text: &str) -> ProfileError {
@@ -1974,17 +1953,33 @@ fn gzip_bytes(bytes: &[u8]) -> Result<Vec<u8>, ProfileError> {
     Ok(enc.finish()?)
 }
 
-fn limited_text(resp: reqwest::blocking::Response) -> Result<String, ProfileError> {
-    const MAX: usize = 256 * 1024;
-    let bytes = read_capped(resp, MAX)?;
-    if bytes.len() > MAX {
-        return Ok(format!("[response truncated: over {MAX}-byte cap]"));
+fn query_url(base: &str, values: &[(&str, Option<&str>)]) -> Result<reqwest::Url, ProfileError> {
+    reqwest::Url::parse_with_params(
+        base,
+        values
+            .iter()
+            .filter_map(|(key, value)| value.map(|value| (*key, value))),
+    )
+    .map_err(|e| ProfileError::Message(e.to_string()))
+}
+
+pub(crate) fn limited_text(resp: reqwest::blocking::Response) -> Result<String, ProfileError> {
+    text_with_limit(resp, 256 * 1024)
+}
+
+pub(crate) fn text_with_limit(
+    resp: impl std::io::Read,
+    max: usize,
+) -> Result<String, ProfileError> {
+    let bytes = read_capped(resp, max)?;
+    if bytes.len() > max {
+        return Err(ProfileError::Message(format!(
+            "server response exceeded {max} bytes"
+        )));
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
-
-fn read_capped(mut resp: reqwest::blocking::Response, max: usize) -> Result<Vec<u8>, ProfileError> {
-    use std::io::Read;
+fn read_capped(mut resp: impl std::io::Read, max: usize) -> Result<Vec<u8>, ProfileError> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8 * 1024];
     loop {
@@ -2037,6 +2032,53 @@ mod tests {
         BillingMode, Confidence, Counters, EventId, Extras, SourceId, Timestamp, UsageEvent,
     };
 
+    #[test]
+    fn sync_lock_is_exclusive_and_reusable_without_deleting_its_inode() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync.lock");
+        let held = try_sync_lock_at(&path).unwrap().unwrap();
+        assert!(try_sync_lock_at(&path).unwrap().is_none());
+        drop(held);
+        assert!(path.exists());
+        assert!(try_sync_lock_at(&path).unwrap().is_some());
+    }
+
+    #[test]
+    fn huge_retry_after_and_schema_versions_do_not_panic_or_wrap() {
+        assert!(
+            pacing_from_body("", Some(u64::MAX))
+                .next_allowed_at
+                .is_none()
+        );
+        let status = status_from_value(
+            "fixture".into(),
+            serde_json::json!({"schema":{"min_v":4294967296u64,"max_v":4294967297u64,"current":4294967298u64}}),
+        );
+        assert_eq!(
+            (
+                status.schema_min_v,
+                status.schema_max_v,
+                status.schema_current
+            ),
+            (None, None, None)
+        );
+    }
+
+    #[test]
+    fn usage_queries_encode_values_and_large_history_has_an_explicit_cap() {
+        let url = query_url(
+            "https://example.invalid/series",
+            &[("machine", Some("m_test&from=other")), ("from", None)],
+        )
+        .unwrap();
+        assert_eq!(
+            url.query_pairs().collect::<Vec<_>>(),
+            [("machine".into(), "m_test&from=other".into())]
+        );
+        let body = vec![b' '; 300 * 1024];
+        assert!(text_with_limit(body.as_slice(), 32 * 1024 * 1024).is_ok());
+        assert!(text_with_limit(body.as_slice(), 256 * 1024).is_err());
+    }
     #[test]
     fn a_pairing_code_is_accepted_however_it_was_pasted() {
         // People paste from a web page: lowercase, dash eaten, a stray space or

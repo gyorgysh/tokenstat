@@ -51,6 +51,9 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 ORIG_HOME="${HOME}"
+# Cleanup owns only paths created during this invocation.
+TEMP_HOME=""
+UPLOAD_IOS_HELPER_PY=""
 
 BUNDLE_ID="ai.tokenstat.tokenstat"
 PROJECT_YML="apps/mac/project.yml"
@@ -95,7 +98,7 @@ def redact():
     pairs = []
     for key, name in (
         ("UPLOAD_IOS_ROOT", "."),
-        ("HOME", "~"),
+        ("UPLOAD_IOS_HOME", "~"),
         ("UPLOAD_IOS_TEAM", "<team>"),
         ("UPLOAD_IOS_KEY", "<key>"),
         ("UPLOAD_IOS_ISSUER", "<issuer>"),
@@ -151,6 +154,15 @@ def bump(path):
     open(path, "w", encoding="utf-8").write(new)
     match = re.search(r'(?m)^\s*CURRENT_PROJECT_VERSION:\s*"(\d+)"', new)
     sys.stdout.write(match.group(1) + "\n")
+
+
+def is_store_profile(profile):
+    # Profile names are chosen by their owner and do not establish eligibility.
+    entitlements = profile.get("Entitlements", {})
+    return (entitlements.get("beta-reports-active") is True
+            and not entitlements.get("get-task-allow")
+            and "ProvisionedDevices" not in profile
+            and not profile.get("ProvisionsAllDevices"))
 
 
 def check_ipa(ipa, expect_ver, expect_build):
@@ -214,8 +226,7 @@ def check_ipa(ipa, expect_ver, expect_build):
                 stderr=subprocess.DEVNULL,
             )
             profile = plistlib.loads(cms)
-            name = str(profile.get("Name") or "")
-            if not name.startswith("iOS Team Store Provisioning Profile"):
+            if not is_store_profile(profile):
                 fail("store-profile")
             if "ProvisionedDevices" in profile:
                 fail("development-devices")
@@ -229,6 +240,9 @@ def check_ipa(ipa, expect_ver, expect_build):
         sig = (signed.stdout or "") + (signed.stderr or "")
         if "Authority=Apple Distribution" not in sig:
             fail("distribution-signature")
+        verification = subprocess.run(["codesign", "--verify", "--strict", app], capture_output=True)
+        if verification.returncode:
+            fail("signature-verification")
         group = "group.ai.tokenstat.tokenstat"
         if group not in ents.get("com.apple.security.application-groups", []):
             fail("app-group")
@@ -259,7 +273,7 @@ def check_ipa(ipa, expect_ver, expect_build):
                 nested_profile = plistlib.loads(subprocess.check_output(
                     ["security", "cms", "-D", "-i", provision], stderr=subprocess.DEVNULL))
                 profile_ents = nested_profile.get("Entitlements", {})
-                if "ProvisionedDevices" in nested_profile or profile_ents.get("get-task-allow"):
+                if not is_store_profile(nested_profile):
                     fail("ecosystem-store-profile")
                 if group not in profile_ents.get("com.apple.security.application-groups", []):
                     fail("ecosystem-profile-group")
@@ -328,7 +342,7 @@ def upload_status():
 
 def self_test():
     os.environ["UPLOAD_IOS_ROOT"] = "/tmp/example-root"
-    os.environ["HOME"] = "/tmp/example-home"
+    os.environ["UPLOAD_IOS_HOME"] = "/tmp/example-home"
     os.environ["UPLOAD_IOS_TEAM"] = "ABCDEF1234"
     os.environ["UPLOAD_IOS_KEY"] = "KEYID12345"
     os.environ["UPLOAD_IOS_ISSUER"] = "00000000-1111-2222-3333-444444444444"
@@ -403,7 +417,7 @@ redact() {
     UPLOAD_IOS_TEAM="${TEAM:-}" \
     UPLOAD_IOS_KEY="${ASC_KEY_ID:-}" \
     UPLOAD_IOS_ISSUER="${ASC_ISSUER_ID:-}" \
-    HOME="$ORIG_HOME" \
+    UPLOAD_IOS_HOME="$ORIG_HOME" \
         helper redact
 }
 

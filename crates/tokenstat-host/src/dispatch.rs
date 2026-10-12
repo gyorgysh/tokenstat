@@ -4614,96 +4614,13 @@ fn stream_open(params: &str) -> Result<Value, String> {
 #[cfg(feature = "local-host")]
 fn proxy_listen(params: &str) -> Result<Value, String> {
     let p: ProxyListenParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| format!("could not bind a loopback port: {e}"))?;
-    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let peer = p.peer;
-    let host = p.host.unwrap_or_else(|| "127.0.0.1".to_string());
-    let target = p.port;
-
-    // Replacing the same target stops the previous bridge, and a cap bounds
-    // how many listeners a session of clicking can accumulate. Without this
-    // every Browse click leaked a listener and a parked thread forever.
-    let key = format!("{peer}:{host}:{target}");
-    let mut registry = proxy_listeners().lock().map_err(|e| e.to_string())?;
-    if let Some(stop) = registry.remove(&key) {
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-    if registry.len() >= MAX_PROXY_LISTENERS {
-        return Err(format!(
-            "too many local port bridges (max {MAX_PROXY_LISTENERS}); close some browser tabs"
-        ));
-    }
-    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    registry.insert(key.clone(), std::sync::Arc::clone(&stop));
-    drop(registry);
-
-    let _ = listener.set_nonblocking(true);
-    std::thread::spawn(move || {
-        loop {
-            if stop.load(std::sync::atomic::Ordering::Relaxed) {
-                break;
-            }
-            match listener.accept() {
-                Ok((tcp, _)) => {
-                    let _ = tcp.set_nodelay(true);
-                    match crate::remote_stream::open_proxy_stream(&peer, &host, target) {
-                        Ok(connection) => {
-                            crate::remote_stream::pump_local(tcp, connection, &host, target, port)
-                        }
-                        Err(error) => {
-                            eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
-                            crate::remote_stream::write_proxy_error(tcp, &error);
-                        }
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-                Err(_) => break,
-            }
-        }
-        if let Ok(mut registry) = proxy_listeners().lock() {
-            // A reopened listener may already own the same endpoint.
-            if registry
-                .get(&key)
-                .is_some_and(|current| std::sync::Arc::ptr_eq(current, &stop))
-            {
-                registry.remove(&key);
-            }
-        }
-    });
-    Ok(json!({"url": format!("http://127.0.0.1:{port}/")}))
+    crate::remote_proxy::listen(&p.peer, p.host.as_deref().unwrap_or("127.0.0.1"), p.port)
 }
 
 #[cfg(feature = "local-host")]
 fn proxy_unlisten(params: &str) -> Result<Value, String> {
     let p: ProxyListenParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-    let host = p.host.as_deref().unwrap_or("127.0.0.1");
-    let key = format!("{}:{host}:{}", p.peer, p.port);
-    if let Some(stop) = proxy_listeners()
-        .lock()
-        .map_err(|e| e.to_string())?
-        .remove(&key)
-    {
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-    Ok(json!({"stopped": true}))
-}
-
-/// How many loopback bridges a daemon will hold at once. Browsed ports are
-/// cheap but not free, and each one parks a thread.
-#[cfg(feature = "local-host")]
-const MAX_PROXY_LISTENERS: usize = 16;
-
-#[cfg(feature = "local-host")]
-fn proxy_listeners()
--> &'static Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>
-{
-    static LISTENERS: std::sync::OnceLock<
-        Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>,
-    > = std::sync::OnceLock::new();
-    LISTENERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+    crate::remote_proxy::unlisten(&p.peer, p.host.as_deref().unwrap_or("127.0.0.1"), p.port)
 }
 
 // MARK: - Remote pty routing
@@ -4848,49 +4765,6 @@ pub fn call_sessionless(method: &str, params: &str) -> Option<String> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
-
-    #[cfg(feature = "local-host")]
-    #[test]
-    fn proxy_retired_listener_preserves_replacement() {
-        use std::sync::Arc;
-        use std::sync::atomic::AtomicBool;
-
-        let params = json!({ "peer": "test-proxy-replacement", "host": "127.0.0.1", "port": 3000 })
-            .to_string();
-        let key = "test-proxy-replacement:127.0.0.1:3000";
-        proxy_listen(&params).unwrap();
-        let replacement = Arc::new(AtomicBool::new(false));
-        let retired = {
-            let mut registry = proxy_listeners().lock().unwrap();
-            let retired = registry
-                .insert(key.to_string(), Arc::clone(&replacement))
-                .unwrap();
-            // Publication precedes the real old thread's cleanup, removing
-            // scheduler timing from the close-and-reopen regression.
-            retired.store(true, Ordering::Relaxed);
-            retired
-        };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while Arc::strong_count(&retired) != 1 && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        let still_current = proxy_listeners()
-            .lock()
-            .unwrap()
-            .get(key)
-            .is_some_and(|current| Arc::ptr_eq(current, &replacement));
-        proxy_unlisten(&params).unwrap();
-        assert_eq!(
-            Arc::strong_count(&retired),
-            1,
-            "retired listener did not exit"
-        );
-        assert!(still_current, "old cleanup erased the new registration");
-        assert!(
-            replacement.load(Ordering::Relaxed),
-            "replacement could not be stopped"
-        );
-    }
 
     #[cfg(feature = "local-host")]
     #[test]

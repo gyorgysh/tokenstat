@@ -504,25 +504,18 @@ private struct TouchGrid: View {
     var pan: CGSize
 
     var body: some View {
-        Canvas { ctx, _ in
-            let step: CGFloat = 24
-            let z = max(zoom, 0.2)
-            let left = floor(((-pan.width / z) - step) / step) * step
-            let top = floor(((-pan.height / z) - step) / step) * step
-            // The grid is decorative context, not content: cap the dot count
-            // so a far zoom-out cannot mint thousands of dots.
-            let maxDots = 4000
+        Canvas { ctx, size in
+            let xs = WorkflowCanvasCoordinates.gridAxis(pan: pan.width, extent: size.width, zoom: zoom)
+            let ys = WorkflowCanvasCoordinates.gridAxis(pan: pan.height, extent: size.height, zoom: zoom)
+            // Decorative dots stay bounded even on unusually large canvases.
             var drawn = 0
-            var x = left
-            while x < left + 200 * step, drawn < maxDots {
-                var y = top
-                while y < top + 200 * step, drawn < maxDots {
+            for x in xs {
+                for y in ys {
+                    guard drawn < 4000 else { return }
                     let rect = CGRect(x: x, y: y, width: 1.5, height: 1.5)
                     ctx.fill(Path(ellipseIn: rect), with: .color(Theme.border))
                     drawn += 1
-                    y += step
                 }
-                x += step
             }
         }
         .allowsHitTesting(false)

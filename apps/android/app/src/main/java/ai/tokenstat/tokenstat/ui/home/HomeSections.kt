@@ -392,7 +392,7 @@ fun ContinueSection(
                                 maxLines = 2,
                             )
                             val name = machineName(place.id.peer)
-                            val state = machineRowState(name != null, offline, name?.let(machineOnline))
+                            val state = machineRowState(name != null, offline, name?.let { machineOnline(place.id.peer) })
                             Text(
                                 "${name ?: L10n.text("android.homesections.machine.8f1cc42d")} · $state · ${RelativeClock.label(place.openedAtMs)}",
                                 style = MaterialTheme.typography.bodySmall,
@@ -579,7 +579,7 @@ fun PinnedSection(
                         Column(Modifier.weight(1f)) {
                             Text(pin.label, fontWeight = FontWeight.SemiBold, color = colors.textPrimary, maxLines = 2)
                             val name = machineName(pin.hostIdentity)
-                            val state = machineRowState(name != null, offline, name?.let(machineOnline))
+                            val state = machineRowState(name != null, offline, name?.let { machineOnline(pin.hostIdentity) })
                             Text(
                                 L10n.text("android.homesections.0_1_2_pinned.75ce5ac6", "${pin.folderName}", "${name ?: L10n.text("android.homesections.machine.8f1cc42d")}", "${state}"),
                                 style = MaterialTheme.typography.bodySmall,

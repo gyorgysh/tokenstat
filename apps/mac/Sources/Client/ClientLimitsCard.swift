@@ -168,7 +168,7 @@ private struct WindowGauge: View {
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("\(Int(window.percent.rounded()))%")
+                Text("\(window.percent.formatted(.number.precision(.fractionLength(0))))%")
                     .font(ClientType.caption.weight(.semibold))
                     .foregroundStyle(colour)
                     .contentTransition(.numericText())
@@ -189,7 +189,7 @@ private struct WindowGauge: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(L10n.text("apple.clientlimitscard.0_1_percent_used.bae57146", "\(window.displayLabel)", "\(Int(window.percent.rounded()))"))
+        .accessibilityLabel(L10n.text("apple.clientlimitscard.0_1_percent_used.bae57146", "\(window.displayLabel)", "\(window.percent.formatted(.number.precision(.fractionLength(0))))"))
     }
 
     /// Severity is the renderer's decision, taken from the core's thresholds

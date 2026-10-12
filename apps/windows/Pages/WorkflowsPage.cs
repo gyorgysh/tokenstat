@@ -48,6 +48,8 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
     private JsonObject? _graph;
     private ulong? _detailRevision;
     private bool _detailDirty;
+    private long _editRevision;
+    private int _loadGeneration;
     private string? _conflictId;
     private bool _confirmDelete;
     private string? _stepId;
@@ -87,6 +89,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         };
         RenderDetail();
         Loaded += async (_, _) => await LoadAsync();
+        Unloaded += (_, _) => ++_loadGeneration;
     }
 
     public event Action? ToolbarChanged;
@@ -138,7 +141,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
     {
         _creating = true;
         _selectedId = null;
-        _graph = BlankGraph(L10n.Text("windows.workflowspage.untitled.f59ab8d1"));
+        _graph = BlankGraph("");
         _detailRevision = null;
         _detailDirty = false;
         _conflictId = null;
@@ -216,16 +219,20 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task LoadAsync()
     {
+        var generation = ++_loadGeneration;
         _working = true;
         try
         {
-            _protocol = await ProtocolAsync();
+            var protocol = await ProtocolAsync();
+            if (generation != _loadGeneration || !IsLoaded) return;
+            _protocol = protocol;
             var listTask = CallWorkbenchAsync("workflow.list", new JsonObject());
             var runsTask = CallWorkbenchAsync("workflow.runs", new JsonObject());
             var foldersTask = CallWorkbenchAsync("workspace.list", new JsonObject());
             var backendsTask = CallWorkbenchAsync("automation.backends", new JsonObject());
             var queueTask = CallWorkbenchAsync("automation.queue", new JsonObject());
             await Task.WhenAll(listTask, runsTask, foldersTask, backendsTask, queueTask);
+            if (generation != _loadGeneration || !IsLoaded) return;
             _graphs = Format.Items(listTask.Result, "graphs") ?? new JsonArray();
             _runs = Format.Items(runsTask.Result) ?? new JsonArray();
             if (_scopeWorkspaceId is null || !RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out _))
@@ -279,11 +286,15 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         }
         catch (Exception ex)
         {
-            Banner(ex.Message);
+            if (generation == _loadGeneration && IsLoaded) Banner(ex.Message);
         }
         finally
         {
-            _working = false;
+            if (generation == _loadGeneration)
+            {
+                _working = false;
+                if (IsLoaded) RenderDetail();
+            }
         }
     }
 
@@ -733,7 +744,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         _detailHost.Children.Clear();
         if (_creating && _graph is null)
         {
-            _graph = BlankGraph(L10n.Text("windows.workflowspage.untitled.f59ab8d1"));
+            _graph = BlankGraph("");
         }
         if (_graph is null)
         {
@@ -815,7 +826,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var name = new TextBox
         {
             Text = Format.Text(graph, "name"),
-            PlaceholderText = L10n.Text("windows.workflowspage.name.dcd1d522"),
+            PlaceholderText = L10n.Text("windows.workflowspage.untitled.f59ab8d1"),
         };
         name.TextChanged += (_, _) =>
         {
@@ -823,7 +834,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             {
                 _graph["name"] = name.Text;
             }
-            _detailDirty = true;
+            _detailDirty = true; ++_editRevision;
         };
         body.Children.Add(Labeled(L10n.Text("windows.workflowspage.name.dcd1d522"), name));
 
@@ -836,7 +847,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             {
                 _graph["scope"] = scope.SelectedIndex == 1 ? "workspace" : "global";
             }
-            _detailDirty = true;
+            _detailDirty = true; ++_editRevision;
         };
         body.Children.Add(Labeled(L10n.Text("windows.workflowspage.scope.b073f6c6"), scope));
 
@@ -856,7 +867,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                     ? _folders[pick - 1].Id
                     : "";
             }
-            _detailDirty = true;
+            _detailDirty = true; ++_editRevision;
         };
         body.Children.Add(Labeled(L10n.Text("windows.workflowspage.folder.74ccd433"), folderBox));
 
@@ -884,9 +895,9 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 _graph["budgetSeconds"] = parsed.Value;
             }
         }
-        budget.TextChanged += (_, _) => { WriteBudget(); _detailDirty = true; };
-        unit.SelectionChanged += (_, _) => { WriteBudget(); _detailDirty = true; };
-        noLimitBox.Click += (_, _) => { WriteBudget(); _detailDirty = true; };
+        budget.TextChanged += (_, _) => { WriteBudget(); _detailDirty = true; ++_editRevision; };
+        unit.SelectionChanged += (_, _) => { WriteBudget(); _detailDirty = true; ++_editRevision; };
+        noLimitBox.Click += (_, _) => { WriteBudget(); _detailDirty = true; ++_editRevision; };
         var budgetRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         budgetRow.Children.Add(budget);
         budgetRow.Children.Add(unit);
@@ -900,7 +911,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             {
                 _graph["enabled"] = enabled.IsChecked == true;
             }
-            _detailDirty = true;
+            _detailDirty = true; ++_editRevision;
         };
         body.Children.Add(enabled);
 
@@ -1014,7 +1025,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             await DesignFromPromptAsync(prompt, backend);
             return;
         }
-        var name = Format.Text(_graph, "name", L10n.Text("windows.workflowspage.untitled.f59ab8d1"));
+        var name = Format.Text(_graph, "name");
         _graph = recipe switch
         {
             1 => RecipeGraph(name, backend, "plan"),
@@ -1022,7 +1033,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             _ => BlankGraph(name),
         };
         _stepId = null;
-        _detailDirty = true;
+        _detailDirty = true; ++_editRevision;
         RenderDetail();
     }
 
@@ -1037,7 +1048,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         kind.SelectionChanged += (_, _) =>
         {
             WriteSchedule(kind.SelectedIndex, null, null, null, null, null);
-            _detailDirty = true;
+            _detailDirty = true; ++_editRevision;
         };
         body.Children.Add(Labeled(L10n.Text("windows.workflowspage.schedule.f4830a1d"), kind));
 
@@ -1048,11 +1059,11 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         };
         interval.TextChanged += (_, _) =>
         {
-            if (ulong.TryParse(interval.Text.Trim(), out var minutes) && minutes > 0)
+            if (ulong.TryParse(interval.Text.Trim(), out var minutes) && minutes > 0 && minutes <= ulong.MaxValue / 60)
             {
                 WriteSchedule(null, minutes * 60, null, null, null, null);
             }
-            _detailDirty = true;
+            _detailDirty = true; ++_editRevision;
         };
         var intervalRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         intervalRow.Children.Add(interval);
@@ -1070,7 +1081,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         hour.SelectionChanged += (_, _) =>
         {
             WriteSchedule(null, null, hour.SelectedIndex, null, null, null);
-            _detailDirty = true;
+            _detailDirty = true; ++_editRevision;
         };
         var minute = new ComboBox { MinWidth = 80 };
         minute.ItemsSource = Enumerable.Range(0, 60).Select(m => m.ToString("00")).ToArray();
@@ -1078,7 +1089,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         minute.SelectionChanged += (_, _) =>
         {
             WriteSchedule(null, null, null, minute.SelectedIndex, null, null);
-            _detailDirty = true;
+            _detailDirty = true; ++_editRevision;
         };
         var timeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         timeRow.Children.Add(hour);
@@ -1091,7 +1102,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         weekday.SelectionChanged += (_, _) =>
         {
             WriteSchedule(null, null, null, null, weekday.SelectedIndex, null);
-            _detailDirty = true;
+            _detailDirty = true; ++_editRevision;
         };
         body.Children.Add(Labeled(L10n.Text("windows.workflowspage.day.8f2364e1"), weekday));
 
@@ -1117,7 +1128,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                     current &= ~(1 << captured);
                 }
                 WriteSchedule(null, null, null, null, null, current);
-                _detailDirty = true;
+                _detailDirty = true; ++_editRevision;
             };
             daysRow.Children.Add(day);
         }
@@ -1327,7 +1338,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         }
         nodes.Add(nodeObject);
         _stepId = id;
-        _detailDirty = true;
+        _detailDirty = true; ++_editRevision;
         RenderDetail();
     }
 
@@ -1351,7 +1362,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             {
                 node["title"] = title.Text;
             }
-            _detailDirty = true;
+            _detailDirty = true; ++_editRevision;
         };
         body.Children.Add(Labeled(L10n.Text("windows.workflowspage.title.7e8cd205"), title));
 
@@ -1392,7 +1403,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             var remove = ActionIconGlyph.Button(L10n.Text("common.remove"), ActionIcon.Delete, (_, _) =>
             {
                 GraphEdges().Remove(edge);
-                _detailDirty = true;
+                _detailDirty = true; ++_editRevision;
                 RenderDetail();
             });
             Grid.SetColumn(remove, 1);
@@ -1479,7 +1490,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             box.TextChanged += (_, _) =>
             {
                 step[key] = box.Text;
-                _detailDirty = true;
+                _detailDirty = true; ++_editRevision;
             };
             fields.Add(Labeled(label, box));
         }
@@ -1500,7 +1511,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             {
                 var pick = backendBox.SelectedIndex;
                 step["backend"] = pick >= 1 && pick - 1 < _backends.Count ? _backends[pick - 1].Id : "";
-                _detailDirty = true;
+                _detailDirty = true; ++_editRevision;
             };
             fields.Add(Labeled(L10n.Text("windows.workflowspage.agent.11b39c93"), backendBox));
             Text("model", "Model", placeholder: L10n.Text("windows.workflowspage.default_model.3840d9d2"));
@@ -1519,7 +1530,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             method.SelectionChanged += (_, _) =>
             {
                 step["method"] = method.SelectedItem as string ?? "GET";
-                _detailDirty = true;
+                _detailDirty = true; ++_editRevision;
             };
             fields.Add(Labeled(L10n.Text("windows.workflowspage.method.52a0f9b6"), method));
             Text("url", "URL");
@@ -1539,7 +1550,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 {
                     step["times"] = count;
                 }
-                _detailDirty = true;
+                _detailDirty = true; ++_editRevision;
             };
             fields.Add(Labeled(L10n.Text("windows.workflowspage.passes_at_most_20.995c2f71"), times));
             Text("until", "Stop when found");
@@ -1588,7 +1599,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             if (Format.Text(edge, "from") == from && Format.Text(edge, "to") == to)
             {
                 edge["when"] = when;
-                _detailDirty = true;
+                _detailDirty = true; ++_editRevision;
                 RenderDetail();
                 return;
             }
@@ -1599,7 +1610,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             return;
         }
         edges.Add(Edge(from, to, when));
-        _detailDirty = true;
+        _detailDirty = true; ++_editRevision;
         RenderDetail();
     }
 
@@ -1626,7 +1637,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             _stepId = null;
         }
         _confirmStep = false;
-        _detailDirty = true;
+        _detailDirty = true; ++_editRevision;
         RenderDetail();
     }
 
@@ -1650,6 +1661,9 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task SaveAsync(bool force)
     {
+        if (_working) return;
+        var savedGraph = _graph;
+        var editRevision = _editRevision;
         var error = ValidateGraph();
         if (error is not null)
         {
@@ -1665,10 +1679,14 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 payload["id"] = "";
                 var created = await CallWorkbenchAsync(
                     "workflow.create", new JsonObject { ["workflow"] = payload });
-                _creating = false;
-                _selectedId = Format.Text(created, "id");
-                _detailDirty = false;
-                _conflictId = null;
+                if (ReferenceEquals(_graph, savedGraph))
+                {
+                    _creating = false;
+                    _selectedId = Format.Text(created, "id");
+                    _detailDirty = editRevision != _editRevision;
+                    _detailRevision = WorkbenchOps.Revision(created);
+                    _conflictId = null;
+                }
                 Notice(L10n.Text("windows.workflowspage.workflow_added.f5b03ba6"));
             }
             else if (_selectedId is not null)
@@ -1695,7 +1713,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                     }
                     catch (Exception ex) when (WorkbenchOps.IsConflict(ex))
                     {
-                        _conflictId = id;
+                        if (ReferenceEquals(_graph, savedGraph)) _conflictId = id;
                         Banner(L10n.Text("windows.workflowspage.this_workflow_changed_since_you_opened_it.b752a79e"));
                         await LoadAsync();
                         return;
@@ -1706,9 +1724,12 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                     await CallWorkbenchAsync(
                         "workflow.update", new JsonObject { ["workflow"] = payload });
                 }
-                _detailDirty = false;
-                _conflictId = null;
-                Notice(L10n.Text("windows.workflowspage.saved_0.8eb4b783", $"{Format.Text(_graph, "name")}"));
+                if (ReferenceEquals(_graph, savedGraph) && editRevision == _editRevision)
+                {
+                    _detailDirty = false;
+                    _conflictId = null;
+                }
+                Notice(L10n.Text("windows.workflowspage.saved_0.8eb4b783", $"{Format.Text(savedGraph, "name")}"));
             }
         }
         catch (Exception ex)
@@ -1738,22 +1759,26 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task DeleteAsync()
     {
-        if (_selectedId is null)
+        if (_selectedId is null || _working)
         {
             return;
         }
+        var deletingId = _selectedId;
         _working = true;
         try
         {
             await CallWorkbenchAsync(
-                "workflow.remove", new JsonObject { ["id"] = _selectedId });
+                "workflow.remove", new JsonObject { ["id"] = deletingId });
             Notice(L10n.Text("windows.workflowspage.workflow_deleted.80fce204"));
-            _creating = false;
-            _selectedId = null;
-            _graph = null;
-            _detailDirty = false;
-            _confirmDelete = false;
-            _stepId = null;
+            if (_selectedId == deletingId)
+            {
+                _creating = false;
+                _selectedId = null;
+                _graph = null;
+                _detailDirty = false;
+                _confirmDelete = false;
+                _stepId = null;
+            }
         }
         catch (Exception ex)
         {
@@ -1769,6 +1794,9 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task DesignFromPromptAsync(string prompt, string backend)
     {
+        if (_working) return;
+        var designingGraph = _graph;
+        var editRevision = _editRevision;
         var clean = prompt.Trim();
         if (string.IsNullOrEmpty(clean))
         {
@@ -1799,17 +1827,18 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             // Design drains a backend for up to three minutes, so allow four.
             var designed = await CallWorkbenchAsync(
                 "workflow.design", parameters, TimeSpan.FromMinutes(4));
+            if (!IsLoaded || !ReferenceEquals(_graph, designingGraph) || editRevision != _editRevision) return;
             if (designed is JsonObject graph && graph.Count > 0)
             {
                 var name = Format.Text(_graph, "name");
                 _graph = (JsonObject)designed.DeepClone();
-                if (!string.IsNullOrWhiteSpace(name) && name != "Untitled")
+                if (!string.IsNullOrWhiteSpace(name))
                 {
                     _graph["name"] = name;
                 }
                 _graph["id"] = _creating ? "" : _selectedId ?? "";
                 _stepId = null;
-                _detailDirty = true;
+                _detailDirty = true; ++_editRevision;
                 Notice(L10n.Text("windows.workflowspage.draft_ready_review_the_steps_then_create_o.e8280683"));
             }
             else
@@ -1851,6 +1880,8 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task RunAsync()
     {
+        if (_working) return;
+        var requestedId = _selectedId;
         if (_creating || _selectedId is null)
         {
             Banner(L10n.Text("windows.workflowspage.save_the_workflow_before_running_it.73851c7f"));
@@ -1865,12 +1896,13 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 return;
             }
         }
+        if (_selectedId != requestedId) return;
         _working = true;
         try
         {
             var parameters = new JsonObject
             {
-                ["id"] = _selectedId,
+                ["id"] = requestedId,
                 ["input"] = _runInput,
             };
             var folder = Format.Text(_graph, "workspaceId");
@@ -2010,7 +2042,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = DateTimeOffset.FromUnixTimeMilliseconds(started).LocalDateTime.ToString("g"),
+                Text = Format.Instant(started)?.LocalDateTime.ToString("g") ?? L10n.Text("common.unknown"),
                 FontSize = 12,
                 Opacity = 0.68,
             });

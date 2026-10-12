@@ -143,21 +143,13 @@ struct WorkflowCanvas: View {
 
     private func grid(in size: CGSize) -> some View {
         Canvas { ctx, _ in
-            let step: CGFloat = 24
-            let z = max(zoom, 0.2)
-            let left = floor(((-pan.width / z) - step) / step) * step
-            let top = floor(((-pan.height / z) - step) / step) * step
-            let right = left + size.width / z + step * 2
-            let bottom = top + size.height / z + step * 2
-            var x = left
-            while x < right {
-                var y = top
-                while y < bottom {
+            let xs = WorkflowCanvasCoordinates.gridAxis(pan: pan.width, extent: size.width, zoom: zoom)
+            let ys = WorkflowCanvasCoordinates.gridAxis(pan: pan.height, extent: size.height, zoom: zoom)
+            for x in xs {
+                for y in ys {
                     let rect = CGRect(x: x, y: y, width: 1.5, height: 1.5)
                     ctx.fill(Path(ellipseIn: rect), with: .color(Theme.border))
-                    y += step
                 }
-                x += step
             }
         }
         .allowsHitTesting(false)

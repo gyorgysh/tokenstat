@@ -21,6 +21,7 @@ class ConnectionLogicTest {
         // be refused while offline nor counted as evidence about the network.
         assertNull(NetworkPlane.of("account.logout"))
         assertNull(NetworkPlane.of("account.cancelLogin"))
+        assertNull(NetworkPlane.of("sync.scheduleStatus"))
     }
 
     @Test

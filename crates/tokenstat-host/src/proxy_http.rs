@@ -13,7 +13,7 @@
 //! random loopback port and those URLs miss. This hop rewrites `Host`,
 //! `Location` / `Refresh`, and obvious loopback URLs inside HTML.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
@@ -40,8 +40,8 @@ pub(crate) fn bridge(
         Ok(buf) if !buf.is_empty() => buf,
         _ => return,
     };
-    clear_timeouts(&local);
     if !looks_like_http(&first) {
+        clear_timeouts(&local);
         pump_raw(local, connection, Some(first));
         return;
     }
@@ -67,21 +67,33 @@ fn pump_one_http(
     let head_text = String::from_utf8_lossy(&head);
     let (rewritten, is_upgrade) =
         rewrite_request_headers(&head_text, target_host, target_port, listen_port).ok_or(())?;
+    let body = request_body(&head_text).ok_or(())?;
     let (reader, writer) = connection.split();
+    let mut cleanup = HttpCleanup {
+        socket: local.try_clone().map_err(|_| ())?,
+        writer: writer.clone(),
+        upload: None,
+    };
     writer.write(rewritten.as_bytes()).map_err(|_| ())?;
-    let want = request_content_length(&head_text).unwrap_or(0);
-    if !leftover.is_empty() {
-        writer.write(&leftover).map_err(|_| ())?;
-    }
-    let mut sent = leftover.len();
-    while sent < want {
-        let mut buf = vec![0u8; (want - sent).min(64 * 1024)];
-        let n = local.read(&mut buf).map_err(|_| ())?;
-        if n == 0 {
-            break;
+    if is_upgrade && matches!(body, RequestBody::Length(0)) {
+        if !leftover.is_empty() {
+            writer.write(&leftover).map_err(|_| ())?;
         }
-        writer.write(&buf[..n]).map_err(|_| ())?;
-        sent += n;
+    } else {
+        // Upload and response are independent: a server may send 100 Continue
+        // before accepting a body, or reject an upload before it finishes.
+        let socket = local.try_clone().map_err(|_| ())?;
+        let upload_writer = writer.clone();
+        cleanup.upload = Some(std::thread::spawn(move || {
+            let mut source = BufReader::new(std::io::Cursor::new(leftover).chain(socket));
+            if forward_body(&mut source, body, |bytes| {
+                upload_writer.write(bytes).map_err(std::io::Error::other)
+            })
+            .is_err()
+            {
+                upload_writer.close();
+            }
+        }));
     }
 
     let mut remote = RemoteBuf {
@@ -95,7 +107,6 @@ fn pump_one_http(
     // connection, so forward it and read on; treating it as final would close
     // the connection the client is still waiting on. A 101 switches protocols
     // instead: hand it to the upgrade pump without reading another HTTP head.
-    let mut interim: Vec<u8> = Vec::new();
     let mut interim_hops = 0;
     while interim_hops < 8
         && response_status(&resp_text)
@@ -103,7 +114,9 @@ fn pump_one_http(
     {
         let (rewritten_interim, _) =
             rewrite_response_headers(&resp_text, target_port, listen_port).ok_or(())?;
-        interim.extend_from_slice(rewritten_interim.as_bytes());
+        local
+            .write_all(rewritten_interim.as_bytes())
+            .map_err(|_| ())?;
         resp_head = remote.read_headers().ok_or(())?;
         resp_text = String::from_utf8_lossy(&resp_head).into_owned();
         interim_hops += 1;
@@ -112,11 +125,8 @@ fn pump_one_http(
         rewrite_response_headers(&resp_text, target_port, listen_port).ok_or(())?;
     meta.no_body =
         response_has_no_body(head_text.starts_with("HEAD "), response_status(&resp_text));
-    if !interim.is_empty() {
-        local.write_all(&interim).map_err(|_| ())?;
-    }
-
-    if is_upgrade || meta.is_upgrade {
+    if meta.is_upgrade {
+        clear_timeouts(&local);
         local.write_all(rewritten_resp.as_bytes()).map_err(|_| ())?;
         if !remote.buf.is_empty() {
             local.write_all(&remote.buf).map_err(|_| ())?;
@@ -151,18 +161,22 @@ fn pump_one_http(
     }
 
     local.write_all(rewritten_resp.as_bytes()).map_err(|_| ())?;
-    if !remote.buf.is_empty() {
-        local.write_all(&remote.buf).map_err(|_| ())?;
+    let buffered = meta
+        .content_length
+        .map_or(remote.buf.len(), |len| len.min(remote.buf.len()));
+    if buffered > 0 {
+        local.write_all(&remote.buf[..buffered]).map_err(|_| ())?;
     }
     if let Some(len) = meta.content_length {
         let mut left = len.saturating_sub(remote.buf.len());
         while left > 0 {
-            let chunk = reader.read(left.min(1 << 20)).map_err(|_| ())?;
+            let chunk = reader.read(1 << 20).map_err(|_| ())?;
             if chunk.is_empty() {
                 break;
             }
-            local.write_all(&chunk).map_err(|_| ())?;
-            left = left.saturating_sub(chunk.len());
+            let take = left.min(chunk.len());
+            local.write_all(&chunk[..take]).map_err(|_| ())?;
+            left -= take;
         }
     } else {
         loop {
@@ -278,13 +292,16 @@ impl RemoteBuf<'_> {
     fn read_headers(&mut self) -> Option<Vec<u8>> {
         loop {
             if let Some((head, rest)) = split_head(&self.buf) {
+                if head.len() > MAX_HEADER {
+                    return None;
+                }
                 self.buf = rest;
                 return Some(head);
             }
             if self.buf.len() > MAX_HEADER {
                 return None;
             }
-            let chunk = self.reader.read(64 * 1024).ok()?;
+            let chunk = self.reader.read(1 << 20).ok()?;
             if chunk.is_empty() {
                 return None;
             }
@@ -294,7 +311,7 @@ impl RemoteBuf<'_> {
 
     fn take(&mut self, n: usize) -> Option<Vec<u8>> {
         while self.buf.len() < n {
-            let chunk = self.reader.read((n - self.buf.len()).min(1 << 20)).ok()?;
+            let chunk = self.reader.read(1 << 20).ok()?;
             if chunk.is_empty() {
                 break;
             }
@@ -353,6 +370,9 @@ fn maybe_http(buf: &[u8]) -> bool {
 fn split_head(buf: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
     let pos = buf.windows(4).position(|w| w == b"\r\n\r\n")?;
     let end = pos + 4;
+    if end > MAX_HEADER {
+        return None;
+    }
     Some((buf[..end].to_vec(), buf[end..].to_vec()))
 }
 
@@ -502,9 +522,7 @@ fn rewrite_response_headers(
 ) -> Option<(String, ResponseMeta)> {
     let (first, mut headers) = header_map(block)?;
     let mut meta = ResponseMeta {
-        is_upgrade: first.contains(" 101 ")
-            || header_ci(&headers, "Upgrade")
-                .is_some_and(|v| v.to_ascii_lowercase().contains("websocket")),
+        is_upgrade: response_status(block) == Some(101),
         ..ResponseMeta::default()
     };
     if let Some(len) = header_ci(&headers, "Content-Length") {
@@ -519,6 +537,9 @@ fn rewrite_response_headers(
     }
     if let Some(te) = header_ci(&headers, "Transfer-Encoding") {
         meta.chunked = te.to_ascii_lowercase().contains("chunked");
+        // Transfer-Encoding takes precedence over Content-Length.
+        meta.content_length = None;
+        headers.retain(|(name, _)| !name.eq_ignore_ascii_case("Content-Length"));
     }
     for name in ["Location", "Content-Location", "Refresh"] {
         if let Some(value) = header_ci(&headers, name).map(str::to_string) {
@@ -529,9 +550,113 @@ fn rewrite_response_headers(
     Some((serialize(&first, &headers), meta))
 }
 
-fn request_content_length(block: &str) -> Option<usize> {
+struct HttpCleanup {
+    socket: TcpStream,
+    writer: tokenstat_remote::StreamWriter,
+    upload: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for HttpCleanup {
+    fn drop(&mut self) {
+        let _ = self.socket.shutdown(std::net::Shutdown::Both);
+        self.writer.close();
+        if let Some(upload) = self.upload.take() {
+            let _ = upload.join();
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RequestBody {
+    Length(u64),
+    Chunked,
+}
+
+fn request_body(block: &str) -> Option<RequestBody> {
     let (_, headers) = header_map(block)?;
-    header_ci(&headers, "Content-Length")?.parse().ok()
+    if let Some(encoding) = header_ci(&headers, "Transfer-Encoding") {
+        // No ambiguous framing or unsupported transfer codings.
+        if header_ci(&headers, "Content-Length").is_some()
+            || !encoding.eq_ignore_ascii_case("chunked")
+        {
+            return None;
+        }
+        return Some(RequestBody::Chunked);
+    }
+    let mut length = None;
+    for (_, value) in headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("Content-Length"))
+    {
+        let n: u64 = value.parse().ok()?;
+        if length.is_some_and(|old| old != n) {
+            return None;
+        }
+        length = Some(n);
+    }
+    Some(RequestBody::Length(length.unwrap_or(0)))
+}
+
+fn forward_body(
+    source: &mut impl BufRead,
+    body: RequestBody,
+    mut send: impl FnMut(&[u8]) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    fn copy(
+        source: &mut impl Read,
+        mut left: u64,
+        send: &mut impl FnMut(&[u8]) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        let mut buf = [0; 64 * 1024];
+        while left > 0 {
+            let take = left.min(buf.len() as u64) as usize;
+            source.read_exact(&mut buf[..take])?;
+            send(&buf[..take])?;
+            left -= take as u64;
+        }
+        Ok(())
+    }
+    fn line(source: &mut impl BufRead) -> std::io::Result<Vec<u8>> {
+        let mut line = Vec::new();
+        source
+            .take(MAX_HEADER as u64 + 1)
+            .read_until(b'\n', &mut line)?;
+        if line.len() > MAX_HEADER || !line.ends_with(b"\r\n") {
+            return Err(std::io::Error::other("invalid chunk header"));
+        }
+        Ok(line)
+    }
+    match body {
+        RequestBody::Length(n) => copy(source, n, &mut send),
+        RequestBody::Chunked => loop {
+            let header = line(source)?;
+            let text = std::str::from_utf8(&header).map_err(std::io::Error::other)?;
+            let size = text.trim_end().split(';').next().unwrap_or("");
+            let size = u64::from_str_radix(size, 16).map_err(std::io::Error::other)?;
+            send(&header)?;
+            if size == 0 {
+                let mut total = 0;
+                loop {
+                    let trailer = line(source)?;
+                    total += trailer.len();
+                    if total > MAX_HEADER {
+                        return Err(std::io::Error::other("chunk trailers too large"));
+                    }
+                    send(&trailer)?;
+                    if trailer == b"\r\n" {
+                        return Ok(());
+                    }
+                }
+            }
+            copy(source, size, &mut send)?;
+            let mut end = [0; 2];
+            source.read_exact(&mut end)?;
+            if end != *b"\r\n" {
+                return Err(std::io::Error::other("invalid chunk ending"));
+            }
+            send(&end)?;
+        },
+    }
 }
 
 fn replace_content_length(block: &str, len: usize) -> String {
@@ -546,27 +671,55 @@ fn rewrite_loopback_urls(text: &str, target_port: u16, listen_port: u16) -> Stri
     if target_port == listen_port {
         return text.to_string();
     }
-    let target = target_port.to_string();
-    let listen = listen_port.to_string();
-    let hosts = ["127.0.0.1", "localhost", "[::1]"];
-    let schemes = ["http://", "https://", "ws://", "wss://", "//"];
-    let mut out = text.to_string();
-    for scheme in schemes {
-        for host in hosts {
-            let from = format!("{scheme}{host}:{target}");
-            let to_host = if host == "[::1]" { "127.0.0.1" } else { host };
-            let to = if scheme == "//" {
-                format!("//{to_host}:{listen}")
-            } else if scheme.starts_with("ws") {
-                format!("ws://{to_host}:{listen}")
-            } else if scheme.starts_with("https") || scheme.starts_with("wss") {
-                // Stay on the local HTTP listener. The page was loaded over
-                // http://127.0.0.1:<listen> and a https/wss target would miss.
-                format!("http://{to_host}:{listen}")
-            } else {
-                format!("{scheme}{to_host}:{listen}")
-            };
-            out = out.replace(&from, &to);
+    let patterns: Vec<_> = ["http://", "https://", "ws://", "wss://", "//"]
+        .into_iter()
+        .flat_map(|scheme| {
+            ["127.0.0.1", "localhost", "[::1]"]
+                .into_iter()
+                .map(move |host| {
+                    let from = format!("{scheme}{host}:{target_port}");
+                    let local_scheme = if scheme == "//" {
+                        "//"
+                    } else if scheme.starts_with("ws") {
+                        "ws://"
+                    } else {
+                        "http://"
+                    };
+                    // The listener is IPv4-only, including when the target used ::1.
+                    (from, format!("{local_scheme}127.0.0.1:{listen_port}"))
+                })
+        })
+        .collect();
+    let mut out = String::with_capacity(text.len());
+    let mut remaining = text;
+    while !remaining.is_empty() {
+        let found = patterns.iter().find(|(from, _)| {
+            remaining.starts_with(from)
+                && remaining.as_bytes().get(from.len()).is_none_or(|next| {
+                    matches!(
+                        next,
+                        b'/' | b'?'
+                            | b'#'
+                            | b' '
+                            | b'\t'
+                            | b'\r'
+                            | b'\n'
+                            | b'\"'
+                            | b'\''
+                            | b'<'
+                            | b'>'
+                            | b')'
+                            | b'}'
+                    )
+                })
+        });
+        if let Some((from, to)) = found {
+            out.push_str(to);
+            remaining = &remaining[from.len()..];
+        } else {
+            let ch = remaining.chars().next().unwrap();
+            out.push(ch);
+            remaining = &remaining[ch.len_utf8()..];
         }
     }
     out
@@ -575,6 +728,138 @@ fn rewrite_loopback_urls(text: &str, target_port: u16, listen_port: u16) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rewrite_matches_the_complete_port_once() {
+        let text = "https://localhost:5/x ws://[::1]:5/ //localhost:5?x http://localhost:50/ http://localhost:5@evil/x";
+        assert_eq!(
+            rewrite_loopback_urls(text, 5, 50),
+            "http://127.0.0.1:50/x ws://127.0.0.1:50/ //127.0.0.1:50?x http://localhost:50/ http://localhost:5@evil/x"
+        );
+    }
+
+    #[test]
+    fn request_framing_is_bounded_and_chunk_trailers_are_forwarded() {
+        let bytes = b"4;extension=yes\r\ntest\r\n0\r\nX-Trailer: ok\r\n\r\nNEXT";
+        let mut source = std::io::Cursor::new(bytes);
+        let mut out = Vec::new();
+        forward_body(&mut source, RequestBody::Chunked, |chunk| {
+            out.extend_from_slice(chunk);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(&out, &bytes[..bytes.len() - 4]);
+        assert_eq!(source.position(), (bytes.len() - 4) as u64);
+        assert!(
+            forward_body(
+                &mut std::io::Cursor::new(b"5\r\na"),
+                RequestBody::Chunked,
+                |_| Ok(())
+            )
+            .is_err()
+        );
+        assert!(
+            request_body("POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n")
+                .is_none()
+        );
+        assert!(
+            request_body(
+                "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 2\r\n\r\n"
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn rejected_websocket_is_an_http_response() {
+        let (_, meta) = rewrite_response_headers(
+            "HTTP/1.1 426 Upgrade Required\r\nUpgrade: websocket\r\nContent-Length: 0\r\n\r\n",
+            3000,
+            4000,
+        )
+        .unwrap();
+        assert!(!meta.is_upgrade);
+        let (_, meta) = rewrite_response_headers(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 12\r\n\r\n",
+            3000,
+            4000,
+        )
+        .unwrap();
+        assert_eq!(meta.content_length, None);
+    }
+
+    fn with_proxy(
+        server: impl FnOnce(Connection) + Send + 'static,
+        client: impl FnOnce(TcpStream),
+    ) {
+        use tokenstat_identity::MachineIdentity;
+        use tokenstat_remote::{handshake_initiator, handshake_responder};
+        let peer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = peer.local_addr().unwrap();
+        let responder = MachineIdentity::from_secret([91; 32]);
+        let key = responder.public_key();
+        let peer_thread = std::thread::spawn(move || {
+            let (tcp, _) = peer.accept().unwrap();
+            let connection = handshake_responder(Box::new(tcp), &responder).unwrap();
+            server(connection);
+        });
+        let connection = handshake_initiator(
+            Box::new(TcpStream::connect(address).unwrap()),
+            &MachineIdentity::from_secret([92; 32]),
+            Some(key),
+            "proxy test",
+        )
+        .unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let proxy = std::thread::spawn(move || {
+            bridge(
+                listener.accept().unwrap().0,
+                connection,
+                "127.0.0.1",
+                3000,
+                address.port(),
+            );
+        });
+        let tcp = TcpStream::connect(address).unwrap();
+        tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        tcp.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+        client(tcp);
+        proxy.join().unwrap();
+        peer_thread.join().unwrap();
+    }
+
+    #[test]
+    fn continue_response_precedes_upload_and_response_stops_at_length() {
+        with_proxy(
+            |mut connection| {
+                let request = connection
+                    .receive_within(1 << 20, Duration::from_secs(5))
+                    .unwrap();
+                assert!(String::from_utf8_lossy(&request).contains("Expect: 100-continue"));
+                connection.send(b"HTTP/1.1 100 Continue\r\n\r\n").unwrap();
+                assert_eq!(
+                    connection
+                        .receive_within(1 << 20, Duration::from_secs(5))
+                        .unwrap(),
+                    b"test"
+                );
+                connection
+                    .send(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nokEXCESS")
+                    .unwrap();
+            },
+            |mut client| {
+                client.write_all(b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\nExpect: 100-continue\r\n\r\n").unwrap();
+                let mut interim = [0; 25];
+                client.read_exact(&mut interim).unwrap();
+                assert_eq!(&interim, b"HTTP/1.1 100 Continue\r\n\r\n");
+                client.write_all(b"test").unwrap();
+                let mut response = String::new();
+                client.read_to_string(&mut response).unwrap();
+                assert!(response.ends_with("\r\n\r\nok"), "{response}");
+            },
+        );
+    }
 
     #[test]
     fn request_host_becomes_the_target_port() {
@@ -601,7 +886,7 @@ mod tests {
         let raw = "HTTP/1.1 302 Found\r\nLocation: http://localhost:5173/app\r\nContent-Length: 0\r\n\r\n";
         let (out, meta) = rewrite_response_headers(raw, 5173, 48080).unwrap();
         assert_eq!(meta.content_length, Some(0));
-        assert!(out.contains("Location: http://localhost:48080/app"));
+        assert!(out.contains("Location: http://127.0.0.1:48080/app"));
     }
 
     #[test]
@@ -610,9 +895,9 @@ mod tests {
 <link href="http://127.0.0.1:5173/src/main.css">
 const ws = "ws://localhost:5173/";"#;
         let out = rewrite_loopback_urls(html, 5173, 48080);
-        assert!(out.contains("http://localhost:48080/@vite/client"));
+        assert!(out.contains("http://127.0.0.1:48080/@vite/client"));
         assert!(out.contains("http://127.0.0.1:48080/src/main.css"));
-        assert!(out.contains("ws://localhost:48080/"));
+        assert!(out.contains("ws://127.0.0.1:48080/"));
         assert!(!out.contains(":5173"));
     }
 

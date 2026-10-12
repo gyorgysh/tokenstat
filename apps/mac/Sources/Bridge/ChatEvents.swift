@@ -198,7 +198,8 @@ private extension KeyedDecodingContainer where K == ChatAgentEvent.CodingKeys {
         if let value = try? decodeIfPresent(Int64.self, forKey: key), value >= 0 {
             return UInt64(value)
         }
-        if let value = try? decodeIfPresent(Double.self, forKey: key), value >= 0 {
+        if let value = try? decodeIfPresent(Double.self, forKey: key),
+           value.isFinite, value >= 0, value < Double(UInt64.max) {
             return UInt64(value)
         }
         return nil

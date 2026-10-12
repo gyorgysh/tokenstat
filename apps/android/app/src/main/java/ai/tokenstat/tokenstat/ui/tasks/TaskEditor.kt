@@ -51,6 +51,7 @@ import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonNull
@@ -72,10 +73,11 @@ fun TaskFields(
     enabled: Boolean,
     showValidation: Boolean = true,
 ) {
+    fun changeFields(next: TaskEditorDraft) { if (enabled) onFields(next) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
         OutlinedTextField(
             fields.title,
-            { onFields(fields.copy(title = it)) },
+            { changeFields(fields.copy(title = it)) },
             modifier = Modifier.fillMaxWidth(),
             enabled = enabled,
             label = { Text(L10n.text("android.taskeditor.task_title.11622e0f")) },
@@ -83,7 +85,7 @@ fun TaskFields(
         )
         OutlinedTextField(
             fields.prompt,
-            { onFields(fields.copy(prompt = it)) },
+            { changeFields(fields.copy(prompt = it)) },
             modifier = Modifier.fillMaxWidth(),
             enabled = enabled,
             label = { Text(if (fields.backend == "sh") L10n.text("android.taskeditor.command.71316697") else L10n.text("android.taskeditor.prompt.5c391238")) },
@@ -91,9 +93,9 @@ fun TaskFields(
         )
         Text(L10n.text("android.taskeditor.task_settings.b8a028c3"), style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-            ChoiceChip(L10n.text("android.taskeditor.uncategorized.8d40d123"), fields.workspaceID.isEmpty(), { onFields(fields.copy(workspaceID = "")) })
+            ChoiceChip(L10n.text("android.taskeditor.uncategorized.8d40d123"), fields.workspaceID.isEmpty(), { changeFields(fields.copy(workspaceID = "")) })
             folders.forEach { folder ->
-                ChoiceChip(folder.name.ifBlank { folder.id }, fields.workspaceID == folder.id, { onFields(fields.copy(workspaceID = folder.id)) })
+                ChoiceChip(folder.name.ifBlank { folder.id }, fields.workspaceID == folder.id, { changeFields(fields.copy(workspaceID = folder.id)) })
             }
             if (fields.workspaceID.isNotEmpty() && folders.none { it.id == fields.workspaceID }) {
                 ChoiceChip(L10n.text("android.taskeditor.unavailable_folder.6454a349"), true, {})
@@ -101,14 +103,14 @@ fun TaskFields(
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
             listOf("low" to L10n.text("android.taskeditor.low.f793de20"), "normal" to L10n.text("android.taskeditor.normal.a7248eeb"), "high" to L10n.text("android.taskeditor.high.c4ebc6d4")).forEach { (value, label) ->
-                ChoiceChip(label, fields.priority == value, { onFields(fields.copy(priority = value)) })
+                ChoiceChip(label, fields.priority == value, { changeFields(fields.copy(priority = value)) })
             }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-            ChoiceChip(L10n.text("android.taskeditor.choose_later.64f99c1c"), fields.backend.isEmpty(), { onFields(fields.copy(backend = "", model = "", effort = "")) })
+            ChoiceChip(L10n.text("android.taskeditor.choose_later.64f99c1c"), fields.backend.isEmpty(), { changeFields(fields.copy(backend = "", model = "", effort = "")) })
             backends.forEach { backend ->
                 ChoiceChip(backend.label.ifBlank { backend.id }, fields.backend == backend.id, {
-                    if (backend.id != fields.backend) onFields(fields.copy(backend = backend.id, model = "", effort = ""))
+                    if (backend.id != fields.backend) changeFields(fields.copy(backend = backend.id, model = "", effort = ""))
                 })
             }
             if (fields.backend.isNotEmpty() && backends.none { it.id == fields.backend }) {
@@ -119,12 +121,12 @@ fun TaskFields(
         if (backend != null && (backend.models.isNotEmpty() || fields.model.isNotEmpty())) {
             val options = (backend.models + listOf(fields.model).filter { it.isNotEmpty() }).distinct()
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                ChoiceChip(L10n.text("android.taskeditor.default.21b111cb"), fields.model.isEmpty(), { onFields(fields.copy(model = "")) })
+                ChoiceChip(L10n.text("android.taskeditor.default.21b111cb"), fields.model.isEmpty(), { changeFields(fields.copy(model = "")) })
                 options.forEach { model ->
                     ChoiceChip(
                         model,
                         fields.model == model,
-                        { onFields(fields.copy(model = model)) },
+                        { changeFields(fields.copy(model = model)) },
                     )
                 }
             }
@@ -140,28 +142,28 @@ fun TaskFields(
             val options = (listOf("") + backend.efforts + listOf(fields.effort).filter { it.isNotEmpty() }).distinct()
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                 options.forEach { effort ->
-                    ChoiceChip(if (effort.isEmpty()) L10n.text("android.taskeditor.default.21b111cb") else effort, fields.effort == effort, { onFields(fields.copy(effort = effort)) })
+                    ChoiceChip(if (effort.isEmpty()) L10n.text("android.taskeditor.default.21b111cb") else effort, fields.effort == effort, { changeFields(fields.copy(effort = effort)) })
                 }
             }
         }
-        BrandToggleChip(L10n.text("android.taskeditor.no_time_limit.436b4b94"), fields.noTimeLimit, { onFields(fields.copy(noTimeLimit = !fields.noTimeLimit)) })
+        BrandToggleChip(L10n.text("android.taskeditor.no_time_limit.436b4b94"), fields.noTimeLimit, { changeFields(fields.copy(noTimeLimit = !fields.noTimeLimit)) })
         if (!fields.noTimeLimit) {
             TimeLimitChips(
                 minutesText = if (fields.budgetUnit == "minutes") fields.budgetValue else "",
                 noLimit = false,
-                onMinutesChange = { onFields(fields.copy(budgetValue = it, budgetUnit = "minutes")) },
+                onMinutesChange = { changeFields(fields.copy(budgetValue = it, budgetUnit = "minutes")) },
                 onNoLimitChange = {},
             )
             OutlinedTextField(
                 fields.budgetValue,
-                { onFields(fields.copy(budgetValue = it)) },
+                { changeFields(fields.copy(budgetValue = it)) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = enabled,
                 label = { Text(L10n.text("android.taskeditor.time_limit.e592a9ca")) },
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                ChoiceChip(L10n.text("android.taskeditor.minutes.4f846a84"), fields.budgetUnit == "minutes", { onFields(fields.copy(budgetUnit = "minutes")) })
-                ChoiceChip(L10n.text("android.taskeditor.seconds.381a8e96"), fields.budgetUnit == "seconds", { onFields(fields.copy(budgetUnit = "seconds")) })
+                ChoiceChip(L10n.text("android.taskeditor.minutes.4f846a84"), fields.budgetUnit == "minutes", { changeFields(fields.copy(budgetUnit = "minutes")) })
+                ChoiceChip(L10n.text("android.taskeditor.seconds.381a8e96"), fields.budgetUnit == "seconds", { changeFields(fields.copy(budgetUnit = "seconds")) })
             }
         }
         if (showValidation && fields.validation != null) {
@@ -256,9 +258,17 @@ fun TaskEditorScreen(
             } else if (card.revision == null) {
                 error = L10n.text("android.taskeditor.this_computer_did_not_return_the_task_s_re.ec042ca5")
             } else {
-                baseline = card
+                val previous = baseline
+                val draft = fields
                 current = card
-                fields = TaskEditorDraft.fromCard(card)
+                if (previous == null || draft == null || draft.matches(previous)) {
+                    baseline = card
+                    fields = TaskEditorDraft.fromCard(card)
+                    conflict = false
+                } else {
+                    conflict = card.revision != previous.revision
+                }
+                missing = false
                 error = null
             }
             runCatching { model.workspaceSection(peer, "automation.backends", buildJsonObject {}) }
@@ -272,6 +282,8 @@ fun TaskEditorScreen(
                         ?.filterIsInstance<JsonObject>() ?: emptyList()).map(FolderRef::parse)
                 }
             loaded = true
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = TunnelCopy.display(e.message ?: L10n.text("android.taskeditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
@@ -320,6 +332,8 @@ fun TaskEditorScreen(
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = TunnelCopy.display(e.message ?: L10n.text("android.taskeditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
@@ -352,6 +366,8 @@ fun TaskEditorScreen(
             conflict = false
             error = null
             onSaved()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = L10n.text("android.taskeditor.check_the_saved_task_before_trying_again_y.5af9adad", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
         } finally {
@@ -374,12 +390,11 @@ fun TaskEditorScreen(
                 outcome
             }
             is RunAcceptance.Pending -> {
-                lastRun = outcome
                 error = accepted.message
-                outcome
+                null
             }
             is RunAcceptance.Rejected -> {
-                if (!outcome.hasRun && outcome.card == null) {
+                if (outcome.operationID == submission.operationID && outcome.cardID == submission.cardID && !outcome.hasRun && outcome.card == null) {
                     pendingRun = null
                     missing = true
                 }
@@ -400,6 +415,8 @@ fun TaskEditorScreen(
             })
             val outcome = TaskRunOutcome.parse(element as JsonObject)
             return acceptOutcome(outcome, submission)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = L10n.text("android.taskeditor.the_run_result_is_not_confirmed_check_this.b7631660", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
             return null
@@ -408,9 +425,9 @@ fun TaskEditorScreen(
         }
     }
 
-    suspend fun reconcileRun() {
-        val submission = pendingRun ?: return
-        if (working) return
+    suspend fun reconcileRun(): TaskRunOutcome? {
+        val submission = pendingRun ?: return null
+        if (working) return null
         working = true
         try {
             val element = model.workspaceSection(peer, "todo.runReceipt", buildJsonObject {
@@ -419,13 +436,16 @@ fun TaskEditorScreen(
             if (element is JsonNull) {
                 error = L10n.text("android.taskeditor.the_computer_has_not_accepted_this_run_req.956da73e")
             } else {
-                acceptOutcome(TaskRunOutcome.parse(element as JsonObject), submission)
+                return acceptOutcome(TaskRunOutcome.parse(element as JsonObject), submission)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = L10n.text("android.taskeditor.the_run_result_is_still_unavailable_your_r.294ee202", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
         } finally {
             working = false
         }
+        return null
     }
 
     suspend fun stop() {
@@ -444,6 +464,8 @@ fun TaskEditorScreen(
             current = baseline
             error = null
             onSaved()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = L10n.text("android.taskeditor.the_stop_was_not_confirmed_reload_this_tas.ea360237", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
         } finally {
@@ -475,6 +497,13 @@ fun TaskEditorScreen(
         base?.revision != null && !pendingEdit && pendingRun == null &&
         base?.delegate?.isRunning != true && readiness == null
     val delegate = base?.delegate
+    ForegroundEffect(peer, cardId, delegate?.isRunning) {
+        if (delegate?.isRunning != true) return@ForegroundEffect
+        while (true) {
+            delay(3_000)
+            refresh()
+        }
+    }
 
     BackHandler { onBack() }
     Column(
@@ -542,7 +571,7 @@ fun TaskEditorScreen(
                     onFields = { fields = it },
                     backends = liveBackends,
                     folders = liveFolders,
-                    enabled = loaded && !working && pendingRun == null,
+                    enabled = loaded && !working && !pendingEdit && pendingRun == null,
                 )
             }
             val snapshot = current
@@ -580,8 +609,7 @@ fun TaskEditorScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                         TsSecondaryButton(label = L10n.text("android.taskeditor.check_run.cece2401"), enabled = !working, onClick = {
                             scope.launch {
-                                reconcileRun()
-                                openOutcome(lastRun)
+                                openOutcome(reconcileRun())
                             }
                         })
                         TsAccentButton(label = L10n.text("android.taskeditor.retry_same_request.16003a1a"), enabled = !working, onClick = {
@@ -768,6 +796,8 @@ fun TaskCreateScreen(
                 put("operationId", operationID)
             })
             confirm(TaskCreationOutcome.parse(element as JsonObject), operationID)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val receipt = runCatching {
                 model.workspaceSection(peer, "todo.creationReceipt", buildJsonObject { put("operationId", operationID) })
@@ -798,6 +828,8 @@ fun TaskCreateScreen(
             } else {
                 confirm(TaskCreationOutcome.parse(element as JsonObject), operationID)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = TunnelCopy.display(e.message ?: L10n.text("android.taskeditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
@@ -921,39 +953,30 @@ fun TaskRunScreen(
     var attachError by remember { mutableStateOf<String?>(null) }
 
     suspend fun loadTranscript(id: String, live: Boolean) {
-        var offset = 0L
-        val builder = StringBuilder()
-        while (true) {
-            val chunk = runCatching {
+        ai.tokenstat.tokenstat.ui.automations.readRunTranscript(
+            live = live,
+            read = { offset ->
                 model.workspaceSection(peer, "automation.transcript", buildJsonObject {
                     put("id", id)
                     put("offset", offset)
                 }) as JsonObject
-            }.getOrNull() ?: break
-            builder.append(chunk.optStr("text") ?: "")
-            if (builder.length > 256 * 1024) {
-                builder.delete(0, builder.length - 256 * 1024)
-            }
-            offset = chunk.optLong("nextOffset") ?: break
-            transcript = builder.toString()
-            if (!live) break
-            delay(1_000)
-            val fresh = runCatching {
-                model.workspaceSection(peer, "automation.runs", buildJsonObject {})
-            }.getOrNull()
-            val updated = ((fresh as? kotlinx.serialization.json.JsonArray)
-                ?.filterIsInstance<JsonObject>() ?: emptyList()).firstOrNull { it.optStr("id") == id }
-            run = updated
-            val status = updated?.optStr("status") ?: ""
-            if (status !in setOf("starting", "queued", "running", "stopping")) break
-        }
-        transcript = builder.toString()
+            },
+            running = {
+                delay(1_000)
+                val fresh = model.workspaceSection(peer, "automation.runs", buildJsonObject {})
+                val updated = ((fresh as? kotlinx.serialization.json.JsonArray)
+                    ?.filterIsInstance<JsonObject>() ?: emptyList()).firstOrNull { it.optStr("id") == id }
+                run = updated
+                updated?.optStr("status") in setOf("starting", "queued", "running", "stopping")
+            },
+            update = { transcript = it },
+        )
     }
 
     suspend fun load() {
         loading = true
         runCatching { model.workspaceSection(peer, "automation.runs", buildJsonObject {}) }
-            .onSuccess { element ->
+            .mapCatching { element ->
                 val found = ((element as? kotlinx.serialization.json.JsonArray)
                     ?.filterIsInstance<JsonObject>() ?: emptyList()).firstOrNull { it.optStr("id") == runID }
                 run = found

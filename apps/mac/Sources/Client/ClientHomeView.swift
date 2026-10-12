@@ -280,7 +280,7 @@ struct ClientHomeView: View {
     private func totals(_ calendar: ActivityCalendar) -> some View {
         HStack(spacing: Theme.Space.s) {
             TotalTile(label: L10n.text("common.today"), micros: todayValue(calendar), mark: "mark_day")
-            TotalTile(label: L10n.text("apple.clienthomeview.this_week.8c4eef5a"), micros: weekValue(calendar), mark: "mark_week")
+            TotalTile(label: L10n.text("apple.homeview.last_7_days.0603deca"), micros: weekValue(calendar), mark: "mark_week")
         }
     }
 
@@ -331,7 +331,7 @@ struct ClientHomeView: View {
     }
 
     private func weekValue(_ calendar: ActivityCalendar) -> UInt64 {
-        days(calendar).suffix(7).reduce(0) { $0 + $1.value }
+        days(calendar).suffix(7).reduce(0) { $0.saturatingAdd($1.value) }
     }
 
     private func days(_ calendar: ActivityCalendar) -> [HeatCell] {

@@ -1541,12 +1541,19 @@ internal sealed class AccountPage : Page, IToolbarItems
 
     private async Task StartPullLoginAsync()
     {
-        _pullPoll?.Cancel();
+        // Reserve the flow before starting its request. A second click must
+        // not replace the token a previous wait owns, including during startup.
+        if (_pullPoll is not null) return;
+        using var cancellation = new CancellationTokenSource();
+        _pullPoll = cancellation;
+        var token = cancellation.Token;
+        var confirmed = false;
         try
         {
             var started = await AppServices.Host.CallAsync(
                 "pulls.signIn",
                 new JsonObject { ["host"] = "github.com" });
+            token.ThrowIfCancellationRequested();
             var url = Format.Text(started, "openUrl");
             var code = Format.Text(started, "userCode");
             if (!string.IsNullOrEmpty(url)) Open(url);
@@ -1593,42 +1600,56 @@ internal sealed class AccountPage : Page, IToolbarItems
                 Content = content,
                 CloseButtonText = L10n.Text("common.cancel"),
             };
-            _pullPoll = new CancellationTokenSource();
-            var token = _pullPoll.Token;
-            var confirmed = false;
-
             async Task PollAsync()
             {
-                var interval = Math.Max(1, Format.Long(started, "interval"));
-                while (!token.IsCancellationRequested)
+                try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(interval), token);
-                    var polled = await AppServices.Host.CallAsync("pulls.signInPoll", new JsonObject());
-                    if (Format.Text(polled, "state") == "confirmed")
+                    var interval = Math.Max(1, Format.Long(started, "interval"));
+                    while (!token.IsCancellationRequested)
                     {
-                        confirmed = true;
-                        dialog.Hide();
-                        return;
+                        await Task.Delay(TimeSpan.FromSeconds(interval), token);
+                        var polled = await AppServices.Host.CallAsync("pulls.signInPoll", new JsonObject());
+                        token.ThrowIfCancellationRequested();
+                        if (Format.Text(polled, "state") == "confirmed")
+                        {
+                            confirmed = true;
+                            return;
+                        }
+                        var next = Format.Long(polled, "interval");
+                        if (next > 0) interval = next;
                     }
-                    var next = Format.Long(polled, "interval");
-                    if (next > 0) interval = next;
+                }
+                finally
+                {
+                    // A failed or cancelled poll must end the modal wait too.
+                    dialog.Hide();
                 }
             }
 
             var polling = PollAsync();
-            await Chrome.ShowDialog(this, dialog);
-            _pullPoll.Cancel();
-            try { await polling; }
-            catch (OperationCanceledException) { }
-            if (!confirmed)
+            try { await Chrome.ShowDialog(this, dialog); }
+            finally
             {
-                await AppServices.Host.CallAsync("pulls.cancelSignIn", new JsonObject());
+                cancellation.Cancel();
+                try { await polling; }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             }
-            await LoadAsync();
+            if (IsLoaded) await LoadAsync();
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            _content.Children.Insert(0, Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
+            if (IsLoaded) _content.Children.Insert(0, Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (!confirmed)
+            {
+                try { await AppServices.Host.CallAsync("pulls.cancelSignIn", new JsonObject()); }
+                catch { /* leaving or ending the flow must not throw */ }
+            }
+            _pullPoll = null;
         }
     }
 

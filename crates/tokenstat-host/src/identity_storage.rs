@@ -49,9 +49,18 @@ pub(crate) fn lock_at(path: &std::path::Path, mutex: &'static Mutex<()>) -> Resu
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let file = options.open(path).map_err(|error| error.to_string())?;
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("Storage lock is not a regular file".into());
+    }
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;

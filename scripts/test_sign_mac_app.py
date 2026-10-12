@@ -7,6 +7,9 @@ import importlib.util
 from pathlib import Path
 import unittest
 import sys
+import tempfile
+import plistlib
+from unittest import mock
 
 sys.dont_write_bytecode = True
 
@@ -97,6 +100,26 @@ class MatchIdentityTests(unittest.TestCase):
 
     def test_unknown_identity_matches_nothing(self):
         self.assertEqual(signing.match_identity(self.candidates, "Nobody"), [])
+
+
+class OptionalSigningTests(unittest.TestCase):
+    def test_available_identity_signs_but_check_only_never_mutates_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = root / "Tokenstat.app"
+            (app / "Contents/Resources").mkdir(parents=True)
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": signing.BUNDLE_ID}))
+            (app / "Contents/Resources/tokenstat-hostd").write_text("fixture")
+            identity = '  1) ' + 'A' * 40 + ' "Developer ID Application: Fixture (TEAM)"'
+            for check_only in (True, False):
+                argv = ["sign-mac-app.py", str(app), "--optional"] + (["--check-only"] if check_only else [])
+                with self.subTest(check_only=check_only), mock.patch.object(sys, "argv", argv), \
+                     mock.patch.dict(signing.os.environ, {}, clear=True), \
+                     mock.patch.object(Path, "home", return_value=root), \
+                     mock.patch.object(signing.subprocess, "check_output", return_value=identity), \
+                     mock.patch.object(signing.subprocess, "run") as run:
+                    signing.main()
+                    self.assertEqual(run.call_count, 0 if check_only else 3)
 
 
 if __name__ == "__main__":

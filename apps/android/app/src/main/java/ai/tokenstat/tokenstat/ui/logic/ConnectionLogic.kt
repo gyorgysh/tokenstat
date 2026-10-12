@@ -52,7 +52,7 @@ enum class NetworkPlane {
         /// short budget so a dead path cannot hold it up. Refusing it offline
         /// would leave somebody unable to sign out on a plane, which is the
         /// opposite of what the gate is for.
-        private val localAccountMethods = setOf("account.logout", "account.cancelLogin")
+        private val localMethods = setOf("account.logout", "account.cancelLogin", "sync.scheduleStatus")
 
         /// Which plane a core method is on, or null for one that says nothing
         /// about the network.
@@ -63,7 +63,7 @@ enum class NetworkPlane {
         /// count.
         fun of(method: String): NetworkPlane? = when {
             method == "remote.call" -> PEER
-            method in localAccountMethods -> null
+            method in localMethods -> null
             method.startsWith("account.") || method.startsWith("sync") -> ACCOUNT
             else -> null
         }

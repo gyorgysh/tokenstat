@@ -5,7 +5,13 @@
 //! but it cannot start, poll, replace, or remove credentials on this machine.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
+
+static CACHE_EPOCH: AtomicU64 = AtomicU64::new(0);
+fn cache_epoch() -> u64 {
+    CACHE_EPOCH.load(Ordering::Acquire)
+}
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -47,6 +53,7 @@ struct ListKey {
 
 #[derive(Clone)]
 struct ListEntry {
+    epoch: u64,
     at: Instant,
     rows: Vec<tokenstat_sync::forge::PullSummary>,
 }
@@ -67,6 +74,7 @@ pub(crate) fn cached_open_count(workspace_id: &str) -> Option<usize> {
             key.workspace_id == workspace_id
                 && key.scope == tokenstat_sync::forge::Scope::All
                 && key.state == tokenstat_sync::forge::State::Open
+                && entry.epoch == cache_epoch()
                 && entry.at.elapsed() < Duration::from_secs(60)
         })
         .max_by_key(|(_, entry)| entry.at)
@@ -77,6 +85,7 @@ pub(crate) fn cached_open_count(workspace_id: &str) -> Option<usize> {
 /// branch has no pull request.
 #[derive(Clone)]
 struct BranchEntry {
+    epoch: u64,
     at: Instant,
     pull: Option<tokenstat_sync::forge::BranchPull>,
 }
@@ -121,7 +130,7 @@ fn cached_for_repository(key: &BranchKey) -> Option<BranchEntry> {
     });
     cache
         .get(key)
-        .filter(|entry| entry.at.elapsed() < BRANCH_TTL)
+        .filter(|entry| entry.epoch == cache_epoch() && entry.at.elapsed() < BRANCH_TTL)
         .cloned()
 }
 
@@ -130,6 +139,7 @@ fn remember_branch(
     branch: &str,
     repo: &tokenstat_sync::forge::Repo,
     pull: Option<tokenstat_sync::forge::BranchPull>,
+    epoch: u64,
 ) {
     let mut cache = branch_cache()
         .lock()
@@ -145,6 +155,7 @@ fn remember_branch(
             repo: repo.clone(),
         },
         BranchEntry {
+            epoch,
             at: Instant::now(),
             pull,
         },
@@ -164,6 +175,7 @@ pub(crate) fn cached_branch_pull(
         .find(|(key, entry)| {
             key.workspace_id == workspace_id
                 && key.branch == branch
+                && entry.epoch == cache_epoch()
                 && entry.at.elapsed() < BRANCH_SHOWN
         })
         .and_then(|(_, entry)| entry.pull.clone())
@@ -178,12 +190,14 @@ fn clear_list_cache() {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct DetailKey {
+    repo: tokenstat_sync::forge::Repo,
     workspace_id: String,
     number: u32,
 }
 
 #[derive(Clone)]
 struct DetailEntry<T> {
+    epoch: u64,
     at: Instant,
     value: T,
 }
@@ -200,7 +214,7 @@ fn cached<K: Eq + std::hash::Hash, V: Clone>(
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get(key)
-        .filter(|entry| entry.at.elapsed() < DETAIL_TTL)
+        .filter(|entry| entry.epoch == cache_epoch() && entry.at.elapsed() < DETAIL_TTL)
         .map(|entry| entry.value.clone())
 }
 
@@ -214,12 +228,14 @@ fn remember<K: Eq + std::hash::Hash, V>(
     cache: &Mutex<HashMap<K, DetailEntry<V>>>,
     key: K,
     value: V,
+    epoch: u64,
 ) {
     let mut cache = cache.lock().unwrap_or_else(PoisonError::into_inner);
     cache.retain(|_, entry| entry.at.elapsed() < DETAIL_TTL);
     cache.insert(
         key,
         DetailEntry {
+            epoch,
             at: Instant::now(),
             value,
         },
@@ -236,6 +252,7 @@ fn detail_cache()
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct TimelineKey {
+    repo: tokenstat_sync::forge::Repo,
     workspace_id: String,
     number: u32,
     cursor: Option<String>,
@@ -258,6 +275,7 @@ fn diff_cache()
 }
 
 fn clear_read_cache() {
+    CACHE_EPOCH.fetch_add(1, Ordering::AcqRel);
     clear_list_cache();
     branch_cache()
         .lock()
@@ -278,6 +296,7 @@ fn clear_read_cache() {
 }
 
 fn invalidate_workspace(workspace_id: &str) {
+    CACHE_EPOCH.fetch_add(1, Ordering::AcqRel);
     branch_cache()
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -320,6 +339,23 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
 }
 
 fn call_inner(method: &str, params: &str) -> Result<Value, String> {
+    // A poll stores the credential before returning. Serialize cancellation,
+    // replacement and sign-out through that acceptance so a late poll cannot
+    // restore a connection after sign-out has finished.
+    static AUTH_OPERATION: Mutex<()> = Mutex::new(());
+    let _auth = matches!(
+        method,
+        "pulls.signIn"
+            | "pulls.signInPoll"
+            | "pulls.cancelSignIn"
+            | "pulls.signOut"
+            | "pulls.setToken"
+    )
+    .then(|| {
+        AUTH_OPERATION
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    });
     let p: Params = serde_json::from_str(params.trim()).map_err(|error| error.to_string())?;
     match method {
         "pulls.availability" => availability(&p.workspace_id),
@@ -357,6 +393,12 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             })?;
             match tokenstat_sync::forge::device_poll(&login).map_err(|e| e.to_string())? {
                 tokenstat_sync::forge::DeviceStatus::Pending { interval } => {
+                    with_pending(|pending| {
+                        if let Some(login) = pending {
+                            login.interval = interval;
+                        }
+                        Ok(())
+                    })?;
                     Ok(json!({"state": "pending", "interval": interval}))
                 }
                 tokenstat_sync::forge::DeviceStatus::Confirmed(credential) => {
@@ -383,6 +425,10 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         "pulls.signOut" => {
             local_credentials_only()?;
             tokenstat_sync::forge::sign_out(host_or_default(&p.host)).map_err(|e| e.to_string())?;
+            with_pending(|pending| {
+                *pending = None;
+                Ok(())
+            })?;
             clear_read_cache();
             Ok(json!({"signedOut": true}))
         }
@@ -390,6 +436,10 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             local_credentials_only()?;
             tokenstat_sync::forge::set_token(host_or_default(&p.host), &p.token)
                 .map_err(|e| e.to_string())?;
+            with_pending(|pending| {
+                *pending = None;
+                Ok(())
+            })?;
             clear_read_cache();
             Ok(json!({"stored": true}))
         }
@@ -429,6 +479,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
 /// answers with no pull request rather than an error, because the chips that
 /// ask are decoration and must not turn into warnings.
 fn branch(p: &Params) -> Result<Value, String> {
+    let epoch = cache_epoch();
     if p.workspace_id.trim().is_empty() {
         return Err("pulls.branch needs workspaceId".into());
     }
@@ -460,7 +511,7 @@ fn branch(p: &Params) -> Result<Value, String> {
     }
     match tokenstat_sync::forge::for_branch(&repo, &branch) {
         Ok(pull) => {
-            remember_branch(&p.workspace_id, &branch, &repo, pull.clone());
+            remember_branch(&p.workspace_id, &branch, &repo, pull.clone(), epoch);
             Ok(json!({"branch": branch, "pull": pull, "connected": true}))
         }
         Err(tokenstat_sync::forge::ForgeError::NotSignedIn) => {
@@ -530,6 +581,7 @@ fn create(p: &Params) -> Result<Value, String> {
                 draft: p.draft,
                 base_ref: p.base.clone(),
             }),
+            cache_epoch(),
         );
     }
     serde_json::to_value(result).map_err(|e| e.to_string())
@@ -594,8 +646,11 @@ fn checkout(p: &Params) -> Result<Value, String> {
 }
 
 fn view(p: &Params) -> Result<Value, String> {
+    let epoch = cache_epoch();
     let number = pull_number(p, "pulls.view")?;
+    let repo = repo_for(&p.workspace_id, "pull request")?;
     let key = DetailKey {
+        repo: repo.clone(),
         workspace_id: p.workspace_id.clone(),
         number,
     };
@@ -604,15 +659,17 @@ fn view(p: &Params) -> Result<Value, String> {
     {
         return serde_json::to_value(hit).map_err(|error| error.to_string());
     }
-    let value = tokenstat_sync::forge::view(&repo_for(&p.workspace_id, "pulls.view")?, number)
-        .map_err(|error| error.to_string())?;
-    remember(detail_cache(), key, value.clone());
+    let value = tokenstat_sync::forge::view(&repo, number).map_err(|error| error.to_string())?;
+    remember(detail_cache(), key, value.clone(), epoch);
     serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
 fn timeline(p: &Params) -> Result<Value, String> {
+    let epoch = cache_epoch();
     let number = pull_number(p, "pulls.timeline")?;
+    let repo = repo_for(&p.workspace_id, "pulls.timeline")?;
     let key = TimelineKey {
+        repo: repo.clone(),
         workspace_id: p.workspace_id.clone(),
         number,
         cursor: p.cursor.clone(),
@@ -622,19 +679,18 @@ fn timeline(p: &Params) -> Result<Value, String> {
     {
         return serde_json::to_value(hit).map_err(|error| error.to_string());
     }
-    let value = tokenstat_sync::forge::timeline(
-        &repo_for(&p.workspace_id, "pulls.timeline")?,
-        number,
-        p.cursor.as_deref(),
-    )
-    .map_err(|error| error.to_string())?;
-    remember(timeline_cache(), key, value.clone());
+    let value = tokenstat_sync::forge::timeline(&repo, number, p.cursor.as_deref())
+        .map_err(|error| error.to_string())?;
+    remember(timeline_cache(), key, value.clone(), epoch);
     serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
 fn diff(p: &Params) -> Result<Value, String> {
+    let epoch = cache_epoch();
     let number = pull_number(p, "pulls.diff")?;
+    let repo = repo_for(&p.workspace_id, "pull request")?;
     let key = DetailKey {
+        repo: repo.clone(),
         workspace_id: p.workspace_id.clone(),
         number,
     };
@@ -643,10 +699,9 @@ fn diff(p: &Params) -> Result<Value, String> {
     {
         return serde_json::to_value(hit).map_err(|error| error.to_string());
     }
-    let raw = tokenstat_sync::forge::diff_text(&repo_for(&p.workspace_id, "pulls.diff")?, number)
-        .map_err(|error| error.to_string())?;
+    let raw = tokenstat_sync::forge::diff_text(&repo, number).map_err(|error| error.to_string())?;
     let value = tokenstat_workspace::git::split_unified(&raw);
-    remember(diff_cache(), key, value.clone());
+    remember(diff_cache(), key, value.clone(), epoch);
     serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
@@ -655,7 +710,7 @@ fn diff(p: &Params) -> Result<Value, String> {
 /// without a sign-in: the forge allows 60 anonymous requests an hour.
 const AVATAR_TTL: Duration = Duration::from_secs(10 * 60);
 
-type AvatarKey = (String, String);
+type AvatarKey = (tokenstat_sync::forge::Repo, String, u64);
 
 fn avatar_cache() -> &'static Mutex<HashMap<AvatarKey, (Instant, Value)>> {
     static CACHE: OnceLock<Mutex<HashMap<AvatarKey, (Instant, Value)>>> = OnceLock::new();
@@ -666,8 +721,9 @@ fn avatar_cache() -> &'static Mutex<HashMap<AvatarKey, (Instant, Value)>> {
 /// history row shows who wrote it whoever that is, not only this machine's
 /// own git identity.
 fn commit_avatars(p: &Params) -> Result<Value, String> {
+    let epoch = cache_epoch();
     let repo = repo_for(&p.workspace_id, "pulls.commitAvatars")?;
-    let key = (p.workspace_id.clone(), p.oid.to_ascii_lowercase());
+    let key = (repo.clone(), p.oid.to_ascii_lowercase(), epoch);
     {
         let mut cache = avatar_cache()
             .lock()
@@ -718,6 +774,7 @@ fn availability(workspace_id: &str) -> Result<Value, String> {
 }
 
 fn list(p: &Params) -> Result<Value, String> {
+    let epoch = cache_epoch();
     if p.workspace_id.trim().is_empty() {
         return Err("pulls.list needs workspaceId".into());
     }
@@ -740,7 +797,9 @@ fn list(p: &Params) -> Result<Value, String> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(&key)
-            .filter(|entry| entry.at.elapsed() < Duration::from_secs(60))
+            .filter(|entry| {
+                entry.epoch == cache_epoch() && entry.at.elapsed() < Duration::from_secs(60)
+            })
             .cloned();
         if let Some(hit) = hit {
             return serde_json::to_value(hit.rows).map_err(|error| error.to_string());
@@ -753,6 +812,7 @@ fn list(p: &Params) -> Result<Value, String> {
     cache.insert(
         key,
         ListEntry {
+            epoch,
             at: Instant::now(),
             rows: rows.clone(),
         },
@@ -785,6 +845,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn retired_reads_and_other_repositories_do_not_satisfy_a_pull_detail() {
+        let repo = tokenstat_sync::forge::Repo {
+            host: "github.com".into(),
+            owner: "owner".into(),
+            repo: "first".into(),
+        };
+        let key = DetailKey {
+            workspace_id: "workspace".into(),
+            number: 1,
+            repo: repo.clone(),
+        };
+        let cache = Mutex::new(HashMap::new());
+        remember(
+            &cache,
+            key.clone(),
+            "old response",
+            cache_epoch().wrapping_sub(1),
+        );
+        assert!(cached(&cache, &key).is_none());
+        remember(&cache, key.clone(), "current response", cache_epoch());
+        assert_eq!(cached(&cache, &key), Some("current response"));
+        let changed = DetailKey {
+            repo: tokenstat_sync::forge::Repo {
+                repo: "second".into(),
+                ..repo
+            },
+            ..key
+        };
+        assert!(cached(&cache, &changed).is_none());
+    }
+
+    #[test]
     fn branch_cache_binds_the_repository_and_supersedes_old_badges() {
         let workspace = "branch-cache-repository-test";
         let repo = tokenstat_sync::forge::Repo {
@@ -808,6 +900,7 @@ mod tests {
                 draft: false,
                 base_ref: "main".into(),
             }),
+            cache_epoch(),
         );
         let changed_key = BranchKey {
             workspace_id: workspace.into(),
@@ -818,7 +911,7 @@ mod tests {
         assert_eq!(cached_branch_pull(workspace, "feature").unwrap().number, 1);
         assert!(cached_for_repository(&changed_key).is_none());
         assert!(cached_branch_pull(workspace, "feature").is_none());
-        remember_branch(workspace, "feature", &changed, None);
+        remember_branch(workspace, "feature", &changed, None, cache_epoch());
         assert!(cached_branch_pull(workspace, "feature").is_none());
         invalidate_workspace(workspace);
     }

@@ -47,7 +47,7 @@ function Get-TargetTriple {
   # Prefer the process env var: it exists on every Windows PowerShell, including
   # 5.1 under StrictMode. RuntimeInformation.OSArchitecture is Core / newer
   # Framework only and throws PropertyNotFoundException on older hosts.
-  $arch = $env:PROCESSOR_ARCHITECTURE
+  $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
   if (-not $arch) {
     try {
       $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
@@ -149,6 +149,7 @@ try {
   if (-not $exeSrc) { Die "archive did not contain tokenstat.exe" }
 
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+  $BinDir = (Resolve-Path -LiteralPath $BinDir).Path
   $dest = Join-Path $BinDir "tokenstat.exe"
   Copy-Item -Force -Path $exeSrc.FullName -Destination $dest
   Unblock-File -Path $dest -ErrorAction SilentlyContinue

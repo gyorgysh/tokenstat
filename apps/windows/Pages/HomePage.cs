@@ -54,6 +54,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     private bool _scanning;
     private bool _loading;
     private bool _hasContent;
+    private long _contentAccountGeneration = -1;
     private bool _reloadRequested;
     private bool _forceNext;
 
@@ -68,6 +69,9 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     private readonly Dictionary<string, JsonNode?> _dayCache = new();
     private readonly Dictionary<string, DayOverview> _overviewCache = new();
     private string? _loadingDetailFor;
+    private int _dayEpoch;
+    private readonly Dictionary<string, string> _dayErrors = new();
+    private readonly HashSet<string> _loadingDays = new();
     private string? _loadingOverviewFor;
 
     /// <summary>One pinned day's local breakdown, the Mac DayOverview shape.</summary>
@@ -124,6 +128,11 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             PinnedWorkStore.Shared.Changed += PinsChanged;
             AppServices.AccountChanged += PinsAccountChanged;
+            if (_contentAccountGeneration != AppServices.AccountGeneration)
+            {
+                InvalidateDayCaches();
+                _hasContent = false;
+            }
             await RefreshPinsAsync();
             if (!_hasContent && !_loading)
             {
@@ -257,6 +266,9 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
 
     private void InvalidateDayCaches()
     {
+        ++_dayEpoch;
+        _dayErrors.Clear();
+        _loadingDays.Clear();
         _dayCache.Clear();
         _overviewCache.Clear();
         _hoverDate = null;
@@ -315,6 +327,9 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
 
     private async Task LoadOnceAsync(bool force)
     {
+        var accountGeneration = AppServices.AccountGeneration;
+        var requestedScope = _scope;
+        bool Current() => accountGeneration == AppServices.AccountGeneration && requestedScope == _scope;
         while (_root.Children.Count > 1)
         {
             _root.Children.RemoveAt(1);
@@ -344,12 +359,13 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             calendar = await AppServices.Host.CallAsync(
                 "activity.calendar",
-                new JsonObject { ["weeks"] = 53, ["scope"] = _scope, ["force"] = force });
+                new JsonObject { ["weeks"] = 53, ["scope"] = requestedScope, ["force"] = force });
         }
         catch (Exception ex)
         {
             calendarError = FriendlyError.Display(ex.Message);
         }
+        if (!Current()) return;
         if (calendar is not JsonObject)
         {
             calendar = null;
@@ -385,6 +401,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             _planError = FriendlyError.Display(ex.Message);
         }
+        if (!Current()) return;
         var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (limitsSync?["skip"] is JsonArray skipped)
         {
@@ -445,9 +462,11 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             // not report recents simply shows no section.
         }
 
+        if (!Current()) return;
         _root.Children.Remove(skeleton);
         _status.Text = "";
         _hasContent = true;
+        _contentAccountGeneration = accountGeneration;
 
         var noticeCode = calendar is null ? "" : Format.Text(calendar, "noticeCode");
         var signedIn = account?["signedIn"]?.GetValue<bool>() ?? false;
@@ -460,6 +479,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         _root.Children.Add(ProfileCard(account, calendar));
         _root.Children.Add(_pinsHost);
         await RefreshPinsAsync();
+        if (!Current()) return;
         _sections.Children.Clear();
         _sectionViews.Clear();
         if (_recent.Count > 0) _sectionViews["Continue"] = ContinueCard(_recent);
@@ -1021,16 +1041,8 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var lower = note.ToLowerInvariant();
         string[] absent =
         [
-            L10n.Text("windows.homepage.not_found.907ba78b"),
-            L10n.Text("windows.homepage.not_running.415ed734"),
-            L10n.Text("windows.homepage.no_sessions.2e94a473"),
-            L10n.Text("windows.homepage.no_cursor_session.87ee6fb8"),
-            L10n.Text("windows.homepage.no_opencode.15483a3e"),
-            L10n.Text("windows.homepage.no_antigravity.461aac7a"),
-            L10n.Text("windows.homepage.no_codex.4d9c54eb"),
-            L10n.Text("windows.homepage.not_signed_in.7fb9b38a"),
-            L10n.Text("windows.homepage.no_claude_code.bd40a735"),
-            L10n.Text("windows.homepage.no_home_directory.ad4872fc"),
+            "not found", "not running", "no sessions", "no cursor session", "no opencode",
+            "no antigravity", "no codex", "not signed in", "no claude code", "no home directory",
         ];
         foreach (var marker in absent)
         {
@@ -1134,7 +1146,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             }
         }
         if (next != long.MaxValue
-            && DateTimeOffset.FromUnixTimeMilliseconds(next) > DateTimeOffset.Now)
+            && Format.Instant(next) > DateTimeOffset.Now)
         {
             parts.Add("next window " + FutureIn(next));
         }
@@ -1167,7 +1179,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         head.Children.Add(figure);
         var reset = OptLong(window, "resetsAtMs");
         if (reset is > 0
-            && DateTimeOffset.FromUnixTimeMilliseconds(reset.Value) > DateTimeOffset.Now)
+            && Format.Instant(reset.Value) > DateTimeOffset.Now)
         {
             var when = new TextBlock
             {
@@ -1460,6 +1472,9 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
 
     private async Task FetchDayAsync(string date)
     {
+        if (!_loadingDays.Add(date)) return;
+        var epoch = _dayEpoch;
+        _dayErrors.Remove(date);
         _loadingDetailFor = date;
         RefreshInspector();
         try
@@ -1467,21 +1482,21 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             var detail = await AppServices.Host.CallAsync(
                 "activity.day",
                 new JsonObject { ["date"] = date, ["weeks"] = 53, ["scope"] = _delivered });
-            _dayCache[date] = detail is JsonObject ? detail : null;
+            if (epoch == _dayEpoch) _dayCache[date] = detail is JsonObject ? detail : null;
         }
-        catch
+        catch (Exception ex)
         {
-            // A day that cannot be read leaves no entry, so a later hover
-            // tries again instead of showing a cached failure.
+            if (epoch == _dayEpoch) _dayErrors[date] = FriendlyError.Display(ex.Message);
         }
         finally
         {
-            if (_loadingDetailFor == date)
+            if (epoch == _dayEpoch)
             {
-                _loadingDetailFor = null;
+                _loadingDays.Remove(date);
+                if (_loadingDetailFor == date) _loadingDetailFor = null;
             }
         }
-        RefreshInspector();
+        if (epoch == _dayEpoch) RefreshInspector();
     }
 
     /// <summary>
@@ -1491,6 +1506,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     /// </summary>
     private async Task FetchOverviewAsync(string date)
     {
+        var epoch = _dayEpoch;
         _loadingOverviewFor = date;
         RefreshInspector();
         JsonNode? totals = null;
@@ -1506,6 +1522,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var bySource = await FetchReportAsync("source", date);
         var byProject = await FetchReportAsync("project", date);
         var bySession = await FetchReportAsync("session", date, limit: 80);
+        if (epoch != _dayEpoch) return;
         _overviewCache[date] = new DayOverview(totals, byModel, bySource, byProject, bySession);
         if (_loadingOverviewFor == date)
         {
@@ -1577,7 +1594,12 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
         if (!_dayCache.TryGetValue(date, out var detail))
         {
-            if (_loadingDetailFor == date)
+            if (_dayErrors.TryGetValue(date, out var error))
+            {
+                _inspectorRoot.Children.Add(Chrome.Banner(error, Theme.Warning, Symbol.Important));
+                _inspectorRoot.Children.Add(ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh, async (_, _) => await FetchDayAsync(date)));
+            }
+            else if (_loadingDays.Contains(date))
             {
                 _inspectorRoot.Children.Add(new TextBlock
                 {
@@ -2155,7 +2177,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     /// <summary>How long ago an epoch-millis instant was, in words.</summary>
     private static string Ago(long epochMs)
     {
-        var moment = DateTimeOffset.FromUnixTimeMilliseconds(epochMs);
+        if (Format.Instant(epochMs) is not DateTimeOffset moment) return L10n.Text("common.unknown");
         var age = DateTimeOffset.Now - moment;
         if (age < TimeSpan.FromMinutes(1))
         {
@@ -2182,7 +2204,8 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     /// <summary>How far off a future epoch-millis instant is, in words.</summary>
     private static string FutureIn(long epochMs)
     {
-        var wait = DateTimeOffset.FromUnixTimeMilliseconds(epochMs) - DateTimeOffset.Now;
+        if (Format.Instant(epochMs) is not DateTimeOffset moment) return L10n.Text("common.unknown");
+        var wait = moment - DateTimeOffset.Now;
         if (wait < TimeSpan.FromMinutes(1))
         {
             return L10n.Text("windows.homepage.in_a_moment.453a67d7");

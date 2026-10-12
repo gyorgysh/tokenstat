@@ -55,7 +55,7 @@ const MAX_CONNECTIONS: usize = 64;
 #[path = "pipe_server.rs"]
 mod pipe_server;
 #[cfg(windows)]
-pub use pipe_server::{bind, connect, serve};
+pub use pipe_server::{bind, connect, read_response, serve};
 
 #[cfg(unix)]
 fn live_connections() -> &'static AtomicUsize {
@@ -137,7 +137,14 @@ pub fn bind(path: &Path) -> Result<UnixListener, String> {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
 
-    if path.exists() {
+    if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        use std::os::unix::fs::FileTypeExt;
+        if !metadata.file_type().is_socket() {
+            return Err(format!(
+                "refusing to replace a non-socket file: {}",
+                path.display()
+            ));
+        }
         match UnixStream::connect(path) {
             Ok(_) => {
                 return Err(format!(
@@ -145,9 +152,20 @@ pub fn bind(path: &Path) -> Result<UnixListener, String> {
                     path.display()
                 ));
             }
-            Err(_) => {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                ) =>
+            {
                 std::fs::remove_file(path)
                     .map_err(|e| format!("could not clear stale socket {}: {e}", path.display()))?;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "could not check existing socket {}: {error}",
+                    path.display()
+                ));
             }
         }
     }
@@ -600,9 +618,54 @@ mod tests {
         // to bind would mean it never restarts without manual cleanup.
         let dir = temp_dir("stale");
         let path = dir.join("host.sock");
-        std::fs::write(&path, b"not a socket").unwrap();
+        // Never listen on this fixture. Another test can fork while a listener
+        // is open and retain its descriptor until exec, making a dropped
+        // listener briefly look live to the stale-socket probe.
+        use std::os::fd::{FromRawFd, OwnedFd};
+        use std::os::unix::ffi::OsStrExt;
+        let raw = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+        assert!(raw >= 0, "{}", std::io::Error::last_os_error());
+        // SAFETY: socket returned a new descriptor and this is its sole owner.
+        let socket = unsafe { OwnedFd::from_raw_fd(raw) };
+        // SAFETY: a zero-initialized sockaddr_un has a valid empty path.
+        let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+        address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+        let bytes = path.as_os_str().as_bytes();
+        assert!(bytes.len() < address.sun_path.len());
+        for (target, byte) in address.sun_path.iter_mut().zip(bytes) {
+            *target = *byte as libc::c_char;
+        }
+        let length = std::mem::size_of_val(&address) as libc::socklen_t;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        {
+            address.sun_len = length as u8;
+        }
+        // SAFETY: address and length describe the initialized Unix address.
+        let result = unsafe { libc::bind(raw, std::ptr::from_ref(&address).cast(), length) };
+        assert_eq!(result, 0, "{}", std::io::Error::last_os_error());
+        drop(socket);
         let listener = bind(&path).expect("stale socket should be cleared");
         drop(listener);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_file_or_symlink_is_never_deleted_to_bind() {
+        let dir = temp_dir("preserve");
+        let path = dir.join("host.sock");
+        std::fs::write(&path, b"preserve this file").unwrap();
+        assert!(bind(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"preserve this file");
+        let link = dir.join("link.sock");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        assert!(bind(&link).is_err());
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
     }
 
     #[cfg(unix)]

@@ -230,19 +230,28 @@ internal fun TranscriptItemRow(
                 }
             }
         }
-        is ChatDisplayItem.Approval -> ApprovalCard(
-            approval = item.raw,
-            onResolve = { choice ->
-                scope.launch {
-                    runCatching {
-                        model.workspaceSection(peer, "chat.resolveApproval", buildJsonObject {
-                            put("id", item.raw.str("id") ?: "")
-                            put("choice", choice)
-                        })
+        is ChatDisplayItem.Approval -> {
+            var resolving by remember(item.id) { mutableStateOf(false) }
+            var failure by remember(item.id) { mutableStateOf<String?>(null) }
+            Column {
+                ApprovalCard(approval = item.raw, onResolve = { choice ->
+                    if (resolving) return@ApprovalCard
+                    resolving = true
+                    scope.launch {
+                        try {
+                            model.workspaceSection(peer, "chat.resolveApproval", buildJsonObject {
+                                put("id", item.raw.str("id") ?: "")
+                                put("choice", choice)
+                            })
+                            failure = null
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (error: Exception) { failure = TunnelCopy.display(error.message.orEmpty(), hostLabel) }
+                        finally { resolving = false }
                     }
-                }
-            },
-        )
+                })
+                failure?.let { Text(it, color = LocalTsColors.current.danger) }
+            }
+        }
         is ChatDisplayItem.Usage -> {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text(
@@ -522,7 +531,7 @@ private fun snippetColor(
     removed: androidx.compose.ui.graphics.Color,
 ): androidx.compose.ui.graphics.Color {
     val shown = displaySnippet(line)
-    if (ChatToolState.isDiffLine(shown)) {
+    if (!line.startsWith("|") && ChatToolState.isDiffLine(shown)) {
         return if (shown.startsWith("+")) added else removed
     }
     return secondary
@@ -952,7 +961,7 @@ internal fun MarkdownText(
     }
 }
 
-private sealed interface MdBlock {
+internal sealed interface MdBlock {
     data class Code(val code: String) : MdBlock
     data class Table(val table: MarkdownTable) : MdBlock
     data class Header(val level: Int, val text: String) : MdBlock
@@ -963,7 +972,7 @@ private sealed interface MdBlock {
     data class Paragraph(val text: String) : MdBlock
 }
 
-private fun parseMarkdown(text: String): List<MdBlock> {
+internal fun parseMarkdown(text: String): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
     val paragraph = StringBuilder()
     var fence: StringBuilder? = null
@@ -1023,8 +1032,9 @@ private fun parseMarkdown(text: String): List<MdBlock> {
                 blocks.add(MdBlock.Rule)
             }
             stripped.startsWith("#") -> {
-                val level = stripped.takeWhile { it == '#' }.length.coerceIn(1, 3)
-                val title = stripped.drop(level).trim().ifEmpty { stripped }
+                val marks = stripped.takeWhile { it == '#' }.length
+                val level = marks.coerceIn(1, 3)
+                val title = stripped.drop(marks).trim().ifEmpty { stripped }
                 flushParagraph()
                 breakList()
                 blocks.add(MdBlock.Header(level, title))
@@ -1037,7 +1047,7 @@ private fun parseMarkdown(text: String): List<MdBlock> {
             stripped.matches(Regex("\\d+[.)] .*")) -> {
                 flushParagraph()
                 number += 1
-                blocks.add(MdBlock.Numbered(number, stripped.substringAfter(" ").substringAfter(". ")))
+                blocks.add(MdBlock.Numbered(number, stripped.substringAfter(" ")))
             }
             stripped.startsWith(">") -> {
                 flushParagraph()
@@ -1100,10 +1110,11 @@ private fun InlineMarkdown(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalTsColors.current
-    val annotated = remember(text, color) {
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
+    val annotated = remember(text, color, style, colors.accent, colors.textSecondary, uri) {
         buildAnnotatedString {
             withStyle(style.toSpanStyle().copy(color = color)) {
-                parseInline(text, colors.accent, colors.textSecondary)
+                parseInline(text, colors.accent, colors.textSecondary) { target -> runCatching { uri.openUri(target) }; Unit }
             }
         }
     }
@@ -1115,6 +1126,7 @@ private fun AnnotatedString.Builder.parseInline(
     text: String,
     accent: androidx.compose.ui.graphics.Color,
     secondary: androidx.compose.ui.graphics.Color,
+    openLink: (String) -> Unit,
 ) {
     var i = 0
     fun codeStyle() = SpanStyle(fontFamily = TsType.mono(12).fontFamily, color = secondary)
@@ -1129,7 +1141,7 @@ private fun AnnotatedString.Builder.parseInline(
                 // Parsed again inside, not appended raw: a link inside bold
                 // is a bold link, not the letters `[text](url)`.
                 withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                    parseInline(text.substring(i + 2, end), accent, secondary)
+                    parseInline(text.substring(i + 2, end), accent, secondary, openLink)
                 }
                 i = end + 2
             }
@@ -1149,9 +1161,12 @@ private fun AnnotatedString.Builder.parseInline(
                     append(text[i])
                     i += 1
                 } else {
-                    withLink(LinkAnnotation.Url(text.substring(mid + 2, end))) {
-                        withStyle(SpanStyle(color = accent)) { append(text.substring(i + 1, mid)) }
-                    }
+                    val target = text.substring(mid + 2, end)
+                    if (safeMarkdownLink(target)) {
+                        withLink(LinkAnnotation.Url(target) { openLink(target) }) {
+                            withStyle(SpanStyle(color = accent)) { append(text.substring(i + 1, mid)) }
+                        }
+                    } else append(text.substring(i + 1, mid))
                     i = end + 1
                 }
             }
@@ -1166,7 +1181,7 @@ private fun AnnotatedString.Builder.parseInline(
                     i += 1
                 } else {
                     withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                        parseInline(text.substring(i + 1, end), accent, secondary)
+                        parseInline(text.substring(i + 1, end), accent, secondary, openLink)
                     }
                     i = end + 1
                 }
@@ -1419,3 +1434,12 @@ private fun stepGroupDuration(group: ChatStepGroup): String? {
     return if (rest == 0L) L10n.text("android.chatdetail.duration_h", "${minutes / 60}")
     else L10n.text("android.chatdetail.duration_h_m", "${minutes / 60}", "$rest")
 }
+
+internal fun safeMarkdownLink(target: String): Boolean = runCatching {
+    val uri = java.net.URI(target)
+    when (uri.scheme?.lowercase()) {
+        "http", "https" -> !uri.host.isNullOrBlank()
+        "mailto" -> !uri.schemeSpecificPart.isNullOrBlank()
+        else -> false
+    }
+}.getOrDefault(false)

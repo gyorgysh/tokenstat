@@ -54,3 +54,7 @@ object TerminalKeysLogic {
     fun cssPx(viewPx: Int, density: Float): Int =
         if (viewPx <= 0 || density <= 0f) 0 else (viewPx / density).toInt().coerceAtLeast(1)
 }
+
+/** Choose a shell that exists on the destination, not on this phone. */
+internal fun terminalShell(platform: String?): String =
+    if (platform?.contains("windows", ignoreCase = true) == true) "powershell.exe" else "/bin/bash"

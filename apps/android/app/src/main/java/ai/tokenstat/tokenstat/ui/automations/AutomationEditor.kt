@@ -54,6 +54,7 @@ import ai.tokenstat.tokenstat.ui.tasks.FolderRef
 import ai.tokenstat.tokenstat.ui.tasks.TaskOperations
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -160,7 +161,17 @@ fun AutomationEditorScreen(
                         missing = true
                         error = L10n.text("android.automationeditor.this_job_was_deleted_on_the_computer_your.282b1669")
                     } else {
-                        baseline = fresh
+                        val previous = baseline
+                        if (previous == null || fields.matches(previous)) {
+                            baseline = fresh
+                            fields = AutomationEditorDraft.fromJob(fresh)
+                            conflict = false
+                        } else if (supportsReceipts) {
+                            conflict = fresh.revision != previous.revision
+                        } else {
+                            overwriteNotice = !fields.matches(fresh)
+                        }
+                        missing = false
                         error = null
                     }
                 }
@@ -168,6 +179,31 @@ fun AutomationEditorScreen(
         }
         loaded = true
         working = false
+    }
+
+    suspend fun resolveConflict(useComputerVersion: Boolean) {
+        val id = baseline?.id ?: return
+        if (working) return
+        working = true
+        try {
+            val fresh = readCurrent(id)
+            if (fresh == null) {
+                missing = true
+                error = L10n.text("android.automationeditor.this_job_was_deleted_on_the_computer_your.282b1669")
+            } else {
+                baseline = fresh
+                if (useComputerVersion) fields = AutomationEditorDraft.fromJob(fresh)
+                conflict = false
+                missing = false
+                error = null
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = TunnelCopy.display(e.message ?: L10n.text("android.automationeditor.the_request_failed.db4fb447"), hostLabel)
+        } finally {
+            working = false
+        }
     }
 
     suspend fun refresh() {
@@ -206,6 +242,8 @@ fun AutomationEditorScreen(
                     overwriteNotice = true
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = TunnelCopy.display(e.message ?: L10n.text("android.automationeditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
@@ -248,6 +286,8 @@ fun AutomationEditorScreen(
                 })
                 applySaved(AutomationJob.parse(element as JsonObject))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val message = e.message ?: ""
             if (message.contains("This job changed since you opened it")) {
@@ -287,6 +327,8 @@ fun AutomationEditorScreen(
                 put("operationId", operationID)
             })
             confirmCreation(AutomationCreationOutcome.parse(element as JsonObject), operationID)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val receipt = runCatching {
                 model.workspaceSection(peer, "automation.creationReceipt", buildJsonObject { put("operationId", operationID) })
@@ -319,6 +361,8 @@ fun AutomationEditorScreen(
             } else {
                 confirmCreation(AutomationCreationOutcome.parse(element as JsonObject), operationID)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = TunnelCopy.display(e.message ?: L10n.text("android.automationeditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
@@ -337,6 +381,8 @@ fun AutomationEditorScreen(
             error = null
             notice = L10n.text("android.automationeditor.created_0.558d3d2c", "${created?.name ?: L10n.text("android.automationeditor.the_job.b8fac54e")}")
             onSaved()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = L10n.text("android.automationeditor.the_computer_did_not_confirm_this_job_chec.8f3afcaa")
         } finally {
@@ -366,8 +412,9 @@ fun AutomationEditorScreen(
     val isCreate = base == null && created == null
     val dirty = if (base != null) !fields.matches(base) else fields.name.isNotEmpty() || fields.prompt.isNotEmpty() || fields.schedule.scheduleKind != ScheduleKind.ONCE
     val canSave = loaded && !working && !missing && !conflict && !pendingEdit && created == null && pendingCreation == null && fields.validation == null && dirty
-    val canCreate = isCreate && loaded && !working && pendingCreation == null && created == null && fields.validation == null
+    val canCreate = isCreate && loaded && !working && !pendingEdit && pendingCreation == null && created == null && fields.validation == null
 
+    val canEditFields = loaded && !working && !pendingEdit && pendingCreation == null && created == null
     BackHandler { onBack() }
     Column(
         Modifier
@@ -409,40 +456,40 @@ fun AutomationEditorScreen(
                 fields.name,
                 { fields = fields.copy(name = it) },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !working && pendingCreation == null,
+                enabled = canEditFields,
                 label = { Text(L10n.text("android.automationeditor.name.dcd1d522")) },
             )
             OutlinedTextField(
                 fields.prompt,
                 { fields = fields.copy(prompt = it) },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !working && pendingCreation == null,
+                enabled = canEditFields,
                 label = { Text(L10n.text("android.automationeditor.prompt.5c391238")) },
                 minLines = 6,
             )
             Text(L10n.text("common.settings"), style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
-            AutomationFolderChips(fields = fields, onFields = { fields = it }, folders = folders, lockedFolder = workspaceID)
-            AutomationBackendChips(fields = fields, onFields = { fields = it }, backends = backends)
+            AutomationFolderChips(fields = fields, onFields = { if (canEditFields) fields = it }, folders = folders, lockedFolder = workspaceID)
+            AutomationBackendChips(fields = fields, onFields = { if (canEditFields) fields = it }, backends = backends)
             ScheduleEditor(
                 schedule = fields.schedule,
-                onSchedule = { fields = fields.copy(schedule = it) },
+                onSchedule = { if (canEditFields) fields = fields.copy(schedule = it) },
                 timezoneCaption = HostScheduleClock.timeCaption(hostLabel, timezone.ifBlank { null }),
-                enabled = !working && pendingCreation == null,
+                enabled = canEditFields,
             )
             Text(L10n.text("android.automationeditor.time_limit.e592a9ca"), style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
-            BrandToggleChip(L10n.text("android.automationeditor.no_time_limit.436b4b94"), fields.budget.noTimeLimit, { fields = fields.copy(budget = fields.budget.copy(noTimeLimit = !fields.budget.noTimeLimit)) })
+            BrandToggleChip(L10n.text("android.automationeditor.no_time_limit.436b4b94"), fields.budget.noTimeLimit, { if (canEditFields) fields = fields.copy(budget = fields.budget.copy(noTimeLimit = !fields.budget.noTimeLimit)) })
             if (!fields.budget.noTimeLimit) {
                 TimeLimitChips(
                     minutesText = fields.budget.budgetMinutes,
                     noLimit = false,
-                    onMinutesChange = { fields = fields.copy(budget = fields.budget.copy(budgetMinutes = it)) },
+                    onMinutesChange = { if (canEditFields) fields = fields.copy(budget = fields.budget.copy(budgetMinutes = it, originalSeconds = null)) },
                     onNoLimitChange = {},
                 )
                 OutlinedTextField(
                     fields.budget.budgetMinutes,
-                    { fields = fields.copy(budget = fields.budget.copy(budgetMinutes = it)) },
+                    { fields = fields.copy(budget = fields.budget.copy(budgetMinutes = it, originalSeconds = null)) },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !working && pendingCreation == null,
+                    enabled = canEditFields,
                     label = { Text(L10n.text("android.automationeditor.minutes.4f846a84")) },
                 )
             }
@@ -455,23 +502,10 @@ fun AutomationEditorScreen(
                         Text(L10n.text("android.automationeditor.changed_on_the_computer.aefb92cf"), style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                             TsSecondaryButton(label = L10n.text("android.automationeditor.use_computer_version.f0d6599f"), small = true, onClick = {
-                                scope.launch {
-                                    val fresh = readCurrent(base.id)
-                                    if (fresh != null) {
-                                        baseline = fresh
-                                        fields = AutomationEditorDraft.fromJob(fresh)
-                                    }
-                                    conflict = false
-                                    error = null
-                                }
+                                scope.launch { resolveConflict(useComputerVersion = true) }
                             })
                             TsSecondaryButton(label = L10n.text("android.automationeditor.keep_my_draft.cdb80bb9"), small = true, onClick = {
-                                scope.launch {
-                                    val fresh = readCurrent(base.id)
-                                    if (fresh != null) baseline = fresh
-                                    conflict = false
-                                    error = null
-                                }
+                                scope.launch { resolveConflict(useComputerVersion = false) }
                             })
                         }
                     }
@@ -596,12 +630,13 @@ fun ScheduleEditor(
     timezoneCaption: String,
     enabled: Boolean,
 ) {
+    fun changeSchedule(next: ScheduleFields) { if (enabled) onSchedule(next) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         Text(L10n.text("android.automationeditor.schedule.f4830a1d"), style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
         Text(timezoneCaption, style = TsType.caption, color = LocalTsColors.current.textSecondary)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
             ScheduleKind.entries.forEach { kind ->
-                ChoiceChip(kind.label, schedule.scheduleKind == kind, { onSchedule(schedule.copy(scheduleKind = kind)) })
+                ChoiceChip(kind.label, schedule.scheduleKind == kind, { changeSchedule(schedule.copy(scheduleKind = kind)) })
             }
         }
         when (schedule.scheduleKind) {
@@ -614,13 +649,13 @@ fun ScheduleEditor(
                         ChoiceChip(
                             JobScheduleCopy.intervalPresetLabel(minutes),
                             schedule.intervalCurrentSeconds == minutes * 60L,
-                            { onSchedule(schedule.copy(scheduleKind = ScheduleKind.INTERVAL, intervalMinutes = minutes.toString(), intervalTouched = true)) },
+                            { changeSchedule(schedule.copy(scheduleKind = ScheduleKind.INTERVAL, intervalMinutes = minutes.toString(), intervalTouched = true)) },
                         )
                     }
                 }
                 OutlinedTextField(
                     schedule.intervalMinutes,
-                    { onSchedule(schedule.copy(intervalMinutes = it.filter(Char::isDigit), intervalTouched = true)) },
+                    { changeSchedule(schedule.copy(intervalMinutes = it.filter(Char::isDigit), intervalTouched = true)) },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = enabled,
                     label = { Text(L10n.text("android.automationeditor.every_minutes.d4a198e5")) },
@@ -638,7 +673,7 @@ fun ScheduleEditor(
                         ChoiceChip(
                             JobScheduleCopy.weekdayShort[day],
                             schedule.weeklyDaySelected(day),
-                            { onSchedule(schedule.copy(weekday = day, weeklyDayEdited = true)) },
+                            { changeSchedule(schedule.copy(weekday = day, weeklyDayEdited = true)) },
                         )
                     }
                 }
@@ -654,7 +689,7 @@ fun ScheduleEditor(
                             selected,
                             {
                                 val bit = 1 shl day
-                                onSchedule(schedule.copy(customDays = if (selected) schedule.customDays and bit.inv() else schedule.customDays or bit))
+                                changeSchedule(schedule.copy(customDays = if (selected) schedule.customDays and bit.inv() else schedule.customDays or bit))
                             },
                         )
                     }

@@ -24,7 +24,10 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+static ALLOWED_GENERATION: AtomicU64 = AtomicU64::new(0);
 use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
@@ -92,7 +95,7 @@ fn path() -> Result<PathBuf, String> {
 }
 
 fn load() -> Result<Store, String> {
-    let mut store: Store = match fs::read(path()?) {
+    let mut store: Store = match read_policy(&path()?) {
         Ok(v) => serde_json::from_slice(&v).map_err(|e| e.to_string())?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Store::default(),
         Err(e) => return Err(e.to_string()),
@@ -106,8 +109,37 @@ fn load() -> Result<Store, String> {
     {
         store.invite = None;
     }
-    store.attempts.retain(|attempt| attempt.at + HOUR > now);
+    store
+        .attempts
+        .retain(|attempt| attempt.at.saturating_add(HOUR) > now);
     Ok(store)
+}
+
+fn read_policy(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    const LIMIT: u64 = 8 * 1024 * 1024;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > LIMIT {
+        return Err(std::io::Error::other(
+            "Workspace access policy is not a bounded regular file",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(LIMIT + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > LIMIT {
+        return Err(std::io::Error::other(
+            "Workspace access policy is too large",
+        ));
+    }
+    Ok(bytes)
 }
 
 impl Store {
@@ -181,43 +213,9 @@ fn same_hash(left: &str, right: &str) -> bool {
 
 fn save(store: &Store) -> Result<(), String> {
     let path = path()?;
-    fs::create_dir_all(path.parent().ok_or("invalid policy path")?).map_err(|e| e.to_string())?;
-    let temp = path.with_extension("tmp");
-    // The invite hash is a password-equivalent oracle (40 bits). The file must
-    // never be world-readable, even briefly: create with 0600 before writing.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&temp)
-            .map_err(|e| e.to_string())?;
-        use std::io::Write;
-        file.write_all(&serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(
-            &temp,
-            serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o600));
-    }
-    fs::rename(&temp, &path).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
+    let body = serde_json::to_string_pretty(store).map_err(|error| error.to_string())?;
+    tokenstat_sync::snapshot::write_private_atomically(&path, &body)
+        .map_err(|error| error.to_string())?;
     invalidate_allowed_cache();
     Ok(())
 }
@@ -288,12 +286,14 @@ fn allowed_cache() -> &'static AllowedCached {
 /// trusted on coarse filesystems.
 fn invalidate_allowed_cache() {
     if let Ok(mut guard) = allowed_cache().lock() {
+        ALLOWED_GENERATION.fetch_add(1, Ordering::AcqRel);
         *guard = None;
     }
 }
 
 fn allowed_now() -> Option<std::sync::Arc<HashSet<String>>> {
     let cache = allowed_cache();
+    let generation = ALLOWED_GENERATION.load(Ordering::Acquire);
 
     let path = path().ok()?;
     // A file that is not there yet has no grants in it, and a clock that will
@@ -314,6 +314,9 @@ fn allowed_now() -> Option<std::sync::Arc<HashSet<String>>> {
 
     let allowed = std::sync::Arc::new(load().ok()?.allowed.into_iter().collect::<HashSet<_>>());
     if let Ok(mut guard) = cache.lock() {
+        if ALLOWED_GENERATION.load(Ordering::Acquire) != generation {
+            return None;
+        }
         *guard = Some((stamp, len, Instant::now(), std::sync::Arc::clone(&allowed)));
     }
     Some(allowed)
@@ -702,7 +705,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 );
             };
             if !same_hash(&invite.hash, &hash_code(&code)) {
-                invite.tries += 1;
+                invite.tries = invite.tries.saturating_add(1);
                 let retired = invite.tries >= MAX_INVITE_ATTEMPTS;
                 if retired {
                     store.invite = None;
@@ -731,8 +734,17 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             // it through the grant so a later revocation cannot be overwritten
             // by the second half of this redemption.
             store.invite = None;
+            let already = store.allowed.contains(&peer);
+            if !already {
+                store.allowed.push(peer.clone());
+            }
+            store.pending.retain(|request| request.peer_id != peer);
+            // Consume the invite and grant access in one durable replacement.
+            // A failed write must leave the code available for retry.
             save(&store)?;
-            set_allowed_locked_with_label(&peer, true, Authority::Invite, label.clone())?;
+            if !already {
+                access_audit::record("granted", Some(&peer), label.as_deref(), Authority::Invite);
+            }
             let label_clone = label.clone();
             drop(_guard);
             access_audit::record(
@@ -998,6 +1010,26 @@ mod tests {
                 .sum::<usize>();
             assert_eq!(successes, 1);
             assert!(is_allowed(&peer));
+        });
+    }
+
+    #[test]
+    fn unreadable_policy_types_fail_closed_and_extreme_attempt_dates_do_not_wrap() {
+        crate::test_identity::isolated(|| {
+            save(&Store {
+                attempts: vec![Attempt {
+                    peer_id: "peer".into(),
+                    kind: "ask".into(),
+                    at: u64::MAX,
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+            assert_eq!(load().unwrap().attempts.len(), 1);
+            fs::remove_file(path().unwrap()).unwrap();
+            fs::create_dir(path().unwrap()).unwrap();
+            assert!(load().is_err());
+            assert!(!is_allowed("peer"));
         });
     }
 

@@ -91,11 +91,19 @@ impl Engine {
     }
 
     pub fn report(&self, group: GroupBy, q: &Query) -> Result<Vec<Bucket>, CoreError> {
-        let rows = self.store.report(group, q)?;
-        Ok(match group {
+        let mut query = q.clone();
+        if group == GroupBy::Source {
+            query.limit = None;
+        }
+        let rows = self.store.report(group, &query)?;
+        let mut rows = match group {
             GroupBy::Source => fold_source_buckets(rows),
             _ => rows,
-        })
+        };
+        if let Some(limit) = q.limit {
+            rows.truncate(limit as usize);
+        }
+        Ok(rows)
     }
 
     /// [`Engine::report`] with a list-rate value on every row.
@@ -110,7 +118,13 @@ impl Engine {
         q: &Query,
         prices: &PriceTable,
     ) -> Result<Vec<PricedBucket>, CoreError> {
-        let buckets = self.store.report(group, q)?;
+        // Recovered and live usage form one source. Limiting before that fold
+        // can discard part of the winning source or select the wrong winner.
+        let mut query = q.clone();
+        if group == GroupBy::Source {
+            query.limit = None;
+        }
+        let buckets = self.store.report(group, &query)?;
         let split = self.store.report_by_model(group, q)?;
 
         let mut value_by_key: HashMap<&str, (i64, bool, Vec<String>)> = HashMap::new();
@@ -146,10 +160,14 @@ impl Engine {
                 }
             })
             .collect();
-        Ok(match group {
+        let mut priced = match group {
             GroupBy::Source => fold_priced_source_buckets(priced),
             _ => priced,
-        })
+        };
+        if let Some(limit) = q.limit {
+            priced.truncate(limit as usize);
+        }
+        Ok(priced)
     }
 
     /// [`Store::report_split`] with recovery rows folded when a side is source.
@@ -267,7 +285,7 @@ fn fold_split_source_keys(
             });
         }
     }
-    let chronological = matches!(group, GroupBy::Day | GroupBy::Week);
+    let chronological = matches!(group, GroupBy::Day | GroupBy::Week | GroupBy::Month);
     merged.sort_by(|a, b| {
         let keys = if chronological {
             a.key.cmp(&b.key)
@@ -506,5 +524,67 @@ mod tests {
         assert_eq!(split.len(), 1);
         assert_eq!(split[0].split, "claude_code");
         assert_eq!(split[0].events, 3);
+    }
+
+    #[test]
+    fn source_limits_apply_after_combining_recovered_usage() {
+        let mut engine = engine();
+        let mut recovered = ev("recovered", "claude-opus-4-5", "s2");
+        recovered.source = SourceId::ClaudeCodeRollup;
+        let mut competitor = ev("competitor", "claude-opus-4-5", "s3");
+        competitor.source = SourceId::Codex;
+        competitor.counters.output = Some(2_000_000);
+        engine
+            .store_mut()
+            .insert_events(
+                &[ev("live", "claude-opus-4-5", "s1"), recovered, competitor],
+                &jiff::tz::TimeZone::UTC,
+            )
+            .unwrap();
+        let query = Query {
+            limit: Some(1),
+            ..Query::default()
+        };
+        let rows = engine.report(GroupBy::Source, &query).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].key, "claude_code");
+        assert_eq!(rows[0].counters.total(), 4_000_000);
+        let prices = PriceTable::parse(PRICES).unwrap();
+        let priced = engine
+            .priced_report(GroupBy::Source, &query, &prices)
+            .unwrap();
+        assert_eq!(priced.len(), 1);
+        assert_eq!(priced[0].key, "claude_code");
+        assert_eq!(priced[0].value.micros(), 60_000_000);
+    }
+
+    #[test]
+    fn monthly_source_splits_keep_calendar_order() {
+        let mut engine = engine();
+        let mut early = ev("early", "claude-opus-4-5", "s1");
+        let mut late = ev("late", "claude-opus-4-5", "s2");
+        early.ts = Timestamp::from_ms(
+            "2026-01-01T00:00:00Z"
+                .parse::<jiff::Timestamp>()
+                .unwrap()
+                .as_millisecond(),
+        );
+        late.ts = Timestamp::from_ms(
+            "2026-02-01T00:00:00Z"
+                .parse::<jiff::Timestamp>()
+                .unwrap()
+                .as_millisecond(),
+        );
+        engine
+            .store_mut()
+            .insert_events(&[late, early], &jiff::tz::TimeZone::UTC)
+            .unwrap();
+        let rows = engine
+            .report_split(GroupBy::Month, GroupBy::Source, &Query::default())
+            .unwrap();
+        assert_eq!(
+            rows.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(),
+            ["2026-01", "2026-02"]
+        );
     }
 }

@@ -23,6 +23,13 @@ internal static class ShellChromeSmoke
 
     internal static async Task Run(StackPanel host)
     {
+        var wrapped = new WrapPanel { Spacing = 6 };
+        wrapped.Children.Add(new Border { Width = 30, Height = 10 });
+        wrapped.Children.Add(new Border { Width = 50, Height = 20, Visibility = Visibility.Collapsed });
+        wrapped.Children.Add(new Border { Width = 30, Height = 10 });
+        wrapped.Measure(new Size(66, 100));
+        if (wrapped.DesiredSize.Width != 66 || wrapped.DesiredSize.Height != 10)
+            throw new Exception("Collapsed choices left gaps or wrapped visible controls");
         var removed = FriendlyError.From("remote reach registration failed (403 Forbidden): {\"error\":\"machine_unlinked\"}");
         if (!removed.RequiresSignIn || removed.OpensPlans || removed.ActionIcon != ActionIcon.SignIn)
             throw new Exception("An unlinked device must offer fresh sign-in, rather than retrying or changing plans");

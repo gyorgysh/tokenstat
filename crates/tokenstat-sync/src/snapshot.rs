@@ -168,6 +168,31 @@ pub fn write_private_atomically(path: &Path, contents: &str) -> anyhow::Result<(
     Ok(())
 }
 
+/// Publish an initial snapshot without replacing a file another process won.
+pub fn write_private_if_missing(path: &Path, contents: &str) -> std::io::Result<bool> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("snapshot has no parent"))?;
+    fs::create_dir_all(parent)?;
+    let result = AtomicFile::new(path, atomicwrites::DisallowOverwrite).write(|file| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        }
+        file.write_all(contents.as_bytes())
+    });
+    match result {
+        Ok(()) => Ok(true),
+        Err(atomicwrites::Error::Internal(error))
+            if error.kind() == std::io::ErrorKind::AlreadyExists =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// True when a rate moved by more than half, which we treat as a bad feed entry
 /// until an operator says otherwise.
 pub fn moved_over_half(old: f64, new: f64) -> bool {
@@ -191,6 +216,31 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
+
+    #[test]
+    fn concurrent_initial_snapshots_publish_exactly_one_complete_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("seed.json");
+        let winners = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..16)
+                .map(|n| {
+                    let path = &path;
+                    scope.spawn(move || {
+                        write_private_if_missing(path, &n.to_string().repeat(1000)).unwrap()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| usize::from(worker.join().unwrap()))
+                .sum::<usize>()
+        });
+        assert_eq!(winners, 1);
+        let text = fs::read_to_string(&path).unwrap();
+        assert!((0..16).any(|n| text == n.to_string().repeat(1000)));
+        assert!(!write_private_if_missing(&path, "replacement").unwrap());
+        assert_eq!(fs::read_to_string(path).unwrap(), text);
+    }
 
     static NEXT_PATH: AtomicU64 = AtomicU64::new(0);
 

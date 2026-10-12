@@ -113,9 +113,14 @@ fun FolderPickerScreen(
     }
 
     suspend fun create(): Boolean {
+        if (loading) return false
         val here = listing?.str("path") ?: return false
         val name = newFolder.trim()
         if (name.isEmpty()) return false
+        if (name == "." || name == ".." || name.any { it == '/' || it == '\\' || it == '\u0000' }) {
+            error = L10n.text("android.clonerepository.a_folder_name_is_one_name_without_a_path_i.d41badd4")
+            return false
+        }
         loading = true
         val made = runCatching {
             val answer = model.workspaceSection(peer, "fs.mkdir", buildJsonObject { put("path", "$here/$name") }) as JsonObject
@@ -133,6 +138,7 @@ fun FolderPickerScreen(
     }
 
     suspend fun add(path: String) {
+        if (loading) return
         if (onPickedPath != null) { onPickedPath(path); return }
         loading = true
         runCatching {
@@ -282,7 +288,7 @@ fun FolderPickerScreen(
                 }
             },
             confirmButton = {
-                TsAccentButton(label = L10n.text("android.folderpicker.create.4759498a"), small = true, enabled = newFolder.isNotBlank(), onClick = {
+                TsAccentButton(label = L10n.text("android.folderpicker.create.4759498a"), small = true, enabled = newFolder.isNotBlank() && !loading, onClick = {
                     scope.launch { create() }
                 })
             },

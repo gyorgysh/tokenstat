@@ -2,27 +2,27 @@ use anstream::println;
 use anyhow::Result;
 use tokenstat_core::Store;
 
-use super::{json_opt, json_string, login_as_suffix};
+use super::{json_opt, json_string, login_as_suffix, sanitize_label};
 use crate::ui::{self, BOLD, DIM, accent, good, warn};
+
+pub fn fetch_report_values(reports: &[tokenstat_sync::FetchReport]) -> serde_json::Value {
+    serde_json::Value::Array(
+        reports
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "vendor": r.vendor, "events": r.events, "from_cache": r.from_cache,
+                    "skipped_no_token": r.skipped_no_token, "message": r.message,
+                })
+            })
+            .collect(),
+    )
+}
 
 /// Report remote fetch outcomes after scan or `tokenstat fetch`.
 pub fn fetch_reports(reports: &[tokenstat_sync::FetchReport], json: bool) -> Result<()> {
     if json {
-        print!("[");
-        for (i, r) in reports.iter().enumerate() {
-            if i > 0 {
-                print!(",");
-            }
-            print!(
-                r#"{{"vendor":{},"events":{},"from_cache":{},"skipped_no_token":{},"message":{}}}"#,
-                json_string(r.vendor),
-                r.events,
-                r.from_cache,
-                r.skipped_no_token,
-                json_opt(r.message.as_deref()),
-            );
-        }
-        println!("]");
+        println!("{}", fetch_report_values(reports));
         return Ok(());
     }
     for r in reports {
@@ -132,7 +132,14 @@ pub fn auth(
             tokenstat_sync::Vendor::Cursor => tokenstat_sync::cursor::logout()?,
             tokenstat_sync::Vendor::Antigravity => tokenstat_sync::antigravity::logout()?,
         }
-        println!("  cleared {} token", vendor.as_str());
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"vendor": vendor.as_str(), "logged_out": true})
+            );
+        } else {
+            println!("  cleared {} token", vendor.as_str());
+        }
         return Ok(());
     }
 
@@ -160,6 +167,13 @@ pub fn auth(
         }
     };
 
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"vendor": vendor.as_str(), "source": how, "path": path, "present": true})
+        );
+        return Ok(());
+    }
     let g = good();
     println!(
         "  {g}{} {g:#}{} token → {}",
@@ -343,8 +357,8 @@ pub fn profile_sync_status(host: Option<&str>, json: bool) -> Result<()> {
     } else {
         println!("  {DIM}machines{DIM:#}  {}", st.machines.len());
         for m in &st.machines {
-            let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("?");
-            let label = m.get("label").and_then(|v| v.as_str()).unwrap_or("");
+            let id = sanitize_label(m.get("id").and_then(|v| v.as_str()).unwrap_or("?"));
+            let label = sanitize_label(m.get("label").and_then(|v| v.as_str()).unwrap_or(""));
             let last = m
                 .get("last_sync_at")
                 .and_then(|v| v.as_str())
@@ -407,7 +421,7 @@ pub fn device(host: Option<&str>, name: Option<&str>, clear: bool, json: bool) -
     }
 
     println!();
-    println!("  {BOLD}{label}{BOLD:#}");
+    println!("  {BOLD}{}{BOLD:#}", sanitize_label(&label));
     println!("  {DIM}what{DIM:#}     {}", platform.pretty());
     println!("  {DIM}machine{DIM:#}  {machine}");
     if chosen {

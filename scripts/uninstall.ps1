@@ -4,7 +4,7 @@
   tokenstat Windows uninstaller.
 
 .DESCRIPTION
-  Removes the hourly scan scheduled task, then the install directory under
+  Removes the hourly scan scheduled task, then the CLI executable under
   %LOCALAPPDATA%\tokenstat. Leaves the local archive alone unless you set
   TOKENSTAT_PURGE=1 (your scanned history, including usage coding tools have
   already deleted). Does not touch a hosted tokenstat.ai profile.
@@ -91,17 +91,15 @@ if (Test-Path -LiteralPath $ScheduleDir) {
   }
 }
 
-# 2. Binary / install directory.
-if (Test-Path -LiteralPath $BinDir) {
-  Say "removing $BinDir"
-  Remove-Item -LiteralPath $BinDir -Recurse -Force -ErrorAction SilentlyContinue
-  if (Test-Path -LiteralPath $BinDir) {
-    Warn "could not fully delete $BinDir (file may be in use). Remove it after closing terminals."
-  } else {
-    Ok "binary removed"
-  }
+# 2. The installer owns only this executable. A custom BIN_DIR may also
+# contain unrelated programs; the default directory holds host logs/cache.
+$CliPath = Join-Path $BinDir "tokenstat.exe"
+if (Test-Path -LiteralPath $CliPath -PathType Leaf) {
+  Say "removing $CliPath"
+  Remove-Item -LiteralPath $CliPath -Force -ErrorAction Stop
+  Ok "binary removed"
 } else {
-  Say "no install directory at $BinDir"
+  Say "no CLI binary at $CliPath"
 }
 
 # User PATH entry pointing at the install dir (harmless if left).

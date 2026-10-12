@@ -51,6 +51,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         new(StringComparer.Ordinal);
     private DispatcherQueueTimer? _poll;
     private bool _refreshing;
+    private readonly SemaphoreSlim _reads = new(1, 1);
+    private bool _permissionWriting;
+    private int _readGeneration;
     private enum DevicePage { Devices, Access }
     private DevicePage _devicePage;
     private readonly TextBox _deviceSearch = new() { PlaceholderText = L10n.Text("windows.machinespage.search_devices.3aebaefc"), MinHeight = 36 };
@@ -89,6 +92,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         };
         Unloaded += (_, _) =>
         {
+            ++_readGeneration;
             StopPoll();
             RemoteWorkspaces.Changed -= OnRemoteChanged;
         };
@@ -124,6 +128,15 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
 
     private async Task RefreshAsync()
     {
+        if (!IsLoaded || _permissionWriting || !await _reads.WaitAsync(0)) return;
+        try { await RefreshCoreAsync(); }
+        finally { _reads.Release(); }
+    }
+
+    private async Task RefreshCoreAsync()
+    {
+        var generation = _readGeneration;
+        var accountGeneration = AppServices.AccountGeneration;
         if (_refreshing)
         {
             return;
@@ -177,7 +190,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 || previousRequests.Count != _requests.Count
                 || previousRequests.Where((row, index) => index < _requests.Count
                     && (row.Screen != _requests[index].Screen || !JsonNode.DeepEquals(row.Row, _requests[index].Row))).Any();
-            if (changed)
+            if (changed && IsLoaded && generation == _readGeneration && accountGeneration == AppServices.AccountGeneration)
             {
                 Render();
                 _pairAllowed = RemoteReachAllowed(_account);
@@ -236,6 +249,15 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
 
     private async Task LoadAsync()
     {
+        var generation = ++_readGeneration;
+        await _reads.WaitAsync();
+        try { if (generation == _readGeneration) await LoadCoreAsync(generation); }
+        finally { _reads.Release(); }
+    }
+
+    private async Task LoadCoreAsync(int generation)
+    {
+        var accountGeneration = AppServices.AccountGeneration;
         if (_root.Children.Count == 0)
         {
             _root.Children.Add(Motion.SkeletonCard());
@@ -298,6 +320,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         await LoadRequestsAsync();
         await LoadPermissionsAsync();
 
+        if (!IsLoaded || generation != _readGeneration || accountGeneration != AppServices.AccountGeneration) return;
         Render();
         _pairAllowed = RemoteReachAllowed(account);
         RaiseToolbarChanged();
@@ -1000,7 +1023,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                     new JsonObject { ["peerId"] = captured, ["view"] = true, ["control"] = on });
                 _screenPermissions[captured] = (true, on);
             });
-            controlSwitch.IsEnabled = screen.View;
+            controlSwitch.IsEnabled = screen.View && !_permissionWriting;
             ToolTipService.SetToolTip(controlSwitch, L10n.Text("windows.machinespage.control_requires_screen_viewing_access.bf319cd9"));
             switches.Children.Add(controlSwitch);
             row.Children.Add(switches);
@@ -1027,29 +1050,41 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             IsOn = isOn,
             OnContent = "",
             OffContent = "",
+            IsEnabled = !_permissionWriting,
         };
         var reverting = false;
         toggle.Toggled += async (_, _) =>
         {
-            if (reverting)
+            if (reverting) return;
+            if (_permissionWriting)
             {
+                reverting = true;
+                toggle.IsOn = isOn;
+                reverting = false;
                 return;
             }
+            var requested = toggle.IsOn;
+            _permissionWriting = true;
+            Render();
             try
             {
-                await set(toggle.IsOn);
+                await set(requested);
             }
             catch (Exception ex)
             {
                 reverting = true;
-                toggle.IsOn = !toggle.IsOn;
+                toggle.IsOn = isOn;
                 reverting = false;
                 _root.Children.Insert(0, Chrome.Banner(
                     FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
                 return;
             }
-            Render();
-            RefreshInspector();
+            finally
+            {
+                _permissionWriting = false;
+                Render();
+                RefreshInspector();
+            }
         };
         return toggle;
     }
@@ -2699,6 +2734,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         try
         {
             await AppServices.Host.CallAsync("machine.forget", new JsonObject { ["key"] = key });
+            RemoteWorkspaces.Disconnect(key);
             _notice = L10n.Text("windows.machinespage.0_is_forgotten_it_will_arrive_as_a_strange.c48a4600", $"{name}");
         }
         catch (Exception ex)

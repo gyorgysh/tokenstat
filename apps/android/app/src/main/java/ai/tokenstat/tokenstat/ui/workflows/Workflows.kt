@@ -82,6 +82,7 @@ import ai.tokenstat.tokenstat.ui.tasks.RunRef
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -220,6 +221,7 @@ fun WorkflowsScreen(
     }
 
     suspend fun run(graph: WorkflowGraph, input: String) {
+        if (working) return
         val issue = WorkflowGraphRules.stepsIssue(graph.nodes, graph.edges)
         if (issue != null) {
             error = L10n.text("android.workflows.0_fix_it_in_the_editor_before_running.4e7debe8", "${issue}")
@@ -243,6 +245,7 @@ fun WorkflowsScreen(
     }
 
     suspend fun stop(run: WorkflowRunRecord) {
+        if (working) return
         working = true
         runCatching {
             model.workspaceSection(peer, "workflow.kill", buildJsonObject { put("id", run.id) })
@@ -257,6 +260,7 @@ fun WorkflowsScreen(
     }
 
     suspend fun continueRun(run: WorkflowRunRecord) {
+        if (working) return
         working = true
         runCatching {
             model.workspaceSection(peer, "workflow.continue", buildJsonObject { put("id", run.id) })
@@ -277,7 +281,12 @@ fun WorkflowsScreen(
         // phone copy cannot wipe a newer edit.
         val fresh = runCatching {
             model.workspaceSection(peer, "workflow.list", buildJsonObject {})
-        }.getOrNull()?.let { element ->
+        }.getOrElse {
+            if (it is CancellationException) throw it
+            error = TunnelCopy.display(it.message ?: L10n.text("android.workflows.the_request_failed.db4fb447"), hostLabel)
+            working = false
+            return
+        }.let { element ->
             ((element as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList())
                 .map(WorkflowGraph::parse).firstOrNull { it.id == graph.id }
         }
@@ -308,6 +317,7 @@ fun WorkflowsScreen(
     }
 
     suspend fun remove(graph: WorkflowGraph) {
+        if (working) return
         working = true
         runCatching {
             model.workspaceSection(peer, "workflow.remove", buildJsonObject { put("id", graph.id) })
@@ -1129,29 +1139,29 @@ private fun WorkflowStepTranscript(
     live: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    var text by remember(runID, nodeID) { mutableStateOf<String?>(null) }
+    var text by remember(peer, runID, nodeID) { mutableStateOf<String?>(null) }
+    var error by remember(peer, runID, nodeID) { mutableStateOf<String?>(null) }
     ForegroundEffect(peer, runID, nodeID, live) {
-        var offset = 0L
-        val buffer = StringBuilder()
-        do {
-            val chunk = runCatching {
-                model.workspaceSection(peer, "workflow.transcript", buildJsonObject {
-                    put("id", runID)
-                    put("nodeId", nodeID)
-                    put("offset", offset)
-                }) as JsonObject
-            }.getOrElse { failure ->
-                if (failure is kotlinx.coroutines.CancellationException) throw failure
-                text = buffer.toString().ifEmpty { L10n.text("android.workflows.output_is_unavailable_right_now.8b0840d6") }
-                return@ForegroundEffect
-            }
-            buffer.append(chunk.optStr("text").orEmpty())
-            if (buffer.length > 256 * 1024) buffer.delete(0, buffer.length - 256 * 1024)
-            text = buffer.toString()
-            offset = chunk.optLong("nextOffset") ?: break
-            if (live) delay(1_000)
-        } while (live)
+        try {
+            ai.tokenstat.tokenstat.ui.automations.readRunTranscript(
+                live = live,
+                read = { offset ->
+                    model.workspaceSection(peer, "workflow.transcript", buildJsonObject {
+                        put("id", runID)
+                        put("nodeId", nodeID)
+                        put("offset", offset)
+                    }) as JsonObject
+                },
+                running = { delay(1_000); true },
+                update = { text = it; error = null },
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = L10n.text("android.workflows.output_is_unavailable_right_now.8b0840d6")
+        }
     }
+    if (error != null) Text(error!!, color = LocalTsColors.current.danger, modifier = modifier)
     Text(
         text ?: L10n.text("android.workflows.loading.ba3bbbe1"),
         style = TsType.mono(12),

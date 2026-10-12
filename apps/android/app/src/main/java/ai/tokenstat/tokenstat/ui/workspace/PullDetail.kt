@@ -140,35 +140,36 @@ internal fun PullDetailPage(
     val colors = LocalTsColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var detail by remember(number) { mutableStateOf<JsonObject?>(null) }
-    var timeline by remember(number) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var nextCursor by remember(number) { mutableStateOf<String?>(null) }
-    var diffs by remember(number) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var selectedPath by remember(number) { mutableStateOf<String?>(null) }
-    var tab by remember(number) { mutableStateOf(PullTab.Conversation) }
-    var error by remember(number) { mutableStateOf<String?>(null) }
-    var timelineError by remember(number) { mutableStateOf<String?>(null) }
-    var diffError by remember(number) { mutableStateOf<String?>(null) }
-    var actionError by remember(number) { mutableStateOf<String?>(null) }
-    var actionNotice by remember(number) { mutableStateOf<String?>(null) }
-    var loading by remember(number) { mutableStateOf(true) }
-    var loadingTimeline by remember(number) { mutableStateOf(false) }
-    var loadingDiff by remember(number) { mutableStateOf(false) }
-    var actionBusy by remember(number) { mutableStateOf(false) }
-    var commentDraft by remember(number) { mutableStateOf("") }
-    var reviewMode by remember(number) { mutableStateOf<String?>(null) }
-    var reviewDraft by remember(number) { mutableStateOf("") }
-    var mergeMethod by remember(number) { mutableStateOf("squash") }
-    var checkoutBranch by remember(number) { mutableStateOf("") }
-    var confirmingClose by remember(number) { mutableStateOf(false) }
-    var confirmingMerge by remember(number) { mutableStateOf(false) }
+    var detail by remember(peer, workspace, number) { mutableStateOf<JsonObject?>(null) }
+    var timeline by remember(peer, workspace, number) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var nextCursor by remember(peer, workspace, number) { mutableStateOf<String?>(null) }
+    var diffs by remember(peer, workspace, number) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var selectedPath by remember(peer, workspace, number) { mutableStateOf<String?>(null) }
+    var tab by remember(peer, workspace, number) { mutableStateOf(PullTab.Conversation) }
+    var error by remember(peer, workspace, number) { mutableStateOf<String?>(null) }
+    var timelineError by remember(peer, workspace, number) { mutableStateOf<String?>(null) }
+    var diffError by remember(peer, workspace, number) { mutableStateOf<String?>(null) }
+    var actionError by remember(peer, workspace, number) { mutableStateOf<String?>(null) }
+    var actionNotice by remember(peer, workspace, number) { mutableStateOf<String?>(null) }
+    var loading by remember(peer, workspace, number) { mutableStateOf(true) }
+    var loadingTimeline by remember(peer, workspace, number) { mutableStateOf(false) }
+    var loadingDiff by remember(peer, workspace, number) { mutableStateOf(false) }
+    var diffGeneration by remember(peer, workspace, number) { mutableStateOf(0) }
+    var actionBusy by remember(peer, workspace, number) { mutableStateOf(false) }
+    var commentDraft by remember(peer, workspace, number) { mutableStateOf("") }
+    var reviewMode by remember(peer, workspace, number) { mutableStateOf<String?>(null) }
+    var reviewDraft by remember(peer, workspace, number) { mutableStateOf("") }
+    var mergeMethod by remember(peer, workspace, number) { mutableStateOf("squash") }
+    var checkoutBranch by remember(peer, workspace, number) { mutableStateOf("") }
+    var confirmingClose by remember(peer, workspace, number) { mutableStateOf(false) }
+    var confirmingMerge by remember(peer, workspace, number) { mutableStateOf(false) }
 
-    suspend fun loadTimeline(cursor: String? = null, append: Boolean = false) {
+    suspend fun loadTimeline(cursor: String? = null, append: Boolean = false, refresh: Boolean = false) {
         if (loadingTimeline) return
         loadingTimeline = true
         runCatching {
             model.workspaceSection(peer, "pulls.timeline", buildJsonObject {
-                put("workspaceId", workspace); put("number", number); put("refresh", false)
+                put("workspaceId", workspace); put("number", number); put("refresh", refresh)
                 if (cursor != null) put("cursor", cursor)
             })
         }.onSuccess { element ->
@@ -186,19 +187,22 @@ internal fun PullDetailPage(
     suspend fun loadDiff(refresh: Boolean = false) {
         if (loadingDiff || (diffs.isNotEmpty() && !refresh)) return
         loadingDiff = true
+        val generation = ++diffGeneration
         runCatching {
             model.workspaceSection(peer, "pulls.diff", buildJsonObject {
                 put("workspaceId", workspace); put("number", number); put("refresh", refresh)
             })
         }.onSuccess { element ->
+            if (generation != diffGeneration) return@onSuccess
             val obj = element as? JsonObject
             diffs = asObjects(element).ifEmpty { asObjects(obj?.get("diffs")) }.ifEmpty { asObjects(obj?.get("files")) }
             selectedPath = diffs.firstOrNull()?.str("path")
             diffError = null
         }.onFailure {
+            if (generation != diffGeneration) return@onFailure
             diffError = TunnelCopy.display(it.message ?: L10n.text("android.pulldetail.the_request_failed.db4fb447"), hostLabel)
         }
-        loadingDiff = false
+        if (generation == diffGeneration) loadingDiff = false
     }
 
     suspend fun load(refresh: Boolean = false) {
@@ -214,12 +218,13 @@ internal fun PullDetailPage(
             // The branch to check out is the one this pull request is on,
             // until the person types another.
             if (checkoutBranch.isBlank()) checkoutBranch = view?.str("headRef").orEmpty()
-            loadTimeline()
+            loadTimeline(refresh = refresh)
+            if (refresh) { diffGeneration++; loadingDiff = false; diffs = emptyList(); selectedPath = null }
             if (tab == PullTab.Changes) loadDiff(refresh = refresh)
         }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.pulldetail.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
-    LaunchedEffect(number) { load() }
+    LaunchedEffect(peer, workspace, number) { load() }
     // Opening Changes is what pays for the diff, exactly as on the Apple
     // client: the bytes are the expensive part of this page.
     LaunchedEffect(tab) { if (tab == PullTab.Changes) loadDiff() }
@@ -227,12 +232,12 @@ internal fun PullDetailPage(
     // than closing the whole section from under the person.
     BackHandler { onBack() }
 
-    suspend fun act(label: String, method: String, params: JsonObjectBuilder.() -> Unit) {
-        if (actionBusy) return
+    suspend fun act(label: String, method: String, params: JsonObjectBuilder.() -> Unit): Boolean {
+        if (actionBusy) return false
         actionBusy = true
         actionNotice = null
         try {
-            runCatching {
+            return runCatching {
                 model.workspaceSection(peer, method, buildJsonObject {
                     put("workspaceId", workspace); put("number", number)
                     params()
@@ -242,8 +247,9 @@ internal fun PullDetailPage(
                 actionNotice = label
                 load(refresh = true)
             }.onFailure {
+                if (it is kotlinx.coroutines.CancellationException) throw it
                 actionError = TunnelCopy.display(it.message ?: L10n.text("android.pulldetail.the_request_failed.db4fb447"), hostLabel)
-            }
+            }.isSuccess
         } finally {
             actionBusy = false
         }
@@ -285,6 +291,7 @@ internal fun PullDetailPage(
                 )
             }
         } else if (view != null) {
+            error?.let { PullInlineError(it) }
             PullHero(view, number)
             PullDetailTabs(selection = tab, checks = asObjects(view["checks"]).size) { tab = it }
             actionNotice?.let {
@@ -305,10 +312,12 @@ internal fun PullDetailPage(
                     busy = actionBusy,
                     onMore = { scope.launch { loadTimeline(nextCursor, append = true) } },
                     onComment = {
-                        val body = commentDraft.trim()
-                        if (body.isNotEmpty()) {
-                            commentDraft = ""
-                            scope.launch { act(L10n.text("android.pulldetail.comment_posted.f79769cc"), "pulls.comment") { put("body", body) } }
+                        val submitted = commentDraft
+                        val body = submitted.trim()
+                        if (body.isNotEmpty() && !actionBusy) {
+                            scope.launch {
+                                if (act(L10n.text("android.pulldetail.comment_posted.f79769cc"), "pulls.comment") { put("body", body) } && commentDraft == submitted) commentDraft = ""
+                            }
                         }
                     },
                 )
@@ -332,12 +341,16 @@ internal fun PullDetailPage(
                 onCancelReview = { reviewMode = null; reviewDraft = "" },
                 onApprove = { scope.launch { act(L10n.text("android.pulldetail.review_approved.0978fd61"), "pulls.review") { put("verdict", "approve"); put("body", "") } } },
                 onSendReview = { mode ->
-                    val body = reviewDraft.trim()
-                    if (body.isNotEmpty()) {
-                        reviewMode = null
-                        reviewDraft = ""
+                    val submitted = reviewDraft
+                    val body = submitted.trim()
+                    if (body.isNotEmpty() && !actionBusy) {
                         val message = if (mode == "requestChanges") L10n.text("android.pulldetail.changes_requested.10a92a8a") else L10n.text("android.pulldetail.review_comment_posted.b23f0868")
-                        scope.launch { act(message, "pulls.review") { put("verdict", mode); put("body", body) } }
+                        scope.launch {
+                            if (act(message, "pulls.review") { put("verdict", mode); put("body", body) } && reviewMode == mode && reviewDraft == submitted) {
+                                reviewMode = null
+                                reviewDraft = ""
+                            }
+                        }
                     }
                 },
                 onReady = { scope.launch { act(L10n.text("android.pulldetail.ready_for_review.75c2a5c8"), "pulls.ready") {} } },

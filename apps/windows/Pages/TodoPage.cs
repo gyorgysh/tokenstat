@@ -53,6 +53,8 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private bool _showArchive;
     private bool _newestFirst;
     private bool _working;
+    private int _loadGeneration;
+    private bool _quietReading;
     private string? _selectedId;
     private string? _pendingCreateOp;
     private TextBox? _pendingCreateInput;
@@ -66,10 +68,13 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private Grid? _doingEntry;
     private bool _updatingFilters;
     private string? _pendingRunOp;
+    private JsonObject? _pendingRunParameters;
     private string? _runError;
     private string? _conflictId;
     private bool _confirmDelete;
     private bool _detailDirty;
+    private long _editRevision;
+    private string? _editorId;
     private ulong? _detailRevision;
     private TaskDraft? _draft;
     private TextBox? _dTitle;
@@ -143,7 +148,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             await LoadAsync();
             StartPolling();
         };
-        Unloaded += (_, _) => StopPolling();
+        Unloaded += (_, _) => { ++_loadGeneration; StopPolling(); };
     }
 
     /// <summary>
@@ -290,6 +295,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private void StartPolling()
     {
+        if (!IsLoaded) return;
         StopPolling();
         _poll = DispatcherQueue.CreateTimer();
         _poll.Interval = TimeSpan.FromSeconds(2);
@@ -364,13 +370,18 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private async Task LoadAsync(bool quiet = false)
     {
+        if (quiet && _quietReading) return;
+        if (quiet) _quietReading = true;
+        var generation = ++_loadGeneration;
         if (!quiet)
         {
             _working = true;
         }
         try
         {
-            _protocol = await ProtocolAsync();
+            var protocol = await ProtocolAsync();
+            if (generation != _loadGeneration || !IsLoaded) return;
+            _protocol = protocol;
             var cardsTask = CallTodoAsync(
                 "todo.list", new JsonObject { ["includeArchived"] = true });
             var runsTask = CallTodoAsync("automation.runs", new JsonObject());
@@ -378,6 +389,8 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             var backendsTask = CallTodoAsync("automation.backends", new JsonObject());
             var queueTask = CallTodoAsync("automation.queue", new JsonObject());
             await Task.WhenAll(cardsTask, runsTask, foldersTask, backendsTask, queueTask);
+            if (generation != _loadGeneration || !IsLoaded) return;
+            if (_detailDirty) SnapshotDraft();
             _cards = cardsTask.Result as JsonArray
                 ?? cardsTask.Result["cards"] as JsonArray
                 ?? new JsonArray();
@@ -421,6 +434,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 try { _defaultBudgetSeconds = budget.GetValue<ulong>(); } catch { /* keep */ }
             }
+            if (!quiet) _working = false;
             RefreshFilterLists(selectedFolderId, selectedBackendId);
             RaiseToolbarChangedIfNeeded();
             RenderBoard();
@@ -429,14 +443,15 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         catch (Exception ex)
         {
             Program.LogStartup("Tasks load/layout failed: " + ex);
-            if (!quiet)
+            if (!quiet && generation == _loadGeneration && IsLoaded)
             {
                 Banner(ex.Message);
             }
         }
         finally
         {
-            if (!quiet)
+            if (quiet) _quietReading = false;
+            if (!quiet && generation == _loadGeneration)
             {
                 _working = false;
             }
@@ -529,10 +544,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private string SelectedBackendId()
     {
         var index = _agentFilter.SelectedIndex;
-        if (index >= 1 && index - 1 < _backends.Count)
-        {
-            return _backends[index - 1].Id;
-        }
+        if (box?.Tag is string[] ids && index >= 1 && index - 1 < ids.Length) return ids[index - 1];
         return "";
     }
 
@@ -823,7 +835,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             _selectedId = id;
             _confirmDelete = false;
             _conflictId = null;
-            _runError = null;
+            if (_pendingRunOp is null) _runError = null;
             _detailDirty = false;
             _draft = null;
             _detailRevision = WorkbenchOps.Revision(card);
@@ -1037,6 +1049,8 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private void RenderDetail()
     {
+        if (_detailDirty) SnapshotDraft();
+        else _draft = null;
         if (!_detailDirty && SelectedCard() is JsonNode fresh)
         {
             _detailRevision = WorkbenchOps.Revision(fresh);
@@ -1085,7 +1099,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     /// </summary>
     private void SnapshotDraft()
     {
-        if (_dTitle is null)
+        if (_dTitle is null || _editorId != _selectedId)
         {
             return;
         }
@@ -1107,26 +1121,21 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private string ComboFolderId(ComboBox? box)
     {
         var index = box?.SelectedIndex ?? 0;
-        if (index >= 1 && index - 1 < _folders.Count)
-        {
-            return _folders[index - 1].Id;
-        }
+        if (box?.Tag is string[] ids && index >= 1 && index - 1 < ids.Length) return ids[index - 1];
         return "";
     }
 
     private string ComboBackendId(ComboBox? box)
     {
         var index = box?.SelectedIndex ?? 0;
-        if (index >= 1 && index - 1 < _backends.Count)
-        {
-            return _backends[index - 1].Id;
-        }
+        if (box?.Tag is string[] ids && index >= 1 && index - 1 < ids.Length) return ids[index - 1];
         return "";
     }
 
     private UIElement DetailCard(JsonNode card)
     {
         var id = Format.Text(card, "id");
+        _editorId = id;
         var body = new StackPanel { Spacing = Theme.SpaceM };
         var draft = _draft;
 
@@ -1135,7 +1144,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             Text = draft?.Title ?? Format.Text(card, "title"),
             PlaceholderText = L10n.Text("windows.todopage.title.7e8cd205"),
         };
-        title.TextChanged += (_, _) => _detailDirty = true;
+        title.TextChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         body.Children.Add(Labeled(L10n.Text("windows.todopage.title.7e8cd205"), title));
         _dTitle = title;
 
@@ -1147,7 +1156,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 96,
         };
-        prompt.TextChanged += (_, _) => _detailDirty = true;
+        prompt.TextChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         body.Children.Add(Labeled(L10n.Text("windows.todopage.prompt.5c391238"), prompt));
         _dPrompt = prompt;
 
@@ -1155,10 +1164,11 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         var folderNames = new List<string> { L10n.Text("windows.todopage.uncategorized.8d40d123") };
         folderNames.AddRange(_folders.Select(f => f.Name));
         folderBox.ItemsSource = folderNames;
+        folderBox.Tag = _folders.Select(folder => folder.Id).ToArray();
         var workspaceId = draft?.FolderId ?? Format.Text(card, "workspaceId");
         var folderIndex = _folders.FindIndex(f => f.Id == workspaceId);
         folderBox.SelectedIndex = folderIndex >= 0 ? folderIndex + 1 : 0;
-        folderBox.SelectionChanged += (_, _) => _detailDirty = true;
+        folderBox.SelectionChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         body.Children.Add(Labeled(L10n.Text("windows.todopage.folder.74ccd433"), folderBox));
         _dFolder = folderBox;
 
@@ -1170,7 +1180,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             "high" => "high",
             _ => "normal",
         };
-        priorityBox.SelectionChanged += (_, _) => _detailDirty = true;
+        priorityBox.SelectionChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         body.Children.Add(Labeled(L10n.Text("windows.todopage.priority.d60dbba0"), priorityBox));
         _dPriority = priorityBox;
 
@@ -1178,10 +1188,11 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         var backendNames = new List<string> { L10n.Text("windows.todopage.choose_an_agent.b6890bc2") };
         backendNames.AddRange(_backends.Select(b => b.Label));
         backendBox.ItemsSource = backendNames;
+        backendBox.Tag = _backends.Select(backend => backend.Id).ToArray();
         var backendId = draft?.BackendId ?? Format.Text(card, "backend");
         var backendIndex = _backends.FindIndex(b => b.Id == backendId);
         backendBox.SelectedIndex = backendIndex >= 0 ? backendIndex + 1 : 0;
-        backendBox.SelectionChanged += (_, _) => _detailDirty = true;
+        backendBox.SelectionChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         body.Children.Add(Labeled(L10n.Text("windows.todopage.agent.11b39c93"), backendBox));
         _dBackend = backendBox;
 
@@ -1190,7 +1201,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             Text = draft?.Model ?? Format.Text(card, "model"),
             PlaceholderText = L10n.Text("windows.todopage.default_model.3840d9d2"),
         };
-        model.TextChanged += (_, _) => _detailDirty = true;
+        model.TextChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         body.Children.Add(Labeled(L10n.Text("windows.todopage.model.5e2c614c"), model));
         _dModel = model;
 
@@ -1199,7 +1210,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             Text = draft?.Effort ?? Format.Text(card, "effort"),
             PlaceholderText = L10n.Text("windows.todopage.default_effort.58c96ef8"),
         };
-        effort.TextChanged += (_, _) => _detailDirty = true;
+        effort.TextChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         body.Children.Add(Labeled(L10n.Text("windows.todopage.effort.4387e5d3"), effort));
         _dEffort = effort;
 
@@ -1207,12 +1218,12 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             ? (draft.BudgetText, draft.BudgetUnit, draft.NoLimit)
             : WorkbenchOps.SplitBudget((ulong)Format.Long(card, "budgetSeconds"));
         var budget = new TextBox { Text = budgetValue, MinWidth = 100 };
-        budget.TextChanged += (_, _) => _detailDirty = true;
+        budget.TextChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         var unit = Chrome.BudgetUnits(budgetUnit);
         // Selection first, handler after: the initial pick is not an edit.
-        unit.SelectionChanged += (_, _) => _detailDirty = true;
+        unit.SelectionChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         var noLimitBox = new CheckBox { Content = L10n.Text("windows.todopage.no_limit.f7fcff0d"), IsChecked = noLimit };
-        noLimitBox.Click += (_, _) => _detailDirty = true;
+        noLimitBox.Click += (_, _) => { _detailDirty = true; ++_editRevision; };
         var budgetRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         budgetRow.Children.Add(budget);
         budgetRow.Children.Add(unit);
@@ -1320,6 +1331,8 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private async Task SaveDraftAsync(string id, bool force)
     {
+        if (_working || _selectedId != id) return;
+        var editRevision = _editRevision;
         var draft = _draft;
         if (draft is null)
         {
@@ -1385,10 +1398,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                     _conflictId = id;
                     Banner(L10n.Text("windows.todopage.this_task_changed_since_you_opened_it_comp.e4a26988"));
                     await LoadAsync(quiet: true);
-                    if (SelectedCard() is JsonNode conflicted)
-                    {
-                        _detailRevision = WorkbenchOps.Revision(conflicted);
-                    }
                     RenderBoard();
                     RenderDetail();
                     return;
@@ -1398,9 +1407,12 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 await CallTodoAsync("todo.update", parameters);
             }
-            _detailDirty = false;
-            _conflictId = null;
-            _draft = null;
+            if (_selectedId == id && editRevision == _editRevision)
+            {
+                _detailDirty = false;
+                _conflictId = null;
+                _draft = null;
+            }
             Notice(L10n.Text("windows.todopage.saved_0.8eb4b783", $"{cleanTitle}"));
         }
         catch (Exception ex)
@@ -1411,6 +1423,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         finally
         {
             _working = false;
+            if (IsLoaded) RenderDetail();
         }
         await LoadAsync(quiet: true);
         RenderBoard();
@@ -1432,6 +1445,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private async Task DeleteAsync(string id)
     {
+        if (_working) return;
         SnapshotDraft();
         _working = true;
         try
@@ -1451,10 +1465,13 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 await CallTodoAsync("todo.remove", new JsonObject { ["id"] = id });
             }
-            _selectedId = null;
-            _confirmDelete = false;
-            _draft = null;
-            _detailDirty = false;
+            if (_selectedId == id)
+            {
+                _selectedId = null;
+                _confirmDelete = false;
+                _draft = null;
+                _detailDirty = false;
+            }
             Notice(L10n.Text("windows.todopage.task_deleted.e954e713"));
         }
         catch (Exception ex)
@@ -1465,6 +1482,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         finally
         {
             _working = false;
+            if (IsLoaded) RenderDetail();
         }
         await LoadAsync(quiet: true);
         RenderBoard();
@@ -1480,7 +1498,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         var status = Format.Text(delegateNode, "status");
         var running = WorkbenchOps.IsRunning(delegateNode);
 
-        if (!string.IsNullOrEmpty(_runError))
+        if (!string.IsNullOrEmpty(_runError) && (_pendingRunOp is null || Format.Text(_pendingRunParameters, "id") == id))
         {
             body.Children.Add(Chrome.Banner(_runError, Theme.Warning, Symbol.Important));
             if (_pendingRunOp is not null)
@@ -1577,7 +1595,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = DateTimeOffset.FromUnixTimeMilliseconds(started).LocalDateTime.ToString("g"),
+                Text = Format.Instant(started)?.LocalDateTime.ToString("g") ?? L10n.Text("common.unknown"),
                 FontSize = 12,
                 Opacity = 0.68,
             });
@@ -1675,7 +1693,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             }
         }
         var card = SelectedCard();
-        if (card is null)
+        if (card is null || _selectedId != id)
         {
             return;
         }
@@ -1704,13 +1722,14 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                 _runError = null;
                 try
                 {
-                    await CallTodoAsync("todo.runTask", new JsonObject
+                    _pendingRunParameters = new JsonObject
                     {
                         ["id"] = id,
                         ["expectedRevision"] = revision.Value,
                         ["operationId"] = _pendingRunOp,
                         ["placement"] = placement,
-                    });
+                    };
+                    await CallTodoAsync("todo.runTask", _pendingRunParameters.DeepClone());
                     _pendingRunOp = null;
                     Notice(placement == "foreground"
                         ? L10n.Text("windows.todopage.foreground_run_started_in_a_terminal.c4cc5790")
@@ -1738,6 +1757,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         finally
         {
             _working = false;
+            if (IsLoaded) RenderDetail();
         }
         await LoadAsync(quiet: true);
         RenderBoard();
@@ -1778,34 +1798,12 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private async Task RetryRunAsync()
     {
         SnapshotDraft();
-        if (_pendingRunOp is null || _selectedId is null)
-        {
-            return;
-        }
-        var card = SelectedCard();
-        if (card is null)
-        {
-            return;
-        }
+        if (_working || _pendingRunOp is null || _pendingRunParameters is null) return;
         _working = true;
         try
         {
-            var revision = _detailRevision ?? await FreshRevisionAsync(_selectedId);
-            if (revision is null)
-            {
-                _runError = L10n.Text("windows.todopage.reload_this_task_before_retrying_the_run.b57793dc");
-                RenderDetail();
-                return;
-            }
-            // Same operation id as the first attempt: the host answers from
-            // the receipt when it already accepted the run.
-            await CallTodoAsync("todo.runTask", new JsonObject
-            {
-                ["id"] = _selectedId,
-                ["expectedRevision"] = revision.Value,
-                ["operationId"] = _pendingRunOp,
-                ["placement"] = "background",
-            });
+            // Reuse the original task, revision and placement as well as its receipt id.
+            await CallTodoAsync("todo.runTask", _pendingRunParameters.DeepClone());
             _pendingRunOp = null;
             _runError = null;
             Notice(L10n.Text("windows.todopage.the_run_is_confirmed.fa711bc2"));
@@ -1819,6 +1817,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         finally
         {
             _working = false;
+            if (IsLoaded) RenderDetail();
         }
         await LoadAsync(quiet: true);
         RenderBoard();
@@ -1860,6 +1859,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         finally
         {
             _working = false;
+            if (IsLoaded) RenderDetail();
         }
         await LoadAsync(quiet: true);
         RenderBoard();

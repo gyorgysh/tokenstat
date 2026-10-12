@@ -56,6 +56,7 @@ import ai.tokenstat.tokenstat.ui.tasks.BackendRef
 import ai.tokenstat.tokenstat.ui.tasks.FolderRef
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -154,6 +155,8 @@ fun WorkflowEditorScreen(
     var designing by remember { mutableStateOf(false) }
     var designTranscript by remember { mutableStateOf<String?>(null) }
 
+    fun canEditDraft() = loaded && !working && !designing && pendingID == null && created == null
+
     suspend fun readCurrent(id: String): WorkflowGraph? {
         val element = model.workspaceSection(peer, "workflow.get", buildJsonObject { put("id", id) })
         if (element is kotlinx.serialization.json.JsonNull) return null
@@ -170,7 +173,15 @@ fun WorkflowEditorScreen(
                         missing = true
                         error = L10n.text("android.workfloweditor.this_workflow_was_deleted_on_the_computer.ae1bafd3")
                     } else {
-                        baseline = fresh
+                        val previous = baseline
+                        if (previous == null || fields.matches(previous)) {
+                            baseline = fresh
+                            fields = WorkflowEditorDraft.fromGraph(fresh)
+                            conflict = false
+                        } else if (supportsEdits) {
+                            conflict = fresh.revision != previous.revision
+                        }
+                        missing = false
                         error = null
                     }
                 }
@@ -178,6 +189,31 @@ fun WorkflowEditorScreen(
         }
         loaded = true
         working = false
+    }
+
+    suspend fun resolveConflict(useComputerVersion: Boolean) {
+        val id = baseline?.id ?: return
+        if (working || designing) return
+        working = true
+        try {
+            val fresh = readCurrent(id)
+            if (fresh == null) {
+                missing = true
+                error = L10n.text("android.workfloweditor.this_workflow_was_deleted_on_the_computer.ae1bafd3")
+            } else {
+                baseline = fresh
+                if (useComputerVersion) fields = WorkflowEditorDraft.fromGraph(fresh)
+                conflict = false
+                missing = false
+                error = null
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = TunnelCopy.display(e.message ?: L10n.text("android.workfloweditor.the_request_failed.db4fb447"), hostLabel)
+        } finally {
+            working = false
+        }
     }
 
     suspend fun applySaved(updated: WorkflowGraph) {
@@ -192,7 +228,12 @@ fun WorkflowEditorScreen(
     /// A failed save is never retried blindly: the host may have applied
     /// it while the reply was lost. Re-read and compare instead.
     suspend fun recoverSave(submitted: WorkflowGraph, base: WorkflowGraph, message: String) {
-        val fresh = runCatching { readCurrent(base.id) }.getOrNull()
+        val fresh = try { readCurrent(base.id) } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = message
+            return
+        }
         if (fresh == null) {
             missing = true
             error = L10n.text("android.workfloweditor.this_workflow_was_deleted_on_the_computer.ae1bafd3")
@@ -229,9 +270,13 @@ fun WorkflowEditorScreen(
                     })
                 }
                 applySaved(WorkflowGraph.parse(element as JsonObject))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 recoverSave(graph, base, TunnelCopy.display(e.message ?: L10n.text("android.workfloweditor.the_request_failed.db4fb447"), hostLabel))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = e.message ?: L10n.text("android.workfloweditor.check_this_workflow_s_settings.e97a5e74")
         } finally {
@@ -260,6 +305,8 @@ fun WorkflowEditorScreen(
                 put("workflow", graph.toJson())
             })
             confirmCreated(WorkflowGraph.parse(element as JsonObject))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val message = (e.message ?: "").lowercase()
             val existing = runCatching { readCurrent(id) }.getOrNull()
@@ -289,6 +336,8 @@ fun WorkflowEditorScreen(
                 canRetryCreate = true
                 error = L10n.text("android.workfloweditor.this_workflow_is_not_in_the_folder_yet_it.cbedf44d")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = TunnelCopy.display(e.message ?: L10n.text("android.workfloweditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
@@ -313,7 +362,7 @@ fun WorkflowEditorScreen(
     }
 
     suspend fun design() {
-        if (designPrompt.trim().isEmpty() || designing) return
+        if (designPrompt.trim().isEmpty() || !canEditDraft()) return
         designing = true
         error = null
         try {
@@ -329,6 +378,8 @@ fun WorkflowEditorScreen(
             fields = fields.applyDesign(result.workflow.layoutIfNeeded())
             designTranscript = result.transcript.ifBlank { null }
             notice = L10n.text("android.workfloweditor.drafted_from_your_prompt_review_the_steps.ce4abf58")
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = TunnelCopy.display(e.message ?: L10n.text("android.workfloweditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
@@ -337,6 +388,7 @@ fun WorkflowEditorScreen(
     }
 
     fun updateNode(id: String, transform: (WorkflowNode) -> WorkflowNode) {
+        if (!canEditDraft()) return
         fields = fields.copy(nodes = fields.nodes.map { if (it.id == id) transform(it) else it })
     }
 
@@ -348,9 +400,9 @@ fun WorkflowEditorScreen(
         fields.starterID != WorkflowEditorDraft.BLANK_STARTER_ID ||
         fields.schedule.scheduleKind != ai.tokenstat.tokenstat.ui.automations.ScheduleKind.ONCE ||
         !fields.enabled
-    val canSave = loaded && !working && !missing && !conflict && pendingID == null &&
+    val canSave = loaded && !working && !designing && !missing && !conflict && pendingID == null &&
         created == null && fields.validation == null && dirty && !isCreate
-    val canCreate = isCreate && loaded && !working && pendingID == null && created == null && fields.validation == null
+    val canCreate = isCreate && loaded && !working && !designing && pendingID == null && created == null && fields.validation == null
     val recipes = remember(backends) { WorkflowRecipes.recipes(backends) }
 
     BackHandler { onBack() }
@@ -400,12 +452,12 @@ fun WorkflowEditorScreen(
                 fields.name,
                 { fields = fields.copy(name = it) },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !working && pendingID == null,
+                enabled = canEditDraft(),
                 label = { Text(L10n.text("android.workfloweditor.name.dcd1d522")) },
             )
-            WorkflowFolderChips(fields = fields, onFields = { fields = it }, folders = folders)
+            WorkflowFolderChips(fields = fields, onFields = { if (canEditDraft()) fields = it }, folders = folders)
             if (fields.schedule.builtSchedule.repeats) {
-                BrandToggleChip(L10n.text("common.enabled"), fields.enabled, { fields = fields.copy(enabled = !fields.enabled) })
+                BrandToggleChip(L10n.text("common.enabled"), fields.enabled, { if (canEditDraft()) fields = fields.copy(enabled = !fields.enabled) })
             } else {
                 Text(L10n.text("android.workfloweditor.once_workflows_run_from_run.ec0024bc"), style = TsType.caption, color = LocalTsColors.current.textSecondary)
             }
@@ -413,29 +465,29 @@ fun WorkflowEditorScreen(
                 schedule = fields.schedule,
                 onSchedule = { fields = fields.copy(schedule = it) },
                 timezoneCaption = HostScheduleClock.timeCaption(hostLabel, timezone.ifBlank { null }),
-                enabled = !working && pendingID == null,
+                enabled = canEditDraft(),
             )
             Text(L10n.text("android.workfloweditor.time_limit.e592a9ca"), style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
-            BrandToggleChip(L10n.text("android.workfloweditor.no_time_limit.436b4b94"), fields.budget.noTimeLimit, { fields = fields.copy(budget = fields.budget.copy(noTimeLimit = !fields.budget.noTimeLimit)) })
+            BrandToggleChip(L10n.text("android.workfloweditor.no_time_limit.436b4b94"), fields.budget.noTimeLimit, { if (canEditDraft()) fields = fields.copy(budget = fields.budget.copy(noTimeLimit = !fields.budget.noTimeLimit)) })
             if (!fields.budget.noTimeLimit) {
                 TimeLimitChips(
                     minutesText = fields.budget.budgetMinutes,
                     noLimit = false,
-                    onMinutesChange = { fields = fields.copy(budget = fields.budget.copy(budgetMinutes = it)) },
+                    onMinutesChange = { if (canEditDraft()) fields = fields.copy(budget = fields.budget.copy(budgetMinutes = it, originalSeconds = null)) },
                     onNoLimitChange = {},
                 )
                 OutlinedTextField(
                     fields.budget.budgetMinutes,
-                    { fields = fields.copy(budget = fields.budget.copy(budgetMinutes = it)) },
+                    { fields = fields.copy(budget = fields.budget.copy(budgetMinutes = it, originalSeconds = null)) },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !working && pendingID == null,
+                    enabled = canEditDraft(),
                     label = { Text(L10n.text("android.workfloweditor.minutes.4f846a84")) },
                 )
             }
             if (isCreate) {
                 StarterSection(
                     fields = fields,
-                    onFields = { fields = it },
+                    onFields = { if (canEditDraft()) fields = it },
                     recipes = recipes,
                     designPrompt = designPrompt,
                     onDesignPrompt = { designPrompt = it },
@@ -448,13 +500,14 @@ fun WorkflowEditorScreen(
                     designing = designing,
                     designTranscript = designTranscript,
                     backends = backends,
-                    enabled = !working && pendingID == null,
+                    enabled = canEditDraft(),
                     onDesign = { scope.launch { design() } },
                 )
             }
             StepListSection(
                 fields = fields,
-                onAddStep = { kind ->
+                onAddStep = addStep@ { kind ->
+                    if (!canEditDraft()) return@addStep
                     val issue = WorkflowGraphRules.additionIssue(kind, fields.nodes.size)
                     if (issue != null) {
                         error = issue
@@ -491,7 +544,7 @@ fun WorkflowEditorScreen(
                 onSelectStep = { selectedStep = if (selectedStep == it) null else it },
                 backends = backendRefs,
                 automations = automations,
-                enabled = !working && pendingID == null,
+                enabled = canEditDraft(),
             )
             if (fields.validation != null) {
                 Text(fields.validation!!, style = TsType.caption, color = LocalTsColors.current.danger)
@@ -503,23 +556,10 @@ fun WorkflowEditorScreen(
                         Text(L10n.text("android.workfloweditor.the_computer_copy_moved_under_your_draft_s.30e63e75"), style = TsType.caption, color = LocalTsColors.current.textSecondary)
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                             TsSecondaryButton(label = L10n.text("android.workfloweditor.use_computer_version.f0d6599f"), small = true, onClick = {
-                                scope.launch {
-                                    val fresh = readCurrent(base.id)
-                                    if (fresh != null) {
-                                        baseline = fresh
-                                        fields = WorkflowEditorDraft.fromGraph(fresh)
-                                    }
-                                    conflict = false
-                                    error = null
-                                }
+                                scope.launch { resolveConflict(useComputerVersion = true) }
                             })
                             TsSecondaryButton(label = L10n.text("android.workfloweditor.keep_my_draft.cdb80bb9"), small = true, onClick = {
-                                scope.launch {
-                                    val fresh = readCurrent(base.id)
-                                    if (fresh != null) baseline = fresh
-                                    conflict = false
-                                    error = null
-                                }
+                                scope.launch { resolveConflict(useComputerVersion = false) }
                             })
                         }
                     }
@@ -537,6 +577,8 @@ fun WorkflowEditorScreen(
                             scope.launch {
                                 try {
                                     submitCreation(fields.makeGraph(id), id)
+                                } catch (e: CancellationException) {
+                                    throw e
                                 } catch (e: Exception) {
                                     error = e.message ?: L10n.text("android.workfloweditor.check_this_workflow_s_settings.e97a5e74")
                                 }
@@ -554,6 +596,8 @@ fun WorkflowEditorScreen(
                             val graph = fields.makeGraph(id)
                             pendingID = id
                             scope.launch { submitCreation(graph, id) }
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             error = e.message ?: L10n.text("android.workfloweditor.check_this_workflow_s_settings.e97a5e74")
                         }
@@ -865,16 +909,19 @@ private fun StepDetailFields(
                     enabled = enabled,
                     label = { Text(L10n.text("android.workfloweditor.url.e7a241de")) },
                 )
+                var headersText by remember(node.id) {
+                    mutableStateOf(node.headers?.entries?.joinToString("\n") { (k, v) -> "$k: $v" }.orEmpty())
+                }
+                LaunchedEffect(node.headers) {
+                    if (parseWorkflowHeaders(headersText) != node.headers) {
+                        headersText = node.headers?.entries?.joinToString("\n") { (k, v) -> "$k: $v" }.orEmpty()
+                    }
+                }
                 OutlinedTextField(
-                    node.headers?.entries?.joinToString("\n") { (k, v) -> "$k: $v" } ?: "",
+                    headersText,
                     { text ->
-                        onUpdate {
-                            it.copy(headers = text.lines().mapNotNull { line ->
-                                val name = line.substringBefore(':').trim()
-                                val value = line.substringAfter(':', "").trim()
-                                if (name.isEmpty() || !line.contains(':')) null else name to value
-                            }.toMap().ifEmpty { null })
-                        }
+                        headersText = text
+                        onUpdate { it.copy(headers = parseWorkflowHeaders(text)) }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = enabled,
@@ -947,13 +994,9 @@ private fun StepDetailFields(
 
 @Composable
 private fun TitleField(node: WorkflowNode, onUpdate: ((WorkflowNode) -> WorkflowNode) -> Unit, enabled: Boolean) {
-    var title by remember(node.id) { mutableStateOf(node.title) }
     OutlinedTextField(
-        title,
-        {
-            title = it
-            onUpdate { node -> node.copy(title = title) }
-        },
+        node.title,
+        { title -> onUpdate { it.copy(title = title) } },
         modifier = Modifier.fillMaxWidth(),
         enabled = enabled,
         label = { Text(L10n.text("android.workfloweditor.step_title.2e9af9d4")) },
@@ -962,16 +1005,17 @@ private fun TitleField(node: WorkflowNode, onUpdate: ((WorkflowNode) -> Workflow
 
 @Composable
 private fun PromptField(node: WorkflowNode, onUpdate: ((WorkflowNode) -> WorkflowNode) -> Unit, enabled: Boolean) {
-    var prompt by remember(node.id) { mutableStateOf(node.prompt ?: "") }
     OutlinedTextField(
-        prompt,
-        {
-            prompt = it
-            onUpdate { node -> node.copy(prompt = prompt.ifBlank { null }) }
-        },
+        node.prompt.orEmpty(),
+        { prompt -> onUpdate { it.copy(prompt = prompt.ifBlank { null }) } },
         modifier = Modifier.fillMaxWidth(),
         enabled = enabled,
         label = { Text(L10n.text("android.workfloweditor.edit_prompt.da00ce14")) },
         minLines = 3,
     )
 }
+
+internal fun parseWorkflowHeaders(text: String): Map<String, String>? = text.lines().mapNotNull { line ->
+    val name = line.substringBefore(':').trim()
+    if (name.isEmpty() || !line.contains(':')) null else name to line.substringAfter(':').trim()
+}.toMap().ifEmpty { null }

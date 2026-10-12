@@ -232,15 +232,14 @@ struct IOSCodeTextView: UIViewRepresentable {
                     document.selection = next
                 }
             case .replaceAll:
-                guard !isComposing(view), !find.matches.isEmpty else { return }
+                guard !isComposing(view), !find.matches.isEmpty,
+                      let wholeDocument = textRange(NSRange(location: 0, length: (view.text as NSString).length), in: view)
+                else { return }
                 // One undo for the whole scope, which is this open document.
+                // The bounded match list is only for navigation/highlighting.
+                let replacement = find.replacingAll(in: view.text)
                 view.undoManager?.beginUndoGrouping()
-                for range in find.matches.reversed() {
-                    view.selectedRange = range
-                    if let textRange = textRange(range, in: view) {
-                        view.replace(textRange, withText: find.replaceText)
-                    }
-                }
+                view.replace(wholeDocument, withText: replacement)
                 view.undoManager?.endUndoGrouping()
                 syncedText = view.text
                 document.setText(view.text)

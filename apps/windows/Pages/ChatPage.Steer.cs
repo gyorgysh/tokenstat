@@ -147,7 +147,8 @@ internal sealed partial class ChatPage
     private async Task<bool> TryParkSteerAsync(string chat, string text, bool sendNext, string[] attachmentIds)
     {
         var generation = _openGeneration;
-        bool Current() => OpenChatIs(chat) && generation == _openGeneration;
+        var accountGeneration = AppServices.AccountGeneration;
+        bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
         if (sendNext || attachmentIds.Length > 0 || text.Length == 0 || !Busy()) return false;
         if (SteerUnsupported()) return false;
         var backend = Format.Text(_openChat, "backend");
@@ -193,7 +194,10 @@ internal sealed partial class ChatPage
     private void ApplyOpenChat(string chatId, bool wasBusy, bool transcriptChanged)
     {
         var previous = PendingSteerText(_openChat);
-        _openChat = FindChat(chatId);
+        var latest = FindChat(chatId);
+        var settingsChanged = Format.Long(_openChat, "sendRevision") != Format.Long(latest, "sendRevision")
+            || !JsonNode.DeepEquals(_openChat?["routing"], latest?["routing"]);
+        _openChat = latest;
         _running = Format.Flag(_openChat, "running");
         _started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
         if (_titleBox.FocusState == FocusState.Unfocused)
@@ -201,7 +205,7 @@ internal sealed partial class ChatPage
             _titleBox.Text = Format.Text(_openChat, "title", L10n.Text("windows.chatpage_steer.new_chat.db18382a"));
         }
         var note = PendingSteerText(_openChat);
-        if (wasBusy != Busy() || previous != note)
+        if (wasBusy != Busy() || previous != note || settingsChanged)
         {
             PaintConversation();
         }

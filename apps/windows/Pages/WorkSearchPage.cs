@@ -456,8 +456,19 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Content = card,
         };
-        var section = kind == "conversation" ? WorkspaceSection.Chat : WorkspaceSection.Sessions;
-        open.Click += (_, _) => AppServices.OpenWorkspace?.Invoke(workspaceId, section);
+        var itemId = Format.Text(reference, "itemId");
+        open.Click += (_, _) =>
+        {
+            if (kind == "conversation" && itemId.Length > 0)
+                AppServices.OpenConversation?.Invoke(workspaceId, itemId);
+            else AppServices.OpenWorkspace?.Invoke(workspaceId, kind switch
+            {
+                "conversation" => WorkspaceSection.Chat,
+                "commit" => WorkspaceSection.History,
+                "savedDiff" => WorkspaceSection.Changes,
+                _ => WorkspaceSection.Launcher,
+            });
+        };
         return open;
     }
 
@@ -485,11 +496,11 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         {
             foreach (var mark in marks)
             {
-                var start = (int)Format.Long(mark, "location");
-                var length = (int)Format.Long(mark, "length");
-                if (start >= 0 && length > 0 && start + length <= excerpt.Length)
+                var start = Format.Long(mark, "location");
+                var length = Format.Long(mark, "length");
+                if (start >= 0 && start <= excerpt.Length && length > 0 && length <= excerpt.Length - start)
                 {
-                    ranges.Add((start, length));
+                    ranges.Add(((int)start, (int)length));
                 }
             }
         }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.ssh
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -119,4 +121,33 @@ class SshSessionsTest {
         assertEquals(listOf("a"), state.sessionsFor("host_1").map { it.id })
         assertFalse(state.sessions.value.isEmpty())
     }
+
+    @Test fun failedCloseKeepsTheShellVisibleAndRetryable() = runTest {
+        var fail = true
+        val state = SshConnectionState { _, _ ->
+            if (fail) throw IllegalStateException("Close failed")
+            buildJsonObject { put("closed", true) }
+        }
+        val shell = entry("a")
+        state.adopt(shell)
+        state.close(shell)
+        assertEquals(listOf(shell), state.sessions.value)
+        assertEquals("Close failed", state.closeError.value)
+        fail = false
+        state.close(shell)
+        assertTrue(state.sessions.value.isEmpty())
+        assertNull(state.closeError.value)
+    }
+
+    @Test fun cancelledCloseKeepsTheShellAndPropagatesCancellation() = runTest {
+        val state = SshConnectionState { _, _ -> throw CancellationException("Cancelled") }
+        val shell = entry("a")
+        state.adopt(shell)
+        try {
+            state.close(shell)
+            throw AssertionError("Cancellation must propagate")
+        } catch (_: CancellationException) { }
+        assertEquals(listOf(shell), state.sessions.value)
+    }
+
 }

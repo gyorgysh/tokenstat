@@ -15,6 +15,8 @@ struct JSONValueTests {
         check(roundTrip(.null) == .null, "null")
         check(roundTrip(.bool(true)) == .bool(true), "bool")
         check(roundTrip(.int(7)) == .int(7), "int stays an int")
+        check(roundTrip(.uint(UInt64.max)) == .uint(UInt64.max), "large unsigned integers retain exact bits")
+        check(roundTrip(.uint(UInt64.max - 1)) == .uint(UInt64.max - 1), "adjacent large integers stay distinct")
         check(roundTrip(.double(2.5)) == .double(2.5), "double")
         check(roundTrip(.string("keep me")) == .string("keep me"), "string")
         check(

@@ -55,6 +55,8 @@ internal sealed class TerminalSurface : Grid
     private async Task InitializeAsync()
     {
         await _lifecycle.WaitAsync();
+        var ready = _ready;
+        var generation = _generation;
         var claimed = false;
         var started = false;
         try
@@ -63,7 +65,6 @@ internal sealed class TerminalSurface : Grid
             _starting = true;
             claimed = true;
             var web = _web;
-            var generation = _generation;
             await web.EnsureCoreWebView2Async(await WebViewEnvironment.GetAsync());
             if (_closed || generation != _generation || !ReferenceEquals(web, _web))
             {
@@ -92,7 +93,7 @@ internal sealed class TerminalSurface : Grid
                     {
                         Rows = Math.Clamp(message.GetProperty("rows").GetInt32(), 5, 200);
                         Cols = Math.Clamp(message.GetProperty("cols").GetInt32(), 20, 400);
-                        if (type == "ready") { _ready.TrySetResult(); SendTheme(); }
+                        if (type == "ready") { ready.TrySetResult(); SendTheme(); }
                         var rows = Rows; var cols = Cols;
                         await _resizeGate.WaitAsync();
                         try
@@ -106,16 +107,21 @@ internal sealed class TerminalSurface : Grid
                     {
                         var selection = message.GetProperty("selection").GetString() ?? "";
                         var menu = new MenuFlyout();
-                        ContextMenus.Add(menu, L10n.Text("common.copy"), () =>
+                        ContextMenus.AddAsync(menu, L10n.Text("common.copy"), () =>
                         {
                             var data = new DataPackage(); data.SetText(selection); Clipboard.SetContent(data);
+                            return Task.CompletedTask;
                         }, () => selection.Length > 0);
                         ContextMenus.AddAsync(menu, L10n.Text("windows.terminalsurface.paste.f3380f7b"), async () =>
                         {
                             try
                             {
                                 var data = Clipboard.GetContent();
-                                if (data.Contains(StandardDataFormats.Text)) Paste(await data.GetTextAsync());
+                                if (data.Contains(StandardDataFormats.Text))
+                                {
+                                    var text = await data.GetTextAsync();
+                                    if (!_closed && generation == _generation) Paste(text);
+                                }
                             }
                             catch (Exception ex) { Failed?.Invoke(ex.Message); }
                         });
@@ -134,7 +140,11 @@ internal sealed class TerminalSurface : Grid
                     else if (type == "pasteRequest")
                     {
                         var content = Clipboard.GetContent();
-                        if (content.Contains(StandardDataFormats.Text)) Paste(await content.GetTextAsync());
+                        if (content.Contains(StandardDataFormats.Text))
+                        {
+                            var text = await content.GetTextAsync();
+                            if (!_closed && generation == _generation) Paste(text);
+                        }
                     }
                     else if (type is "input" or "binary")
                     {
@@ -155,8 +165,8 @@ internal sealed class TerminalSurface : Grid
         }
         catch (Exception ex)
         {
-            _ready.TrySetException(ex);
-            if (!_closed) Failed?.Invoke(ex.Message);
+            ready.TrySetException(ex);
+            if (!_closed && generation == _generation) Failed?.Invoke(ex.Message);
         }
         finally
         {

@@ -94,7 +94,7 @@ struct DeviceAccessRequestSheet: View {
                     .buttonStyle(AccentButtonStyle())
             }
         }
-        .disabled(isAnswering)
+        .disabled(isAnswering || model.answeringIDs.contains(request.id))
     }
 
     private func answer(view: Bool, control: Bool) {

@@ -11,6 +11,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -181,7 +183,7 @@ private fun TsCapsuleButton(
             .clip(buttonShape)
             .background(if (pressed) pressedFill else fill)
             .border(if (pressed) pressedStroke else stroke, buttonShape)
-            .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .heightIn(min = if (small) 0.dp else 48.dp)
             .padding(horizontal = if (small) 10.dp else 20.dp, vertical = if (small) 4.dp else 6.dp)
             .alpha(if (pressed) 0.85f else 1f),
@@ -224,7 +226,7 @@ fun <T> SegmentedCapsulePicker(
                     .weight(1f)
                     .clip(RoundedCornerShape(7.dp))
                     .background(if (active) colors.accentSoft else Color.Transparent)
-                    .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
+                    .selectable(selected = active, role = Role.Tab, indication = null, interactionSource = remember { MutableInteractionSource() }) {
                         onSelect(value)
                     }
                     .padding(vertical = 6.dp),

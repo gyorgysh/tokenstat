@@ -14,6 +14,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,9 +68,9 @@ fun selectedConcurrentPreset(countText: String): UInt? {
 @Composable
 fun ChoiceChip(title: String, isSelected: Boolean, onSelect: () -> Unit, modifier: Modifier = Modifier) {
     if (isSelected) {
-        TsAccentButton(label = title, onClick = onSelect, modifier = modifier, small = true)
+        TsAccentButton(label = title, onClick = onSelect, modifier = modifier.semantics { selected = isSelected }, small = true)
     } else {
-        TsSecondaryButton(label = title, onClick = onSelect, modifier = modifier, small = true)
+        TsSecondaryButton(label = title, onClick = onSelect, modifier = modifier.semantics { selected = isSelected }, small = true)
     }
 }
 
@@ -76,7 +80,7 @@ fun ChoiceChip(title: String, isSelected: Boolean, onSelect: () -> Unit, modifie
 /// chip and the row stays in theme.
 @Composable
 fun BrandToggleChip(title: String, isOn: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
-    ChoiceChip(title = title, isSelected = isOn, onSelect = onToggle, modifier = modifier)
+    ChoiceChip(title = title, isSelected = isOn, onSelect = onToggle, modifier = modifier.semantics { toggleableState = ToggleableState(isOn) })
 }
 
 /// Minutes as chips plus the No limit chip, wrapping like the Apple

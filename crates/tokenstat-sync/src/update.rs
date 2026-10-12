@@ -630,8 +630,7 @@ pub fn is_windows_app_zip(name: &str, arch: &str) -> bool {
     if !lower.ends_with(".zip") || lower.ends_with(".sha256") {
         return false;
     }
-    let needle = format!("-windows-{arch}");
-    lower.contains(&needle)
+    lower.starts_with("tokenstat-") && lower.ends_with(&format!("-windows-{arch}.zip"))
 }
 
 /// Download the release's disk image and prove it is the published one.
@@ -671,7 +670,9 @@ pub fn download_app_image() -> Result<PathBuf, UpdateError> {
     let expected = expected_sha256(&String::from_utf8_lossy(&sums_bytes), name)
         .ok_or_else(|| UpdateError::Message(format!("SHA256SUMS has no entry for {name}")))?;
 
-    let path = tempfile_dir()?.join(name);
+    let directory = tempfile_dir()?;
+    let mut cleanup = StagingCleanup(Some(directory.clone()));
+    let path = directory.join(name);
     let actual = stream_to_file_capped(
         download_response(&client, url, None)?,
         &path,
@@ -684,6 +685,7 @@ pub fn download_app_image() -> Result<PathBuf, UpdateError> {
             "checksum mismatch for {name}: expected {expected}, got {actual}"
         )));
     }
+    cleanup.0 = None; // The native installer owns the successful download.
     Ok(path)
 }
 
@@ -722,7 +724,9 @@ fn download_windows_zip(check: UpdateCheck) -> Result<PathBuf, UpdateError> {
     let expected = expected_sha256(&String::from_utf8_lossy(&sums_bytes), name)
         .ok_or_else(|| UpdateError::Message(format!("SHA256SUMS has no entry for {name}")))?;
 
-    let path = tempfile_dir()?.join(name);
+    let directory = tempfile_dir()?;
+    let mut cleanup = StagingCleanup(Some(directory.clone()));
+    let path = directory.join(name);
     let actual = stream_to_file_capped(
         download_response(&client, url, check.app_win_api_url.as_deref())?,
         &path,
@@ -735,6 +739,7 @@ fn download_windows_zip(check: UpdateCheck) -> Result<PathBuf, UpdateError> {
             "checksum mismatch for {name}: expected {expected}, got {actual}"
         )));
     }
+    cleanup.0 = None; // The native installer owns the successful download.
     Ok(path)
 }
 
@@ -933,8 +938,40 @@ pub fn apply_update() -> Result<ApplyReport, UpdateError> {
 /// number and that `--help` says "tokenstat", which both binaries do. The next
 /// service restart then runs the CLI as the daemon. So the path is a
 /// parameter, and the one shape it is allowed to have is checked below.
+fn update_lock(dest: &Path) -> Result<fs::File, UpdateError> {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dest.with_extension("update.lock"))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(UpdateError::Message(
+            "another update is already running for this installation".into(),
+        )),
+        Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
+    }
+}
+
+struct StagingCleanup(Option<PathBuf>);
+impl Drop for StagingCleanup {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+}
+
 pub fn apply_update_to(dest: &Path) -> Result<ApplyReport, UpdateError> {
     require_cli_path(dest)?;
+    if !is_safe_replace_path(dest) {
+        return Err(UpdateError::Message(format!(
+            "refusing to replace {}: update this installation through its package manager",
+            dest.display()
+        )));
+    }
+    let _lock = update_lock(dest)?;
     let check = check_latest()?;
     if !check.newer {
         return Err(UpdateError::Message(format!(
@@ -966,6 +1003,7 @@ pub fn apply_update_to(dest: &Path) -> Result<ApplyReport, UpdateError> {
         .ok_or_else(|| UpdateError::Message(format!("SHA256SUMS has no entry for {asset_name}")))?;
 
     let tmp = tempfile_dir()?;
+    let _cleanup = StagingCleanup(Some(tmp.clone()));
     let archive_path = tmp.join(asset_name);
     let actual = stream_to_file_capped(
         download_response(&client, asset_url, check.asset_api_url.as_deref())?,
@@ -1117,12 +1155,12 @@ fn run_probe(bin: &Path, args: &[&str], timeout: Duration) -> Result<(bool, Stri
     ));
     let mut child = spawn_probe(bin, args, &out_path)?;
 
-    let deadline = SystemTime::now() + timeout;
+    let started = std::time::Instant::now();
     let status = loop {
         match child.try_wait()? {
             Some(status) => break status,
             None => {
-                if SystemTime::now() >= deadline {
+                if started.elapsed() >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(UpdateError::Message(format!(
@@ -1739,15 +1777,15 @@ fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
         let path = entry.path()?.into_owned();
         reject_unsafe_archive_path(&path)?;
         let out = dest.join(&path);
-        if kind.is_dir() {
-            fs::create_dir_all(&out)?;
-            continue;
-        }
         files += 1;
         if files > EXTRACT_MAX_FILES {
             return Err(UpdateError::Message(format!(
-                "archive contains more than {EXTRACT_MAX_FILES} files; refusing to extract"
+                "archive contains more than {EXTRACT_MAX_FILES} entries; refusing to extract"
             )));
+        }
+        if kind.is_dir() {
+            fs::create_dir_all(&out)?;
+            continue;
         }
         if let Some(parent) = out.parent() {
             fs::create_dir_all(parent)?;
@@ -1955,8 +1993,12 @@ fn replace_executable(src: &Path, dest: &Path) -> Result<(), UpdateError> {
     };
 
     if let Err(err) = fs::rename(&staged, dest) {
-        if had_old {
-            let _ = fs::rename(&old, dest);
+        if had_old && let Err(rollback) = fs::rename(&old, dest) {
+            return Err(UpdateError::Message(format!(
+                "could not install the new binary: {err}; could not restore {} from {}: {rollback}",
+                dest.display(),
+                old.display()
+            )));
         }
         let _ = fs::remove_file(&staged);
         return Err(UpdateError::Message(format!(
@@ -1979,13 +2021,18 @@ fn replace_executable(src: &Path, dest: &Path) -> Result<(), UpdateError> {
                 Err(e) => e.to_string(),
             };
             if had_old {
-                let _ = fs::remove_file(dest);
-                let _ = fs::rename(&old, dest);
+                fs::remove_file(dest).and_then(|()| fs::rename(&old, dest)).map_err(|rollback| UpdateError::Message(format!("the new binary failed: {detail}; could not restore {} from {}: {rollback}", dest.display(), old.display())))?;
                 return Err(UpdateError::Message(format!(
                     "the new binary did not run once installed, so the previous one was \
                      restored: {detail}"
                 )));
             }
+            fs::remove_file(dest).map_err(|error| {
+                UpdateError::Message(format!(
+                    "the new binary failed: {detail}; could not remove {}: {error}",
+                    dest.display()
+                ))
+            })?;
             Err(UpdateError::Message(format!(
                 "the new binary did not run once installed: {detail}"
             )))
@@ -2930,5 +2977,68 @@ mod tests {
         let path = std::env::var("TOKENSTAT_SIGNED_BIN").ok()?;
         let path = PathBuf::from(path);
         if path.is_file() { Some(path) } else { None }
+    }
+    #[test]
+    fn simultaneous_updates_cannot_share_staging_and_backup_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("tokenstat");
+        let held = update_lock(&dest).unwrap();
+        assert!(update_lock(&dest).is_err());
+        drop(held);
+        assert!(update_lock(&dest).is_ok());
+    }
+
+    #[test]
+    fn abandoned_download_directories_are_cleaned_up() {
+        let dir = tempfile_dir().unwrap();
+        let cleanup = StagingCleanup(Some(dir.clone()));
+        fs::write(dir.join("partial"), b"partial download").unwrap();
+        drop(cleanup);
+        assert!(!dir.exists());
+        assert!(!is_windows_app_zip(
+            "tokenstat-1.6.0-windows-x64-symbols.zip",
+            "x64"
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_first_install_removes_the_broken_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let candidate = fake_binary(dir.path(), "candidate", "exit 1");
+        let dest = dir.path().join("tokenstat");
+        assert!(replace_executable(&candidate, &dest).is_err());
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn archive_directory_entries_count_towards_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("release.tar.gz");
+        let encoder = flate2::write::GzEncoder::new(
+            fs::File::create(&archive).unwrap(),
+            flate2::Compression::default(),
+        );
+        let mut builder = tar::Builder::new(encoder);
+        for n in 0..=EXTRACT_MAX_FILES {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Directory);
+            header.set_size(0);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, format!("d{n}/"), &[][..])
+                .unwrap();
+        }
+        builder.into_inner().unwrap().finish().unwrap();
+        let dest = dir.path().join("extract");
+        fs::create_dir(&dest).unwrap();
+        assert!(
+            extract_tar_gz(&archive, &dest)
+                .unwrap_err()
+                .to_string()
+                .contains("entries")
+        );
+        assert!(!dest.join(format!("d{EXTRACT_MAX_FILES}")).exists());
     }
 }

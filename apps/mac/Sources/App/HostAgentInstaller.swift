@@ -429,18 +429,11 @@ enum HostAgentInstaller {
 
     @discardableResult
     private static func run(_ executable: String, _ arguments: [String]) throws -> String {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.standardOutput = output
-        process.standardError = output
-        try process.run()
-        process.waitUntilExit()
-        let text = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        guard process.terminationStatus == 0 else {
+        let result = try ProcessOutput.run(executable, arguments)
+        let text = result.output + result.errors
+        guard result.status == 0 else {
             throw InstallerError.commandFailed(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? L10n.text("apple.hostagentinstaller.launchctl_failed_with_status_0.03e545fd", "\(process.terminationStatus)")
+                ? L10n.text("apple.hostagentinstaller.launchctl_failed_with_status_0.03e545fd", "\(result.status)")
                 : text.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return text

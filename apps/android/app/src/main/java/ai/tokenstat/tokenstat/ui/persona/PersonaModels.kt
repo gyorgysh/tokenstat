@@ -3,6 +3,7 @@ package ai.tokenstat.tokenstat.ui.persona
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -137,7 +138,7 @@ fun personaSaveParams(persona: ChatPersona, workspaceId: String?): JsonObject = 
             if (persona.workspaceId != null) put("workspaceId", persona.workspaceId) else put("workspaceId", JsonNull)
             put("name", persona.name)
             put("systemPrompt", persona.systemPrompt)
-            put("seed", persona.seed.toLong())
+            put("seed", Json.parseToJsonElement(persona.seed.toString()))
         },
     )
     if (workspaceId != null) put("workspaceId", workspaceId)

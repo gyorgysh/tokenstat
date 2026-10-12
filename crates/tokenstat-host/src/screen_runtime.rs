@@ -141,11 +141,11 @@ pub(crate) fn revoke_peer(peer: &str, view: bool, control: bool) -> Result<(), S
 /// second capture beside the first, so a viewer that reconnected left the old
 /// `SCStream` running and started another: the same desktop shared twice, then
 /// three times, each one still pushing frames.
-fn end_sessions_for(peer: &str, reason: EndReason) -> Result<usize, String> {
-    let mut held = sessions()
-        .lock()
-        .map_err(|_| "screen capture registry poisoned")?;
-    let before = held.len();
+fn end_sessions_for(
+    held: &mut HashMap<String, Arc<Mutex<CaptureSession>>>,
+    peer: &str,
+    reason: EndReason,
+) {
     held.retain(|id, session| {
         let Ok(session) = session.lock() else {
             return false;
@@ -156,7 +156,6 @@ fn end_sessions_for(peer: &str, reason: EndReason) -> Result<usize, String> {
         }
         true
     });
-    Ok(before - held.len())
 }
 
 pub(crate) struct CaptureReceiver {
@@ -206,23 +205,24 @@ pub(crate) fn create(
     // One live session per peer. Dropping the old sender wakes its pump, which
     // closes its stream and stops its capture, so the replacement is a
     // handover rather than a second share.
-    end_sessions_for(&peer, EndReason::Superseded)?;
     let (tx, rx) = mpsc::sync_channel(FRAME_SLOTS);
-    sessions()
+    let mut registry = sessions()
         .lock()
-        .map_err(|_| "screen capture registry poisoned")?
-        .insert(
-            id.clone(),
-            Arc::new(Mutex::new(CaptureSession {
-                peer,
-                control,
-                route,
-                quality,
-                frames: tx,
-                input: VecDeque::new(),
-                dropped: 0,
-            })),
-        );
+        .map_err(|_| "screen capture registry poisoned")?;
+    end_sessions_for(&mut registry, &peer, EndReason::Superseded);
+    registry.insert(
+        id.clone(),
+        Arc::new(Mutex::new(CaptureSession {
+            peer,
+            control,
+            route,
+            quality,
+            frames: tx,
+            input: VecDeque::new(),
+            dropped: 0,
+        })),
+    );
+    drop(registry);
     #[cfg(windows)]
     if !cfg!(test)
         && let Err(error) = crate::windows_screen::start(id.clone())
@@ -436,6 +436,41 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn simultaneous_reconnects_leave_only_one_capture_for_the_peer() {
+        let barrier = Arc::new(std::sync::Barrier::new(16));
+        let receivers = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..16)
+                .map(|i| {
+                    let barrier = barrier.clone();
+                    scope.spawn(move || {
+                        barrier.wait();
+                        create(
+                            format!("race-{i}"),
+                            "reconnect-race-peer".into(),
+                            false,
+                            None,
+                            crate::remote::Route::Relay,
+                        )
+                        .unwrap()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        let count = sessions()
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|s| s.lock().unwrap().peer == "reconnect-race-peer")
+            .count();
+        assert_eq!(count, 1);
+        drop(receivers);
+    }
 
     #[test]
     fn a_second_session_for_one_peer_replaces_the_first() {

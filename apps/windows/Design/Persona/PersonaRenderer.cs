@@ -88,7 +88,7 @@ internal static class PersonaRenderer
             {
                 var path = canvas[i];
                 // Transform the face geometry, keeping its body clip fixed.
-                path.Data.Transform = PersonaScene.CopyTransform(transform);
+                canvas.TransformFace(i, transform);
                 path.Opacity *= Math.Min(1, facing * 4);
             }
         }
@@ -147,7 +147,7 @@ internal static class PersonaRenderer
         double h = unit * 0.052 * closeness;
         double y = PersonaStage.Floor * height - h * 0.35;
         var geometry = new PathGeometry();
-        PersonaDraw.Ellipse(geometry, width / 2, y + h / 2, w / 2, h / 2);
+        PersonaDraw.Ellipse(geometry, bounds.MidX * width, y + h / 2, w / 2, h / 2);
         canvas.Paint(geometry, PersonaDraw.Solid(hue, 0.20 * closeness));
     }
 
@@ -549,12 +549,20 @@ internal static class PersonaRenderer
                 }
 
                 case PersonaMote.Kind.Paper:
+                {
+                    var first = canvas.Count;
                     PersonaRendererProps.DrawPaper(canvas, px, py, unit, mote.Angle, mote.Scale, hue);
+                    for (var i = first; i < canvas.Count; i++) canvas[i].Opacity *= mote.Opacity;
                     break;
+                }
 
                 case PersonaMote.Kind.Console:
-                    PersonaRendererProps.DrawConsole(canvas, px, py, unit, mote.Angle, hue);
+                {
+                    var first = canvas.Count;
+                    PersonaRendererProps.DrawConsole(canvas, px, py, unit * mote.Scale, mote.Angle, hue);
+                    for (var i = first; i < canvas.Count; i++) canvas[i].Opacity *= mote.Opacity;
                     break;
+                }
 
                 case PersonaMote.Kind.Keyboard:
                     PersonaRendererProps.DrawKeyboard(canvas, px, py, unit, hue, mote.Opacity);

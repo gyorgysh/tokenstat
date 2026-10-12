@@ -95,23 +95,30 @@ enum SSHVaultBiometrics {
     }
 
     static func load(account: String) async throws -> String {
-        try await Task.detached {
-            let context = LAContext()
-            context.localizedReason = L10n.text("apple.sshvaultbiometrics.unlock_your_ssh_vault.fbfedbb2")
-            context.localizedFallbackTitle = ""
-            defer { context.invalidate() }
-            var query = query(account)
-            query[kSecUseAuthenticationContext as String] = context
-            query[kSecReturnData as String] = true
-            query[kSecMatchLimit as String] = kSecMatchLimitOne
-            var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
-            guard status == errSecSuccess, let data = result as? Data,
-                  let password = String(data: data, encoding: .utf8) else {
-                throw failure(L10n.text("apple.sshvaultbiometrics.biometric_unlock_did_not_complete_try_agai.791fe7fa"))
-            }
-            return password
-        }.value
+        try Task.checkCancellation()
+        let context = LAContext()
+        context.localizedReason = L10n.text("apple.sshvaultbiometrics.unlock_your_ssh_vault.fbfedbb2")
+        context.localizedFallbackTitle = ""
+        defer { context.invalidate() }
+        let password = try await withTaskCancellationHandler {
+            try await Task.detached {
+                var query = query(account)
+                query[kSecUseAuthenticationContext as String] = context
+                query[kSecReturnData as String] = true
+                query[kSecMatchLimit as String] = kSecMatchLimitOne
+                var result: CFTypeRef?
+                let status = SecItemCopyMatching(query as CFDictionary, &result)
+                guard status == errSecSuccess, let data = result as? Data,
+                      let password = String(data: data, encoding: .utf8) else {
+                    throw failure(L10n.text("apple.sshvaultbiometrics.biometric_unlock_did_not_complete_try_agai.791fe7fa"))
+                }
+                return password
+            }.value
+        } onCancel: {
+            context.invalidate()
+        }
+        try Task.checkCancellation()
+        return password
     }
 
     static func remove(account: String? = nil) throws {

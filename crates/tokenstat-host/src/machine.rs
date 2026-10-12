@@ -173,7 +173,6 @@ fn pair(params: &str) -> Result<Value, String> {
         return Err("that is this machine's own key, not another machine".into());
     }
 
-    let mut store = PeerStore::load().map_err(|e| e.to_string())?;
     // An empty name is "no name", not a machine called "". The stored fallback
     // is the fingerprint, so a row added by key alone still identifies the
     // peer until somebody names it; the screen leads with the word pair anyway.
@@ -192,8 +191,13 @@ fn pair(params: &str) -> Result<Value, String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let peer = store.add_approved(&key, &label, address.as_deref(), &now());
-    store.save().map_err(|e| e.to_string())?;
+    let peer = PeerStore::update(|store| {
+        (
+            store.add_approved(&key, &label, address.as_deref(), &now()),
+            true,
+        )
+    })
+    .map_err(|e| e.to_string())?;
     // Pairing by code is a person saying yes to one device by name, in front
     // of the machine, which is exactly the consent workspace access asks for.
     // Appearing on the account is not, and that path grants nothing.
@@ -229,15 +233,15 @@ fn set_trust(params: &str, trust: Trust) -> Result<Value, String> {
     let p: KeyParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let key = public_key_from_hex(&p.key).map_err(|e| e.to_string())?;
 
-    let mut store = PeerStore::load().map_err(|e| e.to_string())?;
-    let changed = match trust {
-        Trust::Approved => store.approve(&key),
-        Trust::Revoked => store.revoke(&key),
-        Trust::Pending => false,
-    };
-    if changed {
-        store.save().map_err(|e| e.to_string())?;
-    }
+    let changed = PeerStore::update(|store| {
+        let changed = match trust {
+            Trust::Approved => store.approve(&key),
+            Trust::Revoked => store.revoke(&key),
+            Trust::Pending => false,
+        };
+        (changed, changed)
+    })
+    .map_err(|e| e.to_string())?;
     // Approving in Devices is the same yes as typing a pairing code, and
     // revoking has to take the work back with it: a device nobody trusts
     // enough to reach this machine must not keep a grant waiting for it.
@@ -261,11 +265,11 @@ fn forget(params: &str) -> Result<Value, String> {
     let p: KeyParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let key = public_key_from_hex(&p.key).map_err(|e| e.to_string())?;
 
-    let mut store = PeerStore::load().map_err(|e| e.to_string())?;
-    let forgotten = store.forget(&key);
-    if forgotten {
-        store.save().map_err(|e| e.to_string())?;
-    }
+    let forgotten = PeerStore::update(|store| {
+        let forgotten = store.forget(&key);
+        (forgotten, forgotten)
+    })
+    .map_err(|e| e.to_string())?;
     // A device this machine has forgotten must not come back to a grant it
     // was left holding.
     grant_work(&key, false);
@@ -274,6 +278,25 @@ fn forget(params: &str) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn repeated_approval_preserves_a_disabled_workspace_grant() {
+        crate::test_identity::isolated(|| {
+            let key = tokenstat_identity::MachineIdentity::from_secret([63; 32]).public_key();
+            tokenstat_identity::PeerStore::update(|store| {
+                store.add_approved(&key, "Test device", None, "2026-10-12T00:00:00Z");
+                ((), true)
+            })
+            .unwrap();
+            super::grant_work(&key, false);
+            let params = serde_json::json!({"key": tokenstat_identity::hex(&key)}).to_string();
+            let result = super::set_trust(&params, tokenstat_identity::Trust::Approved).unwrap();
+            assert_eq!(result["changed"], false);
+            assert!(!crate::workspace_policy::is_allowed(
+                &tokenstat_identity::hex(&key)
+            ));
+        });
+    }
+
     #[test]
     fn a_remote_peer_cannot_change_who_is_trusted() {
         crate::request_context::with_remote_peer("phone", || {

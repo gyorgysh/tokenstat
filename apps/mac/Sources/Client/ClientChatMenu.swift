@@ -104,11 +104,12 @@ struct ClientChatMenu: View {
                 guard let chat = pendingDelete else { return }
                 pendingDelete = nil
                 removing = true
+                let ticket = navigation.chatActionTicket()
                 Task {
                     defer { removing = false }
-                    guard ownsProject else { return }
+                    guard visible, ownsProject, navigation.acceptsChatAction(ticket) else { return }
                     let removed = await model.remove(chat, in: workspaceID)
-                    guard removed, ownsProject else { return }
+                    guard removed, visible, ownsProject, navigation.acceptsChatAction(ticket) else { return }
                     onDelete?(chat)
                 }
             }

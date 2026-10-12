@@ -46,6 +46,7 @@ final class AutomationsModel {
     var queueMaxConcurrent = "2"
     /// Last values the daemon accepted. The Save button is only live when
     /// the fields differ, so a tap that did nothing cannot look like a save.
+    private var savedQueueBudgetSeconds: UInt64 = 10_800
     private(set) var savedQueueBudgetMinutes = "180"
     private(set) var savedQueueNoLimit = false
     private(set) var savedQueueMaxConcurrent = "2"
@@ -71,6 +72,7 @@ final class AutomationsModel {
     private(set) var transcriptText: String = ""
     private var transcriptOffset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
+    private var catchUpTask: Task<Void, Never>?
     /// The run id the poll task is actually tailing. Distinct from
     /// `watchingRunID` so switching runs restarts the loop.
     private var pollingID: String?
@@ -132,7 +134,7 @@ final class AutomationsModel {
             RunNotifications.shared.settle(automations: runs)
             #endif
             backends = freshBackends
-            if let queue = freshQueue {
+            if let queue = freshQueue, !queueDirty {
                 applyQueue(queue)
             }
             hasLoaded = true
@@ -312,6 +314,7 @@ final class AutomationsModel {
             existing.budgetSeconds = budget
             existing.enabled = true
             await update(existing, announce: false)
+            guard errorMessage == nil else { return }
             showNotice(L10n.text("apple.automationsmodel.updated_auto_commit_in_this_folder.90b44ff5"))
             selectJob(existing.id)
             return
@@ -358,17 +361,20 @@ final class AutomationsModel {
         }
     }
 
+    var queueBudgetSeconds: UInt64? {
+        if queueNoLimit { return 0 }
+        if !savedQueueNoLimit, queueBudgetMinutes == savedQueueBudgetMinutes {
+            return savedQueueBudgetSeconds
+        }
+        let trimmed = queueBudgetMinutes.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let minutes = UInt64(trimmed), minutes > 0, minutes <= UInt64.max / 60 else { return nil }
+        return minutes * 60
+    }
+
     func saveQueue() async {
-        let budget: UInt64
-        if queueNoLimit {
-            budget = 0
-        } else {
-            let trimmed = queueBudgetMinutes.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let minutes = UInt64(trimmed), minutes > 0, minutes <= UInt64.max / 60 else {
-                errorMessage = L10n.text("apple.automationsmodel.time_limit_must_be_a_whole_number_of_minut.490575e6")
-                return
-            }
-            budget = minutes * 60
+        guard let budget = queueBudgetSeconds else {
+            errorMessage = L10n.text("apple.automationsmodel.time_limit_must_be_a_whole_number_of_minut.490575e6")
+            return
         }
         let maxTrimmed = queueMaxConcurrent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let max = UInt32(maxTrimmed) else {
@@ -388,6 +394,7 @@ final class AutomationsModel {
     }
 
     private func applyQueue(_ queue: AutomationQueue) {
+        savedQueueBudgetSeconds = queue.defaultBudgetSeconds
         queueNoLimit = queue.defaultBudgetSeconds == 0
         if queue.defaultBudgetSeconds > 0 {
             queueBudgetMinutes = String(max(1, queue.defaultBudgetSeconds / 60))
@@ -419,8 +426,8 @@ final class AutomationsModel {
             errorMessage = nil
             await load()
         } catch {
-            errorMessage = error.localizedDescription
             await load()
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -619,6 +626,7 @@ final class AutomationsModel {
     }
 
     func watch(_ run: RunRecord) {
+        stopPolling()
         selectedRunID = run.id
         watchingRunID = run.id
         transcriptText = ""
@@ -633,7 +641,7 @@ final class AutomationsModel {
             transcriptText = ""
             transcriptOffset = 0
         }
-        guard let live = selectedRun ?? liveRun else {
+        guard isVisible, let live = selectedRun ?? liveRun else {
             stopPolling()
             return
         }
@@ -649,7 +657,7 @@ final class AutomationsModel {
             // Each reply is 64 KiB. A finished run is not growing, so pull
             // until we have the display window or the host has no more.
             let id = live.id
-            Task { await self.fetchTranscriptUntilCaughtUp(id: id) }
+            startCatchUp(id: id)
         }
     }
 
@@ -662,7 +670,7 @@ final class AutomationsModel {
             var ticks = 0
             while !Task.isCancelled {
                 guard let self else { return }
-                await self.fetchTranscript(id: id, resetIfNeeded: true)
+                await self.fetchTranscript(id: id)
                 ticks += 1
                 // Status lives on the run list, not in the transcript. Refresh
                 // it often enough that a finished job flips off Running
@@ -675,7 +683,16 @@ final class AutomationsModel {
         }
     }
 
+    private func startCatchUp(id: String) {
+        catchUpTask?.cancel()
+        catchUpTask = Task { [weak self] in
+            await self?.fetchTranscriptUntilCaughtUp(id: id)
+        }
+    }
+
     private func stopPolling() {
+        catchUpTask?.cancel()
+        catchUpTask = nil
         pollTask?.cancel()
         pollTask = nil
         pollingID = nil
@@ -685,12 +702,13 @@ final class AutomationsModel {
     private func refreshRuns() async {
         do {
             let latest = try await Bridge.automationRuns()
+            guard !Task.isCancelled, isVisible else { return }
             let before = runs.first { $0.id == watchingRunID }
             runs = latest
             let after = runs.first { $0.id == watchingRunID }
             if let before, let after, before.status != after.status, !after.isRunning {
                 stopPolling()
-                await fetchTranscriptUntilCaughtUp(id: after.id)
+                startCatchUp(id: after.id)
             }
         } catch {
             // The next tick tries again.
@@ -698,31 +716,28 @@ final class AutomationsModel {
     }
 
     private func fetchTranscriptUntilCaughtUp(id: String) async {
-        var slices = 0
-        while slices < 8 {
-            slices += 1
+        while !Task.isCancelled, isVisible, watchingRunID == id {
             let before = transcriptOffset
-            await fetchTranscript(id: id, resetIfNeeded: false)
+            await fetchTranscript(id: id)
             if watchingRunID != id { return }
             if transcriptOffset <= before { return }
-            if transcriptText.utf8.count >= transcriptDisplayCap { return }
         }
     }
 
-    private func fetchTranscript(id: String, resetIfNeeded: Bool) async {
+    private func fetchTranscript(id: String) async {
         // The run being watched may have changed between ticks.
-        if resetIfNeeded, watchingRunID != id {
-            stopPolling()
-            return
-        }
+        guard !Task.isCancelled, isVisible, watchingRunID == id else { return }
         do {
-            let chunk = try await Bridge.automationTranscript(id: id, offset: transcriptOffset)
+            let offset = transcriptOffset
+            let chunk = try await Bridge.automationTranscript(id: id, offset: offset)
+            guard !Task.isCancelled, isVisible, watchingRunID == id, transcriptOffset == offset else { return }
             if chunk.nextOffset < transcriptOffset {
                 // The host compacted the readable file. Start again from the
                 // window it kept rather than appending onto dropped bytes.
                 transcriptText = ""
                 transcriptOffset = 0
                 let again = try await Bridge.automationTranscript(id: id, offset: 0)
+                guard !Task.isCancelled, isVisible, watchingRunID == id, transcriptOffset == 0 else { return }
                 transcriptText = Self.capped(again.text)
                 transcriptOffset = again.nextOffset
                 return

@@ -7,6 +7,9 @@
 ;
 ; Compiled on windows-latest by scripts/pack-windows-installer.ps1.
 
+#ifndef AppArch
+  #define AppArch "x64"
+#endif
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
@@ -62,8 +65,13 @@ OutputBaseFilename={#OutputBase}
 Compression=lzma2
 SolidCompression=yes
 Uninstallable=no
+#if AppArch == "arm64"
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+#else
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+#endif
 CloseApplications=no
 RestartApplications=no
 MinVersion=10.0
@@ -86,5 +94,18 @@ ButtonInstall=&Install
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{tmp}\tokenstat-payload"; Flags: recursesubdirs ignoreversion
 
-[Run]
-Filename: "{tmp}\tokenstat-payload\Tokenstat.exe"; Parameters: "--install"; StatusMsg: "Installing tokenstat for this user…"; Flags: waituntilterminated
+[Code]
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ExitCode: Integer;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    WizardForm.StatusLabel.Caption := 'Installing tokenstat for this user…';
+    if not Exec(ExpandConstant('{tmp}\tokenstat-payload\Tokenstat.exe'),
+      '--install', '', SW_SHOWNORMAL, ewWaitUntilTerminated, ExitCode) then
+      RaiseException('Could not start tokenstat installation: ' + SysErrorMessage(ExitCode));
+    if ExitCode <> 0 then
+      RaiseException('tokenstat installation failed (exit ' + IntToStr(ExitCode) + ').');
+  end;
+end;

@@ -234,10 +234,10 @@ private fun ReviewedFileRow(
     path: String,
 ) {
     val scope = rememberCoroutineScope()
-    var open by remember(path) { mutableStateOf(false) }
-    var diff by remember(path) { mutableStateOf<JsonObject?>(null) }
-    var error by remember(path) { mutableStateOf<String?>(null) }
-    var loading by remember(path) { mutableStateOf(false) }
+    var open by remember(peer, workspace, review, path) { mutableStateOf(false) }
+    var diff by remember(peer, workspace, review, path) { mutableStateOf<JsonObject?>(null) }
+    var error by remember(peer, workspace, review, path) { mutableStateOf<String?>(null) }
+    var loading by remember(peer, workspace, review, path) { mutableStateOf(false) }
 
     suspend fun load() {
         loading = true

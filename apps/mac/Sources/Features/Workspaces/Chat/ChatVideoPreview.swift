@@ -20,8 +20,10 @@ struct ChatVideoPreview: View {
             }
         }
         .task(id: file) {
+            poster = nil
+            duration = nil
             let asset = AVURLAsset(url: file)
-            if let time = try? await asset.load(.duration), time.seconds.isFinite, time.seconds > 0 {
+            if let time = try? await asset.load(.duration), !Task.isCancelled, time.seconds.isFinite, time.seconds > 0 {
                 let seconds = Int(min(time.seconds, 86400 * 365))
                 duration = String(format: "%d:%02d", seconds / 60, seconds % 60)
             }

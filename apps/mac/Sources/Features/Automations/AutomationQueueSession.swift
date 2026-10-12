@@ -46,13 +46,15 @@ final class AutomationQueueSession {
     var canSave: Bool { loaded && queue != nil && !working && draft.validation == nil && dirty }
 
     func load() async {
-        if loaded && dirty { return }
+        if working || (loaded && dirty) { return }
+        let before = draft
         do {
             async let fresh = service.automationQueue()
             async let running = service.runningJobCount()
             let queue = try await fresh
             runningCount = (try? await running) ?? runningCount
-            apply(queue, asSaved: true)
+            guard !Task.isCancelled, !working else { return }
+            apply(queue, asSaved: true, keepingDraft: draft != before)
             errorMessage = nil
             noticeMessage = nil
             loaded = true
@@ -70,7 +72,8 @@ final class AutomationQueueSession {
         noticeMessage = nil
         submitted = (budget, count)
         do {
-            apply(try await service.setAutomationQueue(defaultBudgetSeconds: budget, maxConcurrent: count), asSaved: true)
+            let updated = try await service.setAutomationQueue(defaultBudgetSeconds: budget, maxConcurrent: count)
+            apply(updated, asSaved: true, keepingDraft: draft.budgetSeconds != budget || draft.concurrent != count)
             errorMessage = nil
             noticeMessage = L10n.text("apple.automationqueuesession.scheduler_saved.4e10688a")
             submitted = nil
@@ -94,14 +97,15 @@ final class AutomationQueueSession {
               current.maxConcurrent == submitted.concurrent
         else { return false }
         runningCount = (try? await service.runningJobCount()) ?? runningCount
-        apply(current, asSaved: true)
+        apply(current, asSaved: true,
+              keepingDraft: draft.budgetSeconds != submitted.budget || draft.concurrent != submitted.concurrent)
         return true
     }
 
-    private func apply(_ queue: AutomationQueue, asSaved: Bool) {
+    private func apply(_ queue: AutomationQueue, asSaved: Bool, keepingDraft: Bool = false) {
         self.queue = queue
         let next = AutomationQueueDraft(queue)
-        draft = next
+        if !keepingDraft { draft = next }
         if asSaved { saved = next }
         if let timezone = HostScheduleClock.resolved(queue.timezone) {
             self.timezone = timezone

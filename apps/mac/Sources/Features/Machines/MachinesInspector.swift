@@ -164,8 +164,7 @@ struct MachinesInspector: View {
     }
 
     private func accountBody(_ machine: Machine) -> some View {
-        let isSelf = machine.machineID == model.account?.thisMachineID
-            || machine.publicIdentity == model.identity?.key
+        let isSelf = model.isThisMachine(machine)
         return ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 Text(model.resolvedName(for: machine) ?? machine.displayName)

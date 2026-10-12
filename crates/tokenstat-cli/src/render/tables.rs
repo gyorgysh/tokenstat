@@ -97,9 +97,7 @@ pub fn grouped(store: &Store, group: GroupBy, q: &Query, label: &str, json: bool
 /// total and from the trend line anyway. The days are named so they can be
 /// recognised, and the totals above are honestly a floor.
 pub(super) fn note_unmeasured_days(store: &Store, q: &Query) {
-    let days = store
-        .days_active_without_usage("claude_code")
-        .unwrap_or_default();
+    let days = unmeasured_days(store, q);
     let in_range: Vec<&String> = days
         .iter()
         .filter(|d| {
@@ -181,7 +179,10 @@ fn print_table(
         .max()
         .unwrap_or(1)
         .max(1);
-    let grand: u64 = rows.iter().map(|r| r.counters.total()).sum();
+    let grand: u64 = rows
+        .iter()
+        .map(|r| r.counters.total())
+        .fold(0u64, u64::saturating_add);
 
     println!();
     println!(
@@ -365,10 +366,13 @@ pub fn blocks(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -> 
     for b in rows.iter().rev().take(40) {
         let start = format_block_instant(b.start_ms, tz);
         let c = &b.counters;
-        let in_out = c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0);
+        let in_out = c
+            .input_fresh
+            .unwrap_or(0)
+            .saturating_add(c.output.unwrap_or(0));
         let frac = c.total() as f64 / max as f64;
         let status = if b.active {
-            let left = ((b.end_ms - now_ms).max(0) / 60_000) as u64;
+            let left = (b.end_ms.saturating_sub(now_ms).max(0) / 60_000) as u64;
             format!("active {} {left}m left", ui::separator())
         } else {
             "closed".into()
@@ -420,10 +424,6 @@ pub fn export(
         anyhow::bail!("unknown export format {format:?}, use csv or json");
     }
     let rows = store.events(q)?;
-    if rows.is_empty() {
-        return empty_range(json_flag || format == "json");
-    }
-
     let format = if json_flag { "json" } else { format };
     let mut sink: Box<dyn Write> = match out {
         Some(path) => Box::new(

@@ -96,8 +96,7 @@ final class AvatarCache {
 
     init() {
         decoded.countLimit = 128
-        // The cost is the downloaded byte count, so this really is a cap on
-        // how many bytes of pictures are held at once.
+        // Count decoded pixel storage rather than compressed downloads.
         decoded.totalCostLimit = 64 * 1024 * 1024
     }
 
@@ -221,12 +220,14 @@ private enum AvatarFetch {
         else {
             return .missing
         }
+        guard let thumbnail = AvatarImageDecode.thumbnail(data) else { return .missing }
+        let decodedBytes = thumbnail.bytesPerRow * thumbnail.height
         #if os(macOS)
-        guard let image = NSImage(data: data) else { return .missing }
-        return .image(Image(nsImage: image), bytes: size)
+        let image = NSImage(cgImage: thumbnail, size: .zero)
+        return .image(Image(nsImage: image), bytes: decodedBytes)
         #else
-        guard let image = UIImage(data: data) else { return .missing }
-        return .image(Image(uiImage: image), bytes: size)
+        let image = UIImage(cgImage: thumbnail)
+        return .image(Image(uiImage: image), bytes: decodedBytes)
         #endif
     }
 }
@@ -270,6 +271,7 @@ struct Avatar: View {
     /// cache synchronously, so a picture fetched once paints immediately on
     /// every later view instead of flashing the letter tile again.
     @State private var image: Image?
+    @State private var imageURL: String?
 
     /// A stable colour for a person, from the app's own ramp.
     ///
@@ -333,6 +335,7 @@ struct Avatar: View {
                 }
                 if let hit = AvatarCache.shared.cached(url) {
                     image = hit
+                    imageURL = url
                     return
                 }
                 image = nil
@@ -343,6 +346,7 @@ struct Avatar: View {
                 // for the previous row cannot cover the new one.
                 guard !Task.isCancelled, pictureURL == url else { return }
                 image = loaded
+                imageURL = url
             }
     }
 
@@ -358,8 +362,8 @@ struct Avatar: View {
     /// then the shared cache, read synchronously so the first frame already
     /// has it.
     private var displayImage: Image? {
-        if let image { return image }
         guard let url = pictureURL else { return nil }
+        if imageURL == url, let image { return image }
         return AvatarCache.shared.cached(url)
     }
 
@@ -534,6 +538,8 @@ struct LogoMark: View {
     /// splash), or one rise that lands and holds (an intro page).
     var loops: Bool = true
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var raised = false
     /// One run of the same rise, for a refresh somebody pulled. Not the
     /// repeating launch animation: a spinner already says "working", and the
@@ -572,11 +578,11 @@ struct LogoMark: View {
                     // it shares with the other two rather than shrinking in
                     // place. Each starts a beat after the one before it.
                     .scaleEffect(
-                        y: (animated && !raised) || pulse ? 0.35 : 1,
+                        y: !reduceMotion && ((animated && !raised) || pulse) ? 0.35 : 1,
                         anchor: .bottom
                     )
                     .animation(
-                        animated
+                        animated && !reduceMotion
                             ? (loops
                                 ? .easeInOut(duration: 0.62)
                                     .repeatForever(autoreverses: true)
@@ -587,7 +593,7 @@ struct LogoMark: View {
                         value: raised
                     )
                     .animation(
-                        .easeInOut(duration: 0.26).delay(Double(index) * 0.07),
+                        reduceMotion ? nil : .easeInOut(duration: 0.26).delay(Double(index) * 0.07),
                         value: pulse
                     )
                     .offset(
@@ -604,7 +610,7 @@ struct LogoMark: View {
         // on the phone, so it is the one place both apps can acknowledge
         // the same gesture.
         .onReceive(NotificationCenter.default.publisher(for: .clientRefreshing)) { _ in
-            guard !animated, !pulse else { return }
+            guard !reduceMotion, !animated, !pulse else { return }
             pulse = true
             Task {
                 try? await Task.sleep(for: .milliseconds(300))

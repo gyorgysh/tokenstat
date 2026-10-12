@@ -38,7 +38,7 @@ struct ChatFileTransferControls: ViewModifier {
             Button(L10n.text("common.continue")) { model.answerFileRelay(true) }
         } message: {
             Text(L10n.text("common.chat_files_relay_message", model.fileRelayName ?? "",
-                ByteCountFormatter.string(fromByteCount: Int64(model.fileRelaySize ?? 0), countStyle: .file)))
+                ByteCountFormatter.string(fromByteCount: Int64(clamping: model.fileRelaySize ?? 0), countStyle: .file)))
             if let remaining = model.fileRelayRemaining { Text(L10n.text("common.chat_files_remaining", ByteCountFormatter.string(fromByteCount: Int64(clamping: remaining), countStyle: .file))) }
         }
         .onChange(of: model.selectionGeneration) { _, _ in model.fileTransferCancelled = true; model.answerFileRelay(false) }

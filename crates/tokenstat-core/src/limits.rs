@@ -494,7 +494,7 @@ impl CodexLimitScan {
         // quote the word thousands of times in ordinary conversation, where
         // it arrives escaped as `\"rate_limits\":` and does not match, so a
         // looser test would parse megabytes of chat to learn nothing.
-        if !line.contains(r#""rate_limits":{"#) {
+        if !line.contains(r#""rate_limits""#) {
             return;
         }
         let Ok(parsed) = serde_json::from_str::<RolloutLine>(line) else {
@@ -1125,6 +1125,14 @@ mod tests {
         assert_eq!(found.windows[0].percent, 73.0);
         assert_eq!(found.windows[0].resets_at_ms, None);
         assert_eq!(found.plan, None);
+    }
+
+    #[test]
+    fn whitespace_around_rate_limit_fields_does_not_hide_readings() {
+        let mut scan = CodexLimitScan::default();
+        scan.absorb(r#"{ "timestamp": "2026-09-11T19:34:31Z", "payload": { "rate_limits" : { "primary": { "used_percent": 73.0 } } } }"#);
+        let (windows, _, _) = scan.finish(1_789_160_000_000).unwrap();
+        assert_eq!(windows[0].percent, 73.0);
     }
 
     #[test]

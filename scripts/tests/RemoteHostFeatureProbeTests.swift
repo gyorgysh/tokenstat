@@ -101,6 +101,18 @@ struct RemoteHostFeatureProbeTests {
             check(probe.beginRun(key: key("b")), "new peer asks")
             check(probe.state == .checking, "new peer clears the old answer")
         }
+        // Return to an answered peer while the other peer is still pending.
+        do {
+            let probe = RemoteHostFeatureProbe()
+            check(probe.beginRun(key: key("a")), "first peer asks")
+            probe.didAnswer(key: key("a"), state: .available)
+            check(probe.beginRun(key: key("b")), "second peer asks")
+            check(probe.beginRun(key: key("a")), "return to first must leave the second pending check")
+            probe.didAnswer(key: key("b"), state: .needsUpdate(3))
+            check(probe.state == .checking, "second peer cannot answer for first")
+            probe.didAnswer(key: key("a"), state: .available)
+            check(probe.state == .available, "first peer resolves the pending check")
+        }
         // An explicit retry asks again.
         do {
             let probe = RemoteHostFeatureProbe()

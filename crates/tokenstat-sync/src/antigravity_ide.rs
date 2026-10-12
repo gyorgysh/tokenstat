@@ -729,12 +729,12 @@ fn normalize_trajectory_summaries(response: &Value, fingerprint: &str) -> Vec<Tr
     {
         object
             .iter()
-            .map(|(key, value)| {
-                let mut entry = value.clone();
-                if entry.get("cascadeId").is_none() {
-                    entry["cascadeId"] = Value::String(key.clone());
-                }
+            .filter_map(|(key, value)| {
+                let mut entry = value.as_object()?.clone();
                 entry
+                    .entry("cascadeId")
+                    .or_insert_with(|| Value::String(key.clone()));
+                Some(Value::Object(entry))
             })
             .collect()
     } else if let Some(array) = response
@@ -889,6 +889,7 @@ fn https_rpc_request(connection: &Connection, method: &str, body: &Value) -> any
     let url = format!("https://127.0.0.1:{}/{SERVICE}/{method}", connection.port);
     let client = reqwest::blocking::Client::builder()
         .danger_accept_invalid_certs(true)
+        .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
         .timeout(Duration::from_secs(10))
         .connect_timeout(Duration::from_secs(5))
@@ -901,10 +902,7 @@ fn https_rpc_request(connection: &Connection, method: &str, body: &Value) -> any
         .body(serde_json::to_vec(body)?)
         .send()?;
     let status = response.status();
-    let response_body = response.text()?;
-    if response_body.len() > MAX_RPC_BODY_BYTES {
-        anyhow::bail!("Antigravity RPC body exceeds {MAX_RPC_BODY_BYTES} cap");
-    }
+    let response_body = crate::profile::text_with_limit(response, MAX_RPC_BODY_BYTES)?;
     if !status.is_success() {
         anyhow::bail!(
             "Antigravity HTTPS RPC {method} failed with status {status}: {response_body}"
@@ -932,8 +930,7 @@ fn rpc_request_plain_http(
     stream.write_all(request.as_bytes())?;
 
     let mut reader = BufReader::new(stream);
-    let mut status_line = String::new();
-    reader.read_line(&mut status_line)?;
+    let status_line = read_http_line(&mut reader)?;
     let status_code = status_line
         .split_whitespace()
         .nth(1)
@@ -942,9 +939,13 @@ fn rpc_request_plain_http(
 
     let mut content_length: Option<usize> = None;
     let mut chunked = false;
+    let mut header_bytes = status_line.len();
     loop {
-        let mut header = String::new();
-        reader.read_line(&mut header)?;
+        let header = read_http_line(&mut reader)?;
+        header_bytes += header.len();
+        if header_bytes > 64 * 1024 {
+            anyhow::bail!("Antigravity HTTP headers exceed cap");
+        }
         let trimmed = header.trim();
         if trimmed.is_empty() {
             break;
@@ -985,11 +986,19 @@ fn rpc_request_plain_http(
     Ok(serde_json::from_str(&response_body)?)
 }
 
-fn read_chunked_body(reader: &mut BufReader<TcpStream>) -> anyhow::Result<String> {
+fn read_http_line(reader: &mut impl BufRead) -> anyhow::Result<String> {
+    let mut line = String::new();
+    reader.take(8193).read_line(&mut line)?;
+    if line.len() > 8192 || !line.ends_with('\n') {
+        anyhow::bail!("Antigravity HTTP line is incomplete or exceeds cap");
+    }
+    Ok(line)
+}
+
+fn read_chunked_body(reader: &mut impl BufRead) -> anyhow::Result<String> {
     let mut body = Vec::new();
     loop {
-        let mut size_line = String::new();
-        reader.read_line(&mut size_line)?;
+        let size_line = read_http_line(reader)?;
         let trimmed = size_line.trim();
         let chunk_size = usize::from_str_radix(
             trimmed
@@ -1013,6 +1022,9 @@ fn read_chunked_body(reader: &mut BufReader<TcpStream>) -> anyhow::Result<String
         body.extend_from_slice(&chunk);
         let mut crlf = [0_u8; 2];
         reader.read_exact(&mut crlf)?;
+        if crlf != *b"\r\n" {
+            anyhow::bail!("Malformed Antigravity chunk terminator");
+        }
     }
     Ok(String::from_utf8(body)?)
 }
@@ -1116,5 +1128,26 @@ mod tests {
             ),
             Some(61542)
         );
+    }
+    #[test]
+    fn malformed_trajectory_map_values_are_skipped_without_panicking() {
+        let result = normalize_trajectory_summaries(
+            &serde_json::json!({"trajectorySummaries":{"bad":42,"missing":null,"good":{"stepCount":1}}}),
+            "fixture",
+        );
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].session_id, "good");
+    }
+
+    #[test]
+    fn rpc_headers_and_chunk_framing_are_bounded_and_validated() {
+        let mut overlong = std::io::Cursor::new(vec![b'a'; 9000]);
+        assert!(read_http_line(&mut overlong).is_err());
+        assert!(read_http_line(&mut std::io::Cursor::new(b"truncated")).is_err());
+        assert_eq!(
+            read_chunked_body(&mut std::io::Cursor::new(b"2\r\n{}\r\n0\r\n\r\n")).unwrap(),
+            "{}"
+        );
+        assert!(read_chunked_body(&mut std::io::Cursor::new(b"2\r\n{}xx0\r\n")).is_err());
     }
 }

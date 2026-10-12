@@ -12,7 +12,7 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     }
     let models = store.report(GroupBy::Model, q)?;
     let days = store.report(GroupBy::Day, q)?;
-    let peak = store.peak_hour()?;
+    let peak = store.peak_hour_for(q)?;
 
     if json {
         // The headline shows what this would have cost at list rates; the
@@ -44,18 +44,21 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     // is a fact about the tokens, not about the day, and the grid and the floor
     // note are where that uncertainty belongs. Reporting 50 here denied that a
     // week of work happened at all.
-    let unmeasured_days = store
-        .days_active_without_usage("claude_code")
-        .unwrap_or_default()
-        .len() as u64;
+    let unmeasured_days = crate::render::unmeasured_days(store, q).len() as u64;
 
     let c = &totals.counters;
     // Split the headline the way the tools themselves do. Cache reads dwarf
     // everything else, often by two orders of magnitude, so folding them into
     // one "total tokens" figure makes it unrecognizable next to what Claude
     // Code's own usage view reports.
-    let in_out = c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0);
-    let cache_write = c.cache_write_5m.unwrap_or(0) + c.cache_write_1h.unwrap_or(0);
+    let in_out = c
+        .input_fresh
+        .unwrap_or(0)
+        .saturating_add(c.output.unwrap_or(0));
+    let cache_write = c
+        .cache_write_5m
+        .unwrap_or(0)
+        .saturating_add(c.cache_write_1h.unwrap_or(0));
 
     println!();
     let stats = [
@@ -101,9 +104,7 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     if !days.is_empty() {
         println!();
         let pairs = daily_tokens(&days);
-        let unknown = store
-            .days_active_without_usage("claude_code")
-            .unwrap_or_default();
+        let unknown = crate::render::unmeasured_days(store, q);
         if let Some(cal) = ui::heat_calendar(&pairs, heat_weeks(53), today(tz), &unknown) {
             let marked = cal.unmeasured_days();
             heat_block(&cal, false);
@@ -123,7 +124,7 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         let grand: u64 = models
             .iter()
             .map(|m| m.counters.total())
-            .sum::<u64>()
+            .fold(0u64, u64::saturating_add)
             .max(1);
         let w = models
             .iter()
@@ -293,9 +294,7 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
     }
     let pairs = daily_tokens(&days);
     let weeks = if json { 53 } else { heat_weeks(53) };
-    let unknown = store
-        .days_active_without_usage("claude_code")
-        .unwrap_or_default();
+    let unknown = crate::render::unmeasured_days(store, q);
     let Some(cal) = ui::heat_calendar(&pairs, weeks, today(tz), &unknown) else {
         return empty_range(json);
     };
@@ -324,7 +323,7 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
             cal.weeks,
             cal.days()
                 .map(|c| cost_for(&c.date.to_string()))
-                .sum::<u64>(),
+                .fold(0u64, u64::saturating_add),
             cal.total,
             cal.active_days,
             cal.streak_current,
@@ -408,7 +407,7 @@ pub fn wrapped(
     let models = store.report(GroupBy::Model, &q)?;
     let projects = store.report(GroupBy::Project, &q)?;
     let days = store.report(GroupBy::Day, &q)?;
-    let peak = store.peak_hour()?;
+    let peak = store.peak_hour_for(&q)?;
     let prices = PriceTable::load_with_catalog();
     let top_model_label = models.first().map(|m| model_label(&m.key));
     let value: EquivalentValue = models
@@ -420,7 +419,11 @@ pub fn wrapped(
     let day_tokens = daily_tokens(&days);
     let busiest_day = day_tokens.iter().max_by_key(|(_, tokens)| *tokens);
     let top_project = projects.first();
-    let in_out = totals.counters.input_fresh.unwrap_or(0) + totals.counters.output.unwrap_or(0);
+    let in_out = totals
+        .counters
+        .input_fresh
+        .unwrap_or(0)
+        .saturating_add(totals.counters.output.unwrap_or(0));
 
     if json {
         println!(
@@ -443,9 +446,7 @@ pub fn wrapped(
     println!();
     println!("  {DIM}requests{DIM:#}     {}", ui::exact(totals.events));
     println!("  {DIM}sessions{DIM:#}     {}", ui::exact(totals.sessions));
-    let unmeasured_in_year = store
-        .days_active_without_usage("claude_code")
-        .unwrap_or_default()
+    let unmeasured_in_year = crate::render::unmeasured_days(store, &q)
         .iter()
         .filter(|d| d.starts_with(&format!("{y:04}-")))
         .count();
@@ -482,9 +483,7 @@ pub fn wrapped(
         let now = today(tz);
         let anchor = if now < year_end { now } else { year_end };
         let weeks = (anchor.day_of_year() as usize).div_ceil(7) + 1;
-        let unknown = store
-            .days_active_without_usage("claude_code")
-            .unwrap_or_default();
+        let unknown = crate::render::unmeasured_days(store, &q);
         if let Some(cal) = ui::heat_calendar(&day_tokens, heat_weeks(weeks), anchor, &unknown) {
             heat_block(&cal, true);
         }

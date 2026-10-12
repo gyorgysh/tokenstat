@@ -138,7 +138,10 @@ final class AutomationEditorSession {
             let record = try await storage.load()
             diskRevision = record?.revision
             persistedFields = record?.value.fields
-            if let record { restore(record.value) }
+            if let record {
+                restore(record.value)
+                appliedDefaultBudget = true
+            }
             loaded = true
         } catch {
             errorMessage = error.localizedDescription
@@ -372,10 +375,7 @@ final class AutomationEditorSession {
             }
             if isCreate, !appliedDefaultBudget {
                 restoring = true
-                fields.noTimeLimit = queue.defaultBudgetSeconds == 0
-                if queue.defaultBudgetSeconds > 0 {
-                    fields.budgetMinutes = String(max(1, queue.defaultBudgetSeconds / 60))
-                }
+                fields.loadBudget(seconds: queue.defaultBudgetSeconds)
                 restoring = false
                 appliedDefaultBudget = true
                 _ = await persist()
@@ -646,6 +646,7 @@ final class AutomationEditorSession {
     static let didChange = Notification.Name("tokenstat.automationDidChange")
 
     static func isUncertain(_ error: Error) -> Bool {
+        if case BridgeError.core(let code, _) = error, code == "delivery_unknown" { return true }
         let lower = error.localizedDescription.lowercased()
         return lower.contains("timed out")
             || lower.contains("timeout")

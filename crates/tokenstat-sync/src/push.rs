@@ -522,20 +522,25 @@ pub fn notify_in_background(reason: Reason) {
     static QUEUE: std::sync::OnceLock<std::sync::mpsc::SyncSender<Reason>> =
         std::sync::OnceLock::new();
     let sender = QUEUE.get_or_init(|| {
-        let (tx, rx) = std::sync::mpsc::sync_channel::<Reason>(8);
-        // If this fails, the receiver goes with the closure that never ran,
-        // so every `try_send` below fails and notifications are quietly
-        // skipped rather than failing the caller.
-        let _ = std::thread::Builder::new()
-            .name("tokenstat-push-notify".to_string())
-            .spawn(move || {
-                for queued in rx {
-                    let _ = notify(queued);
-                }
-            });
-        tx
+        notification_worker(|reason| {
+            let _ = notify(reason);
+        })
     });
     let _ = sender.try_send(reason);
+}
+
+fn notification_worker(
+    send: impl Fn(Reason) + Send + 'static,
+) -> std::sync::mpsc::SyncSender<Reason> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Reason>(8);
+    let _ = std::thread::Builder::new()
+        .name("tokenstat-push-notify".to_string())
+        .spawn(move || {
+            for queued in rx {
+                send(queued);
+            }
+        });
+    tx
 }
 
 #[cfg(test)]
@@ -651,9 +656,12 @@ mod tests {
     fn background_notify_never_blocks_the_caller() {
         // Queued on one worker, not a thread per call: a burst must return
         // promptly even while the worker is stuck on a slow server.
+        // Exercise the real bounded worker without contacting a signed-in
+        // account or sending notifications from a test process.
+        let sender = notification_worker(|_| {});
         let start = std::time::Instant::now();
         for _ in 0..64 {
-            notify_in_background(Reason::Test);
+            let _ = sender.try_send(Reason::Test);
         }
         assert!(start.elapsed() < std::time::Duration::from_secs(10));
     }

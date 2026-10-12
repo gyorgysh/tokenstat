@@ -14,6 +14,19 @@ enum WorkflowCanvasCoordinates {
         return point.x.isFinite && point.y.isFinite ? point : origin
     }
 
+    /// Count viewport cells instead of incrementing world coordinates. At
+    /// large finite positions, adding one grid step may round back to the
+    /// same Double and an ordinary while loop would never terminate.
+    static func gridAxis(pan: CGFloat, extent: CGFloat, zoom: CGFloat, step: CGFloat = 24) -> [CGFloat] {
+        guard pan.isFinite, extent.isFinite, extent > 0,
+              zoom.isFinite, zoom > 0, step.isFinite, step > 0 else { return [] }
+        let start = floor(((-pan / zoom) - step) / step) * step
+        let cells = ceil(extent / zoom / step) + 2
+        guard start.isFinite, cells.isFinite else { return [] }
+        let count = Int(min(512, cells))
+        return (0..<count).map { start + CGFloat($0) * step }.filter(\.isFinite)
+    }
+
     static func clampedZoom(_ zoom: CGFloat) -> CGFloat {
         guard zoom.isFinite else { return 1 }
         return min(WorkflowTouchViewport.maxZoom, max(WorkflowTouchViewport.minZoom, zoom))

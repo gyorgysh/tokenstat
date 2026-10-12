@@ -313,7 +313,7 @@ fn apply(params: &str) -> Result<Value, String> {
     record_update(&report.from, &report.to);
     let staged = stage_app_image();
     let live = live_work();
-    let restarting = (asked.restart_now || live == 0) && begin_restart();
+    let restarting = (asked.restart_now || live == 0) && begin_restart(asked.restart_now);
     Ok(json!({
         "from": report.from,
         "to": report.to,
@@ -389,7 +389,7 @@ fn stage_app_image() -> Option<String> {
 ///
 /// On a thread with a delay, because the answer to this request has not been
 /// written yet and the caller is owed it.
-fn begin_restart() -> bool {
+fn begin_restart(force: bool) -> bool {
     if !crate::host_policy::supervisor_would_restart_this_process() {
         return false;
     }
@@ -400,21 +400,20 @@ fn begin_restart() -> bool {
         );
         return false;
     }
-    let _ = std::thread::Builder::new()
+    std::thread::Builder::new()
         .name("tokenstat-host-restart".into())
-        .spawn(|| {
+        .spawn(move || {
             std::thread::sleep(RESTART_GRACE);
             // Work may have started during the grace wait. Exiting then would
             // end a session that began after the decision to restart.
-            if live_work() != 0 {
+            if !force && live_work() != 0 {
                 eprintln!(
                     "tokenstat-hostd: update installed, keeping this process: work started during restart wait"
                 );
                 return;
             }
             request_supervisor_restart();
-        });
-    true
+        }).is_ok()
 }
 
 /// Ask the supervisor to start the new binary. Never `reboot`, `isolate`, or
@@ -466,7 +465,8 @@ fn request_supervisor_restart() {
         eprintln!(
             "tokenstat-hostd: updated on disk, stopping so the supervisor starts the new version"
         );
-        std::process::exit(0);
+        // Task Scheduler's RestartOnFailure does not restart a successful exit.
+        std::process::exit(if cfg!(windows) { 1 } else { 0 });
     }
 }
 
@@ -498,7 +498,7 @@ fn tick() -> Duration {
     // another release: the answer is on disk, the restart is what is left.
     if restart_pending().load(Ordering::Acquire) {
         if live_work() == 0 {
-            let _ = begin_restart();
+            let _ = begin_restart(false);
         }
         // Linux asks systemd and may still be here if that call fails.
         return RESTART_RETRY_EVERY;
@@ -515,7 +515,7 @@ fn tick() -> Duration {
             record_update(&report.from, &report.to);
             let _ = stage_app_image();
             if live_work() == 0 {
-                let _ = begin_restart();
+                let _ = begin_restart(false);
             }
             eprintln!(
                 "tokenstat-hostd: updated to {} on disk, restarting when nothing is running",
@@ -579,7 +579,7 @@ mod tests {
         assert!(!crate::host_policy::supervisor_would_restart_this_process());
         assert!(!crate::host_policy::this_process_can_self_restart());
         assert!(
-            !begin_restart(),
+            !begin_restart(false),
             "begin_restart must refuse without a supervisor rather than exit the test runner"
         );
     }

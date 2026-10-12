@@ -90,24 +90,21 @@ fun WorkspaceFileEditorPage(
     // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
-    // A pushed screen owns the system back. Without it the gesture falls
-    // through to the activity and closes the app instead of stepping back.
-    BackHandler { onClose() }
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
-    var field by remember(path) { mutableStateOf(TextFieldValue("")) }
-    var savedText by remember(path) { mutableStateOf<String?>(null) }
-    var savedAt by remember(path) { mutableStateOf<Long?>(null) }
-    var loading by remember(path) { mutableStateOf(true) }
-    var saving by remember(path) { mutableStateOf(false) }
-    var error by remember(path) { mutableStateOf<String?>(null) }
-    var conflictHost by remember(path) { mutableStateOf<String?>(null) }
-    var confirmDiscard by remember(path) { mutableStateOf(false) }
-    var findOpen by remember(path) { mutableStateOf(false) }
-    var query by remember(path) { mutableStateOf("") }
-    var replaceText by remember(path) { mutableStateOf("") }
-    var replacing by remember(path) { mutableStateOf(false) }
-    var matchIndex by remember(path) { mutableStateOf(0) }
+    var field by remember(peer, workspace, path) { mutableStateOf(TextFieldValue("")) }
+    var savedText by remember(peer, workspace, path) { mutableStateOf<String?>(null) }
+    var savedAt by remember(peer, workspace, path) { mutableStateOf<Long?>(null) }
+    var loading by remember(peer, workspace, path) { mutableStateOf(true) }
+    var saving by remember(peer, workspace, path) { mutableStateOf(false) }
+    var error by remember(peer, workspace, path) { mutableStateOf<String?>(null) }
+    var conflictHost by remember(peer, workspace, path) { mutableStateOf<String?>(null) }
+    var confirmDiscard by remember(peer, workspace, path) { mutableStateOf(false) }
+    var findOpen by remember(peer, workspace, path) { mutableStateOf(false) }
+    var query by remember(peer, workspace, path) { mutableStateOf("") }
+    var replaceText by remember(peer, workspace, path) { mutableStateOf("") }
+    var replacing by remember(peer, workspace, path) { mutableStateOf(false) }
+    var matchIndex by remember(peer, workspace, path) { mutableStateOf(0) }
 
     val dirty = savedText != null && field.text != savedText
     val matches by remember(field.text, query) { derivedStateOf { EditorFind.matches(field.text, query) } }
@@ -188,10 +185,13 @@ fun WorkspaceFileEditorPage(
     }
 
     fun requestClose() {
+        if (saving) return
         if (dirty) confirmDiscard = true else onClose()
     }
 
-    LaunchedEffect(path) { load() }
+    // System back must honor the same unsaved-draft guard as the toolbar.
+    BackHandler { requestClose() }
+    LaunchedEffect(peer, workspace, path) { load() }
 
     Column(modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -237,9 +237,10 @@ fun WorkspaceFileEditorPage(
                 replaceText = replaceText,
                 onReplaceText = { replaceText = it },
                 onReplace = {
-                    val done = EditorFind.replaceFirst(field.text, query, replaceText)
-                    if (done.count > 0) {
-                        field = TextFieldValue(done.text, TextRange(field.selection.start, field.selection.start))
+                    val range = matches.getOrNull(safeIndex)
+                    val done = EditorFind.replaceMatch(field.text, query, replaceText, safeIndex)
+                    if (done.count > 0 && range != null) {
+                        field = TextFieldValue(done.text, TextRange(range.first + replaceText.length))
                     }
                 },
                 onReplaceAll = {

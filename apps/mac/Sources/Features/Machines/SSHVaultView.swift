@@ -38,6 +38,7 @@ final class SSHVaultModel {
         }
     }
 
+    private(set) var isWorking = false
     var status: SSHVaultStatus?
     /// Set only between generating a recovery code and confirming it. While
     /// it holds a code, it has not been written down yet, and that is the
@@ -60,7 +61,8 @@ final class SSHVaultModel {
     /// that may already exist is simply out of reach.
     var unreachable: String? { status?.unreachable }
 
-    func refresh() async {
+    func refresh(allowDuringMutation: Bool = false) async {
+        guard !isWorking || allowDuringMutation else { return }
         guard let owner = ownership.claim(), owner.scope.kind == .account else { return }
         refreshGeneration &+= 1
         let generation = refreshGeneration
@@ -101,54 +103,67 @@ final class SSHVaultModel {
     }
 
     func rotateRecovery(password: String) async {
-        guard let owner = ownership.claim() else { return }
+        guard !isWorking, let owner = ownership.claim() else { return }
+        isWorking = true
+        defer { isWorking = false }
         refreshGeneration &+= 1
         do {
             let result = try await Bridge.rotateSSHVaultRecovery(password: password, expectedScope: owner.scope, expectedGeneration: owner.generation)
             guard ownership.permits(owner) else { return }
             recovery = result.recovery
             error = nil
-            await refresh()
+            await refresh(allowDuringMutation: true)
         } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
     }
 
     /// Local Lock succeeds even when the following status refresh is offline.
     func lock() async {
-        guard let owner = ownership.claim() else { return }
+        guard !isWorking, let owner = ownership.claim() else { return }
+        isWorking = true
+        defer { isWorking = false }
         refreshGeneration &+= 1
         do {
             try await Bridge.lockSSHVault(expectedScope: owner.scope, expectedGeneration: owner.generation)
             guard ownership.permits(owner) else { return }
             status?.locked = true
             error = nil
-            await refresh()
+            await refresh(allowDuringMutation: true)
         } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
     }
 
-    func reset() async {
-        guard let owner = ownership.claim() else { return }
+    @discardableResult
+    func reset() async -> Bool {
+        guard !isWorking, let owner = ownership.claim() else { return false }
+        isWorking = true
+        defer { isWorking = false }
         refreshGeneration &+= 1
         do {
             try await Bridge.resetSSHVault(expectedScope: owner.scope, expectedGeneration: owner.generation)
-            guard ownership.permits(owner) else { return }
+            guard ownership.permits(owner) else { return false }
             recovery = nil
             status?.created = false
             status?.recordCount = 0
             status?.locked = false
             error = nil
-            await refresh()
-        } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
+            await refresh(allowDuringMutation: true)
+            return ownership.permits(owner)
+        } catch {
+            if ownership.permits(owner) { self.error = error.localizedDescription }
+            return false
+        }
     }
 
     func changePassword(current: String, to next: String) async -> Bool {
-        guard let owner = ownership.claim() else { return false }
+        guard !isWorking, let owner = ownership.claim() else { return false }
+        isWorking = true
+        defer { isWorking = false }
         refreshGeneration &+= 1
         do {
             let result = try await Bridge.setSSHVaultPassword(current: current, newPassword: next, expectedScope: owner.scope, expectedGeneration: owner.generation)
             guard ownership.permits(owner) else { return false }
             if let fresh = result.recovery { recovery = fresh }
             error = nil
-            await refresh()
+            await refresh(allowDuringMutation: true)
             return ownership.permits(owner)
         } catch {
             if ownership.permits(owner) { self.error = error.localizedDescription }
@@ -247,7 +262,7 @@ struct SSHVaultRow: View {
         // saying it twice.
         if vault.locked { return nil }
         if vault.created {
-            let records = vault.recordCount == 1 ? "1 record" : L10n.text("apple.sshvaultview.0_records.2cd6fd62", "\(vault.recordCount)")
+            let records = vault.recordCount == 1 ? L10n.text("apple.sshvaultview.1_record.43507739") : L10n.text("apple.sshvaultview.0_records.2cd6fd62", "\(vault.recordCount)")
             // A vault that exists on a plan that cannot write it is the state
             // somebody lands in by letting Supporter lapse, and the row used
             // to look exactly like a vault that was working. The records are
@@ -595,7 +610,7 @@ struct SSHVaultScreen: View {
                     Button(button, icon, action: perform).buttonStyle(SecondaryButtonStyle())
                 }
             }
-            .disabled(busy)
+            .disabled(busy || vault.isWorking)
             .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -773,12 +788,12 @@ struct SSHVaultDeleteSheet: View {
     private func run() async {
         working = true
         vault.error = nil
-        await vault.reset()
+        let succeeded = await vault.reset()
         working = false
         // Staying open is the point. A sheet that closed here would leave
         // somebody on the screen they started from with an empty account and
         // no hint that their servers are still on the machine.
-        if vault.error == nil { deleted = true }
+        if succeeded { deleted = true }
     }
 }
 

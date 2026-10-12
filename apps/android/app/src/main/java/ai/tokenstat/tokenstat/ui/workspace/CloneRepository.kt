@@ -122,6 +122,7 @@ fun CloneRepositoryScreen(
                     icon = ActionIcon.Download.vector,
                     onClick = {
                         scope.launch {
+                            if (working) return@launch
                             working = true
                             error = null
                             runCatching {
@@ -345,8 +346,12 @@ fun FolderPickerScreen(
     var naming by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
+    var loading by remember(peer) { mutableStateOf(false) }
+    var generation by remember(peer) { mutableStateOf(0) }
 
     fun load(next: String?) {
+        val request = ++generation
+        loading = true
         scope.launch {
             error = null
             runCatching {
@@ -354,6 +359,7 @@ fun FolderPickerScreen(
                     if (next != null) put("path", next)
                 }).jsonObject
             }.onSuccess { answer ->
+                if (generation != request) return@onSuccess
                 path = answer["path"]?.jsonPrimitive?.contentOrNull
                 parentPath = answer["parent"]?.jsonPrimitive?.contentOrNull
                 entries = (answer["entries"] as? JsonArray)
@@ -362,7 +368,8 @@ fun FolderPickerScreen(
                         it["kind"]?.jsonPrimitive?.contentOrNull == "directory" &&
                             it["hidden"]?.jsonPrimitive?.booleanOrNull != true
                     } ?: emptyList()
-            }.onFailure { error = SetupFailure.readable(it) }
+            }.onFailure { if (generation == request) error = SetupFailure.readable(it) }
+            if (generation == request) loading = false
         }
     }
     LaunchedEffect(peer) { load(null) }
@@ -380,7 +387,7 @@ fun FolderPickerScreen(
                         label = L10n.text("android.clonerepository.new_folder.cf28f49e"),
                         small = true,
                         onClick = { naming = true },
-                        enabled = path != null && !creating,
+                        enabled = path != null && !creating && !loading,
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.background),
@@ -391,7 +398,8 @@ fun FolderPickerScreen(
                 TsAccentButton(
                     label = confirm,
                     icon = ActionIcon.Approve.vector,
-                    onClick = { onChosen(path!!) },
+                    onClick = { if (!loading && !creating) onChosen(path!!) },
+                    enabled = !loading && !creating,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),
                 )
             }
@@ -511,6 +519,7 @@ fun RegisterFolderScreen(
         onClose = onClose,
         onChosen = { picked ->
             scope.launch {
+                if (registering) return@launch
                 registering = true
                 error = null
                 runCatching {

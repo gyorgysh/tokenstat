@@ -378,25 +378,27 @@ fn parse_last(s: &str) -> Result<u32, String> {
 }
 
 impl Window {
-    fn to_query(&self, tz: &jiff::tz::TimeZone) -> Query {
+    fn to_query(&self, tz: &jiff::tz::TimeZone) -> Result<Query> {
         let since = match (self.last, &self.since) {
             (Some(n), _) => {
                 let today = jiff::Timestamp::now().to_zoned(tz.clone()).date();
-                today
-                    .checked_sub(jiff::Span::new().days(i64::from(n) - 1))
-                    .ok()
-                    .map(|d| d.to_string())
+                Some(
+                    today
+                        .checked_sub(jiff::Span::new().try_days(i64::from(n) - 1)?)
+                        .context("--last exceeds the supported date range")?
+                        .to_string(),
+                )
             }
             (None, s) => s.clone(),
         };
-        Query {
+        Ok(Query {
             since,
             until: self.until.clone(),
             model: self.model.clone(),
             project: self.project.clone(),
             billing: None,
             limit: None,
-        }
+        })
     }
 }
 
@@ -455,16 +457,32 @@ fn main() -> Result<()> {
             store.clear_watermarks()?;
         }
         let report = tokenstat_core::scan(&mut store, &tz)?;
-        render::scan_report(&report, cli.json)?;
+        let mut json_report = render::scan_report_value(&report);
+        if !cli.json {
+            render::scan_report(&report, false)?;
+        }
         // Cursor and Antigravity IDE/quota use a 30 minute cache. IDE sync only
         // works while the Antigravity app is open. Soft-fails per vendor.
         if !scheduled || tokenstat_sync::scheduled_network_allowed() {
             match tokenstat_sync::fetch_remotes(&mut store, &tz, false) {
-                Ok(remote) => render::fetch_reports(&remote, cli.json)?,
+                Ok(remote) => {
+                    if cli.json {
+                        json_report["remote"] = render::fetch_report_values(&remote);
+                    } else {
+                        render::fetch_reports(&remote, false)?;
+                    }
+                }
                 Err(e) => {
-                    eprintln!("  remote fetch: {e}");
+                    if cli.json {
+                        json_report["remote_error"] = serde_json::json!(e.to_string());
+                    } else {
+                        eprintln!("  remote fetch: {e}");
+                    }
                 }
             }
+        }
+        if cli.json {
+            println!("{json_report}");
         }
         // Soft update check (24h TTL). Applies when auto-update is on (default).
         if !scheduled || tokenstat_sync::scheduled_network_allowed() {
@@ -602,7 +620,7 @@ fn main() -> Result<()> {
     // missing database on a fresh install, exits quietly with no output.
     if let Command::Statusline { format, max_age } = &command {
         if let Ok(store) = Store::open(&db_path) {
-            let _ = render::statusline(&store, &tz, format, *max_age);
+            let _ = render::statusline(&store, &tz, format, *max_age, &db_path, cli.tz.as_deref());
         }
         return Ok(());
     }
@@ -646,7 +664,7 @@ fn main() -> Result<()> {
     }
 
     let totals = store.totals(&Query::default())?;
-    if totals.events == 0 {
+    if totals.events == 0 && !matches!(command, Command::Export { .. }) {
         render::empty_archive(cli.json)?;
         return Ok(());
     }
@@ -671,14 +689,14 @@ fn main() -> Result<()> {
         | Command::Sync { .. }
         | Command::Mcp => unreachable!("handled above"),
         Command::Daily(w) => {
-            render::grouped(&store, GroupBy::Day, &w.to_query(&tz), "Date", cli.json)?
+            render::grouped(&store, GroupBy::Day, &w.to_query(&tz)?, "Date", cli.json)?
         }
         Command::Weekly(w) => {
-            render::grouped(&store, GroupBy::Week, &w.to_query(&tz), "Week", cli.json)?
+            render::grouped(&store, GroupBy::Week, &w.to_query(&tz)?, "Week", cli.json)?
         }
-        Command::Monthly(w) => render::monthly(&store, &w.to_query(&tz), cli.json)?,
+        Command::Monthly(w) => render::monthly(&store, &w.to_query(&tz)?, cli.json)?,
         Command::Models { window, detail } => {
-            let q = window.to_query(&tz);
+            let q = window.to_query(&tz)?;
             if detail {
                 render::models_detail(&store, &q, cli.json)?
             } else {
@@ -688,24 +706,24 @@ fn main() -> Result<()> {
         Command::Projects(w) => render::grouped(
             &store,
             GroupBy::Project,
-            &w.to_query(&tz),
+            &w.to_query(&tz)?,
             "Project",
             cli.json,
         )?,
         Command::Sessions { window, top } => {
-            render::sessions(&store, &window.to_query(&tz), top, cli.json)?
+            render::sessions(&store, &window.to_query(&tz)?, top, cli.json)?
         }
-        Command::Summary(w) => render::overview(&store, &tz, &w.to_query(&tz), cli.json)?,
-        Command::Heatmap(w) => render::heatmap(&store, &tz, &w.to_query(&tz), cli.json)?,
+        Command::Summary(w) => render::overview(&store, &tz, &w.to_query(&tz)?, cli.json)?,
+        Command::Heatmap(w) => render::heatmap(&store, &tz, &w.to_query(&tz)?, cli.json)?,
         Command::Wrapped { year } => render::wrapped(&store, &tz, year, cli.json)?,
-        Command::Blocks(w) => render::blocks(&store, &tz, &w.to_query(&tz), cli.json)?,
+        Command::Blocks(w) => render::blocks(&store, &tz, &w.to_query(&tz)?, cli.json)?,
         Command::Export {
             window,
             format,
             out,
         } => render::export(
             &store,
-            &window.to_query(&tz),
+            &window.to_query(&tz)?,
             &format,
             out.as_deref(),
             cli.json,
@@ -789,5 +807,14 @@ mod cli_tests {
             err.contains("unexpected argument"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn oversized_last_is_an_error_instead_of_panicking_or_removing_the_filter() {
+        let window = Window {
+            last: Some(u32::MAX),
+            ..Window::default()
+        };
+        assert!(window.to_query(&jiff::tz::TimeZone::UTC).is_err());
     }
 }

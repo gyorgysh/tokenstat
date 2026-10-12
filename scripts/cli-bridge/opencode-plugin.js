@@ -30,14 +30,19 @@ async function hostHook(phase, payload) {
   });
   child.stdin.write(JSON.stringify(payload));
   child.stdin.end();
-  const body = await new Response(child.stdout).text();
-  const code = await child.exited;
+  // Drain both pipes while the helper runs. Waiting for stdout before reading
+  // stderr can deadlock a helper whose diagnostic pipe fills first.
+  const [body, diagnostic, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
 
   // Fail closed on anything unexpected. A gate that cannot say what it decided
   // has not decided anything, and letting the tool run on that basis is the
   // failure mode this whole channel exists to prevent.
   if (code !== 0) {
-    const reason = (await new Response(child.stderr).text()).trim();
+    const reason = diagnostic.trim();
     throw new Error(reason || "tokenstat cannot approve this: the host hook failed");
   }
   let decision;

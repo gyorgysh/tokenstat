@@ -238,7 +238,8 @@ fun ChatSection(
     /// send outlives a navigation: one unkeyed flag showed the spinner on
     /// whatever conversation was opened next.
     var sendingIds by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
-    val sending = openId?.let { it in sendingIds } == true
+    var preparingIds by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
+    val sending = openId?.let { it in sendingIds || it in preparingIds } == true
     var sendError by remember(projectOwner) { mutableStateOf<String?>(null) }
     var actionError by remember(projectOwner) { mutableStateOf<String?>(null) }
     var eventsError by remember(projectOwner, openId) { mutableStateOf<String?>(null) }
@@ -745,7 +746,7 @@ fun ChatSection(
         if (!ownsProject()) return false
         when (receipt?.str("state") ?: "unknown") {
             "accepted" -> {
-                writeQueue(id) { list -> list.removeAll { it.id == item.id } }
+                if (!writeQueue(id) { list -> list.removeAll { it.id == item.id } }) return false
                 sendError = null
                 loadEvents(id)
                 refreshChats()
@@ -810,31 +811,16 @@ fun ChatSection(
                     kotlinx.coroutines.delay(200)
                 }
             }
-            // The row stays editable through the stop wait above, so the words
-            // may have changed since this message was picked up. The bytes
-            // sent are the bytes saved, never the stale closure.
-            val live = runCatching { outbox.items(key) }.getOrDefault(emptyList())
-                .firstOrNull { it.id == item.id } ?: item
-            if (!ownsProject()) return false
-            // An edit after an attempt means the words changed, so the
-            // delivery id changes with them: the old one may already have a
-            // receipt on the host.
-            val rotates = live.attemptedAtMs != null && live.delivery == ChatDelivery.Waiting
-            val deliveryId = if (rotates) java.util.UUID.randomUUID().toString() else live.id
-            val now = System.currentTimeMillis()
-            val firstAttempt = if (rotates) now else (live.firstAttemptAtMs ?: live.attemptedAtMs ?: now)
+            // Claim the latest saved bytes atomically. Removing or editing a
+            // message during the stop wait must never send a stale closure.
+            if (openId != id || !ownsProject()) return false
+            var attempt: QueuedMessage? = null
             if (!writeQueue(id) { list ->
-                    val at = list.indexOfFirst { it.id == item.id }
-                    if (at >= 0) {
-                        list[at] = list[at].copy(
-                            id = deliveryId,
-                            delivery = ChatDelivery.Sending,
-                            firstAttemptAtMs = firstAttempt,
-                            attemptedAtMs = now,
-                        )
-                    }
-                }
-            ) return false
+                attempt = prepareQueuedDelivery(list, item.id, System.currentTimeMillis(), java.util.UUID.randomUUID().toString())
+            }) return false
+            val live = attempt ?: return false
+            val deliveryId = live.id
+            val firstAttempt = live.firstAttemptAtMs ?: return false
             if (!ownsProject()) return false
             val sent = runCatching {
                 model.workspaceSection(
@@ -848,14 +834,11 @@ fun ChatSection(
             }
             if (sent.isSuccess) {
                 val revision = sent.getOrNull()?.long("sendRevision")
-                runCatching {
-                    val carried = outbox.update(outboxKey(id)) { list ->
-                        val kept = ChatOutboxRules.accept(list.toList(), deliveryId, revision)
-                        list.clear()
-                        list.addAll(kept)
-                    }
-                    if (id == openId) queued = carried
-                }
+                if (!writeQueue(id) { list ->
+                    val kept = ChatOutboxRules.accept(list.toList(), deliveryId, revision)
+                    list.clear()
+                    list.addAll(kept)
+                }) return false
                 if (!ownsProject()) return true
                 authorized = authorized - deliveryId - item.id
                 sendError = null
@@ -898,7 +881,7 @@ fun ChatSection(
         if (!ownsProject()) return
         val id = openId ?: return
         while (true) {
-            if (sendingIds.isNotEmpty() || !hostReachable || !ownsProject()) return
+            if (openId != id || sendingIds.isNotEmpty() || !hostReachable || !ownsProject()) return
             val next = queued.firstOrNull() ?: return
             if (next.id !in authorized) return
             if (chats.firstOrNull { it.str("id") == id }?.bol("running") == true) return
@@ -1084,7 +1067,9 @@ fun ChatSection(
 
     suspend fun send(text: String) {
         val id = openId ?: return
-        if (!ownsProject()) return
+        if (!ownsProject() || id in preparingIds || id in sendingIds) return
+        preparingIds = preparingIds + id
+        try {
         val selectedBackend = backends.firstOrNull { it.str("id") == chats.firstOrNull { chat -> chat.str("id") == id }?.str("backend") }
         // Only the CLI's own answer stops a send. A stored token past its
         // expiry is routine (the CLI renews it), and an agent signed in with
@@ -1101,6 +1086,7 @@ fun ChatSection(
         // Sending is engaging: follow is the default, so a new turn resumes
         // it even from a scrollback.
         pinToLatest()
+        if (openId != id || !ownsProject()) return
         if (staged.isEmpty() && tryParkSteer(id, clean)) return
         // Uploaded first, and only then queued: a message that names a file
         // the host does not have yet is worse than a slower send. A refused
@@ -1115,6 +1101,7 @@ fun ChatSection(
                     confirm = { remaining -> confirmFileRelay(attachment.name, attachment.bytes.toLong(), remaining) },
                     progress = { value -> check(ownsProject() && openId == id); fileProgress = attachment.name to value })
             }
+            (uploaded.exceptionOrNull() as? CancellationException)?.let { throw it }
             val file = uploaded.getOrNull()
             if (!ownsProject()) return
             if (uploaded.isFailure || file?.str("id") == null) {
@@ -1128,6 +1115,7 @@ fun ChatSection(
             files.add(QueuedAttachment(file.str("id").orEmpty(), file.str("name") ?: attachment.name))
         }
         fileProgress = null
+        if (openId != id || !ownsProject()) return
         val item = enqueue(id, clean, files, whenConnected = false) ?: return
         model.chatComposers.clearIfUnchanged(sentOwner, sentDraft)
         if (!ownsProject()) return
@@ -1143,6 +1131,13 @@ fun ChatSection(
             if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) deliver(item, stopCurrent = false)
         } finally {
             deliveringFromComposer = null
+        }
+        } finally {
+            preparingIds = preparingIds - id
+            if (fileTransferJob == kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]) {
+                fileTransferJob = null
+                fileProgress = null
+            }
         }
     }
 
@@ -1173,7 +1168,7 @@ fun ChatSection(
     LaunchedEffect(projectOwner) { loadChats() }
     // A navigation that named a conversation: open exactly it, even when
     // this folder's list is already on screen.
-    LaunchedEffect(initialChatId, workspace) {
+    LaunchedEffect(initialChatId, projectOwner) {
         if (initialChatId != null) openId = initialChatId
     }
     // The launcher's promise: arriving to start work opens the conversation
@@ -1189,7 +1184,7 @@ fun ChatSection(
             }?.str("id")
         }
     }
-    LaunchedEffect(openId, peer) {
+    LaunchedEffect(openId, peer, projectOwner) {
         if (openId == null || backends.isNotEmpty()) return@LaunchedEffect
         runCatching {
             model.workspaceSection(peer, "chat.backends", buildJsonObject {})
@@ -1846,6 +1841,7 @@ fun ChatSection(
                 onStop = {
                     val id = openId ?: return@ChatComposer
                     scope.launch {
+                        if (id in preparingIds) fileTransferJob?.cancel()
                         val noteVersion = steerVersions.version(id)
                         try {
                             stopChat(id)
@@ -3170,4 +3166,21 @@ private fun ChatSegmented(
             }
         }
     }
+}
+
+/** Freeze a queued attempt in the same store update that reads its latest text. */
+internal fun prepareQueuedDelivery(
+    items: MutableList<QueuedMessage>, id: String, now: Long, replacementId: String,
+): QueuedMessage? {
+    val index = items.indexOfFirst { it.id == id }
+    if (index < 0) return null
+    val current = items[index]
+    if (current.needsReceipt || current.delivery == ChatDelivery.NeedsReview || current.expectedRevision == null) return null
+    val rotates = current.attemptedAtMs != null && current.delivery == ChatDelivery.Waiting
+    return current.copy(
+        id = if (rotates) replacementId else current.id,
+        delivery = ChatDelivery.Sending,
+        firstAttemptAtMs = if (rotates) now else current.firstAttemptAtMs ?: current.attemptedAtMs ?: now,
+        attemptedAtMs = now,
+    ).also { items[index] = it }
 }

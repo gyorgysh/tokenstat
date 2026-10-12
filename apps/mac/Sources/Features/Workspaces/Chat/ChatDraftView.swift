@@ -12,6 +12,7 @@ import SwiftUI
 struct ChatDraftView: NSViewRepresentable {
     @Binding var text: String
     @Binding var selection: NSRange
+    var owner: WorkReference?
     var placeholder: String
     var enabled: Bool
     var onSend: () -> Void
@@ -19,7 +20,7 @@ struct ChatDraftView: NSViewRepresentable {
     var onPasteAttachments: () -> Void = {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, selection: $selection, onSend: onSend, onStop: onStop)
+        Coordinator(text: $text, selection: $selection, owner: owner, onSend: onSend, onStop: onStop)
     }
 
     func makeNSView(context: Context) -> ChatDraftScrollView {
@@ -81,6 +82,11 @@ struct ChatDraftView: NSViewRepresentable {
 
     func updateNSView(_ scroll: ChatDraftScrollView, context: Context) {
         guard let textView = scroll.documentView as? ChatDraftTextView else { return }
+        context.coordinator.text = $text
+        if context.coordinator.owner != owner {
+            textView.undoManager?.removeAllActions()
+            context.coordinator.owner = owner
+        }
         context.coordinator.onSend = onSend
         context.coordinator.onStop = onStop
         context.coordinator.selection = $selection
@@ -125,6 +131,7 @@ struct ChatDraftView: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
+        var owner: WorkReference?
         var selection: Binding<NSRange>
         var onSend: () -> Void
         var onStop: () -> Void
@@ -145,10 +152,12 @@ struct ChatDraftView: NSViewRepresentable {
         init(
             text: Binding<String>,
             selection: Binding<NSRange>,
+            owner: WorkReference?,
             onSend: @escaping () -> Void,
             onStop: @escaping () -> Void
         ) {
             self.text = text
+            self.owner = owner
             self.selection = selection
             self.onSend = onSend
             self.onStop = onStop
@@ -161,9 +170,13 @@ struct ChatDraftView: NSViewRepresentable {
         func requestSend() {
             guard !sendQueued else { return }
             sendQueued = true
+            let owner = self.owner
+            let send = onSend
             DispatchQueue.main.async { [weak self] in
-                self?.sendQueued = false
-                self?.onSend()
+                guard let self else { return }
+                self.sendQueued = false
+                guard self.owner == owner else { return }
+                send()
             }
         }
 
@@ -236,6 +249,8 @@ final class ChatDraftScrollView: NSScrollView {
 }
 
 final class ChatDraftTextView: NSTextView {
+    private let draftUndo = UndoManager()
+    override var undoManager: UndoManager? { draftUndo }
     var placeholder: String = "" {
         didSet {
             if placeholder != oldValue, string.isEmpty {

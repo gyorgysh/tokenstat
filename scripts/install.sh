@@ -200,13 +200,20 @@ expected_sha() {
   ' "$sums_file"
 }
 
+path_export() {
+  # A custom directory is literal shell data, including quotes and dollars.
+  local quote="'" replacement="'\\''"
+  local quoted_dir="${1//$quote/$replacement}"
+  printf 'export PATH=\x27%s\x27:"$PATH"\n' "$quoted_dir"
+}
+
 ensure_path() {
   local dir="$1"
   case ":$PATH:" in
     *":$dir:"*) return 0 ;;
   esac
   warn "$dir is not on PATH yet"
-  local line="export PATH=\"${dir}:\$PATH\""
+  local line="$(path_export "$dir")"
   local profile=""
   if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
     profile="$HOME/.zprofile"
@@ -323,6 +330,7 @@ main() {
   [ "$daemon_version" = "tokenstat-hostd $version" ] || die "tokenstat-hostd version does not match tokenstat $version"
 
   mkdir -p "$BIN_DIR"
+  BIN_DIR="$(cd "$BIN_DIR" && pwd)"
   dest="$BIN_DIR/tokenstat"
   install_release_pair "$extracted" "$daemon" "$BIN_DIR"
   if [ "$(uname -s)" = "Darwin" ]; then

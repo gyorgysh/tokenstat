@@ -393,15 +393,15 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         );
     }
 
-    // Pi: JSONL, one file per session, appended to. Read from the last offset
-    // like Claude Code's transcripts.
+    // Pi: re-read changed sessions to preserve header metadata and absolute
+    // record positions used when messages have no durable ID.
     if let Some(sessions) = pi::discover(&home) {
         let files = pi::shards(&sessions);
         report.files_found += files.len() as u64;
         let parsed: Vec<_> = files
             .par_iter()
             .map(|path| {
-                read_shard(path, &marks, |p, text| {
+                read_document_shard(path, &marks, |p, text| {
                     pi::parse_file(p, &sessions, text).into()
                 })
             })
@@ -425,21 +425,25 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
 
     // Kimi Code: one durable wire per main agent and subagent. Only its flat
     // usage records are decoded; conversation records are ignored. Each wire
-    // is append-only, so resume at the last byte like the other JSONL logs.
+    // is append-only; re-read changed wires to preserve absolute record positions.
     if let Some(root) = kimi::discover(&home) {
         let files = kimi::wires(&root);
         if !files.is_empty() {
             report.files_found += files.len() as u64;
             let parsed: Vec<_> = files
                 .par_iter()
-                .map(|path| read_shard(path, &marks, |p, text| kimi::parse_file(p, text).into()))
+                // Kimi has no record ID and includes the file line number in
+                // event identity. Parsing only a tail resets that number.
+                .map(|path| {
+                    read_document_shard(path, &marks, |p, text| kimi::parse_file(p, text).into())
+                })
                 .collect();
             absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
         }
     }
 
     // Qwen Code: its own append-only usage ledger, one file per calendar
-    // month. Read from the last offset, and the transcripts are never opened:
+    // month. Re-read changed ledgers to preserve ID-less record positions;
     // the folder each session ran in comes from their file names alone. See
     // `sources::qwen`.
     if let Some(root) = qwen::discover(&home) {
@@ -450,7 +454,7 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
             let parsed: Vec<_> = files
                 .par_iter()
                 .map(|path| {
-                    read_shard(path, &marks, |p, text| {
+                    read_document_shard(path, &marks, |p, text| {
                         qwen::parse_file(p, text, &sessions).into()
                     })
                 })
@@ -459,16 +463,16 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         }
     }
 
-    // Muse: JSONL event log, one per session and one per subagent, appended
-    // to. Read from the last offset like Pi's. The project lives in the head
-    // of the file, which a tail read never sees, so the parser reads that
-    // itself rather than being handed the whole log again on every append.
+    // Muse: re-read changed logs to preserve absolute record positions used
+    // when model-completed records have no durable ID.
     if let Some(sessions) = muse::discover(&home) {
         let files = muse::shards(&sessions);
         report.files_found += files.len() as u64;
         let parsed: Vec<_> = files
             .par_iter()
-            .map(|path| read_shard(path, &marks, |p, text| muse::parse_file(p, text).into()))
+            .map(|path| {
+                read_document_shard(path, &marks, |p, text| muse::parse_file(p, text).into())
+            })
             .collect();
         absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
     }
@@ -520,7 +524,7 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         let outcomes: Vec<_> = files
             .par_iter()
             .map(|path| {
-                read_shard(path, &marks, |p, text| {
+                read_document_shard(path, &marks, |p, text| {
                     antigravity_cache::parse_file(p, text).into()
                 })
             })
@@ -575,9 +579,28 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
     }
 
     // Zed agent threads (zstd JSON in SQLite). Empty usage is a no-op.
+    let mut zed_replacements = Vec::new();
     if let Some(db) = zed::discover(&home) {
+        let zed_marks = marks
+            .iter()
+            .filter_map(|(key, mark)| {
+                key.strip_prefix("zed-v2:")
+                    .map(|path| (path.to_string(), mark.clone()))
+            })
+            .collect();
         report.files_found += 1;
-        let outcome = read_db_shard(&db, &marks, |p| zed::parse_db(p).into());
+        let mut outcome = read_db_shard(&db, &zed_marks, |p| zed::parse_db(p).into());
+        // A cumulative-only thread may later expose individual requests, and
+        // its derived remainder can shrink. Max-upserts would retain both.
+        if outcome.parsed.warnings.is_empty() {
+            zed_replacements.append(&mut outcome.parsed.events);
+            if let Some((key, _)) = &mut outcome.mark {
+                *key = format!("zed-v2:{key}");
+            }
+        } else {
+            outcome.parsed.events.clear();
+            outcome.mark = None;
+        }
         absorb(
             &mut report,
             &mut all_events,
@@ -601,6 +624,8 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
     const INSERT_CHUNK: usize = 4_096;
     let mut inserted = 0u64;
     inserted += store.replace_codex_sessions(&codex_replacements, tz)?;
+    inserted +=
+        store.replace_source_sessions(crate::model::SourceId::Zed, &zed_replacements, tz)?;
     for chunk in all_events.chunks(INSERT_CHUNK) {
         inserted += store.insert_events(chunk, tz)?;
     }
@@ -938,19 +963,28 @@ fn read_db_shard(
     }
 
     let parsed = parse(path);
+    // A busy database or a transient read failure has not been consumed.
+    // Keeping its watermark would suppress retries until the vendor writes
+    // again, even after the original problem has cleared.
+    let readable = !parsed
+        .warnings
+        .iter()
+        .any(|warning| matches!(warning, Warning::Unreadable { .. }));
     FileOutcome {
         parsed,
         read: true,
-        mark: Some((key, {
-            let (head_sig, sig_len) = watermark::head_signature(&head);
-            watermark::Watermark {
-                size,
-                mtime_ms,
-                head_sig,
-                sig_len,
-                byte_offset: size,
-            }
-        })),
+        mark: readable.then(|| {
+            (key, {
+                let (head_sig, sig_len) = watermark::head_signature(&head);
+                watermark::Watermark {
+                    size,
+                    mtime_ms,
+                    head_sig,
+                    sig_len,
+                    byte_offset: size,
+                }
+            })
+        }),
     }
 }
 
@@ -972,18 +1006,19 @@ pub fn reconcile(store: &Store) -> Result<Option<Reconciliation>, CoreError> {
         return Ok(None);
     };
 
-    let totals = store.totals(&crate::store::Query::default())?;
+    let (archive_in_out, archive_sessions, archive_first_date) =
+        store.claude_reconciliation_totals()?;
     Ok(Some(Reconciliation {
         vendor_in_out: stats.in_out_total(),
-        archive_in_out: store.in_out_total()?,
+        archive_in_out,
         vendor_sessions: stats.total_sessions,
-        archive_sessions: totals.sessions,
+        archive_sessions,
         vendor_first_date: stats
             .first_session_date
             .as_deref()
             .and_then(|s| s.get(..10))
             .map(str::to_string),
-        archive_first_date: totals.first_date,
+        archive_first_date,
         vendor_last_computed: stats.last_computed_date.clone(),
     }))
 }
@@ -1119,5 +1154,96 @@ mod tests {
     #[test]
     fn a_missing_store_has_no_stat() {
         assert!(store_stat(std::path::Path::new("/nope/does-not-exist.db")).is_none());
+    }
+
+    #[test]
+    fn an_unreadable_database_is_not_marked_as_consumed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.db");
+        std::fs::write(&path, b"database fixture").unwrap();
+        let marks = std::collections::HashMap::new();
+        let outcome = read_db_shard(&path, &marks, |path| Parsed {
+            warnings: vec![Warning::Unreadable {
+                path: path.to_path_buf(),
+                reason: "database is locked".into(),
+            }],
+            ..Parsed::default()
+        });
+        assert!(outcome.mark.is_none());
+        let retried = read_db_shard(&path, &marks, |_| Parsed::default());
+        assert!(retried.read);
+        assert!(retried.mark.is_some());
+    }
+
+    #[test]
+    fn kimi_append_keeps_file_positions_and_distinct_identical_calls() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wire.jsonl");
+        let line = r#"{"type":"usage.record","agentId":"main","model":"m","usage":{"inputOther":1,"output":2},"time":2}"#;
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+        let mut marks = std::collections::HashMap::new();
+        let first = read_document_shard(&path, &marks, |path, text| {
+            kimi::parse_file(path, text).into()
+        });
+        let original = first.parsed.events[0].id;
+        let (key, mark) = first.mark.unwrap();
+        marks.insert(key, mark);
+        std::fs::write(&path, format!("{line}\n{line}\n")).unwrap();
+        let next = read_document_shard(&path, &marks, |path, text| {
+            kimi::parse_file(path, text).into()
+        });
+        assert_eq!(next.parsed.events.len(), 2);
+        assert_eq!(next.parsed.events[0].id, original);
+        assert_ne!(next.parsed.events[1].id, original);
+    }
+
+    #[test]
+    fn document_parsers_preserve_metadata_and_idless_record_positions_on_append() {
+        let dir = tempfile::tempdir().unwrap();
+        for (source, header, line) in [
+            (
+                "pi",
+                r#"{"type":"session","cwd":"/work/demo-app"}"#,
+                r#"{"type":"message","timestamp":"2026-10-12T00:00:00Z","message":{"role":"assistant","model":"m","usage":{"input":1,"output":2}}}"#,
+            ),
+            (
+                "muse",
+                r#"{"payload":{"record":{"workspace_root":"/work/demo-app"}}}"#,
+                r#"{"recorded_at":1788257973508549,"payload":{"event":{"kind":"model_completed","model":"m","usage":{"input_tokens":1,"output_tokens":2}}}}"#,
+            ),
+            (
+                "qwen",
+                "{}",
+                r#"{"timestamp":"2026-10-12T00:00:00Z","sessionId":"s","model":"m","inputTokens":1,"outputTokens":2}"#,
+            ),
+            (
+                "antigravity",
+                r#"{"type":"session_meta","modelId":"m","timestamp":1711200000000}"#,
+                r#"{"type":"usage","input":1,"output":2}"#,
+            ),
+        ] {
+            let path = dir.path().join(format!("{source}.jsonl"));
+            let parse = |path: &std::path::Path, text: &str| -> Parsed {
+                match source {
+                    "pi" => pi::parse_file(path, dir.path(), text).into(),
+                    "muse" => muse::parse_file(path, text).into(),
+                    "qwen" => {
+                        qwen::parse_file(path, text, &std::collections::HashMap::new()).into()
+                    }
+                    _ => antigravity_cache::parse_file(path, text).into(),
+                }
+            };
+            std::fs::write(&path, format!("{header}\n{line}\n")).unwrap();
+            let first = read_document_shard(&path, &std::collections::HashMap::new(), parse);
+            let original = &first.parsed.events[0];
+            let marks = std::collections::HashMap::from([first.mark.unwrap()]);
+            std::fs::write(&path, format!("{header}\n{line}\n{line}\n")).unwrap();
+            let next = read_document_shard(&path, &marks, parse);
+            assert_eq!(next.parsed.events.len(), 2, "{source}");
+            assert_eq!(next.parsed.events[0].id, original.id, "{source}");
+            assert_ne!(next.parsed.events[1].id, original.id, "{source}");
+            assert_eq!(next.parsed.events[1].model, original.model, "{source}");
+            assert_eq!(next.parsed.events[1].project, original.project, "{source}");
+        }
     }
 }

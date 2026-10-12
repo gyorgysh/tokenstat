@@ -191,7 +191,7 @@ fn fetch_quota(store: &mut Store, force: bool) -> anyhow::Result<QuotaFetch> {
     let loaded = if !force && cache_is_fresh(&cache, FETCH_TTL) {
         fs::read_to_string(&cache)
             .ok()
-            .and_then(|t| parse_quota_bundle(&t).ok().map(|s| (s, true)))
+            .and_then(|t| cached_quota(&t, &token).map(|s| (s, true)))
     } else {
         None
     };
@@ -200,7 +200,9 @@ fn fetch_quota(store: &mut Store, force: bool) -> anyhow::Result<QuotaFetch> {
         None => match download_quota_bundle(&token) {
             Ok(text) => match parse_quota_bundle(&text) {
                 Ok(snap) => {
-                    let _ = write_cache(&cache, &text);
+                    let mut cached: Value = serde_json::from_str(&text)?;
+                    cached["credentialSha256"] = crate::snapshot::sha256(&token).into();
+                    let _ = write_cache(&cache, &serde_json::to_string(&cached)?);
                     (snap, false)
                 }
                 Err(e) => {
@@ -291,9 +293,6 @@ fn download_quota_bundle(access_token: &str) -> anyhow::Result<String> {
 
     // Prefer a live oauth access token when the pasted/stored one is stale.
     let mut token = access_token.trim().to_string();
-    if let Some(fresh) = gemini_oauth_access_token_fresh() {
-        token = fresh;
-    }
 
     let load_body = serde_json::json!({
         "metadata": {
@@ -307,7 +306,7 @@ fn download_quota_bundle(access_token: &str) -> anyhow::Result<String> {
     let load_resp = if load_resp.status() == reqwest::StatusCode::UNAUTHORIZED
         || load_resp.status() == reqwest::StatusCode::FORBIDDEN
     {
-        if let Some(new_token) = try_refresh_from_oauth_file()? {
+        if let Some(new_token) = try_refresh_from_oauth_file(&token)? {
             token = new_token;
             post_json(&client, LOAD_URL, &token, &load_body)?
         } else {
@@ -323,7 +322,7 @@ fn download_quota_bundle(access_token: &str) -> anyhow::Result<String> {
     if !load_resp.status().is_success() {
         anyhow::bail!("Antigravity loadCodeAssist returned {}", load_resp.status());
     }
-    let load_text = load_resp.text()?;
+    let load_text = crate::profile::limited_text(load_resp)?;
     let load: Value = serde_json::from_str(&load_text)?;
     let project = load
         .get("cloudaicompanionProject")
@@ -347,7 +346,7 @@ fn download_quota_bundle(access_token: &str) -> anyhow::Result<String> {
             models_resp.status()
         );
     }
-    let models_text = models_resp.text()?;
+    let models_text = crate::profile::limited_text(models_resp)?;
 
     // Bundle both responses so cache + parser stay self-contained.
     let bundle = serde_json::json!({
@@ -372,10 +371,15 @@ fn post_json(
         .send()?)
 }
 
-fn try_refresh_from_oauth_file() -> anyhow::Result<Option<String>> {
+fn try_refresh_from_oauth_file(rejected: &str) -> anyhow::Result<Option<String>> {
     let Some(creds) = read_oauth_creds()? else {
         return Ok(None);
     };
+    // An explicit environment/pasted token must never silently switch to a
+    // different Gemini account when it is refused.
+    if creds.access_token.as_deref().map(str::trim) != Some(rejected) {
+        return Ok(None);
+    }
     let Some(refresh) = creds.refresh_token.filter(|s| !s.is_empty()) else {
         return Ok(None);
     };
@@ -397,7 +401,7 @@ fn try_refresh_from_oauth_file() -> anyhow::Result<Option<String>> {
     if !resp.status().is_success() {
         return Ok(None);
     }
-    let body: Value = serde_json::from_str(&resp.text()?)?;
+    let body: Value = serde_json::from_str(&crate::profile::limited_text(resp)?)?;
     let Some(access) = body.get("access_token").and_then(Value::as_str) else {
         return Ok(None);
     };
@@ -443,27 +447,14 @@ fn oauth_creds_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".gemini/oauth_creds.json"))
 }
 
-fn gemini_oauth_access_token_fresh() -> Option<String> {
-    let path = oauth_creds_path();
-    let text = fs::read_to_string(path).ok()?;
-    let v: Value = serde_json::from_str(&text).ok()?;
-    let token = v.get("access_token")?.as_str()?.trim();
-    if token.is_empty() {
+fn cached_quota(text: &str, token: &str) -> Option<QuotaSnapshot> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    if value.get("credentialSha256")?.as_str()? != crate::snapshot::sha256(token) {
         return None;
     }
-    if let Some(exp_ms) = v.get("expiry_date").and_then(|x| x.as_i64()) {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?
-            .as_millis() as i64;
-        if now_ms + 60_000 >= exp_ms {
-            return None;
-        }
-    }
-    Some(token.to_string())
+    parse_quota_bundle(text).ok()
 }
 
-/// Parse the cached load+models bundle into a snapshot.
 pub fn parse_quota_bundle(text: &str) -> anyhow::Result<QuotaSnapshot> {
     let root: Value = serde_json::from_str(text)?;
     // Accept either the bundled shape or a bare fetchAvailableModels payload.
@@ -472,6 +463,9 @@ pub fn parse_quota_bundle(text: &str) -> anyhow::Result<QuotaSnapshot> {
         .get("fetchAvailableModels")
         .cloned()
         .unwrap_or_else(|| root.clone());
+    if !models_root.get("models").is_some_and(Value::is_object) {
+        anyhow::bail!("Antigravity did not return a model quota map");
+    }
     Ok(parse_parts(&load, &models_root))
 }
 
@@ -651,5 +645,16 @@ mod tests {
         assert_eq!(s.models.len(), 1);
         assert!(s.models[0].remaining_fraction.is_none());
         assert!(!s.summary_line().contains("100%"));
+    }
+    #[test]
+    fn a_quota_cache_belongs_to_one_credential() {
+        let mut value: Value = serde_json::from_str(SAMPLE).unwrap();
+        assert!(cached_quota(SAMPLE, "first").is_none());
+        value["credentialSha256"] = crate::snapshot::sha256("first").into();
+        let encoded = serde_json::to_string(&value).unwrap();
+        assert!(cached_quota(&encoded, "first").is_some());
+        assert!(cached_quota(&encoded, "second").is_none());
+        assert!(parse_quota_bundle("null").is_err());
+        assert!(parse_quota_bundle("{}").is_err());
     }
 }

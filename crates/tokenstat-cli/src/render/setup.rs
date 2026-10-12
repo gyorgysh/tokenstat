@@ -68,7 +68,7 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
         );
         println!();
     }
-    if !confirm("Go ahead?", opts.yes) {
+    if !opts.json && !confirm("Go ahead?", opts.yes) {
         if !opts.json {
             println!();
             println!("  {DIM}Stopped. Nothing was changed.{DIM:#}");
@@ -87,7 +87,9 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
     if !opts.json {
         println!("  {g}1{g:#} Read your existing logs");
     }
-    scan_report(&report, opts.json)?;
+    if !opts.json {
+        scan_report(&report, false)?;
+    }
 
     let totals = store.totals(&Query::default())?;
     if !opts.json {
@@ -203,7 +205,7 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
             if !opts.json {
                 println!("  {DIM}Counters only, and nothing is published until you ask.{DIM:#}");
             }
-            if interactive {
+            if interactive && !opts.json && !opts.yes {
                 match tokenstat_sync::login(opts.host) {
                     Ok(res) => {
                         connected = true;
@@ -389,7 +391,10 @@ pub fn schedule(
     use crate::schedule::{self as sched, Platform, Unit};
 
     let exe = sched::preferred_executable();
-    let interval = every_mins.max(1) * 60;
+    let interval = every_mins
+        .max(1)
+        .checked_mul(60)
+        .context("--every is too large")?;
     let platform = Platform::detect();
 
     // The sync unit is only worth installing for an account, and its cadence is
@@ -398,7 +403,10 @@ pub fn schedule(
     let info = tokenstat_sync::scheduling_info(None).ok();
     let want_sync = !no_sync && info.as_ref().is_some_and(|i| i.logged_in);
     let sync_interval = match sync_every_mins {
-        Some(m) => m.max(1) * 60,
+        Some(m) => m
+            .max(1)
+            .checked_mul(60)
+            .context("--sync-every is too large")?,
         None => info
             .as_ref()
             .and_then(|i| i.min_interval)
@@ -611,9 +619,18 @@ fn print_unit(
             println!("  {DIM}or run: tokenstat schedule --install{DIM:#}");
         }
         Platform::WindowsTaskScheduler => {
-            println!("  Run this once, in a terminal:");
+            println!(
+                "  Save this as {} (create its parent folder first):",
+                sched::windows_helper_path(unit)?.display()
+            );
             println!();
-            println!("  {}", sched::windows_command(unit, exe, interval));
+            for line in sched::windows_hidden_vbs(exe, unit)?.lines() {
+                println!("  {line}");
+            }
+            println!();
+            println!("  Then run this once, in a terminal:");
+            println!();
+            println!("  {}", sched::windows_command(unit, exe, interval)?);
             println!();
             println!("  {DIM}or run: tokenstat schedule --install{DIM:#}");
         }

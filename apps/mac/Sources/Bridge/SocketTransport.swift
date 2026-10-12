@@ -248,6 +248,25 @@ final class SocketTransport: Transport, @unchecked Sendable {
         "pty.write",
         "ssh.session.write",
         "pulls.merge",
+        "workflow.run",
+        "pty.spawn",
+        "ssh.session.open",
+        "chat.create",
+        "chat.fork",
+        "automation.create",
+        "workflow.create",
+        "workflow.continue",
+        "workflow.design",
+        "todo.create",
+        "pulls.create",
+        "pulls.comment",
+        "pulls.review",
+        "launcher.signIn",
+        "launcher.install",
+        "chat.personaDraft",
+        "screen.viewer.input",
+        "ssh.vault.password.set",
+        "ssh.vault.recovery.rotate",
     ]
 
     /// Whether a lost answer for this call must be reported rather than
@@ -446,7 +465,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
         // `["method"]` minus its brackets is the escaped string literal, which
         // is cheaper than reaching for an encoder to quote one identifier.
         let quoted = name.dropFirst().dropLast()
-        var line = Data(L10n.text("apple.sockettransport.id_0_method_0_params_1.3cb87427", "\(quoted)", "\(body)").utf8)
+        var line = Data("{\"id\":0,\"method\":\(quoted),\"params\":\(body)}".utf8)
         line.append(0x0A)
         return line
     }
@@ -497,6 +516,11 @@ private final class Connection {
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else {
             throw TransportFailure.system("socket", errno)
+        }
+        guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0 else {
+            let failure = errno
+            close(descriptor)
+            throw TransportFailure.system("fcntl", failure)
         }
 
         // Without this, a daemon that exits between the write and the read

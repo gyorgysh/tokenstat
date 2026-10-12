@@ -239,14 +239,22 @@ pub fn backfill_events(
             if denom == 0 {
                 continue;
             }
-            let share =
-                |part: u64| ((tokens as f64) * (part as f64) / (denom as f64)).round() as u64;
+            let share = |part: u64| {
+                ((u128::from(tokens) * u128::from(part) + u128::from(denom / 2))
+                    / u128::from(denom))
+                .min(u128::from(tokens)) as u64
+            };
             let input = share(m.input);
             // Only the total basis says anything about cache. On the in+out
             // basis these must stay zero or they would eat into output, which
             // is the bucket that has to absorb the remainder below.
             let (cache_read, cache_write) = match basis {
-                DailyBasis::Total => (share(m.cache_read), share(m.cache_creation)),
+                DailyBasis::Total => {
+                    // Rounded shares must still fit inside the reported total.
+                    let read = share(m.cache_read).min(tokens - input);
+                    let write = share(m.cache_creation).min(tokens - input - read);
+                    (read, write)
+                }
                 DailyBasis::InputOutput => (0, 0),
             };
             // Output takes the remainder so rounding can never lose or invent a
@@ -256,12 +264,14 @@ pub fn backfill_events(
 
             // Midday local time, so the event cannot drift across a date
             // boundary when bucketed back into the same zone.
-            let ts = date
+            let Some(ts) = date
                 .parse::<jiff::civil::Date>()
                 .ok()
                 .and_then(|d| d.at(12, 0, 0, 0).to_zoned(tz.clone()).ok())
                 .map(|z| z.timestamp().as_millisecond())
-                .unwrap_or(0);
+            else {
+                continue;
+            };
 
             let counters = match basis {
                 DailyBasis::Total => Counters {
@@ -633,6 +643,31 @@ mod tests {
         let a = backfill_events(&stats, &daily, &none, &tz).events;
         let b = backfill_events(&stats, &daily, &none, &tz).events;
         assert_eq!(a[0].id, b[0].id);
+    }
+
+    #[test]
+    fn rounded_shares_never_exceed_the_reported_day_total() {
+        let stats = parse(r#"{"modelUsage":{"m":{"inputTokens":1,"cacheReadInputTokens":1,"cacheCreationInputTokens":1}}}"#).unwrap();
+        let recovery = backfill_events(
+            &stats,
+            &[day("2026-06-20", "m", 2)],
+            &BTreeMap::new(),
+            &jiff::tz::TimeZone::UTC,
+        );
+        assert_eq!(recovery.events.len(), 1);
+        assert_eq!(recovery.events[0].counters.total(), 2);
+    }
+
+    #[test]
+    fn invalid_dates_do_not_create_epoch_usage() {
+        let stats = parse(SAMPLE).unwrap();
+        let recovery = backfill_events(
+            &stats,
+            &[day("invalid", "claude-opus-4-8", 1000)],
+            &BTreeMap::new(),
+            &jiff::tz::TimeZone::UTC,
+        );
+        assert!(recovery.events.is_empty());
     }
 
     #[test]

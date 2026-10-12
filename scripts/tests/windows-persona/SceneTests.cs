@@ -41,6 +41,23 @@ internal static class SceneTests
         }
         Check(canvas.Children.Count == 16 && ReferenceEquals(canvas.Children[0], first)
             && ReferenceEquals(canvas.Children[1], second), "Steady animation kept allocating visual elements");
+        scene.Begin();
+        var mask = new PathGeometry();
+        var body = new PathGeometry();
+        scene.Paint(new PathGeometry(), clip: body, mask: mask);
+        var turn = new MatrixTransform { Matrix = new Matrix(0.5, 0, 0, 1, 7, 0) };
+        scene.TransformFace(0, turn);
+        var clips = (List<PersonaClip?>)typeof(PersonaScene).GetField("_clips",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(scene)!;
+        var moved = clips[0]!.Value;
+        var point = new Windows.Foundation.Point(20, 10);
+        Check(ReferenceEquals(moved.Body, body) && body.Transform is null && mask.Transform is null,
+            "A face turn moved the fixed silhouette or mutated the source mask");
+        Check(moved.Mask!.Transform!.TransformPoint(point) == first.Data!.Transform!.TransformPoint(point)
+            && moved.Mask.Transform.TransformPoint(point).X == 17
+            && !ReferenceEquals(moved.Mask.Transform, first.Data.Transform),
+            "A tongue or glint mask did not follow its face independently");
+        scene.End();
         scene.Begin(); scene.End();
         Check(canvas.Children.All(p => p.Visibility == Visibility.Collapsed && p.Data is null),
             "An empty frame did not hide the previous pose");

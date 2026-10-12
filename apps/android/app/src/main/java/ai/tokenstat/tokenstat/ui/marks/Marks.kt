@@ -69,7 +69,10 @@ object UiSignals {
 
     /// A refresh somebody asked for dips the logo bars and lets them back up,
     /// once.
-    fun beganRefreshing() = synchronized(listeners) { listeners.forEach { it() } }
+    fun beganRefreshing() {
+        val snapshot = synchronized(listeners) { listeners.toList() }
+        snapshot.forEach { it() }
+    }
 }
 
 /// The logo bar timings, transcribed from `LogoMark` in the Apple client's
@@ -143,7 +146,7 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
                 v
             } else {
                 val land = remember { Animatable(if (animated && !reduceMotion) LogoMotion.dipScale else 1f) }
-                LaunchedEffect(animated, index) {
+                LaunchedEffect(animated, index, reduceMotion) {
                     if (animated && !reduceMotion) {
                         land.snapTo(LogoMotion.dipScale)
                         kotlinx.coroutines.delay(index * LogoMotion.oneShotStaggerMs)
@@ -157,7 +160,11 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
             // The refresh dip: each bar sinks to 0.35 and comes back up over
             // 260ms, a beat after the one before it, like `Marks.swift`.
             val dip = remember { Animatable(1f) }
-            LaunchedEffect(pulse) {
+            LaunchedEffect(pulse, reduceMotion) {
+                if (reduceMotion) {
+                    dip.snapTo(1f)
+                    return@LaunchedEffect
+                }
                 delay(index * LogoMotion.dipStaggerMs)
                 dip.animateTo(
                     if (pulse) LogoMotion.dipScale else 1f,
@@ -274,9 +281,8 @@ fun FeatureMark(name: String, tint: Color = LocalTsColors.current.accent, size: 
 /// name to take them from, so the caller falls through to the handle.
 fun avatarInitials(name: String?): String? {
     val parts = (name ?: "").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-    val first = parts.firstOrNull()?.firstOrNull() ?: return null
-    val second = if (parts.size > 1) parts[1].firstOrNull()?.toString().orEmpty() else ""
-    return "$first$second".uppercase()
+    if (parts.isEmpty()) return null
+    return parts.take(2).joinToString("") { it.substring(0, it.offsetByCodePoints(0, 1)) }.uppercase()
 }
 
 /// The account, reached from the leading edge of every screen. Ported from

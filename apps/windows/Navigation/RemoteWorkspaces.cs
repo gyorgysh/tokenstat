@@ -138,10 +138,7 @@ internal static class RemoteWorkspaces
         {
             return AppServices.Host.CallAsync(method, parameters, patience);
         }
-        var forwarded = parameters is null
-            ? new JsonObject()
-            : (JsonObject)JsonNode.Parse(parameters.ToJsonString())!;
-        forwarded["id"] = inner;
+        var forwarded = RemoteWorkspaceParameters.Forward(parameters, id, inner);
         return CallOnPeerAsync(peer, method, forwarded, patience);
     }
 
@@ -158,6 +155,26 @@ internal static class RemoteWorkspaces
                 FoldersByPeer[peer] = folders = new List<RemoteFolder>();
             folders.RemoveAll(existing => existing.Id == remote.Id);
             folders.Add(remote);
+            NextDial.Remove(peer);
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>Reflect a confirmed folder mutation without waiting for backoff.</summary>
+    public static void ProjectChanged(string id, string? name = null)
+    {
+        if (!TrySplit(id, out var peer, out _)) return;
+        lock (Gate)
+        {
+            if (FoldersByPeer.TryGetValue(peer, out var folders))
+            {
+                var index = folders.FindIndex(folder => folder.Id == id);
+                if (index >= 0)
+                {
+                    if (name is null) folders.RemoveAt(index);
+                    else folders[index] = folders[index] with { Name = name };
+                }
+            }
             NextDial.Remove(peer);
         }
         Changed?.Invoke();
@@ -418,7 +435,10 @@ internal static class RemoteWorkspaces
                     // anything actually moved.
                     var newlySeen = !FoldersByPeer.ContainsKey(key);
                     var same = !newlySeen
-                        && FoldersByPeer[key].SequenceEqual(folders);
+                        && FoldersByPeer[key].Count == folders.Count
+                        && FoldersByPeer[key].Zip(folders).All(pair =>
+                            (pair.First with { Git = null }) == (pair.Second with { Git = null })
+                            && JsonNode.DeepEquals(pair.First.Git, pair.Second.Git));
                     FoldersByPeer[key] = folders;
                     NextDial[key] = now + RefreshAfter;
                     Failures[key] = 0;

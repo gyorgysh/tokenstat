@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with HostAgentInstaller.swift.
+// Compile with HostAgentInstaller.swift and ProcessOutput.swift.
 import Foundation
 
 // These tests call only the installer's filesystem operations in a private

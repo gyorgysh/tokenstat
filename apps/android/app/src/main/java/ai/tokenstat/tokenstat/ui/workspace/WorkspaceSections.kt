@@ -116,6 +116,7 @@ import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import androidx.compose.material.icons.filled.Language
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -166,9 +167,9 @@ fun WorkspaceSection(
     machineId: String? = null,
 ) {
     val scope = rememberCoroutineScope()
-    var data by remember(section) { mutableStateOf<JsonElement?>(null) }
-    var error by remember(section) { mutableStateOf<String?>(null) }
-    var loading by remember(section) { mutableStateOf(true) }
+    var data by remember(peer, workspace, section) { mutableStateOf<JsonElement?>(null) }
+    var error by remember(peer, workspace, section) { mutableStateOf<String?>(null) }
+    var loading by remember(peer, workspace, section) { mutableStateOf(true) }
 
     suspend fun load() {
         loading = true
@@ -183,10 +184,10 @@ fun WorkspaceSection(
         }
         runCatching { model.workspaceSection(peer, methodFor(section), params) }
             .onSuccess { data = it; error = null }
-            .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacesections.the_request_failed.db4fb447"), hostLabel) }
+            .onFailure { if (it is CancellationException) throw it; error = TunnelCopy.display(it.message ?: L10n.text("android.workspacesections.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
-    LaunchedEffect(section) { load() }
+    LaunchedEffect(peer, workspace, section) { load() }
 
     val reload: () -> Unit = { scope.launch { load() } }
     when (section) {
@@ -349,13 +350,14 @@ private fun SessionsSection(
     }
 
     fun install(profile: ai.tokenstat.tokenstat.ui.logic.LaunchProfile) {
-        if (installingId != null) return
+        if (installingId != null || launchingId != null || !current()) return
         installingId = profile.id
         scope.launch {
             runCatching {
                 model.workspaceSection(peer, "launcher.install", buildJsonObject { put("id", profile.id) }) as? JsonObject
             }.onSuccess { result ->
                 installingId = null
+                if (!current()) return@onSuccess
                 if (result?.bol("installed") == true || result?.bol("ok") == true) {
                     setHidden(profile.id, false, tellHost = false)
                     loadCatalog()
@@ -377,15 +379,16 @@ private fun SessionsSection(
         if (!ws.isNullOrEmpty()) {
             ws == workspace
         } else if (folderPath.isNotEmpty()) {
-            val cwd = session.str("cwd").orEmpty()
-            cwd == folderPath || cwd.startsWith(folderPath + "/")
+            sessionBelongsToFolder(session.str("cwd").orEmpty(), folderPath)
         } else {
             true
         }
     }
     val tiles = ai.tokenstat.tokenstat.ui.logic.LaunchCatalog.visible(catalog, locallyHidden)
     val extra = ai.tokenstat.tokenstat.ui.logic.LaunchCatalog.extra(catalog, locallyHidden)
-    val shell = ai.tokenstat.tokenstat.ui.logic.LaunchCatalog.shellFallback()
+    val shellPlatform = asObjects(client.account?.get("machines"))
+        .firstOrNull { it.str("publicIdentity") == peer }?.str("platform")
+    val shell = ai.tokenstat.tokenstat.ui.logic.LaunchCatalog.shellFallback(shellPlatform)
     val grid = tiles.ifEmpty {
         if (catalogLoaded && !locallyHidden.contains(shell.id)) listOf(shell) else emptyList()
     }
@@ -510,7 +513,7 @@ private fun SessionsSection(
                         DropdownMenuItem(text = { Text(L10n.text("common.rename")) }, onClick = { menu = false; renaming = session })
                         DropdownMenuItem(text = { Text(L10n.text("android.workspacesections.duplicate.02cdaabf")) }, onClick = {
                             menu = false
-                            if (current()) launch(catalog.firstOrNull { it.id == "shell" } ?: ai.tokenstat.tokenstat.ui.logic.LaunchCatalog.shellFallback(), session)
+                            if (current()) launch(catalog.firstOrNull { it.id == "shell" } ?: shell, session)
                         })
                         val pinned = pins.isPinned(pinIdentity, peer, workspace, ai.tokenstat.tokenstat.ui.logic.PinnedWork.Kind.TERMINAL, id)
                         DropdownMenuItem(text = { Text(if (pinned) L10n.text("android.workspacesections.unpin.ee3c7161") else L10n.text("android.workspacesections.pin.ff1cee74")) }, onClick = {
@@ -544,10 +547,9 @@ private fun SessionsSection(
             title = { Text(L10n.text("android.workspacesections.close_this_session.2b66ce2d")) },
             text = { Text(L10n.text("android.workspacesections.the_process_on_0_stops_this_cannot_be_undo.2263278f", "${hostLabel.ifBlank { L10n.text("android.workspacesections.that_computer.2b209061") }}")) },
             confirmButton = {
-                val scope2 = rememberCoroutineScope()
                 TextButton(onClick = {
                     pendingClose = null
-                    scope2.launch {
+                    scope.launch {
                         runCatching {
                             model.workspaceSection(peer, "pty.close", buildJsonObject { put("id", closing.str("id") ?: "") })
                         }.onFailure { stickyError = TunnelCopy.display(it.message ?: L10n.text("android.workspacesections.the_request_failed.db4fb447"), hostLabel) }
@@ -814,6 +816,8 @@ private fun TodoSection(
 ) {
     val scope = rememberCoroutineScope()
     val cards = asObjects(data).filter { (it.str("kind") ?: "task") == if (kindTask) "task" else "note" }
+    var saving by remember { mutableStateOf(false) }
+    var writeError by remember { mutableStateOf<String?>(null) }
     var composer by remember { mutableStateOf(false) }
     var resultCard by remember { mutableStateOf<JsonObject?>(null) }
     var boardFolder by remember { mutableStateOf<String?>(null) }
@@ -836,6 +840,7 @@ private fun TodoSection(
 
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
+        if (writeError != null) item { SectionError(writeError) }
         item {
             // Spaced: the label's own count sits at its trailing edge, so
             // with no gap the button covered it and the header read "TASKS 1".
@@ -948,9 +953,11 @@ private fun TodoSection(
     if (composer) {
         ComposerDialog(
             title = if (kindTask) L10n.text("android.workspacesections.new_task.3e992276") else L10n.text("android.workspacesections.new_note.76ea482f"),
-            onDismiss = { composer = false },
+            onDismiss = { if (!saving) composer = false },
             onSave = { text ->
-                composer = false
+                if (saving) return@ComposerDialog
+                saving = true
+                writeError = null
                 scope.launch {
                     runCatching {
                         model.workspaceSection(peer, "todo.create", buildJsonObject {
@@ -964,23 +971,26 @@ private fun TodoSection(
                             // a task gets the Mac's default three hours.
                             put("budgetSeconds", if (kindTask) 180 * 60 else 0)
                         })
-                    }
-                    onChanged()
+                    }.onSuccess { composer = false; onChanged() }
+                        .onFailure { if (it is CancellationException) throw it; writeError = it.message }
+                    saving = false
                 }
             },
+            saving = saving,
+            error = writeError,
         )
     }
 }
 
 @Composable
-private fun ComposerDialog(title: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+private fun ComposerDialog(title: String, onDismiss: () -> Unit, onSave: (String) -> Unit, saving: Boolean = false, error: String? = null) {
     var text by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        text = { OutlinedTextField(text, { text = it }, minLines = 3, modifier = Modifier.fillMaxWidth()) },
-        confirmButton = { Button(enabled = text.isNotBlank(), onClick = { onSave(text.trim()) }) { Text(L10n.text("common.save")) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
+        text = { Column { OutlinedTextField(text, { text = it }, enabled = !saving, minLines = 3, modifier = Modifier.fillMaxWidth()); SectionError(error) } },
+        confirmButton = { Button(enabled = !saving && text.isNotBlank(), onClick = { onSave(text.trim()) }) { Text(L10n.text("common.save")) } },
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
     )
 }
 
@@ -999,6 +1009,20 @@ private fun WorkflowsSection(
     protocol: Long? = null,
 ) {
     val scope = rememberCoroutineScope()
+    var actionError by remember(peer, workspace) { mutableStateOf<String?>(null) }
+    var working by remember(peer, workspace) { mutableStateOf(false) }
+    fun act(block: suspend () -> Unit) {
+        if (working) return
+        working = true
+        actionError = null
+        scope.launch {
+            try { block() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { actionError = failure.message }
+            finally { working = false }
+        }
+    }
+
     val workflows = asObjects(data)
     var transcript by remember { mutableStateOf<String?>(null) }
     var workbench by remember { mutableStateOf(false) }
@@ -1017,6 +1041,7 @@ private fun WorkflowsSection(
     }
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
+        if (actionError != null) item { SectionError(actionError) }
         item {
             TsSecondaryButton(label = L10n.text("android.workspacesections.open_workflows.6fa79b22"), icon = ActionIcon.Layout.vector, small = true, onClick = { workbench = true })
         }
@@ -1036,8 +1061,8 @@ private fun WorkflowsSection(
                 wf = wf,
                 onRun = {
                     val id = wf.str("id") ?: return@WorkflowCard
-                    scope.launch {
-                        runCatching {
+                    act {
+                        run {
                             model.workspaceSection(peer, "workflow.run", buildJsonObject {
                                 put("id", id)
                                 put("input", "")
@@ -1048,23 +1073,31 @@ private fun WorkflowsSection(
                     }
                 },
                 onKill = { runId ->
-                    scope.launch {
-                        runCatching {
+                    act {
+                        run {
                             model.workspaceSection(peer, "workflow.kill", buildJsonObject { put("id", runId) })
                         }
                         onChanged()
                     }
                 },
                 onTranscript = { runId, nodeId ->
-                    scope.launch {
-                        runCatching {
-                            val chunk = model.workspaceSection(peer, "workflow.transcript", buildJsonObject {
-                                put("id", runId)
-                                put("nodeId", nodeId)
-                                put("offset", 0)
-                            }) as? JsonObject
-                            transcript = chunk?.str("text") ?: chunk?.str("content") ?: chunk.toString()
-                        }.onFailure { transcript = it.message }
+                    act {
+                        run {
+                            var captured = ""
+                            ai.tokenstat.tokenstat.ui.automations.readRunTranscript(
+                                live = false,
+                                read = { offset ->
+                                    model.workspaceSection(peer, "workflow.transcript", buildJsonObject {
+                                        put("id", runId)
+                                        put("nodeId", nodeId)
+                                        put("offset", offset)
+                                    }) as JsonObject
+                                },
+                                running = { false },
+                                update = { captured = it },
+                            )
+                            transcript = captured
+                        }
                     }
                 },
             )
@@ -1166,6 +1199,20 @@ private fun AutomationsSection(
     protocol: Long? = null,
 ) {
     val scope = rememberCoroutineScope()
+    var actionError by remember(peer, workspace) { mutableStateOf<String?>(null) }
+    var working by remember(peer, workspace) { mutableStateOf(false) }
+    fun act(block: suspend () -> Unit) {
+        if (working) return
+        working = true
+        actionError = null
+        scope.launch {
+            try { block() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { actionError = failure.message }
+            finally { working = false }
+        }
+    }
+
     val automations = asObjects(data)
     var workbench by remember { mutableStateOf(false) }
     if (workbench) {
@@ -1183,6 +1230,7 @@ private fun AutomationsSection(
     }
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
+        if (actionError != null) item { SectionError(actionError) }
         item {
             TsSecondaryButton(label = L10n.text("android.workspacesections.open_automations.8c752bc8"), icon = ActionIcon.Layout.vector, small = true, onClick = { workbench = true })
         }
@@ -1238,8 +1286,8 @@ private fun AutomationsSection(
                             .background(if (enabled) colors.accentSoft else colors.controlSeat)
                             .padding(horizontal = Space.s, vertical = 2.dp)
                             .clickable {
-                                scope.launch {
-                                    runCatching {
+                                act {
+                                    run {
                                         model.workspaceSection(
                                             peer,
                                             if (enabled) "automation.disable" else "automation.enable",
@@ -1397,4 +1445,11 @@ private fun MoreLaunchTile(showing: Boolean, onTap: () -> Unit, modifier: Modifi
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+internal fun sessionBelongsToFolder(cwd: String, folder: String): Boolean {
+    val root = folder.replace('\\', '/').trimEnd('/')
+    val path = cwd.replace('\\', '/').trimEnd('/')
+    val windows = folder.contains('\\') || (folder.length > 1 && folder[1] == ':')
+    return path.equals(root, ignoreCase = windows) || path.startsWith("$root/", ignoreCase = windows)
 }

@@ -297,7 +297,7 @@ final class RemoteHostFeatureProbe {
     /// false and the caller asks nothing, leaving the old answer and its
     /// content mounted. Anything else returns true and clears to `.checking`.
     func beginRun(key: RemoteHostFeatureProbeKey) -> Bool {
-        guard checkedKey != key else { return false }
+        guard checkedKey != key || inflightKey != key else { return false }
         inflightKey = key
         state = .checking
         return true

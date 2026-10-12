@@ -807,14 +807,14 @@ internal static class Chrome
         double fraction = 0;
         if (startMs.HasValue)
         {
-            long total = endMs - startMs.Value;
+            double total = (double)endMs - startMs.Value;
             if (total <= 0)
             {
                 fraction = 1;
             }
             else
             {
-                long done = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startMs.Value;
+                double done = (double)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startMs.Value;
                 fraction = Math.Clamp(done / (double)total, 0, 1);
             }
         }

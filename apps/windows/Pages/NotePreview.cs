@@ -58,7 +58,7 @@ internal static class NotePreview
                         CornerRadius = new CornerRadius(8), Child = new TextBlock
                         {
                             Text = code.Lines.ToString(), IsTextSelectionEnabled = true,
-                            FontFamily = new FontFamily("Consolas"), FontSize = 13, TextWrapping = TextWrapping.Wrap,
+                            FontFamily = Fonts.Mono, FontSize = 13, TextWrapping = TextWrapping.Wrap,
                         },
                     });
                     break;
@@ -93,7 +93,7 @@ internal static class NotePreview
                 case LiteralInline literal: output.Add(new Run { Text = literal.Content.ToString() }); break;
                 case HtmlEntityInline entity: output.Add(new Run { Text = entity.Transcoded.ToString() }); break;
                 case LineBreakInline line: output.Add(line.IsHard ? new LineBreak() : new Run { Text = " " }); break;
-                case CodeInline code: output.Add(new Run { Text = code.Content, FontFamily = new FontFamily("Consolas") }); break;
+                case CodeInline code: output.Add(new Run { Text = code.Content, FontFamily = Fonts.Mono }); break;
                 case TaskList task: output.Add(new Run { Text = task.Checked ? "☑ " : "☐ " }); break;
                 case EmphasisInline emphasis:
                     Span span = emphasis.DelimiterChar == '~' ? new Span { TextDecorations = Windows.UI.Text.TextDecorations.Strikethrough }

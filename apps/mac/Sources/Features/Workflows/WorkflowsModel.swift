@@ -40,6 +40,7 @@ final class WorkflowsModel {
     var draft: WorkflowGraph?
     var designTranscript: String = ""
     var isDesigning = false
+    private(set) var isSaving = false
 
     /// The graph open on the canvas. A copy until Save.
     private var document = WorkflowGraphDocument()
@@ -63,6 +64,7 @@ final class WorkflowsModel {
     private(set) var transcriptText: String = ""
     private var transcriptOffset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
+    private var catchUpTask: Task<Void, Never>?
     private var pollingKey: String?
     private var noticeGeneration = 0
     private var isVisible = false
@@ -436,7 +438,7 @@ final class WorkflowsModel {
 
     /// True when Library Design or Blank would overwrite a stashed dirty graph.
     var canStartNewDraft: Bool {
-        !isDirty && draft == nil
+        !isDirty && draft == nil && !isDesigning && !isSaving
     }
 
     func startBlank(scope: WorkflowScope = .global, workspaceID: String? = nil) {
@@ -483,6 +485,7 @@ final class WorkflowsModel {
             errorMessage = L10n.text("apple.workflowsmodel.save_or_discard_the_unsaved_graph_first.1d0405b2")
             return
         }
+        let epoch = editorEpoch
         isDesigning = true
         defer { isDesigning = false }
         do {
@@ -493,6 +496,7 @@ final class WorkflowsModel {
                 model: model,
                 effort: effort
             )
+            guard !Task.isCancelled, editorEpoch == epoch, !isDirty, draft == nil else { return }
             var graph = result.workflow
             graph.id = ""
             draft = graph
@@ -501,6 +505,7 @@ final class WorkflowsModel {
             selectDraft()
             showNotice(L10n.text("apple.workflowsmodel.draft_ready_review_it_then_save_it_will_no.8950c360"))
         } catch {
+            guard !Task.isCancelled, editorEpoch == epoch else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -510,7 +515,11 @@ final class WorkflowsModel {
     }
 
     func saveWorking() async {
-        guard var graph = working ?? draft else { return }
+        guard !isSaving, let original = working ?? draft else { return }
+        isSaving = true
+        defer { isSaving = false }
+        let epoch = editorEpoch
+        var graph = original
         let name = graph.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             errorMessage = L10n.text("apple.workflowsmodel.a_workflow_needs_a_name.fb280d33")
@@ -531,23 +540,33 @@ final class WorkflowsModel {
                 } catch {
                     // A stale working copy must not overwrite the computer.
                     // Show the refusal and re-read what is actually saved.
-                    errorMessage = error.localizedDescription
                     await load()
+                    errorMessage = error.localizedDescription
                     return
                 }
             }
-            draft = nil
-            designTranscript = ""
-            if document.isOpen {
-                document.markSaved(saved)
-            } else {
-                document.open(saved, dirty: false)
+            if editorEpoch == epoch {
+                if document.isOpen {
+                    document.markSaved(saved, preservingEdits: working != original)
+                } else {
+                    document.open(saved, dirty: false)
+                }
+                draft = document.isDirty ? document.graph : nil
+                designTranscript = ""
+                selectedGraphID = saved.id
+                selectedFocus = .graph
+            } else if var stashed = draft, stashed.id == original.id {
+                if stashed == original {
+                    draft = nil
+                } else {
+                    stashed.id = saved.id
+                    stashed.revision = saved.revision
+                    draft = stashed
+                }
             }
             errorMessage = nil
             showNotice(L10n.text("apple.workflowsmodel.saved_0.d851298f", "\(saved.name)"))
             await load()
-            selectedGraphID = saved.id
-            selectedFocus = .graph
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -625,6 +644,7 @@ final class WorkflowsModel {
     }
 
     func watch(_ run: WorkflowRunRecord) {
+        stopPolling()
         selectedRunID = run.id
         if selectedStepID == nil || !(run.steps.contains { $0.nodeID == selectedStepID }) {
             selectedStepID = run.currentNodeID ?? run.steps.last?.nodeID
@@ -640,7 +660,7 @@ final class WorkflowsModel {
             transcriptText = ""
             transcriptOffset = 0
         }
-        guard let run = selectedRun, let stepID = selectedStepID else {
+        guard isVisible, let run = selectedRun, let stepID = selectedStepID else {
             stopPolling()
             return
         }
@@ -654,7 +674,7 @@ final class WorkflowsModel {
             stopPolling()
             let id = run.id
             let node = stepID
-            Task { await self.fetchTranscriptUntilCaughtUp(runID: id, nodeID: node) }
+            startCatchUp(runID: id, nodeID: node)
         }
     }
 
@@ -668,7 +688,7 @@ final class WorkflowsModel {
             var ticks = 0
             while !Task.isCancelled {
                 guard let self else { return }
-                await self.fetchTranscript(runID: runID, nodeID: nodeID, resetIfNeeded: true)
+                await self.fetchTranscript(runID: runID, nodeID: nodeID)
                 ticks += 1
                 if ticks % 3 == 0 {
                     await self.refreshRuns()
@@ -678,7 +698,16 @@ final class WorkflowsModel {
         }
     }
 
+    private func startCatchUp(runID: String, nodeID: String) {
+        catchUpTask?.cancel()
+        catchUpTask = Task { [weak self] in
+            await self?.fetchTranscriptUntilCaughtUp(runID: runID, nodeID: nodeID)
+        }
+    }
+
     private func stopPolling() {
+        catchUpTask?.cancel()
+        catchUpTask = nil
         pollTask?.cancel()
         pollTask = nil
         pollingKey = nil
@@ -687,6 +716,7 @@ final class WorkflowsModel {
     private func refreshRuns() async {
         do {
             let latest = try await Bridge.workflowRuns()
+            guard !Task.isCancelled, isVisible else { return }
             let before = runs.first { $0.id == selectedRunID }
             runs = latest
             #if os(macOS)
@@ -696,7 +726,7 @@ final class WorkflowsModel {
             if let before, let after, before.status != after.status, !after.isLive {
                 stopPolling()
                 if let node = selectedStepID {
-                    await fetchTranscriptUntilCaughtUp(runID: after.id, nodeID: node)
+                    startCatchUp(runID: after.id, nodeID: node)
                 }
             }
         } catch {
@@ -705,14 +735,11 @@ final class WorkflowsModel {
     }
 
     private func fetchTranscriptUntilCaughtUp(runID: String, nodeID: String) async {
-        var slices = 0
-        while slices < 8 {
-            slices += 1
+        while !Task.isCancelled, isVisible, isWatching(runID: runID, nodeID: nodeID) {
             let before = transcriptOffset
-            await fetchTranscript(runID: runID, nodeID: nodeID, resetIfNeeded: false)
-            if !isWatching(runID: runID, nodeID: nodeID) { return }
+            await fetchTranscript(runID: runID, nodeID: nodeID)
+            if Task.isCancelled || !isVisible || !isWatching(runID: runID, nodeID: nodeID) { return }
             if transcriptOffset <= before { return }
-            if transcriptText.utf8.count >= transcriptDisplayCap { return }
         }
     }
 
@@ -722,19 +749,16 @@ final class WorkflowsModel {
         return selectedRun?.workflowID == selectedGraphID
     }
 
-    private func fetchTranscript(runID: String, nodeID: String, resetIfNeeded: Bool) async {
-        if resetIfNeeded, !isWatching(runID: runID, nodeID: nodeID) {
-            stopPolling()
-            return
-        }
+    private func fetchTranscript(runID: String, nodeID: String) async {
+        guard !Task.isCancelled, isVisible, isWatching(runID: runID, nodeID: nodeID) else { return }
         do {
             let chunk = try await Bridge.workflowTranscript(runID: runID, nodeID: nodeID, offset: transcriptOffset)
-            if !isWatching(runID: runID, nodeID: nodeID) { return }
+            if Task.isCancelled || !isVisible || !isWatching(runID: runID, nodeID: nodeID) { return }
             if chunk.nextOffset < transcriptOffset {
                 transcriptText = ""
                 transcriptOffset = 0
                 let again = try await Bridge.workflowTranscript(runID: runID, nodeID: nodeID, offset: 0)
-                if !isWatching(runID: runID, nodeID: nodeID) { return }
+                if Task.isCancelled || !isVisible || !isWatching(runID: runID, nodeID: nodeID) { return }
                 transcriptText = Self.capped(again.text)
                 transcriptOffset = again.nextOffset
                 return

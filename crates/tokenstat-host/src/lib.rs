@@ -103,9 +103,7 @@ mod proxy_http;
 #[cfg(feature = "local-host")]
 pub(crate) mod pulls;
 pub mod remote;
-/// Loopback proxy for phones that dial a host service (no full stream stack).
-/// Host builds use `remote_stream` instead.
-#[cfg(not(feature = "local-host"))]
+/// Browser-side loopback proxy shared by desktop and mobile clients.
 pub(crate) mod remote_proxy;
 #[cfg(feature = "local-host")]
 pub(crate) mod remote_stream;

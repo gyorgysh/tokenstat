@@ -5,6 +5,12 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Test
 
 class TerminalKeysLogicTest {
+    @org.junit.Test fun shellMatchesTheDestinationPlatform() {
+        org.junit.Assert.assertEquals("powershell.exe", terminalShell("Windows 11 · x86_64"))
+        org.junit.Assert.assertEquals("powershell.exe", terminalShell("windows"))
+        org.junit.Assert.assertEquals("/bin/bash", terminalShell("macOS"))
+        org.junit.Assert.assertEquals("/bin/bash", terminalShell(null))
+    }
     @Test fun arrowsRetainArmedModifiers() {
         fun bytes(value: String) = value.toByteArray(Charsets.UTF_8)
         assertArrayEquals(bytes("\u001B[D"), TerminalKeysLogic.arrow('D'))

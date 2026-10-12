@@ -51,7 +51,7 @@ internal fun QuestionCard(question: ChatQuestion, sending: Boolean, error: Strin
     val picked = remember(question.id) { mutableStateListOf<String>() }
     fun sendWritten() {
         val text = written.trim()
-        if (text.isNotEmpty() && !sending) {
+        if (text.isNotEmpty() && !sending && canAnswer && question.answer == null) {
             onAnswer(text)
         }
     }

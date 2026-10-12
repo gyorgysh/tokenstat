@@ -71,4 +71,16 @@ class SshVaultSyncTest {
         val ordered = orderVaultRecords(listOf(orphan), emptySet())
         assertEquals(1, ordered.size)
     }
+    @Test(timeout = 1000) fun folderWithoutIdDoesNotPreventOtherRecordsFromLoading() {
+        val malformed = buildJsonObject {
+            put("id", "folder:damaged")
+            put("plaintext", """{"kind":"folder","folder":{"label":"No id"}}""")
+        }
+        val host = buildJsonObject {
+            put("id", "host:valid")
+            put("plaintext", """{"kind":"host","host":{"id":"valid"}}""")
+        }
+        assertEquals(listOf(malformed, host), orderVaultRecords(listOf(host, malformed), emptySet()))
+    }
+
 }

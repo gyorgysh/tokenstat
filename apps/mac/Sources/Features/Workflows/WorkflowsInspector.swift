@@ -319,7 +319,6 @@ private struct WorkflowBudgetField: View {
     @Bindable var model: WorkflowsModel
     @State private var minutes = ""
     @State private var noLimit = false
-    @State private var applying = false
 
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
@@ -335,26 +334,26 @@ private struct WorkflowBudgetField: View {
             Text(L10n.text("apple.workflowsinspector.minutes.90e63d85"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
-            BrandToggleChip(title: L10n.text("apple.workflowsinspector.no_limit.f7fcff0d"), isOn: $noLimit)
-                .onChange(of: noLimit) { _, on in
-                    guard !applying else { return }
+            BrandToggleChip(title: L10n.text("apple.workflowsinspector.no_limit.f7fcff0d"), isOn: Binding(
+                get: { noLimit },
+                set: { on in
+                    noLimit = on
                     if on {
                         model.setWorkingBudgetMinutes(0)
                     } else {
                         commit()
                     }
                 }
+            ))
         }
         .onAppear { load() }
         .onChange(of: model.working?.budgetSeconds) { _, _ in load() }
     }
 
     private func load() {
-        applying = true
         let seconds = model.working?.budgetSeconds ?? 10_800
         noLimit = seconds == 0
         minutes = seconds == 0 ? "180" : String(max(1, seconds / 60))
-        applying = false
     }
 
     private func commit() {
@@ -384,6 +383,7 @@ private struct WorkflowNodeInspector: View {
     @State private var loopTimes = ""
     @State private var loopUntil = ""
     @State private var loadedID: String?
+    @State private var loadedNode: WorkflowNode?
     @State private var applying = false
 
     var body: some View {
@@ -439,6 +439,9 @@ private struct WorkflowNodeInspector: View {
             model.endGroupedEdit()
             if let node = model.selectedNode { load(node) }
         }
+        .onChange(of: model.selectedNode) { _, next in
+            if let next, next != loadedNode { load(next) }
+        }
         .onChange(of: liveNodeID) { _, _ in
             followLiveStep()
         }
@@ -476,12 +479,14 @@ private struct WorkflowNodeInspector: View {
         Text(node.kind.label)
             .font(Theme.caption.weight(.semibold))
             .foregroundStyle(.tertiary)
-        TextField(L10n.text("apple.workflowsinspector.title.7e8cd205"), text: $title)
-            .textFieldStyle(.themed)
-            .onChange(of: title) { _, next in
-                guard !applying else { return }
+        TextField(L10n.text("apple.workflowsinspector.title.7e8cd205"), text: Binding(
+            get: { title },
+            set: { next in
+                title = next
                 write(node.id) { $0.title = next }
             }
+        ))
+        .textFieldStyle(.themed)
 
         switch node.kind {
         case .input:
@@ -724,6 +729,7 @@ private struct WorkflowNodeInspector: View {
                 body(&graph.nodes[idx])
             }
         }
+        loadedNode = model.selectedNode
     }
 
     private func load(_ node: WorkflowNode) {
@@ -741,9 +747,8 @@ private struct WorkflowNodeInspector: View {
         loopTimes = node.times.map { String($0) } ?? "3"
         loopUntil = node.until ?? ""
         loadedID = node.id
-        Task { @MainActor in
-            applying = false
-        }
+        loadedNode = node
+        applying = false
     }
 
     private static func headersText(_ headers: [String: String]?) -> String {

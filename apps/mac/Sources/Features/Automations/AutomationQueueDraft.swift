@@ -9,8 +9,13 @@ import Foundation
 struct AutomationQueueDraft: Equatable, Sendable {
     static let hostCap: UInt32 = 32
 
-    var budgetMinutes: String
-    var noLimit: Bool
+    private var loadedBudgetSeconds: UInt64? = nil
+    var budgetMinutes: String {
+        didSet { if budgetMinutes != oldValue { loadedBudgetSeconds = nil } }
+    }
+    var noLimit: Bool {
+        didSet { if noLimit != oldValue { loadedBudgetSeconds = nil } }
+    }
     var maxConcurrent: String
 
     init(
@@ -27,10 +32,11 @@ struct AutomationQueueDraft: Equatable, Sendable {
         noLimit = queue.defaultBudgetSeconds == 0
         budgetMinutes = noLimit ? "180" : String(max(1, queue.defaultBudgetSeconds / 60))
         maxConcurrent = String(queue.maxConcurrent)
+        loadedBudgetSeconds = queue.defaultBudgetSeconds
     }
 
     var validation: String? {
-        if !noLimit {
+        if !noLimit, loadedBudgetSeconds == nil {
             let trimmed = budgetMinutes.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let minutes = UInt64(trimmed), minutes > 0, minutes <= UInt64.max / 60 else {
                 return L10n.text("apple.automationqueuedraft.enter_a_positive_time_limit_or_choose_no_l.3b7996e8")
@@ -48,6 +54,7 @@ struct AutomationQueueDraft: Equatable, Sendable {
 
     var budgetSeconds: UInt64? {
         if noLimit { return 0 }
+        if let loadedBudgetSeconds { return loadedBudgetSeconds }
         let trimmed = budgetMinutes.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let minutes = UInt64(trimmed), minutes > 0, minutes <= UInt64.max / 60 else {
             return nil

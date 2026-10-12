@@ -2993,7 +2993,7 @@ impl Store {
         // The inline brief is bounded; a long conversation drops early turns.
         // Point the new agent at the full export exactly then, so depth is
         // one file read away and the handover still works when it never reads.
-        if crate::chat_brain::dropped_turns(&events, crate::chat_brain::BUDGET) > 0 {
+        if crate::chat_brain::dropped_turns(&events, &folder, crate::chat_brain::BUDGET) > 0 {
             let history = crate::chat_brain::export_markdown(&events, &folder);
             let path = self.write_history(&chat.id, &history)?;
             brief.push_str(&format!(
@@ -5002,7 +5002,7 @@ fn read_fork_file(path: &Path, maximum: u64, missing_is_empty: bool) -> Result<V
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let file = match options.open(path) {
         Ok(file) => file,
@@ -5016,7 +5016,7 @@ fn read_fork_file(path: &Path, maximum: u64, missing_is_empty: bool) -> Result<V
         return Err("the chat file cannot be copied".into());
     }
     let mut bytes = Vec::new();
-    file.take(maximum + 1)
+    file.take(maximum.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
     if bytes.len() as u64 > maximum {
@@ -9725,15 +9725,17 @@ mod tests {
                 .unwrap()
                 .join("workspace-policy.json");
             for revoke_trust in [false, true] {
-                let mut peers = tokenstat_identity::PeerStore::load().unwrap();
-                peers.seen(
-                    &phone.public_key(),
-                    "Test device",
-                    None,
-                    "2026-09-10T00:00:00Z",
-                );
-                peers.approve(&phone.public_key());
-                peers.save().unwrap();
+                tokenstat_identity::PeerStore::update(|peers| {
+                    peers.seen(
+                        &phone.public_key(),
+                        "Test device",
+                        None,
+                        "2026-09-10T00:00:00Z",
+                    );
+                    peers.approve(&phone.public_key());
+                    ((), true)
+                })
+                .unwrap();
                 fs::write(
                     &policy,
                     serde_json::to_vec(&serde_json::json!({"allowed": [&peer]})).unwrap(),
@@ -9762,8 +9764,10 @@ mod tests {
                     });
                     admitted.recv_timeout(Duration::from_secs(5)).unwrap();
                     if revoke_trust {
-                        peers.revoke(&phone.public_key());
-                        peers.save().unwrap();
+                        tokenstat_identity::PeerStore::update(|peers| {
+                            ((), peers.revoke(&phone.public_key()))
+                        })
+                        .unwrap();
                     } else {
                         // Simulate another process changing the durable grant.
                         fs::write(&policy, br#"{"allowed":[]}"#).unwrap();

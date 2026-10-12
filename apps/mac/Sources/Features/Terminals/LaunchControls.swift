@@ -150,10 +150,7 @@ struct LocalModelControl: View {
         // until the view is torn down (Home and back).
         .id("\(selectedKey)|\(buttonLabel)")
         .help(helpText)
-        .task { await load() }
-        .onChange(of: folder.id) { _, _ in
-            Task { await load() }
-        }
+        .task(id: "\(folder.id)|\(peer ?? "local")") { await load() }
     }
 
     /// Providers that cannot be picked: not running, empty, or disabled here.
@@ -203,6 +200,8 @@ struct LocalModelControl: View {
         loadGeneration += 1
         let generation = loadGeneration
         isLoading = true
+        providers = []
+        errorMessage = nil
         defer {
             if generation == loadGeneration { isLoading = false }
         }
@@ -212,11 +211,11 @@ struct LocalModelControl: View {
             } else {
                 try await Bridge.localModels()
             }
-            guard generation == loadGeneration else { return }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             providers = loaded
             errorMessage = nil
         } catch {
-            guard generation == loadGeneration else { return }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
             // Kept and shown. Swallowing this is what made a decoding failure
             // read as "no local models discovered" while both servers were up.
             providers = []

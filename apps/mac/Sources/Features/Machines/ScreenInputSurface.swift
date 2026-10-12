@@ -190,7 +190,7 @@ struct ScreenInputSurface: NSViewRepresentable {
             let flags = event.modifierFlags.screenFlags
             if let characters = event.characters, !characters.isEmpty,
                !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control),
-               let scalar = characters.unicodeScalars.first, scalar.value >= 32, scalar.value != 127
+               ScreenInputValues.isText(characters)
             {
                 actions.text(characters, flags)
             } else {
@@ -272,6 +272,7 @@ struct ScreenInputSurface: UIViewRepresentable {
         private var modifiers: UInt64 = 0
         private var dragging = false
         private var lastPan: CGPoint = .zero
+        private var lastHold: CGPoint = .zero
         private weak var moveRecognizer: UIPanGestureRecognizer?
         private weak var pinchRecognizer: UIPinchGestureRecognizer?
         var onModifiersChanged: ((UInt64) -> Void)?
@@ -290,6 +291,10 @@ struct ScreenInputSurface: UIViewRepresentable {
             mode: ScreenPointerMode,
             zoomed: Bool
         ) {
+            if self.enabled, !enabled {
+                if dragging { self.actions?.press(false); dragging = false }
+                resignFirstResponder()
+            }
             self.actions = actions
             self.enabled = enabled
             self.mode = mode
@@ -431,11 +436,16 @@ struct ScreenInputSurface: UIViewRepresentable {
             case .began:
                 positionForTap(recognizer)
                 dragging = true
+                lastHold = recognizer.location(in: self)
                 actions.press(true)
             case .changed:
+                let point = recognizer.location(in: self)
                 if mode == .direct {
-                    actions.move(normalized(recognizer.location(in: self)))
+                    actions.move(normalized(point))
+                } else {
+                    actions.nudge(CGSize(width: point.x - lastHold.x, height: point.y - lastHold.y), bounds.size)
                 }
+                lastHold = point
             case .ended, .cancelled, .failed:
                 guard dragging else { return }
                 dragging = false
@@ -462,7 +472,7 @@ struct ScreenInputSurface: UIViewRepresentable {
         var hasText: Bool { false }
 
         func insertText(_ text: String) {
-            guard let actions else { return }
+            guard enabled, let actions else { return }
             if text == "\n" {
                 actions.key(ScreenKey.ret, true, modifiers)
                 actions.key(ScreenKey.ret, false, modifiers)
@@ -473,7 +483,7 @@ struct ScreenInputSurface: UIViewRepresentable {
         }
 
         func deleteBackward() {
-            guard let actions else { return }
+            guard enabled, let actions else { return }
             actions.key(ScreenKey.delete, true, modifiers)
             actions.key(ScreenKey.delete, false, modifiers)
             consumeModifiers()

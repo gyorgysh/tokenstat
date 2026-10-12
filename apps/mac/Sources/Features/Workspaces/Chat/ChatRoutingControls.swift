@@ -61,22 +61,30 @@ struct ChatRoutingNotice: View {
                 Toggle(L10n.text("common.chat_wait_reset"), isOn: Binding(
                     get: { state.policy.waitForReset }, set: { value in
                         var policy = state.policy; policy.waitForReset = value
-                        Task { _ = await model.routing(policy: policy) }
+                        change(policy: policy)
                     }))
                     .toggleStyle(.brandCheckbox)
                     .disabled((limit.resetsAtMs == nil && state.nextReset == nil) || state.needsDeliveryCheck)
                 HStack(spacing: Theme.Space.s) {
-                    Button(L10n.text("common.chat_route_retry"), .refresh) { Task { _ = await model.routing(action: "resume") } }
+                    Button(L10n.text("common.chat_route_retry"), .refresh) { change(action: "resume") }
                         .disabled(chat.running || state.needsDeliveryCheck)
                     ChatRoutingControls(model: model, chat: chat)
                     if state.waiting {
-                        Button(L10n.text("common.cancel"), .dismiss) { Task { _ = await model.routing(action: "cancel") } }
+                        Button(L10n.text("common.cancel"), .dismiss) { change(action: "cancel") }
                     }
                 }.buttonStyle(SecondaryButtonStyle(small: true))
             }
             .font(Theme.caption).padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func change(policy: ChatRoutingPolicy? = nil, action: String? = nil) {
+        guard let owner = model.currentReference, model.selected?.id == chat.id else { return }
+        Task {
+            guard model.currentReference == owner, model.selected?.id == chat.id else { return }
+            _ = await model.routing(policy: policy, action: action)
         }
     }
 }
@@ -154,8 +162,14 @@ private struct ChatRoutingSheet: View {
             if loadFailed { Button(L10n.text("common.retry"), .refresh) { Task { await loadPolicy() } } }
             Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
             Button(L10n.text("common.save"), .save) {
+                guard let owner = model.currentReference, model.selected?.id == chat.id else { return }
+                let submitted = policy
                 saving = true
-                Task { if await model.routing(policy: policy) { dismiss() }; saving = false }
+                Task {
+                    defer { saving = false }
+                    guard model.currentReference == owner, model.selected?.id == chat.id else { return }
+                    if await model.routing(policy: submitted) { dismiss() }
+                }
             }
             .buttonStyle(AccentButtonStyle())
             .disabled(!loaded || saving)
@@ -171,8 +185,11 @@ private struct ChatRoutingSheet: View {
     }
 
     private func loadPolicy() async {
+        guard let owner = model.currentReference, model.selected?.id == chat.id else { return }
         loadFailed = false
-        if await model.routing() { policy = model.selected?.routing?.policy ?? ChatRoutingPolicy(); loaded = true }
+        let success = await model.routing()
+        guard !Task.isCancelled, model.currentReference == owner, model.selected?.id == chat.id else { return }
+        if success { policy = model.selected?.routing?.policy ?? ChatRoutingPolicy(); loaded = true }
         else { loadFailed = true }
     }
 

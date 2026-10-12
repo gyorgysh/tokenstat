@@ -404,10 +404,9 @@ fn load_prefs_in(dir: &Path) -> LauncherPrefs {
 }
 
 fn save_prefs_in(dir: &Path, prefs: &LauncherPrefs) -> Result<(), String> {
-    let _ = std::fs::create_dir_all(dir);
     let path = prefs_path_in(dir);
     let text = serde_json::to_string_pretty(prefs).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+    tokenstat_sync::snapshot::write_private_atomically(&path, &text).map_err(|e| e.to_string())
 }
 
 /// Read only. A catalog draw must not create the identity directory.
@@ -435,7 +434,13 @@ fn hide_in(dir: &Path, id: &str) -> Result<Value, String> {
     if !PROFILES.iter().any(|p| p.id == id) {
         return Err(format!("no launcher profile {id}"));
     }
-    let mut prefs = load_prefs_in(dir);
+    let path = prefs_path_in(dir);
+    let _guard = crate::harness_config::config_lock(&path)?;
+    let mut prefs: LauncherPrefs = match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| e.to_string())?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => LauncherPrefs::default(),
+        Err(e) => return Err(e.to_string()),
+    };
     if !prefs.hidden.iter().any(|hidden| hidden == id) {
         prefs.hidden.push(id.to_string());
         prefs.hidden.sort();
@@ -454,7 +459,13 @@ fn show_in(dir: &Path, id: &str) -> Result<Value, String> {
     if !PROFILES.iter().any(|p| p.id == id) && id != "shell" {
         return Err(format!("no launcher profile {id}"));
     }
-    let mut prefs = load_prefs_in(dir);
+    let path = prefs_path_in(dir);
+    let _guard = crate::harness_config::config_lock(&path)?;
+    let mut prefs: LauncherPrefs = match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| e.to_string())?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => LauncherPrefs::default(),
+        Err(e) => return Err(e.to_string()),
+    };
     let before = prefs.hidden.len();
     prefs.hidden.retain(|hidden| hidden != id);
     if prefs.hidden.len() != before {
@@ -658,20 +669,18 @@ fn run_probe(command: &str, args: &[&str]) -> Option<[Vec<u8>; 2]> {
     drop(tx);
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if child.try_wait().ok()?.is_some() {
-            break;
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => {
+                reap_child(&mut child);
+                return None;
+            }
         }
         if Instant::now() >= deadline {
             // The whole tree, so a shim's child cannot keep the pipes open
             // and strand both reader threads.
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(-(child.id() as i32), libc::SIGKILL);
-            }
-            #[cfg(windows)]
-            tokenstat_pty::kill_windows_process_tree(child.id());
-            let _ = child.kill();
-            let _ = child.wait();
+            reap_child(&mut child);
             return None;
         }
         std::thread::sleep(Duration::from_millis(25));
@@ -789,6 +798,10 @@ fn install_delivered(profile: &Profile, path: &[String], home: &Path) -> bool {
 /// with the login environment so `npm`, `brew` and friends resolve, and its
 /// output is captured so the calling app can say what happened.
 pub(crate) fn install(id: &str) -> Result<Value, String> {
+    static INSTALLING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _installing = INSTALLING
+        .try_lock()
+        .map_err(|_| "An agent installation is already running")?;
     let profile = PROFILES
         .iter()
         .find(|p| p.id == id)
@@ -872,19 +885,15 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("failed to start the installer: {e}"))?;
-    let mut stdout = child.stdout.take().ok_or("installer produced no stdout")?;
-    let mut stderr = child.stderr.take().ok_or("installer produced no stderr")?;
+    let stdout = child.stdout.take().ok_or("installer produced no stdout")?;
+    let stderr = child.stderr.take().ok_or("installer produced no stderr")?;
     let (out_tx, out_rx) = std::sync::mpsc::channel();
     let (err_tx, err_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
-        let _ = out_tx.send(buf);
+        let _ = out_tx.send(capture_installer_output(stdout));
     });
     std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stderr.read_to_end(&mut buf);
-        let _ = err_tx.send(buf);
+        let _ = err_tx.send(capture_installer_output(stderr));
     });
 
     // The pipes are drained on the reader threads, so waiting on the child
@@ -892,27 +901,15 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
     // so the connection thread it runs on does not stay busy forever.
     let deadline = Instant::now() + INSTALL_TIMEOUT;
     let status = loop {
-        match child
-            .try_wait()
-            .map_err(|e| format!("installer wait failed: {e}"))?
-        {
-            Some(status) => break status,
-            None => {
+        match child.try_wait() {
+            Err(error) => {
+                reap_child(&mut child);
+                return Err(format!("installer wait failed: {error}"));
+            }
+            Ok(Some(status)) => break status,
+            Ok(None) => {
                 if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    // Kill the rest of the process group too: the shell's own
-                    // children (curl, npm postinstall, a download) would keep
-                    // running and keep the captured pipes open otherwise.
-                    #[cfg(unix)]
-                    {
-                        let pid = child.id();
-                        let _ = std::process::Command::new("kill")
-                            .args(["-9", &format!("-{pid}")])
-                            .status();
-                    }
-                    // Reap the child; a killed but unwaited process is a
-                    // zombie for as long as the daemon lives.
-                    let _ = child.wait();
+                    reap_child(&mut child);
                     return Err(format!("the {id} installer timed out"));
                 }
                 std::thread::sleep(Duration::from_millis(200));
@@ -979,6 +976,37 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
 /// Handles CSI (`ESC [ … final`) and OSC (`ESC ] … BEL`) and the one-shot
 /// sequences (`ESC X`). Everything else passes through untouched; a trailing
 /// half-eaten sequence from the 4 KiB cap simply has nothing left to strip.
+fn reap_child(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    if let Ok(pid) = i32::try_from(child.id()) {
+        // SAFETY: this process was spawned in its own process group.
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+    #[cfg(windows)]
+    tokenstat_pty::kill_windows_process_tree(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn capture_installer_output(mut pipe: impl Read) -> Vec<u8> {
+    let mut kept = Vec::with_capacity(4097);
+    let mut buffer = [0; 8192];
+    loop {
+        match pipe.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => {
+                let take = count.min(4097 - kept.len());
+                kept.extend_from_slice(&buffer[..take]);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+    kept
+}
+
 fn strip_ansi(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -1043,8 +1071,8 @@ pub(crate) fn model_environment(
         _ => return Err("local model selection needs both a provider and a model".into()),
     }
 
-    let executable = executable_name(command);
-    match (executable, provider) {
+    let executable = executable_name(command).to_ascii_lowercase();
+    match (executable.as_str(), provider) {
         ("claude", Some("lmstudio")) => {
             let base = crate::local_models::origin("lmstudio")?;
             Ok(vec![
@@ -1136,7 +1164,7 @@ pub(crate) fn model_arguments(
     let (Some(provider), Some(model)) = (provider, model) else {
         return Vec::new();
     };
-    match executable_name(command) {
+    match executable_name(command).to_ascii_lowercase().as_str() {
         // Codex names the provider itself, and refuses a local model without
         // being told to leave its cloud account out of it.
         "codex" => vec![
@@ -2213,6 +2241,37 @@ mod tests {
         assert!(unknown.contains("no launcher profile"), "{unknown}");
         assert!(load_prefs_in(&dir).hidden.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn simultaneous_preferences_preserve_all_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        std::thread::scope(|scope| {
+            for id in ["codex", "claude_code", "grok", "muse"] {
+                let root = dir.path();
+                scope.spawn(move || {
+                    hide_in(root, id).unwrap();
+                });
+            }
+        });
+        assert_eq!(
+            load_prefs_in(dir.path()).hidden,
+            ["claude_code", "codex", "grok", "muse"]
+        );
+        std::fs::write(super::prefs_path_in(dir.path()), "broken").unwrap();
+        assert!(show_in(dir.path(), "codex").is_err());
+    }
+
+    #[test]
+    fn installer_output_is_drained_with_bounded_retention() {
+        let mut input = std::io::Cursor::new(vec![b'x'; 100_000]);
+        let kept = super::capture_installer_output(&mut input);
+        assert_eq!(input.position(), 100_000);
+        assert_eq!(kept.len(), 4097);
+        assert_eq!(
+            model_arguments(r"C:\Tools\CODEX.EXE", Some("ollama"), Some("qwen")),
+            ["--oss", "--local-provider", "ollama", "--model", "qwen"]
+        );
     }
 
     #[test]

@@ -19,9 +19,12 @@
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::{
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     process::ExitCode,
 };
+
+#[cfg(unix)]
+use std::io::{BufRead, BufReader};
 
 use serde_json::{Value, json};
 
@@ -646,6 +649,9 @@ fn hook_call(socket: &str, request: &Value) -> Result<Value, String> {
     let mut stream = UnixStream::connect(socket)
         .map_err(|_| "tokenstat cannot approve this: the host is not reachable")?;
     stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(3)))
+        .map_err(|error| error.to_string())?;
+    stream
         .set_read_timeout(Some(std::time::Duration::from_secs(3)))
         .map_err(|error| error.to_string())?;
     stream
@@ -654,6 +660,7 @@ fn hook_call(socket: &str, request: &Value) -> Result<Value, String> {
         .map_err(|_| "tokenstat cannot approve this: the host stopped listening")?;
     let mut line = String::new();
     BufReader::new(&mut stream)
+        .take(64 * 1024)
         .read_line(&mut line)
         .map_err(|_| "tokenstat cannot approve this: the host did not reply")?;
     serde_json::from_str(&line)
@@ -669,10 +676,9 @@ fn hook_call(socket: &str, request: &Value) -> Result<Value, String> {
         .and_then(|_| stream.write_all(b"\n"))
         .and_then(|_| stream.flush())
         .map_err(|_| "tokenstat cannot approve this: the host stopped listening")?;
-    let mut line = String::new();
-    BufReader::new(&mut stream)
-        .read_line(&mut line)
-        .map_err(|_| "tokenstat cannot approve this: the host did not reply")?;
+    let line =
+        tokenstat_host::server::read_response(&mut stream, std::time::Duration::from_secs(3))
+            .ok_or("tokenstat cannot approve this: the host did not reply")?;
     serde_json::from_str(&line)
         .map_err(|_| "tokenstat cannot approve this: the host replied with nonsense".into())
 }

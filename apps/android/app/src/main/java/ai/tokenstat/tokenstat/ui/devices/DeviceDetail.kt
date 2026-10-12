@@ -83,6 +83,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -136,6 +137,8 @@ fun DeviceDetailScreen(
     val currentName = DeviceCopy.displayName(currentLabel, machine.string("platform"), isHost)
     val detailScope = rememberCoroutineScope()
     fun saveName() {
+        if (savingName) return
+        val submitted = draft.trim()
         val id = machine.string("id")
         if (id.isNullOrEmpty()) {
             renameError = L10n.text("android.devicedetail.this_device_has_no_id_on_the_account_yet.5edab834")
@@ -148,11 +151,11 @@ fun DeviceDetailScreen(
                     "account.renameMachine",
                     buildJsonObject {
                         put("id", id)
-                        put("name", draft.trim())
+                        put("name", submitted)
                     },
                 )
             }.onSuccess {
-                renamedTo = draft.trim().ifEmpty { null }
+                renamedTo = submitted
                 renameError = null
                 renaming = false
                 model.refresh()
@@ -492,6 +495,7 @@ private fun IdentityCard(
             Text(L10n.text("android.devicedetail.name.dcd1d522"), style = TsType.caption, color = colors.textSecondary)
             OutlinedTextField(
                 value = draft,
+                enabled = !savingName,
                 onValueChange = onDraftChange,
                 placeholder = { Text(L10n.text("android.devicedetail.name_this_device.ab6b2bc7")) },
                 singleLine = true,
@@ -505,6 +509,7 @@ private fun IdentityCard(
                 )
                 TsSecondaryButton(
                     label = L10n.text("common.cancel"),
+                    enabled = !savingName,
                     onClick = {
                         onRenamingChange(false)
                         onRenameErrorChange(null)
@@ -934,35 +939,35 @@ private fun SoftwareCard(model: AppViewModel, peer: String) {
                 ?: HostContracts.protocolOf(it)
         }
     }.getOrNull()
-    fun load() {
-        scope.launch {
-            phase = UpdatePhase.Checking
-            applied = null
-            runCatching { model.prepareHost(peer, L10n.text("android.devicedetail.computer.76ed42d2")) }
-            // A host older than these methods must not be discovered by
-            // showing somebody its `unknown method` error.
-            val version = probeVersion() ?: run {
-                // The tunnel session is often still coming up behind the
-                // stats bar's own prepare, which fires in the same frame.
-                // One patient retry beats hiding the card for a race.
-                delay(3000)
-                probeVersion()
-            }
-            supported = version != null && HostContracts.supportsHostUpdate(version)
-            if (!supported) return@launch
-            runCatching {
-                model.workspaceSection(peer, "host.updateCheck", buildJsonObject {}) as? JsonObject
-            }.onSuccess {
-                state = it
-                phase = UpdatePhase.Ready
-            }.onFailure {
-                phase = UpdatePhase.Failed(friendlyError(it.message).message)
-            }
+    suspend fun load() {
+        phase = UpdatePhase.Checking
+        applied = null
+        runCatching { model.prepareHost(peer, L10n.text("android.devicedetail.computer.76ed42d2")) }
+        // A host older than these methods must not be discovered by
+        // showing somebody its `unknown method` error.
+        val version = probeVersion() ?: run {
+            // The tunnel session is often still coming up behind the
+            // stats bar's own prepare, which fires in the same frame.
+            // One patient retry beats hiding the card for a race.
+            delay(3000)
+            probeVersion()
+        }
+        supported = version != null && HostContracts.supportsHostUpdate(version)
+        if (!supported) return
+        runCatching {
+            model.workspaceSection(peer, "host.updateCheck", buildJsonObject {}) as? JsonObject
+        }.onSuccess {
+            state = it
+            phase = UpdatePhase.Ready
+        }.onFailure {
+            if (it is CancellationException) throw it
+            phase = UpdatePhase.Failed(friendlyError(it.message).message)
         }
     }
     fun apply(restartNow: Boolean) {
+        if (phase == UpdatePhase.Installing || phase == UpdatePhase.Checking) return
+        phase = UpdatePhase.Installing
         scope.launch {
-            phase = UpdatePhase.Installing
             runCatching {
                 model.workspaceSection(
                     peer,
@@ -973,16 +978,8 @@ private fun SoftwareCard(model: AppViewModel, peer: String) {
                 applied = it
                 phase = UpdatePhase.Done
             }.onFailure {
-                // A restart the caller asked for takes the connection with
-                // it, and that is the update working. Saying it failed
-                // would be wrong, and would invite a second attempt at
-                // something already done.
-                if (restartNow) {
-                    applied = buildJsonObject { put("restarting", true) }
-                    phase = UpdatePhase.Done
-                } else {
-                    phase = UpdatePhase.Failed(friendlyError(it.message).message)
-                }
+                if (it is CancellationException) throw it
+                phase = UpdatePhase.Failed(friendlyError(it.message).message)
             }
         }
     }

@@ -229,16 +229,20 @@ pub fn merge(repo: &Repo, number: u32, method: MergeMethod) -> Result<(), ForgeE
             &format!("/repos/{}/{}/pulls/{number}/merge", repo.owner, repo.repo),
             json!({"merge_method": method}),
         )?;
-        if result["merged"].as_bool() == Some(false) {
-            return Err(HttpFailure::Forge(ForgeError::Api(
-                result["message"]
-                    .as_str()
-                    .unwrap_or("GitHub did not merge this pull request")
-                    .into(),
-            )));
-        }
-        Ok(())
+        confirm_merge(&result)
     })
+}
+
+fn confirm_merge(result: &Value) -> Result<(), HttpFailure> {
+    if result["merged"].as_bool() == Some(true) {
+        return Ok(());
+    }
+    Err(HttpFailure::Forge(ForgeError::Api(
+        result["message"]
+            .as_str()
+            .unwrap_or("GitHub did not confirm the merge. Check the pull request before retrying.")
+            .into(),
+    )))
 }
 
 fn required_body<'a>(body: &'a str, noun: &str) -> Result<&'a str, ForgeError> {
@@ -298,7 +302,15 @@ fn graphql_success(raw: &str) -> Result<(), HttpFailure> {
         .filter_map(|error| error["message"].as_str())
         .collect::<Vec<_>>();
     if messages.is_empty() {
-        Ok(())
+        if value["data"]["markPullRequestReadyForReview"]["pullRequest"]["isDraft"].as_bool()
+            == Some(false)
+        {
+            Ok(())
+        } else {
+            Err(HttpFailure::Forge(ForgeError::Api(
+                "GitHub did not confirm that the pull request is ready for review.".into(),
+            )))
+        }
     } else {
         Err(HttpFailure::Forge(ForgeError::Api(messages.join("; "))))
     }
@@ -358,6 +370,20 @@ mod tests {
             ForgeError::from(error)
                 .to_string()
                 .contains("Already ready")
+        );
+    }
+    #[test]
+    fn writes_require_positive_confirmation() {
+        for value in [json!(null), json!({}), json!({"merged":false})] {
+            assert!(confirm_merge(&value).is_err());
+        }
+        assert!(confirm_merge(&json!({"merged":true})).is_ok());
+        assert!(graphql_success(r#"{"data":null}"#).is_err());
+        assert!(
+            graphql_success(
+                r#"{"data":{"markPullRequestReadyForReview":{"pullRequest":{"isDraft":false}}}}"#
+            )
+            .is_ok()
         );
     }
 }

@@ -613,6 +613,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var created = await CallChatAsync("chat.create", request);
             ChatLaunchChoice.Save(created);
             AppServices.NotifyConversationsChanged();
+            if (generation != _openGeneration || !IsLoaded) return;
             await OpenAsync(Format.Text(created, "id"), created);
         }
         catch (Exception ex)
@@ -2097,7 +2098,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private async Task SendAsync(bool sendNext = false)
     {
         if (_opening) return;
-        if (_openId is not string chat || _sending || _queueing) return;
+        if (_openId is not string chat || _sending || _queueing || _fileTransfer is not null) return;
         if (OpenBackendMissing()) return;
         var backend = Backend(Format.Text(_openChat, "backend"));
         // Only the CLI's own answer stops a send. A stored token past its
@@ -2109,7 +2110,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             return;
         }
         var generation = _openGeneration;
-        bool Current() => OpenChatIs(chat) && generation == _openGeneration;
+        var accountGeneration = AppServices.AccountGeneration;
+        bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
         var text = _draft.Text.Trim();
         if (text.Length == 0 && _attachments.Count == 0) return;
         var attachmentIds = _attachments.Select(file => file.Id).ToArray();
@@ -2118,6 +2120,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             var key = await OutboxKeyAsync(chat);
             if (!Current()) return;
+            if (_outboxKey != key)
+                throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.reopen_this_conversation_with_its_original.bb0e73dd"));
             if (await TryParkSteerAsync(chat, text, sendNext, attachmentIds)) return;
             if (!Current()) return;
             if (_openChat?["sendRevision"] is null) throw new InvalidOperationException(L10n.Text("windows.chatpage.update_the_host_to_use_reliable_message_de.fcb58190"));

@@ -220,18 +220,8 @@ fn save_to(path: &Path, store: &Store) -> Result<(), String> {
         version: store_version(),
         ..store.clone()
     };
-    let parent = path.parent().ok_or("SSH record path has no parent")?;
-    fs::create_dir_all(parent).map_err(|e| format!("create SSH record directory: {e}"))?;
-    let temp = path.with_extension("json.new");
-    let bytes = serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?;
-    fs::write(&temp, bytes).map_err(|e| format!("write SSH records: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("protect SSH records: {e}"))?;
-    }
-    fs::rename(&temp, path).map_err(|e| format!("replace SSH records: {e}"))
+    let text = serde_json::to_string_pretty(store).map_err(|e| e.to_string())?;
+    tokenstat_sync::snapshot::write_private_atomically(path, &text).map_err(|e| e.to_string())
 }
 
 fn id(prefix: &str) -> Result<String, String> {
@@ -305,8 +295,9 @@ impl SaveFlags {
 pub(crate) fn snippets_for(
     host_id: Option<&str>,
 ) -> Result<Vec<crate::ssh_suggest::Snippet>, String> {
-    let _guard = lock().lock().map_err(|e| e.to_string())?;
-    let store = load_from(&path()?)?;
+    let path = path()?;
+    let _guard = crate::identity_storage::lock_at(&path.with_extension("lock"), lock())?;
+    let store = load_from(&path)?;
     let mut out: Vec<crate::ssh_suggest::Snippet> = Vec::new();
     for snippet in &store.snippets {
         let scoped = match host_id {
@@ -385,8 +376,8 @@ struct TrustedHost {
 }
 
 fn call_inner(method: &str, params: &str) -> Result<Value, String> {
-    let _guard = lock().lock().map_err(|e| e.to_string())?;
     let path = path()?;
+    let _guard = crate::identity_storage::lock_at(&path.with_extension("lock"), lock())?;
     call_at(&path, method, params)
 }
 
@@ -638,6 +629,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             let had = !host.host_keys.is_empty();
             host.host_keys.clear();
             if had {
+                host.updated_ms = now_ms().max(host.updated_ms.saturating_add(1));
                 save_to(path, &store)?;
             }
             Ok(json!({"forgotten": had}))
@@ -664,6 +656,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
                         .unwrap_or_default()
                         .to_string(),
                     initial_directory: default_initial_directory(),
+                    updated_ms: now_ms(),
                     ..SshHost::default()
                 };
                 if host.hostname.is_empty() || host.username.is_empty() {
@@ -680,6 +673,56 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
 
         _ => Err(format!("unknown method: {method}")),
     }
+}
+
+/// Merge read-only provider inventory under the same transaction lock as
+/// interactive edits. A refresh updates addresses without resetting custom
+/// credentials, names, folders, colours or pinned identities for other hosts.
+pub(crate) fn import_hosts(hosts: Vec<SshHost>) -> Result<Vec<SshHost>, String> {
+    let path = path()?;
+    let _guard = crate::identity_storage::lock_at(&path.with_extension("lock"), lock())?;
+    import_hosts_at(&path, hosts)
+}
+
+fn import_hosts_at(path: &Path, hosts: Vec<SshHost>) -> Result<Vec<SshHost>, String> {
+    let mut store = load_from(path)?;
+    let mut imported = Vec::new();
+    for mut candidate in hosts {
+        required(&candidate.hostname, "hostname")?;
+        required(&candidate.username, "username")?;
+        let provider = candidate
+            .provider
+            .as_ref()
+            .ok_or("imported host has no provider identity")?;
+        required(&provider.resource_id, "provider resource identity")?;
+        let existing = store.hosts.iter_mut().find(|host| {
+            host.provider.as_ref().is_some_and(|held| {
+                held.kind == provider.kind
+                    && held.resource_id == provider.resource_id
+                    && (held.region.is_none()
+                        || provider.region.is_none()
+                        || held.region == provider.region)
+            })
+        });
+        if let Some(host) = existing {
+            if host.hostname != candidate.hostname || host.port != candidate.port {
+                host.hostname = candidate.hostname;
+                host.port = candidate.port;
+                host.host_keys.clear();
+                host.updated_ms = now_ms().max(host.updated_ms.saturating_add(1));
+            }
+            imported.push(host.clone());
+        } else {
+            candidate.id = id("host")?;
+            candidate.updated_ms = now_ms();
+            store.hosts.push(candidate.clone());
+            imported.push(candidate);
+        }
+    }
+    if !imported.is_empty() {
+        save_to(path, &store)?;
+    }
+    Ok(imported)
 }
 
 fn generate_key() -> Result<Value, String> {
@@ -847,8 +890,10 @@ fn parse_ssh_config(text: &str, store: &Store) -> Vec<Value> {
         }
         let mut parts = line.splitn(2, |c: char| c.is_whitespace() || c == '=');
         let keyword = parts.next().unwrap_or_default().to_ascii_lowercase();
-        let value = parts.next().unwrap_or_default().trim().to_string();
+        let rest = parts.next().unwrap_or_default().trim();
+        let value = rest.strip_prefix('=').unwrap_or(rest).trim().to_string();
         match keyword.as_str() {
+            "match" => flush(&mut current, &mut out, store),
             "host" => {
                 flush(&mut current, &mut out, store);
                 let name = value
@@ -856,7 +901,11 @@ fn parse_ssh_config(text: &str, store: &Store) -> Vec<Value> {
                     .next()
                     .unwrap_or_default()
                     .to_string();
-                if name.is_empty() || name.contains('*') || name.contains('?') {
+                if name.is_empty()
+                    || name.starts_with('!')
+                    || name.contains('*')
+                    || name.contains('?')
+                {
                     continue;
                 }
                 current = Some((name, String::new(), String::new(), 22, None));
@@ -924,6 +973,112 @@ mod tests {
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed)
         ))
+    }
+
+    #[test]
+    fn provider_refresh_preserves_local_settings_and_rechecks_changed_addresses() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("connections.json");
+        let candidate = SshHost {
+            label: "cloud name".into(),
+            hostname: "one.example".into(),
+            username: "root".into(),
+            port: 22,
+            provider: Some(ProviderRef {
+                kind: "cloud".into(),
+                resource_id: "one".into(),
+                region: None,
+            }),
+            ..Default::default()
+        };
+        let first = import_hosts_at(&path, vec![candidate.clone()])
+            .unwrap()
+            .remove(0);
+        let mut saved = load_from(&path).unwrap();
+        saved.hosts[0].label = "my label".into();
+        saved.hosts[0].credential_id = Some("private-key".into());
+        saved.hosts[0].host_keys = vec!["SHA256:one".into()];
+        save_to(&path, &saved).unwrap();
+        let same = import_hosts_at(&path, vec![candidate.clone()])
+            .unwrap()
+            .remove(0);
+        assert_eq!(same.id, first.id);
+        assert_eq!(same.label, "my label");
+        assert_eq!(same.credential_id.as_deref(), Some("private-key"));
+        assert_eq!(same.host_keys, vec!["SHA256:one"]);
+        let mut moved = candidate;
+        moved.hostname = "two.example".into();
+        let moved = import_hosts_at(&path, vec![moved]).unwrap().remove(0);
+        assert_eq!(moved.id, first.id);
+        assert!(moved.host_keys.is_empty());
+        assert_eq!(load_from(&path).unwrap().hosts.len(), 1);
+    }
+
+    #[test]
+    fn forgetting_a_key_is_a_merge_edit_and_config_match_does_not_retarget_hosts() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("connections.json");
+        save_to(
+            &path,
+            &Store {
+                hosts: vec![SshHost {
+                    id: "one".into(),
+                    updated_ms: 1,
+                    host_keys: vec!["SHA256:one".into()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        call_at(&path, "ssh.knownhost.forget", r#"{"id":"one"}"#).unwrap();
+        let host = load_from(&path).unwrap().hosts.remove(0);
+        assert!(host.updated_ms > 1);
+        assert!(host.host_keys.is_empty());
+        let found = parse_ssh_config(
+            "Host one\n HostName = one.example\n User=root\nMatch host other\n HostName two.example\n",
+            &Store::default(),
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0]["hostname"], "one.example");
+        assert_eq!(found[0]["username"], "root");
+    }
+
+    #[test]
+    fn records_process_writer() {
+        let Ok(worker) = std::env::var("TOKENSTAT_SSH_RECORDS_TEST_WORKER") else {
+            return;
+        };
+        for index in 0..12 {
+            call_inner("ssh.host.save", &json!({"id":format!("worker-{worker}-{index}"),"label":"test","hostname":"fixture.invalid","username":"fixture"}).to_string()).unwrap();
+        }
+    }
+
+    #[test]
+    fn concurrent_process_writes_preserve_every_record() {
+        let root = tempfile::tempdir().unwrap();
+        let children: Vec<_> = (0..3)
+            .map(|worker| {
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", "ssh_records::tests::records_process_writer"])
+                    .env("TOKENSTAT_DATA_DIR", root.path())
+                    .env("TOKENSTAT_IDENTITY_DIR", root.path().join("identity"))
+                    .env("TOKENSTAT_SSH_RECORDS_TEST_WORKER", worker.to_string())
+                    .stdout(std::process::Stdio::null())
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        for mut child in children {
+            assert!(child.wait().unwrap().success());
+        }
+        assert_eq!(
+            load_from(&root.path().join("ssh/connections.json"))
+                .unwrap()
+                .hosts
+                .len(),
+            36
+        );
     }
 
     #[test]

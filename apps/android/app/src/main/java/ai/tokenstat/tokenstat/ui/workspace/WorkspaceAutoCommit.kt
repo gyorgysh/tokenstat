@@ -26,6 +26,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.automations.AutomationRun
+import ai.tokenstat.tokenstat.ui.automations.AutomationRunOutcome
+import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
@@ -66,16 +71,16 @@ fun AutoCommitCard(
     hostLabel: String,
 ) {
     val scope = rememberCoroutineScope()
-    var supported by remember { mutableStateOf(false) }
-    var backends by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var backendId by remember { mutableStateOf("") }
-    var modelName by remember { mutableStateOf("") }
-    var jobId by remember { mutableStateOf<String?>(null) }
-    var pendingOp by remember { mutableStateOf<String?>(null) }
-    var retryable by remember { mutableStateOf(false) }
-    var running by remember { mutableStateOf(false) }
-    var working by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var supported by remember(peer, workspace) { mutableStateOf(false) }
+    var backends by remember(peer, workspace) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var backendId by remember(peer, workspace) { mutableStateOf("") }
+    var modelName by remember(peer, workspace) { mutableStateOf("") }
+    var jobId by remember(peer, workspace) { mutableStateOf<String?>(null) }
+    var pendingOp by remember(peer, workspace) { mutableStateOf<String?>(null) }
+    var retryable by remember(peer, workspace) { mutableStateOf(false) }
+    var running by remember(peer, workspace) { mutableStateOf(false) }
+    var working by remember(peer, workspace) { mutableStateOf(false) }
+    var error by remember(peer, workspace) { mutableStateOf<String?>(null) }
 
     val commitBackends = backends.filter { backend ->
         val id = backend.str("id") ?: ""
@@ -129,6 +134,32 @@ fun AutoCommitCard(
             }) as? JsonObject
         }.getOrNull()
 
+    fun adoptRun(outcome: JsonObject, operation: String) {
+        val confirmed = confirmedAutoCommitRun(outcome, operation, jobId.orEmpty())
+        if (confirmed == null) {
+            error = L10n.text("android.automations.the_computer_accepted_this_request_but_has.582c4fe2")
+            return
+        }
+        running = confirmed.isRunning
+        if (!running) pendingOp = null
+        retryable = false
+        error = null
+    }
+
+    // Returning to Changes must not offer another start while the existing
+    // auto-commit run is still using this working tree.
+    ForegroundEffect(peer, workspace, jobId) {
+        val currentJob = jobId ?: return@ForegroundEffect
+        while (true) {
+            runCatching { model.workspaceSection(peer, "automation.runs", buildJsonObject {}) }
+                .onSuccess { answer ->
+                    running = (answer as? JsonArray)?.filterIsInstance<JsonObject>()
+                        ?.map(AutomationRun::parse)?.any { it.jobId == currentJob && it.isRunning } == true
+                }.onFailure { if (it is CancellationException) throw it }
+            delay(5_000)
+        }
+    }
+
     fun start() {
         val chosen = backend ?: return
         if (!canStart) return
@@ -156,26 +187,8 @@ fun AutoCommitCard(
                 }
             }.getOrNull()
             if (saved == null) {
-                // A create that fails while a job exists launches the old one.
-                runCatching {
-                    model.workspaceSection(peer, "automation.list", buildJsonObject {})
-                }.onSuccess { element ->
-                    val jobs = (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
-                    val match = jobs.firstOrNull {
-                        (it.str("workspaceId") ?: it.str("workspace_id") ?: "") == workspace &&
-                            (it.str("name") ?: "").equals(AUTO_COMMIT_NAME, ignoreCase = true)
-                    }
-                    if (match != null) {
-                        jobId = match.str("id")
-                        val id = match.str("id")
-                        if (id != null && !running) {
-                            pendingOp = opId
-                            launch(id, opId)
-                        }
-                        working = false
-                        return@launch
-                    }
-                }
+                // A failed save must never run an older job whose agent or
+                // prompt differs from the settings just reviewed.
                 error = TunnelCopy.display(L10n.text("android.workspaceautocommit.the_request_failed.db4fb447"), hostLabel)
                 working = false
                 return@launch
@@ -183,10 +196,7 @@ fun AutoCommitCard(
             jobId = saved.str("id")
             pendingOp = opId
             val outcome = saved.str("id")?.let { launch(it, opId) }
-            if (outcome != null) {
-                running = outcome.str("state")?.equals("running", ignoreCase = true) == true
-                if (!running) pendingOp = null
-            }
+            if (outcome != null) adoptRun(outcome, opId)
             working = false
         }
     }
@@ -202,10 +212,7 @@ fun AutoCommitCard(
                 }) as? JsonObject
             }.onSuccess { outcome ->
                 if (outcome != null) {
-                    running = outcome.str("state")?.equals("running", ignoreCase = true) == true
-                    if (!running) pendingOp = null
-                    retryable = false
-                    error = null
+                    adoptRun(outcome, opId)
                 } else {
                     retryable = true
                     error = null
@@ -221,7 +228,8 @@ fun AutoCommitCard(
         if (working) return
         working = true
         scope.launch {
-            launch(id, opId)
+            retryable = false
+            launch(id, opId)?.let { adoptRun(it, opId) }
             working = false
         }
     }
@@ -285,7 +293,8 @@ fun AutoCommitCard(
         if (error != null) Banner(error!!, BannerSeverity.DANGER)
         if (pendingOp != null) {
             Text(
-                L10n.text("android.workspaceautocommit.this_start_is_not_confirmed_yet_check_it_b.086397b5"),
+                if (running) L10n.text("common.running")
+                else L10n.text("android.workspaceautocommit.this_start_is_not_confirmed_yet_check_it_b.086397b5"),
                 style = TextStyle(fontSize = 12.sp),
                 color = LocalTsColors.current.textSecondary,
             )
@@ -356,4 +365,10 @@ private fun BackendPicker(
             }
         }
     }
+}
+
+internal fun confirmedAutoCommitRun(answer: JsonObject, operation: String, job: String): AutomationRun? {
+    val outcome = AutomationRunOutcome.parse(answer)
+    if (outcome.operationID != operation || outcome.jobID != job) return null
+    return outcome.run?.takeIf { it.id == outcome.runID && it.jobId == job }
 }

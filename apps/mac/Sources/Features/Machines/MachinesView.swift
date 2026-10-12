@@ -272,8 +272,7 @@ struct MachinesView: View {
     }
 
     private func lockedMachineRow(_ machine: Machine) -> some View {
-        let isSelf = machine.machineID == model.account?.thisMachineID
-            || machine.publicIdentity == model.identity?.key
+        let isSelf = model.isThisMachine(machine)
         let resolved = model.resolvedName(for: machine)
         let symbol = machine.isHost
             ? (isSelf ? "laptopcomputer" : ClientDeviceIcon.symbol(for: machine))
@@ -607,6 +606,7 @@ struct MachinesView: View {
                         .buttonStyle(SecondaryButtonStyle())
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .disabled(deviceRequests.answeringIDs.contains(request.id))
                 }
                 if let error = deviceRequests.errorMessage {
                     Text(error)
@@ -654,8 +654,7 @@ struct MachinesView: View {
     private var filteredAccountMachines: [Machine] {
         let query = deviceSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return model.listedAccountMachines.filter { machine in
-            let isSelf = machine.machineID == model.account?.thisMachineID
-                || machine.publicIdentity == model.identity?.key
+            let isSelf = model.isThisMachine(machine)
             return query.isEmpty || [
                 deviceTitle(resolved: model.resolvedName(for: machine), machine: machine),
                 machine.platform ?? "", machine.machineID ?? "",
@@ -809,8 +808,7 @@ struct MachinesView: View {
                     // "This device" can also be matched by its key: a stale
                     // record whose id no longer equals thisMachineID must not
                     // suddenly look like a stranger with Connect buttons.
-                    let isSelf = machine.machineID == model.account?.thisMachineID
-                        || machine.publicIdentity == model.identity?.key
+                    let isSelf = model.isThisMachine(machine)
                     // The row's title: the machine's own name, or the name we
                     // know it by (this machine, or an approved peer) when the
                     // account has never named it. The code stays as the
@@ -1160,6 +1158,8 @@ private struct DevicePermissionCard: View {
     @State private var workspaceAllowed: Set<String> = []
     @State private var error: String?
     @State private var transferDestination: String?
+    @State private var savingPermissions: Set<String> = []
+    @State private var permissionGeneration: UInt64 = 0
     #if os(macOS)
     @State private var access = ScreenAccess()
     #endif
@@ -1278,6 +1278,7 @@ private struct DevicePermissionCard: View {
         VStack(spacing: 5) {
             if compact { Text(title).font(Theme.caption).foregroundStyle(.secondary) }
             Toggle(title, isOn: value).toggleStyle(.switch).labelsHidden()
+                .disabled(savingPermissions.contains(peer.key))
                 .accessibilityLabel("\(peer.label): \(title)")
         }
         .frame(width: 105)
@@ -1337,10 +1338,21 @@ private struct DevicePermissionCard: View {
         Binding {
             workspaceAllowed.contains(peer.key)
         } set: { allow in
+            guard savingPermissions.insert(peer.key).inserted else { return }
+            permissionGeneration &+= 1
+            let wasAllowed = workspaceAllowed.contains(peer.key)
             if allow { workspaceAllowed.insert(peer.key) } else { workspaceAllowed.remove(peer.key) }
             Task {
-                do { try await Bridge.setWorkspaceAccess(peerID: peer.key, allow: allow) }
-                catch { self.error = error.localizedDescription; await load() }
+                defer { savingPermissions.remove(peer.key) }
+                do {
+                    try await Bridge.setWorkspaceAccess(peerID: peer.key, allow: allow)
+                    self.error = nil
+                } catch {
+                    if wasAllowed { workspaceAllowed.insert(peer.key) } else { workspaceAllowed.remove(peer.key) }
+                    savingPermissions.remove(peer.key)
+                    await load()
+                    self.error = error.localizedDescription
+                }
             }
         }
     }
@@ -1349,7 +1361,10 @@ private struct DevicePermissionCard: View {
         Binding {
             control ? permissions[peer.key]?.control == true : permissions[peer.key]?.view == true
         } set: { enabled in
-            var permission = permissions[peer.key] ?? ScreenPermission(peerID: peer.key, view: false, control: false)
+            guard savingPermissions.insert(peer.key).inserted else { return }
+            permissionGeneration &+= 1
+            let previous = permissions[peer.key]
+            var permission = previous ?? ScreenPermission(peerID: peer.key, view: false, control: false)
             if control { permission.control = enabled; if enabled { permission.view = true } }
             else { permission.view = enabled; if !enabled { permission.control = false } }
             permissions[peer.key] = permission
@@ -1363,20 +1378,40 @@ private struct DevicePermissionCard: View {
             }
             #endif
             Task {
-                do { try await Bridge.setScreenPermission(peerID: peer.key, view: permission.view, control: permission.control) }
-                catch { self.error = error.localizedDescription; await load() }
+                defer { savingPermissions.remove(peer.key) }
+                do {
+                    try await Bridge.setScreenPermission(peerID: peer.key, view: permission.view, control: permission.control)
+                    self.error = nil
+                } catch {
+                    permissions[peer.key] = previous
+                    savingPermissions.remove(peer.key)
+                    await load()
+                    self.error = error.localizedDescription
+                }
             }
         }
     }
 
     private func load() async {
+        guard savingPermissions.isEmpty else { return }
+        permissionGeneration &+= 1
+        let owner = permissionGeneration
         do {
-            let values = try await Bridge.screenPermissions()
+            async let screens = Bridge.screenPermissions()
+            async let workspaces = Bridge.workspaceAccessList()
+            async let destination = Bridge.screenTransferDestination()
+            let values = try await screens
+            let allowed = try? await workspaces
+            let folder = try? await destination
+            guard !Task.isCancelled, permissionGeneration == owner, savingPermissions.isEmpty else { return }
             permissions = Dictionary(values.map { ($0.peerID, $0) }, uniquingKeysWith: { _, last in last })
-            workspaceAllowed = Set((try? await Bridge.workspaceAccessList()) ?? [])
-            transferDestination = try? await Bridge.screenTransferDestination().path
+            if let allowed { workspaceAllowed = Set(allowed) }
+            if let folder { transferDestination = folder.path }
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            guard !Task.isCancelled, permissionGeneration == owner else { return }
+            self.error = error.localizedDescription
+        }
     }
 
     #if os(macOS)
@@ -1420,15 +1455,18 @@ private struct StatusDot: View {
         Circle()
             .fill(color)
             .frame(width: 8, height: 8)
-            .opacity(ready || reduceMotion ? 1 : (pulsing ? 0.3 : 1))
-            .onAppear {
-                guard !ready, !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
-                    pulsing = true
-                }
-            }
+            .opacity(online != nil || reduceMotion ? 1 : (pulsing ? 0.3 : 1))
+            .onAppear { updatePulse() }
+            .onChange(of: online) { _, _ in updatePulse() }
+            .onChange(of: reduceMotion) { _, _ in updatePulse() }
             .accessibilityLabel(accessibilityText)
             .help(helpText)
+    }
+
+    private func updatePulse() {
+        pulsing = false
+        guard online == nil, !reduceMotion else { return }
+        withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulsing = true }
     }
 
     private var accessibilityText: String {

@@ -32,7 +32,11 @@ cd "$ROOT"
 # A sandbox may export this elsewhere and leave hostd copied from a stale path.
 unset CARGO_TARGET_DIR
 
-ARCH="${TOKENSTAT_MAC_ARCH:-arm64}"
+ARCH="${TOKENSTAT_MAC_ARCH:-$(uname -m)}"
+case "$ARCH" in
+    arm64|x86_64) ;;
+    *) echo "unsupported macOS architecture: $ARCH" >&2; exit 2 ;;
+esac
 PROJECT="$ROOT/apps/mac/Tokenstat.xcodeproj"
 FFI="$ROOT/apps/mac/Vendor/TokenstatFFI.xcframework"
 DERIVED="$ROOT/target/xcode-debug"

@@ -347,10 +347,11 @@ struct ChatComposer: View {
         ChatDraftView(
             text: $draft,
             selection: $selection,
+            owner: model.currentReference,
             placeholder: placeholder,
             enabled: !model.sending,
             onSend: {
-                if !cannotSend { onSend() }
+                if model.selected?.id == chat.id, !cannotSend { onSend() }
             },
             onStop: {
                 if running { onStop() }

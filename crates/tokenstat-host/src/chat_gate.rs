@@ -106,11 +106,20 @@ fn stable_hook_path(helper: &Path) -> PathBuf {
     #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
-        // Replace rather than reuse: the helper is updated in place by the
-        // installer, and a link left pointing at a deleted inode is worse than
-        // no link at all.
-        let _ = std::fs::remove_file(&link);
-        if symlink(helper, &link).is_err() {
+        if std::fs::read_link(&link).is_ok_and(|target| target == helper) {
+            return link;
+        }
+        // Never unlink a hook another turn may be executing. A symlink follows
+        // an in-place binary replacement without being rebuilt for each call.
+        if std::fs::symlink_metadata(&link).is_ok_and(|meta| !meta.file_type().is_symlink()) {
+            return helper.to_path_buf();
+        }
+        let temporary = parent.join(format!(".hostd-hook-{:032x}", rand::random::<u128>()));
+        if symlink(helper, &temporary).is_err() {
+            return helper.to_path_buf();
+        }
+        if std::fs::rename(&temporary, &link).is_err() {
+            let _ = std::fs::remove_file(&temporary);
             return helper.to_path_buf();
         }
     }
@@ -287,6 +296,27 @@ pub fn write_grok_home(home: &Path, helper: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn credential_source(
+    home: &Path,
+    directory: &str,
+    file: &str,
+    codex_home: Option<&Path>,
+) -> PathBuf {
+    if directory == ".codex"
+        && let Some(configured) = codex_home.filter(|path| !path.as_os_str().is_empty())
+    {
+        let configured = if configured.is_absolute() {
+            configured.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| home.to_path_buf())
+                .join(configured)
+        };
+        return configured.join(file);
+    }
+    home.join(directory).join(file)
+}
+
 /// Point `target` at `source`, replacing a stale file but never silently
 /// reusing a credential that points elsewhere.
 #[cfg(unix)]
@@ -329,13 +359,17 @@ fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), Strin
     let Some(user_home) = tokenstat_paths::home_dir() else {
         return Ok(());
     };
-    let source = user_home.join(directory).join(file);
+    let source = credential_source(
+        &user_home,
+        directory,
+        file,
+        std::env::var_os("CODEX_HOME").map(PathBuf::from).as_deref(),
+    );
     let target = home.join(file);
     #[cfg(unix)]
     {
-        if !source.exists() {
-            return Ok(());
-        }
+        // A dangling link is intentional after sign-out. Leaving an old
+        // link or legacy copy here would reuse the previous account instead.
         ensure_symlink(&source, &target)
     }
     #[cfg(not(unix))]
@@ -698,6 +732,37 @@ mod tests {
             );
             assert_eq!(post["timeout"], POST_TIMEOUT_SECONDS);
         }
+    }
+
+    #[test]
+    fn relocated_codex_credentials_are_the_source_of_the_private_home() {
+        let root = tempfile::tempdir().unwrap();
+        let moved = root.path().join("custom-codex");
+        assert_eq!(
+            credential_source(root.path(), ".codex", "auth.json", Some(&moved)),
+            moved.join("auth.json")
+        );
+        assert_eq!(
+            credential_source(root.path(), ".grok", "auth.json", Some(&moved)),
+            root.path().join(".grok/auth.json")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hook_links_are_stable_and_do_not_replace_unrelated_files() {
+        use std::os::unix::fs::MetadataExt;
+        let root = tempfile::tempdir().unwrap();
+        let helper = root.path().join("hostd");
+        std::fs::write(&helper, "helper").unwrap();
+        let link = stable_hook_path(&helper);
+        let inode = std::fs::symlink_metadata(&link).unwrap().ino();
+        assert_eq!(stable_hook_path(&helper), link);
+        assert_eq!(std::fs::symlink_metadata(&link).unwrap().ino(), inode);
+        std::fs::remove_file(&link).unwrap();
+        std::fs::write(&link, "unrelated").unwrap();
+        assert_eq!(stable_hook_path(&helper), helper);
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "unrelated");
     }
 
     #[test]

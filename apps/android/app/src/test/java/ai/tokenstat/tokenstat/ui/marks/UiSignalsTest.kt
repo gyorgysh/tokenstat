@@ -9,6 +9,19 @@ import org.junit.Test
 /// cannot stack listeners and dip twice.
 class UiSignalsTest {
     @Test
+    fun refreshListenerCanUnsubscribeItselfDuringDelivery() {
+        var count = 0
+        lateinit var unsubscribe: () -> Unit
+        unsubscribe = UiSignals.onRefreshing { count++; unsubscribe() }
+        val other = UiSignals.onRefreshing { count++ }
+        try {
+            UiSignals.beganRefreshing()
+            UiSignals.beganRefreshing()
+            assertEquals(3, count)
+        } finally { unsubscribe(); other() }
+    }
+
+    @Test
     fun refreshFansOutOnceThenUnsubscribes() {
         var first = 0
         var second = 0

@@ -225,7 +225,7 @@ struct DesktopHomeEditor: View {
         preset = nil
         beforeReset = nil
         announcement = L10n.text("apple.desktophomeeditor.0_moved_to_position_1.4fa1daea", "\(section.label)", "\((visible.firstIndex(of: section) ?? 0) + 1)")
-        NSAccessibility.post(element: NSApp, notification: .announcementRequested,
+        NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
                              userInfo: [.announcement: announcement, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
 }

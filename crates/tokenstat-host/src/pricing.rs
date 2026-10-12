@@ -30,7 +30,17 @@ const MAX_SEED_BYTES: u64 = 32 * 1024 * 1024;
 /// read and one parse of the snapshot file, and the catalog behind it is
 /// shared, not re-read per report.
 pub fn reload(session: &mut Session) {
-    session.prices = PriceTable::load_with_catalog();
+    if let Ok(path) = PriceTable::default_path() {
+        reload_from(session, &path);
+    } else {
+        session.prices = PriceTable::load_with_catalog();
+    }
+}
+
+fn reload_from(session: &mut Session, path: &std::path::Path) {
+    session.prices = PriceTable::load_from(path)
+        .unwrap_or_default()
+        .with_catalog(std::sync::Arc::new(tokenstat_core::catalog::Catalog::load()));
 }
 
 /// What seeding did, so a front end can say so rather than guess.
@@ -85,6 +95,9 @@ fn seed_into(
     }
 
     let metadata = std::fs::metadata(from).map_err(|e| format!("{}: {e}", from.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("{} is not a regular price book", from.display()));
+    }
     if metadata.len() > MAX_SEED_BYTES {
         return Err(format!(
             "{} is larger than {} MiB and is not a price book",
@@ -92,13 +105,31 @@ fn seed_into(
             MAX_SEED_BYTES / (1024 * 1024)
         ));
     }
-    let text = std::fs::read_to_string(from).map_err(|e| format!("{}: {e}", from.display()))?;
+    use std::io::Read;
+    let mut text = String::new();
+    std::fs::File::open(from)
+        .map_err(|e| e.to_string())?
+        .take(MAX_SEED_BYTES + 1)
+        .read_to_string(&mut text)
+        .map_err(|e| e.to_string())?;
+    if text.len() as u64 > MAX_SEED_BYTES {
+        return Err("price book grew beyond its size limit".into());
+    }
     let table = PriceTable::parse(&text)
         .ok_or_else(|| format!("{} is not a price book", from.display()))?;
     if let Some(parent) = destination.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    std::fs::write(destination, &text).map_err(|e| format!("{}: {e}", destination.display()))?;
+    if !tokenstat_sync::snapshot::write_private_if_missing(destination, &text)
+        .map_err(|e| e.to_string())?
+    {
+        reload_from(session, destination);
+        return Ok(Seeded {
+            adopted: false,
+            effective_from: session.prices.effective_from.clone(),
+            models: 0,
+        });
+    }
     // From the file just written rather than through `reload`, so this holds
     // for a destination that is not the platform default. The catalog is
     // attached the same way `load_with_catalog` does it: a book without one
@@ -115,17 +146,14 @@ fn seed_into(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
-    use crate::session::OpenParams;
 
     /// The data directory follows `$HOME` on macOS (via the `directories`
     /// crate), so the reload test points it at a temp dir. `HOME` is
     /// process-wide, so tests that repoint it must not run at the same time;
     /// this lock is the same convention the identity tests use.
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
     const SNAPSHOT: &str = r#"{
@@ -141,57 +169,19 @@ mod tests {
       }]
     }"#;
 
-    struct HomeGuard(Option<std::ffi::OsString>);
-
-    impl Drop for HomeGuard {
-        fn drop(&mut self) {
-            match &self.0 {
-                Some(home) => unsafe { std::env::set_var("HOME", home) },
-                None => unsafe { std::env::remove_var("HOME") },
-            }
-        }
-    }
-
-    fn temp_home() -> (std::path::PathBuf, HomeGuard) {
-        let previous = std::env::var_os("HOME");
-        let home = std::env::temp_dir().join(format!(
-            "tokenstat-pricing-home-{}-{}",
-            std::process::id(),
-            SEQ.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&home).unwrap();
-        unsafe { std::env::set_var("HOME", &home) };
-        (home, HomeGuard(previous))
-    }
-
     #[test]
     fn a_refreshed_book_replaces_the_cached_one() {
-        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (home, _restore) = temp_home();
-
-        // A snapshot on disk, as `pricing.refresh` would have written it.
-        let book = PriceTable::default_path().expect("data directory");
-        std::fs::create_dir_all(book.parent().unwrap()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("current.json");
         std::fs::write(&book, SNAPSHOT).unwrap();
-
-        let dir = home.join("session");
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut session = Session::open(&OpenParams {
-            db_path: Some(dir.join("tokenstat.db").display().to_string()),
-            timezone: Some("UTC".into()),
-        })
-        .expect("open temp archive");
-
-        // A daemon that started before its first fetch holds the empty book,
-        // which is the machine the bug report describes. The refresh writes
-        // the file; the session has to be told about it.
+        let mut session = Session::open_client(Some("UTC")).unwrap();
         session.prices = PriceTable::default();
         assert!(
             session.prices.is_empty(),
             "precondition: session is unpriced"
         );
 
-        reload(&mut session);
+        reload_from(&mut session, &book);
 
         assert!(!session.prices.is_empty(), "reload must pick up the book");
         assert_eq!(session.prices.effective_from, "2026-08-01");

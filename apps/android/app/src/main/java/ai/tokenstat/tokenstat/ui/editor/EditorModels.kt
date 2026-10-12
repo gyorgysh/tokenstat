@@ -2,6 +2,9 @@
 package ai.tokenstat.tokenstat.ui.editor
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 import ai.tokenstat.tokenstat.ui.theme.SyntaxKind
 import kotlinx.serialization.json.JsonArray
@@ -164,8 +167,8 @@ object EditorGutterMap {
 
 /// Find and replace for one open file: literal, case-insensitive matches
 /// over the buffer, wrapping in both directions. Port of
-/// `EditorFindSession`. Deliberately UI-thread-free so tests exercise it
-/// without a view.
+/// `EditorFindSession`. Observable state lets query and selection changes
+/// refresh the find bar and highlight even when the document is unchanged.
 class EditorFind {
     companion object {
         /// Bounded so a pathological query cannot mint unbounded ranges.
@@ -173,13 +176,13 @@ class EditorFind {
     }
 
     var showing: Boolean = false
-    var query: String = ""
+    var query: String by mutableStateOf("")
     var replaceText: String = ""
     var replacing: Boolean = false
 
-    private var matches: List<IntRange> = emptyList()
-    private var currentIndex: Int = 0
-    private var truncated: Boolean = false
+    private var matches: List<IntRange> by mutableStateOf(emptyList())
+    private var currentIndex: Int by mutableStateOf(0)
+    private var truncated: Boolean by mutableStateOf(false)
     private var lastText: String = ""
 
     val hasQuery: Boolean get() = query.isNotEmpty()
@@ -236,6 +239,7 @@ class EditorFind {
     /// Replace the current match. Returns the new buffer, or null when
     /// there is nothing to replace.
     fun replaceCurrent(text: String): String? {
+        refresh(text)
         if (!canReplace) return null
         val range = current ?: return null
         return text.substring(0, range.first) + replaceText + text.substring(range.last + 1)
@@ -243,23 +247,22 @@ class EditorFind {
 
     /// Replace every match. One undo, in this file only.
     fun replaceAll(text: String): String? {
-        if (!canReplace) return null
-        if (replaceText.isEmpty()) {
-            var out = text
-            matches.sortedByDescending { it.first }.forEach { range ->
-                out = out.substring(0, range.first) + out.substring(range.last + 1)
+        if (!hasQuery) return null
+        val first = text.indexOf(query, ignoreCase = true)
+        if (first < 0) return null
+        // Highlighting is capped, but an explicit Replace all must cover
+        // the whole document without allocating an unbounded range list.
+        return buildString {
+            var cursor = 0
+            var found = first
+            while (found >= 0) {
+                append(text, cursor, found)
+                append(replaceText)
+                cursor = found + query.length
+                found = text.indexOf(query, cursor, ignoreCase = true)
             }
-            return out
+            append(text, cursor, text.length)
         }
-        val builder = StringBuilder()
-        var cursor = 0
-        matches.sortedBy { it.first }.forEach { range ->
-            builder.append(text, cursor, range.first)
-            builder.append(replaceText)
-            cursor = range.last + 1
-        }
-        builder.append(text, cursor, text.length)
-        return builder.toString()
     }
 
     private fun search(query: String, text: String): Pair<List<IntRange>, Boolean> {

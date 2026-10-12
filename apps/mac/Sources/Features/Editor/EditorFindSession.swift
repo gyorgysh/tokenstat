@@ -123,6 +123,16 @@ final class EditorFindSession {
         handler?(.replaceAll)
     }
 
+    /// The highlight cap must not limit an edit advertised as Replace All.
+    /// Foundation replaces the complete buffer without storing every range.
+    func replacingAll(in text: String) -> String {
+        guard !query.isEmpty else { return text }
+        return (text as NSString).replacingOccurrences(
+            of: query, with: replaceText, options: [.caseInsensitive],
+            range: NSRange(location: 0, length: (text as NSString).length)
+        )
+    }
+
     private static func search(query: String, in text: String) -> (matches: [NSRange], truncated: Bool) {
         guard !query.isEmpty, !text.isEmpty else { return ([], false) }
         let haystack = text as NSString
@@ -136,11 +146,11 @@ final class EditorFindSession {
                 range: searchRange
             )
             guard found.location != NSNotFound else { break }
-            out.append(found)
-            if out.count >= matchLimit {
+            if out.count == matchLimit {
                 truncated = true
                 break
             }
+            out.append(found)
             let next = found.location + max(found.length, 1)
             if next >= haystack.length { break }
             searchRange = NSRange(location: next, length: haystack.length - next)

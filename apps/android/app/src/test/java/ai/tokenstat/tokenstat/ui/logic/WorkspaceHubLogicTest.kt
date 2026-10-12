@@ -120,7 +120,9 @@ class WorkspaceHubLogicTest {
         assertTrue(LaunchCatalog.visible(catalog, setOf("a")).isEmpty())
         val shell = LaunchCatalog.shellFallback()
         assertTrue(shell.installed)
-        assertEquals("/bin/zsh", shell.command)
+        assertEquals("/bin/bash", shell.command)
+        assertEquals("powershell.exe", LaunchCatalog.shellFallback("Windows").command)
+        assertTrue(LaunchCatalog.shellFallback("Windows 11").args.isEmpty())
     }
 
     @Test
@@ -185,6 +187,14 @@ class WorkspaceHubLogicTest {
             EditorFind.Replacement("abc", 0),
             EditorFind.replaceAll("abc", "z", "B"),
         )
+    }
+
+    @Test
+    fun editorReplaceUsesTheSelectedMatch() {
+        assertEquals(EditorFind.Replacement("one two ONE", 1), EditorFind.replaceMatch("one two one", "one", "ONE", 1))
+        assertEquals(EditorFind.Replacement("one two ", 1), EditorFind.replaceMatch("one two one", "one", "", 1))
+        assertEquals(EditorFind.Replacement("one", 0), EditorFind.replaceMatch("one", "one", "", 1))
+        assertEquals(EditorFind.Replacement("one", 0), EditorFind.replaceMatch("one", "", "", 0))
     }
 
     @Test

@@ -56,7 +56,7 @@ struct WorkflowsEditor: View {
         }
         .background(Theme.background)
         .onAppear { name = model.working?.name ?? "" }
-        .onChange(of: model.working?.id) { _, _ in
+        .onChange(of: model.working?.name) { _, _ in
             name = model.working?.name ?? ""
         }
         .sheet(item: $running) { graph in
@@ -162,7 +162,7 @@ struct WorkflowsEditor: View {
             }
             Button(L10n.text("common.save"), .save) { Task { await model.saveWorking() } }
                 .buttonStyle(AccentButtonStyle(small: true))
-                .disabled(!model.isDirty && !(model.working?.id.isEmpty ?? true))
+                .disabled(model.isSaving || (!model.isDirty && !(model.working?.id.isEmpty ?? true)))
             Button(L10n.text("apple.workflowseditor.design.0072e6b9"), .create) {
                 if model.isDirty {
                     model.errorMessage = L10n.text("apple.workflowseditor.save_or_discard_this_draft_first.274b905e")

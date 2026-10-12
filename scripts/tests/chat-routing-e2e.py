@@ -220,7 +220,18 @@ def main():
                     stop.unlink(missing_ok=True)
             finally:
                 host.terminate()
-                host.wait(timeout=10)
+                try:
+                    host.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    host.kill()
+                    host.wait(timeout=10)
+                fixture = OUT / "native-fixture.json"
+                if fixture.is_file():
+                    try:
+                        if json.loads(fixture.read_text()).get("socket") == str(socket_path):
+                            fixture.unlink()
+                    except (OSError, ValueError):
+                        pass
                 (OUT / "routing-e2e-host.log").write_text((root / "host.log").read_text())
 
 

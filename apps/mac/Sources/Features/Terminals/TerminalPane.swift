@@ -814,7 +814,7 @@ struct TerminalPane: View {
             ? LocalModelSelection.stored(for: folder.id, in: workspaces)
             : nil
         Task {
-            await terminals.start(
+            let started = await terminals.start(
                 workspace: folder,
                 command: profile.command,
                 args: args,
@@ -823,7 +823,7 @@ struct TerminalPane: View {
                 modelProvider: selection?.provider,
                 modelID: selection?.model
             )
-            if let url = profile.openUrl {
+            if started != nil, let url = profile.openUrl {
                 await workspaces.openHarnessPage(url, in: folder)
             }
         }
@@ -1428,8 +1428,9 @@ private struct LaunchSurface: View {
         .task(id: folder.id) {
             previewGeneration &+= 1
             let generation = previewGeneration
+            previewChats = []
             guard let list = try? await Bridge.chats(workspaceID: folder.id) else { return }
-            guard generation == previewGeneration else { return }
+            guard !Task.isCancelled, generation == previewGeneration else { return }
             previewChats = list
         }
         .confirmationDialog(
@@ -1648,7 +1649,7 @@ private struct LaunchSurface: View {
     private func installButton(_ profile: LaunchProfile) -> some View {
         LaunchInstallTile(
             profile: profile,
-            isInstalling: LaunchCatalog.shared.installing.contains(profile.id),
+            isInstalling: LaunchCatalog.shared.isInstalling(profile.id, peer: modelPeer),
             onInstall: { pendingInstall = profile }
         )
     }
@@ -1706,6 +1707,7 @@ private struct LaunchSurface: View {
         let selection = modelProfiles.contains(where: { $0.id == profile.id }) ? selectedModel : nil
         return LaunchTile(
             profile: profile,
+            peer: modelPeer,
             isLaunching: launching == profile.id,
             othersBusy: launching != nil && launching != profile.id,
             onHide: profile.id == "shell" ? nil : { pendingHide = profile },
@@ -1728,7 +1730,7 @@ private struct LaunchSurface: View {
                     // front end that mapped one and not the other could point
                     // a session at a local server and still ask it for a
                     // cloud model.
-                    _ = await terminals.complete(
+                    let started = await terminals.complete(
                         session,
                         args: args,
                         rows: grid.rows,
@@ -1736,7 +1738,7 @@ private struct LaunchSurface: View {
                         modelProvider: selection?.provider,
                         modelID: selection?.model
                     )
-                    if let url = profile.openUrl {
+                    if started != nil, let url = profile.openUrl {
                         await workspaces.openHarnessPage(url, in: folder)
                     }
                     launching = nil
@@ -1796,6 +1798,7 @@ private struct LaunchSurface: View {
 /// Save is the only write.
 private struct LaunchTile: View {
     let profile: LaunchProfile
+    let peer: String?
     let isLaunching: Bool
     let othersBusy: Bool
     var onHide: (() -> Void)? = nil
@@ -1847,7 +1850,7 @@ private struct LaunchTile: View {
             }
         }
         .sheet(isPresented: $configuring) {
-            HarnessConfigView(profile: profile) { configuring = false }
+            HarnessConfigView(profile: profile, peer: peer) { configuring = false }
         }
         .contextMenu {
             if let onHide {

@@ -217,7 +217,12 @@ fn read(params: &str) -> Result<Value, String> {
     let p: ReadParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
     let viewer = lookup(&p.id)?;
     let mut state = viewer.state.lock().map_err(|_| "screen viewer poisoned")?;
-    if state.frames.queued_bytes() == 0 && state.active {
+    if state.frames.queued_bytes() == 0
+        && state.metadata.is_none()
+        && state.audio.is_empty()
+        && state.error.is_none()
+        && state.active
+    {
         let waited = viewer
             .changed
             .wait_timeout(state, Duration::from_millis(p.wait_ms.min(1_000)))
@@ -291,6 +296,31 @@ fn close(params: &str) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn buffered_metadata_and_audio_are_returned_without_waiting_for_video() {
+        use super::*;
+        let id = "buffered-screen-test";
+        let viewer = Arc::new(Viewer {
+            state: Mutex::new(ViewerState {
+                frames: VideoQueue::default(),
+                writer: None,
+                active: true,
+                error: None,
+                input_sequence: 0,
+                metadata: Some(b"metadata".to_vec()),
+                audio: std::collections::VecDeque::from([b"audio".to_vec()]),
+            }),
+            changed: Condvar::new(),
+        });
+        viewers().lock().unwrap().insert(id.into(), viewer);
+        let started = std::time::Instant::now();
+        let response = read(&json!({"id":id,"waitMs":1000}).to_string()).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert_eq!(response["metadata"], crate::base64::encode(b"metadata"));
+        assert_eq!(response["audio"], crate::base64::encode(b"audio"));
+        close(&json!({"id":id}).to_string()).unwrap();
+    }
+
     #[test]
     fn a_remote_peer_cannot_drive_the_local_viewer() {
         crate::request_context::with_remote_peer("phone", || {

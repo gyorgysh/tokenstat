@@ -77,6 +77,7 @@ class ScreenTouchView(context: Context) : View(context) {
     private var twoFingers = false
     private var twoFingerDownAt = 0L
     private var twoFingerTravel = 0f
+    private var pinched = false
     private var lastFocusX = 0f
     private var lastFocusY = 0f
 
@@ -117,6 +118,7 @@ class ScreenTouchView(context: Context) : View(context) {
         context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
+                pinched = true
                 actions?.magnify(detector.scaleFactor, width.toFloat(), height.toFloat())
                 return true
             }
@@ -164,6 +166,13 @@ class ScreenTouchView(context: Context) : View(context) {
                 twoFingers = true
                 twoFingerDownAt = event.eventTime
                 twoFingerTravel = 0f
+                pinched = false
+                // The tap detector must see cancellation; otherwise its
+                // first-finger long-press timer survives the pinch.
+                val cancel = MotionEvent.obtain(event)
+                cancel.action = MotionEvent.ACTION_CANCEL
+                taps.onTouchEvent(cancel)
+                cancel.recycle()
                 lastFocusX = focusX(event)
                 lastFocusY = focusY(event)
                 panning = false
@@ -174,7 +183,7 @@ class ScreenTouchView(context: Context) : View(context) {
                 // trackpad. Anything that travelled or lingered was a scroll
                 // or a pinch and has already done its job.
                 val quick = event.eventTime - twoFingerDownAt < TWO_FINGER_TAP_MS
-                if (inputEnabled && quick && twoFingerTravel < slop) {
+                if (inputEnabled && quick && !pinched && twoFingerTravel < slop) {
                     positionForTap(focusX(event), focusY(event))
                     actions?.click(1, 1)
                     spendModifiers()
@@ -295,7 +304,7 @@ class ScreenTouchView(context: Context) : View(context) {
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         if (handleKey(event)) true else super.onKeyDown(keyCode, event)
 
-    private fun typed(text: String) {
+    private fun typed(text: String, held: Long = modifiers) {
         if (!inputEnabled || text.isEmpty()) return
         if (text == "\n") {
             tap(ScreenKey.RETURN)
@@ -303,7 +312,6 @@ class ScreenTouchView(context: Context) : View(context) {
         }
         // A character typed with command or control has to reach the host as a
         // key code, because the host synthesises a key event and not text.
-        val held = modifiers
         if (held and (ScreenFlag.COMMAND or ScreenFlag.CONTROL) != 0L && text.length == 1) {
             val code = ScreenKey.code(text[0])
             if (code != null) {
@@ -318,14 +326,14 @@ class ScreenTouchView(context: Context) : View(context) {
     private fun handleKey(event: KeyEvent): Boolean {
         if (!inputEnabled) return false
         val flags = modifiers or metaFlags(event.metaState)
-        val code = keyCode(event.keyCode)
+        val code = screenShortcutCode(event.keyCode, flags) ?: keyCode(event.keyCode)
         if (code != null) {
             tap(code, flags)
             return true
         }
-        val character = event.unicodeChar.toChar()
-        if (character.code != 0) {
-            typed(character.toString())
+        val character = event.unicodeChar
+        if (character != 0 && Character.isValidCodePoint(character)) {
+            typed(String(Character.toChars(character)), flags)
             return true
         }
         return false
@@ -366,4 +374,15 @@ class ScreenTouchView(context: Context) : View(context) {
             return value
         }
     }
+}
+
+/// Android maps Ctrl+letter to a control character, which cannot be used
+/// as the remote key. Preserve the physical shortcut and modifier flags.
+internal fun screenShortcutCode(androidCode: Int, flags: Long): Int? {
+    if (flags and (ScreenFlag.COMMAND or ScreenFlag.CONTROL) == 0L) return null
+    val character = when (androidCode) {
+        in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'a' + (androidCode - KeyEvent.KEYCODE_A)
+        else -> return null
+    }
+    return ScreenKey.code(character)
 }

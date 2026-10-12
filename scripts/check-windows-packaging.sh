@@ -67,7 +67,7 @@ need "$ISS" "PrivilegesRequired=lowest" \
     "installer must stay per-user (no UAC)"
 need "$ISS" "LicenseFile=" \
     "installer must show LICENSE"
-need "$ISS" 'Parameters: "--install"' \
+need "$ISS" "'--install',.*ewWaitUntilTerminated" \
     "installer must run Tokenstat.exe --install rather than copy ARP itself"
 need "$ISS" "Uninstallable=no" \
     "Inno must not write a second Add/Remove Programs row"

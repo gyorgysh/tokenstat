@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -98,6 +99,8 @@ class SshConnectionState(
     /// the next reconcile adopts it back and the tab somebody just closed
     /// reappears.
     private val closingIds = mutableSetOf<String>()
+    private val mutableCloseError = MutableStateFlow<String?>(null)
+    val closeError: StateFlow<String?> = mutableCloseError.asStateFlow()
 
     val selected: SshSessionEntry?
         get() = mutableSessions.value.firstOrNull { it.id == mutableSelectedId.value }
@@ -134,12 +137,24 @@ class SshConnectionState(
     }
 
     suspend fun close(entry: SshSessionEntry) {
-        closingIds.add(entry.id)
+        if (!closingIds.add(entry.id)) return
+        mutableCloseError.value = null
         mutableSessions.update { current -> current.filterNot { it.id == entry.id } }
         if (mutableSelectedId.value == entry.id) {
             mutableSelectedId.value = mutableSessions.value.lastOrNull()?.id
         }
-        runCatching { call("ssh.session.close", buildJsonObject { put("id", entry.id) }) }
+        try {
+            call("ssh.session.close", buildJsonObject { put("id", entry.id) })
+        } catch (error: Exception) {
+            // A failed close is not evidence the shell ended. Keep it reachable
+            // and allow a retry rather than suppressing every later list echo.
+            closingIds.remove(entry.id)
+            mutableSessions.update { current ->
+                if (current.any { it.id == entry.id }) current else current + entry
+            }
+            if (error is CancellationException) throw error
+            mutableCloseError.value = error.message ?: L10n.text("android.tslogic.the_request_could_not_be_completed.4c9681ac")
+        }
     }
 
     /// Close every session on one host. Used when a saved record is deleted.
@@ -219,9 +234,11 @@ fun SshOpenSessionsSection(
     onEnd: (SshSessionEntry) -> Unit,
 ) {
     val sessions by state.sessions.collectAsState()
+    val closeError by state.closeError.collectAsState()
     if (sessions.isEmpty()) return
     val colors = LocalTsColors.current
     Column(Modifier.fillMaxWidth()) {
+        closeError?.let { Text(it, color = colors.danger) }
         Text(
             L10n.text("android.sshsessions.open_sessions.8bf47766"),
             style = MaterialTheme.typography.labelLarge,

@@ -160,7 +160,9 @@ fn private_options() -> OpenOptions {
     {
         use std::os::unix::fs::OpenOptionsExt;
         let mut options = OpenOptions::new();
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
         options
     }
     #[cfg(not(unix))]
@@ -222,6 +224,7 @@ fn try_lock_exclusive(path: &Path) -> Result<Option<File>, String> {
         .truncate(false)
         .open(path)
         .map_err(|error| error.to_string())?;
+    require_regular_lock(&file)?;
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
@@ -280,11 +283,13 @@ impl RunnerLease {
 
 impl Drop for RunnerLease {
     fn drop(&mut self) {
-        let _ = self._lock.take();
-        tracked_running_leases()
+        let mut tracked = tracked_running_leases()
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .remove(&self._path);
+            .unwrap_or_else(|error| error.into_inner());
+        // A successor may acquire the OS lock immediately after it is released.
+        // Remove this entry before the successor can register its own lease.
+        let _ = self._lock.take();
+        tracked.remove(&self._path);
     }
 }
 
@@ -310,7 +315,9 @@ pub(crate) fn running_count(root: &Path) -> usize {
         return tracked_running_leases()
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .len();
+            .iter()
+            .filter(|path| path.parent() == Some(root))
+            .count();
     };
     entries
         .flatten()
@@ -370,6 +377,17 @@ fn lease_is_held(path: &Path) -> bool {
     }
 }
 
+fn require_regular_lock(file: &File) -> Result<(), String> {
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("Message acceptance lock is not a regular file.".into());
+    }
+    Ok(())
+}
+
 struct FileLock(File);
 impl FileLock {
     fn acquire(path: &Path, exclusive: bool) -> Result<Self, String> {
@@ -380,6 +398,7 @@ impl FileLock {
             .truncate(false)
             .open(path)
             .map_err(|e| e.to_string())?;
+        require_regular_lock(&file)?;
         #[cfg(unix)]
         {
             use std::os::fd::AsRawFd;
@@ -658,6 +677,28 @@ mod tests {
         assert!(!valid_id("has|a|separator"));
         assert!(!valid_id("../escape"));
         assert!(!valid_id(&"x".repeat(MAX_ID + 1)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fifo_receipts_and_locks_are_refused_without_waiting() {
+        use std::os::unix::ffi::OsStrExt;
+        let root = tempfile::tempdir().unwrap();
+        let path = path_for(root.path());
+        let name = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(Ledger::load(path.clone(), 0).is_err());
+        assert!(FileLock::acquire(&path, true).is_err());
+        assert!(try_lock_exclusive(&path).is_err());
+    }
+
+    #[test]
+    fn unavailable_directory_does_not_count_another_roots_runners() {
+        let root = tempfile::tempdir().unwrap();
+        let _lease = RunnerLease::try_acquire(root.path(), "active")
+            .unwrap()
+            .unwrap();
+        assert_eq!(running_count(&root.path().join("missing")), 0);
     }
 
     #[test]

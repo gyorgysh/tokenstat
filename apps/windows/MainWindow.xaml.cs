@@ -741,7 +741,7 @@ public sealed partial class MainWindow : Window
             await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.rename", new JsonObject { ["id"] = id, ["name"] = input.Text.Trim() });
             var memory = await BrowserProjectMemory.ForAsync(id);
             if (memory is not null) PinnedWorkStore.Shared.Rename(memory.Owner, "", input.Text.Trim());
-            if (remote) await RemoteWorkspaces.SweepAsync();
+            if (remote) RemoteWorkspaces.ProjectChanged(id, input.Text.Trim());
             await TryLoadFoldersAsync(refresh: true);
         });
         ContextMenus.Add(menu, L10n.Text("windows.mainwindow_xaml.open_folder.6a908402"), () => NavigateTo("ws:" + id + ":Launcher"));
@@ -778,6 +778,7 @@ public sealed partial class MainWindow : Window
                 await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.remove", new JsonObject { ["id"] = id });
                 var memory = await BrowserProjectMemory.ForAsync(id);
                 if (memory is not null) PinnedWorkStore.Shared.Remove(memory.Owner, "");
+                if (remote) RemoteWorkspaces.ProjectChanged(id);
                 await TryLoadFoldersAsync(refresh: true);
             }
             catch (Exception ex) { await Chrome.ShowDialog(parent, new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.could_not_remove_folder.36080129"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
@@ -1596,7 +1597,8 @@ public sealed partial class MainWindow : Window
         filters.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var search = new TextBox { PlaceholderText = L10n.Text("windows.mainwindow_xaml.search_projects.9e079c7d"), MinWidth = 120 };
         var machine = new ComboBox { MinWidth = 160 };
-        machine.Items.Add("All machines"); machine.Items.Add("This PC");
+        machine.Items.Add(L10n.Text("windows.mainwindow_xaml.all_devices.0594fe82"));
+        machine.Items.Add(L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"));
         foreach (var label in remote.Select(folder => folder.MachineLabel).Distinct()) machine.Items.Add(label);
         machine.SelectedIndex = 0;
         Grid.SetColumn(machine, 1); filters.Children.Add(search); filters.Children.Add(machine);
@@ -2186,7 +2188,7 @@ public sealed partial class MainWindow : Window
             var item = new MenuFlyoutItem
             {
                 Text = section == GlobalSection.Account && (AppServices.Update.IsReady || AppServices.Update.IsAvailable)
-                    ? L10n.Text("windows.mainwindow_xaml.account_update_available.29a1fbd6") : section.ToString(),
+                    ? L10n.Text("windows.mainwindow_xaml.account_update_available.29a1fbd6") : section.Label(),
             };
             item.Click += (_, _) =>
             {

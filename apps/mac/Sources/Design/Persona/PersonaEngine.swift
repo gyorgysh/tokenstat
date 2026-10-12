@@ -476,7 +476,7 @@ final class PersonaEngine {
                 let side: CGFloat = Int(previous / 0.085).isMultiple(of: 2) ? -1 : 1
                 body.impulse(CGVector(dx: side * 1.05, dy: 0))
             }
-            if crossed(0.34, previous, now) {
+            if previous < 0.34, now >= 0.34 {
                 body.slump(0.85)
             }
             // It has another go every few seconds, gets a third of the way up,

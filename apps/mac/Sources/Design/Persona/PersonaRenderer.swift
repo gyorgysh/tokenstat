@@ -86,7 +86,7 @@ enum PersonaRenderer {
         let height = unit * 0.052 * closeness
         let y = rect.minY + PersonaStage.floor * rect.height - height * 0.35
         context.fill(
-            Path(ellipseIn: CGRect(x: rect.midX - width / 2, y: y, width: width, height: height)),
+            Path(ellipseIn: CGRect(x: rect.minX + bounds.midX * rect.width - width / 2, y: y, width: width, height: height)),
             with: .color(hue.opacity(0.20 * closeness))
         )
     }
@@ -559,8 +559,10 @@ enum PersonaRenderer {
                 )
 
             case .paper:
+                var propContext = context
+                propContext.opacity *= mote.opacity
                 drawPaper(
-                    in: &context,
+                    in: &propContext,
                     at: point,
                     unit: unit,
                     tilt: mote.angle,
@@ -569,7 +571,9 @@ enum PersonaRenderer {
                 )
 
             case .console:
-                drawConsole(in: &context, at: point, unit: unit, tilt: mote.angle, hue: hue)
+                var propContext = context
+                propContext.opacity *= mote.opacity
+                drawConsole(in: &propContext, at: point, unit: unit * mote.scale, tilt: mote.angle, hue: hue)
 
             case .keyboard:
                 drawKeyboard(in: &context, at: point, unit: unit, hue: hue, opacity: mote.opacity)

@@ -110,6 +110,18 @@ try
     Check(stopped && File.ReadAllText(Path.Combine(dest, "Tokenstat.exe")) == "new", "Successful staged swap installs new app.");
     Check(!File.Exists(Path.Combine(dest, "obsolete.dll")), "Old release files do not leak into new install.");
     Check(!Directory.EnumerateDirectories(scratch).Any(path => Path.GetFileName(path).StartsWith("installed.", StringComparison.Ordinal)), "Staging and backup directories cleaned up.");
+    var legacy = Path.Combine(dest, "Tokenstat.exe.WebView2");
+    var profile = Path.Combine(scratch, "profile", "WebView2");
+    Directory.CreateDirectory(legacy);
+    File.WriteAllText(Path.Combine(legacy, "Preferences"), "retained browser state");
+    Check(WebViewProfile.MoveLegacyFrom(dest, profile), "Legacy browser profile migrates before old app cleanup.");
+    Check(File.ReadAllText(Path.Combine(profile, "Preferences")) == "retained browser state" && !Directory.Exists(legacy),
+        "Migration preserves profile content and releases the backup directory.");
+    Directory.CreateDirectory(legacy);
+    File.WriteAllText(Path.Combine(legacy, "Preferences"), "recoverable old browser state");
+    Check(!WebViewProfile.MoveLegacyFrom(dest, profile), "Existing new profile does not overwrite recoverable old browser state.");
+    Check(File.ReadAllText(Path.Combine(legacy, "Preferences")) == "recoverable old browser state",
+        "Failed migration retains the old profile for recovery.");
 
 }
 finally { Directory.Delete(scratch, recursive: true); }

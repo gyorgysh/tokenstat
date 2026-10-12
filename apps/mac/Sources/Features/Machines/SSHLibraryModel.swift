@@ -689,13 +689,19 @@ final class SSHLibraryModel {
         let take = verdict(remote: key.updatedMs, local: local?.updatedMs)
         if take == .takeRemote || (take == .same && !havePrivate) {
             do {
-                let reference = try SSHSecretStore.store(key.privateKey, id: key.id)
+                // Keep the previous key usable until its matching metadata is
+                // confirmed. Reusing key.id overwrites that secret even when
+                // the host refuses the update or its response is lost.
+                let reference = try SSHSecretStore.store(key.privateKey, id: "vault_\(key.id)_\(UUID().uuidString)")
                 _ = try await Bridge.applySSHKey(SSHKeyRecord(
                     id: key.id, label: key.label, algorithm: key.algorithm,
                     publicKey: key.publicKey, secretRef: reference,
                     hardwareBacked: key.hardwareBacked, updatedMs: key.updatedMs
                 ))
                 guard ownership.permits(owner) else { return false }
+                if let local, local.secretRef != reference {
+                    SSHSecretStore.delete(reference: local.secretRef)
+                }
                 return true
             } catch {
                 guard ownership.permits(owner) else { return false }
@@ -786,11 +792,10 @@ final class SSHLibraryModel {
                 try await Bridge.deleteSSHSnippet(id: rest)
                 guard ownership.permits(owner) else { return false }
             } else if let rest = id.after("key:") {
-                if let key = keys.first(where: { $0.id == rest }) {
-                    SSHSecretStore.delete(reference: key.secretRef)
-                }
+                let key = keys.first(where: { $0.id == rest })
                 try await Bridge.deleteSSHKey(id: rest)
                 guard ownership.permits(owner) else { return false }
+                if let key { SSHSecretStore.delete(reference: key.secretRef) }
             } else {
                 return false
             }
@@ -908,20 +913,6 @@ struct SSHVaultEnvelope: Codable {
     var key: SSHVaultSyncedKey?
     var snippet: SSHSnippet?
     var folder: SSHFolder?
-}
-
-/// A key on its way through the vault, private half included. This shape exists
-/// only inside an encrypted record and is never written to disk in the clear.
-struct SSHVaultSyncedKey: Codable {
-    var id: String
-    var label: String
-    var algorithm: String
-    var publicKey: String
-    var privateKey: String
-    var hardwareBacked: Bool
-    /// Missing on records written by a build without merge stamps, which reads
-    /// as 0 and loses to anything stamped.
-    var updatedMs: Int64 = 0
 }
 
 private extension String {

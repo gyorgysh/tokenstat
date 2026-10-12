@@ -108,6 +108,7 @@ private struct ClientInAppWebView: UIViewRepresentable {
         configuration.websiteDataStore = .nonPersistent()
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
         context.coordinator.observe(webView)
         webView.load(URLRequest(url: url))
         return webView
@@ -123,7 +124,7 @@ private struct ClientInAppWebView: UIViewRepresentable {
     /// Receives navigation events and progress. `WKNavigationDelegate` fires
     /// on the main thread; `estimatedProgress` KVO is hopped there explicitly
     /// so the state setters below are always on the main thread.
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         let onLoadingChange: (Bool) -> Void
         let onProgress: (Double) -> Void
         let onHostChange: (String) -> Void

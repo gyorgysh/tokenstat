@@ -205,6 +205,12 @@ final class ClientStore {
     /// this account's `appAccountToken` or the receipt has no owner.
     @ObservationIgnored var currentAccount: (() -> Account?)?
 
+    private var statusGeneration = UUID()
+
+    private func owns(_ owner: WorkReference.Scope) -> Bool {
+        !Task.isCancelled && owner == WorkSessionContext.shared.scope
+    }
+
     private var updatesTask: Task<Void, Never>?
     private var intentsTask: Task<Void, Never>?
     /// Product-page tap waiting on sign-in. One at a time.
@@ -311,7 +317,9 @@ final class ClientStore {
         account: Account,
         offer: Product.SubscriptionOffer? = nil
     ) async {
-        guard purchasingProductID == nil else { return }
+        guard purchasingProductID == nil, !isRestoring,
+              let owner = account.pinnedWorkScope, owns(owner),
+              currentAccount?()?.pinnedWorkScope == owner else { return }
         guard let raw = account.billing?.appAccountToken,
               let token = UUID(uuidString: raw) else {
             errorMessage = L10n.text("apple.clientstore.could_not_start_this_purchase_sign_out_and.48100444")
@@ -337,9 +345,11 @@ final class ClientStore {
                 options.insert(.winBackOffer(offer))
             }
             let result = try await product.purchase(options: options)
+            guard owns(owner) else { return }
             switch result {
             case .success(let verification):
-                try await activate(verification)
+                try await activate(verification, owner: owner)
+                guard owns(owner) else { return }
                 await reportRenewal()
             case .userCancelled:
                 break
@@ -349,46 +359,57 @@ final class ClientStore {
                 errorMessage = L10n.text("apple.clientstore.the_purchase_did_not_finish.e5a00501")
             }
         } catch {
+            guard owns(owner) else { return }
             errorMessage = error.localizedDescription
         }
     }
 
     func restore() async {
-        guard !isRestoring else { return }
+        guard !isRestoring, purchasingProductID == nil,
+              let owner = WorkSessionContext.shared.scope, owns(owner) else { return }
         isRestoring = true
         errorMessage = nil
         defer { isRestoring = false }
         do {
             try await AppStore.sync()
-            var activated = false
+            guard owns(owner) else { return }
+            var foundPurchase = false
             for await result in Transaction.currentEntitlements {
-                if await handle(result) { activated = true }
+                guard owns(owner) else { return }
+                foundPurchase = true
+                _ = await handle(result)
             }
-            if !activated {
+            guard owns(owner) else { return }
+            if !foundPurchase {
                 errorMessage = L10n.text("apple.clientstore.no_app_store_purchase_found_for_this_apple.e744dcad")
             }
             await reportRenewal()
         } catch {
+            guard owns(owner) else { return }
             errorMessage = error.localizedDescription
         }
     }
 
     @discardableResult
     func handle(_ result: VerificationResult<Transaction>, quietly: Bool = false) async -> Bool {
+        guard let owner = WorkSessionContext.shared.scope, owns(owner) else { return false }
         do {
-            try await activate(result)
+            try await activate(result, owner: owner)
             return true
         } catch {
-            if !quietly { errorMessage = error.localizedDescription }
+            if !quietly, owns(owner) { errorMessage = error.localizedDescription }
             return false
         }
     }
 
-    private func activate(_ result: VerificationResult<Transaction>) async throws {
+    private func activate(_ result: VerificationResult<Transaction>, owner: WorkReference.Scope) async throws {
+        guard owns(owner) else { throw CancellationError() }
         let transaction = try checkVerified(result)
         let account = try await Bridge.appleActivate(signedTransaction: result.jwsRepresentation)
+        guard owns(owner) else { throw CancellationError() }
         onAccountChange?(account)
         await transaction.finish()
+        guard owns(owner) else { return }
         await refreshIntroEligibility()
         await refreshSubscriptionStatus()
     }
@@ -397,13 +418,16 @@ final class ClientStore {
     /// new transaction until then, so this is the only way the website sees
     /// the queued drop immediately.
     func reportRenewal() async {
+        guard let owner = WorkSessionContext.shared.scope, owns(owner) else { return }
         await refreshSubscriptionStatus()
         for product in products {
             guard let statuses = try? await product.subscription?.status else { continue }
             for status in statuses {
+                guard owns(owner) else { return }
                 if let account = try? await Bridge.appleRenewal(
                     signedRenewalInfo: status.renewalInfo.jwsRepresentation
                 ) {
+                    guard owns(owner) else { return }
                     onAccountChange?(account)
                     return
                 }
@@ -420,6 +444,9 @@ final class ClientStore {
     }
 
     func refreshSubscriptionStatus() async {
+        let request = UUID()
+        statusGeneration = request
+        let owner = WorkSessionContext.shared.scope
         var liveProductID: String?
         var liveAutoRenewID: String?
         var liveWillRenew = false
@@ -449,6 +476,7 @@ final class ClientStore {
             }
             if foundLive { break }
         }
+        guard !Task.isCancelled, statusGeneration == request, owner == WorkSessionContext.shared.scope else { return }
         if foundLive {
             currentProductID = liveProductID
             autoRenewProductID = liveAutoRenewID

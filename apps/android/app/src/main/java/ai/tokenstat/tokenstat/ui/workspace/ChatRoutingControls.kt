@@ -54,10 +54,13 @@ internal fun ChatRoutingControls(
             ?.takeIf { it.isNotBlank() } ?: id
     var showing by remember(chat.routeText("id")) { mutableStateOf(false) }
     var error by remember(chat.routeText("id")) { mutableStateOf<String?>(null) }
+    var applying by remember(chat.routeText("id")) { mutableStateOf(false) }
     val state = chat["routing"] as? JsonObject
     val policy = state?.get("policy") as? JsonObject
     val limit = state?.get("limit") as? JsonObject
     fun apply(method: String, extra: JsonObject) {
+        if (applying) return
+        applying = true
         scope.launch {
             runCatching {
                 call(
@@ -74,6 +77,7 @@ internal fun ChatRoutingControls(
                     onChanged()
                 }
                 .onFailure { error = it.message }
+            applying = false
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
@@ -304,6 +308,7 @@ private fun ChatRoutingDialog(
         }
     }
     fun updateRoute(index: Int, key: String, value: String) {
+        if (saving) return
         val old = routes[index]
         val updated =
             JsonObject(
@@ -314,7 +319,7 @@ private fun ChatRoutingDialog(
     }
     val colors = LocalTsColors.current
     ModalBottomSheet(
-        onDismissRequest = dismiss,
+        onDismissRequest = { if (!saving) dismiss() },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.background,
     ) {
@@ -347,7 +352,7 @@ private fun ChatRoutingDialog(
                 if (loaded) {
                     BrandCheckbox(
                         enabled,
-                        { enabled = !enabled },
+                        { if (!saving) enabled = !enabled },
                         L10n.text("common.chat_routing_enabled"),
                     )
                     Text(L10n.text("common.chat_route_order"), style = TsType.headline)
@@ -383,7 +388,7 @@ private fun ChatRoutingDialog(
                                             route.routeText("model").ifBlank {
                                                 L10n.text("android.chatagentpanel.default.21b111cb")
                                             },
-                                        onOpen = { menu = true },
+                                        onOpen = { if (!saving) menu = true },
                                     )
                                     DropdownMenu(menu, { menu = false }) {
                                         (listOf("") + models).forEach { model ->
@@ -426,7 +431,7 @@ private fun ChatRoutingDialog(
                                                         "android.chatagentpanel.default.21b111cb"
                                                     )
                                                 },
-                                            onOpen = { effortMenu = true },
+                                            onOpen = { if (!saving) effortMenu = true },
                                         )
                                         DropdownMenu(effortMenu, { effortMenu = false }) {
                                             (listOf("") + efforts).forEach { effort ->
@@ -454,7 +459,7 @@ private fun ChatRoutingDialog(
                                         label = L10n.text("common.move_up"),
                                         icon = ActionIcon.Move.vector,
                                         small = true,
-                                        enabled = index > 0,
+                                        enabled = index > 0 && !saving,
                                         onClick = {
                                             routes =
                                                 routes.toMutableList().also {
@@ -467,6 +472,7 @@ private fun ChatRoutingDialog(
                                         icon = ActionIcon.Delete.vector,
                                         small = true,
                                         onClick = {
+                                            if (saving) return@TsSecondaryButton
                                             if (preferred == routes[index]) preferred = null
                                             routes = routes.filterIndexed { i, _ -> i != index }
                                         },
@@ -481,7 +487,7 @@ private fun ChatRoutingDialog(
                             label = L10n.text("common.add"),
                             icon = ActionIcon.Create.vector,
                             small = true,
-                            enabled = routes.size < 8,
+                            enabled = routes.size < 8 && !saving,
                             onClick = { addMenu = true },
                         )
                         DropdownMenu(addMenu, { addMenu = false }) {
@@ -494,6 +500,7 @@ private fun ChatRoutingDialog(
                                     DropdownMenuItem(
                                         text = { Text(backend.routeText("label")) },
                                         onClick = {
+                                            if (saving) return@DropdownMenuItem
                                             routes =
                                                 routes +
                                                     buildJsonObject {
@@ -511,10 +518,10 @@ private fun ChatRoutingDialog(
                         L10n.text("common.chat_route_priority_help"),
                         style = TsType.footnote,
                     )
-                    BrandCheckbox(wait, { wait = !wait }, L10n.text("common.chat_wait_reset"))
+                    BrandCheckbox(wait, { if (!saving) wait = !wait }, L10n.text("common.chat_wait_reset"))
                     BrandCheckbox(
                         returns,
-                        { returns = !returns },
+                        { if (!saving) returns = !returns },
                         L10n.text("common.chat_return_preferred"),
                     )
                     if (returns) {
@@ -532,7 +539,7 @@ private fun ChatRoutingDialog(
                                             .filter { value -> value.isNotBlank() }
                                             .joinToString(" · ")
                                     } ?: L10n.text("common.chat_route_current_preferred"),
-                                onOpen = { preferredMenu = true },
+                                onOpen = { if (!saving) preferredMenu = true },
                             )
                             DropdownMenu(preferredMenu, { preferredMenu = false }) {
                                 DropdownMenuItem(
@@ -540,6 +547,7 @@ private fun ChatRoutingDialog(
                                         Text(L10n.text("common.chat_route_current_preferred"))
                                     },
                                     onClick = {
+                                        if (saving) return@DropdownMenuItem
                                         preferred = null
                                         preferredMenu = false
                                     },
@@ -558,6 +566,7 @@ private fun ChatRoutingDialog(
                                             )
                                         },
                                         onClick = {
+                                            if (saving) return@DropdownMenuItem
                                             preferred = route
                                             preferredMenu = false
                                         },
@@ -581,7 +590,7 @@ private fun ChatRoutingDialog(
                     HorizontalDivider(color = colors.border)
                     BrandCheckbox(
                         defaults,
-                        { defaults = !defaults },
+                        { if (!saving) defaults = !defaults },
                         L10n.text("common.chat_route_default"),
                     )
                     TsSecondaryButton(
@@ -594,23 +603,23 @@ private fun ChatRoutingDialog(
                     if (advanced) {
                         BrandCheckbox(
                             throttles,
-                            { throttles = !throttles },
+                            { if (!saving) throttles = !throttles },
                             L10n.text("common.chat_route_throttle"),
                         )
                         BrandCheckbox(
                             outages,
-                            { outages = !outages },
+                            { if (!saving) outages = !outages },
                             L10n.text("common.chat_route_errors"),
                         )
                         BrandCheckbox(
                             notifies,
-                            { notifies = !notifies },
+                            { if (!saving) notifies = !notifies },
                             L10n.text("common.chat_route_notify"),
                         )
-                        BrandCheckbox(auth, { auth = !auth }, L10n.text("common.chat_route_auth"))
+                        BrandCheckbox(auth, { if (!saving) auth = !auth }, L10n.text("common.chat_route_auth"))
                         BrandCheckbox(
                             failures,
-                            { failures = !failures },
+                            { if (!saving) failures = !failures },
                             L10n.text("common.chat_route_agent_errors"),
                         )
                     }
@@ -693,6 +702,7 @@ private fun ChatRoutingDialog(
                     label = L10n.text("common.cancel"),
                     icon = ActionIcon.Dismiss.vector,
                     modifier = Modifier.weight(1f),
+                    enabled = !saving,
                     onClick = dismiss,
                 )
                 TsAccentButton(
@@ -701,6 +711,7 @@ private fun ChatRoutingDialog(
                     modifier = Modifier.weight(1f),
                     enabled = loaded && !saving,
                     onClick = {
+                        if (saving) return@TsAccentButton
                         saving = true
                         scope.launch {
                             runCatching {

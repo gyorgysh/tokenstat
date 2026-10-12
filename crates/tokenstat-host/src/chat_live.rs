@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::{Mutex, OnceLock, PoisonError, mpsc};
@@ -71,29 +71,11 @@ pub(crate) fn supported(backend: &str) -> bool {
         return *value;
     }
     let value = (|| {
-        let mut child = tokenstat_pty::headless_command(&command, &["--version".into()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        let until = Instant::now() + Duration::from_secs(2);
-        loop {
-            if child.try_wait().ok()?.is_some() {
-                break;
-            }
-            if Instant::now() >= until {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        let output = child.wait_with_output().ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let text = String::from_utf8(output.stdout).ok()?;
+        let text = crate::agent_models::run_list_with_timeout(
+            &command,
+            &["--version"],
+            Duration::from_secs(2),
+        )?;
         let version = text
             .split_whitespace()
             .find(|part| part.as_bytes().first().is_some_and(u8::is_ascii_digit))?;
@@ -143,6 +125,9 @@ impl Launch {
         argv: &[String],
         parent: &Path,
     ) -> Result<Option<Self>, String> {
+        if argv.is_empty() {
+            return Err("missing agent command".into());
+        }
         if !supported(backend) {
             return Ok(None);
         }
@@ -191,7 +176,7 @@ impl Launch {
         )?;
         let until = Instant::now() + Duration::from_secs(10);
         loop {
-            if let Ok(bytes) = fs::read(&response) {
+            if let Ok(bytes) = read_control_file(&response) {
                 let _ = fs::remove_file(&response);
                 let result: Value =
                     serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
@@ -330,7 +315,7 @@ fn codex_launch(argv: &[String]) -> Result<(Vec<String>, Value, Value), String> 
 }
 
 fn claude_launch(argv: &[String]) -> Result<(Vec<String>, String), String> {
-    let mut args = argv[1..].to_vec();
+    let mut args = argv.get(1..).ok_or("missing Claude command")?.to_vec();
     let at = args
         .iter()
         .position(|arg| arg == "-p")
@@ -341,14 +326,64 @@ fn claude_launch(argv: &[String]) -> Result<(Vec<String>, String), String> {
     Ok((args, prompt))
 }
 
+fn read_control_file(path: &Path) -> Result<Vec<u8>, String> {
+    const CAP: u64 = 16 * 1024 * 1024;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let file = options.open(path).map_err(|error| error.to_string())?;
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("live control message is not a regular file".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(CAP + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > CAP {
+        return Err("live control message is too large".into());
+    }
+    Ok(bytes)
+}
+
+fn read_message(reader: &mut impl BufRead, cap: u64) -> Result<Option<Value>, String> {
+    let mut line = String::new();
+    let length = reader
+        .take(cap + 1)
+        .read_line(&mut line)
+        .map_err(|error| error.to_string())?;
+    if length == 0 {
+        return Ok(None);
+    }
+    if length as u64 > cap {
+        return Err("agent protocol message is too large".into());
+    }
+    serde_json::from_str(&line)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
 fn read_messages(child: &mut Child) -> Result<mpsc::Receiver<Result<Value, String>>, String> {
     let output = child.stdout.take().ok_or("missing agent output")?;
     let (tx, rx) = mpsc::sync_channel(32);
     std::thread::spawn(move || {
-        for line in BufReader::new(output).lines() {
-            let value = line
-                .map_err(|error| error.to_string())
-                .and_then(|line| serde_json::from_str(&line).map_err(|error| error.to_string()));
+        let mut reader = BufReader::new(output);
+        loop {
+            let value = match read_message(&mut reader, 16 * 1024 * 1024) {
+                Ok(Some(value)) => Ok(value),
+                Ok(None) => break,
+                Err(error) => {
+                    let _ = tx.send(Err(error));
+                    break;
+                }
+            };
             if tx.send(value).is_err() {
                 break;
             }
@@ -413,9 +448,8 @@ impl Protocol {
             if id.len() != 32 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
                 continue;
             }
-            let request: Value =
-                serde_json::from_slice(&fs::read(entry.path()).map_err(|error| error.to_string())?)
-                    .map_err(|error| error.to_string())?;
+            let request: Value = serde_json::from_slice(&read_control_file(&entry.path())?)
+                .map_err(|error| error.to_string())?;
             let response = directory.join(format!("response-{id}.json"));
             if request["id"] != id
                 || request["expires"]
@@ -472,8 +506,10 @@ impl Protocol {
 /// Entry point called only by the bundled host helper's `chat-live` command.
 pub fn run(path: &Path) -> Result<(), String> {
     let config: Config =
-        serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?;
+        serde_json::from_slice(&read_control_file(path)?).map_err(|error| error.to_string())?;
+    if config.argv.is_empty() {
+        return Err("missing agent command".into());
+    }
     let directory = path.parent().ok_or("missing live control directory")?;
     let (args, mut setup, initial) = match config.backend.as_str() {
         "codex" => codex_launch(&config.argv)?,
@@ -678,7 +714,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                 // provider permission request or leave it parked indefinitely.
                 send(
                     &mut input,
-                    &json!({"id":message["id"],"error":{"code":-32601,"message":"This headless turn uses Tokenstat tool hooks; interactive requests are unavailable."}}),
+                    &json!({"id":message["id"],"error":{"code":-32601,"message":"This headless turn uses tokenstat tool hooks; interactive requests are unavailable."}}),
                 )?;
             }
             if started {
@@ -756,6 +792,22 @@ fn codex_item(item: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_launch_and_oversized_protocol_messages_are_refused() {
+        assert!(claude_launch(&[]).is_err());
+        assert!(codex_launch(&[]).is_err());
+        let mut reader = std::io::Cursor::new(format!("{{\"text\":\"{}\"}}\n", "x".repeat(100)));
+        assert!(
+            read_message(&mut reader, 32)
+                .unwrap_err()
+                .contains("too large")
+        );
+        let mut reader = std::io::Cursor::new(b"{}\n{}\n");
+        assert!(read_message(&mut reader, 32).unwrap().is_some());
+        assert!(read_message(&mut reader, 32).unwrap().is_some());
+        assert!(read_message(&mut reader, 32).unwrap().is_none());
+    }
 
     #[test]
     fn launch_translation_keeps_hooks_resume_sandbox_images_and_literal_prompts() {

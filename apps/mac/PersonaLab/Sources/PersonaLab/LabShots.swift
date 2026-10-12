@@ -28,6 +28,17 @@ enum LabShots {
     }
 
     static func run(arguments: [String]) -> Bool {
+        // Reject invalid dimensions/clocks before AppKit allocates a bitmap or
+        // the fixed-step sampler loops toward an infinite target.
+        for flag in ["--size", "--cell", "--span", "--columns"] {
+            guard arguments.contains(flag) else { continue }
+            guard let raw = value(after: flag, in: arguments), let number = Double(raw),
+                  number.isFinite, flag == "--span" ? number >= 0 : number > 0,
+                  flag != "--columns" || Int(raw) != nil else {
+                FileHandle.standardError.write(Data("\(flag) needs a finite \(flag == "--span" ? "nonnegative" : "positive") number\n".utf8))
+                return true
+            }
+        }
         if let path = value(after: "--animation", in: arguments) {
             let names = (value(after: "--mood", in: arguments) ?? "idle,thinking,bouncing,speaking,dancing").split(separator: ",")
             let moods = names.compactMap { name in PersonaMood.allCases.first { String(describing: $0) == name } }
@@ -94,6 +105,9 @@ enum LabShots {
         if let value = value(after: "--cell", in: arguments), let cell = Double(value) {
             plan.cell = cell
         }
+        if let value = value(after: "--columns", in: arguments), let columns = Int(value) {
+            plan.columns = columns
+        }
         if arguments.contains("--light") {
             plan.dark = false
         }
@@ -104,7 +118,12 @@ enum LabShots {
         }
         if let moods = value(after: "--mood", in: arguments) {
             let wanted = moods.split(separator: ",").map(String.init)
-            write(strip(plan: plan, moods: PersonaMood.allCases.filter { wanted.contains(String(describing: $0)) }), to: path)
+            let selected = PersonaMood.allCases.filter { wanted.contains(String(describing: $0)) }
+            guard !selected.isEmpty else {
+                FileHandle.standardError.write(Data("--mood must name at least one persona mood\n".utf8))
+                return true
+            }
+            write(strip(plan: plan, moods: selected), to: path)
         } else {
             write(strip(plan: plan, moods: PersonaMood.allCases), to: path)
         }

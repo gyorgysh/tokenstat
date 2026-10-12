@@ -68,9 +68,7 @@ impl App {
     pub(super) fn reload(&mut self, store: &Store) -> Result<()> {
         let q = self.filter.clone();
         self.totals = store.totals(&q)?;
-        self.days_unmeasured = store
-            .days_active_without_usage("claude_code")
-            .unwrap_or_default();
+        self.days_unmeasured = crate::render::unmeasured_days(store, &q);
         self.empty = self.totals.events == 0;
         // Invalidate lazy reports on every scan/filter change. Only Summary's
         // data is eager; opening the CLI must not query every other tab.
@@ -103,7 +101,7 @@ impl App {
         self.models = store.report(GroupBy::Model, &q)?;
         self.days = store.report(GroupBy::Day, &q)?;
         self.day_tokens = crate::render::daily_tokens(&self.days);
-        self.peak_hour = store.peak_hour()?;
+        self.peak_hour = store.peak_hour_for(&q)?;
         self.last_scan = store.meta("last_scan_ms")?;
         Ok(())
     }
@@ -460,7 +458,7 @@ impl App {
     }
 
     pub(super) fn apply_filter_args(&mut self, args: &[&str]) -> Result<()> {
-        if args.is_empty() || args.iter().any(|a| *a == "clear" || *a == "--clear") {
+        if args.is_empty() || matches!(args, ["clear"] | ["--clear"]) {
             self.filter = Query::default();
             let store = Store::open(&self.db_path)?;
             self.reload(&store)?;
@@ -473,30 +471,50 @@ impl App {
             match args[i] {
                 "--model" | "-m" => {
                     i += 1;
-                    q.model = args.get(i).map(|s| (*s).to_string());
+                    q.model = Some(
+                        args.get(i)
+                            .filter(|value| !value.starts_with("--"))
+                            .ok_or_else(|| anyhow::anyhow!("--model needs a value"))?
+                            .to_string(),
+                    );
                 }
                 "--project" | "-p" => {
                     i += 1;
-                    q.project = args.get(i).map(|s| (*s).to_string());
+                    q.project = Some(
+                        args.get(i)
+                            .filter(|value| !value.starts_with("--"))
+                            .ok_or_else(|| anyhow::anyhow!("--project needs a value"))?
+                            .to_string(),
+                    );
                 }
                 "--since" => {
                     i += 1;
-                    q.since = args.get(i).map(|s| (*s).to_string());
+                    q.since = Some(
+                        args.get(i)
+                            .filter(|value| !value.starts_with("--"))
+                            .ok_or_else(|| anyhow::anyhow!("--since needs a value"))?
+                            .to_string(),
+                    );
                 }
                 "--until" => {
                     i += 1;
-                    q.until = args.get(i).map(|s| (*s).to_string());
+                    q.until = Some(
+                        args.get(i)
+                            .filter(|value| !value.starts_with("--"))
+                            .ok_or_else(|| anyhow::anyhow!("--until needs a value"))?
+                            .to_string(),
+                    );
                 }
                 "--last" => {
                     i += 1;
-                    let n: i64 = args
-                        .get(i)
-                        .ok_or_else(|| anyhow::anyhow!("--last needs a day count"))?
-                        .parse()
-                        .context("--last must be a number")?;
+                    let n = crate::parse_last(
+                        args.get(i)
+                            .ok_or_else(|| anyhow::anyhow!("--last needs a day count"))?,
+                    )
+                    .map_err(anyhow::Error::msg)?;
                     let today = jiff::Timestamp::now().to_zoned(self.tz.clone()).date();
                     let since = today
-                        .checked_sub(jiff::Span::new().days(n - 1))
+                        .checked_sub(jiff::Span::new().try_days(i64::from(n) - 1)?)
                         .context("invalid --last span")?;
                     q.since = Some(since.to_string());
                     q.until = Some(today.to_string());

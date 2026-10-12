@@ -189,8 +189,16 @@ fun ChangesSection(
         if (state.loaded && files.isEmpty() && state.error == null) {
             EmptyState(
                 Icons.Default.Difference,
-                L10n.text("android.workspacechanges.nothing_to_commit.f377a9f6"),
-                L10n.text("android.workspacechanges.every_file_in_this_folder_matches_the_last.fffbaf63"),
+                when {
+                    !state.exists -> L10n.text("android.workspacehistory.folder_missing.f06c68a6")
+                    !state.isRepo -> L10n.text("android.workspacehistory.not_a_git_repository.f903b388")
+                    else -> L10n.text("android.workspacechanges.nothing_to_commit.f377a9f6")
+                },
+                when {
+                    !state.exists -> L10n.text("android.workspacehistory.this_folder_is_no_longer_on_0.ccbb9519", hostLabel)
+                    !state.isRepo -> L10n.text("android.workspacehistory.this_folder_has_no_commits_to_browse_make.9d24da5f", hostLabel)
+                    else -> L10n.text("android.workspacechanges.every_file_in_this_folder_matches_the_last.fffbaf63")
+                },
                 art = { EmptyArt(EmptyArtKind.Changes) },
             )
         }
@@ -410,9 +418,10 @@ fun FileDiffPage(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var diff by remember(path) { mutableStateOf<JsonObject?>(null) }
-    var error by remember(path) { mutableStateOf<String?>(null) }
-    var loading by remember(path) { mutableStateOf(true) }
+    androidx.activity.compose.BackHandler(onBack = onBack)
+    var diff by remember(peer, workspace, path) { mutableStateOf<JsonObject?>(null) }
+    var error by remember(peer, workspace, path) { mutableStateOf<String?>(null) }
+    var loading by remember(peer, workspace, path) { mutableStateOf(true) }
     suspend fun load() {
         loading = true
         runCatching {
@@ -423,7 +432,7 @@ fun FileDiffPage(
             .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacechanges.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
-    LaunchedEffect(path) { load() }
+    LaunchedEffect(peer, workspace, path) { load() }
     DiffDocumentView(diffs = listOfNotNull(diff), modifier = modifier, fileHeaders = false) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack, modifier = Modifier.weight(1f)) {

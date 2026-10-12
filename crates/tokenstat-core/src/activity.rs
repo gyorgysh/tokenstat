@@ -277,7 +277,12 @@ pub fn calendar(
     );
     let start = shift_days(end, -((weeks * 7 - 1) as i64));
 
-    let scale = Scale::from_days(parsed.iter().filter(|(d, _)| *d >= start).map(|(_, v)| *v));
+    let scale = Scale::from_days(
+        parsed
+            .iter()
+            .filter(|(d, _)| *d >= start && *d <= anchor)
+            .map(|(_, v)| *v),
+    );
 
     let span = (days_between(start, end) as usize) + 1;
     let cols = span.div_ceil(7);
@@ -304,7 +309,7 @@ pub fn calendar(
             if *d < date {
                 lookup.next();
             } else if *d == date {
-                value += *v;
+                value = value.saturating_add(*v);
                 lookup.next();
             } else {
                 break;
@@ -318,7 +323,7 @@ pub fn calendar(
             locked: false,
         };
         if value > 0 {
-            total += value;
+            total = total.saturating_add(value);
             active_days += 1;
             run += 1;
             streak_best = streak_best.max(run);
@@ -586,6 +591,34 @@ mod tests {
         assert!(cal.rows[2][last_col].is_some(), "Wednesday is the anchor");
         assert!(cal.rows[3][last_col].is_none(), "Thursday is the future");
         assert!(cal.rows[6][last_col].is_none(), "Sunday is the future");
+    }
+
+    #[test]
+    fn future_usage_does_not_change_visible_heatmap_shades() {
+        let mut days: Vec<_> = (20..=28)
+            .map(|day| (format!("2026-07-{day}"), day as u64))
+            .collect();
+        let before = calendar(&days, 2, anchor()).unwrap();
+        days.extend((1..=30).map(|day| (format!("2026-08-{day:02}"), 1_000_000)));
+        let after = calendar(&days, 2, anchor()).unwrap();
+        assert_eq!(
+            before.days().map(|cell| cell.level).collect::<Vec<_>>(),
+            after.days().map(|cell| cell.level).collect::<Vec<_>>()
+        );
+        assert_eq!(before.total, after.total);
+    }
+
+    #[test]
+    fn huge_daily_values_saturate_without_overflow() {
+        let days = [
+            ("2026-07-28".into(), u64::MAX),
+            ("2026-07-28".into(), 10),
+            ("2026-07-29".into(), 10),
+        ];
+        let calendar = calendar(&days, 2, anchor()).unwrap();
+        assert_eq!(calendar.total, u64::MAX);
+        assert_eq!(calendar.busiest.unwrap().value, u64::MAX);
+        assert_eq!(calendar.active_days, 2);
     }
 
     #[test]

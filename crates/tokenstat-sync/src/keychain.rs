@@ -27,6 +27,7 @@ pub fn store_token(host: &str, token: &str) -> Result<(), KeychainError> {
     if token.is_empty() {
         return Err(KeychainError::Unavailable("empty token".into()));
     }
+    let _lock = token_lock(host)?;
     file_store(host, token)?;
     // Drop any legacy keychain copy so we do not leave the secret in two places.
     #[cfg(target_os = "macos")]
@@ -38,6 +39,7 @@ pub fn store_token(host: &str, token: &str) -> Result<(), KeychainError> {
 
 /// Read the sync bearer token for `host`, if any.
 pub fn load_token(host: &str) -> Result<Option<String>, KeychainError> {
+    let _lock = token_lock(host)?;
     if let Some(t) = file_load(host)? {
         return Ok(Some(t));
     }
@@ -60,17 +62,18 @@ pub fn load_token(host: &str) -> Result<Option<String>, KeychainError> {
 
 /// Delete the sync bearer token for `host`. Idempotent.
 pub fn delete_token(host: &str) -> Result<(), KeychainError> {
-    file_delete(host)?;
+    let _lock = token_lock(host)?;
+    // Remove the legacy fallback first. If deletion is refused, preserve the
+    // current token and report the failure rather than resurrecting it later.
     #[cfg(target_os = "macos")]
-    {
-        let _ = legacy_keychain_delete(host);
-    }
+    legacy_keychain_delete(host)?;
+    file_delete(host)?;
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
 fn legacy_keychain_load(host: &str) -> Result<Option<String>, KeychainError> {
-    let output = std::process::Command::new("security")
+    let output = std::process::Command::new("/usr/bin/security")
         .args(["find-generic-password", "-s", SERVICE, "-a", host, "-w"])
         .output()?;
     if !output.status.success() {
@@ -84,10 +87,16 @@ fn legacy_keychain_load(host: &str) -> Result<Option<String>, KeychainError> {
 
 #[cfg(target_os = "macos")]
 fn legacy_keychain_delete(host: &str) -> Result<(), KeychainError> {
-    let _ = std::process::Command::new("security")
+    let output = std::process::Command::new("/usr/bin/security")
         .args(["delete-generic-password", "-s", SERVICE, "-a", host])
         .output()?;
-    Ok(())
+    if output.status.success() || output.status.code() == Some(44) {
+        Ok(())
+    } else {
+        Err(KeychainError::Unavailable(
+            "could not remove the legacy sign-in".into(),
+        ))
+    }
 }
 
 fn creds_path(host: &str) -> Result<std::path::PathBuf, KeychainError> {
@@ -103,6 +112,20 @@ fn creds_path(host: &str) -> Result<std::path::PathBuf, KeychainError> {
     }
     // Host origin as filename is awkward on Windows; hash for the path.
     Ok(dir.join(format!("{}.token", blake3_lite(host.as_bytes()))))
+}
+
+fn token_lock(host: &str) -> Result<std::fs::File, KeychainError> {
+    let path = creds_path(host)?.with_extension("lock");
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let lock = options.open(path)?;
+    lock.lock()?;
+    Ok(lock)
 }
 
 fn blake3_lite(bytes: &[u8]) -> String {

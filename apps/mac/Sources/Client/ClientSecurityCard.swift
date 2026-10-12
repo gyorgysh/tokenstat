@@ -90,7 +90,7 @@ struct ClientSecurityCard: View {
                             key: identity.key
                         )
                     }
-                    if let peer {
+                    if let peer, peer.key == peerKey {
                         keyRow(
                             title: peerName ?? (peer.label.isEmpty ? L10n.text("apple.clientsecuritycard.the_other_device.80640982") : peer.label),
                             words: peer.words,

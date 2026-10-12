@@ -55,6 +55,18 @@ import Foundation
         }, streak: 7)
         assert(complete.weekTotal(at: now, calendar: calendar) == 7_000_000)
         assert(complete.weekTotal(at: now.addingTimeInterval(120), calendar: calendar) == nil)
+        for identifier in [Calendar.Identifier.buddhist, .japanese, .hebrew] {
+            var displayCalendar = Calendar(identifier: identifier)
+            displayCalendar.timeZone = calendar.timeZone
+            assert(EcosystemUsage.dayKey(now, calendar: displayCalendar) == "2026-10-06")
+            assert(usage.today(at: now, calendar: displayCalendar)?.value == 0)
+            assert(complete.weekTotal(at: now, calendar: displayCalendar) == 7_000_000)
+            assert(usage.weekWindow(at: now, calendar: displayCalendar).map(\.day)
+                   == usage.weekWindow(at: now, calendar: calendar).map(\.day))
+            displayCalendar.timeZone = TimeZone(secondsFromGMT: 2 * 3600)!
+            assert(EcosystemUsage.dayKey(now, calendar: displayCalendar) == "2026-10-07")
+            assert(usage.today(at: now, calendar: displayCalendar) == nil)
+        }
         calendar.timeZone = TimeZone(secondsFromGMT: 2 * 3600)!
         assert(usage.today(at: now, calendar: calendar) == nil) // Device timezone rollover.
         assert(EcosystemUsage.sum([.init(day: "a", value: .max, level: 4), .init(day: "b", value: 1, level: 1)]) == .max)

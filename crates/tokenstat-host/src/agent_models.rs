@@ -318,7 +318,7 @@ fn run_list(bin: &str, args: &[&str]) -> Option<String> {
     run_list_with_timeout(bin, args, LIST_TIMEOUT)
 }
 
-fn run_list_with_timeout(bin: &str, args: &[&str], timeout: Duration) -> Option<String> {
+pub(crate) fn run_list_with_timeout(bin: &str, args: &[&str], timeout: Duration) -> Option<String> {
     let mut cmd = Command::new(bin);
     #[cfg(windows)]
     {
@@ -340,8 +340,8 @@ fn run_list_with_timeout(bin: &str, args: &[&str], timeout: Duration) -> Option<
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut buf = Vec::new();
-        let _ = stdout.take(LIST_CAP as u64).read_to_end(&mut buf);
-        let _ = tx.send(buf);
+        let read = stdout.take(LIST_CAP as u64 + 1).read_to_end(&mut buf);
+        let _ = tx.send(read.ok().filter(|_| buf.len() <= LIST_CAP).map(|_| buf));
     });
     let deadline = Instant::now() + timeout;
     let status = loop {
@@ -363,7 +363,7 @@ fn run_list_with_timeout(bin: &str, args: &[&str], timeout: Duration) -> Option<
     if !status.success() {
         return None;
     }
-    let bytes = rx.recv_timeout(Duration::from_secs(1)).ok()?;
+    let bytes = rx.recv_timeout(Duration::from_secs(1)).ok()??;
     Some(String::from_utf8_lossy_owned(bytes))
 }
 
@@ -421,43 +421,45 @@ fn codex_models() -> Option<Vec<String>> {
 
     // `initialize` first: the server answers nothing else until it has been
     // told who is asking.
-    {
-        let stdin = child.stdin.as_mut()?;
-        let handshake = concat!(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":"#,
-            r#"{"name":"tokenstat","title":"tokenstat","version":"1"}}}"#,
-            "\n",
-            r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
-            "\n",
-            r#"{"jsonrpc":"2.0","id":2,"method":"model/list","params":{}}"#,
-            "\n",
-        );
-        stdin.write_all(handshake.as_bytes()).ok()?;
-        stdin.flush().ok()?;
-    }
-    // Closing stdin would end the session before the answer arrives, so the
-    // pipe is held open for as long as the child is.
-    let stdout = child.stdout.take()?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let reader = std::io::BufReader::new(stdout.take(LIST_CAP as u64));
-        for line in reader.lines().map_while(Result::ok) {
-            // Notifications arrive on the same pipe. Only the answer to id 2
-            // is being waited for: parse the line so a payload mentioning
-            // `"id":2` elsewhere does not match.
-            let is_answer = serde_json::from_str::<serde_json::Value>(&line)
-                .ok()
-                .and_then(|value| value.get("id")?.as_u64())
-                .is_some_and(|id| id == 2);
-            if is_answer {
-                let _ = tx.send(line);
-                return;
-            }
+    let answer = (|| {
+        {
+            let stdin = child.stdin.as_mut()?;
+            let handshake = concat!(
+                r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":"#,
+                r#"{"name":"tokenstat","title":"tokenstat","version":"1"}}}"#,
+                "\n",
+                r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+                "\n",
+                r#"{"jsonrpc":"2.0","id":2,"method":"model/list","params":{}}"#,
+                "\n",
+            );
+            stdin.write_all(handshake.as_bytes()).ok()?;
+            stdin.flush().ok()?;
         }
-    });
-    let answer = rx.recv_timeout(LIST_TIMEOUT);
+        // Closing stdin would end the session before the answer arrives, so the
+        // pipe is held open for as long as the child is.
+        let stdout = child.stdout.take()?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let reader = std::io::BufReader::new(stdout.take(LIST_CAP as u64));
+            for line in reader.lines().map_while(Result::ok) {
+                // Notifications arrive on the same pipe. Only the answer to id 2
+                // is being waited for: parse the line so a payload mentioning
+                // `"id":2` elsewhere does not match.
+                let is_answer = serde_json::from_str::<serde_json::Value>(&line)
+                    .ok()
+                    .and_then(|value| value.get("id")?.as_u64())
+                    .is_some_and(|id| id == 2);
+                if is_answer {
+                    let _ = tx.send(line);
+                    return;
+                }
+            }
+        });
+        rx.recv_timeout(LIST_TIMEOUT).ok()
+    })();
     reap_list_child(&mut child);
-    parse_codex_models(&answer.ok()?)
+    parse_codex_models(&answer?)
 }
 
 /// The ids out of one `model/list` answer, in the order the server gave them,
@@ -867,6 +869,19 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn an_oversized_model_list_is_not_published_as_complete() {
+        assert!(
+            run_list_with_timeout(
+                "/bin/sh",
+                &["-c", "head -c 300000 /dev/zero"],
+                Duration::from_secs(2)
+            )
+            .is_none()
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn reaping_a_model_list_launcher_also_stops_its_child() {
@@ -916,6 +931,7 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
     }
 
     #[test]
+    #[ignore = "requires installed vendor CLIs and their live account credentials"]
     fn installed_clis_parse_to_model_ids() {
         if let Some(list) = parse_if_cli_lists("grok", &["models"], parse_grok_models) {
             assert!(

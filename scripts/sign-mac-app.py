@@ -131,7 +131,7 @@ def main():
             message = ("No matching Developer ID certificate/profile for ai.tokenstat.tokenstat. "
                        "Download its Developer ID provisioning profile and set TOKENSTAT_MAC_PROFILE to its path. "
                        "CI requires the DEVELOPER_ID_PROFILE_BASE64 release secret.")
-            if args.optional and not (explicit or encoded or args.identity):
+            if args.optional and not candidates and not (explicit or encoded or args.identity):
                 print(message + " Debug build remains unsigned; biometric vault unlock and shared widgets are unavailable.")
                 return
             if args.optional and candidates:
@@ -140,6 +140,9 @@ def main():
                 # across rebuilds (which is what keeps the Screen Recording
                 # and Accessibility grants). Biometric vault unlock needs the
                 # profile's Keychain group and is unavailable in this build.
+                if args.check_only:
+                    print("Developer ID identity is available; signing will omit profile entitlements.")
+                    return
                 digest = candidates[0][0]
                 fallback = ["codesign", "--force", "--options", "runtime", "--timestamp", "--sign", digest]
                 helper = args.app / "Contents/Resources/tokenstat-hostd"

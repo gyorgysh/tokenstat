@@ -141,6 +141,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
         draft.systemPrompt.trim().isNotEmpty()
 
     fun save() {
+        if (!canSave) return
         val name = draft.name.trim()
         if (name.isEmpty()) return
         val persona = draft.copy(name = name)
@@ -261,7 +262,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                         } else {
                             draft.name + if (isDefault) L10n.text("android.personasheet.default.2a7e0b7b") else ""
                         }
-                        TsSecondaryButton(label = label.ifEmpty { L10n.text("android.personasheet.choose.c7f93783") }, small = true, onClick = { pickerOpen = true })
+                        TsSecondaryButton(label = label.ifEmpty { L10n.text("android.personasheet.choose.c7f93783") }, small = true, enabled = !improving && !saving, onClick = { pickerOpen = true })
                         DropdownMenu(expanded = pickerOpen, onDismissRequest = { pickerOpen = false }) {
                             if (isNew) {
                                 DropdownMenuItem(text = { Text(L10n.text("android.personasheet.new_persona.044eafe2")) }, onClick = { pickerOpen = false })
@@ -332,7 +333,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                             TsBrandSwitch(
                                 checked = draft.workspaceId == null,
                                 onCheckedChange = { shared ->
-                                    draft = draft.copy(workspaceId = if (shared) null else workspaceId)
+                                    if (!improving && !saving) draft = draft.copy(workspaceId = if (shared) null else workspaceId)
                                 },
                             )
                         }

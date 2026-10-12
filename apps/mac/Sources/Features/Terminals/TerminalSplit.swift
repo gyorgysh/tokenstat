@@ -92,6 +92,9 @@ extension WorkspacePreference {
 struct TerminalSplitHandle: View {
     let axis: Axis
     @Binding var fraction: Double
+    @State private var hovering = false
+    @State private var dragging = false
+    @State private var cursorPushed = false
 
     var body: some View {
         GeometryReader { geo in
@@ -113,25 +116,33 @@ struct TerminalSplitHandle: View {
                 .gesture(
                     DragGesture(minimumDistance: 1)
                         .onChanged { value in
+                            dragging = true
                             let raw = axis == .horizontal
                                 ? value.location.x / max(length, 1)
                                 : value.location.y / max(length, 1)
                             fraction = min(1 - minFrac, max(minFrac, raw))
                         }
-                )
-                .onHover { hovering in
-                    if hovering {
-                        NSCursor.resizeLeftRight.push()
-                        if axis == .vertical {
-                            NSCursor.pop()
-                            NSCursor.resizeUpDown.push()
+                        .onEnded { _ in
+                            dragging = false
+                            if !hovering { releaseCursor() }
                         }
-                    } else {
-                        NSCursor.pop()
+                )
+                .onHover { inside in
+                    hovering = inside
+                    if inside, !cursorPushed {
+                        (axis == .horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push()
+                        cursorPushed = true
+                    } else if !inside, !dragging {
+                        releaseCursor()
                     }
                 }
+                .onDisappear { releaseCursor() }
         }
         .allowsHitTesting(true)
+    }
+
+    private func releaseCursor() {
+        if cursorPushed { NSCursor.pop(); cursorPushed = false }
     }
 
     private var alignment: Alignment {

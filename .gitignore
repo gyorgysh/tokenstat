@@ -151,3 +151,4 @@ __pycache__/
 # Info plists generated from the XcodeGen project specification.
 /apps/mac/Generated/
 /apps/mac/WidgetQA.xcodeproj/
+/xcode-skills

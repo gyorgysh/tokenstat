@@ -255,6 +255,7 @@ jobs:
             -Version $env:VERSION -Out dist
           Push-Location dist
           7z a "$name.zip" $name | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Windows archive creation failed (exit $LASTEXITCODE)" }
           $zipHash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
           $setup = "$name-setup.exe"
           $setupHash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()

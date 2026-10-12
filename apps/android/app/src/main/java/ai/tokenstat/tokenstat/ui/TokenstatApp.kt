@@ -930,6 +930,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     // Greater, not different: the counter resets to zero when the process
     // dies while the seen mark restores, and `!=` would open the sheet on
     // its own on the next launch.
+    // Saved UI state can outlive the process-local request counter. Rebase
+    // it after process recreation so the next request opens the sheet.
+    SideEffect { if (planRequestSeen > planRequests) planRequestSeen = planRequests }
     val planSheetOpen = planRequests > planRequestSeen
     if (planSheetOpen && !accountOpen) {
         PaywallSheet(
@@ -1471,33 +1474,40 @@ private fun InsightsScreen(
     // Rows per cut. Null means "not asked yet", which is not the same as an
     // empty account and must not draw like one.
     val cached = remember { mutableStateMapOf<String, List<JsonObject>>() }
-    var isLoading by remember { mutableStateOf(false) }
+    val loadingCuts = remember { mutableStateListOf<Int>() }
+    val isLoading = cut in loadingCuts
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var needsSignIn by remember { mutableStateOf(false) }
-    var fetchedAtMs by remember { mutableStateOf<Long?>(null) }
-    var stale by remember { mutableStateOf(false) }
+    val freshness = remember { mutableStateMapOf<String, Pair<Long?, Boolean>>() }
+    val fetchedAtMs = freshness[cutKeys[cut]]?.first
+    val stale = freshness[cutKeys[cut]]?.second == true
     val scope = rememberCoroutineScope()
 
     suspend fun fetch(asked: Int) {
-        isLoading = true
-        runCatching { model.accountReport(cutKeys[asked]) }
-            .onSuccess { report ->
-                cached[cutKeys[asked]] = (report["rows"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
-                fetchedAtMs = report["fetchedAtMs"]?.jsonPrimitive?.longOrNull
-                stale = report["stale"]?.jsonPrimitive?.booleanOrNull == true
-                if (asked == cut) {
-                    errorMessage = null
-                    needsSignIn = false
+        if (asked in loadingCuts) return
+        loadingCuts.add(asked)
+        try {
+            runCatching { model.accountReport(cutKeys[asked]) }
+                .onSuccess { report ->
+                    cached[cutKeys[asked]] = (report["rows"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+                    freshness[cutKeys[asked]] = (report["fetchedAtMs"] as? JsonPrimitive)?.longOrNull to
+                        ((report["stale"] as? JsonPrimitive)?.booleanOrNull == true)
+                    if (asked == cut) {
+                        errorMessage = null
+                        needsSignIn = false
+                    }
                 }
-            }
-            .onFailure {
-                if (asked == cut) {
-                    val text = it.message ?: L10n.text("android.tokenstatapp.the_request_failed.db4fb447")
-                    needsSignIn = text.contains("sign in", ignoreCase = true)
-                    errorMessage = text
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    if (asked == cut) {
+                        val text = it.message ?: L10n.text("android.tokenstatapp.the_request_failed.db4fb447")
+                        needsSignIn = text.contains("sign in", ignoreCase = true)
+                        errorMessage = text
+                    }
                 }
-            }
-        if (asked == cut) isLoading = false
+        } finally {
+            loadingCuts.remove(asked)
+        }
     }
     LaunchedEffect(cut) {
         // Each cut keeps its own rows, so going back to one already seen is
@@ -2233,6 +2243,8 @@ private fun AndroidSSHScreenForAccount(
     var vault by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var vaultError by remember { mutableStateOf<String?>(null) }
+    var librarySaving by remember { mutableStateOf(false) }
+    var libraryError by remember { mutableStateOf<String?>(null) }
     var addHost by remember { mutableStateOf(false) }
     var addSnippet by remember { mutableStateOf(false) }
     var addKey by remember { mutableStateOf(false) }
@@ -2376,6 +2388,7 @@ private fun AndroidSSHScreenForAccount(
             snippets = snippets,
             onClose = { connections.dismiss() },
             startup = startupBySession[live.id].orEmpty(),
+            onStartupSent = { startupBySession = startupBySession - live.id },
             onEnded = {
                 scope.launch { connections.close(live) }
                 startupBySession = startupBySession - live.id
@@ -2608,20 +2621,41 @@ private fun AndroidSSHScreenForAccount(
         onRetry = { performVaultOperation { load() } },
         onPlans = onPlans,
     )
-    if (addHost) SSHHostDialog(folders = folders, keys = keys, onDismiss = { addHost = false }) { body ->
-        scope.launch { runCatching { model.core("ssh.host.save", body); load() }.onFailure { error = it.message }; addHost = false }
-    }
-    editHost?.let { host ->
-        SSHHostDialog(folders = folders, keys = keys, existing = host, onDismiss = { editHost = null }) { body ->
-            scope.launch { runCatching { model.core("ssh.host.save", body); load() }.onFailure { error = it.message }; editHost = null }
+    fun saveLibrary(method: String, body: JsonObject, saved: () -> Unit) {
+        if (librarySaving || !currentVaultOwner()) return
+        librarySaving = true
+        libraryError = null
+        scope.launch {
+            try {
+                ownedCore(method, body)
+                saved()
+                load()
+            } catch (failure: Exception) {
+                if (failure is CancellationException) throw failure
+                libraryError = failure.message ?: L10n.text("android.tokenstatapp.the_request_failed.db4fb447")
+            } finally {
+                librarySaving = false
+            }
         }
     }
-    if (addSnippet) SSHSnippetDialog(onDismiss = { addSnippet = false }) { body ->
-        scope.launch { runCatching { model.core("ssh.snippet.save", body); load() }.onFailure { error = it.message }; addSnippet = false }
+    if (addHost) SSHHostDialog(folders = folders, keys = keys, working = librarySaving, error = libraryError,
+        onDismiss = { addHost = false; libraryError = null }) { body ->
+        saveLibrary("ssh.host.save", body) { addHost = false }
+    }
+    editHost?.let { host ->
+        SSHHostDialog(folders = folders, keys = keys, existing = host, working = librarySaving, error = libraryError,
+            onDismiss = { editHost = null; libraryError = null }) { body ->
+            saveLibrary("ssh.host.save", body) { editHost = null }
+        }
+    }
+    if (addSnippet) SSHSnippetDialog(working = librarySaving, error = libraryError,
+        onDismiss = { addSnippet = false; libraryError = null }) { body ->
+        saveLibrary("ssh.snippet.save", body) { addSnippet = false }
     }
     editSnippet?.let { snippet ->
-        SSHSnippetDialog(existing = snippet, onDismiss = { editSnippet = null }) { body ->
-            scope.launch { runCatching { model.core("ssh.snippet.save", body); load() }.onFailure { error = it.message }; editSnippet = null }
+        SSHSnippetDialog(existing = snippet, working = librarySaving, error = libraryError,
+            onDismiss = { editSnippet = null; libraryError = null }) { body ->
+            saveLibrary("ssh.snippet.save", body) { editSnippet = null }
         }
     }
     editKey?.let { key ->
@@ -2745,6 +2779,8 @@ private fun SSHHostDialog(
     folders: JsonArray,
     keys: JsonArray = JsonArray(emptyList()),
     existing: JsonObject? = null,
+    working: Boolean,
+    error: String?,
     onDismiss: () -> Unit,
     onSave: (JsonObject) -> Unit,
 ) {
@@ -2759,7 +2795,7 @@ private fun SSHHostDialog(
     var credentialId by remember { mutableStateOf(existing?.string("credentialId") ?: "") }
     var authOpen by remember { mutableStateOf(false) }
     val savedKeys = remember(keys) { keys.filterIsInstance<JsonObject>() }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (existing == null) L10n.text("android.tokenstatapp.add_ssh_host.00d846a8") else L10n.text("android.tokenstatapp.edit_ssh_host.f66b117f")) }, text = {
+    AlertDialog(onDismissRequest = { if (!working) onDismiss() }, title = { Text(if (existing == null) L10n.text("android.tokenstatapp.add_ssh_host.00d846a8") else L10n.text("android.tokenstatapp.edit_ssh_host.f66b117f")) }, text = {
         Column(
             Modifier.verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2812,11 +2848,12 @@ private fun SSHHostDialog(
                     }
                 }
             }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Text(L10n.text("android.tokenstatapp.you_will_verify_the_host_fingerprint_and_c.b1e753b9"), style = MaterialTheme.typography.bodySmall)
         }
     }, confirmButton = {
         Button(
-            enabled = label.isNotBlank() && host.isNotBlank() && user.isNotBlank(),
+            enabled = !working && label.isNotBlank() && host.isNotBlank() && user.isNotBlank() && port.toIntOrNull() in 1..65535,
             onClick = {
                 // An edit keeps what it does not show: the id, the trusted
                 // server keys, the folder depth. A save that dropped the
@@ -2825,7 +2862,7 @@ private fun SSHHostDialog(
                 map["id"] = JsonPrimitive(existing?.string("id") ?: "")
                 map["label"] = JsonPrimitive(label)
                 map["hostname"] = JsonPrimitive(host)
-                map["port"] = JsonPrimitive(port.toIntOrNull() ?: 22)
+                map["port"] = JsonPrimitive(port.toInt())
                 map["username"] = JsonPrimitive(user)
                 map["initialDirectory"] = JsonPrimitive(directory.ifBlank { "~" })
                 if (folderId != null) map["folderId"] = JsonPrimitive(folderId!!) else map.remove("folderId")
@@ -2837,11 +2874,11 @@ private fun SSHHostDialog(
                 onSave(JsonObject(map))
             },
         ) { Text(L10n.text("common.save")) }
-    }, dismissButton = { TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) } })
+    }, dismissButton = { TextButton(enabled = !working, onClick = onDismiss) { Text(L10n.text("common.cancel")) } })
 }
 
 @Composable
-private fun SSHSnippetDialog(existing: JsonObject? = null, onDismiss: () -> Unit, onSave: (JsonObject) -> Unit) {
+private fun SSHSnippetDialog(existing: JsonObject? = null, working: Boolean, error: String?, onDismiss: () -> Unit, onSave: (JsonObject) -> Unit) {
     var title by remember { mutableStateOf(existing?.string("title") ?: "") }
     var command by remember { mutableStateOf(existing?.string("command") ?: "") }
     // Placeholders are read back the same way every client reads them, so a
@@ -2852,10 +2889,11 @@ private fun SSHSnippetDialog(existing: JsonObject? = null, onDismiss: () -> Unit
         .distinct()
         .toList()
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!working) onDismiss() },
         title = { Text(if (existing == null) L10n.text("android.tokenstatapp.add_snippet.a1f802b9") else L10n.text("android.tokenstatapp.edit_snippet.3bb69add")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 OutlinedTextField(title, { title = it }, label = { Text(L10n.text("android.tokenstatapp.name.dcd1d522")) }, singleLine = true)
                 OutlinedTextField(
                     command,
@@ -2874,7 +2912,7 @@ private fun SSHSnippetDialog(existing: JsonObject? = null, onDismiss: () -> Unit
             }
         },
         confirmButton = {
-            Button(enabled = title.isNotBlank() && command.isNotBlank(), onClick = {
+            Button(enabled = !working && title.isNotBlank() && command.isNotBlank(), onClick = {
                 val map = existing?.toMutableMap() ?: mutableMapOf()
                 map["id"] = JsonPrimitive(existing?.string("id") ?: "")
                 map["title"] = JsonPrimitive(title)
@@ -2887,7 +2925,7 @@ private fun SSHSnippetDialog(existing: JsonObject? = null, onDismiss: () -> Unit
                 onSave(JsonObject(map))
             }) { Text(L10n.text("common.save")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
+        dismissButton = { TextButton(enabled = !working, onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
     )
 }
 
@@ -3122,7 +3160,7 @@ private fun WorkspacesScreen(
     // same refusal with no sign that anything changed: while refused, ask
     // again every few seconds and load when the answer lands.
     ForegroundEffect(connectedPeer, allowed, host) {
-        if (connectedPeer != null || allowed != false) return@ForegroundEffect
+        if (allowed != false) return@ForegroundEffect
         val machine = host ?: return@ForegroundEffect
         while (true) {
             delay(4000)

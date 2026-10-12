@@ -180,15 +180,16 @@ data class ScheduleFields(
     }
 
     val intervalCurrentSeconds: Long get() {
-        if (!intervalTouched && intervalSeconds > 0) return maxOf(intervalSeconds, 60)
-        val minutes = intervalMinutes.toLongOrNull()?.coerceAtMost(Long.MAX_VALUE / 60) ?: 60
-        return maxOf(minutes * 60, 60)
+        if (!intervalTouched && intervalSeconds > 0) return intervalSeconds
+        val minutes = intervalMinutes.trim().toLongOrNull()
+            ?.takeIf { it in 1..Long.MAX_VALUE / 60 } ?: return 0
+        return minutes * 60
     }
 
     val intervalMenuMinutes: List<Int> get() {
         val seconds = intervalCurrentSeconds
-        if (seconds % 60 != 0L) return JobScheduleCopy.intervalPresets
-        val current = maxOf(1, (seconds / 60).toInt())
+        if (seconds <= 0 || seconds % 60 != 0L || seconds / 60 > Int.MAX_VALUE) return JobScheduleCopy.intervalPresets
+        val current = (seconds / 60).toInt()
         if (JobScheduleCopy.intervalPresets.contains(current)) return JobScheduleCopy.intervalPresets
         return (JobScheduleCopy.intervalPresets + current).sorted()
     }
@@ -236,15 +237,18 @@ data class ScheduleFields(
 
 /// Minutes and no-limit, shared by automations and workflows.
 /// Port of `JobBudgetEditing`.
-data class BudgetFields(val budgetMinutes: String = "180", val noTimeLimit: Boolean = false) {
+data class BudgetFields(val budgetMinutes: String = "180", val noTimeLimit: Boolean = false, val originalSeconds: Long? = null) {
     companion object {
         fun load(seconds: Long): BudgetFields =
             if (seconds == 0L) BudgetFields("180", true)
-            else BudgetFields(maxOf(1, seconds / 60).toString(), false)
+            else BudgetFields(maxOf(1, seconds / 60).toString(), false, seconds)
     }
 
     val budgetSeconds: Long? get() {
         if (noTimeLimit) return 0
+        originalSeconds?.let { seconds ->
+            if (budgetMinutes == maxOf(1, seconds / 60).toString()) return seconds
+        }
         val minutes = budgetMinutes.trim().toLongOrNull() ?: return null
         if (minutes <= 0) return null
         val product = minutes * 60

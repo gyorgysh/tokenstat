@@ -350,16 +350,25 @@ pub fn windows_helper_path(unit: Unit) -> Result<PathBuf> {
     Ok(windows_helper_dir()?.join(format!("{}.vbs", unit.label())))
 }
 
-pub fn windows_command(unit: Unit, _exe: &str, interval_secs: u64) -> String {
+fn windows_schedule(interval_secs: u64) -> Result<(&'static str, u64)> {
     let minutes = (interval_secs / 60).max(1);
+    if minutes < 1440 {
+        return Ok(("MINUTE", minutes));
+    }
+    if minutes.is_multiple_of(1440) && minutes / 1440 <= 365 {
+        return Ok(("DAILY", minutes / 1440));
+    }
+    bail!("Windows schedules require 1–1439 minutes or a whole number of days up to 365")
+}
+
+pub fn windows_command(unit: Unit, _exe: &str, interval_secs: u64) -> Result<String> {
+    let (schedule, modifier) = windows_schedule(interval_secs)?;
     let label = unit.label();
-    // Doctor / printed instructions: same shape install_windows_task writes.
-    // The helper path is resolved at install time; here we show the pattern.
-    let helper = format!("%LOCALAPPDATA%\\\\ai.tokenstat.tokenstat\\\\schedule\\\\{label}.vbs");
-    format!(
+    let helper = windows_helper_path(unit)?.display().to_string();
+    Ok(format!(
         "schtasks /Create /TN \"{label}\" /TR \"wscript.exe //B //Nologo \\\"{helper}\\\"\" \
-         /SC MINUTE /MO {minutes} /F"
-    )
+         /SC {schedule} /MO {modifier} /F"
+    ))
 }
 
 /// Where a LaunchAgent belongs.
@@ -420,7 +429,7 @@ pub fn install_launchd(
     };
 
     let domain = format!("gui/{}", current_uid());
-    quiet(Command::new("launchctl").args(["bootout", &domain, label]));
+    quiet(Command::new("launchctl").args(["bootout", &format!("{domain}/{label}")]));
     quiet(Command::new("launchctl").args(["unload", "-w"]).arg(&path));
 
     let loaded = quiet(
@@ -438,7 +447,7 @@ pub fn install_launchd(
     Ok(InstallReport {
         paths: vec![path],
         hint: Some(format!(
-            "logs: {log_s}; remove with: launchctl bootout {domain} {label} && rm ~/Library/LaunchAgents/{label}.plist"
+            "logs: {log_s}; remove with: launchctl bootout {domain}/{label} && rm ~/Library/LaunchAgents/{label}.plist"
         )),
     })
 }
@@ -491,7 +500,8 @@ pub fn install_systemd_user(
 /// cannot leave a stale action behind.
 pub fn install_windows_task(unit: Unit, exe: &str, interval_secs: u64) -> Result<InstallReport> {
     let label = unit.label();
-    let minutes = (interval_secs / 60).max(1).to_string();
+    let (schedule, modifier) = windows_schedule(interval_secs)?;
+    let modifier = modifier.to_string();
     let dir = windows_helper_dir()?;
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let helper = windows_helper_path(unit)?;
@@ -509,7 +519,7 @@ pub fn install_windows_task(unit: Unit, exe: &str, interval_secs: u64) -> Result
     let tr = format!("wscript.exe //B //Nologo \"{}\"", helper.display());
     let status = Command::new("schtasks")
         .args([
-            "/Create", "/TN", label, "/TR", &tr, "/SC", "MINUTE", "/MO", &minutes, "/F",
+            "/Create", "/TN", label, "/TR", &tr, "/SC", schedule, "/MO", &modifier, "/F",
         ])
         .status()
         .with_context(|| "running schtasks")?;
@@ -561,7 +571,7 @@ fn uninstall_launchd(home: &Path, unit: Unit) -> Result<UninstallReport> {
             .stderr(std::process::Stdio::null())
             .status();
     };
-    quiet(Command::new("launchctl").args(["bootout", &domain, label]));
+    quiet(Command::new("launchctl").args(["bootout", &format!("{domain}/{label}")]));
     quiet(Command::new("launchctl").args(["unload", "-w"]).arg(&path));
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(&log);
@@ -897,11 +907,11 @@ mod tests {
 
     #[test]
     fn the_windows_command_quotes_a_path_with_spaces() {
-        let c = windows_command(Unit::Scan, r"C:\Program Files\tokenstat.exe", 1800);
+        let c = windows_command(Unit::Scan, r"C:\Program Files\tokenstat.exe", 1800).unwrap();
         assert!(c.contains("/MO 30"));
         assert!(c.contains("wscript.exe //B //Nologo"));
         assert!(c.contains("ai.tokenstat.scan.vbs"));
-        let s = windows_command(Unit::Sync, r"C:\tokenstat.exe", 600);
+        let s = windows_command(Unit::Sync, r"C:\tokenstat.exe", 600).unwrap();
         assert!(s.contains("ai.tokenstat.sync.vbs"));
         assert!(s.contains("ai.tokenstat.sync"));
     }
@@ -918,7 +928,11 @@ mod tests {
     #[test]
     fn a_sub_minute_interval_still_produces_a_valid_windows_task() {
         // schtasks rejects /MO 0, so short intervals clamp to one minute.
-        assert!(windows_command(Unit::Scan, "t.exe", 30).contains("/MO 1"));
+        assert!(
+            windows_command(Unit::Scan, "t.exe", 30)
+                .unwrap()
+                .contains("/MO 1")
+        );
     }
 
     #[test]
@@ -943,5 +957,20 @@ mod tests {
     fn systemd_unit_dir_is_under_xdg_config() {
         let p = systemd_unit_dir(Path::new("/home/u"));
         assert_eq!(p, PathBuf::from("/home/u/.config/systemd/user"));
+    }
+
+    #[test]
+    fn daily_windows_updates_use_a_supported_schedule_modifier() {
+        assert_eq!(
+            windows_schedule(Unit::Update.default_interval()).unwrap(),
+            ("DAILY", 1)
+        );
+        assert!(
+            windows_command(Unit::Update, "t.exe", 86400)
+                .unwrap()
+                .contains("/SC DAILY /MO 1")
+        );
+        assert!(windows_schedule(1441 * 60).is_err());
+        assert!(windows_schedule(u64::MAX).is_err());
     }
 }

@@ -139,9 +139,11 @@ fn open_pairing_file(path: &Path) -> Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)
         .context("Could not open the pairing-code file")?;
+    // Nonblocking open also lets validation reject a FIFO without waiting
+    // forever for a writer. It does not change regular-file reads.
     // `metadata()` here is fstat on the opened fd, so it describes what will
     // be read rather than what the path named at some earlier instant.
     validate_file(&file.metadata()?)?;
@@ -350,6 +352,16 @@ mod tests {
         std::os::unix::fs::symlink(&path, &link).unwrap();
         assert!(PairingCode::read(None, Some(&link)).is_err());
         assert!(PairingCode::read(None, Some(&dir)).is_err());
+        let fifo = dir.join("fifo");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .args(["-m", "600"])
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(PairingCode::read(None, Some(&fifo)).is_err());
         std::fs::write(&path, "A".repeat(129)).unwrap();
         assert!(PairingCode::read(None, Some(&path)).is_err());
         std::fs::remove_dir_all(dir).unwrap();

@@ -231,7 +231,11 @@ struct EcosystemUsage: Codable, Equatable, Sendable {
     }
 
     static func dayKey(_ date: Date, calendar: Calendar = .current) -> String {
-        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        // Archive keys are Gregorian even when the user's display calendar is
+        // Buddhist, Japanese or Hebrew. Keep their timezone for day rollover.
+        var archiveCalendar = Calendar(identifier: .gregorian)
+        archiveCalendar.timeZone = calendar.timeZone
+        let parts = archiveCalendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
 

@@ -222,6 +222,7 @@ internal sealed class WorkspaceCommitSession
         }
         Working = true;
         Error = null;
+        Review = null;
         try
         {
             var sorted = new JsonArray();
@@ -304,7 +305,8 @@ internal sealed class WorkspaceCommitSession
                     ["id"] = workspaceId,
                     ["operationId"] = SubmittedOperationId,
                 });
-            if (receipt is null)
+            // HostClient represents a successful JSON null as an empty object.
+            if (receipt is null or JsonObject { Count: 0 })
             {
                 CanRetry = true;
                 Error = L10n.Text("windows.workspacecommit.the_computer_has_no_recorded_outcome_yet_y.0b11d451");

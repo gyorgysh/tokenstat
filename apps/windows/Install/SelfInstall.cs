@@ -189,7 +189,8 @@ internal static class SelfInstall
         {
             try { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); } catch { /* Best effort. */ }
             // Keep the recoverable old tree if rollback itself failed.
-            try { if (Directory.Exists(dest) && Directory.Exists(previous)) Directory.Delete(previous, recursive: true); } catch { /* Best effort. */ }
+            try { if (Directory.Exists(dest) && Directory.Exists(previous)
+                && Tokenstat.Pages.WebViewProfile.MoveLegacyFrom(previous)) Directory.Delete(previous, recursive: true); } catch { /* Best effort. */ }
         }
     }
 
@@ -418,6 +419,8 @@ internal static class SelfInstall
                 Arguments = $"-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{helper}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                // The uninstall helper must not pin the directory it deletes.
+                WorkingDirectory = Path.GetTempPath(),
             });
         }
         catch

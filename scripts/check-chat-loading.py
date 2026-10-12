@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Run the actual ChatModel opening/catalog methods against held replies."""
 from pathlib import Path
 import subprocess
@@ -55,6 +56,7 @@ struct Bag { mutating func removeAll() {}; func retain(_ keys: Set<String>, in p
     var loadGeneration: UInt64 = 0, previewCacheEpoch: UInt64 = 0
     var setupLoadTask: Task<Void, Never>?
     var isLoading = false, openingConversation = false, pagingUnavailable = false
+    var isCreating = false
     var workspaceID: String?, peer: String?, folderID: String?, continuityScope: WorkReference.Scope?
     var chatListCache: [String: [ChatConversation]] = [:]
     var chats: [ChatConversation] = [], selected: ChatConversation?

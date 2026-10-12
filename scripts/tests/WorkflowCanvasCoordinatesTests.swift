@@ -6,6 +6,12 @@ import CoreGraphics
 @main
 struct WorkflowCanvasCoordinatesTests {
     static func main() {
+        let normalGrid = WorkflowCanvasCoordinates.gridAxis(pan: 0, extent: 1000, zoom: 1)
+        assert(normalGrid.count == 44 && normalGrid.first == -24)
+        let distantGrid = WorkflowCanvasCoordinates.gridAxis(pan: -1e18, extent: 1000, zoom: 1)
+        assert(distantGrid.count == 44 && distantGrid.allSatisfy(\.isFinite))
+        assert(WorkflowCanvasCoordinates.gridAxis(pan: .infinity, extent: 1000, zoom: 1).isEmpty)
+        assert(WorkflowCanvasCoordinates.gridAxis(pan: 0, extent: 1e100, zoom: 1).count == 512)
         let origin = CGPoint(x: 200, y: 300)
         for zoom: CGFloat in [0.4, 1, 2.2] {
             let delta = CGSize(width: 80, height: -40)

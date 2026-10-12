@@ -228,9 +228,10 @@ private fun CommitDetailPage(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var detail by remember(commit) { mutableStateOf<JsonObject?>(null) }
-    var error by remember(commit) { mutableStateOf<String?>(null) }
-    var loaded by remember(commit) { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(onBack = onBack)
+    var detail by remember(peer, workspace, commit) { mutableStateOf<JsonObject?>(null) }
+    var error by remember(peer, workspace, commit) { mutableStateOf<String?>(null) }
+    var loaded by remember(peer, workspace, commit) { mutableStateOf(false) }
 
     suspend fun load() {
         runCatching {
@@ -241,7 +242,7 @@ private fun CommitDetailPage(
             .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacehistory.the_request_failed.db4fb447"), hostLabel) }
         loaded = true
     }
-    LaunchedEffect(commit) { load() }
+    LaunchedEffect(peer, workspace, commit) { load() }
 
     val id = commit.str("id") ?: ""
     val subject = detail?.str("subject") ?: commit.str("subject") ?: ""

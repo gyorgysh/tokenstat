@@ -66,7 +66,7 @@ class UsageWidgetLayoutTest {
         val calendar = buildJsonObject {
             put("scope", "account"); put("fetchedAtMs", System.currentTimeMillis())
             put("rows", JsonArray(listOf(JsonArray(listOf(buildJsonObject {
-                put("date", LocalDate.now().toString()); put("value", 18_420_000L); put("locked", false)
+                put("date", LocalDate.now(java.time.ZoneOffset.UTC).toString()); put("value", 18_420_000L); put("locked", false)
             })))))
         }
         UsageWidgetStore.clear(context)
@@ -110,7 +110,7 @@ class UsageWidgetLayoutTest {
         fun calendar(scope: String = "account") = buildJsonObject {
             put("scope", scope); put("fetchedAtMs", System.currentTimeMillis())
             put("rows", JsonArray(listOf(JsonArray(listOf(buildJsonObject {
-                put("date", LocalDate.now().toString()); put("value", 18_420_000L); put("locked", false)
+                put("date", LocalDate.now(java.time.ZoneOffset.UTC).toString()); put("value", 18_420_000L); put("locked", false)
             })))))
         }
         UsageWidgetStore.clear(context)
@@ -161,7 +161,7 @@ class UsageWidgetLayoutTest {
     @Test fun rendersAllSizesAndThemes() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val base = instrumentation.targetContext
-        val today = LocalDate.now()
+        val today = LocalDate.now(java.time.ZoneOffset.UTC)
         val typical = UsageSnapshot("a".repeat(64), System.currentTimeMillis(), (6 downTo 0).map {
             UsageDay(today.minusDays(it.toLong()).toString(), (it + 1) * 18_420_000L, false)
         })
@@ -205,7 +205,7 @@ class UsageWidgetLayoutTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val prefs = LimitsWidgetProvider.preferences(context)
-        val today = LocalDate.now()
+        val today = LocalDate.now(java.time.ZoneOffset.UTC)
         val snapshot = UsageSnapshot("a".repeat(64), System.currentTimeMillis(), (6 downTo 0).map {
             UsageDay(today.minusDays(it.toLong()).toString(), (it + 1) * 1_000_000L, false)
         })

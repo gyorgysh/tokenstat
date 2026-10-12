@@ -79,7 +79,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: No dependency may block shipping tokenstat
-        run: bash scripts/check-dep-licences.sh
+        run: |
+          python3 scripts/tests/test_licence_rules.py
+          bash scripts/check-dep-licences.sh
 
   # .gitignore is not enough on its own: a commit built at an older revision
   # uses that revision's rules, which is how a 30 MB static library once got in.
@@ -208,6 +210,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - name: Custom installer paths remain literal
+        run: python3 scripts/tests/test_install_scripts.py
       - name: Failed replacements preserve the installed pair
         run: bash scripts/tests/install-release-pair.sh
       - name: Failed service stops preserve host binaries
@@ -243,10 +247,14 @@ jobs:
           python3 scripts/check-watching-scope.py
           python3 scripts/check-vault-scope.py
           python3 scripts/check-ssh-workbench.py
+          python3 scripts/tests/chat-model-review.py
+          python3 scripts/tests/screen-viewer-lifecycle.py
+          python3 scripts/tests/terminal-final-output.py
 
       - name: Validate Apple widget signing rules
         run: |
           python3 scripts/test_sign_mac_app.py
+          python3 scripts/tests/test_install_scripts.py
           python3 scripts/tests/AppleWidgetSigningTests.py
 
       - uses: actions/setup-node@v7
@@ -254,7 +262,9 @@ jobs:
           node-version: '24'
 
       - name: Mobile terminal scroll regressions
-        run: node scripts/tests/TerminalScrollTests.cjs
+        run: |
+          node scripts/tests/TerminalScrollTests.cjs
+          node scripts/tests/OpenCodeGateTests.mjs
 
   windows-state-tests:
     name: windows state tests
@@ -301,6 +311,10 @@ jobs:
       - name: Test without the local half
         run: cargo test -p tokenstat-host -p tokenstat-ffi --no-default-features --locked
 
+      - name: Live chat routing regressions
+        if: runner.os == 'macOS'
+        run: python3 scripts/tests/chat-routing-e2e.py
+
       - uses: actions/setup-dotnet@v6
         if: runner.os == 'Windows'
         with:
@@ -340,20 +354,37 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet run --project scripts/tests/windows-host/WindowsHostTests.csproj -- --hostd "$PWD/target/debug/tokenstat-hostd.exe"
 
-  # The Rust half of the client, on the platform it ships to.
-  #
-  # This is a regression gate, not a milestone gate. Everything below the Swift
-  # layer is shared code that already compiles for iOS, so it can break, and it
-  # did: the first run of this job found `open_browser` reaching for a process
-  # on a platform that has none.
-  #
-  # The **app** is deliberately not built here yet. `RootView` is the desktop
-  # shell, and the phone is meant to have its own root rather than a
-  # phone-sized copy of the Mac window (see `docs/mobile-app.md`). Until that
-  # root exists, an app build would fail for a reason that is not a
-  # regression, and a job that is always red is a job everybody learns to
-  # ignore. Add the `xcodebuild` step back in the same change that adds the
-  # client root.
+  mac-client:
+    name: mac client
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mac-client
+
+      - name: Build the macOS FFI
+        run: scripts/build-ffi-xcframework.sh macos
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd apps/mac && xcodegen
+
+      - name: Build the universal Mac app
+        run: |
+          xcodebuild -project apps/mac/Tokenstat.xcodeproj \
+            -scheme Tokenstat \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=NO build
+
+  # Compile the shared Rust layer and the iOS app on both simulator architectures.
   apple-client:
     name: ios client
     runs-on: macos-latest
@@ -380,9 +411,7 @@ jobs:
       - name: Build the FFI for the simulator
         run: scripts/build-ffi-xcframework.sh sim
 
-      # Back in, now that `ClientRootView` exists. This is the step that catches
-      # the real failure mode, which is `#if os(macOS)` rot in shared views, not
-      # signing. Unsigned on purpose: no secret is needed to prove it compiles.
+      # Compile the phone root and shared views without requiring signing.
       - name: Generate the Xcode project
         run: |
           brew install xcodegen
@@ -428,8 +457,8 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
-      - name: Unit tests and release bundle
-        run: gradle -p apps/android testDebugUnitTest lintDebug lintRelease bundleRelease
+      - name: Unit tests, instrumentation test APK, and release bundle
+        run: gradle -p apps/android testDebugUnitTest lintDebug lintRelease assembleDebugAndroidTest bundleRelease
 
       - name: Verify native symbols are embedded
         run: |

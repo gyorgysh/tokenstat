@@ -52,6 +52,25 @@ internal sealed class PersonaScene(Canvas canvas)
         return path;
     }
 
+    // Face masks (eye glints and tongue) move with their paint. The body
+    // silhouette stays fixed; transforming only Path.Data leaves those small
+    // masks at their old position after a turn.
+    public void TransformFace(int index, Transform transform)
+    {
+        _paths[index].Data!.Transform = CopyTransform(transform);
+        if (_clips[index] is { Mask: { } mask } clip)
+        {
+            Geometry moved = mask switch
+            {
+                PathGeometry path => CopyGeometry(path),
+                RectangleGeometry rectangle => new RectangleGeometry { Rect = rectangle.Rect },
+                _ => throw new NotSupportedException(L10n.Text("windows.personaclipgeometry.unsupported_persona_clip_0.07a77db1", $"{mask.GetType().Name}")),
+            };
+            moved.Transform = CopyTransform(transform);
+            _clips[index] = new PersonaClip(clip.Body, moved);
+        }
+    }
+
     public void End()
     {
         _clipper.Update(_paths, _clips, Count);

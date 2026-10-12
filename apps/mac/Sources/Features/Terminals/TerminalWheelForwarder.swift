@@ -58,7 +58,8 @@ enum TerminalWheelForwarder {
     static func terminalDisappeared(_ view: TerminalView) { live.remove(view) }
 
     private static func handle(_ event: NSEvent) -> NSEvent? {
-        guard live.count > 0, event.deltaY != 0, let window = event.window else { return event }
+        guard live.count > 0, event.deltaY.isFinite, event.deltaY != 0, let window = event.window,
+              window.attachedSheet == nil, NSApp.modalWindow == nil else { return event }
         let point = event.locationInWindow
         let overTerminal = live.allObjects.contains { candidate in
             candidate.window === window
@@ -84,7 +85,7 @@ enum TerminalWheelForwarder {
         let position = TerminalMouse.gridPosition(of: event, in: view, terminal: terminal)
         // One wheel event covers several lines. Clamped, because a trackpad
         // flick reports a delta that would send a hundred events at once.
-        let lines = min(5, max(1, Int(abs(event.deltaY).rounded())))
+        let lines = Int(min(5, max(1, abs(event.deltaY).rounded())))
         // SGR, not SwiftTerm's last-write protocol. A program that enabled
         // both 1006 and 1015 is left on urxvt inside SwiftTerm, and Grok
         // does not read that encoding.

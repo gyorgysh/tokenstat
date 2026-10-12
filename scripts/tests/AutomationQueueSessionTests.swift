@@ -26,7 +26,19 @@ actor FixtureQueue: AutomationQueueService {
     var loseReply = false
     var failBefore = false
 
-    func automationQueue() async throws -> AutomationQueue { queue }
+    var holdRead = false
+    var readWaiter: CheckedContinuation<Void, Never>?
+    func holdNextRead() { holdRead = true }
+    var isReadWaiting: Bool { readWaiter != nil }
+    func releaseRead() { readWaiter?.resume(); readWaiter = nil }
+    func automationQueue() async throws -> AutomationQueue {
+        let result = queue
+        if holdRead {
+            holdRead = false
+            await withCheckedContinuation { readWaiter = $0 }
+        }
+        return result
+    }
 
     func setAutomationQueue(
         defaultBudgetSeconds: UInt64,
@@ -54,6 +66,18 @@ actor FixtureQueue: AutomationQueueService {
     @MainActor static func main() async throws {
         func check(_ condition: Bool, _ message: String) {
             assert(condition, message)
+        }
+
+        do {
+            let queue = AutomationQueue(defaultBudgetSeconds: 90, maxConcurrent: 2)
+            var draft = AutomationQueueDraft(queue)
+            check(draft.matches(queue), "exact queue budget does not appear dirty")
+            draft.maxConcurrent = "4"
+            check(draft.budgetSeconds == 90, "concurrency edits preserve exact seconds")
+            draft.budgetMinutes = "2"
+            check(draft.budgetSeconds == 120, "explicit minutes replace exact seconds")
+            let maximum = AutomationQueueDraft(AutomationQueue(defaultBudgetSeconds: UInt64.max))
+            check(maximum.validation == nil && maximum.budgetSeconds == UInt64.max, "maximum host budget survives")
         }
 
         do {
@@ -166,6 +190,23 @@ actor FixtureQueue: AutomationQueueService {
         check(session.draft.maxConcurrent == "3", "clean load takes the host")
         check(session.draft.budgetMinutes == "10", "clean load minutes")
         check(session.dirty == false, "clean load is clean")
+
+        do {
+            let service = FixtureQueue()
+            let editor = AutomationQueueSession(hostName: "Host", service: service)
+            await editor.load()
+            await service.holdNextRead()
+            let refresh = Task { await editor.load() }
+            for _ in 0..<200 {
+                if await service.isReadWaiting { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            check(await service.isReadWaiting, "refresh suspended")
+            editor.draft.maxConcurrent = "8"
+            await service.releaseRead()
+            await refresh.value
+            check(editor.draft.maxConcurrent == "8" && editor.dirty, "late refresh preserves new scheduler edits")
+        }
 
         print("AutomationQueueSessionTests passed")
     }

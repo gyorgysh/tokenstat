@@ -730,6 +730,7 @@ private final class ScreenViewerModel {
     /// How long a session has to hold up before the budget is given back.
     private static let stableAfter: TimeInterval = 12
     private var stopped = false
+    private var generation: UInt64 = 0
     /// When the viewer last asked for access on its own after a failed
     /// connect. Bounds the auto-ask so repeated failures do not spam the host.
     private var lastAutoRequest = Date.distantPast
@@ -762,10 +763,13 @@ private final class ScreenViewerModel {
     /// carries no device id at all, which is why it was never enough on its
     /// own. A host that is asleep cannot be asked, and says so.
     func requestAccess() async {
+        guard !isRequesting, !stopped else { return }
+        let owner = generation
         isRequesting = true
         defer { isRequesting = false }
         do {
             var answer = try await Bridge.askScreenAccess(peer: peer, control: requestedControl)
+            guard owner == generation, !stopped, !Task.isCancelled else { return }
             // Already allowed to watch, and still not running: what is missing
             // is the mouse. Asking for exactly what the Control toggle happened
             // to say left somebody who had been granted View only pressing a
@@ -774,18 +778,21 @@ private final class ScreenViewerModel {
             if answer.granted == true, !requestedControl {
                 answer = try await Bridge.askScreenAccess(peer: peer, control: true)
             }
+            guard owner == generation, !stopped, !Task.isCancelled else { return }
             if answer.granted == true {
                 requestNotice = L10n.text("apple.screenviewerview.this_device_already_has_access_press_try_a.fd1aee06")
                 return
             }
             requestNotice = L10n.text("apple.screenviewerview.asked_approve_this_device_on_that_computer.f8ffae43")
         } catch {
+            guard owner == generation, !stopped, !Task.isCancelled else { return }
             requestNotice = error.localizedDescription
             return
         }
         // Best effort, and never the reason the request failed. Somebody with
         // no phone registered has still asked the computer itself.
         if let sent = try? await Bridge.requestScreenAccess(), sent.signedIn, sent.enabled, sent.sent > 0 {
+            guard owner == generation, !stopped, !Task.isCancelled else { return }
             requestNotice = L10n.text("apple.screenviewerview.asked_a_notification_went_to_your_other_de.3be993ac")
         }
     }
@@ -805,9 +812,12 @@ private final class ScreenViewerModel {
     }
 
     private func connect() async {
+        let owner = generation
+        func isCurrent() -> Bool { owner == generation && !stopped && !Task.isCancelled }
         // Whatever the last session left behind has to be gone before this one
         // dials: the relay allows one screen channel per account.
         await awaitClose()
+        guard isCurrent() else { return }
         let tier = requestedTier
         let control = requestedControl
         guard tier?.lowercased() == "legend" else {
@@ -817,18 +827,24 @@ private final class ScreenViewerModel {
         }
         do {
             let identity = try await Bridge.machineIdentity()
+            guard isCurrent() else { return }
             let capability = try await Bridge.onPeer(
                 peer,
                 "screen.capability.issue",
                 ["peerId": identity.key, "control": control, "tier": tier ?? ""],
                 as: ScreenCapability.self
             )
+            guard isCurrent() else { return }
             let session = try await Bridge.screenViewerOpen(
                 peer: peer,
                 capability: capability.token,
                 control: control,
                 quality: quality
             )
+            guard isCurrent() else {
+                await Bridge.screenViewerClose(id: session.id)
+                return
+            }
             self.session = session
             transport = session.transport
             connectedSince = Date()
@@ -840,6 +856,7 @@ private final class ScreenViewerModel {
             message = L10n.text("apple.screenviewerview.waiting_for_the_first_picture.be8d50cf")
             task = Task { [weak self] in await self?.readLoop(session.id) }
         } catch {
+            guard isCurrent() else { return }
             let reason = error.localizedDescription
             if actionable(reason) {
                 state = .failed
@@ -860,6 +877,7 @@ private final class ScreenViewerModel {
     }
 
     func stop() {
+        generation &+= 1
         stopped = true
         heartbeatTask?.cancel()
         heartbeatTask = nil
@@ -898,6 +916,7 @@ private final class ScreenViewerModel {
         while !Task.isCancelled {
             do {
                 let read = try await Bridge.screenViewerRead(id: id)
+                guard !Task.isCancelled, !stopped, session?.id == id else { return }
                 if let encoded = read.metadata, let data = Data(base64Encoded: encoded),
                    let metadata = try? JSONDecoder().decode(ScreenMetadata.self, from: data)
                 {
@@ -935,7 +954,8 @@ private final class ScreenViewerModel {
                     // viewer and the host's capture running behind a failed
                     // overlay while waiting for somebody to press Try Again.
                     await Bridge.screenViewerClose(id: id)
-                    if session?.id == id { session = nil }
+                    guard !Task.isCancelled, !stopped, session?.id == id else { return }
+                    session = nil
                     connectedSince = nil
                     streamingSince = nil
                     state = .failed
@@ -953,6 +973,7 @@ private final class ScreenViewerModel {
                 }
                 if requestedControl { syncClipboard() }
             } catch {
+                guard !Task.isCancelled, !stopped, session?.id == id else { return }
                 reconnect(after: error.localizedDescription)
                 return
             }
@@ -1050,10 +1071,13 @@ private final class ScreenViewerModel {
     /// starts streaming as it appears.
     func setControl(_ wanted: Bool) async {
         guard wanted != requestedControl, !peer.isEmpty else { return }
+        let owner = generation
         if await flipControlOnLiveSession(wanted) { return }
+        guard owner == generation, !stopped, !Task.isCancelled else { return }
         let tier = requestedTier
         stop()
         stopped = false
+        startHeartbeat()
         requestedControl = wanted
         reconnectAttempts = 0
         state = .connecting
@@ -1127,6 +1151,7 @@ private final class ScreenViewerModel {
                 capability: capability.token,
                 control: wanted
             )
+            guard !stopped, !Task.isCancelled, session?.id == live.id else { return true }
             requestedControl = wanted
             session?.control = wanted
             return true
@@ -1294,10 +1319,9 @@ private final class ScreenAudioPlayer {
               let output = buffer.floatChannelData else { return }
         buffer.frameLength = AVAudioFrameCount(frames)
         data.withUnsafeBytes { raw in
-            let input = raw.baseAddress!.advanced(by: 16).assumingMemoryBound(to: Int16.self)
             for frame in 0..<Int(frames) {
                 for channel in 0..<Int(channels) {
-                    output[channel][frame] = Float(Int16(littleEndian: input[frame * Int(channels) + channel])) / Float(Int16.max)
+                    output[channel][frame] = Float(Int16(littleEndian: raw.loadUnaligned(fromByteOffset: 16 + (frame * Int(channels) + channel) * 2, as: Int16.self))) / Float(Int16.max)
                 }
             }
         }
@@ -1343,7 +1367,7 @@ private struct ScreenEncodedFrame {
         width = data.integer(at: 24)
         height = data.integer(at: 26)
         let count: UInt32 = data.integer(at: 28)
-        guard data.count == 32 + Int(count) else { return nil }
+        guard width > 0, height > 0, data.count == 32 + Int(count) else { return nil }
         payload = data.subdata(in: 32..<data.count)
     }
 }

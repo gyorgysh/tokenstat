@@ -58,7 +58,8 @@ fn detect_caps(env: impl Fn(&str) -> Option<String>) -> Caps {
     let utf8_locale = ["LC_ALL", "LC_CTYPE", "LANG"]
         .iter()
         .filter_map(|name| lower(name))
-        .any(|v| v.contains("utf-8") || v.contains("utf8"));
+        .find(|v| !v.is_empty())
+        .is_some_and(|v| v.contains("utf-8") || v.contains("utf8"));
     let unicode = !forced_ascii && (utf8_locale || cfg!(windows));
 
     Caps {
@@ -356,7 +357,7 @@ pub fn pad_left(s: &str, w: usize) -> String {
 
 /// Approximate display width. Full width CJK and emoji count as two columns.
 fn width(s: &str) -> usize {
-    s.chars().map(char_width).sum()
+    ratatui::text::Span::raw(s).width()
 }
 
 /// Terminal columns `s` occupies. Column budgets must use this, not
@@ -367,21 +368,8 @@ pub fn display_width(s: &str) -> usize {
 }
 
 fn char_width(c: char) -> usize {
-    let cp = c as u32;
-    // Ranges that render double width in a terminal. Not exhaustive, but it
-    // covers what actually shows up in project and model names.
-    if (0x1100..=0x115F).contains(&cp)
-        || (0x2E80..=0xA4CF).contains(&cp)
-        || (0xAC00..=0xD7A3).contains(&cp)
-        || (0xF900..=0xFAFF).contains(&cp)
-        || (0xFF00..=0xFF60).contains(&cp)
-        || (0xFFE0..=0xFFE6).contains(&cp)
-        || (0x1F300..=0x1FAFF).contains(&cp)
-    {
-        2
-    } else {
-        1
-    }
+    let mut bytes = [0; 4];
+    width(c.encode_utf8(&mut bytes))
 }
 
 pub(crate) fn truncate(s: &str, w: usize) -> String {
@@ -572,6 +560,10 @@ mod tests {
         assert!(caps_for(&[("LANG", "en_US.UTF-8")]).unicode);
         assert!(caps_for(&[("LC_ALL", "C.utf8")]).unicode);
         assert_eq!(
+            caps_for(&[("LC_ALL", "C"), ("LANG", "en_US.UTF-8")]).unicode,
+            cfg!(windows)
+        );
+        assert_eq!(
             caps_for(&[("LANG", "en_US.ISO-8859-1")]).unicode,
             cfg!(windows)
         );
@@ -643,6 +635,7 @@ mod tests {
     #[test]
     fn column_budgets_use_display_width() {
         assert_eq!(display_width("ab"), 2);
+        assert_eq!(display_width("e\u{301}"), 1);
         assert_eq!(display_width("日本"), 4);
         assert_eq!(display_width("/Users/test/日本語"), 12 + 6);
     }

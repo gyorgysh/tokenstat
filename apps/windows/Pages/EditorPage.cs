@@ -339,6 +339,14 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 Symbol.Important));
             return;
         }
+        // Opening the same file twice while its read is pending still owns
+        // one buffer, so competing tabs cannot overwrite each other's edits.
+        existing = _open.FirstOrDefault(t => t.Path == path);
+        if (existing is not null)
+        {
+            Select(existing);
+            return;
+        }
         var tab = new EditorTab(this, _workspaceId, path, content);
         _open.Add(tab);
         var item = new TabViewItem
@@ -564,6 +572,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 
             _applying = true;
             _box.Document.SetText(TextSetOptions.None, content);
+            _text = ReadEditorText();
             _applying = false;
             _box.TextChanged += (_, _) => OnEdited();
             // Coalesce layout notifications; never mutate the visual tree from
@@ -579,6 +588,13 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _box.SelectionChanged += (_, _) => RefreshStatus();
             _findQuery.TextChanged += (_, _) => RefreshMatches();
             _box.KeyDown += BoxOnKeyDown;
+            var saveShortcut = new KeyboardAccelerator { Key = VirtualKey.S, Modifiers = VirtualKeyModifiers.Control };
+            saveShortcut.Invoked += async (_, args) =>
+            {
+                args.Handled = true;
+                await SaveAsync();
+            };
+            _view.KeyboardAccelerators.Add(saveShortcut);
             RefreshStatus();
         }
 
@@ -860,7 +876,8 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 var selection = _box.Document.Selection;
                 var start = selection.StartPosition;
                 _box.Document.SetText(TextSetOptions.None, next);
-                _box.Document.Selection.SetRange(Math.Min(start, next.Length), Math.Min(start, next.Length));
+                _text = ReadEditorText();
+                _box.Document.Selection.SetRange(Math.Min(start, _text.Length), Math.Min(start, _text.Length));
             }
             catch
             {
@@ -1090,6 +1107,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             try
             {
                 _box.Document.SetText(TextSetOptions.None, content);
+                _text = ReadEditorText();
             }
             catch
             {

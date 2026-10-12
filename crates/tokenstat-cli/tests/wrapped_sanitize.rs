@@ -68,3 +68,35 @@ fn wrapped_sanitizes_hostile_labels() {
         "expected replacement chars for hostile labels: {text:?}"
     );
 }
+
+#[test]
+fn an_empty_export_replaces_old_output_with_a_valid_empty_document() {
+    let dir = std::env::temp_dir().join(format!(
+        "ts-review-export-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("archive.db");
+    let output = dir.join("export.json");
+    std::fs::write(&output, "old report").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_tokenstat"))
+        .arg("--db")
+        .arg(&db)
+        .args(["export", "--format", "json", "--out"])
+        .arg(&output)
+        .env("TOKENSTAT_DATA_DIR", dir.join("data"))
+        .env("TOKENSTAT_IDENTITY_DIR", dir.join("identity"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
+    assert_eq!(value, serde_json::json!([]));
+    assert!(result.stdout.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}

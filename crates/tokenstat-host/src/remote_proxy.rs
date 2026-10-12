@@ -16,13 +16,14 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{Value, json};
 use tokenstat_remote::Connection;
 
 const MAX_PROXY_LISTENERS: usize = 16;
+const MAX_PROXY_CONNECTIONS: usize = 32;
 
 fn listeners() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     static LISTENERS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
@@ -42,6 +43,7 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
     }
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("could not bind a loopback port: {e}"))?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let peer = peer.to_string();
 
@@ -59,24 +61,41 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
     registry.insert(key.clone(), Arc::clone(&stop));
     drop(registry);
 
-    let _ = listener.set_nonblocking(true);
     std::thread::spawn(move || {
+        let active = Arc::new(AtomicUsize::new(0));
         loop {
             if stop.load(Ordering::Relaxed) {
                 break;
             }
             match listener.accept() {
                 Ok((tcp, _)) => {
-                    let _ = tcp.set_nodelay(true);
-                    match open_proxy_stream(&peer, &host, target) {
-                        Ok(connection) => {
-                            crate::proxy_http::bridge(tcp, connection, &host, target, port)
+                    let Some(permit) = ConnectionPermit::acquire(&active) else {
+                        write_proxy_error(tcp, "too many active browser connections");
+                        continue;
+                    };
+                    let peer = peer.clone();
+                    let host = host.clone();
+                    let stop = Arc::clone(&stop);
+                    // A websocket stays open for the lifetime of a page. It
+                    // must not prevent this listener accepting other requests.
+                    std::thread::spawn(move || {
+                        let _permit = permit;
+                        if stop.load(Ordering::Relaxed) {
+                            return;
                         }
-                        Err(error) => {
-                            eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
-                            write_proxy_error(tcp, &error);
+                        let _ = tcp.set_nodelay(true);
+                        match open_proxy_stream(&peer, &host, target) {
+                            Ok(connection) => {
+                                if !stop.load(Ordering::Relaxed) {
+                                    crate::proxy_http::bridge(tcp, connection, &host, target, port);
+                                }
+                            }
+                            Err(error) => {
+                                eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
+                                write_proxy_error(tcp, &error);
+                            }
                         }
-                    }
+                    });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -100,6 +119,25 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
     Ok(json!({"url": format!("http://127.0.0.1:{port}/")}))
 }
 
+struct ConnectionPermit(Arc<AtomicUsize>);
+
+impl ConnectionPermit {
+    fn acquire(active: &Arc<AtomicUsize>) -> Option<Self> {
+        active
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                (n < MAX_PROXY_CONNECTIONS).then_some(n + 1)
+            })
+            .ok()?;
+        Some(Self(Arc::clone(active)))
+    }
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// Stop the loopback bridge for this peer and port.
 pub(crate) fn unlisten(peer: &str, host: &str, target: u16) -> Result<Value, String> {
     let host = if host.is_empty() { "127.0.0.1" } else { host };
@@ -113,6 +151,7 @@ pub(crate) fn unlisten(peer: &str, host: &str, target: u16) -> Result<Value, Str
 /// Same HTTP 502 the host's stream stack writes. Kept here so a client
 /// build does not have to compile `remote_stream`.
 fn write_proxy_error(mut tcp: TcpStream, error: &str) {
+    let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(2)));
     let body = format!("tokenstat could not reach the service on the host.\n\n{error}\n");
     let response = format!(
         "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -143,6 +182,20 @@ fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Connection, St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_connections_are_bounded_and_slots_are_reused() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let mut permits: Vec<_> = (0..MAX_PROXY_CONNECTIONS)
+            .map(|_| ConnectionPermit::acquire(&count).unwrap())
+            .collect();
+        assert!(ConnectionPermit::acquire(&count).is_none());
+        permits.pop();
+        let replacement = ConnectionPermit::acquire(&count).unwrap();
+        drop(permits);
+        drop(replacement);
+        assert_eq!(count.load(Ordering::Relaxed), 0);
+    }
 
     #[test]
     fn proxy_retired_listener_preserves_replacement() {

@@ -1918,7 +1918,6 @@ struct RootView: View {
         #if os(macOS)
         var trailingSince: Date?
         var trailingLeftAt: Date?
-        var leadingSince: Date?
         var leadingLeftAt: Date?
         let now = { Date() }
 
@@ -1973,9 +1972,7 @@ struct RootView: View {
                     // a place, not asking for the list of projects. ⌘B and the
                     // toggle float the sidebar when the window is too narrow.
                     leadingLeftAt = nil
-                    leadingSince = nil
                 } else {
-                    leadingSince = nil
                     if isSidebarOverlayVisible, !isSidebarPinned, !isSidebarModalVisible {
                         let left = leadingLeftAt ?? now()
                         leadingLeftAt = left
@@ -1988,7 +1985,6 @@ struct RootView: View {
                     }
                 }
             } else {
-                leadingSince = nil
                 leadingLeftAt = nil
             }
 
@@ -3894,7 +3890,7 @@ struct RootView: View {
     private func openPendingNotification() {
         guard let request = notificationOpen.request else { return }
         if openFromNotification(request) {
-            notificationOpen.take()
+            _ = notificationOpen.take()
             return
         }
         if notificationOpen.dropIfStale() { landAfterFailedTap() }

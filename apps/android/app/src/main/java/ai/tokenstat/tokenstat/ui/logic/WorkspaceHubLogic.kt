@@ -141,11 +141,11 @@ object LaunchCatalog {
     }
 
     /// The built-in shell tile, for a host that answered with no catalog.
-    fun shellFallback(): LaunchProfile = LaunchProfile(
+    fun shellFallback(platform: String? = null): LaunchProfile = LaunchProfile(
         id = "shell",
         name = L10n.text("android.workspacehublogic.shell.a7332854"),
-        command = "/bin/zsh",
-        args = listOf("-l"),
+        command = ai.tokenstat.tokenstat.ui.terminal.terminalShell(platform),
+        args = if (platform?.contains("windows", ignoreCase = true) == true) emptyList() else listOf("-l"),
         bypassArgs = emptyList(),
         harnessId = null,
         installed = true,
@@ -232,14 +232,19 @@ object EditorFind {
 
     data class Replacement(val text: String, val count: Int)
 
-    fun replaceFirst(text: String, query: String, replacement: String): Replacement {
-        if (query.isEmpty()) return Replacement(text, 0)
-        val at = text.indexOf(query, ignoreCase = true)
-        if (at < 0) return Replacement(text, 0)
-        return Replacement(
-            text.substring(0, at) + replacement + text.substring(at + query.length),
-            1,
-        )
+    fun replaceFirst(text: String, query: String, replacement: String): Replacement =
+        replaceMatch(text, query, replacement, 0)
+
+    fun replaceMatch(text: String, query: String, replacement: String, index: Int): Replacement {
+        if (query.isEmpty() || index < 0) return Replacement(text, 0)
+        var from = 0
+        var at = -1
+        repeat(index + 1) {
+            at = text.indexOf(query, from, ignoreCase = true)
+            if (at < 0) return Replacement(text, 0)
+            from = at + query.length
+        }
+        return Replacement(text.substring(0, at) + replacement + text.substring(from), 1)
     }
 
     fun replaceAll(text: String, query: String, replacement: String): Replacement {

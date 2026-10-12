@@ -104,6 +104,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -168,7 +170,7 @@ class WorkspaceLayoutStore(context: Context) {
 /// Which harness a session command belongs to, port of
 /// `harnessID(forCommand:)`. The last path component decides: the full
 /// command is a path, and the brand is the binary.
-fun harnessIdForCommand(command: String): String? = when (command.substringAfterLast("/")) {
+fun harnessIdForCommand(command: String): String? = when (command.replace('\\', '/').substringAfterLast("/").removeSuffix(".exe").removeSuffix(".cmd").removeSuffix(".bat")) {
     "claude" -> "claude_code"
     "codex" -> "codex"
     "opencode", "opencode2" -> "opencode"
@@ -375,7 +377,7 @@ fun HostCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (online == false) {
+                if (online == false && !connected) {
                     Text(L10n.text("common.offline"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                 } else if (connected) {
                     // Soft accent, like iOS `.bordered`: the card already
@@ -451,6 +453,8 @@ private const val ROW_MARK = 26
 /// middle is what nobody needs. Compose only ellipsizes the end, so long
 /// paths are cut by hand.
 fun middleTruncate(text: String, maxChars: Int = 48): String {
+    if (maxChars <= 0) return ""
+    if (maxChars == 1) return if (text.length <= 1) text else "…"
     if (text.length <= maxChars) return text
     val head = (maxChars - 1) * 2 / 3
     val tail = maxChars - 1 - head
@@ -469,7 +473,7 @@ fun SecurityCard(model: AppViewModel, peerKey: String?, peerName: String?) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     var identity by remember { mutableStateOf<JsonObject?>(null) }
-    var peer by remember { mutableStateOf<JsonObject?>(null) }
+    var peer by remember(peerKey) { mutableStateOf<JsonObject?>(null) }
     var copied by remember { mutableStateOf<String?>(null) }
     var expanded by remember { mutableStateOf(false) }
     LaunchedEffect(peerKey) {
@@ -478,7 +482,7 @@ fun SecurityCard(model: AppViewModel, peerKey: String?, peerName: String?) {
         // run is for and refuse to publish into a different peer's card.
         val wanted = peerKey
         val got = runCatching { model.machineIdentity() }.getOrNull()
-        if (wanted != peerKey) return@LaunchedEffect
+        currentCoroutineContext().ensureActive()
         identity = got
         if (wanted == null) {
             peer = null
@@ -487,7 +491,7 @@ fun SecurityCard(model: AppViewModel, peerKey: String?, peerName: String?) {
         val found = runCatching { model.machinePeers() }.getOrNull()
             .orEmpty().mapNotNull { it as? JsonObject }
             .find { (it["key"] as? JsonPrimitive)?.contentOrNull == wanted }
-        if (wanted != peerKey) return@LaunchedEffect
+        currentCoroutineContext().ensureActive()
         peer = found
     }
     Column(
@@ -737,7 +741,7 @@ fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen
     val colors = LocalTsColors.current
     val command = session.str("command").orEmpty()
     val harness = harnessIdForCommand(command)
-    val title = displayName ?: harness?.let { harnessName(it) } ?: command.substringAfterLast("/").ifEmpty { L10n.text("android.hostworkspaces.shell.a7332854") }
+    val title = displayName ?: harness?.let { harnessName(it) } ?: command.replace('\\', '/').substringAfterLast("/").removeSuffix(".exe").removeSuffix(".cmd").removeSuffix(".bat").ifEmpty { L10n.text("android.hostworkspaces.shell.a7332854") }
     val alive = (session["alive"] as? JsonPrimitive)?.booleanOrNull != false
     Row(
         verticalAlignment = Alignment.CenterVertically,

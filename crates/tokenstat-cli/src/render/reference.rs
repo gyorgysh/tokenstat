@@ -186,7 +186,7 @@ pub fn plans(
         Some(v) => plans.for_vendor(v),
         None => plans.all().iter().collect(),
     };
-    if selected.is_empty() {
+    if selected.is_empty() && !json {
         println!();
         println!("  {DIM}No plans for that vendor.{DIM:#}");
         println!();
@@ -241,10 +241,10 @@ pub fn plans(
     for p in &selected {
         println!(
             "  {}  {}  {}  {DIM}{}{DIM:#}",
-            ui::pad_right(&p.name, name_w),
+            ui::pad_right(&sanitize_label(&p.name), name_w),
             ui::pad_left(&price_or_dash(p.price_usd_month), 8),
             ui::pad_left(&price_or_dash(p.price_usd_year), 8),
-            p.surfaces.join(", "),
+            sanitize_label(&p.surfaces.join(", ")),
         );
     }
 
@@ -364,8 +364,11 @@ pub fn models_detail(store: &Store, q: &Query, json: bool) -> Result<()> {
                     .unwrap_or_else(|| "-".into()),
                 8
             ),
-            ui::pad_right(m.and_then(|m| m.family.as_deref()).unwrap_or("-"), 14),
-            tail.join(", "),
+            ui::pad_right(
+                &sanitize_label(m.and_then(|m| m.family.as_deref()).unwrap_or("-")),
+                14
+            ),
+            sanitize_label(&tail.join(", ")),
         );
     }
     println!();

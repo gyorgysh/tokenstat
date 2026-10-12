@@ -34,7 +34,7 @@ class UsageWidgetFailureTest {
         UsageWidgetStore.publish(context, lease, buildJsonObject {
             put("scope", "account"); put("fetchedAtMs", System.currentTimeMillis() - 60_000)
             put("rows", JsonArray(listOf(JsonArray(listOf(buildJsonObject {
-                put("date", LocalDate.now().toString()); put("value", 18_420_000L); put("locked", false)
+                put("date", LocalDate.now(java.time.ZoneOffset.UTC).toString()); put("value", 18_420_000L); put("locked", false)
             })))))
         })
         return UsageWidgetStore.read(context)!!

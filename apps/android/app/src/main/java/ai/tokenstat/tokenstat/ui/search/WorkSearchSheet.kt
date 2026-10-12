@@ -139,14 +139,13 @@ fun WorkSearchSheet(
                         .onSuccess { list ->
                             for (folder in list.mapNotNull { it as? JsonObject }) {
                                 val folderId = folder.string("id") ?: continue
-                                if (known.any { it.folderId == folderId && it.peer == peer }) continue
                                 live += SearchFolder(peer, id, name, folderId, folder.string("name") ?: L10n.text("android.worksearchsheet.project.98595978"), folder.string("path"))
                             }
                         }.onFailure { missed += 1 }
                 }
                 Triple(known, live, missed)
             }.onSuccess { (known, live, missed) ->
-                folders = (known + live).distinctBy { it.peer to it.folderId }
+                folders = (live + known).distinctBy { it.peer to it.folderId }
                 unreachable = missed
             }.onFailure {
                 failure = true

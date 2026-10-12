@@ -14,6 +14,7 @@ enum JSONValue: Codable, Hashable, Sendable {
     case null
     case bool(Bool)
     case int(Int64)
+    case uint(UInt64)
     case double(Double)
     case string(String)
     case array([JSONValue])
@@ -31,6 +32,10 @@ enum JSONValue: Codable, Hashable, Sendable {
         }
         if let value = try? single.decode(Int64.self) {
             self = .int(value)
+            return
+        }
+        if let value = try? single.decode(UInt64.self) {
+            self = .uint(value)
             return
         }
         if let value = try? single.decode(Double.self) {
@@ -56,6 +61,8 @@ enum JSONValue: Codable, Hashable, Sendable {
         case .bool(let value):
             try single.encode(value)
         case .int(let value):
+            try single.encode(value)
+        case .uint(let value):
             try single.encode(value)
         case .double(let value):
             try single.encode(value)

@@ -125,7 +125,7 @@ pub(crate) fn reading(
 /// SuperGrok sign-in; anything else is a key the person pasted, which bills.
 /// An unreadable or absent file is `Unknown`, not a guess in either direction.
 fn grok_billing() -> BillingMode {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+    let Some(home) = tokenstat_paths::home_dir() else {
         return BillingMode::Unknown;
     };
     let Ok(text) = std::fs::read_to_string(home.join(".grok").join("auth.json")) else {
@@ -176,8 +176,14 @@ struct SpawnMatch<'a> {
 /// A small grace before the spawn, because the two clocks are not the same
 /// one: the harness stamps the turn, the daemon stamps the spawn, and a first
 /// turn written a moment "before" launch is still this session's.
+fn spawn_floor(start: u64) -> i64 {
+    i64::try_from(start)
+        .unwrap_or(i64::MAX)
+        .saturating_sub(GRACE_MS)
+}
+
 fn since(events: &[UsageEvent], started_at_ms: u64) -> Vec<&UsageEvent> {
-    let floor = started_at_ms as i64 - GRACE_MS;
+    let floor = spawn_floor(started_at_ms);
     events.iter().filter(|e| e.ts.utc_ms >= floor).collect()
 }
 
@@ -193,6 +199,10 @@ fn claim_since<T: Ord>(
     spawn: SpawnMatch<'_>,
 ) -> Option<T> {
     let mut remaining: Vec<(i64, T)> = candidates.into_iter().collect();
+    // Multiple Muse shards can name the same parent session. Claim each
+    // session once, using its earliest recorded birth.
+    remaining.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    remaining.dedup_by(|a, b| a.1 == b.1);
     remaining.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     let mut starts: Vec<(&str, u64, bool)> = spawn
         .siblings
@@ -202,7 +212,7 @@ fn claim_since<T: Ord>(
     starts.push((spawn.id, spawn.started_at_ms, true));
     starts.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(b.0)));
     for (_, start, is_self) in starts {
-        let floor = start as i64 - GRACE_MS;
+        let floor = spawn_floor(start);
         let Some(idx) = remaining.iter().position(|(born, _)| *born >= floor) else {
             if is_self {
                 return None;
@@ -334,9 +344,9 @@ fn json_time_ms(value: &serde_json::Value, key: &str) -> Option<i64> {
         // Seconds vs milliseconds vs microseconds. Ten billion ms is 1970-04,
         // so a smaller absolute value is a Unix second. Ten trillion ms is
         // year 2286, so a larger value is microseconds (Muse `recorded_at`).
-        return Some(if n.abs() < 10_000_000_000 {
+        return Some(if n.unsigned_abs() < 10_000_000_000 {
             n.saturating_mul(1_000)
-        } else if n.abs() < 10_000_000_000_000 {
+        } else if n.unsigned_abs() < 10_000_000_000_000 {
             n
         } else {
             n / 1_000
@@ -587,7 +597,9 @@ pub(crate) fn can_meter(command: &str) -> bool {
 }
 
 pub(crate) fn harness_name(command: &str) -> Option<&'static str> {
-    let name = command.rsplit('/').next().unwrap_or(command).trim();
+    let name = command.trim().rsplit(['/', '\\']).next().unwrap_or(command);
+    let name = name.to_ascii_lowercase();
+    let name = name.strip_suffix(".exe").unwrap_or(&name);
     match name {
         "claude" => Some("claude"),
         "grok" => Some("grok"),
@@ -652,10 +664,10 @@ fn codex_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>
 /// holds every session the machine has run, and the counters sit inside a JSON
 /// column that SQLite can pick apart without handing the conversation over.
 fn devin_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = tokenstat_paths::home_dir()?;
     let db = devin::discover(&home)?;
     let births = devin::session_births(&db, cwd);
-    let floor = spawn.started_at_ms as i64 - GRACE_MS;
+    let floor = spawn_floor(spawn.started_at_ms);
     let scope = format!("{cwd}#{floor}");
     let events = cached_db_events(&db, &scope, |path| {
         devin::parse_db_in(path, Some(cwd), Some(floor)).events
@@ -670,7 +682,7 @@ fn devin_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>
 /// The meter picks that directory, then folds every wire under it. A second
 /// Kimi window in the folder is a later session directory.
 fn kimi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = tokenstat_paths::home_dir()?;
     let root = kimi::discover(&home)?;
     let grouped = kimi::session_wires_for_cwd(&root, cwd);
     let candidates = grouped.iter().filter_map(|(session, wires)| {
@@ -701,7 +713,7 @@ fn kimi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
 
 /// Qwen Code's monthly ledger narrowed to this process's session.
 fn qwen_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = tokenstat_paths::home_dir()?;
     let root = qwen::discover(&home)?;
     let session_ids: std::collections::HashSet<_> =
         qwen::sessions_for_cwd(&root, cwd).into_iter().collect();
@@ -740,7 +752,7 @@ fn qwen_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
 /// same reading. A second Muse window in the folder is a later parent.
 fn muse_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let parent = resolve_logs("muse", cwd, spawn, || {
-        let home = std::env::var_os("HOME").map(PathBuf::from)?;
+        let home = tokenstat_paths::home_dir()?;
         let sessions = muse::discover(&home)?;
         Some(
             newest_first(muse::shards(&sessions))
@@ -819,6 +831,7 @@ fn resolve_logs(
             .filter(|(_, path)| path.exists())
             .collect::<Vec<_>>();
         if let Ok(mut guard) = resolve_cache().lock() {
+            guard.retain(|_, entry| entry.at.elapsed() < RESOLVE_TTL);
             guard.insert(
                 key,
                 ResolvedLogs {
@@ -873,10 +886,10 @@ fn read_head(path: &Path) -> Option<String> {
 /// messages and 12 MB of JSON, all but a handful of it older than the session
 /// asking. Reading it whole four times a second is what this avoids.
 fn opencode_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = tokenstat_paths::home_dir()?;
     let db = opencode::discover(&home)?;
     let births = opencode::session_births(&db, cwd);
-    let floor = spawn.started_at_ms as i64 - GRACE_MS;
+    let floor = spawn_floor(spawn.started_at_ms);
     let scope = format!("{cwd}#{floor}");
     let events = cached_db_events(&db, &scope, |path| {
         opencode::parse_db_in(path, Some(cwd), Some(floor)).events
@@ -888,10 +901,10 @@ fn opencode_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEven
 /// Kilo Code's database, narrowed the same way OpenCode's is. Same schema,
 /// same reason for the narrowing.
 fn kilo_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = tokenstat_paths::home_dir()?;
     let db = kilo::discover(&home)?;
     let births = kilo::session_births(&db, cwd);
-    let floor = spawn.started_at_ms as i64 - GRACE_MS;
+    let floor = spawn_floor(spawn.started_at_ms);
     let scope = format!("{cwd}#{floor}");
     let events = cached_db_events(&db, &scope, |path| {
         kilo::parse_db_in(path, Some(cwd), Some(floor)).events
@@ -906,9 +919,9 @@ fn kilo_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
 /// is the session's total so far rather than a sum of turns. Two Hermes
 /// windows in one folder are two database sessions, picked by birth time.
 fn hermes_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = tokenstat_paths::home_dir()?;
     let db = hermes::discover(&home)?;
-    let floor = spawn.started_at_ms as i64 - GRACE_MS;
+    let floor = spawn_floor(spawn.started_at_ms);
     let scope = format!("{cwd}#{floor}");
     let events = cached_db_events(&db, &scope, |path| {
         hermes::parse_db_in(path, Some(cwd), Some(floor)).events
@@ -925,7 +938,7 @@ fn hermes_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>
 /// this only ever goes forwards, from the folder we already know to the
 /// directory it must be in.
 fn pi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = tokenstat_paths::home_dir()?;
     let root = pi::discover(&home)?;
     let dir = root.join(pi_dir_name(cwd));
     let path = resolve_logs("pi", cwd, spawn, || {
@@ -956,7 +969,7 @@ fn pi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
 /// text. Small enough to decompress on a poll: a long session is tens of
 /// kilobytes.
 fn dsh_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = tokenstat_paths::home_dir()?;
     let root = dsh::discover(&home)?;
     let dir = root.join(pi_dir_name(cwd));
     let path = resolve_logs("dsh", cwd, spawn, || {
@@ -991,7 +1004,7 @@ fn pi_dir_name(cwd: &str) -> String {
 /// times a second to answer one question is not a poll, it is a load test.
 fn antigravity_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let path = resolve_logs("antigravity", cwd, spawn, || {
-        let home = std::env::var_os("HOME").map(PathBuf::from)?;
+        let home = tokenstat_paths::home_dir()?;
         let root = antigravity_cli::discover(&home)?;
         Some(
             newest_first(antigravity_cli::shards(&root))
@@ -1006,7 +1019,7 @@ fn antigravity_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageE
 }
 
 fn claude_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = tokenstat_paths::home_dir()?;
     let projects = claude_code::discover(&home)?;
     let slug: String = cwd
         .chars()
@@ -1020,7 +1033,7 @@ fn claude_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>
 }
 
 fn grok_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = tokenstat_paths::home_dir()?;
     let grok_home = grok::discover(&home)?;
     let encoded = grok_encode(cwd);
     let session_dir = grok_home.join("sessions").join(&encoded);
@@ -1051,12 +1064,12 @@ fn grok_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
 }
 
 fn grok_encode(cwd: &str) -> String {
-    cwd.chars()
+    cwd.bytes()
         .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_' {
-                c.to_string()
+            if c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_') {
+                char::from(c).to_string()
             } else {
-                format!("%{:02X}", c as u32)
+                format!("%{c:02X}")
             }
         })
         .collect()
@@ -1923,6 +1936,24 @@ mod tests {
         );
         // A rollout with no session_meta cannot claim a folder.
         assert_eq!(codex::session_cwd("{\"type\":\"event_msg\"}"), None);
+    }
+
+    #[test]
+    fn session_matching_handles_duplicate_logs_and_extreme_timestamps() {
+        assert_eq!(
+            claim_since(
+                [(20_000, "a"), (21_000, "a"), (30_000, "b")],
+                spawn("second", 10_000, &[("first", 9_000)])
+            ),
+            Some("b")
+        );
+        assert!(since(&[stamped(0)], u64::MAX).is_empty());
+        assert_eq!(
+            json_time_ms(&serde_json::json!({"ts": i64::MIN}), "ts"),
+            Some(i64::MIN / 1_000)
+        );
+        assert_eq!(harness_name(r"C:\Tools\CODEX.EXE"), Some("codex"));
+        assert_eq!(grok_encode("/été"), "%2F%C3%A9t%C3%A9");
     }
 
     #[test]

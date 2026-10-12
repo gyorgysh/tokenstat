@@ -60,12 +60,36 @@ fn safe_name(name: &str) -> Result<&str, String> {
     if name.is_empty()
         || name.len() > 255
         || matches!(name, "." | "..")
+        || name.ends_with('.')
+        || name
+            .chars()
+            .any(|c| c.is_control() || "\\/:*?\"<>|".contains(c))
+        || windows_device_name(name)
         || path.components().count() != 1
         || path.file_name().and_then(|value| value.to_str()) != Some(name)
     {
         return Err("file name must be a plain name without a path".into());
     }
     Ok(name)
+}
+
+// Windows treats these as devices even when followed by a file extension.
+fn windows_device_name(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end()
+        .to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| {
+            stem.strip_prefix(prefix).is_some_and(|suffix| {
+                matches!(
+                    suffix,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
+        })
 }
 
 fn safe_id(id: &str) -> Result<&str, String> {
@@ -321,6 +345,19 @@ mod tests {
         assert!(safe_name("../report.zip").is_err());
         assert!(safe_name("folder/report.zip").is_err());
         assert!(safe_name("..").is_err());
+        for name in [
+            "file:stream",
+            "folder\\file",
+            "CON",
+            "nul.txt",
+            "COM1.log",
+            "LPT²",
+            "file.",
+            "file\nname",
+        ] {
+            assert!(safe_name(name).is_err(), "{name:?}");
+        }
+        assert!(safe_name("console.txt").is_ok());
     }
     #[test]
     fn ids_are_safe_for_temporary_names() {

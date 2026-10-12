@@ -378,6 +378,49 @@ pub fn connect(path: &Path, timeout_ms: u32) -> Result<File, String> {
     }
 }
 
+/// Read only bytes already available, under one deadline for the whole line.
+/// A first byte does not promise the rest: read_line after one successful peek
+/// can block forever on an incomplete response.
+pub fn read_response(file: &mut std::fs::File, budget: Duration) -> Option<String> {
+    use std::os::windows::io::AsRawHandle;
+    let deadline = std::time::Instant::now() + budget;
+    let mut line = Vec::new();
+    let mut chunk = [0u8; 4096];
+    while std::time::Instant::now() < deadline && line.len() < 64 * 1024 {
+        let mut available = 0;
+        let ok = unsafe {
+            crate::win32::PeekNamedPipe(
+                file.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return None;
+        }
+        if available == 0 {
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
+        }
+        let limit = (available as usize)
+            .min(chunk.len())
+            .min(64 * 1024 - line.len());
+        let count = file.read(&mut chunk[..limit]).ok()?;
+        if count == 0 {
+            return None;
+        }
+        if let Some(end) = chunk[..count].iter().position(|byte| *byte == b'\n') {
+            line.extend_from_slice(&chunk[..=end]);
+            return String::from_utf8(line).ok();
+        }
+        line.extend_from_slice(&chunk[..count]);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

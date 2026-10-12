@@ -48,7 +48,7 @@ struct StoredCredentials {
     claude_ai_oauth: Option<OauthToken>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 struct OauthToken {
     #[serde(rename = "accessToken")]
     access_token: String,
@@ -390,10 +390,9 @@ fn refresh(
         return Err("Anthropic renewed the login without returning a token.".into());
     }
 
-    // Best effort on purpose. The reading is good either way, and failing it
-    // because the store could not be updated would turn a cosmetic problem
-    // into a missing number.
-    let _ = write_back(stored, &fresh);
+    // The refresh token may have rotated. Report a failed persistence rather
+    // than hiding the fact that Claude Code still holds the spent credential.
+    write_back(stored, &fresh)?;
     Ok(fresh.access_token)
 }
 
@@ -422,7 +421,27 @@ fn renewed_blob(raw: &str, fresh: &RefreshedToken) -> Result<String, String> {
 
 /// Put the renewed login back where Claude Code will look for it.
 fn write_back(stored: &Stored, fresh: &RefreshedToken) -> Result<(), String> {
-    let updated = renewed_blob(&stored.raw, fresh)?;
+    // Plugin state or the login itself can change while the HTTP call runs.
+    // Preserve new plugin fields, and never restore a login removed/replaced
+    // by Claude Code or by the person signing out.
+    let current = match &stored.store {
+        #[cfg(target_os = "macos")]
+        Store::Keychain { service } => {
+            let account = std::env::var("USER").map_err(|e| e.to_string())?;
+            keychain_blob_for(service, &account)
+                .ok_or("The Claude Code login changed while renewing it.")?
+        }
+        Store::File(path) => std::fs::read_to_string(path).map_err(|e| e.to_string())?,
+    };
+    let current_token = serde_json::from_str::<StoredCredentials>(&current)
+        .map_err(|e| e.to_string())?
+        .claude_ai_oauth;
+    if current_token != stored.token() {
+        return Err(
+            "The Claude Code login changed while renewing it. Refresh its limits again.".into(),
+        );
+    }
+    let updated = renewed_blob(&current, fresh)?;
     match &stored.store {
         #[cfg(target_os = "macos")]
         Store::Keychain { service } => write_keychain(service, &updated),
@@ -648,5 +667,33 @@ mod tests {
         let out = ProviderLimits::unavailable("claude_code", "not signed in");
         assert!(out.windows.is_empty());
         assert!(out.note.is_some());
+    }
+    #[test]
+    fn renewal_preserves_new_plugin_data_and_never_restores_another_login() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        let raw = r#"{"claudeAiOauth":{"accessToken":"old","refreshToken":"r"},"plugins":1}"#;
+        let stored = Stored {
+            raw: raw.into(),
+            store: Store::File(path.clone()),
+        };
+        let fresh = RefreshedToken {
+            access_token: "fresh".into(),
+            refresh_token: Some("fresh-r".into()),
+            expires_in: Some(3600),
+        };
+        std::fs::write(&path, raw.replace("\"plugins\":1", "\"plugins\":2")).unwrap();
+        write_back(&stored, &fresh).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(value["plugins"], 2);
+        assert_eq!(value["claudeAiOauth"]["accessToken"], "fresh");
+        let new_login = raw.replace("old", "another-account");
+        std::fs::write(&path, &new_login).unwrap();
+        assert!(write_back(&stored, &fresh).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), new_login);
+        std::fs::remove_file(&path).unwrap();
+        assert!(write_back(&stored, &fresh).is_err());
+        assert!(!path.exists());
     }
 }

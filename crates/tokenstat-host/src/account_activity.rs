@@ -21,7 +21,9 @@
 //! Cached, because this is drawn on the screen that opens first and a window
 //! that dials out on every visit is a window that dials out constantly.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+static GENERATION: AtomicU64 = AtomicU64::new(0);
 use std::time::{Duration, Instant};
 
 use tokenstat_core::activity::{self, HeatCalendar};
@@ -96,6 +98,9 @@ impl FetchError {
 }
 
 struct Cache {
+    account: String,
+    requested_from: String,
+    requested_to: String,
     rows: Vec<SeriesRow>,
     /// The oldest day the service actually covered. A plan's history span, not
     /// what was asked for.
@@ -115,6 +120,15 @@ struct Cache {
 }
 
 impl Cache {
+    fn fresh_for(&self, account: &str, from: &str, to: &str) -> bool {
+        self.account == account
+            && self.requested_from == from
+            && self.requested_to == to
+            && self.last_error.is_none()
+            && self.fetched_at_ms > 0
+            && self.fetched_at.elapsed() < FRESH_FOR
+    }
+
     fn fetched(&self, stale: bool) -> Fetched {
         Fetched {
             rows: self.rows.clone(),
@@ -139,15 +153,16 @@ fn cache() -> &'static Mutex<Option<Cache>> {
 /// Called after a successful upload: the account just changed, and the figure
 /// on screen is the one the user came to check.
 pub fn invalidate() {
+    GENERATION.fetch_add(1, Ordering::SeqCst);
     if let Ok(mut guard) = cache().lock() {
         *guard = None;
+        let _ = stored::remove();
     }
     // The per-machine answers came from the same upload. Leaving them would
     // show a device list that disagrees with the grid it sits under.
     if let Ok(mut guard) = machine_cache().lock() {
         *guard = None;
     }
-    let _ = stored::remove();
 }
 
 /// The last good answer, kept on disk beside the archive.
@@ -218,12 +233,21 @@ mod stored {
     /// "unknown, use it": a wrong clock is not a reason to throw away the only
     /// answer we have.
     pub(super) fn worth_opening(fetched_at_ms: i64, now_ms: i64) -> bool {
-        now_ms - fetched_at_ms <= KEEP_FOR_MS
+        now_ms.saturating_sub(fetched_at_ms) <= KEEP_FOR_MS
     }
 
     pub(super) fn load(now_ms: i64, account: Option<&str>) -> Option<Snapshot> {
         let path = path()?;
-        let text = std::fs::read_to_string(path).ok()?;
+        use std::io::Read;
+        let mut text = String::new();
+        std::fs::File::open(path)
+            .ok()?
+            .take(32 * 1024 * 1024 + 1)
+            .read_to_string(&mut text)
+            .ok()?;
+        if text.len() > 32 * 1024 * 1024 {
+            return None;
+        }
         let snapshot: Snapshot = serde_json::from_str(&text).ok()?;
         if snapshot.v != VERSION {
             return None;
@@ -247,12 +271,7 @@ mod stored {
         let Ok(text) = serde_json::to_string(snapshot) else {
             return;
         };
-        // Written beside the target and renamed, so a process that dies
-        // mid-write leaves the previous answer rather than half of a new one.
-        let temp = path.with_extension("json.tmp");
-        if std::fs::write(&temp, text).is_ok() {
-            let _ = std::fs::rename(&temp, &path);
-        }
+        let _ = tokenstat_sync::snapshot::write_private_atomically(&path, &text);
     }
 
     pub(super) fn remove() -> std::io::Result<()> {
@@ -310,10 +329,12 @@ pub fn calendar(
         // Value at list rates, for plan usage as well as metered. That is what
         // the local grid colours by, and a plan day that reads as empty here
         // and full there is the two screens disagreeing.
-        let micros = EquivalentValue::price(prices, &row.model, &counters)
+        let model = tokenstat_core::pricing::display_usage_model_id(&row.model);
+        let micros = EquivalentValue::price(prices, &model, &counters)
             .map(|v| v.micros().max(0) as u64)
             .unwrap_or(0);
-        *by_day.entry(row.day.clone()).or_insert(0) += micros;
+        let total = by_day.entry(row.day.clone()).or_insert(0);
+        *total = total.saturating_add(micros);
     }
 
     let mut days: Vec<(String, u64)> = by_day.into_iter().collect();
@@ -510,7 +531,7 @@ pub fn breakdown(
         let entry = value.entry(key).or_default();
         match EquivalentValue::price(prices, &lookup, &counters) {
             Some(v) => {
-                entry.0 += v.micros();
+                entry.0 = entry.0.saturating_add(v.micros());
                 entry.1 |= prices.is_estimate(&lookup);
             }
             None => {
@@ -577,6 +598,9 @@ const MACHINE_FRESH_FOR: Duration = Duration::from_secs(10 * 60);
 const MAX_MACHINE_USAGE: usize = 64;
 
 struct MachineCache {
+    account: String,
+    today: String,
+    pricing_date: String,
     days: u16,
     rows: Vec<MachineUsage>,
     fetched_at: Instant,
@@ -610,9 +634,20 @@ pub fn machine_usage(
     }
     // A caller with more devices than this sees the first of them rather than
     // turning one call into that many HTTP requests.
+    let owner = crate::account_session::current_or_capture().map_err(FetchError::new)?;
+    let client = owner
+        .client
+        .as_ref()
+        .ok_or_else(|| FetchError::new(profile::NOT_LOGGED_IN.into()))?;
+    let account = client.authentication_id();
+    let generation = GENERATION.load(Ordering::SeqCst);
+    let today = activity::today(tz);
     let machines = &machines[..machines.len().min(MAX_MACHINE_USAGE)];
     if let Ok(guard) = machine_cache().lock()
         && let Some(c) = guard.as_ref()
+        && c.account == account
+        && c.today == today.to_string()
+        && c.pricing_date == prices.effective_from
         && c.days == days
         && c.fetched_at.elapsed() < MACHINE_FRESH_FOR
         && machines
@@ -661,7 +696,7 @@ pub fn machine_usage(
             for machine in chunk {
                 let machine = machine.as_str();
                 batch.push(scope.spawn(move || {
-                    match profile::account_series(None, Some(from), Some(to), Some(machine)) {
+                    match client.account_series(from, to, Some(machine)) {
                         Ok(result) => {
                             let mut micros: i64 = 0;
                             let mut events: u64 = 0;
@@ -679,7 +714,7 @@ pub fn machine_usage(
                                     tokenstat_core::pricing::display_usage_model_id(&row.model);
                                 if let Some(v) = EquivalentValue::price(prices, &lookup, &counters)
                                 {
-                                    micros += v.micros();
+                                    micros = micros.saturating_add(v.micros());
                                 }
                                 events = events.saturating_add(row.ev);
                                 active.insert(row.day.clone());
@@ -706,6 +741,12 @@ pub fn machine_usage(
         handles
     });
 
+    owner.ensure_current().map_err(FetchError::new)?;
+    if generation != GENERATION.load(Ordering::SeqCst) {
+        return Err(FetchError::new(
+            "usage changed during refresh; retry".into(),
+        ));
+    }
     let mut out: Vec<MachineUsage> = Vec::new();
     let mut last_error: Option<String> = None;
     for result in results {
@@ -724,7 +765,15 @@ pub fn machine_usage(
     }
 
     if let Ok(mut guard) = machine_cache().lock() {
+        if generation != GENERATION.load(Ordering::SeqCst) {
+            return Err(FetchError::new(
+                "usage changed during refresh; retry".into(),
+            ));
+        }
         *guard = Some(MachineCache {
+            account,
+            today: today.to_string(),
+            pricing_date: prices.effective_from.clone(),
             days,
             rows: out
                 .iter()
@@ -818,6 +867,16 @@ pub struct Fetched {
     pub stale: bool,
 }
 
+impl Fetched {
+    fn within(mut self, from: &str, to: &str) -> Self {
+        self.rows
+            .retain(|row| row.day.as_str() >= from && row.day.as_str() <= to);
+        self.locked
+            .retain(|day| day.d.as_str() >= from && day.d.as_str() <= to);
+        self
+    }
+}
+
 /// Wall clock in milliseconds, or 0 if the clock is before the epoch.
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -826,40 +885,16 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// The login this process would use, read without touching the network.
-///
-/// The account id only comes from `/api/v1/me`, so the offline identity is the
-/// API host plus a digest of the bearer token the keychain holds for it. Only
-/// the digest is written, so the secret stays out of the cache file, and two
-/// logins never share a stored answer.
-fn account_identity() -> Option<String> {
-    use sha2::{Digest, Sha256};
-    let host = tokenstat_sync::profile::resolve_api_host(None).ok()?;
-    let token = tokenstat_sync::keychain::load_token(&host).ok().flatten()?;
-    let mut digest = Sha256::new();
-    digest.update(host.as_bytes());
-    digest.update(b"\0");
-    digest.update(token.as_bytes());
-    Some(
-        digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect(),
-    )
-}
-
 /// Adopt the answer left on disk by an earlier run of this process.
 ///
 /// Deliberately adopted as already stale: it is good enough to draw, and not
 /// good enough to skip a fetch. The first call after launch therefore paints
 /// immediately and refreshes behind it.
-fn adopt_stored(guard: &mut Option<Cache>) {
+fn adopt_stored(guard: &mut Option<Cache>, account: &str) {
     if guard.is_some() {
         return;
     }
-    let identity = account_identity();
-    if let Some(snapshot) = stored::load(now_ms(), identity.as_deref()) {
+    if let Some(snapshot) = stored::load(now_ms(), Some(account)) {
         *guard = Some(adopted(snapshot));
     }
 }
@@ -867,6 +902,9 @@ fn adopt_stored(guard: &mut Option<Cache>) {
 /// A stored answer, entered into the cache as already past its freshness.
 fn adopted(snapshot: stored::Snapshot) -> Cache {
     Cache {
+        account: snapshot.account,
+        requested_from: String::new(),
+        requested_to: String::new(),
         rows: snapshot.rows,
         covered_from: snapshot.covered_from,
         unlock_from: snapshot.unlock_from,
@@ -888,14 +926,30 @@ fn adopted(snapshot: stored::Snapshot) -> Cache {
 
 /// The cached series, fetched if it is stale.
 fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError> {
+    let owner = crate::account_session::current_or_capture().map_err(FetchError::new)?;
+    let client = owner
+        .client
+        .as_ref()
+        .ok_or_else(|| FetchError::new(profile::NOT_LOGGED_IN.into()))?;
+    let account = client.authentication_id();
+    let generation = GENERATION.load(Ordering::SeqCst);
+    let span = (weeks.clamp(1, 53) * 7 + 7) as i64;
+    let from = today
+        .checked_add(jiff::Span::new().days(-span))
+        .map_err(|e| FetchError::new(e.to_string()))?
+        .to_string();
+    let to = today.to_string();
     {
         let mut guard = cache()
             .lock()
             .map_err(|_| FetchError::new("the usage cache is poisoned".into()))?;
-        adopt_stored(&mut guard);
+        if guard.as_ref().is_some_and(|cache| cache.account != account) {
+            *guard = None;
+        }
+        adopt_stored(&mut guard, &account);
         if let Some(c) = guard.as_ref() {
-            if c.fetched_at.elapsed() < FRESH_FOR {
-                return Ok(c.fetched(false));
+            if c.fresh_for(&account, &from, &to) {
+                return Ok(c.fetched(false).within(&from, &to));
             }
             // A recent failure is reported from here rather than by dialling
             // again. Nothing about being signed out changes in a second.
@@ -906,7 +960,7 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
                 // beats a blank one, and on a client there is no local
                 // archive to fall back to.
                 if !c.rows.is_empty() {
-                    return Ok(c.fetched(true));
+                    return Ok(c.fetched(true).within(&from, &to));
                 }
                 return Err(FetchError::new(message.clone()));
             }
@@ -915,17 +969,23 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
 
     // A whole column wider than the grid asks for, so the first partial week
     // is complete rather than starting mid-week.
-    let span = (weeks.clamp(1, 53) * 7 + 7) as i64;
-    let from = today
-        .checked_add(jiff::Span::new().days(-span))
-        .map_err(|e| FetchError::new(e.to_string()))?
-        .to_string();
-    let to = today.to_string();
-
-    match profile::account_series(None, Some(&from), Some(&to), None) {
+    let result = client.account_series(&from, &to, None);
+    owner.ensure_current().map_err(FetchError::new)?;
+    let mut guard = cache()
+        .lock()
+        .map_err(|_| FetchError::new("the usage cache is poisoned".into()))?;
+    if generation != GENERATION.load(Ordering::SeqCst) {
+        return Err(FetchError::new(
+            "usage changed during refresh; retry".into(),
+        ));
+    }
+    match result {
         Ok(result) => {
             let fetched_at_ms = now_ms();
             let entry = Cache {
+                account: account.clone(),
+                requested_from: from,
+                requested_to: to,
                 rows: result.rows,
                 covered_from: result.from.clone(),
                 unlock_from: result.unlock_from.clone(),
@@ -938,7 +998,7 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
             };
             stored::save(&stored::Snapshot {
                 v: 2,
-                account: account_identity().unwrap_or_default(),
+                account,
                 fetched_at_ms,
                 covered_from: entry.covered_from.clone(),
                 rows: entry.rows.clone(),
@@ -947,16 +1007,16 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
                 history_days: entry.history_days,
                 locked: entry.locked.clone(),
             });
-            let fetched = entry.fetched(false);
-            if let Ok(mut guard) = cache().lock() {
-                *guard = Some(entry);
-            }
+            let fetched = entry
+                .fetched(false)
+                .within(&entry.requested_from, &entry.requested_to);
+            *guard = Some(entry);
             Ok(fetched)
         }
         Err(e) => {
             let message = e.to_string();
             let mut remembered = None;
-            if let Ok(mut guard) = cache().lock() {
+            {
                 match guard.as_mut() {
                     // Keep the rows that are already there. A grid that was
                     // right ten minutes ago beats an empty one, as long as the
@@ -969,6 +1029,9 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
                     }
                     None => {
                         *guard = Some(Cache {
+                            account,
+                            requested_from: from.clone(),
+                            requested_to: to.clone(),
                             rows: Vec::new(),
                             covered_from: None,
                             unlock_from: None,
@@ -985,7 +1048,7 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
                 }
             }
             match remembered {
-                Some(fetched) => Ok(fetched),
+                Some(fetched) => Ok(fetched.within(&from, &to)),
                 None => Err(FetchError::new(message)),
             }
         }
@@ -1082,6 +1145,31 @@ mod tests {
                 || Instant::now().checked_sub(FRESH_FOR).is_none(),
             "an adopted answer must not count as fresh"
         );
+    }
+
+    #[test]
+    fn fresh_usage_requires_the_same_login_and_requested_window() {
+        let mut cache = adopted(stored::Snapshot {
+            v: 2,
+            account: "account-a".into(),
+            fetched_at_ms: now_ms(),
+            covered_from: None,
+            rows: vec![a_row("2026-01-01"), a_row("2026-10-01")],
+            unlock_from: None,
+            history_locked: false,
+            history_days: None,
+            locked: vec![],
+        });
+        cache.fetched_at = Instant::now();
+        cache.requested_from = "2026-10-01".into();
+        cache.requested_to = "2026-10-12".into();
+        assert!(cache.fresh_for("account-a", "2026-10-01", "2026-10-12"));
+        assert!(!cache.fresh_for("account-b", "2026-10-01", "2026-10-12"));
+        assert!(!cache.fresh_for("account-a", "2026-01-01", "2026-10-12"));
+        let fetched = cache.fetched(true).within("2026-10-01", "2026-10-12");
+        assert_eq!(fetched.rows.len(), 1);
+        assert_eq!(fetched.rows[0].day, "2026-10-01");
+        assert!(!stored::worth_opening(i64::MIN, i64::MAX));
     }
 
     #[test]

@@ -50,6 +50,8 @@ final class TerminalsModel {
     /// already forgotten. Without this the next reconcile would adopt it back
     /// and the chip the person just closed would reappear.
     @ObservationIgnored private var closingHostIDs: Set<String> = []
+    @ObservationIgnored private var listGeneration: UInt64 = 0
+    @ObservationIgnored private var sessionRevision: UInt64 = 0
 
     init() {
         // The wheel is a terminal-wide concern, not a per-session one, so it is
@@ -254,8 +256,12 @@ final class TerminalsModel {
     /// Reconcile against the host. Spawned and closed elsewhere show up and
     /// go away rather than being forgotten until relaunch.
     func load() async {
+        listGeneration &+= 1
+        let generation = listGeneration
+        let revision = sessionRevision
         do {
             let list = try await Bridge.ptyList()
+            guard !Task.isCancelled, generation == listGeneration, revision == sessionRevision else { return }
             var byHostID: [String: PtySessionInfo] = [:]
             for info in list { byHostID[info.id] = info }
 
@@ -277,21 +283,14 @@ final class TerminalsModel {
             // still use a synthetic host id, so they never match).
             let knownHostIDs = Set(sessions.map(\.hostID))
 
-            // Adopt sessions that appeared since we last looked (another
-            // surface, or the host itself). Prefer attaching a pending local
-            // spawn over creating a second session: spawn completion and this
-            // list can race, and creating both was the "session appears,
-            // vanishes, comes back" glitch.
+            // A list row cannot identify which pending request created it.
+            // Wait for actual spawn receipts before adopting unknown rows;
+            // matching only command/workspace can attach an unrelated process.
             for info in list
             where !knownHostIDs.contains(info.id)
                 && info.hidden != true
                 && !closingHostIDs.contains(info.id) {
-                if let pending = pendingMatch(for: info) {
-                    pending.attach(info: info)
-                    // Drop any accidental second copy with the same host id.
-                    dedupe(hostID: info.id, keeping: pending)
-                    continue
-                }
+                if sessions.contains(where: { $0.isPending }) { continue }
                 let session = TerminalSession(info: info)
                 session.start()
                 sessions.append(session)
@@ -307,6 +306,7 @@ final class TerminalsModel {
             }
             errorMessage = nil
         } catch {
+            guard !Task.isCancelled, generation == listGeneration, revision == sessionRevision else { return }
             // A quiet or unreachable host is not a failed launch. The sidebar
             // footer owns that state. Putting it on `errorMessage` used to
             // raise "Could not start session" every time this 10-second
@@ -315,31 +315,6 @@ final class TerminalsModel {
             if Bridge.isHostRecoveryError(error) { return }
             errorMessage = error.localizedDescription
         }
-    }
-
-    /// A pending local spawn that should absorb this host session rather than
-    /// becoming a second tab.
-    private func pendingMatch(for info: PtySessionInfo) -> TerminalSession? {
-        let workspace = info.workspaceID ?? ""
-        let pending = sessions.filter {
-            $0.isPending && ($0.workspaceID == workspace || workspace.isEmpty)
-        }
-        guard !pending.isEmpty else { return nil }
-        // Prefer the same command when several pendings share a workspace.
-        if let exact = pending.first(where: { commandMatches($0.command, info.command) }) {
-            return exact
-        }
-        // One pending in this workspace: it is almost certainly this spawn.
-        if pending.count == 1 { return pending[0] }
-        return pending.first
-    }
-
-    private func commandMatches(_ local: String, _ host: String) -> Bool {
-        if local == host { return true }
-        // Catalog may send a basename; the host reports the path it exec'd.
-        let localBase = URL(fileURLWithPath: local).lastPathComponent
-        let hostBase = URL(fileURLWithPath: host).lastPathComponent
-        return localBase == hostBase
     }
 
     /// Keep one session per host id. The list reconcile and spawn completion
@@ -358,6 +333,7 @@ final class TerminalsModel {
     /// use this after the host has durably linked the process to its card.
     @discardableResult
     func open(_ info: PtySessionInfo) -> TerminalSession {
+        sessionRevision &+= 1
         if let existing = sessions.first(where: { $0.hostID == info.id }) {
             select(existing)
             focus(existing.id)
@@ -399,6 +375,7 @@ final class TerminalsModel {
         cols: Int = 80,
         selectAfter: Bool = true
     ) -> TerminalSession {
+        sessionRevision &+= 1
         let session = TerminalSession(
             pendingCommand: command,
             workspace: workspace,
@@ -457,6 +434,7 @@ final class TerminalsModel {
                 try? await Bridge.ptyClose(id: info.id)
                 return nil
             }
+            sessionRevision &+= 1
             session.attach(info: info)
             dedupe(hostID: info.id, keeping: session)
             if selectAfter {
@@ -470,8 +448,10 @@ final class TerminalsModel {
             if !Bridge.isHostRecoveryError(error) {
                 errorMessage = error.localizedDescription
             }
+            sessionRevision &+= 1
             session.stop()
             sessions.removeAll { $0.id == session.id }
+            reconcilePane(in: session.workspaceID)
             return nil
         }
     }
@@ -509,6 +489,7 @@ final class TerminalsModel {
     /// The local teardown happens before the first suspension point, so the
     /// strip has already lost the chip by the time this yields.
     func close(_ session: TerminalSession) async {
+        sessionRevision &+= 1
         session.stop()
         sessions.removeAll { $0.id == session.id }
         if !session.isPending {

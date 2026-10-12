@@ -41,15 +41,13 @@ impl PromptFile {
 
     fn create(argv: &mut Vec<String>, directory: &Path) -> Result<Self, String> {
         use std::io::Write;
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NEXT: AtomicU64 = AtomicU64::new(0);
         if argv.len() < 2 || argv[argv.len() - 2] != "--" {
             return Err("Muse headless command is missing its prompt boundary".into());
         }
         let path = directory.join(format!(
             ".tokenstat-prompt-{}-{}.txt",
             std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
+            rand::random::<u128>()
         ));
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -102,9 +100,19 @@ pub fn native_attachment(backend: &str, path: &Path) -> bool {
     }
     use std::io::Read;
     let mut header = [0u8; 16];
-    let Ok(mut file) = std::fs::File::open(path) else {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let Ok(mut file) = options.open(path) else {
         return false;
     };
+    if !file.metadata().is_ok_and(|meta| meta.is_file()) {
+        return false;
+    }
     let Ok(count) = file.read(&mut header) else {
         return false;
     };

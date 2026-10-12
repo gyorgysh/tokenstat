@@ -206,7 +206,7 @@ enum SSHLibraryView { enum Section { case hosts, keys, snippets } }
 func fixture(_ id: String = "host") -> SSHHost {
     SSHHost(id: id, label: id, hostname: "mock.example", port: 22, username: "mock", tags: [], provider: nil, hostKeys: ["mock-fingerprint"])
 }
-''' + dtos + '\n' + '\n'.join(block(models, 'struct ' + name + ':') for name in ['ServerCheck', 'InstallLine', 'PairingCode']) + '\n' + block((sources / 'Features/Machines/SSHLibraryView.swift').read_text(), 'enum SSHLibraryRoute:') + '\n' + owner + drafts + library + vault + '\n' + project_links + '\n' + workbench + '\n' + setup_session + '\n' + cache + '\n' + setup_state + '\n' + setup_coordinator + '\n' + setup + r'''
+''' + dtos + '\n' + (sources / 'Features/Machines/SSHVaultSyncedKey.swift').read_text().replace('import Foundation\n', '') + '\n' + '\n'.join(block(models, 'struct ' + name + ':') for name in ['ServerCheck', 'InstallLine', 'PairingCode']) + '\n' + block((sources / 'Features/Machines/SSHLibraryView.swift').read_text(), 'enum SSHLibraryRoute:') + '\n' + owner + drafts + library + vault + '\n' + project_links + '\n' + workbench + '\n' + setup_session + '\n' + cache + '\n' + setup_state + '\n' + setup_coordinator + '\n' + setup + r'''
 @MainActor final class ConnectHarness {
     var host: SSHHost; let model: SSHLibraryModel
     var password = "mock-password", selectedKeyID = ""

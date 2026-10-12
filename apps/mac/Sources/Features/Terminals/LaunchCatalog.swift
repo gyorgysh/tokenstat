@@ -270,7 +270,11 @@ final class LaunchCatalog {
     }
     /// The profile ids whose installer is currently running, so a tile can
     /// show progress and refuse a second click.
-    private(set) var installing: Set<String> = []
+    private struct InstallKey: Hashable { let peer: String?; let profile: String }
+    private var installing: Set<InstallKey> = []
+    func isInstalling(_ id: String, peer: String?) -> Bool {
+        installing.contains(InstallKey(peer: peer, profile: id))
+    }
 
     /// Set once the host has answered. The strip calls `resolve()` every time
     /// it appears, and it must run once per launch, not once per workspace
@@ -410,7 +414,8 @@ final class LaunchCatalog {
     /// has one in defaults, push it once so a phone sees the same hide.
     private func adoptHostHidden(from profiles: [LaunchProfile], scope: String, peer: String?) async {
         let hostHidden = Set(profiles.filter(\.hidden).map(\.id))
-        if hostHidden.isEmpty {
+        let migrationKey = "launcher.hidden.migrated." + scope
+        if hostHidden.isEmpty, !UserDefaults.standard.bool(forKey: migrationKey) {
             let local = LauncherVisibility.shared.ids(for: scope)
             if !local.isEmpty {
                 for id in local.sorted() {
@@ -442,9 +447,11 @@ final class LaunchCatalog {
                         return next
                     }
                 }
+                UserDefaults.standard.set(true, forKey: migrationKey)
                 return
             }
         }
+        UserDefaults.standard.set(true, forKey: migrationKey)
         LauncherVisibility.shared.replace(hostHidden, scope: scope)
     }
 
@@ -457,9 +464,9 @@ final class LaunchCatalog {
     /// failure counts as a failure: the installer's own output is the message.
     @discardableResult
     func install(_ profile: LaunchProfile, peer: String?) async -> String? {
-        guard !installing.contains(profile.id) else { return nil }
-        installing.insert(profile.id)
-        defer { installing.remove(profile.id) }
+        let key = InstallKey(peer: peer, profile: profile.id)
+        guard installing.insert(key).inserted else { return nil }
+        defer { installing.remove(key) }
         let result: LauncherInstallResult
         do {
             if let peer {

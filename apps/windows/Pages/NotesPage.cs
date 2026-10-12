@@ -29,6 +29,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     private readonly ScrollViewer _listScroll = new();
     private readonly ScrollViewer _detailScroll = new();
     private readonly NoteDraftStore _noteDrafts = new();
+    private readonly TaskCreationDraft _creationDraft = new();
     private readonly Dictionary<string, CancellationTokenSource> _saveDelays = new();
     private Action<string>? _draftStatusChanged;
     private readonly StackPanel _root = new() { Spacing = 0 };
@@ -71,6 +72,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     public NotesPage(string? workspaceId = null)
     {
         _workspaceId = workspaceId;
+        _draft.TextChanged += (_, _) => _creationDraft.Edited();
         _draft.KeyDown += async (_, e) =>
         {
             if (e.Key == VirtualKey.Enter)
@@ -431,7 +433,8 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         {
             return "";
         }
-        var span = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(ms);
+        if (Format.Instant(ms) is not DateTimeOffset moment) return L10n.Text("common.unknown");
+        var span = DateTimeOffset.UtcNow - moment;
         if (span.TotalMinutes < 1)
         {
             return L10n.Text("windows.notespage.just_now.7ddb44d8");
@@ -448,7 +451,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         {
             return L10n.Text("windows.notespage.0_d_ago.1fccd42c", $"{(int)span.TotalDays}");
         }
-        return DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime.ToString("d");
+        return moment.LocalDateTime.ToString("d");
     }
 
     /// <summary>
@@ -696,7 +699,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         {
             foot.Children.Add(Buttons.Secondary(
                 L10n.Text("windows.notespage.make_a_task.0cfbd102"), ActionIcon.Move,
-                async (_, _) => await ConvertAsync(id, DestinationId()), small: true));
+                async (_, _) => await ConvertAsync(id, Format.Text(note, "workspaceId")), small: true));
         }
         if (_gridLayout) body.Children.Add(foot);
         var frame = new Border
@@ -899,7 +902,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = DateTimeOffset.FromUnixTimeMilliseconds(created).LocalDateTime.ToString("f"),
+                Text = Format.Instant(created)?.LocalDateTime.ToString("f") ?? L10n.Text("common.unknown"),
                 FontSize = 12,
                 Opacity = 0.66,
             });
@@ -1001,6 +1004,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             return;
         }
         _saving = true;
+        var submittedRevision = _creationDraft.Revision;
         try
         {
             await CallTodoAsync(
@@ -1015,8 +1019,8 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                     ["workspaceId"] = DestinationId(),
                     ["budgetSeconds"] = 0,
                 });
-            _draft.Text = "";
-            _draft.Focus(FocusState.Programmatic);
+            if (_creationDraft.Accepts(submittedRevision)) _draft.Text = "";
+            if (IsLoaded) _draft.Focus(FocusState.Programmatic);
         }
         catch (Exception ex)
         {

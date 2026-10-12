@@ -13,6 +13,7 @@ import UIKit
 @Observable
 final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     private var outputFilter = TerminalOutputFilter()
+    @ObservationIgnored private let inputQueue = SSHInputQueue()
     /// The host's session id. Also this object's identity, because the two are
     /// the same thing: a session is the handle, and a second id would be a
     /// second answer to "which session is this" for the list to disagree with.
@@ -164,9 +165,10 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         resizeRevision &+= 1
         let revision = resizeRevision, epoch = reader.inputEpoch
         let handle = id
-        Task { [weak self] in
-            guard let self, self.reader.acceptsInput(epoch), self.resizeRevision == revision else { return }
+        inputQueue.enqueue { [weak self] in
+            guard let self, self.reader.acceptsInput(epoch), self.resizeRevision == revision else { return false }
             try? await Bridge.resizeSSHSession(id: handle, rows: rows, cols: cols)
+            return true
         }
     }
 
@@ -503,10 +505,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// word: whatever was typed since is part of what it replaces. A line
     /// that has changed some other way is not one these rows can answer.
     private func replacement(for row: SSHSuggestion) -> Int? {
-        guard typedLine.hasPrefix(suggestionsFragment) else { return nil }
-        let since = typedLine.count - suggestionsFragment.count
-        let count = row.replace + since
-        return count <= typedLine.count ? count : nil
+        SSHCompletionReplacement.count(replacing: row.replace, fragment: suggestionsFragment, current: typedLine)
     }
 
     /// Type text at the prompt in place of what it stands in for.
@@ -515,7 +514,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// not a command being run for them, and the difference is the whole
     /// reason this is safe to offer.
     func insert(_ text: String, replacing count: Int) {
-        guard reader.canInput, count <= typedLine.count else { return }
+        guard reader.canInput, count >= 0, count <= typedLine.count else { return }
         // Our own guesses come off the screen before anything is sent: the
         // far end is about to echo the deletions and then the new text, and a
         // guess left standing would be rubbed out at the wrong column.
@@ -525,9 +524,10 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         typedLine = String(typedLine.dropLast(count)) + text
         closePalette()
         let handle = handle, epoch = reader.inputEpoch
-        Task { [weak self] in
-            guard let self, self.reader.acceptsInput(epoch) else { return }
+        inputQueue.enqueue { [weak self] in
+            guard let self, self.reader.acceptsInput(epoch) else { return false }
             try? await Bridge.writeSSHSession(id: handle, data: bytes)
+            return true
         }
     }
 
@@ -916,19 +916,24 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         // Through the same guess as typing, so a tapped `esc` ends a line's
         // local echo exactly as a typed one does.
         predict(bytes)
-        Task { [weak self] in
-            guard let self, self.reader.acceptsInput(epoch) else { return }
+        inputQueue.enqueue { [weak self] in
+            guard let self, self.reader.acceptsInput(epoch) else { return false }
             try? await Bridge.writeSSHSession(id: handle, data: bytes)
+            return true
         }
     }
 
     /// Startup progress is committed immediately before dispatch. Once a
     /// write has started, an uncertain reply must not replay the command.
-    func sendStartupBytes(_ bytes: [UInt8], beforeDispatch: @MainActor () -> Bool) async -> Bool {
-        guard reader.canInput, !bytes.isEmpty, beforeDispatch() else { return false }
-        predict(bytes)
-        try? await Bridge.writeSSHSession(id: id, data: bytes)
-        return true
+    func sendStartupBytes(_ bytes: [UInt8], beforeDispatch: @escaping @MainActor () -> Bool) async -> Bool {
+        guard reader.canInput, !bytes.isEmpty else { return false }
+        let epoch = reader.inputEpoch
+        return await inputQueue.enqueue { [weak self] in
+            guard let self, self.reader.acceptsInput(epoch), beforeDispatch() else { return false }
+            self.predict(bytes)
+            try? await Bridge.writeSSHSession(id: self.id, data: bytes)
+            return true
+        }.value
     }
 
     func stop() {
@@ -1294,10 +1299,13 @@ struct SSHLiveTerminalScreen: View {
     /// a menu that opens on an empty list is a key that does nothing.
     #if !os(macOS)
     private var snippetKey: AnyView? {
-        guard let library, !library.snippets.isEmpty else { return nil }
+        guard let library else { return nil }
+        let snippets = session.hostID.map { library.snippets(for: $0) }
+            ?? library.snippets.filter { $0.hostIDs.isEmpty }
+        guard !snippets.isEmpty else { return nil }
         return AnyView(
             Menu {
-                ForEach(library.snippets) { snippet in
+                ForEach(snippets) { snippet in
                     Button(snippet.title, .run) { run(snippet) }
                 }
             } label: {

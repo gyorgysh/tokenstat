@@ -33,6 +33,7 @@ final class DeviceAccessRequests {
 
     private(set) var pending: [DeviceAccessPending] = []
     private(set) var errorMessage: String?
+    private(set) var answeringIDs: Set<String> = []
 
     /// The request the sheet is asking about. Set when a new request arrives,
     /// by the sidebar card's View button, by a notification, or from Devices.
@@ -128,6 +129,8 @@ final class DeviceAccessRequests {
     ///
     /// `control` is ignored for a workspace request, which has no half.
     func answer(_ request: DeviceAccessPending, view: Bool, control: Bool) async {
+        guard answeringIDs.insert(request.id).inserted else { return }
+        defer { answeringIDs.remove(request.id) }
         do {
             switch request.kind {
             case .screen:

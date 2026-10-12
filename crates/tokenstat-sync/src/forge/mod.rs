@@ -520,19 +520,8 @@ fn get_json<T: DeserializeOwned>(
         .bearer_auth(credential.bearer())
         .send()
         .map_err(ForgeError::from)?;
-    let status = response.status();
-    let text = read_response_text(response)?;
-    match status.as_u16() {
-        401 => Err(HttpFailure::Unauthorized),
-        403 => Err(HttpFailure::Forbidden),
-        404 => Err(HttpFailure::NotFound),
-        _ if !status.is_success() => Err(HttpFailure::Forge(ForgeError::Api(format!(
-            "HTTP {}: {}",
-            status.as_u16(),
-            text.trim()
-        )))),
-        _ => serde_json::from_str(&text)
-            .map_err(ForgeError::from)
-            .map_err(HttpFailure::from),
-    }
+    let text = response_text(response)?;
+    serde_json::from_str(&text)
+        .map_err(ForgeError::from)
+        .map_err(HttpFailure::from)
 }

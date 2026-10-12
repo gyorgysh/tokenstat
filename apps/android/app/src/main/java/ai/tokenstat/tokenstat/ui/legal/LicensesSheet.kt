@@ -81,7 +81,7 @@ fun LicensesSheet(onDismiss: () -> Unit) {
     LaunchedEffect(Unit) {
         text = withContext(Dispatchers.IO) {
             runCatching {
-                context.assets.open("THIRD_PARTY_NOTICES.md").bufferedReader().readText()
+                context.assets.open("THIRD_PARTY_NOTICES.md").bufferedReader().use { it.readText() }
             }.getOrNull()
         }
         loadFailed = text == null

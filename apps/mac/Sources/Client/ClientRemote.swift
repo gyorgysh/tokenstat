@@ -172,7 +172,7 @@ enum ClientRemote {
 
     static func ptyKill(peer: String, id: String) async throws {
         struct Ack: Codable, Sendable { let ok: Bool? }
-        _ = try? await Bridge.onPeer(peer, "pty.kill", ["id": id], as: Ack.self)
+        _ = try await Bridge.onPeer(peer, "pty.kill", ["id": id], as: Ack.self)
     }
 
     static func ptyClose(peer: String, id: String) async throws {
@@ -370,6 +370,7 @@ enum ClientRemote {
                 "id": id,
                 "column": "backlog",
                 "kind": TodoKind.task.rawValue,
+                "budgetSeconds": defaultTaskBudgetSeconds,
                 "notes": prompt,
                 "workspaceId": workspaceID,
             ],

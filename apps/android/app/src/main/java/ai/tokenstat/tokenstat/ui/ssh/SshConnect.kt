@@ -61,6 +61,7 @@ fun SshConnectDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val colors = LocalTsColors.current
+    var pendingFingerprint by remember(host) { mutableStateOf<String?>(null) }
     var password by remember { mutableStateOf("") }
     var passphrase by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -139,12 +140,18 @@ fun SshConnectDialog(
                     style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
                 )
+                pendingFingerprint?.let { fingerprint ->
+                    Text(L10n.text("android.setupconnectscreens.compare_this_fingerprint_with_your_server.f06f2526"), color = colors.textSecondary)
+                    androidx.compose.foundation.text.selection.SelectionContainer { Text(fingerprint) }
+                }
                 error?.let { Text(it, color = colors.danger) }
             }
         },
         confirmButton = {
             TsAccentButton(
-                label = if (busy) L10n.text("android.sshconnect.connecting.72021eb7") else L10n.text("common.connect"),
+                label = if (busy) L10n.text("android.sshconnect.connecting.72021eb7")
+                    else if (pendingFingerprint != null) L10n.text("android.setupconnectscreens.this_is_my_server.22acffe8")
+                    else L10n.text("common.connect"),
                 enabled = !busy,
                 onClick = {
                     scope.launch {
@@ -152,7 +159,7 @@ fun SshConnectDialog(
                         error = null
                         runCatching {
                             var keysForOpen = hostKeys
-                            if (keysForOpen.isEmpty()) {
+                            if (keysForOpen.isEmpty() && pendingFingerprint == null) {
                                 val probe = model.core(
                                     "ssh.host.probe",
                                     buildJsonObject {
@@ -165,7 +172,13 @@ fun SshConnectDialog(
                                 ) as JsonObject
                                 val fingerprint = probe.sshString("fingerprint")
                                     ?: throw IllegalStateException(L10n.text("android.sshconnect.the_server_did_not_offer_a_host_key.3c1b0e56"))
-                                keysForOpen = listOf(fingerprint)
+                                pendingFingerprint = fingerprint
+                                // Reading the key is not permission to trust it.
+                                // Wait for the person to compare and confirm.
+                                return@runCatching null
+                            }
+                            if (keysForOpen.isEmpty()) {
+                                keysForOpen = listOf(requireNotNull(pendingFingerprint))
                                 val saved = buildJsonObject {
                                     host.forEach { (k, v) -> put(k, v) }
                                     put("hostKeys", buildJsonArray { keysForOpen.forEach { add(JsonPrimitive(it)) } })
@@ -213,7 +226,7 @@ fun SshConnectDialog(
                                 },
                             ) as JsonObject
                             opened.sshString("id") ?: throw IllegalStateException(L10n.text("android.sshconnect.the_session_opened_without_an_id.09911388"))
-                        }.onSuccess(onOpened).onFailure { error = it.message }
+                        }.onSuccess { it?.let(onOpened) }.onFailure { error = it.message }
                         busy = false
                     }
                 },

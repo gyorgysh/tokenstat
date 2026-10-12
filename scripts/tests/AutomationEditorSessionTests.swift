@@ -3,6 +3,11 @@
 // JobScheduleEditing.swift HostScheduleClock.swift WorkbenchDraftFile.swift OriginalFileCoordination.swift WorkReference.swift.
 import Foundation
 
+enum BridgeError: LocalizedError {
+    case core(code: String, message: String)
+    var errorDescription: String? { switch self { case let .core(_, message): message } }
+}
+
 enum ScheduleKind: String, Codable, Sendable, Hashable, CaseIterable {
     case once, interval, daily, weekdays, weekly, custom
     var label: String { rawValue }
@@ -214,6 +219,8 @@ actor FixtureAutomations: AutomationEditorService {
         func check(_ condition: Bool, _ message: String) {
             assert(condition, message)
         }
+        check(AutomationEditorSession.isUncertain(BridgeError.core(code: "delivery_unknown", message: "unrelated localized copy")),
+              "unknown delivery preserves pending creation regardless of translated message")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let service = FixtureAutomations()
@@ -254,6 +261,30 @@ actor FixtureAutomations: AutomationEditorService {
             await reopened.load()
             check(!reopened.applyTemplate(template), "template refuses restored writing")
             check(reopened.fields.prompt == "my unfinished writing", "restored writing survives template selection")
+            check(reopened.fields.budgetSeconds == 600, "restored budget survives host queue defaults")
+        }
+
+        do {
+            var exact = AutomationEditorDraft(workspaceID: "folder", budgetSeconds: 90)
+            check(exact.budgetSeconds == 90, "preserve sub-minute budget remainder")
+            exact.name = "Rename only"
+            check(exact.budgetSeconds == 90, "unrelated edits keep exact seconds")
+            let encoded = try JSONEncoder().encode(exact)
+            let restored = try JSONDecoder().decode(AutomationEditorDraft.self, from: encoded)
+            check(restored.budgetSeconds == 90, "persist exact budget in draft")
+            var legacy = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+            legacy.removeValue(forKey: "loadedBudgetSeconds")
+            let old = try JSONDecoder().decode(AutomationEditorDraft.self, from: JSONSerialization.data(withJSONObject: legacy))
+            check(old.budgetSeconds == 60, "older drafts still decode their minute field")
+            exact.budgetMinutes = "2"
+            check(exact.budgetSeconds == 120, "explicit minute edit replaces original seconds")
+            exact.loadBudget(seconds: 90)
+            exact.noTimeLimit = true
+            check(exact.budgetSeconds == 0, "no limit clears preserved budget")
+            exact.noTimeLimit = false
+            check(exact.budgetSeconds == 60, "reenabling minutes uses current field")
+            exact.loadBudget(seconds: UInt64.max)
+            check(exact.budgetSeconds == UInt64.max, "all host seconds survive roundtrip")
         }
 
         do {

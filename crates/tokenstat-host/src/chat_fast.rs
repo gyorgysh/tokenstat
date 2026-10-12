@@ -71,6 +71,9 @@ pub(crate) fn apply(
     fast: bool,
     argv: &mut Vec<String>,
 ) -> Result<(), String> {
+    if argv.is_empty() {
+        return Err("agent command is empty".into());
+    }
     if fast && !available(backend, model) {
         return Err("Fast mode requires a supported model listed by this agent. Refresh the model list and select a supported model.".into());
     }
@@ -87,7 +90,10 @@ pub(crate) fn apply(
             // Merge into the existing hook settings, so speed never drops
             // approval or edit-observation hooks. Explicit false also wins
             // over a fastMode preference saved in the user's Claude settings.
-            if let Some(at) = argv.iter().position(|arg| arg == "--settings") {
+            if let Some(at) = argv[..argv.len().saturating_sub(1)]
+                .iter()
+                .position(|arg| arg == "--settings")
+            {
                 let raw = argv.get_mut(at + 1).ok_or("missing Claude settings")?;
                 let mut settings: Value =
                     serde_json::from_str(raw).map_err(|error| error.to_string())?;
@@ -216,6 +222,16 @@ mod tests {
             literal,
             ["grok", "--model", "grok-4.7-build-fast", "-p", "--model"]
         );
+    }
+
+    #[test]
+    fn literal_settings_prompt_is_never_parsed_as_a_flag() {
+        let mut argv = vec!["claude".into(), "-p".into(), "--settings".into()];
+        apply("claude", Some("opus"), false, &mut argv).unwrap();
+        assert_eq!(argv.last().map(String::as_str), Some("--settings"));
+        assert_eq!(argv[1], "--settings");
+        assert_eq!(argv[2], r#"{"fastMode":false}"#);
+        assert!(apply("codex", None, false, &mut vec![]).is_err());
     }
 
     #[test]

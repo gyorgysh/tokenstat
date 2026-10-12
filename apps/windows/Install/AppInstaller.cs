@@ -267,7 +267,7 @@ internal static class AppInstaller
         {
             $"$dest = '{Escape(dest.TrimEnd('\\'))}'",
             $"$staging = '{Escape(staging)}'",
-            $"$prev = '{Escape(dest.TrimEnd('\\') + ".prev")}'",
+            $"$prev = '{Escape(dest.TrimEnd('\\') + ".prev-" + Guid.NewGuid().ToString("N"))}'",
             $"$exe = '{Escape(exe)}'",
             $"$log = '{Escape(log)}'",
             // $pid is powershell's own id, so the parent travels as $waitPid.
@@ -316,7 +316,6 @@ internal static class AppInstaller
             "  }",
             "}",
             "if ($moved) { Log 'update applied' } else { Log 'update not applied; restarting the installed version' }",
-            "if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe -WorkingDirectory $dest }",
             // Older builds kept the browser profile inside the install folder.
             // Carry it out before the old folder goes, so an update does not
             // sign anybody out of the sites they use in the app.
@@ -325,7 +324,10 @@ internal static class AppInstaller
             "if ($moved -and (Test-Path -LiteralPath $legacy) -and -not (Test-Path -LiteralPath $profile)) {",
             "  try { Move-Item -LiteralPath $legacy -Destination $profile -ErrorAction Stop } catch { Log ('browser profile kept in place: ' + $_.Exception.Message) }",
             "}",
-            "if ($moved -and (Test-Path -LiteralPath $prev)) { Remove-Item -LiteralPath $prev -Recurse -Force -ErrorAction SilentlyContinue }",
+            // Finish migration before the new app can create an empty profile.
+            // If migration fails, retain its only surviving copy for recovery.
+            "if ($moved -and (Test-Path -LiteralPath $prev) -and -not (Test-Path -LiteralPath $legacy)) { Remove-Item -LiteralPath $prev -Recurse -Force -ErrorAction SilentlyContinue }",
+            "if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe -WorkingDirectory $dest }",
             "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue",
         });
         File.WriteAllText(helper, script);
@@ -368,7 +370,7 @@ internal static class AppInstaller
             return;
         }
         VerifyPublisher(CurrentExe(), stagedExe);
-        var prev = dest.TrimEnd('\\') + ".prev";
+        var prev = dest.TrimEnd('\\') + ".prev-" + Guid.NewGuid().ToString("N");
         if (Directory.Exists(prev))
         {
             try { Directory.Delete(prev, true); } catch { /* ignore */ }
@@ -411,8 +413,9 @@ internal static class AppInstaller
             return;
         }
         SelfInstall.RefreshUninstallKey();
+        if (Tokenstat.Pages.WebViewProfile.MoveLegacyFrom(prev))
+            try { Directory.Delete(prev, true); } catch { /* ignore */ }
         Launch(Path.Combine(dest, "Tokenstat.exe"), dest);
-        try { Directory.Delete(prev, true); } catch { /* ignore */ }
     }
 
     private static void RestartCurrent()

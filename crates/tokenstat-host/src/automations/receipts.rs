@@ -245,18 +245,7 @@ impl Store {
                 return Err(error);
             }
             if let Some(run) = self.get_run(&receipt.run_id) {
-                let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
-                if let Some(job) = jobs.iter_mut().find(|job| job.id == receipt.job_id) {
-                    job.last_run_at_ms = Some(run.started_at_ms);
-                    job.last_run_id = Some(run.id.clone());
-                    job.next_run_at_ms = if job.enabled {
-                        job.schedule.next_run_ms(now_ms())
-                    } else {
-                        None
-                    };
-                }
-                drop(jobs);
-                let _ = self.save();
+                let _ = self.note_started(&receipt.job_id, run.started_at_ms, &run.id, true);
             }
         }
         Ok(self.run_outcome(operation_id, &receipt))

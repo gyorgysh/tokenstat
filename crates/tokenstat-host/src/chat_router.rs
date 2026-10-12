@@ -237,7 +237,9 @@ fn save_document(directory: &Path, name: &str, state: &State) -> Result<(), Stri
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+            options
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
         }
         let mut file = options.open(&temporary).map_err(|e| e.to_string())?;
         file.write_all(&serde_json::to_vec(state).map_err(|e| e.to_string())?)
@@ -272,7 +274,9 @@ fn activity_file(path: &Path, append: bool) -> Result<File, String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let file = options.open(path).map_err(|e| e.to_string())?;
     let meta = file.metadata().map_err(|e| e.to_string())?;
@@ -418,22 +422,23 @@ impl Store {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let default = self.root.join("routing-defaults.json");
                 let mut state = State::default();
-                if let Ok(meta) = fs::symlink_metadata(&default) {
-                    if !meta.file_type().is_file() || meta.len() > 64 * 1024 {
-                        return Err("Routing defaults could not be read safely.".into());
+                match fs::symlink_metadata(&default) {
+                    Ok(_) => {
+                        let defaults: State =
+                            serde_json::from_slice(&read_fork_file(&default, 64 * 1024, false)?)
+                                .map_err(|e| e.to_string())?;
+                        if defaults.owner == self.router_owner()? {
+                            state.policy = defaults.policy;
+                        }
                     }
-                    let defaults: State =
-                        serde_json::from_slice(&fs::read(default).map_err(|e| e.to_string())?)
-                            .map_err(|e| e.to_string())?;
-                    if defaults.owner == self.router_owner()? {
-                        state.policy = defaults.policy;
-                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.to_string()),
                 }
                 Ok(state)
             }
             Err(e) => Err(e.to_string()),
             Ok(meta) if meta.file_type().is_file() && meta.len() <= 64 * 1024 => {
-                serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
+                serde_json::from_slice(&read_fork_file(&path, 64 * 1024, false)?)
                     .map_err(|e| e.to_string())
             }
             Ok(_) => Err("Chat routing could not be read safely.".into()),

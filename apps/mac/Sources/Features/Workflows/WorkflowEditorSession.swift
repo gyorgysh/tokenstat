@@ -51,6 +51,7 @@ final class WorkflowEditorSession {
     /// example replaces the steps.
     private(set) var designTranscript = ""
     private var designTask: Task<Void, Never>?
+    private var designGeneration: UInt64 = 0
     private(set) var otherDraft: WorkbenchDraftFile<SavedWorkflowDraft>.Record?
     private(set) var persistedFields: WorkflowEditorDraft?
     private let service: any WorkflowEditorService
@@ -143,7 +144,10 @@ final class WorkflowEditorSession {
             let record = try await storage.load()
             diskRevision = record?.revision
             persistedFields = record?.value.fields
-            if let record { restore(record.value) }
+            if let record {
+                restore(record.value)
+                appliedDefaultBudget = true
+            }
             loaded = true
         } catch {
             errorMessage = error.localizedDescription
@@ -293,6 +297,7 @@ final class WorkflowEditorSession {
     /// Clears a finished create so the next New workflow is a blank graph.
     func finishCreated() async -> WorkflowGraph? {
         guard let created = saved.created else { return nil }
+        cancelDesign()
         restoring = true
         let fresh = WorkflowEditorDraft(workspaceID: workspaceID)
         fields = fresh
@@ -361,6 +366,8 @@ final class WorkflowEditorSession {
     func design() {
         guard canDesign else { return }
         designTask?.cancel()
+        designGeneration &+= 1
+        let generation = designGeneration
         designing = true
         errorMessage = nil
         let prompt = designPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -373,21 +380,21 @@ final class WorkflowEditorSession {
                 let result = try await self.service.designWorkflow(
                     prompt: prompt, backend: backend, model: model, effort: effort
                 )
-                await MainActor.run {
-                    self.applyDesign(result)
-                }
+                guard !Task.isCancelled, self.designGeneration == generation else { return }
+                self.applyDesign(result)
             } catch is CancellationError {
-                await MainActor.run { self.designing = false }
+                guard self.designGeneration == generation else { return }
+                self.designing = false
             } catch {
-                await MainActor.run {
-                    self.designing = false
-                    self.errorMessage = Self.display(error)
-                }
+                guard !Task.isCancelled, self.designGeneration == generation else { return }
+                self.designing = false
+                self.errorMessage = Self.display(error)
             }
         }
     }
 
     func cancelDesign() {
+        designGeneration &+= 1
         designTask?.cancel()
         designTask = nil
         designing = false
@@ -808,6 +815,7 @@ final class WorkflowEditorSession {
     }
 
     static func isUncertain(_ error: Error) -> Bool {
+        if case BridgeError.core(let code, _) = error, code == "delivery_unknown" { return true }
         let lower = error.localizedDescription.lowercased()
         return lower.contains("timed out")
             || lower.contains("timeout")

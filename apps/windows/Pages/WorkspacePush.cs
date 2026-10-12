@@ -88,6 +88,7 @@ internal sealed class WorkspacePushSession
         }
         Working = true;
         Error = null;
+        Review = null;
         try
         {
             Review = await RemoteWorkspaces.CallWorkspaceAsync(
@@ -160,7 +161,8 @@ internal sealed class WorkspacePushSession
                     ["id"] = workspaceId,
                     ["operationId"] = SubmittedOperationId,
                 });
-            if (receipt is null)
+            // HostClient represents a successful JSON null as an empty object.
+            if (receipt is null or JsonObject { Count: 0 })
             {
                 CanRetry = true;
                 Error = L10n.Text("windows.workspacepush.this_computer_has_no_receipt_for_the_submi.cadba34a");

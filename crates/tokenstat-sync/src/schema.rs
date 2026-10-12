@@ -63,7 +63,7 @@ pub fn fetch_schema(
             resp.status()
         )));
     }
-    let env: SchemaEnvelope = resp.json()?;
+    let env: SchemaEnvelope = serde_json::from_str(&crate::profile::limited_text(resp)?)?;
     if env.min_v > env.max_v {
         return Err(ProfileError::Message(format!(
             "server schema envelope is incoherent: min_v={} max_v={}",

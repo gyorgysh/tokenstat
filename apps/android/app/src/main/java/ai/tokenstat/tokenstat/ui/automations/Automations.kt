@@ -69,6 +69,7 @@ import ai.tokenstat.tokenstat.ui.tasks.RunRef
 import ai.tokenstat.tokenstat.ui.tasks.TaskOperations
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -244,6 +245,8 @@ fun AutomationsScreen(
                 put("operationId", operationID)
             })
             confirmRun(AutomationRunOutcome.parse(element as JsonObject), job)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val receipt = runCatching {
                 model.workspaceSection(peer, "automation.runReceipt", buildJsonObject { put("operationId", operationID) })
@@ -271,7 +274,9 @@ fun AutomationsScreen(
                 notice = L10n.text("android.automations.started_0.8f95ec71", "${job.name}")
                 error = null
                 load()
-            } catch (e: Exception) {
+            } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
                 error = TunnelCopy.display(e.message ?: L10n.text("android.automations.the_request_failed.db4fb447"), hostLabel)
             } finally {
                 working = false
@@ -299,6 +304,8 @@ fun AutomationsScreen(
             } else {
                 confirmRun(AutomationRunOutcome.parse(element as JsonObject), job)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = TunnelCopy.display(e.message ?: L10n.text("android.automations.the_request_failed.db4fb447"), hostLabel)
         } finally {
@@ -515,7 +522,7 @@ fun AutomationsScreen(
                 hostLabel = hostLabel,
                 folderName = folderName,
                 queueTimezone = queue.timezone,
-                onDraft = { queueDraft = it; justSavedQueue = false },
+                onDraft = { if (!working) { queueDraft = it; justSavedQueue = false } },
                 onReload = { scope.launch { load() } },
                 onBack = ::pop,
                 onSave = { budget, max -> scope.launch { saveQueue(budget, max) } },
@@ -1231,13 +1238,13 @@ private fun SchedulerPage(
                 TimeLimitChips(
                     minutesText = draft.budgetMinutes,
                     noLimit = draft.noLimit,
-                    onMinutesChange = { onDraft(draft.copy(budgetMinutes = it)) },
+                    onMinutesChange = { onDraft(draft.copy(budgetMinutes = it, originalBudgetSeconds = null)) },
                     onNoLimitChange = { onDraft(draft.copy(noLimit = it)) },
                 )
                 if (!draft.noLimit && !QueueValidation.isBudgetPreset(draft.noLimit, draft.budgetMinutes)) {
                     OutlinedTextField(
                         draft.budgetMinutes,
-                        { onDraft(draft.copy(budgetMinutes = it.filter(Char::isDigit))) },
+                        { onDraft(draft.copy(budgetMinutes = it.filter(Char::isDigit), originalBudgetSeconds = null)) },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text(L10n.text("android.automations.minutes.4f846a84")) },
                     )
@@ -1301,7 +1308,7 @@ private fun SchedulerPage(
                     small = true,
                     enabled = !working && dirty && budgetError == null && maxError == null,
                     onClick = {
-                        val budget = QueueValidation.budgetSeconds(draft.noLimit, draft.budgetMinutes) ?: return@TsAccentButton
+                        val budget = draft.budgetSeconds ?: return@TsAccentButton
                         val max = QueueValidation.maxConcurrent(draft.maxConcurrent) ?: return@TsAccentButton
                         onSave(budget, max)
                     },
@@ -1312,17 +1319,20 @@ private fun SchedulerPage(
 }
 
 /// Host-level queue editor state. Port of `AutomationQueueDraft`.
-data class QueueDraft(val budgetMinutes: String, val noLimit: Boolean, val maxConcurrent: String) {
+data class QueueDraft(val budgetMinutes: String, val noLimit: Boolean, val maxConcurrent: String, val originalBudgetSeconds: Long? = null) {
     companion object {
         fun fromQueue(queue: AutomationQueue): QueueDraft = QueueDraft(
             budgetMinutes = if (queue.defaultBudgetSeconds == 0L) "180" else maxOf(1, queue.defaultBudgetSeconds / 60).toString(),
             noLimit = queue.defaultBudgetSeconds == 0L,
             maxConcurrent = queue.maxConcurrent.toString(),
+            originalBudgetSeconds = queue.defaultBudgetSeconds,
         )
     }
 
+    val budgetSeconds: Long? get() = BudgetFields(budgetMinutes, noLimit, originalBudgetSeconds).budgetSeconds
+
     fun matches(queue: AutomationQueue): Boolean {
-        val budget = QueueValidation.budgetSeconds(noLimit, budgetMinutes) ?: return false
+        val budget = budgetSeconds ?: return false
         val count = QueueValidation.maxConcurrent(maxConcurrent) ?: return false
         return budget == queue.defaultBudgetSeconds && count == queue.maxConcurrent
     }
@@ -1332,37 +1342,32 @@ data class QueueDraft(val budgetMinutes: String, val noLimit: Boolean, val maxCo
 /// inspector. Polls while the run is running, reads once when it is done.
 @Composable
 fun RunTranscript(model: AppViewModel, peer: String, runID: String, live: Boolean, modifier: Modifier = Modifier) {
-    var text by remember(runID) { mutableStateOf("") }
-    var error by remember(runID) { mutableStateOf<String?>(null) }
+    var text by remember(peer, runID) { mutableStateOf("") }
+    var error by remember(peer, runID) { mutableStateOf<String?>(null) }
     ForegroundEffect(peer, runID, live) {
-        var offset = 0L
-        val builder = StringBuilder()
-        var alive = true
-        while (alive) {
-            val chunk = runCatching {
-                model.workspaceSection(peer, "automation.transcript", buildJsonObject {
-                    put("id", runID)
-                    put("offset", offset)
-                }) as JsonObject
-            }.getOrNull()
-            if (chunk == null) {
-                error = L10n.text("android.automations.output_is_unavailable_right_now.8b0840d6")
-                break
-            }
-            builder.append(chunk.optStr("text") ?: "")
-            if (builder.length > 256 * 1024) builder.delete(0, builder.length - 256 * 1024)
-            offset = chunk.optLong("nextOffset") ?: break
-            text = builder.toString()
-            if (!live) break
-            delay(1_000)
-            val fresh = runCatching {
-                model.workspaceSection(peer, "automation.runs", buildJsonObject {})
-            }.getOrNull()
-            val status = ((fresh as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList())
-                .firstOrNull { it.optStr("id") == runID }?.optStr("status")
-            if (status == null || status !in setOf("starting", "queued", "running", "stopping")) alive = false
+        try {
+            readRunTranscript(
+                live = live,
+                read = { offset ->
+                    model.workspaceSection(peer, "automation.transcript", buildJsonObject {
+                        put("id", runID)
+                        put("offset", offset)
+                    }) as JsonObject
+                },
+                running = {
+                    delay(1_000)
+                    val fresh = model.workspaceSection(peer, "automation.runs", buildJsonObject {})
+                    val status = ((fresh as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList())
+                        .firstOrNull { it.optStr("id") == runID }?.optStr("status")
+                    status in setOf("starting", "queued", "running", "stopping")
+                },
+                update = { text = it; error = null },
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = L10n.text("android.automations.output_is_unavailable_right_now.8b0840d6")
         }
-        text = builder.toString()
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         if (error != null) {
@@ -1373,5 +1378,30 @@ fun RunTranscript(model: AppViewModel, peer: String, runID: String, live: Boolea
             style = TsType.mono(12),
             color = LocalTsColors.current.textPrimary,
         )
+    }
+}
+
+/** Drain every reply page, including output written just before a run completes. */
+internal suspend fun readRunTranscript(
+    live: Boolean,
+    read: suspend (Long) -> JsonObject,
+    running: suspend () -> Boolean,
+    update: (String) -> Unit,
+) {
+    var offset = 0L
+    var isRunning = live
+    val builder = StringBuilder()
+    while (true) {
+        val chunk = read(offset)
+        val next = chunk.optLong("nextOffset") ?: error("Missing transcript offset")
+        builder.append(chunk.optStr("text").orEmpty())
+        if (builder.length > 256 * 1024) builder.delete(0, builder.length - 256 * 1024)
+        update(builder.toString())
+        if (next > offset) {
+            offset = next
+            continue
+        }
+        if (!isRunning) break
+        isRunning = running()
     }
 }

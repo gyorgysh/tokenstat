@@ -15,9 +15,8 @@ namespace Tokenstat.Pages;
 
 /// <summary>
 /// Switch branches without leaving the workspace. Local work first:
-/// remote branches create a tracking branch. Matches the Mac picker,
-/// minus the unsaved-buffers prompt: the Windows editor is modal, so
-/// there are no open buffers holding another branch's text.
+/// remote branches create a tracking branch. Open editor buffers retain
+/// their drafts and re-read host content before any later save.
 /// </summary>
 internal static class WorkspaceBranches
 {
@@ -161,8 +160,12 @@ internal static class WorkspaceBranches
                 DefaultButton = ContentDialogButton.Primary,
             };
             open = dialog;
+            var wasCreating = creating;
             var result = await Chrome.ShowDialog(owner, dialog);
             open = null;
+            // New branch dismisses the picker to rebuild it with the form.
+            // That dismissal is not the user's Close action.
+            if (creating && !wasCreating) continue;
             if (picked is not null && !working)
             {
                 working = true;

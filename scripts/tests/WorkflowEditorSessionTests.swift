@@ -4,6 +4,11 @@
 // WorkReference.swift WorkflowGraphValidation.swift WorkflowGraphDocument.swift JSONValue.swift.
 import Foundation
 
+enum BridgeError: LocalizedError {
+    case core(code: String, message: String)
+    var errorDescription: String? { switch self { case let .core(_, message): message } }
+}
+
 enum ScheduleKind: String, Codable, Sendable, Hashable, CaseIterable {
     case once, interval, daily, weekdays, weekly, custom
     var label: String { rawValue }
@@ -198,6 +203,11 @@ actor FixtureWorkflows: WorkflowEditorService {
     var designResult: WorkflowDesignResult? = nil
     var designError: FixtureError? = nil
     var designs = 0
+    var holdDesign = false
+    var heldDesign: CheckedContinuation<Void, Never>?
+    func setHoldDesign() { holdDesign = true }
+    func releaseDesign() { heldDesign?.resume(); heldDesign = nil; holdDesign = false }
+    var hasHeldDesign: Bool { heldDesign != nil }
 
     func createWorkflow(_ graph: WorkflowGraph) async throws -> WorkflowGraph {
         if loseCreateBefore { throw FixtureError.disconnected }
@@ -276,6 +286,7 @@ actor FixtureWorkflows: WorkflowEditorService {
 
     func designWorkflow(prompt: String, backend: String?, model: String?, effort: String?) async throws -> WorkflowDesignResult {
         designs += 1
+        if holdDesign { await withCheckedContinuation { heldDesign = $0 } }
         if let designError { throw designError }
         if let designResult { return designResult }
         return WorkflowDesignResult(
@@ -299,6 +310,8 @@ actor FixtureWorkflows: WorkflowEditorService {
         func check(_ condition: Bool, _ message: String) {
             assert(condition, message)
         }
+        check(WorkflowEditorSession.isUncertain(BridgeError.core(code: "delivery_unknown", message: "unrelated localized copy")),
+              "unknown delivery preserves pending creation regardless of translated message")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let service = FixtureWorkflows()
@@ -315,6 +328,29 @@ actor FixtureWorkflows: WorkflowEditorService {
                 service: service,
                 draftDirectory: directory.appendingPathComponent(UUID().uuidString)
             )
+        }
+
+        do {
+            var exact = WorkflowEditorDraft(workspaceID: "folder", budgetSeconds: 90)
+            check(exact.budgetSeconds == 90, "preserve sub-minute budget remainder")
+            exact.name = "Rename only"
+            check(exact.budgetSeconds == 90, "unrelated edits keep exact seconds")
+            let encoded = try JSONEncoder().encode(exact)
+            let restored = try JSONDecoder().decode(WorkflowEditorDraft.self, from: encoded)
+            check(restored.budgetSeconds == 90, "persist exact budget in draft")
+            var legacy = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+            legacy.removeValue(forKey: "loadedBudgetSeconds")
+            let old = try JSONDecoder().decode(WorkflowEditorDraft.self, from: JSONSerialization.data(withJSONObject: legacy))
+            check(old.budgetSeconds == 60, "older drafts still decode their minute field")
+            exact.budgetMinutes = "2"
+            check(exact.budgetSeconds == 120, "explicit minute edit replaces original seconds")
+            exact.loadBudget(seconds: 90)
+            exact.noTimeLimit = true
+            check(exact.budgetSeconds == 0, "no limit clears preserved budget")
+            exact.noTimeLimit = false
+            check(exact.budgetSeconds == 60, "reenabling minutes uses current field")
+            exact.loadBudget(seconds: UInt64.max)
+            check(exact.budgetSeconds == UInt64.max, "all host seconds survive roundtrip")
         }
 
         do {
@@ -746,6 +782,41 @@ actor FixtureWorkflows: WorkflowEditorService {
             check(futureDraft.matches(futureGraph), "unknown graph fields match")
             let futureMade = try futureDraft.makeGraph(id: "roundtrip")
             check(futureMade.extraFields == ["futureNote": .string("keep me")], "unknown graph fields survive makeGraph")
+        }
+
+        do {
+            let editor = createSession()
+            await editor.load()
+            await service.setHoldDesign()
+            editor.designPrompt = "Late design"
+            editor.design()
+            for _ in 0..<200 {
+                if await service.hasHeldDesign { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            check(await service.hasHeldDesign, "design request is waiting")
+            editor.applyBlank()
+            await service.releaseDesign()
+            try await Task.sleep(for: .milliseconds(30))
+            check(editor.fields.nodes.count == 1 && editor.fields.starterID == "blank",
+                  "cancelled design reply cannot replace a newer blank draft")
+            check(editor.designTranscript.isEmpty, "cancelled design cannot publish transcript")
+        }
+
+        do {
+            let draftDirectory = directory.appendingPathComponent("budget-reopen")
+            func editor() -> WorkflowEditorSession {
+                WorkflowEditorSession(target: WorkflowEditorTarget(peer: "computer"), workspaceID: "folder",
+                    folderName: "Website", scope: .local(installationID: "budget-fixture"), hostIdentity: "computer",
+                    service: service, draftDirectory: draftDirectory)
+            }
+            let first = editor()
+            await first.load()
+            first.fields.loadBudget(seconds: 90)
+            await first.flush()
+            let reopened = editor()
+            await reopened.load()
+            check(reopened.fields.budgetSeconds == 90, "restored workflow budget survives host defaults")
         }
 
         print("WorkflowEditorSessionTests passed")

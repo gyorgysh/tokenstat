@@ -173,12 +173,16 @@ fn browse_in(
         let directory = meta.is_dir();
         entries.push(json!({
             "name": name,
-            "path": path,
+            "path": plain(path.clone()),
             "kind": if directory { "directory" } else { "file" },
             "symlink": link,
             "hidden": name.starts_with('.'),
             "isRepo": directory && path.join(".git").exists(),
-            "isRegistered": registered.contains(&path),
+            "isRegistered": registered.iter().any(|registered| {
+                let registered = registered.canonicalize().unwrap_or_else(|_| registered.clone());
+                let candidate = path.canonicalize().unwrap_or_else(|_| path.clone());
+                plain(registered) == plain(candidate)
+            }),
             "size": (!directory).then_some(meta.len()),
             "modified": meta
                 .modified()
@@ -206,11 +210,11 @@ fn browse_in(
         .parent()
         .and_then(|parent| resolve(parent, roots).ok());
     Ok(json!({
-        "path": start,
-        "parent": parent,
+        "path": plain(start),
+        "parent": parent.map(plain),
         "roots": roots
             .iter()
-            .map(|(path, label, kind)| json!({"path": path, "label": label, "kind": kind}))
+            .map(|(path, label, kind)| json!({"path": plain(path.clone()), "label": label, "kind": kind}))
             .collect::<Vec<_>>(),
         "entries": entries,
         "truncated": truncated,
@@ -244,7 +248,7 @@ fn mkdir(params: &str) -> Result<Value, String> {
     let target = parent.join(&name);
     std::fs::create_dir(&target)
         .map_err(|error| format!("Could not create {}: {error}", target.display()))?;
-    Ok(json!({"path": target}))
+    Ok(json!({"path": plain(target)}))
 }
 
 #[cfg(test)]

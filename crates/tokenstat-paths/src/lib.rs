@@ -84,6 +84,7 @@ pub fn data_local_dir() -> Option<PathBuf> {
     MOBILE_ROOTS
         .get()
         .map(|roots| roots.data.clone())
+        .or_else(data_dir_override)
         .or_else(|| project_dirs().map(|dirs| dirs.data_local_dir().to_path_buf()))
 }
 

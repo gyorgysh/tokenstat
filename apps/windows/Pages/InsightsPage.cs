@@ -94,6 +94,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     private bool _reloadRequested;
     private bool _scanning;
     private bool _fetching;
+    private bool _showingLoadingStatus;
 
     /// <summary>Rows drawn before the reveal button, same as the Mac table.</summary>
     private const int FirstPage = 50;
@@ -187,6 +188,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             return Task.CompletedTask;
         }
         _focusDay = day;
+        ++_scopeGeneration;
         _selectedKey = null;
         _visible = FirstPage;
         return LoadAsync();
@@ -195,6 +197,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     private Task ClearFocusDayAsync()
     {
         _focusDay = null;
+        ++_scopeGeneration;
         _selectedKey = null;
         _visible = FirstPage;
         return LoadAsync();
@@ -241,6 +244,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         var picker = SegmentedCapsule.View(Periods, _period, value =>
         {
             _period = value;
+            ++_scopeGeneration;
             // Choosing a period is choosing to stop looking at one day.
             _focusDay = null;
             _selectedKey = null;
@@ -293,6 +297,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         _scanning = true;
         RaiseToolbarChanged();
+        _showingLoadingStatus = false;
         _status.Text = L10n.Text("windows.insightspage.scanning_local_logs.efac0264");
         LogoRefresh.Began();
         try
@@ -320,6 +325,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         _fetching = true;
         RaiseToolbarChanged();
+        _showingLoadingStatus = false;
         _status.Text = L10n.Text("windows.insightspage.fetching_remote_usage.607832d5");
         LogoRefresh.Began();
         try
@@ -387,6 +393,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             _root.Children.RemoveAt(1);
         }
+        _showingLoadingStatus = true;
         _status.Text = L10n.Text("windows.insightspage.loading.ba3bbbe1");
         _root.Children.Add(Motion.SkeletonCard());
 
@@ -453,7 +460,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             catch (HostException ex) when (ex.Code.Contains(
                 "unknown", StringComparison.OrdinalIgnoreCase))
             {
-                _snapshot = await LoadLocalFallbackAsync();
+                _snapshot = await LoadLocalFallbackAsync(query);
             }
         }
         catch (Exception ex)
@@ -462,9 +469,10 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             _error = FriendlyError.Display(ex.Message);
             return;
         }
-        if (_status.Text == "Loading…")
+        if (_showingLoadingStatus)
         {
             _status.Text = "";
+            _showingLoadingStatus = false;
         }
         // A selection from before the reload may no longer exist, and a stale
         // row would sit in the inspector describing nothing.
@@ -492,9 +500,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     /// per-project harness split down here, those calls are newer than the
     /// hosts this path serves.
     /// </summary>
-    private async Task<JsonNode> LoadLocalFallbackAsync()
+    private async Task<JsonNode> LoadLocalFallbackAsync(JsonObject query)
     {
-        var query = PeriodQuery();
         var snapshot = new JsonObject();
         try
         {
@@ -532,7 +539,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         try
         {
-            var sessions = PeriodQuery();
+            var sessions = (JsonObject)query.DeepClone();
             sessions["limit"] = 80;
             snapshot["bySession"] = (await AppServices.Host.CallAsync(
                 "report",
@@ -609,8 +616,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         if (report is null) return;
         if (Format.Flag(report, "stale"))
         {
-            var fetched = DateTimeOffset.FromUnixTimeMilliseconds(Format.Long(report, "fetchedAtMs"));
-            _root.Children.Add(new TextBlock { Text = L10n.Text("windows.insightspage.refresh_unavailable_showing_usage_fetched.52df6716", $"{fetched.LocalDateTime:g}"), TextWrapping = TextWrapping.Wrap });
+            var fetched = Format.Instant(Format.Long(report, "fetchedAtMs"));
+            _root.Children.Add(new TextBlock { Text = L10n.Text("windows.insightspage.refresh_unavailable_showing_usage_fetched.52df6716", $"{fetched?.LocalDateTime.ToString("g") ?? L10n.Text("common.unknown")}"), TextWrapping = TextWrapping.Wrap });
         }
         var rows = Format.Items(report, "rows") ?? new JsonArray();
         var plural = _accountCut switch { "source" => L10n.Text("windows.insightspage.coding_tools.d83c0a1b"), "day" => "days", _ => "models" };
@@ -1359,16 +1366,19 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 foot.Children.Add(value);
             }
             cell.Children.Add(foot);
-            var hit = new Border
+            var hit = new Button
             {
-                Child = cell,
+                Content = cell,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                BorderThickness = new Thickness(0),
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(4),
                 Margin = new Thickness(-4),
             };
             var captured = key;
-            hit.Tapped += (_, _) => SelectAndOpen(tab, captured);
+            hit.Click += (_, _) => SelectAndOpen(tab, captured);
             hit.PointerEntered += (_, _) => hit.Background = Theme.Brush(static () => Theme.RowHighlight);
             hit.PointerExited += (_, _) => hit.Background =
                 new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -1468,7 +1478,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             var row = rows[i];
             var key = Format.Text(row, "key");
             long rowTokens = Format.Long(row?["counters"], "total");
-            double share = Math.Min(1, (double)rowTokens / top);
+            double share = Math.Clamp((double)rowTokens / top, 0, 1);
             var line = new Grid
             {
                 Padding = new Thickness(Theme.SpaceM, Theme.SpaceS, Theme.SpaceM, Theme.SpaceS),
@@ -1530,15 +1540,19 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 Grid.SetColumn(value, 3 + nameCol);
                 line.Children.Add(value);
             }
-            var hit = new Border
+            var hit = new Button
             {
-                Child = line,
+                Content = line,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
                 Background = key == _selectedKey
                     ? Theme.Brush(static () => Theme.RowSelected)
                     : new SolidColorBrush(Microsoft.UI.Colors.Transparent),
             };
             var captured = key;
-            hit.Tapped += (_, _) =>
+            hit.Click += (_, _) =>
             {
                 _selectedKey = _selectedKey == captured ? null : captured;
                 Render();
@@ -1698,10 +1712,9 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             head.Children.Add(label);
             open.Children.Add(head);
             long startMs = Format.Long(block, "startMs");
-            string since = startMs > 0
-                ? DateTimeOffset.FromUnixTimeMilliseconds(startMs).ToLocalTime().ToString(
-                    "HH:mm", CultureInfo.InvariantCulture)
-                : "earlier";
+            string since = startMs > 0 && Format.Instant(startMs) is DateTimeOffset started
+                ? started.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture)
+                : L10n.Text("common.unknown");
             open.Children.Add(new TextBlock
             {
                 Text = Format.Tokens(Format.Long(block?["counters"], "total")) + L10n.Text("windows.insightspage.since.e9501119") + since,

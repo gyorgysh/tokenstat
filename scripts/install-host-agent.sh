@@ -21,7 +21,9 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/tokenstat"
 
 if [ "${1:-}" = "--uninstall" ]; then
-    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+        launchctl bootout "gui/$(id -u)/$LABEL"
+    fi
     rm -f "$PLIST"
     echo "Removed $LABEL"
     exit 0
@@ -61,12 +63,22 @@ else
 fi
 if [ "$FORCE_ALWAYS_ON" -eq 1 ] || [ ! -f "$HOST_JSON" ]; then
     mkdir -p "$IDENTITY_DIR"
-    if [ "$ALWAYS_ON" -eq 1 ]; then
-        printf '{\n  "alwaysOn": true\n}\n' > "$HOST_JSON"
-    else
-        printf '{\n  "alwaysOn": false\n}\n' > "$HOST_JSON"
-    fi
-    chmod 600 "$HOST_JSON"
+    # Preserve every other host setting, and do not truncate an existing file
+    # if validation or writing fails. plutil is part of macOS.
+    (
+        umask 077
+        staged="$(mktemp "$IDENTITY_DIR/.host.json.XXXXXX")"
+        trap 'rm -f "$staged"' EXIT
+        if [ -f "$HOST_JSON" ]; then
+            cp "$HOST_JSON" "$staged"
+        else
+            printf '{}\n' > "$staged"
+        fi
+        plutil -replace alwaysOn -bool "$KEEP_ALIVE" "$staged"
+        plutil -convert json "$staged"
+        chmod 600 "$staged"
+        mv -f "$staged" "$HOST_JSON"
+    )
 fi
 
 mkdir -p "$(dirname "$PLIST")" "$LOG_DIR"

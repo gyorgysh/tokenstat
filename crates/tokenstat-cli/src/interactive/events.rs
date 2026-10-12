@@ -391,6 +391,9 @@ pub(super) fn run_login_outside_tui(
     )
     .context("leaving alternate screen for login")?;
 
+    // The terminal is cooked again. Default termination also works while
+    // login or the return prompt is blocked, without running Rust in a handler.
+    restore_stop_signal_handlers();
     println!();
     println!("  Linking this machine to tokenstat.ai…");
     println!();
@@ -409,6 +412,7 @@ pub(super) fn run_login_outside_tui(
         crossterm::cursor::Hide
     )
     .context("re-entering alternate screen after login")?;
+    install_signal_handlers();
     enable_raw_mode().context("re-enabling raw mode after login")?;
     terminal.clear().context("clearing terminal after login")?;
 

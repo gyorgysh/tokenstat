@@ -231,7 +231,7 @@ private struct ClientChatResponseAttachment: View {
                 // Keep its decoded image and geometry on those appearances.
                 guard decodedData != data else { return }
                 let result = await Task.detached(priority: .userInitiated) {
-                    UIImage(data: data)
+                    ClientChatImageDims.thumbnail(of: data).map { UIImage(cgImage: $0) }
                 }.value
                 guard !Task.isCancelled else { return }
                 decodedData = data
@@ -306,7 +306,7 @@ private struct ClientChatResponseAttachment: View {
         if let downloadError { return downloadError }
         let type = attachment.mediaType ?? L10n.text("apple.clientchatrows.file.50009ce1")
         guard let size = attachment.size else { return type }
-        return "\(type) · \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))"
+        return "\(type) · \(ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file))"
     }
 
     private var symbol: String {
@@ -331,6 +331,17 @@ private enum ClientChatImageDims {
         cache.totalCostLimit = 32 * 1024 * 1024
         return cache
     }()
+
+    static func thumbnail(of data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData,
+            [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1024,
+            kCGImageSourceShouldCacheImmediately: true
+        ] as CFDictionary)
+    }
 
     static func aspect(of data: Data) -> CGFloat? {
         let key = data as NSData
@@ -510,7 +521,7 @@ extension ClientChatEventRow: Equatable {
         if case .attachment = lhs.item.kind {
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading
                 && lhs.attachmentError == rhs.attachmentError
-                && (lhs.attachmentData == nil) == (rhs.attachmentData == nil)
+                && lhs.attachmentData == rhs.attachmentData
                 && lhs.attachmentFile == rhs.attachmentFile
         }
         return true

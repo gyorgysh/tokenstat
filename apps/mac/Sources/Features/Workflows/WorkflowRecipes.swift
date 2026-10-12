@@ -4,66 +4,6 @@
 
 import SwiftUI
 
-/// Cheap / low defaults used by Design and by the example recipes.
-///
-/// Keep the markers in step with `tokenstat-host::agent_models`. The Mac
-/// cannot call that crate, so the same rules live here.
-enum WorkflowModelPick {
-    static let cheapMarkers = ["haiku", "nano", "mini", "flash", "fast", "lite", "small"]
-
-    static func cheapestModel(backend: String, models: [String]) -> String? {
-        if models.isEmpty { return nil }
-        for marker in cheapMarkers {
-            if let id = models.first(where: { $0.lowercased().contains(marker) }) {
-                return id
-            }
-        }
-        if backend == "claude" { return models.last }
-        return models.first
-    }
-
-    static func lowestEffort(_ efforts: [String]) -> String? {
-        for prefer in ["low", "minimal"] {
-            if let found = efforts.first(where: { $0.caseInsensitiveCompare(prefer) == .orderedSame }) {
-                return found
-            }
-        }
-        return efforts.first
-    }
-
-    static func highestEffort(_ efforts: [String]) -> String? {
-        for prefer in ["high", "max", "xhigh"] {
-            if let found = efforts.first(where: { $0.caseInsensitiveCompare(prefer) == .orderedSame }) {
-                return found
-            }
-        }
-        return efforts.last
-    }
-
-    static func midModel(models: [String], excluding cheap: String?) -> String? {
-        let review = ["opus", "fable"]
-        if let mid = models.first(where: { id in
-            if let cheap, id == cheap { return false }
-            let low = id.lowercased()
-            if cheapMarkers.contains(where: { low.contains($0) }) { return false }
-            if review.contains(where: { low.contains($0) }) { return false }
-            return true
-        }) {
-            return mid
-        }
-        return models.first { $0 != cheap }
-    }
-
-    static func reviewModel(models: [String]) -> String? {
-        for marker in ["opus", "fable"] {
-            if let id = models.first(where: { $0.lowercased().contains(marker) }) {
-                return id
-            }
-        }
-        return nil
-    }
-}
-
 /// One example pipeline. The Design field uses `prompt`. The canvas inserts
 /// `nodes` and `edges` as a local draft. It does not call the model.
 struct WorkflowRecipe: Identifiable {
@@ -203,7 +143,7 @@ enum WorkflowRecipes {
             id: "done",
             kind: .command,
             title: L10n.text("common.done"),
-            command: "afplay /System/Library/Sounds/Glass.aiff"
+            command: "echo Done"
         ))
         edges.append(WorkflowEdge(from: previous, to: "done", when: .ok))
 
@@ -303,10 +243,7 @@ enum WorkflowRecipes {
     }
 
     private static func pickBuild(_ agents: [AgentBackend], used: [String]) -> AgentPick? {
-        let order = ["opencode", "opencode2", "cursor", "codex", "agy"]
-        let agent = order.compactMap { id in agents.first { $0.id == id } }.first
-            ?? agents.first { !used.contains($0.id) }
-        guard let agent, !used.contains(agent.id) else { return nil }
+        guard let agent = WorkflowModelPick.buildAgent(from: agents, used: used) else { return nil }
         let mid = WorkflowModelPick.midModel(models: agent.models, excluding: nil)
         return AgentPick(
             backend: agent,

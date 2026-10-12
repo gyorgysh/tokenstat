@@ -10,8 +10,7 @@
 //! feature, not archive parsing, and must never add a network dependency to
 //! `tokenstat-core`.
 
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::io::Read;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -180,70 +179,39 @@ pub(crate) fn discover() -> Result<Vec<LocalProvider>, String> {
         .collect())
 }
 
-/// Why a probe failed, in words a person can act on.
-///
-/// A refused or timed-out connect is "the app is not running". The OS
-/// string (`os error 61`) is noise on the settings row and the launcher
-/// menu, so it stays out of the common case.
-fn connect_error(error: std::io::Error) -> String {
-    match error.kind() {
-        std::io::ErrorKind::ConnectionRefused
-        | std::io::ErrorKind::TimedOut
-        | std::io::ErrorKind::ConnectionReset => "not running".into(),
-        _ => {
-            let text = error.to_string();
-            let lower = text.to_ascii_lowercase();
-            if lower.contains("connection refused") || lower.contains("timed out") {
+fn get_json(port: u16, path: &str) -> Result<Value, String> {
+    // A real HTTP decoder handles chunked responses and Content-Length without
+    // waiting for a server to close a reusable connection. The total deadline
+    // also bounds a server that continually trickles a few bytes.
+    let response = reqwest::blocking::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(READ_TIMEOUT)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| error.to_string())?
+        .get(format!("http://127.0.0.1:{port}{path}"))
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .map_err(|error| {
+            if error.is_connect() || error.is_timeout() {
                 "not running".into()
             } else {
-                format!("not running ({text})")
+                error.to_string()
             }
-        }
+        })?;
+    if !response.status().is_success() {
+        return Err(format!("local server returned HTTP {}", response.status()));
     }
-}
-
-fn get_json(port: u16, path: &str) -> Result<Value, String> {
-    let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream =
-        TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).map_err(connect_error)?;
-    stream
-        .set_read_timeout(Some(READ_TIMEOUT))
+    let mut body = Vec::new();
+    response
+        .take(MAX_RESPONSE_BYTES as u64 + 1)
+        .read_to_end(&mut body)
         .map_err(|error| error.to_string())?;
-    stream
-        .set_write_timeout(Some(READ_TIMEOUT))
-        .map_err(|error| error.to_string())?;
-    write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nAccept: application/json\r\n\r\n")
-        .map_err(|error| error.to_string())?;
-
-    let mut response = Vec::new();
-    let mut chunk = [0u8; 16 * 1024];
-    loop {
-        match stream.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(count) => {
-                response.extend_from_slice(&chunk[..count]);
-                if response.len() > MAX_RESPONSE_BYTES {
-                    return Err("response was too large".into());
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => break,
-            Err(error) => return Err(error.to_string()),
-        }
+    if body.len() > MAX_RESPONSE_BYTES {
+        return Err("response was too large".into());
     }
-
-    let text = String::from_utf8(response).map_err(|_| "response was not UTF-8".to_string())?;
-    let (headers, body) = text
-        .split_once("\r\n\r\n")
-        .ok_or("response had no HTTP body")?;
-    let status = headers
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .ok_or("response had no HTTP status")?;
-    if !status.starts_with('2') {
-        return Err(format!("local server returned HTTP {status}"));
-    }
-    serde_json::from_str(body).map_err(|error| format!("invalid model response: {error}"))
+    serde_json::from_slice(&body).map_err(|error| format!("invalid model response: {error}"))
 }
 
 fn parse_lmstudio(value: &Value) -> Result<Vec<LocalModel>, String> {
@@ -290,6 +258,32 @@ fn parse_ollama(value: &Value) -> Result<Vec<LocalModel>, String> {
 mod tests {
     use super::{LocalModel, LocalProvider, api_base_url, origin, parse_lmstudio, parse_ollama};
     use serde_json::json;
+
+    #[test]
+    fn chunked_model_discovery_finishes_without_waiting_for_connection_close() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (done, wait) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0];
+            while !request.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            stream.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nB\r\n{\"data\":[]}\r\n0\r\n\r\n").unwrap();
+            let _ = wait.recv_timeout(std::time::Duration::from_secs(3));
+        });
+        let result = super::get_json(port, "/v1/models");
+        done.send(()).unwrap();
+        server.join().unwrap();
+        assert_eq!(result.unwrap(), json!({"data": []}));
+    }
 
     fn fixture_dir() -> std::path::PathBuf {
         let now = std::time::SystemTime::now()
@@ -420,14 +414,6 @@ mod tests {
         .expect("models");
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "qwen/qwen3.5-27b");
-    }
-
-    #[test]
-    fn a_refused_connect_is_just_not_running() {
-        let refused = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "os error 61");
-        assert_eq!(super::connect_error(refused), "not running");
-        let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
-        assert!(super::connect_error(other).contains("denied"));
     }
 
     #[test]

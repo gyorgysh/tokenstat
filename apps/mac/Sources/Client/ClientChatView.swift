@@ -731,7 +731,7 @@ struct ClientChatThread: View {
     /// transcript and reads it back, which is the screen blanking. Stale
     /// complaints die with the attempt, like the list.
     private func foregroundRefresh() async {
-        guard !refreshing else { return }
+        guard isActive, !Task.isCancelled, !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
         model.error = nil
@@ -930,6 +930,7 @@ struct ClientChatThread: View {
             if !active { model.saveDraftNow() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+            guard isActive else { return }
             Task { await model.resumeWaitingConnection() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentCachePurged)) { _ in
@@ -1496,7 +1497,7 @@ struct ClientChatThread: View {
             }
             .task(id: settleMood) {
                 guard settleMood == .ok else { return }
-                try? await Task.sleep(for: .milliseconds(480))
+                do { try await Task.sleep(for: .milliseconds(480)) } catch { return }
                 settleMood = nil
             }
         }
@@ -2016,6 +2017,7 @@ struct ClientChatThread: View {
     }
 
     private func submit(from chat: ChatConversation, sendNow: Bool = false) {
+        guard isActive, model.selected?.id == chat.id, model.unconfirmedSend == nil else { return }
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
@@ -2084,6 +2086,7 @@ struct ClientChatThread: View {
 
     private func receive(_ drops: [ChatInboxDrop], owner: WorkReference) async {
         for drop in drops {
+            guard isActive, !Task.isCancelled, model.currentReference == owner else { return }
             switch drop {
             case let .attachment(item):
                 await model.attach(item, to: owner)

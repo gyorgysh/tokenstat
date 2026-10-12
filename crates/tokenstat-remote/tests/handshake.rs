@@ -45,21 +45,23 @@ impl Drop for Sandbox {
 }
 
 fn approve(key: &[u8; 32], label: &str) {
-    let mut store = PeerStore::load().expect("load");
-    store.add_approved(key, label, None, "2026-08-04T10:00:00Z");
-    store.save().expect("save");
+    PeerStore::update(|store| {
+        store.add_approved(key, label, None, "2026-08-04T10:00:00Z");
+        ((), true)
+    })
+    .expect("save");
 }
 
 fn revoke(key: &[u8; 32]) {
-    let mut store = PeerStore::load().expect("load");
-    assert!(store.revoke(key), "peer must exist to be revoked");
-    store.save().expect("save");
+    PeerStore::update(|store| {
+        assert!(store.revoke(key), "peer must exist to be revoked");
+        ((), true)
+    })
+    .expect("save");
 }
 
 fn forget(key: &[u8; 32]) {
-    let mut store = PeerStore::load().expect("load");
-    store.forget(key);
-    store.save().expect("save");
+    PeerStore::update(|store| ((), store.forget(key))).expect("save");
 }
 
 #[test]

@@ -502,7 +502,7 @@ struct ClientFolderPush: Hashable {
         case .sessions:
             ClientWorkspaceSessionsView(peer: peerKey, hostName: hostName, folder: folder)
         default:
-            ClientWorkspaceDetailView(peer: peerKey, hostName: hostName, folder: folder)
+            ClientWorkspaceSectionDetail(peer: peerKey, hostName: hostName, folder: folder, section: section)
         }
     }
 }

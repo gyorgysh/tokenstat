@@ -176,6 +176,43 @@ private final class ProtocolServer: @unchecked Sendable {
 
 @main struct SocketTransportTests {
     static func main() throws {
+        for method in ["workflow.run", "pty.spawn", "ssh.session.open", "chat.create", "chat.fork", "automation.create",
+                       "workflow.create", "workflow.continue", "workflow.design", "todo.create",
+                       "pulls.create", "pulls.comment", "pulls.review", "launcher.signIn", "launcher.install",
+                       "chat.personaDraft", "screen.viewer.input", "ssh.vault.password.set", "ssh.vault.recovery.rotate"] {
+            for remote in [false, true] {
+                let server = try ClosingServer()
+                let transport = SocketTransport.connecting(to: server.path)!
+                if method == "workflow.run", !remote {
+                    var found = false
+                    for descriptor: Int32 in 0..<256 {
+                        var address = sockaddr_un()
+                        var length = socklen_t(MemoryLayout<sockaddr_un>.size)
+                        let connected = withUnsafeMutablePointer(to: &address) { pointer in
+                            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                                getpeername(descriptor, $0, &length)
+                            }
+                        }
+                        guard connected == 0, address.sun_family == sa_family_t(AF_UNIX) else { continue }
+                        let path = withUnsafeBytes(of: address.sun_path) {
+                            String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self)
+                        }
+                        guard path == server.path else { continue }
+                        found = true
+                        assert(fcntl(descriptor, F_GETFD) & FD_CLOEXEC != 0,
+                               "Spawned agents must not retain a daemon socket")
+                    }
+                    assert(found)
+                }
+                let outer = remote ? "remote.call" : method
+                let params = remote ? "{\"peer\":\"fixture\",\"method\":\"\(method)\",\"params\":{}}" : "{}"
+                do {
+                    _ = try transport.call(method: outer, params: params, patience: 2)
+                    assertionFailure("A lost \(method) response was replayed")
+                } catch BridgeError.core(let code, _) { assert(code == "delivery_unknown", code) }
+                assert(server.requestCount() == 1)
+            }
+        }
         for pooled in [false, true] {
             for remote in [false, true] {
                 let server = try ClosingServer()

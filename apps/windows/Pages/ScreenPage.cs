@@ -102,6 +102,9 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     private CancellationTokenSource? _poll;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _heartbeat;
     private bool _closed;
+    private bool _started;
+    private bool _changingControl;
+    private bool _reconnecting;
     private int _reconnects;
     private DateTime _connectedSince;
     private DateTime? _streamingSince;
@@ -315,6 +318,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
 
     private async Task StartAsync()
     {
+        if (_closed || _started) return;
+        _started = true;
         _caption.Text = L10n.Text("windows.screenpage.connecting.72021eb7");
         string tier;
         try
@@ -328,6 +333,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             Caption(ex.Message);
             return;
         }
+        if (_closed) return;
         if (!Format.IsLegend(tier))
         {
             Caption(L10n.Text("windows.screenpage.screen_access_requires_the_legend_plan.66173f1c"));
@@ -346,6 +352,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             Caption(ex.Message);
             return;
         }
+        if (_closed) return;
         _peerId = Format.Text(identity, "key", Format.Text(identity, "publicIdentity"));
         if (string.IsNullOrEmpty(_peerId))
         {
@@ -364,6 +371,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             Caption(ex.Message);
             return;
         }
+        if (_closed) return;
         _poll = new CancellationTokenSource();
         _ = PollAsync(_poll.Token);
     }
@@ -376,7 +384,9 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     /// </summary>
     private async Task OpenAsync(bool control)
     {
+        if (_closed) throw new OperationCanceledException();
         _capability = await IssueCapabilityAsync(control);
+        if (_closed) throw new OperationCanceledException();
         var openParams = new JsonObject
         {
             ["peer"] = _peer,
@@ -389,7 +399,18 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
         var opened = await AppServices.Host.CallAsync(
             "screen.viewer.open", openParams, TimeSpan.FromSeconds(30));
-        _sessionId = Format.Text(opened, "id");
+        var openedId = Format.Text(opened, "id");
+        if (_closed)
+        {
+            // Closing while open is in flight must also close the late result.
+            if (!string.IsNullOrEmpty(openedId))
+            {
+                try { await AppServices.Host.CallAsync("screen.viewer.close", new JsonObject { ["id"] = openedId }); }
+                catch { }
+            }
+            throw new OperationCanceledException();
+        }
+        _sessionId = openedId;
         if (string.IsNullOrEmpty(_sessionId))
         {
             throw new InvalidOperationException(L10n.Text("windows.screenpage.the_viewer_opened_without_an_id.9cdf904c"));
@@ -701,6 +722,14 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
 
     private async Task ReconnectAsync(string reason)
     {
+        if (_closed || _reconnecting || _changingControl) return;
+        _reconnecting = true;
+        try { await ReconnectCoreAsync(reason); }
+        finally { _reconnecting = false; RefreshControlChip(); }
+    }
+
+    private async Task ReconnectCoreAsync(string reason)
+    {
         if (_closed)
         {
             return;
@@ -743,10 +772,11 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
         catch (Exception ex)
         {
-            await ReconnectAsync(ex.Message);
+            await ReconnectCoreAsync(ex.Message);
             return;
         }
         _poll?.Cancel();
+        if (_closed) return;
         _poll = new CancellationTokenSource();
         _ = PollAsync(_poll.Token);
     }
@@ -967,15 +997,21 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     /// </summary>
     private async Task SetControlAsync(bool wanted)
     {
-        if (wanted == _control || _closed)
-        {
-            return;
-        }
+        if (wanted == _control || _closed || _reconnecting || _changingControl || string.IsNullOrEmpty(_sessionId)) return;
+        _changingControl = true;
+        try { await SetControlCoreAsync(wanted); }
+        finally { _changingControl = false; RefreshControlChip(); }
+    }
+
+    private async Task SetControlCoreAsync(bool wanted)
+    {
         if (!string.IsNullOrEmpty(_hostSessionId) && !string.IsNullOrEmpty(_sessionId))
         {
             try
             {
+                var session = _hostSessionId;
                 var capability = await IssueCapabilityAsync(wanted);
+                if (_closed || session != _hostSessionId || string.IsNullOrEmpty(_sessionId)) return;
                 await AppServices.Host.CallAsync(
                     "remote.call",
                     new JsonObject
@@ -990,6 +1026,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                         },
                     },
                     TimeSpan.FromSeconds(15));
+                if (_closed || session != _hostSessionId || string.IsNullOrEmpty(_sessionId)) return;
                 _capability = capability;
                 _control = wanted;
                 RefreshControlChip();
@@ -1018,6 +1055,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
         UpdateHeartbeat();
         _poll?.Cancel();
+        if (_closed) return;
         _poll = new CancellationTokenSource();
         _ = PollAsync(_poll.Token);
     }
@@ -1087,7 +1125,9 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         void show()
         {
             _controlSlot.Children.Clear();
-            _controlSlot.Children.Add(Chrome.ToggleChip(L10n.Text("windows.screenpage.control.32d7e820"), _control, SetControlAsync));
+            var toggle = Chrome.ToggleChip(L10n.Text("windows.screenpage.control.32d7e820"), _control, SetControlAsync);
+            toggle.IsEnabled = !_closed && !_reconnecting && !_changingControl && !string.IsNullOrEmpty(_sessionId);
+            _controlSlot.Children.Add(toggle);
             RenderInspector();
         }
         if (DispatcherQueue.HasThreadAccess)

@@ -49,7 +49,7 @@ internal static class ContextMenus
     }
 
     public static void Copy(MenuFlyout menu, string title, Func<string> text) =>
-        Add(menu, title, () => { var data = new DataPackage(); data.SetText(text()); Clipboard.SetContent(data); });
+        AddAsync(menu, title, () => { var data = new DataPackage(); data.SetText(text()); Clipboard.SetContent(data); return Task.CompletedTask; });
 
     public static void Invoke(Button button)
     {

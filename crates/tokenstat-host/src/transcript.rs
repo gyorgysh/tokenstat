@@ -24,6 +24,8 @@ pub const REPLY_CAP: usize = 64 * 1024;
 
 /// How much readable text to keep on disk for one run.
 pub const READABLE_CAP: usize = 256 * 1024;
+const RECORD_CAP: usize = 16 * 1024 * 1024;
+const RECORD_TOO_LARGE: &str = "An agent output record exceeded the transcript size limit.";
 
 /// One meaningful thing that happened while an agent was working.
 ///
@@ -132,6 +134,7 @@ enum Piece {
 pub struct Parser {
     backend: String,
     leftover: Vec<u8>,
+    dropping_line: bool,
     last_block: String,
     last_was_text: bool,
     /// Tool starts that have not seen a matching end yet. Closed on Done,
@@ -192,6 +195,7 @@ impl Parser {
         Self {
             backend: backend.to_string(),
             leftover: Vec::new(),
+            dropping_line: false,
             last_block: String::new(),
             last_was_text: false,
             open_tools: Vec::new(),
@@ -216,17 +220,38 @@ impl Parser {
 
     // Decode only complete records, so a pipe read splitting an emoji or
     // accented character does not replace either half with U+FFFD.
-    fn take_line(&mut self) -> Option<String> {
-        let newline = self.leftover.iter().position(|byte| *byte == b'\n')?;
-        let bytes = self.leftover.drain(..=newline).collect::<Vec<_>>();
-        Some(String::from_utf8_lossy(&bytes[..newline]).into_owned())
+    fn take_lines(&mut self, bytes: &[u8]) -> Vec<Option<String>> {
+        let mut lines = Vec::new();
+        for part in bytes.split_inclusive(|byte| *byte == b'\n') {
+            if !self.dropping_line {
+                if self.leftover.len().saturating_add(part.len()) > RECORD_CAP {
+                    self.leftover.clear();
+                    self.dropping_line = true;
+                    lines.push(None);
+                } else {
+                    self.leftover.extend_from_slice(part);
+                }
+            }
+            if part.last() == Some(&b'\n') {
+                if !self.dropping_line {
+                    self.leftover.pop();
+                    lines.push(Some(String::from_utf8_lossy(&self.leftover).into_owned()));
+                    self.leftover.clear();
+                }
+                self.dropping_line = false;
+            }
+        }
+        lines
     }
 
     /// Consume a drain chunk and return any newly completed display text.
     pub fn push(&mut self, bytes: &[u8]) -> String {
-        self.leftover.extend_from_slice(bytes);
         let mut out = String::new();
-        while let Some(mut line) = self.take_line() {
+        for line in self.take_lines(bytes) {
+            let Some(mut line) = line else {
+                self.emit(&mut out, Piece::Block(RECORD_TOO_LARGE.into()));
+                continue;
+            };
             if line.ends_with('\r') {
                 line.pop();
             }
@@ -243,9 +268,14 @@ impl Parser {
     /// either this API or [`Self::push`] for a stream; chat uses this one while
     /// the existing automation inspector keeps its byte-identical renderer.
     pub fn push_events(&mut self, bytes: &[u8]) -> Vec<Event> {
-        self.leftover.extend_from_slice(bytes);
         let mut events = Vec::new();
-        while let Some(mut line) = self.take_line() {
+        for line in self.take_lines(bytes) {
+            let Some(mut line) = line else {
+                events.extend(self.take_events(vec![Event::Failed {
+                    text: RECORD_TOO_LARGE.into(),
+                }]));
+                continue;
+            };
             if line.ends_with('\r') {
                 line.pop();
             }
@@ -321,7 +351,7 @@ impl Parser {
                 }
                 // Cursor (and some Claude streams) repeat the whole segment
                 // after the deltas. Skip that exact copy.
-                if text == self.last_block {
+                if matches!(self.backend.as_str(), "claude" | "cursor") && text == self.last_block {
                     return;
                 }
                 if self.last_was_text {
@@ -654,7 +684,7 @@ impl Parser {
 
     /// Close the message: whatever comes next starts a new one.
     fn cursor_end_message(&mut self) {
-        self.cursor_repeats += 1;
+        self.cursor_repeats = self.cursor_repeats.saturating_add(1);
         self.cursor_open_message_at(self.cursor_turn.len());
     }
 
@@ -908,7 +938,7 @@ fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
     {
         return Some(text);
     }
-    if lower.contains("please run /login") {
+    if backend == "claude" && lower.contains("please run /login") {
         return Some(
             "Claude Code is not signed in on this computer. Open a terminal, run claude, and use /login."
                 .into(),
@@ -917,7 +947,8 @@ fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
     // Headless `claude -p` cannot sign in by itself: /login only exists in
     // the interactive terminal, so a logged-out turn dies with this instead
     // of the usual "please run /login". Say where the login actually lives.
-    if lower.contains("/login")
+    if backend == "claude"
+        && lower.contains("/login")
         && (lower.contains("isn't available")
             || lower.contains("not available")
             || lower.contains("not supported"))
@@ -942,12 +973,17 @@ fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
         );
     }
     if lower.contains("not logged in") || lower.contains("not signed in") {
+        if backend != "claude" {
+            return Some(line.to_string());
+        }
         return Some(
             "Claude Code is not signed in on this computer. Open a terminal, run claude, and use /login."
                 .into(),
         );
     }
-    if lower.contains("named models unavailable") || lower.contains("free plans can only use auto")
+    if backend == "cursor"
+        && (lower.contains("named models unavailable")
+            || lower.contains("free plans can only use auto"))
     {
         return Some("This Cursor plan can only use Auto.".into());
     }
@@ -1028,14 +1064,22 @@ fn events_for_value(backend: &str, value: &Value) -> Vec<Event> {
 }
 
 fn edit_event(call_id: &str, target: &str, input: &Value) -> Option<Event> {
-    let old = lookup_str(input, &["old_string", "old_str", "OldString", "OldStr"])?;
-    let new = lookup_str(input, &["new_string", "new_str", "NewString", "NewStr"])?;
+    let old = lookup_string(
+        input,
+        &["old_string", "old_str", "OldString", "OldStr"],
+        true,
+    )?;
+    let new = lookup_string(
+        input,
+        &["new_string", "new_str", "NewString", "NewStr"],
+        true,
+    )?;
     if old.is_empty() && new.is_empty() {
         return None;
     }
     Some(Event::Edit {
         call_id: call_id.to_string(),
-        path: target.to_string(),
+        path: tool_arg(Some(input)).unwrap_or(target).to_string(),
         added: new.lines().count() as u32,
         removed: old.lines().count() as u32,
         patch: render_edit_snippet(old, new),
@@ -1191,13 +1235,29 @@ fn events_claude(value: &Value) -> Vec<Event> {
         // An error result is the turn failing, not the agent talking: an
         // expired login came back as a reply bubble. Say it in words when
         // there is copy for it, and keep Claude's own line otherwise.
-        let mut events = if value.get("is_error").and_then(Value::as_bool) == Some(true) {
-            event_failed(
-                result
-                    .and_then(|text| cli_refusal_text("claude", text))
-                    .as_deref()
-                    .or(result),
-            )
+        let failed = value.get("is_error").and_then(Value::as_bool) == Some(true)
+            || value
+                .get("subtype")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s.starts_with("error"));
+        let mut events = if failed {
+            let message = result
+                .filter(|text| !text.trim().is_empty())
+                .map(str::to_owned)
+                .or_else(|| {
+                    value.get("errors")?.as_array().map(|errors| {
+                        errors
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                })
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| "Claude Code failed to complete this turn.".into());
+            event_failed(Some(
+                &cli_refusal_text("claude", &message).unwrap_or(message),
+            ))
         } else {
             event_text(result)
         };
@@ -1282,13 +1342,22 @@ fn events_cursor(value: &Value) -> Vec<Event> {
         Some("thinking") => event_thinking(value.get("text").and_then(Value::as_str)),
         Some("result") => {
             let mut events = cursor_session(value);
-            events.extend(event_text(value.get("result").and_then(Value::as_str)));
             events.extend(event_usage(value));
             let failed = value
                 .get("is_error")
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
                 || value.get("subtype").and_then(Value::as_str) == Some("error");
+            let result = value.get("result").and_then(Value::as_str);
+            events.extend(if failed {
+                event_failed(Some(
+                    result
+                        .filter(|text| !text.trim().is_empty())
+                        .unwrap_or("Cursor failed to complete this turn."),
+                ))
+            } else {
+                event_text(result)
+            });
             events.push(done(if failed { "error" } else { "done" }, None));
             events
         }
@@ -1520,11 +1589,13 @@ fn cursor_edit_event(call_id: &str, call: &Value) -> Option<Event> {
     let added = success
         .get("linesAdded")
         .and_then(Value::as_u64)
-        .unwrap_or(0) as u32;
+        .unwrap_or(0)
+        .min(u32::MAX as u64) as u32;
     let removed = success
         .get("linesRemoved")
         .and_then(Value::as_u64)
-        .unwrap_or(0) as u32;
+        .unwrap_or(0)
+        .min(u32::MAX as u64) as u32;
     Some(Event::Edit {
         call_id: call_id.to_string(),
         path,
@@ -2094,8 +2165,16 @@ fn muse_edit_event(payload: &Value, call_id: &str) -> Option<Event> {
     Some(Event::Edit {
         call_id: call_id.into(),
         path: path.into(),
-        added: facts.get("added").and_then(Value::as_u64).unwrap_or(0) as u32,
-        removed: facts.get("removed").and_then(Value::as_u64).unwrap_or(0) as u32,
+        added: facts
+            .get("added")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .min(u32::MAX as u64) as u32,
+        removed: facts
+            .get("removed")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .min(u32::MAX as u64) as u32,
         patch: patch.into(),
     })
 }
@@ -2172,6 +2251,7 @@ fn events_opencode(value: &Value) -> Vec<Event> {
         Some("error") => event_failed(
             value
                 .pointer("/error/message")
+                .or_else(|| value.pointer("/error/data/message"))
                 .and_then(Value::as_str)
                 .or_else(|| value.get("error").and_then(Value::as_str)),
         ),
@@ -2291,19 +2371,19 @@ fn item_id(value: &Value) -> String {
         .to_string()
 }
 fn event_text(text: Option<&str>) -> Vec<Event> {
-    nonempty(text)
+    text_delta(text)
         .map(|delta| vec![Event::Text { delta }])
         .unwrap_or_default()
 }
 fn event_thinking(text: Option<&str>) -> Vec<Event> {
-    nonempty(text)
+    text_delta(text)
         .map(|delta| vec![Event::Thinking { delta }])
         .unwrap_or_default()
 }
 fn event_failed(text: Option<&str>) -> Vec<Event> {
-    nonempty(text)
-        .map(|text| vec![Event::Failed { text }])
-        .unwrap_or_default()
+    vec![Event::Failed {
+        text: nonempty(text).unwrap_or_else(|| "The agent failed to complete this turn.".into()),
+    }]
 }
 fn done(status: &str, exit_code: Option<i32>) -> Event {
     Event::Done {
@@ -2417,7 +2497,7 @@ pub fn rematerialize(raw: &Path, backend: &str, force: bool) -> Option<String> {
         return None;
     };
     let text = render_raw(backend, &bytes);
-    let _ = std::fs::write(&readable, text.as_bytes());
+    let _ = tokenstat_sync::snapshot::write_private_atomically(&readable, &text);
     Some(text)
 }
 
@@ -2444,7 +2524,9 @@ pub fn cap_readable(text: &mut String) {
 
 /// Slice a transcript file for one RPC reply.
 pub fn slice_reply(bytes: &[u8], offset: u64) -> (String, u64) {
-    let start = (offset as usize).min(bytes.len());
+    let start = usize::try_from(offset)
+        .unwrap_or(usize::MAX)
+        .min(bytes.len());
     let mut end = (start + REPLY_CAP).min(bytes.len());
     while end > start && !is_char_boundary(bytes, end) {
         end -= 1;
@@ -2646,7 +2728,7 @@ fn render_muse(value: &serde_json::Value) -> Option<Piece> {
         Some("run.output.delta") => value
             .pointer("/payload/text")
             .and_then(Value::as_str)
-            .and_then(|text| nonempty(Some(text)))
+            .and_then(|text| text_delta(Some(text)))
             .map(Piece::Text),
         Some("run.terminal.failed") => value
             .pointer("/payload/reason")
@@ -2781,11 +2863,15 @@ fn one_line(s: &str, max: usize) -> String {
 }
 
 fn lookup_str<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    lookup_string(value, keys, false)
+}
+
+fn lookup_string<'a>(value: &'a Value, keys: &[&str], empty: bool) -> Option<&'a str> {
     for key in keys {
         if let Some(s) = value
             .get(*key)
             .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
+            .filter(|s| empty || !s.is_empty())
         {
             return Some(s);
         }
@@ -2794,7 +2880,7 @@ fn lookup_str<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str
     let wanted: Vec<String> = keys.iter().map(|k| fold_key(k)).collect();
     for (key, val) in obj {
         if wanted.iter().any(|want| want == &fold_key(key))
-            && let Some(s) = val.as_str().filter(|s| !s.is_empty())
+            && let Some(s) = val.as_str().filter(|s| empty || !s.is_empty())
         {
             return Some(s);
         }
@@ -2820,7 +2906,7 @@ fn event_timestamp(value: &serde_json::Value) -> Option<i64> {
 fn json_i64(value: &serde_json::Value) -> Option<i64> {
     value
         .as_i64()
-        .or_else(|| value.as_u64().map(|n| n as i64))
+        .or_else(|| value.as_u64().and_then(|n| i64::try_from(n).ok()))
         .or_else(|| value.as_f64().map(|n| n as i64))
 }
 
@@ -2872,8 +2958,16 @@ fn output_snippet(out: &str) -> String {
 
 fn edit_snippet(input: Option<&serde_json::Value>) -> Option<String> {
     let value = input?;
-    let old = lookup_str(value, &["old_string", "old_str", "OldString", "OldStr"])?;
-    let new = lookup_str(value, &["new_string", "new_str", "NewString", "NewStr"])?;
+    let old = lookup_string(
+        value,
+        &["old_string", "old_str", "OldString", "OldStr"],
+        true,
+    )?;
+    let new = lookup_string(
+        value,
+        &["new_string", "new_str", "NewString", "NewStr"],
+        true,
+    )?;
     if old.is_empty() && new.is_empty() {
         return None;
     }
@@ -3177,6 +3271,83 @@ mod tests {
     fn feed(backend: &str, raw: &str) -> String {
         let mut p = Parser::new(backend);
         p.push(raw.as_bytes())
+    }
+
+    #[test]
+    fn streamed_whitespace_and_identical_deltas_are_preserved() {
+        for backend in ["grok", "muse", "agy"] {
+            let mut parser = Parser::new(backend);
+            let raw = ["ha", "ha", " ", "there", "\n", "    code"].iter().map(|text| {
+                let record = match backend {
+                    "grok" => json!({"type":"text", "data":text}),
+                    "muse" => json!({"payload_type":"run.output.delta", "payload":{"text":text}}),
+                    _ => json!({"event":"step_update", "step_update":{"step_type":"agent_response", "text_delta":text}}),
+                };
+                format!("{record}\n")
+            }).collect::<String>();
+            let text: String = parser
+                .push_events(raw.as_bytes())
+                .into_iter()
+                .filter_map(|e| match e {
+                    Event::Text { delta } => Some(delta),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(text, "haha there\n    code", "{backend}");
+            assert_eq!(render_raw(backend, raw.as_bytes()), text, "{backend}");
+        }
+    }
+
+    #[test]
+    fn structured_failures_without_text_still_fail_the_turn() {
+        for (backend, record) in [
+            ("cursor", json!({"type":"result", "is_error":true})),
+            (
+                "claude",
+                json!({"type":"result", "subtype":"error_max_turns", "errors":["Too many turns"]}),
+            ),
+            ("codex", json!({"type":"turn.failed"})),
+            (
+                "opencode",
+                json!({"type":"error", "error":{"data":{"message":"Provider unavailable"}}}),
+            ),
+        ] {
+            let events = Parser::new(backend).push_events(format!("{record}\n").as_bytes());
+            assert!(
+                events.iter().any(|e| matches!(e, Event::Failed { .. })),
+                "{backend}: {events:?}"
+            );
+        }
+        assert_eq!(
+            cli_refusal_text("codex", "Not logged in").as_deref(),
+            Some("Not logged in")
+        );
+    }
+
+    #[test]
+    fn insertion_and_deletion_edits_keep_the_full_path() {
+        let path = format!("/{}", "long-folder/".repeat(20));
+        for (old, new, added, removed) in [("", "new", 1, 0), ("old", "", 0, 1)] {
+            let record = json!({"type":"tool_call", "id":"edit", "title":"edit", "rawInput":{"path":path,"old_string":old,"new_string":new}});
+            let events = Parser::new("grok").push_events(format!("{record}\n").as_bytes());
+            assert!(events.iter().any(|e| matches!(e, Event::Edit { path: actual, added: a, removed: r, .. } if actual == &path && *a == added && *r == removed)), "{events:?}");
+        }
+    }
+
+    #[test]
+    fn oversized_records_are_reported_once_and_the_next_record_survives() {
+        let mut parser = Parser::new("grok");
+        let chunk = vec![b'x'; RECORD_CAP / 2];
+        assert!(parser.push_events(&chunk).is_empty());
+        assert!(parser.push_events(&chunk).is_empty());
+        assert!(matches!(
+            parser.push_events(b"x").as_slice(),
+            [Event::Failed { .. }]
+        ));
+        assert!(parser.leftover.is_empty());
+        assert!(parser.push_events(&chunk).is_empty());
+        let events = parser.push_events(b"\n{\"type\":\"text\",\"data\":\"survived\"}\n");
+        assert!(matches!(events.as_slice(), [Event::Text { delta }] if delta == "survived"));
     }
 
     #[test]
@@ -4861,6 +5032,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires private local transcript"]
     fn local_grok_run_becomes_prose() {
         let path = local_run("run-1786840440894.txt");
         let Some(bytes) = path.and_then(|p| std::fs::read(p).ok()) else {
@@ -4881,6 +5053,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires private local transcript"]
     fn local_claude_run_becomes_prose() {
         let path = local_run("run-1786029156900.txt");
         let Some(bytes) = path.and_then(|p| std::fs::read(p).ok()) else {

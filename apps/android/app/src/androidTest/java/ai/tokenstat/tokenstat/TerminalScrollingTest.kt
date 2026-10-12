@@ -19,6 +19,23 @@ import org.junit.runner.RunWith
 /** Owns an isolated terminal surface, with no PTY, account or host transport. */
 @RunWith(AndroidJUnit4::class)
 class TerminalScrollingTest {
+    @Test fun terminalClipboardCallbackReachesTheOwnerOnMainThread() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val terminal = ai.tokenstat.tokenstat.ui.terminal.TerminalBridge()
+        val done = CountDownLatch(1)
+        var copied: String? = null
+        var wasMain = false
+        terminal.onCopy = {
+            copied = it
+            wasMain = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
+            done.countDown()
+        }
+        terminal.jsApi.onCopy("terminal selection")
+        assertTrue(done.await(5, TimeUnit.SECONDS))
+        assertEquals("terminal selection", copied)
+        assertTrue(wasMain)
+    }
+
     private class Bridge {
         @Volatile var inputCount = 0
         @Volatile var reading = false

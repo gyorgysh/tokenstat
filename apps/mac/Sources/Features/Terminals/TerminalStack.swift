@@ -264,7 +264,8 @@ final class TerminalStackView: NSView {
             shown = key
             DispatchQueue.main.async { [weak self, weak key] in
                 guard let self, let key, key.superview === self else { return }
-                guard self.lastClaimsFocus else { return }
+                guard self.lastClaimsFocus, self.shown === key, !key.isHiddenOrHasHiddenAncestor,
+                      self.window?.attachedSheet == nil, NSApp.modalWindow == nil else { return }
                 self.window?.makeFirstResponder(key)
             }
         } else if key == nil {
@@ -392,7 +393,8 @@ final class TerminalStackView: NSView {
     }
 
     private func noteClick(_ event: NSEvent) {
-        guard let window, event.window === window else { return }
+        guard lastClaimsFocus, !isHiddenOrHasHiddenAncestor, let window, event.window === window,
+              window.attachedSheet == nil, NSApp.modalWindow == nil else { return }
         let point = convert(event.locationInWindow, from: nil)
         if let leading = leadingView, !leading.isHidden, leading.frame.contains(point) {
             onViewClicked?(leading)

@@ -17,6 +17,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -161,7 +163,6 @@ class ScreenViewerModel(
         inputJob?.cancel()
         inputJob = null
         transferJob?.cancel()
-        transferJob = null
         sessionJob?.cancel()
         sessionJob = null
         // A new session starts with no input from the old one.
@@ -733,25 +734,18 @@ class ScreenViewerModel(
 
     fun cancelTransfer() {
         transferJob?.cancel()
-        transferJob = null
         transferProgress = null
     }
 
-    private suspend fun transfer(file: ScreenFileSource) {
+    private suspend fun transfer(file: ScreenFileSource, destination: String = peer) = withContext(Dispatchers.IO) {
+        // Capture the destination before a reconnect can change the viewer.
+        // Content providers and hashing may block, so all file work stays off
+        // the UI thread and cooperates with cancellation between reads.
         var id = ""
         try {
-            val digest = MessageDigest.getInstance("SHA-256")
-            var size = 0L
-            file.open().use { stream ->
-                val buffer = ByteArray(256 * 1024)
-                while (true) {
-                    val read = stream.read(buffer)
-                    if (read <= 0) break
-                    digest.update(buffer, 0, read)
-                    size += read
-                }
-            }
-            val hash = hex(digest.digest())
+            val hashed = hashScreenFile(file.open)
+            val size = hashed.size
+            val hash = hashed.sha256
             // The same resume key the Apple client computes, so a transfer
             // begun on one device carries on from where it stopped on the
             // other.
@@ -763,7 +757,7 @@ class ScreenViewerModel(
                 )
             )
             val opened = CoreClient.remote(
-                peer,
+                destination,
                 "screen.transfer.open",
                 buildJsonObject {
                     put("id", id); put("name", file.name)
@@ -784,6 +778,7 @@ class ScreenViewerModel(
                 var skipped = 0L
                 val discard = ByteArray(8192)
                 while (skipped < offset) {
+                    currentCoroutineContext().ensureActive()
                     val want = minOf(discard.size.toLong(), offset - skipped).toInt()
                     val read = stream.read(discard, 0, want)
                     if (read <= 0) throw IOException(L10n.text("android.screenviewermodel.the_file_changed_during_upload.ed47b50e"))
@@ -791,11 +786,12 @@ class ScreenViewerModel(
                 }
                 val buffer = ByteArray(chunkBytes)
                 while (true) {
+                    currentCoroutineContext().ensureActive()
                     val read = stream.read(buffer)
                     if (read <= 0) break
                     val payload = Base64.encodeToString(buffer.copyOf(read), Base64.NO_WRAP)
                     val sent = CoreClient.remote(
-                        peer,
+                        destination,
                         "screen.transfer.chunk",
                         buildJsonObject { put("id", id); put("offset", offset); put("data", payload) },
                     ) as JsonObject
@@ -804,12 +800,12 @@ class ScreenViewerModel(
                     transferProgress = if (size == 0L) 1f else offset.toFloat() / size.toFloat()
                 }
             }
-            CoreClient.remote(peer, "screen.transfer.finish", buildJsonObject { put("id", id) })
+            CoreClient.remote(destination, "screen.transfer.finish", buildJsonObject { put("id", id) })
             transferProgress = null
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
                 runCatching {
-                    CoreClient.remote(peer, "screen.transfer.cancel", buildJsonObject { put("id", id) })
+                    CoreClient.remote(destination, "screen.transfer.cancel", buildJsonObject { put("id", id) })
                 }
             }
             transferProgress = null

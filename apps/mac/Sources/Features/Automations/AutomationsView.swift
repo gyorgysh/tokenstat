@@ -720,7 +720,7 @@ struct AutomationsView: View {
     /// Seconds a run took, or has taken so far.
     private func seconds(of run: RunRecord) -> Double {
         guard let ended = run.endedAtMs else { return 0 }
-        return max(0, Double(ended - run.startedAtMs) / 1000)
+        return max(0, (Double(ended) - Double(run.startedAtMs)) / 1000)
     }
 
     static func statusTint(_ status: String) -> Color {
@@ -852,8 +852,7 @@ struct NewAutomationSheet: View {
     /// The mask of a multi-day weekly pick, kept unless the day menu is used.
     @State private var weeklyDays = 0
     @State private var weeklyDayEdited = false
-    @State private var budgetMinutes = "180"
-    @State private var noTimeLimit = false
+    @State private var budgetFields = AutomationQueueDraft()
     @State private var working = false
     @State private var step = 0
     @State private var jobRevision: UInt64 = 0
@@ -1031,11 +1030,7 @@ struct NewAutomationSheet: View {
                 workspaceID = model.scope ?? folders.first?.id ?? ""
             }
             if existing == nil && template == nil {
-                applyBudget(
-                    model.queueNoLimit
-                        ? 0
-                        : min(UInt64(model.queueBudgetMinutes) ?? 180, UInt64.max / 60) * 60
-                )
+                applyBudget(model.queueBudgetSeconds ?? 10_800)
             }
         }
         .onChange(of: backendID) { old, new in
@@ -1189,13 +1184,13 @@ struct NewAutomationSheet: View {
                     Text(L10n.text("apple.automationsview.time_limit.e592a9ca"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
-                    TextField("180", text: $budgetMinutes)
+                    TextField("180", text: $budgetFields.budgetMinutes)
                         .frame(width: 56)
-                        .disabled(noTimeLimit)
+                        .disabled(budgetFields.noLimit)
                     Text(L10n.text("apple.automationsview.minutes.90e63d85"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
-                    BrandToggleChip(title: L10n.text("apple.automationsview.no_limit.f7fcff0d"), isOn: $noTimeLimit)
+                    BrandToggleChip(title: L10n.text("apple.automationsview.no_limit.f7fcff0d"), isOn: $budgetFields.noLimit)
                 }
             }
         }
@@ -1500,24 +1495,16 @@ struct NewAutomationSheet: View {
             if scheduleKind == .custom, (customDays & 0b0111_1111) == 0 {
                 return false
             }
-            return canCreate
+            return canCreate && budgetFields.budgetSeconds != nil
         }
-    }
-
-    private var savedBudget: UInt64 {
-        if noTimeLimit { return 0 }
-        let minutes = min(UInt64(budgetMinutes) ?? 180, UInt64.max / 60)
-        return max(minutes, 1) * 60
     }
 
     private func applyBudget(_ seconds: UInt64) {
-        noTimeLimit = seconds == 0
-        if seconds > 0 {
-            budgetMinutes = String(max(1, seconds / 60))
-        }
+        budgetFields = AutomationQueueDraft(AutomationQueue(defaultBudgetSeconds: seconds, maxConcurrent: 2))
     }
 
     private func save() async {
+        guard let savedBudget = budgetFields.budgetSeconds else { return }
         let spec = builtSchedule()
         if let existing {
             await model.update(Automation(

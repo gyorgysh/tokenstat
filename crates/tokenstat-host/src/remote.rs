@@ -2840,21 +2840,25 @@ fn dial_direct_candidates(
 
 pub(crate) fn remember_direct_address(peer_hex: &str, address: &str) -> Result<(), String> {
     let key = public_key_from_hex(peer_hex).map_err(|e| e.to_string())?;
-    let mut store = PeerStore::load().map_err(|e| e.to_string())?;
-    let peer = store
-        .get(&key)
-        .ok_or("that machine is not in this one's peer list")?
-        .clone();
-    if !store.is_approved(&key) {
-        return Err("that machine is not approved".into());
-    }
-    store.add_approved(
-        &key,
-        &peer.label,
-        Some(address),
-        &jiff::Timestamp::now().to_string(),
-    );
-    store.save().map_err(|e| e.to_string())
+    PeerStore::update(|store| {
+        let Some(peer) = store.get(&key).cloned() else {
+            return (
+                Err("that machine is not in this one's peer list".into()),
+                false,
+            );
+        };
+        if !store.is_approved(&key) {
+            return (Err("that machine is not approved".into()), false);
+        }
+        store.seen(
+            &key,
+            &peer.label,
+            Some(address),
+            &jiff::Timestamp::now().to_string(),
+        );
+        (Ok(()), true)
+    })
+    .map_err(|e| e.to_string())?
 }
 
 fn settings() -> RemoteSettings {
@@ -3478,12 +3482,14 @@ mod tests {
             let remote = MachineIdentity::from_secret([52; 32]);
             let key = remote.public_key();
             let peer = remote.public_key_hex();
-            let mut store = PeerStore::load().unwrap();
-            for approved in [key, local.public_key()] {
-                store.seen(&approved, "Test peer", None, "2026-09-10T00:00:00Z");
-                assert!(store.approve(&approved));
-            }
-            store.save().unwrap();
+            PeerStore::update(|store| {
+                for approved in [key, local.public_key()] {
+                    store.seen(&approved, "Test peer", None, "2026-09-10T00:00:00Z");
+                    assert!(store.approve(&approved));
+                }
+                ((), true)
+            })
+            .unwrap();
             let server = tokenstat_remote::Server::bind("127.0.0.1:0", &remote).unwrap();
             let address = server.local_address().unwrap();
             let worker = std::thread::spawn(move || {
@@ -3514,10 +3520,11 @@ mod tests {
             .unwrap();
             checkin(&peer, ChannelPurpose::Unknown, connection);
             assert!(call_peer(&peer, "protocol", "{}").is_ok());
-            // A separate load/save models another process revoking the peer.
-            let mut changed = PeerStore::load().unwrap();
-            assert!(changed.revoke(&key));
-            changed.save().unwrap();
+            PeerStore::update(|changed| {
+                assert!(changed.revoke(&key));
+                ((), true)
+            })
+            .unwrap();
             let error = call_peer(&peer, "protocol", "{}").unwrap_err();
             assert!(error.contains("not approved"), "{error}");
             assert!(!pool().lock().unwrap().keys().any(|(held, _)| held == &peer));
@@ -3573,15 +3580,17 @@ mod tests {
         let host = MachineIdentity::load_or_create().unwrap();
         let phone = MachineIdentity::from_secret([41; 32]);
         let phone_key = phone.public_key_hex();
-        let mut peers = PeerStore::load().unwrap();
-        peers.seen(
-            &phone.public_key(),
-            "QA phone",
-            None,
-            "2026-09-10T00:00:00Z",
-        );
-        assert!(peers.approve(&phone.public_key()));
-        peers.save().unwrap();
+        PeerStore::update(|peers| {
+            peers.seen(
+                &phone.public_key(),
+                "QA phone",
+                None,
+                "2026-09-10T00:00:00Z",
+            );
+            assert!(peers.approve(&phone.public_key()));
+            ((), true)
+        })
+        .unwrap();
         // The grant never fetches: the label is best-effort from the held
         // directory, so this isolated test opens no relay connection.
         crate::workspace_policy::set_allowed_by_with_label(

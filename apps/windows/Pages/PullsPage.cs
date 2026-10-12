@@ -30,6 +30,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
     private readonly ComboBox _scope = new() { MinWidth = 145 };
     private readonly ComboBox _state = new() { MinWidth = 120 };
     private CancellationTokenSource? _loginPoll;
+    private int _loadGeneration;
     private string _folderName = "";
     private string _repo = "";
     private string _login = "";
@@ -57,7 +58,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         };
         RenderInspector();
         Loaded += async (_, _) => await LoadAsync();
-        Unloaded += (_, _) => _loginPoll?.Cancel();
+        Unloaded += (_, _) => { ++_loadGeneration; _loginPoll?.Cancel(); };
     }
 
     public event Action? ToolbarChanged;
@@ -204,13 +205,16 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task LoadAsync(bool refresh = false)
     {
+        var generation = ++_loadGeneration;
         _root.Children.Clear();
         _openNumber = null;
         _detail = null;
         _root.Children.Add(Header(L10n.Text("windows.pullspage.review_the_work_around_this_branch.4ca99549")));
         var skeleton = Motion.SkeletonCard();
         _root.Children.Add(skeleton);
-        _folderName = await FolderNameAsync();
+        var folderName = await FolderNameAsync();
+        if (generation != _loadGeneration || !IsLoaded) return;
+        _folderName = folderName;
         RaiseToolbarChanged();
         RenderInspector();
         UIElement? rows = null;
@@ -219,6 +223,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             var availability = await CallPullsAsync(
                 "pulls.availability",
                 new JsonObject { ["workspaceId"] = _workspaceId });
+            if (generation != _loadGeneration || !IsLoaded) return;
             _root.Children.Remove(skeleton);
             var state = Format.Text(availability, "state");
             switch (state)
@@ -239,7 +244,8 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                     _root.Children.Add(FilterBar());
                     rows = Motion.SkeletonCard();
                     _root.Children.Add(rows);
-                    await AppendListAsync(refresh);
+                    await AppendListAsync(refresh, generation);
+                    if (generation != _loadGeneration || !IsLoaded) return;
                     _root.Children.Remove(rows);
                     rows = null;
                     break;
@@ -272,6 +278,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         }
         catch (Exception ex)
         {
+            if (generation != _loadGeneration || !IsLoaded) return;
             _root.Children.Remove(skeleton);
             if (rows is not null)
             {
@@ -360,8 +367,11 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         };
     }
 
-    private static UIElement LabeledControl(string label, Control control)
+    private readonly Dictionary<Control, Panel> _filterParents = new();
+
+    private UIElement LabeledControl(string label, Control control)
     {
+        if (_filterParents.Remove(control, out var previous)) previous.Children.Remove(control);
         var stack = new StackPanel { Spacing = Theme.SpaceXs };
         stack.Children.Add(new TextBlock
         {
@@ -371,6 +381,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             Opacity = 0.58,
         });
         stack.Children.Add(control);
+        _filterParents[control] = stack;
         return stack;
     }
 
@@ -383,7 +394,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         await LoadAsync();
     }
 
-    private async Task AppendListAsync(bool refresh)
+    private async Task AppendListAsync(bool refresh, int generation)
     {
         var scopes = new[] { "all", "mine", "assigned", "reviewRequested" };
         var states = new[] { "open", "merged", "closed", "draft" };
@@ -395,6 +406,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             ["limit"] = 40,
             ["refresh"] = refresh,
         });
+        if (generation != _loadGeneration || !IsLoaded) return;
         var rows = listed as JsonArray;
         _listCount = rows?.Count ?? 0;
         RenderInspector();
@@ -507,10 +519,16 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task StartLoginAsync()
     {
-        _loginPoll?.Cancel();
+        if (_loginPoll is not null) return;
+        using var polling = new CancellationTokenSource();
+        _loginPoll = polling;
+        var token = polling.Token;
+        var confirmed = false;
         try
         {
             var started = await AppServices.Host.CallAsync("pulls.signIn", new JsonObject());
+            token.ThrowIfCancellationRequested();
+            if (!IsLoaded) return;
             var url = Format.Text(started, "openUrl");
             var code = Format.Text(started, "userCode");
             if (!string.IsNullOrEmpty(url)) Open(url);
@@ -520,17 +538,17 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                     : L10n.Text("windows.pullspage.enter_0_in_the_github_page_that_just_opene.69c61db4", $"{code}"),
                 Theme.Accent,
                 Symbol.Contact));
-            _loginPoll = new CancellationTokenSource();
             _root.Children.Insert(2, ActionIconGlyph.Button(
                 L10n.Text("windows.pullspage.cancel_sign_in.9effa0b7"), ActionIcon.Dismiss, async (_, _) => await CancelLoginAsync()));
-            var token = _loginPoll.Token;
             while (!token.IsCancellationRequested)
             {
                 var interval = Math.Max(1, Format.Long(started, "interval"));
                 await Task.Delay(TimeSpan.FromSeconds(interval), token);
                 var polled = await AppServices.Host.CallAsync("pulls.signInPoll", new JsonObject());
+                token.ThrowIfCancellationRequested();
                 if (Format.Text(polled, "state") == "confirmed")
                 {
+                    confirmed = true;
                     await LoadAsync();
                     return;
                 }
@@ -541,7 +559,16 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _root.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
+            if (IsLoaded) _root.Children.Insert(Math.Min(1, _root.Children.Count), Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
+        }
+        finally
+        {
+            if (!confirmed)
+            {
+                try { await AppServices.Host.CallAsync("pulls.cancelSignIn", new JsonObject()); }
+                catch { }
+            }
+            if (ReferenceEquals(_loginPoll, polling)) _loginPoll = null;
         }
     }
 
@@ -564,6 +591,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task ShowDetailAsync(long number, bool refresh = false)
     {
+        var generation = ++_loadGeneration;
         _root.Children.Clear();
         _openNumber = number;
         _detail = null;
@@ -582,6 +610,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                 ["workspaceId"] = _workspaceId, ["number"] = number, ["refresh"] = refresh,
             });
             await Task.WhenAll(detailTask, timelineTask);
+            if (generation != _loadGeneration || !IsLoaded) return;
             var detail = detailTask.Result;
             var timeline = timelineTask.Result;
             _detail = detail;
@@ -621,6 +650,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         }
         catch (Exception ex)
         {
+            if (generation != _loadGeneration || !IsLoaded) return;
             _root.Children.Add(Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
         }
     }
@@ -698,15 +728,15 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         composerActions.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("windows.pullspage.comment.44f5e3fb"), ActionIcon.Comment, async (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(comment.Text)) return;
-            await WriteAsync("pulls.comment", number, new JsonObject { ["body"] = comment.Text.Trim() });
+            if (!await WriteAsync("pulls.comment", number, new JsonObject { ["body"] = comment.Text.Trim() }, comment)) return;
             await ShowDetailAsync(number, true);
         }));
         composerActions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.pullspage.approve.6007acbe"), ActionIcon.Approve, async (_, _) =>
         {
-            await WriteAsync("pulls.review", number, new JsonObject
+            if (!await WriteAsync("pulls.review", number, new JsonObject
             {
                 ["verdict"] = "approve", ["body"] = comment.Text.Trim(),
-            });
+            }, comment)) return;
             await ShowDetailAsync(number, true);
         }));
         composerActions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.pullspage.request_changes.cb5d9f98"), ActionIcon.Comment, async (_, _) =>
@@ -719,10 +749,10 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                     Symbol.Important));
                 return;
             }
-            await WriteAsync("pulls.review", number, new JsonObject
+            if (!await WriteAsync("pulls.review", number, new JsonObject
             {
                 ["verdict"] = "requestChanges", ["body"] = comment.Text.Trim(),
-            });
+            }, comment)) return;
             await ShowDetailAsync(number, true);
         }));
         composer.Children.Add(composerActions);
@@ -887,7 +917,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
         var values = new[] { "merge", "squash", "rebase" };
-        await WriteAsync("pulls.merge", number, new JsonObject { ["mergeMethod"] = values[Math.Max(0, method.SelectedIndex)] });
+        if (!await WriteAsync("pulls.merge", number, new JsonObject { ["mergeMethod"] = values[Math.Max(0, method.SelectedIndex)] })) return;
         await ShowDetailAsync(number, true);
     }
 
@@ -901,15 +931,35 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             DefaultButton = ContentDialogButton.Close,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
-        await WriteAsync(method, number, new JsonObject());
+        if (!await WriteAsync(method, number, new JsonObject())) return;
         await ShowDetailAsync(number, true);
     }
 
-    private async Task WriteAsync(string method, long number, JsonObject extra)
+    private bool _writing;
+    private async Task<bool> WriteAsync(string method, long number, JsonObject extra, TextBox? draft = null)
     {
-        extra["workspaceId"] = _workspaceId;
-        extra["number"] = number;
-        await CallPullsAsync(method, extra);
+        if (_writing || !IsLoaded) return false;
+        _writing = true;
+        var generation = _loadGeneration;
+        if (draft is not null) draft.IsEnabled = false;
+        try
+        {
+            extra["workspaceId"] = _workspaceId;
+            extra["number"] = number;
+            await CallPullsAsync(method, extra);
+            return IsLoaded && generation == _loadGeneration;
+        }
+        catch (Exception ex)
+        {
+            if (IsLoaded && generation == _loadGeneration)
+                _root.Children.Insert(Math.Min(1, _root.Children.Count), Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
+            return false;
+        }
+        finally
+        {
+            _writing = false;
+            if (draft is not null) draft.IsEnabled = true;
+        }
     }
 
     private static Windows.UI.Color StateTint(string state, bool draft) => draft

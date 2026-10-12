@@ -65,6 +65,17 @@ class DeviceMarksTest {
     }
 
     @Test
+    fun serverDatesPreserveOffsetMinutesAndFractionalSeconds() {
+        val utc = parseServerDate("2026-09-16T12:00:00.123Z")
+        assertEquals(utc, parseServerDate("2026-09-16T17:30:00.123456789+05:30"))
+        assertEquals(utc, parseServerDate("2026-09-16T08:30:00.123-03:30"))
+        assertEquals(utc, parseServerDate("2026-09-16T12:00:00.123"))
+        assertEquals(parseServerDate("2026-09-16T12:00:00Z"), parseServerDate("2026-09-16 12:00:00"))
+        assertNull(parseServerDate("2026-09-16T12:00:00garbage"))
+        assertNull(parseServerDate("2026-02-30 12:00:00"))
+    }
+
+    @Test
     fun glyphsMatchClientDeviceIcon() {
         // The same ladder `ClientDeviceIcon.symbol` climbs: tablets and
         // phones by name, then laptop, desktop, and rack by name or platform.

@@ -314,11 +314,14 @@ pub(super) fn draw_input(f: &mut Frame<'_>, area: Rect, app: &App) {
         ),
         Span::raw(app.input.clone()),
     ]);
-    f.render_widget(Paragraph::new(display), area);
+    let prefix = ui::display_width(&app.input[..app.cursor])
+        .saturating_add(2)
+        .min(u16::MAX as usize) as u16;
+    let scroll = prefix.saturating_sub(area.width.saturating_sub(1));
+    f.render_widget(Paragraph::new(display).scroll((0, scroll)), area);
 
-    let prefix = app.input[..app.cursor].chars().count() as u16;
-    let x = area.x.saturating_add(2).saturating_add(prefix);
-    if x < area.x + area.width {
+    let x = area.x.saturating_add(prefix.saturating_sub(scroll));
+    if area.height > 0 && x < area.x.saturating_add(area.width) {
         f.set_cursor_position(Position { x, y: area.y });
     }
 }

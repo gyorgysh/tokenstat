@@ -42,6 +42,7 @@ enum ClientJobCopy {
 
     static func budget(_ seconds: UInt64) -> String {
         if seconds == 0 { return L10n.text("apple.clientjobsupport.no_time_limit.436b4b94") }
+        if seconds % 60 != 0 { return L10n.text("apple.jobscheduleediting.0_seconds.e549e94b", "\(seconds)") }
         let minutes = seconds / 60
         if minutes >= 60, minutes % 60 == 0 {
             let hours = minutes / 60

@@ -37,6 +37,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     private string _summary = "";
     private DispatcherQueueTimer? _sessionsPoll;
     private bool _sessionsLoading;
+    private StackPanel? _sessionsColumn;
     private bool _showingLauncherCatalog;
     private string? _reviewPath;
     private bool _loading;
@@ -875,6 +876,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         column.Children.Add(launchers);
         await LoadLaunchersAsync(launchers);
         _sessionsHost.Children.Clear();
+        _sessionsColumn?.Children.Remove(_sessionsHost);
+        _sessionsColumn = column;
         column.Children.Add(_sessionsHost);
         await RefreshSessionsAsync();
         StartSessionsPoll();
@@ -1162,6 +1165,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 
     private void StartSessionsPoll()
     {
+        if (!IsLoaded) return;
         StopSessionsPoll();
         _sessionsPoll = DispatcherQueue.CreateTimer();
         _sessionsPoll.Interval = TimeSpan.FromSeconds(2);

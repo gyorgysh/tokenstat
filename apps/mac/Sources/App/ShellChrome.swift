@@ -363,6 +363,7 @@ struct ColumnResizeHandle: View {
 
     @State private var start: Double?
     @State private var cursorPushed = false
+    @State private var isHovering = false
 
     var body: some View {
         ZStack {
@@ -374,6 +375,7 @@ struct ColumnResizeHandle: View {
         .frame(maxHeight: .infinity)
         .contentShape(.rect)
         .onHover { hovering in
+            isHovering = hovering
             if hovering, !cursorPushed {
                 NSCursor.resizeLeftRight.push()
                 cursorPushed = true
@@ -394,6 +396,10 @@ struct ColumnResizeHandle: View {
                     if let liveWidth { width = liveWidth }
                     liveWidth = nil
                     start = nil
+                    if !isHovering, cursorPushed {
+                        NSCursor.pop()
+                        cursorPushed = false
+                    }
                 }
         )
         // Double-click puts the column back where it started.

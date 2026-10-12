@@ -14,6 +14,7 @@ import SwiftUI
 /// badge could only show one line at a time. Save is the only write.
 struct HarnessConfigView: View {
     let profile: LaunchProfile
+    var peer: String? = nil
     var onClose: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
@@ -58,7 +59,7 @@ struct HarnessConfigView: View {
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                         ForEach(config.fields) { field in
-                            fieldRow(field)
+                            fieldRow(field).disabled(saving)
                         }
                     }
                 } else {
@@ -210,7 +211,13 @@ struct HarnessConfigView: View {
         loading = true
         error = nil
         do {
-            let loaded = try await Bridge.harnessConfig(id: profile.id)
+            let loaded: HarnessConfig
+            if let peer {
+                loaded = try await Bridge.onPeer(peer, "harness.config.get", ["id": profile.id], as: HarnessConfig.self)
+            } else {
+                loaded = try await Bridge.harnessConfig(id: profile.id)
+            }
+            guard !Task.isCancelled else { return }
             config = loaded
             draft = Dictionary(uniqueKeysWithValues: loaded.fields.map {
                 ($0.key, $0.value ?? "")
@@ -222,7 +229,7 @@ struct HarnessConfigView: View {
     }
 
     private func save() async {
-        guard let config, dirty else { return }
+        guard let config, dirty, !saving else { return }
         saving = true
         error = nil
         var values: [String: String] = [:]
@@ -233,7 +240,12 @@ struct HarnessConfigView: View {
             }
         }
         do {
-            let saved = try await Bridge.saveHarnessConfig(id: profile.id, values: values)
+            let saved: HarnessConfig
+            if let peer {
+                saved = try await Bridge.onPeer(peer, "harness.config.set", ["id": profile.id, "values": values], as: HarnessConfig.self)
+            } else {
+                saved = try await Bridge.saveHarnessConfig(id: profile.id, values: values)
+            }
             self.config = saved
             draft = Dictionary(uniqueKeysWithValues: saved.fields.map {
                 ($0.key, $0.value ?? "")

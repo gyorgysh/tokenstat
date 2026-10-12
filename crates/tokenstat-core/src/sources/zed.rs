@@ -140,8 +140,15 @@ pub fn parse_db(path: &Path) -> ParseOutput {
     };
 
     for row in rows {
-        let Ok((id, _summary, updated_at, data_type, data)) = row else {
-            continue;
+        let (id, _summary, updated_at, data_type, data) = match row {
+            Ok(row) => row,
+            Err(error) => {
+                out.warnings.push(Warning::Unreadable {
+                    path: path.to_path_buf(),
+                    reason: error.to_string(),
+                });
+                continue;
+            }
         };
         let Some(data) = data else {
             continue;
@@ -396,6 +403,59 @@ mod tests {
             ],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn later_request_details_replace_cumulative_usage_and_shrinking_remainders() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("threads.db");
+        write_thread_db(&path, r#"{"cumulative_token_usage":{"input_tokens":100}}"#);
+        let mut archive = crate::store::Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        archive
+            .replace_source_sessions(SourceId::Zed, &parse_db(&path).events, &tz)
+            .unwrap();
+        for requests in [
+            r#"{"a":{"input_tokens":30}}"#,
+            r#"{"a":{"input_tokens":30},"b":{"input_tokens":70}}"#,
+        ] {
+            let data = format!(
+                r#"{{"cumulative_token_usage":{{"input_tokens":100}},"request_token_usage":{requests}}}"#
+            );
+            Connection::open(&path)
+                .unwrap()
+                .execute(
+                    "UPDATE threads SET data_type = 'json', data = ?1",
+                    [data.as_bytes()],
+                )
+                .unwrap();
+            archive
+                .replace_source_sessions(SourceId::Zed, &parse_db(&path).events, &tz)
+                .unwrap();
+            assert_eq!(
+                archive
+                    .totals(&crate::store::Query::default())
+                    .unwrap()
+                    .counters
+                    .input_fresh,
+                Some(100)
+            );
+        }
+    }
+
+    #[test]
+    fn an_undecodable_database_row_warns_instead_of_committing_a_partial_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("threads.db");
+        write_thread_db(&path, "{}");
+        Connection::open(&path)
+            .unwrap()
+            .execute("UPDATE threads SET data = 'invalid blob'", [])
+            .unwrap();
+        assert!(matches!(
+            parse_db(&path).warnings.as_slice(),
+            [Warning::Unreadable { .. }]
+        ));
     }
 
     #[test]

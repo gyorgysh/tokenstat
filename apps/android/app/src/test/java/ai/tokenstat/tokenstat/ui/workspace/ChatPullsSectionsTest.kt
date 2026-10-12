@@ -48,4 +48,32 @@ class ChatPullsSectionsTest {
         assertEquals(listOf("a", "b"), chatModelOptions(backend, "b"))
         assertEquals(listOf("a"), chatModelOptions(backend, null))
     }
+
+    @Test
+    fun `delivery claims current saved text and never resurrects a removed message`() {
+        val items = mutableListOf(ai.tokenstat.tokenstat.ui.logic.QueuedMessage("one", "edited", expectedRevision = 3))
+        assertNull(prepareQueuedDelivery(items, "removed", 10, "replacement"))
+        val attempt = prepareQueuedDelivery(items, "one", 10, "replacement")!!
+        assertEquals("edited", attempt.text)
+        assertEquals(attempt, items.single())
+        assertEquals(ai.tokenstat.tokenstat.ui.logic.ChatDelivery.Sending, attempt.delivery)
+        assertNull(prepareQueuedDelivery(items, "one", 11, "replacement"))
+    }
+
+    @Test
+    fun `edited retry rotates receipt identity while review stays blocked`() {
+        val items = mutableListOf(ai.tokenstat.tokenstat.ui.logic.QueuedMessage(
+            "old", "edited", expectedRevision = 3, attemptedAtMs = 1, firstAttemptAtMs = 1))
+        val attempt = prepareQueuedDelivery(items, "old", 10, "new")!!
+        assertEquals("new", attempt.id)
+        assertEquals(10L, attempt.firstAttemptAtMs)
+        items[0] = attempt.copy(delivery = ai.tokenstat.tokenstat.ui.logic.ChatDelivery.NeedsReview)
+        assertNull(prepareQueuedDelivery(items, "new", 11, "other"))
+    }
+
+    @Test
+    fun `failed note capture retains writing typed during its save`() {
+        assertEquals("failed\n\nnew writing", restoreFailedNoteDraft("failed", "new writing"))
+        assertEquals("failed", restoreFailedNoteDraft("failed", "  "))
+    }
 }

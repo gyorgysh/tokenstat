@@ -33,6 +33,7 @@ enum ClientRefresh {
     static let minimumInterval: TimeInterval = 5
 
     private static var lastRun: [String: Date] = [:]
+    private static var inFlight: Set<String> = []
 
     /// Announce a refresh to the rest of the app. Safe to call on its own for
     /// a screen with nothing to rate limit.
@@ -47,15 +48,19 @@ enum ClientRefresh {
     /// scoped to the signed-in account, so the first pull after an account
     /// switch is never swallowed by the outgoing account's timestamp.
     static func pull(_ key: String, work: () async -> Void) async {
+        guard !Task.isCancelled else { return }
         began()
         let window = scoped(key)
         let now = Date()
-        if let last = lastRun[window], now.timeIntervalSince(last) < minimumInterval {
+        lastRun = lastRun.filter { now.timeIntervalSince($0.value) < minimumInterval }
+        if inFlight.contains(window) || lastRun[window] != nil {
             // Long enough that the spinner reads as a refresh that happened,
             // short enough that nobody waits for it.
             try? await Task.sleep(for: .milliseconds(450))
             return
         }
+        inFlight.insert(window)
+        defer { inFlight.remove(window) }
         await work()
         // Stamped on the way out, not on the way in. A slow fetch would
         // otherwise spend most of its window running, and the pull somebody

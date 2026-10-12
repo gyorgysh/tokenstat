@@ -138,6 +138,9 @@ pub fn search(
             ) {
                 hits.push(hit);
                 rank(&mut hits);
+                if hits.len() > MAX_DISPLAYED {
+                    coverage.partial = true;
+                }
                 hits.truncate(MAX_DISPLAYED);
             }
         }
@@ -209,6 +212,9 @@ pub fn search(
             // Only the best displayed destinations are retained, even on hosts
             // with many conversations. Text snapshots drop after each iteration.
             rank(&mut hits);
+            if hits.len() > MAX_DISPLAYED {
+                coverage.partial = true;
+            }
             hits.truncate(MAX_DISPLAYED);
         }
     }
@@ -216,6 +222,9 @@ pub fn search(
         return Err("workspace access is no longer available".into());
     }
     rank(&mut hits);
+    if hits.len() > MAX_DISPLAYED {
+        coverage.partial = true;
+    }
     hits.truncate(MAX_DISPLAYED);
     // A deletion or edit after an earlier snapshot must not publish its old
     // excerpt. Reject this generation and let the caller retain/retry results.

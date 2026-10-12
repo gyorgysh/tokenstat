@@ -8,6 +8,7 @@
 //! Fallback: pasted `WorkosCursorSessionToken` against the dashboard CSV export.
 //! Tokens stay on this machine. They are never written into the archive.
 
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 
 use serde::Deserialize;
@@ -379,27 +380,39 @@ pub fn fetch_into(
     } else {
         "usage.csv"
     };
-    let cache = cache_path(Vendor::Cursor, cache_name)?;
+    let account = account_key(&token);
+    let cache = cache_path(Vendor::Cursor, &format!("{account}-{cache_name}"))?;
 
-    let (events, from_cache) = if !force && cache_is_fresh(&cache, FETCH_TTL) {
-        let text = fs::read_to_string(&cache)?;
-        let events = if use_bearer {
-            parse_events_json(&text)?
+    let parse = |raw: &str| {
+        if use_bearer {
+            parse_events_json(raw)
         } else {
-            parse_csv(&text)?
-        };
+            parse_csv(raw)
+        }
+    };
+    // A corrupt cache is disposable; do not make somebody wait for its TTL.
+    let cached = (!force && cache_is_fresh(&cache, FETCH_TTL))
+        .then(|| {
+            fs::read_to_string(&cache)
+                .ok()
+                .and_then(|raw| parse(&raw).ok())
+        })
+        .flatten();
+    let (mut events, from_cache) = if let Some(events) = cached {
         (events, true)
     } else {
-        let (events, raw) = if use_bearer {
-            let raw = download_events_json(&token)?;
-            (parse_events_json(&raw)?, raw)
+        let raw = if use_bearer {
+            download_events_json(&token)?
         } else {
-            let raw = download_csv(&token)?;
-            (parse_csv(&raw)?, raw)
+            download_csv(&token)?
         };
+        let events = parse(&raw)?;
         crate::snapshot::write_private_atomically(&cache, &raw).map_err(|e| anyhow::anyhow!(e))?;
         (events, false)
     };
+    if !use_bearer {
+        reuse_archived_csv_ids(store, &account, &mut events)?;
+    }
 
     let n = events.len();
     store.insert_events(&events, tz)?;
@@ -508,7 +521,7 @@ fn download_events_json(access_token: &str) -> anyhow::Result<String> {
 struct EventsResponse {
     #[serde(rename = "totalUsageEventsCount", default)]
     total_usage_events_count: u64,
-    #[serde(rename = "usageEventsDisplay", default)]
+    #[serde(rename = "usageEventsDisplay")]
     usage_events_display: Vec<serde_json::Value>,
 }
 
@@ -563,8 +576,13 @@ fn parse_events_json(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
             .as_deref()
             .filter(|s| !s.is_empty())
             .unwrap_or("cursor-unknown");
-        let ts_raw = ev.timestamp.as_deref().unwrap_or("0");
-        let ts_ms: i64 = ts_raw.parse().unwrap_or(0);
+        let ts_raw = ev
+            .timestamp
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("Cursor usage event has no timestamp"))?;
+        let ts_ms: i64 = ts_raw
+            .parse()
+            .map_err(|_| anyhow::anyhow!("Cursor usage event has an invalid timestamp"))?;
         let session = ev
             .conversation_id
             .as_deref()
@@ -689,31 +707,41 @@ pub fn parse_csv(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
     let cache_read_i = idx("Cache Read");
     let output_i = idx("Output Tokens");
 
+    if [with_write_i, without_write_i, cache_read_i, output_i]
+        .iter()
+        .all(Option::is_none)
+    {
+        anyhow::bail!("Cursor CSV has no token columns");
+    }
     let mut events = Vec::new();
-    for (row_n, line) in lines.enumerate() {
+    let mut occurrences = HashMap::<String, usize>::new();
+    for line in lines {
         if line.trim().is_empty() {
             continue;
         }
-        let fields = split_csv_line(line);
-        if fields.len() <= model_i.max(date_i) {
-            continue;
-        }
+        let fields = split_csv_line(line)?;
+        anyhow::ensure!(
+            fields.len() == cols.len(),
+            "Cursor CSV row has the wrong number of columns"
+        );
         let date = fields[date_i].trim();
         let model = fields[model_i].trim();
         if date.is_empty() || model.is_empty() {
             continue;
         }
 
-        let num = |i: Option<usize>| -> u64 {
-            i.and_then(|i| fields.get(i))
-                .and_then(|s| parse_number(s))
-                .unwrap_or(0)
+        let num = |i: Option<usize>| -> anyhow::Result<u64> {
+            match i.and_then(|i| fields.get(i)).map(|s| s.trim()) {
+                None | Some("") => Ok(0),
+                Some(value) => parse_number(value)
+                    .ok_or_else(|| anyhow::anyhow!("Cursor CSV has an invalid token count")),
+            }
         };
 
-        let with_write = num(with_write_i);
-        let without_write = num(without_write_i);
-        let cache_read = num(cache_read_i);
-        let output = num(output_i);
+        let with_write = num(with_write_i)?;
+        let without_write = num(without_write_i)?;
+        let cache_read = num(cache_read_i)?;
+        let output = num(output_i)?;
         let cache_write = with_write.saturating_sub(without_write);
         let input_fresh = without_write;
 
@@ -721,16 +749,25 @@ pub fn parse_csv(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
             continue;
         }
 
-        let ts_ms = date_to_ms(date).unwrap_or(0);
-        let id = EventId::derive(&[
+        let ts_ms =
+            date_to_ms(date).ok_or_else(|| anyhow::anyhow!("Cursor CSV has an invalid date"))?;
+        let fingerprint = EventId::derive(&[
             "cursor",
-            date,
+            "csv-v2",
+            &ts_ms.to_string(),
             model,
-            &row_n.to_string(),
             &input_fresh.to_string(),
             &output.to_string(),
             &cache_read.to_string(),
-        ]);
+            &cache_write.to_string(),
+        ])
+        .to_string();
+        // Identical real requests are a multiset, not one request. The ordinal
+        // is within identical content, so unrelated prepends/reorders do not
+        // change an existing request's identity.
+        let occurrence = occurrences.entry(fingerprint.clone()).or_default();
+        let id = EventId::derive(&[&fingerprint, &occurrence.to_string()]);
+        *occurrence += 1;
 
         events.push(UsageEvent {
             id,
@@ -754,39 +791,255 @@ pub fn parse_csv(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
     Ok(events)
 }
 
-fn split_csv_line(line: &str) -> Vec<String> {
+fn split_csv_line(line: &str) -> anyhow::Result<Vec<String>> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut in_quotes = false;
-    for c in line.chars() {
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
         match c {
-            '"' => in_quotes = !in_quotes,
-            ',' if !in_quotes => {
-                out.push(std::mem::take(&mut cur));
+            '"' if in_quotes && chars.peek() == Some(&'"') => {
+                chars.next();
+                cur.push('"');
             }
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => out.push(std::mem::take(&mut cur)),
             _ => cur.push(c),
         }
     }
+    anyhow::ensure!(!in_quotes, "Cursor CSV has an unterminated quoted field");
     out.push(cur);
-    out
+    Ok(out)
 }
 
 fn parse_number(s: &str) -> Option<u64> {
-    let cleaned: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
-    cleaned.parse().ok()
+    let value = s.trim();
+    let groups: Vec<_> = value.split(',').collect();
+    if groups.is_empty()
+        || groups
+            .iter()
+            .any(|g| g.is_empty() || !g.bytes().all(|c| c.is_ascii_digit()))
+    {
+        return None;
+    }
+    if groups.len() > 1 && (groups[0].len() > 3 || groups[1..].iter().any(|g| g.len() != 3)) {
+        return None;
+    }
+    groups.concat().parse().ok()
 }
 
 fn date_to_ms(date: &str) -> Option<i64> {
-    // "2026-07-28" or "2026-07-28 12:34:56"
-    let day = date.get(..10)?;
-    let d = day.parse::<jiff::civil::Date>().ok()?;
-    let zdt = d.at(12, 0, 0, 0).to_zoned(jiff::tz::TimeZone::UTC).ok()?;
-    Some(zdt.timestamp().as_millisecond())
+    if let Ok(timestamp) = date.parse::<jiff::Timestamp>() {
+        return Some(timestamp.as_millisecond());
+    }
+    if let Ok(datetime) = date.parse::<jiff::civil::DateTime>() {
+        return Some(
+            datetime
+                .to_zoned(jiff::tz::TimeZone::UTC)
+                .ok()?
+                .timestamp()
+                .as_millisecond(),
+        );
+    }
+    // A date-only export has no time of day. Retain the historical noon
+    // convention rather than inventing a precise midnight request.
+    let day = date.parse::<jiff::civil::Date>().ok()?;
+    Some(
+        day.at(12, 0, 0, 0)
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .ok()?
+            .timestamp()
+            .as_millisecond(),
+    )
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct CsvAliases {
+    /// Legacy archive rows have no account provenance. Claim each at most
+    /// once, never erase it, and remember the exact new-id to old-id mapping.
+    claims: BTreeMap<String, String>,
+    aliases: BTreeMap<String, String>,
+}
+
+fn event_id_from_hex(hex: &str) -> Option<EventId> {
+    if hex.len() != 32 {
+        return None;
+    }
+    let mut bytes = [0; 16];
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(hex.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+    Some(EventId(bytes))
+}
+
+fn csv_row_key(session: &str, model: &str, counters: &Counters) -> String {
+    EventId::derive(&[
+        session,
+        model,
+        &counters.input_fresh.unwrap_or(0).to_string(),
+        &counters.output.unwrap_or(0).to_string(),
+        &counters.cache_read.unwrap_or(0).to_string(),
+        &counters.cache_write_5m.unwrap_or(0).to_string(),
+    ])
+    .to_string()
+}
+
+fn reuse_archived_csv_ids(
+    store: &Store,
+    account: &str,
+    events: &mut [UsageEvent],
+) -> anyhow::Result<()> {
+    const KEY: &str = "cursor.csv.v2.aliases";
+    let mut aliases: CsvAliases = store
+        .meta(KEY)?
+        .map(|raw| serde_json::from_str(&raw))
+        .transpose()?
+        .unwrap_or_default();
+    let archived = store.events(&tokenstat_core::Query {
+        project: Some("cursor".into()),
+        ..Default::default()
+    })?;
+    let existing: HashSet<_> = archived.iter().map(|row| row.id.clone()).collect();
+    let mut legacy = HashMap::<String, Vec<String>>::new();
+    for row in &archived {
+        if row.source != "cursor" || aliases.claims.contains_key(&row.id) {
+            continue;
+        }
+        // JSON requests use conversation IDs or epoch milliseconds as session.
+        // Old CSV sessions retained the original date, even though their stored
+        // timestamp discarded its time. Do not merge CSV with JSON guesses.
+        let Some(date) = row.session.strip_prefix("cursor:") else {
+            continue;
+        };
+        if date_to_ms(date).is_none() {
+            continue;
+        }
+        let json_id = EventId::derive(&[
+            "cursor",
+            "events",
+            &row.ts_ms.to_string(),
+            &row.model,
+            &row.session,
+            &row.counters.input_fresh.unwrap_or(0).to_string(),
+            &row.counters.output.unwrap_or(0).to_string(),
+            &row.counters.cache_read.unwrap_or(0).to_string(),
+            &row.counters.cache_write_5m.unwrap_or(0).to_string(),
+        ]);
+        if json_id.to_string() == row.id {
+            continue;
+        }
+        let key = csv_row_key(&row.session, &row.model, &row.counters);
+        legacy.entry(key).or_default().push(row.id.clone());
+    }
+    for candidates in legacy.values_mut() {
+        candidates.sort();
+    }
+    for event in events {
+        let canonical = EventId::derive(&["cursor", "csv-account", account, &event.id.to_string()]);
+        let canonical_text = canonical.to_string();
+        event.id = canonical;
+        if let Some(old) = aliases
+            .aliases
+            .get(&canonical_text)
+            .and_then(|id| event_id_from_hex(id))
+        {
+            event.id = old;
+        } else if !existing.contains(&canonical_text) {
+            let key = csv_row_key(&event.session, &event.model, &event.counters);
+            if let Some(old) = legacy.get_mut(&key).and_then(Vec::pop)
+                && let Some(id) = event_id_from_hex(&old)
+            {
+                event.id = id;
+                aliases.claims.insert(old.clone(), account.into());
+                aliases.aliases.insert(canonical_text, old);
+            }
+        }
+        // New rows have explicit account provenance; reused legacy IDs retain
+        // their original archive record under normal max-counter insertion.
+        event.session = format!("cursor:csv:{account}:{}", event.session);
+    }
+    store.set_meta(KEY, &serde_json::to_string(&aliases)?)?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const HEADER: &str =
+        "Date,Model,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens\n";
+
+    #[test]
+    fn csv_identity_survives_reorder_and_prepend_and_preserves_equal_requests() {
+        let a = "2026-07-20T01:02:03Z,gpt-4o,100,80,50,20\n";
+        let b = "2026-07-21T01:02:03Z,gpt-4o,120,80,50,20\n";
+        let before = parse_csv(&format!("{HEADER}{a}{a}{b}")).unwrap();
+        let after = parse_csv(&format!("{HEADER}2026-07-22,gpt-4o,5,5,0,1\n{b}{a}{a}")).unwrap();
+        assert_eq!(before[0].id, after[2].id);
+        assert_eq!(before[1].id, after[3].id);
+        assert_eq!(before[2].id, after[1].id);
+        assert_ne!(before[0].id, before[1].id);
+        assert_ne!(before[0].ts.utc_ms, date_to_ms("2026-07-20").unwrap());
+    }
+
+    #[test]
+    fn csv_parsing_preserves_times_quotes_and_rejects_bad_numbers() {
+        assert_eq!(
+            date_to_ms("2026-07-20T01:02:03+02:00"),
+            date_to_ms("2026-07-19T23:02:03Z")
+        );
+        assert_eq!(
+            date_to_ms("2026-07-20 01:02:03"),
+            date_to_ms("2026-07-20T01:02:03Z")
+        );
+        assert_eq!(date_to_ms("2026-07-20junk"), None);
+        assert_eq!(parse_number("1,234,567"), Some(1_234_567));
+        for bad in ["-1", "1.5", "1e3", "1,23", "12 junk", ",123", "1,"] {
+            assert_eq!(parse_number(bad), None, "{bad}");
+        }
+        // Exercise literal CSV escaping independently of the model's contents.
+        assert_eq!(
+            split_csv_line(r#""model ""quoted""",12"#).unwrap(),
+            vec!["model \"quoted\"", "12"]
+        );
+        assert!(parse_csv(&format!("{HEADER}bad-date,gpt,100,80,0,20\n")).is_err());
+        assert!(parse_csv(&format!("{HEADER}2026-07-20,gpt,-100,80,0,20\n")).is_err());
+        assert!(parse_events_json("{}").is_err());
+    }
+
+    #[test]
+    fn legacy_csv_reuses_ids_without_deleting_other_history_or_accounts() {
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut store = Store::open_in_memory().unwrap();
+        let csv = format!("{HEADER}2026-07-20T01:02:03Z,gpt-4o,100,80,50,20\n");
+        let mut old = parse_csv(&csv).unwrap().remove(0);
+        old.id = EventId::derive(&[
+            "cursor",
+            "2026-07-20T01:02:03Z",
+            "gpt-4o",
+            "7",
+            "80",
+            "20",
+            "50",
+        ]);
+        old.ts = Timestamp::from_ms(date_to_ms("2026-07-20").unwrap());
+        store.insert_events(&[old.clone()], &tz).unwrap();
+        let mut imported = parse_csv(&csv).unwrap();
+        reuse_archived_csv_ids(&store, "account-a", &mut imported).unwrap();
+        assert_eq!(imported[0].id, old.id);
+        store.insert_events(&imported, &tz).unwrap();
+        assert_eq!(store.events(&Default::default()).unwrap().len(), 1);
+        let mut repeated = parse_csv(&csv).unwrap();
+        reuse_archived_csv_ids(&store, "account-a", &mut repeated).unwrap();
+        assert_eq!(repeated[0].id, old.id);
+        let mut other_account = parse_csv(&csv).unwrap();
+        reuse_archived_csv_ids(&store, "account-b", &mut other_account).unwrap();
+        assert_ne!(other_account[0].id, old.id);
+        store.insert_events(&other_account, &tz).unwrap();
+        assert_eq!(store.events(&Default::default()).unwrap().len(), 2);
+        // No unmatched historical row is deleted, including inflated old IDs
+        // whose original account/ordinal cannot be recovered safely.
+    }
 
     #[test]
     fn parses_classic_cursor_csv() {

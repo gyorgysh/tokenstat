@@ -293,7 +293,7 @@ pub fn diff(dir: &Path, path: &str) -> FileDiff {
     let tracked = git(dir, &["ls-files", "--error-unmatch", "--", path]).is_some();
     out.untracked = !tracked;
 
-    let raw = if tracked {
+    let raw = if tracked && git(dir, &["rev-parse", "--verify", "HEAD^{commit}"]).is_some() {
         git(dir, &["diff", "HEAD", "--", path])
     } else {
         // `--no-index` exits 1 when the files differ, which is the normal
@@ -354,16 +354,16 @@ pub(crate) fn parse_diff(raw: &str) -> Vec<DiffHunk> {
 
         let (old_line, new_line) = match kind {
             DiffLineKind::Added => {
-                new_no += 1;
+                new_no = new_no.saturating_add(1);
                 (None, Some(new_no))
             }
             DiffLineKind::Removed => {
-                old_no += 1;
+                old_no = old_no.saturating_add(1);
                 (Some(old_no), None)
             }
             DiffLineKind::Context => {
-                old_no += 1;
-                new_no += 1;
+                old_no = old_no.saturating_add(1);
+                new_no = new_no.saturating_add(1);
                 (Some(old_no), Some(new_no))
             }
         };
@@ -386,23 +386,20 @@ pub fn split_unified(raw: &str) -> Vec<FileDiff> {
     file_chunks(raw)
         .into_iter()
         .filter_map(|chunk| {
-            let path = chunk
-                .lines()
-                .find_map(|line| line.strip_prefix("+++ b/"))
+            let header_path = |prefix: &str, side: &str| {
+                chunk.lines().find_map(|line| {
+                    let decoded = unquote_path(line.strip_prefix(prefix)?);
+                    decoded.strip_prefix(side).map(str::to_owned)
+                })
+            };
+            let path = header_path("+++ ", "b/")
                 .or_else(|| {
                     chunk
                         .lines()
-                        .find_map(|line| line.strip_prefix("rename to "))
+                        .find_map(|line| line.strip_prefix("rename to ").map(unquote_path))
                 })
-                .or_else(|| chunk.lines().find_map(|line| line.strip_prefix("--- a/")))
-                .or_else(|| {
-                    chunk.lines().next().and_then(|line| {
-                        line.strip_prefix("diff --git a/")
-                            .and_then(|paths| paths.rsplit_once(" b/"))
-                            .map(|(_, path)| path)
-                    })
-                })?
-                .to_string();
+                .or_else(|| header_path("--- ", "a/"))
+                .or_else(|| chunk.lines().next().and_then(diff_header_destination))?;
             Some(FileDiff {
                 path,
                 hunks: parse_diff(&chunk),
@@ -413,6 +410,43 @@ pub fn split_unified(raw: &str) -> Vec<FileDiff> {
             })
         })
         .collect()
+}
+
+// Binary patches may have no ---/+++ headers. Skip a C-quoted first path
+// without mistaking an escaped quote or a space inside it for the delimiter.
+fn diff_header_destination(line: &str) -> Option<String> {
+    let fields = line.strip_prefix("diff --git ")?;
+    let destination = if fields.starts_with('"') {
+        let mut escaped = false;
+        let mut end = None;
+        for (index, byte) in fields.bytes().enumerate().skip(1) {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                end = Some(index + 1);
+                break;
+            }
+        }
+        fields.get(end?..)?.trim_start()
+    } else {
+        return fields
+            .rsplit_once(" b/")
+            .map(|(_, path)| path)
+            .map(|path| format!("b/{path}"))
+            .or_else(|| {
+                fields
+                    .rsplit_once(" \"b/")
+                    .map(|(_, path)| format!("\"b/{path}"))
+            })
+            .and_then(|path| unquote_path(&path).strip_prefix("b/").map(str::to_owned));
+    };
+    unquote_path(destination)
+        .strip_prefix("b/")
+        .map(str::to_owned)
 }
 
 /// One string per file in a unified diff.
@@ -439,6 +473,21 @@ fn file_chunks(raw: &str) -> Vec<String> {
 #[cfg(test)]
 mod split_tests {
     use super::*;
+
+    #[test]
+    fn quoted_paths_survive_text_deleted_renamed_and_binary_diffs() {
+        let raw = concat!(
+            "diff --git \"a/a\\tb\" \"b/a\\tb\"\n--- \"a/a\\tb\"\n+++ \"b/a\\tb\"\n@@ -1 +1 @@\n-old\n+new\n",
+            "diff --git \"a/quote\\\"\" \"b/quote\\\"\"\n--- \"a/quote\\\"\"\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n",
+            "diff --git \"a/old\\tname\" \"b/new\\tname\"\nsimilarity index 100%\nrename from \"old\\tname\"\nrename to \"new\\tname\"\n",
+            "diff --git \"a/binary\\tname\" \"b/binary\\tname\"\nBinary files differ\n",
+        );
+        let paths = split_unified(raw)
+            .into_iter()
+            .map(|f| f.path)
+            .collect::<Vec<_>>();
+        assert_eq!(paths, ["a\tb", "quote\"", "new\tname", "binary\tname"]);
+    }
 
     #[test]
     fn a_diff_quoted_inside_a_file_does_not_start_a_new_one() {
@@ -487,7 +536,7 @@ mod split_tests {
 fn hunk_starts(header: &str) -> (u32, u32) {
     let mut old = 0;
     let mut new = 0;
-    for field in header.split_whitespace() {
+    for field in header.split_whitespace().take(3) {
         let number = |s: &str| -> u32 {
             s.split(',')
                 .next()
@@ -567,8 +616,27 @@ pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
 
     // Names and statuses, then counts, the same two-command split `status` uses
     // and for the same reason: neither command reports both.
-    let range = format!("{id}^!");
-    if let Some(names) = git(dir, &["diff", "--name-status", "-M", &range]) {
+    // Bind all detail reads to the resolved commit, even if HEAD moves while
+    // the request runs. Root commits compare against the empty tree; merge
+    // commits compare against their first parent.
+    let diff_args = if let Some(parent) = detail.parents.first() {
+        vec!["diff", "-M", parent.as_str(), detail.id.as_str()]
+    } else {
+        vec![
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "-r",
+            "-M",
+            detail.id.as_str(),
+        ]
+    };
+    let commit_diff = |extra: &[&str]| {
+        let mut args = diff_args.clone();
+        args.extend_from_slice(extra);
+        git(dir, &args)
+    };
+    if let Some(names) = commit_diff(&["--name-status"]) {
         for line in names.lines() {
             let mut parts = line.split('\t');
             let (Some(status), Some(first)) = (parts.next(), parts.next()) else {
@@ -585,7 +653,7 @@ pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
             });
         }
     }
-    if let Some(numstat) = git(dir, &["diff", "--numstat", "-M", &range]) {
+    if let Some(numstat) = commit_diff(&["--numstat"]) {
         let mut status = GitStatus {
             files: std::mem::take(&mut detail.files),
             ..GitStatus::default()
@@ -602,7 +670,7 @@ pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
         .files
         .iter()
         .map(|f| {
-            let raw = git(dir, &["diff", "-M", &range, "--", &f.path]).unwrap_or_default();
+            let raw = commit_diff(&["-p", "--", &f.path]).unwrap_or_default();
             FileDiff {
                 path: f.path.clone(),
                 binary: raw.lines().any(|l| l.starts_with("Binary files ")),
@@ -615,7 +683,7 @@ pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
     // One read-only call for the detail screen's tag line. `log --decorate`
     // would answer too, but it walks history; `--points-at` asks about this
     // commit only.
-    if let Some(raw) = git(dir, &["tag", "--points-at", id]) {
+    if let Some(raw) = git(dir, &["tag", "--points-at", &detail.id]) {
         detail.tags = raw
             .lines()
             .map(str::trim)
@@ -1459,7 +1527,12 @@ fn apply_numstat(raw: &str, status: &mut GitStatus) {
         };
         // A rename prints `docs/{old => new}` here but the plain new name in
         // status, so rebuild it before matching.
-        let path = numstat_new_path(&unquote_path(path));
+        let path = unquote_path(path);
+        let path = if status.files.iter().any(|file| file.path == path) {
+            path
+        } else {
+            numstat_new_path(&path)
+        };
         if let Some(f) = status.files.iter_mut().find(|f| f.path == path) {
             f.added = a.parse().ok();
             f.removed = r.parse().ok();
@@ -2031,6 +2104,11 @@ mod tests {
         let first = show(&dir, "HEAD~1").expect("the root commit resolves");
         assert!(first.parents.is_empty());
         assert_eq!(first.subject, "init");
+        assert_eq!(first.files.len(), 1);
+        assert_eq!(first.files[0].path, "a.txt");
+        assert_eq!(first.added, 1);
+        assert_eq!(first.removed, 0);
+        assert_eq!(first.diffs[0].hunks[0].lines[0].text, "one");
 
         assert!(show(&dir, "nope-not-a-rev").is_none());
 
@@ -2133,6 +2211,34 @@ mod tests {
         assert_eq!(s.added, 10);
         assert_eq!(s.removed, 2);
         assert!(s.partial, "an unknown count must mark the total as a floor");
+    }
+
+    #[test]
+    fn hunk_function_context_cannot_override_line_numbers() {
+        let hunks = parse_diff("@@ -3 +7 @@ text -100 +200\n-old\n+new\n");
+        assert_eq!(hunks[0].lines[0].old_line, Some(3));
+        assert_eq!(hunks[0].lines[1].new_line, Some(7));
+    }
+
+    #[test]
+    fn literal_rename_arrows_in_filenames_keep_their_counts() {
+        let mut status = GitStatus::default();
+        parse_porcelain_v2("? before => after.txt\n", &mut status);
+        apply_numstat("4\t2\tbefore => after.txt\n", &mut status);
+        assert_eq!(status.files[0].added, Some(4));
+        assert_eq!(status.files[0].removed, Some(2));
+    }
+
+    #[test]
+    fn staged_files_before_the_first_commit_have_a_diff() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(git(dir.path(), &["init", "-q"]).is_some());
+        std::fs::write(dir.path().join("first.txt"), "first line\n").unwrap();
+        assert!(git(dir.path(), &["add", "first.txt"]).is_some());
+        let diff = diff(dir.path(), "first.txt");
+        assert!(!diff.untracked);
+        assert_eq!(diff.hunks[0].lines[0].text, "first line");
+        assert_eq!(diff.hunks[0].lines[0].kind, DiffLineKind::Added);
     }
 
     #[test]

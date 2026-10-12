@@ -251,8 +251,10 @@ struct ClientHostWorkspacesView: View {
         .task { await model.connect(peerKey: peerKey, name: hostName) }
         .task(id: peerKey) {
             if let headless = try? await Bridge.peerHeadless(peerKey) {
+                guard !Task.isCancelled else { return }
                 isHeadless = headless
             } else {
+                guard !Task.isCancelled else { return }
                 isHeadless = isHeadlessPlatform(accountPlatform)
             }
         }
@@ -416,9 +418,13 @@ final class ClientHostWorkspacesModel {
     /// refusal with no sign that anything changed.
     private var accessWatch: Task<Void, Never>?
     var activeTerminal: ClientTerminalSession?
+    private let owner = WorkSessionContext.shared.scope
+
+    private var isCurrent: Bool { owner != nil && owner == WorkSessionContext.shared.scope && !Task.isCancelled }
+    private func requireCurrent() throws { if !isCurrent { throw CancellationError() } }
 
     func connect(peerKey: String, name: String) async {
-        guard !isConnecting else { return }
+        guard isCurrent, !isConnecting else { return }
         isConnecting = true
         defer { isConnecting = false }
         accessWatch?.cancel()
@@ -426,13 +432,17 @@ final class ClientHostWorkspacesModel {
         errorMessage = nil
         do {
             await ClientDeviceName.publish()
+            try requireCurrent()
             let peer = try await Bridge.pair(key: peerKey, label: name, address: "")
+            try requireCurrent()
             _ = try await Bridge.setTunnel(true)
+            try requireCurrent()
             // Asked before anything is loaded. Being paired is not being let
             // in: that computer allows each device to open its work
             // explicitly, and a device that has not been allowed should get
             // the screen that says so rather than a list that fails.
             let allowed = try await Bridge.workspaceAccessAllowed(peer: peer.key)
+            try requireCurrent()
             isAllowed = allowed
             reachedHost = true
             guard allowed else {
@@ -445,16 +455,22 @@ final class ClientHostWorkspacesModel {
                 if requestNotice == nil {
                     await requestAccess(peerKey: peerKey)
                 }
+                try requireCurrent()
                 watchForAccess(peerKey: peerKey, name: name)
                 return
             }
             async let loadedFolders = Bridge.remoteWorkspaces(peer: peer)
             async let loadedSessions = ClientRemote.ptyList(peer: peer.key)
             async let loadedChats = ClientRemote.recentChats(peer: peer.key)
-            folders = try await loadedFolders
-            sessions = (try? await loadedSessions) ?? []
-            recentChats = (try? await loadedChats) ?? []
+            let freshFolders = try await loadedFolders
+            let freshSessions = (try? await loadedSessions) ?? []
+            let freshChats = (try? await loadedChats) ?? []
+            try requireCurrent()
+            folders = freshFolders
+            sessions = freshSessions
+            recentChats = freshChats
         } catch {
+            guard isCurrent else { return }
             errorMessage = error.localizedDescription
             folders = []
             sessions = []
@@ -473,16 +489,19 @@ final class ClientHostWorkspacesModel {
     /// could not be loaded. An outcome written into a field something else
     /// reads is how a message ends up changing a state nobody meant it to.
     func requestAccess(peerKey: String) async {
+        guard isCurrent, !isRequesting else { return }
         isRequesting = true
         defer { isRequesting = false }
         do {
             let answer = try await Bridge.askWorkspaceAccess(peer: peerKey)
+            try requireCurrent()
             if answer.granted == true {
                 requestNotice = L10n.text("apple.clienthostworkspacesview.this_device_already_has_access_pull_to_ref.06b896c9")
             } else {
                 requestNotice = L10n.text("apple.clienthostworkspacesview.asked_on_that_computer_run_tokenstat_host.40af0490")
             }
         } catch {
+            guard isCurrent else { return }
             requestNotice = error.localizedDescription
         }
     }
@@ -494,11 +513,11 @@ final class ClientHostWorkspacesModel {
             for _ in 0..<ClientAccessWatch.attempts {
                 guard !Task.isCancelled else { return }
                 try? await Task.sleep(for: ClientAccessWatch.interval)
-                guard !Task.isCancelled, let self else { return }
+                guard !Task.isCancelled, let self, self.isCurrent else { return }
                 guard let allowed = try? await Bridge.workspaceAccessAllowed(peer: peerKey),
                       allowed
                 else { continue }
-                guard !Task.isCancelled else { return }
+                guard self.isCurrent else { return }
                 // Released before reconnecting, for the reason `connect` gives.
                 self.accessWatch = nil
                 await self.connect(peerKey: peerKey, name: name)
@@ -508,6 +527,7 @@ final class ClientHostWorkspacesModel {
     }
 
     func open(_ info: PtySessionInfo, peer: String) {
+        guard isCurrent else { return }
         activeTerminal = ClientTerminalSession(peer: peer, info: info)
     }
 }

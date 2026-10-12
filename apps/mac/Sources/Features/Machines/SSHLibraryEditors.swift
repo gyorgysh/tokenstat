@@ -769,6 +769,21 @@ struct SSHSnippetEditor: View {
                         }
                     }
                 }
+                if !model.hosts.isEmpty {
+                    SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.servers")) {
+                        ForEach(model.hosts) { host in
+                            Toggle(host.label, isOn: Binding(
+                                get: { snippet.hostIDs.contains(host.id) },
+                                set: { selected in
+                                    snippet.hostIDs.removeAll { $0 == host.id }
+                                    if selected { snippet.hostIDs.append(host.id) }
+                                    if snippet.hostIDs.isEmpty { snippet.runOnConnect = false }
+                                }
+                            ))
+                            .toggleStyle(.brandCheckbox)
+                        }
+                    }
+                }
                 Toggle(L10n.text("apple.sshlibraryeditors.run_automatically_after_connecting.b531eae1"), isOn: $draft.snippet.runOnConnect)
                     .toggleStyle(.brandCheckbox)
                     .disabled(snippet.hostIDs.isEmpty || !placeholders.isEmpty)
@@ -815,6 +830,7 @@ struct SSHSnippetEditor: View {
         working = true
         defer { if permits(owner) { working = false } }
         snippet.variables = placeholders
+        if snippet.hostIDs.isEmpty || !placeholders.isEmpty { snippet.runOnConnect = false }
         let saved = await model.save(snippet: snippet)
         guard permits(owner) else { return }
         if saved != nil {
@@ -1032,9 +1048,6 @@ struct SSHConfigImportView: View {
                                 kind: .info
                             )
                         }
-                        if let error {
-                            InlineBanner(text: error, kind: .danger) { self.error = nil }
-                        }
                         ForEach(candidates) { candidate in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -1055,6 +1068,10 @@ struct SSHConfigImportView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
+            if let error {
+                InlineBanner(text: error, kind: .danger) { self.error = nil }
+                    .padding(Theme.Space.m)
+            }
             SSHEditorFooter(
                 saveTitle: newCount == 1 ? L10n.text("apple.sshlibraryeditors.import_1_server.6af4f169") : L10n.text("apple.sshlibraryeditors.import_0_servers.2c452fd7", "\(newCount)"),
                 canSave: newCount > 0,
@@ -1067,9 +1084,17 @@ struct SSHConfigImportView: View {
         .navigationTitle(L10n.text("apple.sshlibraryeditors.import_from_ssh_config.1b6e8c38"))
         .task {
             guard let owner = claim(), loading else { return }
-            let fresh = (try? await Bridge.sshConfigCandidates()) ?? []
+            do {
+                let fresh = try await Bridge.sshConfigCandidates()
+                guard permits(owner) else { return }
+                candidates = fresh
+                error = nil
+            } catch {
+                guard permits(owner) else { return }
+                self.error = error.localizedDescription
+            }
             guard permits(owner) else { return }
-            candidates = fresh; loading = false
+            loading = false
         }
     }
 

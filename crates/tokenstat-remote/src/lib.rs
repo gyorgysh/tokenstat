@@ -236,7 +236,10 @@ impl Connection {
 
     /// Send one message.
     pub fn send(&mut self, payload: &[u8]) -> Result<(), RemoteError> {
-        write_one(&mut self.noise, &mut *self.stream, payload)?;
+        if let Err(error) = write_one(&mut self.noise, &mut *self.stream, payload) {
+            self.stream.close();
+            return Err(error);
+        }
         note_payload(self.relay, payload.len() as u64);
         Ok(())
     }
@@ -452,7 +455,13 @@ impl StreamWriter {
         if closed.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(RemoteError::Closed);
         }
-        write_one(noise, &mut **stream, payload)?;
+        if let Err(error) = write_one(noise, &mut **stream, payload) {
+            // Encryption advances the send nonce before the socket write.
+            // Even a failed first frame cannot safely be retried on this link.
+            closed.store(true, std::sync::atomic::Ordering::Relaxed);
+            stream.close();
+            return Err(error);
+        }
         note_payload(relay, payload.len() as u64);
         Ok(())
     }
@@ -620,6 +629,7 @@ fn read_framed(
             // byte. Once a byte has arrived the frame must complete, or the
             // retry would re-read from the middle of it and corrupt the
             // stream. The timeout is restored afterwards.
+            stream.set_read_timeout(Some(timeout))?;
             let mut filled = 0;
             let header_result = loop {
                 match stream.read(&mut header[filled..]) {
@@ -969,11 +979,19 @@ pub fn authorize_with(
         relay,
     } = connection;
     let label = intro_label.trim().to_string();
-    let trust_result = {
-        let mut store = match PeerStore::load() {
-            Ok(store) => store,
-            Err(e) => return Err(Refused::Handshake(RemoteError::Identity(e))),
-        };
+    // Directory lookups may wait for the network. Do that before taking the
+    // peer-store lock, then check current trust again inside the transaction.
+    let account_label = if let Some(hook) = auto_approve {
+        let store = PeerStore::load().map_err(|e| Refused::Handshake(RemoteError::Identity(e)))?;
+        if store.get(&peer).is_none_or(|p| p.trust == Trust::Pending) {
+            hook(&peer)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let trust_result = PeerStore::update(|store| {
         let prior_peer = store.get(&peer);
         let known = prior_peer.is_some();
         let prior = prior_peer.map(|p| p.trust);
@@ -989,8 +1007,7 @@ pub fn authorize_with(
         // Auto-approve only when still pending (never when revoked).
         if trust == Trust::Pending
             && prior != Some(Trust::Revoked)
-            && let Some(hook) = auto_approve
-            && let Some(account_label) = hook(&peer)
+            && let Some(account_label) = account_label
         {
             let name = if label.is_empty() {
                 account_label
@@ -1005,19 +1022,20 @@ pub fn authorize_with(
         // per workspace, per terminal and per port, and rewriting peers.json
         // on each of them is the disk churn the original code avoided by
         // saving new peers only.
-        if !known || approved_now || named_differently {
-            let _ = store.save();
-        }
         (
-            known,
-            trust,
-            if label.is_empty() {
-                address.to_string()
-            } else {
-                label
-            },
+            (
+                known,
+                trust,
+                if label.is_empty() {
+                    address.to_string()
+                } else {
+                    label
+                },
+            ),
+            !known || approved_now || named_differently,
         )
-    };
+    })
+    .map_err(|e| Refused::Handshake(RemoteError::Identity(e)))?;
     match trust_result {
         (_, Trust::Approved, _) => Ok(Connection {
             stream,
@@ -1460,6 +1478,61 @@ mod tests {
     /// stalled read dropped the bytes it had taken, and the next four bytes
     /// were decoded as a length header, giving a nonsense frame size against
     /// the 65535 limit.
+    #[test]
+    fn the_idle_deadline_is_armed_before_reading_the_first_byte() {
+        let mut stream = StutteringTransport {
+            data: vec![0, 0, 0, 0],
+            position: 0,
+            timeout: None,
+            stall: false,
+        };
+        assert!(matches!(
+            read_framed(&mut stream, 1024, Some(STREAM_READ_TIMEOUT)),
+            Err(RemoteError::Io(error)) if error.kind() == std::io::ErrorKind::TimedOut
+        ));
+        assert_eq!(stream.position, 0);
+    }
+
+    #[test]
+    fn a_failed_encrypted_write_closes_the_split_connection() {
+        struct BrokenWriter;
+        impl Read for BrokenWriter {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                panic!("a broken encrypted stream must not be read again")
+            }
+        }
+        impl Write for BrokenWriter {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::TimedOut.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl Transport for BrokenWriter {
+            fn close(&mut self) {}
+            fn set_deadline(&mut self, _: Option<Duration>) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn set_read_timeout(&mut self, _: Option<Duration>) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let (noise, _) = transport_pair();
+        let (reader, writer) = Connection {
+            stream: Box::new(BrokenWriter),
+            noise,
+            peer: [0; 32],
+            intro_label: String::new(),
+            relay: false,
+        }
+        .split();
+        assert!(writer.write(b"first").is_err());
+        assert!(writer.is_closed());
+        assert!(matches!(writer.write(b"retry"), Err(RemoteError::Closed)));
+        assert!(matches!(reader.read(1024), Err(RemoteError::Closed)));
+    }
+
     #[test]
     fn a_large_message_survives_a_pause_inside_it() {
         // Three Noise frames' worth, so the continuation path is exercised

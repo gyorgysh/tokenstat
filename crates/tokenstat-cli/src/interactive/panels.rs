@@ -25,8 +25,14 @@ pub(super) fn today_line(app: &App) -> Line<'static> {
 
 pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let c = &app.totals.counters;
-    let in_out = c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0);
-    let cache_write = c.cache_write_5m.unwrap_or(0) + c.cache_write_1h.unwrap_or(0);
+    let in_out = c
+        .input_fresh
+        .unwrap_or(0)
+        .saturating_add(c.output.unwrap_or(0));
+    let cache_write = c
+        .cache_write_5m
+        .unwrap_or(0)
+        .saturating_add(c.cache_write_1h.unwrap_or(0));
     let mut lines = Vec::new();
 
     lines.push(Line::from(vec![
@@ -151,7 +157,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             .models
             .iter()
             .map(|m| m.counters.total())
-            .sum::<u64>()
+            .fold(0u64, u64::saturating_add)
             .max(1);
         let prices = &app.prices;
         let w = app
@@ -567,13 +573,16 @@ pub(super) fn block_lines(app: &App) -> Vec<Line<'static>> {
             Err(_) => b.start_ms.to_string(),
         };
         let c = &b.counters;
-        let in_out = c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0);
+        let in_out = c
+            .input_fresh
+            .unwrap_or(0)
+            .saturating_add(c.output.unwrap_or(0));
         let total = {
             let t = ui::tokens(c.total());
             if c.has_unknown() { format!("{t}+") } else { t }
         };
         let status = if b.active {
-            let left = ((b.end_ms - now_ms).max(0) / 60_000) as u64;
+            let left = (b.end_ms.saturating_sub(now_ms).max(0) / 60_000) as u64;
             format!("active · {left}m left")
         } else {
             "closed".into()
@@ -614,7 +623,11 @@ pub(super) fn doctor_lines(app: &App) -> Vec<Line<'static>> {
         let shown = ms
             .parse::<i64>()
             .map(|ts| {
-                let age = (jiff::Timestamp::now().as_millisecond() - ts).max(0) / 1000;
+                let age = jiff::Timestamp::now()
+                    .as_millisecond()
+                    .saturating_sub(ts)
+                    .max(0)
+                    / 1000;
                 format!("{} ago", format_age_secs(age))
             })
             .unwrap_or_else(|_| ms.clone());
@@ -838,8 +851,12 @@ pub(super) fn wrapped_detail_lines(
     let models = store.report(GroupBy::Model, &q)?;
     let projects = store.report(GroupBy::Project, &q)?;
     let days = store.report(GroupBy::Day, &q)?;
-    let peak = store.peak_hour()?;
-    let in_out = totals.counters.input_fresh.unwrap_or(0) + totals.counters.output.unwrap_or(0);
+    let peak = store.peak_hour_for(&q)?;
+    let in_out = totals
+        .counters
+        .input_fresh
+        .unwrap_or(0)
+        .saturating_add(totals.counters.output.unwrap_or(0));
     let value: EquivalentValue = models
         .iter()
         .filter_map(|m| {
@@ -905,9 +922,7 @@ pub(super) fn wrapped_detail_lines(
             .saturating_sub(2 + ui::HEAT_GUTTER)
             .div_ceil(ui::HEAT_COL)
             .clamp(8, 53);
-        let unmeasured = store
-            .days_active_without_usage("claude_code")
-            .unwrap_or_default();
+        let unmeasured = crate::render::unmeasured_days(store, &q);
         if let Some(cal) = ui::heat_calendar(&day_tokens, weeks.min(fit), anchor, &unmeasured) {
             lines.push(Line::from(Span::styled(
                 cal.header(),

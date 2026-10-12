@@ -48,7 +48,9 @@ fn private_options() -> OpenOptions {
     {
         use std::os::unix::fs::OpenOptionsExt;
         let mut options = OpenOptions::new();
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
         options
     }
     #[cfg(not(unix))]
@@ -90,6 +92,9 @@ fn file_lock(directory: &Path, name: &str, mutex: &'static Mutex<()>) -> Result<
         .truncate(false)
         .open(directory.join(name))
         .map_err(|e| e.to_string())?;
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err("handoff lock is not a regular file".into());
+    }
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
@@ -309,6 +314,17 @@ mod tests {
             .unwrap()
             .set_len(MAX_RECORD_BYTES + 1)
             .unwrap();
+        assert!(read(directory.path()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_record_is_rejected_without_waiting_for_a_writer() {
+        use std::os::unix::ffi::OsStrExt;
+        let directory = tempfile::tempdir().unwrap();
+        let path =
+            std::ffi::CString::new(directory.path().join(RECORD).as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
         assert!(read(directory.path()).is_err());
     }
 

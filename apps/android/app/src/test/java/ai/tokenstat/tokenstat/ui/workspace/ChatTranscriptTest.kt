@@ -260,4 +260,16 @@ class ChatTranscriptTest {
         assertEquals("11th", ChatClock.ordinal(11))
         assertEquals("22nd", ChatClock.ordinal(22))
     }
+
+    @Test
+    fun repeatedOrphanEndsUpdateOneRowAndLaterStartsKeepUniqueKeys() {
+        for (verb in listOf("Bash", "Edit")) {
+            val items = coalesceTranscript(listOf(
+                toolEnd("call", verb, "first"), toolEnd("call", verb, "second"),
+                toolStart("call", verb, "file"), toolEnd("call", verb, "third"),
+            ))
+            assertEquals(2, items.size)
+            assertEquals(items.size, items.map { it.id }.distinct().size)
+        }
+    }
 }

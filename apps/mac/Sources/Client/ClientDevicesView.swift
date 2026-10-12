@@ -604,6 +604,7 @@ struct ClientDeviceDetailView: View {
     }
 
     private func saveName() async {
+        guard !savingName, !Task.isCancelled, let owner = WorkSessionContext.shared.scope else { return }
         guard let id = machine.machineID, !id.isEmpty else {
             renameError = L10n.text("apple.clientdevicesview.this_device_has_no_id_on_the_account_yet.5edab834")
             return
@@ -613,11 +614,13 @@ struct ClientDeviceDetailView: View {
         do {
             let wanted = draft.trimmingCharacters(in: .whitespacesAndNewlines)
             try await Bridge.renameAccountMachine(id: id, name: wanted)
+            guard !Task.isCancelled, owner == WorkSessionContext.shared.scope else { return }
             renamedTo = wanted
             renameError = nil
             renaming = false
             await onRenamed()
         } catch {
+            guard !Task.isCancelled, owner == WorkSessionContext.shared.scope else { return }
             renameError = FriendlyError.from(error.localizedDescription).message
         }
     }
@@ -993,63 +996,6 @@ enum DeviceHistory {
         if days >= 360 { return L10n.text("apple.clientdevicesview.the_last_year.ce4cc449") }
         if days == 1 { return L10n.text("apple.clientdevicesview.the_last_day.8319fd61") }
         return L10n.text("apple.clientdevicesview.the_last_0_days.1bfce3a7", "\(days)")
-    }
-}
-
-/// What each device contributed, fetched once and kept.
-///
-/// One request per device on the host's side, so this is asked for when the
-/// screen opens and not warmed behind one somebody might never visit.
-///
-/// The window follows the account tier's history depth: free 30 days,
-/// supporter a year, patron all-time. Asking every tier for a month left a
-/// paid account looking like it only spent a slice of what it really had.
-@Observable
-@MainActor
-final class ClientDevicesModel {
-    private(set) var rows: [MachineUsage] = []
-    private(set) var errorMessage: String?
-    private(set) var isLoading = false
-    private var loadedIDs: Set<String> = []
-    private var loadedDays: Int = 0
-
-    func usage(for machine: Machine) -> MachineUsage? {
-        guard let id = machine.machineID else { return nil }
-        return rows.first { $0.machine == id }
-    }
-
-    var total: Int64 { rows.reduce(0) { $0 + $1.valueMicros } }
-
-    var windowDescription: String {
-        guard let days = rows.first?.days else { return L10n.text("apple.clientdevicesview.across_this_account.2a6688f7") }
-        return L10n.text("apple.clientdevicesview.share_of_0_at_api_list_price.3aad6111", "\(DeviceHistory.windowPhrase(days: days))")
-    }
-
-    func load(machines: [Machine], days: Int = 30, force: Bool = false) async {
-        // Hosts only. Clients never upload an archive, so asking for their
-        // spend only produces $0 rows the UI does not show.
-        let ids = machines.filter(\.isHost).compactMap(\.machineID)
-        guard !ids.isEmpty else {
-            rows = []
-            loadedIDs = []
-            loadedDays = days
-            errorMessage = nil
-            return
-        }
-        if !force, Set(ids) == loadedIDs, loadedDays == days, !rows.isEmpty { return }
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            rows = try await Bridge.machineUsage(machines: ids, days: days)
-            loadedIDs = Set(ids)
-            loadedDays = days
-            errorMessage = nil
-        } catch {
-            // The device list itself came from the account and is already on
-            // screen. This failure costs the figures beside the names, which is
-            // a line of explanation rather than an empty screen.
-            errorMessage = L10n.text("apple.clientdevicesview.could_not_work_out_what_each_device_spent.908fa25b", "\(error.localizedDescription)")
-        }
     }
 }
 

@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -104,9 +105,9 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
             QueryProductDetailsParams.newBuilder().setProductList(products).build()
         ) { result, found ->
             if (result.responseCode != BillingClient.BillingResponseCode.OK) {
-                mutableState.value = BillingState(false, error = result.debugMessage); return@queryProductDetailsAsync
+                mutableState.update { it.copy(loading = false, error = result.debugMessage) }; return@queryProductDetailsAsync
             }
-            mutableState.value = BillingState(false, found.productDetailsList.flatMap { details ->
+            val products = found.productDetailsList.flatMap { details ->
                 // One product per tier, one entry per base plan: monthly and
                 // yearly live under the same product id so an interval change
                 // stays inside one subscription. An offer the user is
@@ -141,7 +142,8 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                             phase.billingPeriod,
                         )
                     }
-            })
+            }
+            mutableState.update { it.copy(loading = false, products = products, error = null) }
         }
     }
 

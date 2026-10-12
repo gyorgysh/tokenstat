@@ -12,6 +12,8 @@ import ai.tokenstat.tokenstat.ui.logic.CommitDraft
 import ai.tokenstat.tokenstat.ui.logic.FileSelection
 import ai.tokenstat.tokenstat.ui.logic.OperationState
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -146,28 +148,32 @@ class CommitUiState(val peer: String, val workspace: String) {
         if (working) return
         working = true
         try {
-            val first = runCatching {
-                model.workspaceSection(peer, "workspace.commitReceipt", buildJsonObject {
-                    put("id", workspace); put("operationId", opId)
-                })
-            }.getOrNull()
+            canRetry = false
+            val first = model.workspaceSection(peer, "workspace.commitReceipt", buildJsonObject {
+                put("id", workspace); put("operationId", opId)
+            })
+            require(first is JsonObject || first is JsonNull) { L10n.text("android.workspacecommitstate.the_request_failed.db4fb447") }
             val receipt = first as? JsonObject
             if (receipt != null) {
                 canRetry = false
                 val state = receipt.str("state") ?: ""
                 if (OperationState.unresolved(state)) {
-                    val reconciled = runCatching {
-                        model.workspaceSection(peer, "workspace.commitRecover", buildJsonObject {
-                            put("id", workspace); put("operationId", opId)
-                        }) as? JsonObject
-                    }.getOrNull()
+                    val reconciled = model.workspaceSection(peer, "workspace.commitRecover", buildJsonObject {
+                        put("id", workspace); put("operationId", opId)
+                    }) as? JsonObject
                     if (reconciled != null) adopt(reconciled, context)
                 } else {
                     adopt(receipt, context)
                 }
                 save(context)
             } else {
-                canRetry = true
+                canRetry = review != null
+                if (review == null) {
+                    // Older drafts did not persist the frozen review. A
+                    // confirmed missing receipt allows a new explicit review.
+                    operationId = null
+                    save(context)
+                }
                 error = L10n.text("android.workspacecommitstate.the_computer_has_no_recorded_outcome_yet_y.0b11d451")
             }
         } catch (e: Exception) {
@@ -231,6 +237,7 @@ class CommitUiState(val peer: String, val workspace: String) {
             .putString(key("details"), details)
             .putStringSet(key("paths"), selection)
             .putString(key("operationId"), operationId)
+            .putString(key("review"), review?.toString())
             .apply()
     }
 
@@ -241,6 +248,9 @@ class CommitUiState(val peer: String, val workspace: String) {
         details = prefs.getString(key("details"), "") ?: ""
         selection = prefs.getStringSet(key("paths"), emptySet()) ?: emptySet()
         operationId = prefs.getString(key("operationId"), null)
+        review = prefs.getString(key("review"), null)?.let {
+            runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull()
+        }
     }
 
     private fun key(field: String): String = "$peer|$workspace|$field"

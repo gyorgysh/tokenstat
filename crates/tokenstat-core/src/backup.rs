@@ -98,6 +98,25 @@ pub fn run(
     if keep == 0 || !is_due(last_backup_ms, now_ms) {
         return Ok(None);
     }
+
+    // The app and helper can back up the same archive at once. Hold a stable
+    // lock across both VACUUM and rotation so neither deletes the other's
+    // partial copy or moves a slot out from under it.
+    let lock_path = slot(path, keep).with_extension("lock");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|source| CoreError::Io {
+            path: lock_path.clone(),
+            source,
+        })?;
+    lock.lock().map_err(|source| CoreError::Io {
+        path: lock_path,
+        source,
+    })?;
     // A temporary name, because `VACUUM INTO` refuses to overwrite and slot 0
     // is still occupied by yesterday's copy at this point.
     let tmp = slot(path, keep).with_extension("part");
@@ -252,6 +271,39 @@ mod tests {
         assert!(run(&conn, &db, Some(0), 1_000, 3).unwrap().is_none());
         assert!(!slot(&db, 0).exists());
         drop(conn);
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn concurrent_backups_leave_readable_rotated_copies() {
+        let dir = scratch("concurrent");
+        let db = dir.join("a.db");
+        {
+            let conn = rusqlite::Connection::open(&db).unwrap();
+            conn.execute("CREATE TABLE t (v INTEGER)", []).unwrap();
+            conn.execute("INSERT INTO t VALUES (42)", []).unwrap();
+        }
+        let barrier = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let db = &db;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    let conn = rusqlite::Connection::open(db).unwrap();
+                    barrier.wait();
+                    assert!(run(&conn, db, None, 0, 3).unwrap().is_some());
+                });
+            }
+        });
+        for (path, _) in list(&db, 3) {
+            let copy = rusqlite::Connection::open(path).unwrap();
+            assert_eq!(
+                copy.query_row("SELECT v FROM t", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                42
+            );
+        }
+        assert_eq!(list(&db, 3).len(), 3);
         cleanup(&dir);
     }
 }

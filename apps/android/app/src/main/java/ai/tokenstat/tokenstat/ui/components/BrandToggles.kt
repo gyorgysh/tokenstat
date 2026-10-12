@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.components
 
-import ai.tokenstat.tokenstat.ui.localization.L10n
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,8 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
@@ -49,15 +45,15 @@ fun BrandCheckbox(
     val boxShape = RoundedCornerShape(5.dp)
     Row(
         modifier
-            .clickable(
+            .toggleable(
+                value = checked,
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() },
                 role = Role.Checkbox,
-                onClick = onToggle,
+                onValueChange = { onToggle() },
             )
             .padding(vertical = Space.xs)
-            .heightIn(min = 44.dp)
-            .semantics { contentDescription = "$label, ${if (checked) L10n.text("android.brandtoggles.on.13001175") else L10n.text("android.brandtoggles.off.ca7981b4")}" },
+            .heightIn(min = 44.dp),
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {

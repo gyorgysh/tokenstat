@@ -33,8 +33,10 @@ internal static class AgentMark
             Width = size, Height = size, CornerRadius = new CornerRadius(Math.Min(9, size / 4)),
             Background = Theme.AccentSoftBrush, Child = body,
         };
+        var paintRevision = 0;
         async Task PaintAsync()
         {
+            var revision = ++paintRevision;
             if (key == "shell") return;
             try
             {
@@ -50,11 +52,13 @@ internal static class AgentMark
                 stream.Seek(0);
                 var source = new SvgImageSource();
                 await source.SetSourceAsync(stream);
+                if (revision != paintRevision || !box.IsLoaded) return;
                 image.Source = source;
                 icon.Visibility = Visibility.Collapsed;
             }
             catch { /* A missing brand keeps the accessible generic agent mark. */ }
         }
+        box.Unloaded += (_, _) => paintRevision++;
         box.Loaded += async (_, _) => await PaintAsync();
         box.ActualThemeChanged += async (_, _) => await PaintAsync();
         return box;

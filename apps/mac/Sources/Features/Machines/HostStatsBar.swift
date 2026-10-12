@@ -57,7 +57,8 @@ enum HostStatsFormat {
     }
 
     static func cpuLabel(_ cpu: Double) -> String {
-        "\(Int((cpu * 100).rounded()))%"
+        guard cpu.isFinite else { return L10n.text("apple.hoststatsbar.n_a.a683c5c5") }
+        return "\(Int((min(1, max(0, cpu)) * 100).rounded()))%"
     }
 
     /// Direct vs relay for a live peer, from this device's `remote.status`.
@@ -158,6 +159,9 @@ struct HostStatsBar: View {
         .machineCardSurface()
         .accessibilityElement(children: .combine)
         .task(id: "\(peer ?? "local")-\(online)-\(local)") {
+            stats = nil
+            route = nil
+            failed = false
             guard local || (online && peer != nil) else { return }
             while !Task.isCancelled {
                 await refresh()
@@ -191,7 +195,7 @@ struct HostStatsBar: View {
             if let cpu = stats?.cpu {
                 HStack(spacing: 6) {
                     meter(fraction: cpu)
-                    Text("\(Int((cpu * 100).rounded()))%")
+                    Text(HostStatsFormat.cpuLabel(cpu))
                         .font(statFont)
                         .monospacedDigit()
                 }
@@ -292,7 +296,9 @@ struct HostStatsBar: View {
         if local {
             route = nil
         } else if let peer {
-            route = await HostStatsFormat.loadRoute(for: peer)
+            let freshRoute = await HostStatsFormat.loadRoute(for: peer)
+            guard !Task.isCancelled else { return }
+            route = freshRoute
         }
     }
 }
@@ -358,6 +364,9 @@ struct HostStatsStrip: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(voiceOverLabel)
         .task(id: "\(peer)-\(online)") {
+            stats = nil
+            route = nil
+            failed = false
             guard online else { return }
             while !Task.isCancelled {
                 await refresh()
@@ -402,7 +411,9 @@ struct HostStatsStrip: View {
         guard !Task.isCancelled, peer == peerAtStart else { return }
         if let fresh { stats = fresh }
         failed = didFail
-        route = await HostStatsFormat.loadRoute(for: peer)
+        let freshRoute = await HostStatsFormat.loadRoute(for: peer)
+        guard !Task.isCancelled else { return }
+        route = freshRoute
     }
 }
 

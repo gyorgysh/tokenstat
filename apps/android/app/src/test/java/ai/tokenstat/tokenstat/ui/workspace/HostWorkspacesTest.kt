@@ -19,11 +19,20 @@ import org.junit.Assert.assertSame
 import org.junit.Test
 
 class HostWorkspacesTest {
+    @org.junit.Test fun sessionFolderHandlesWindowsPathsAndBoundaries() {
+        org.junit.Assert.assertTrue(sessionBelongsToFolder("C:\\Work\\Repo\\src", "c:\\work\\repo"))
+        org.junit.Assert.assertFalse(sessionBelongsToFolder("C:\\Work\\Repository", "C:\\Work\\Repo"))
+        org.junit.Assert.assertTrue(sessionBelongsToFolder("/work/repo/src", "/work/repo/"))
+        org.junit.Assert.assertFalse(sessionBelongsToFolder("/work/Repo", "/work/repo"))
+    }
+
     @Test
     fun harnessFromCommand() {
         assertEquals("claude_code", harnessIdForCommand("/home/someone/.local/bin/claude"))
         assertEquals("opencode", harnessIdForCommand("/home/someone/.opencode/bin/opencode2"))
         assertEquals("codex", harnessIdForCommand("codex"))
+        assertEquals("codex", harnessIdForCommand("C:\\Users\\name\\bin\\codex.exe"))
+        assertEquals("claude_code", harnessIdForCommand("C:\\bin\\claude.cmd"))
         assertNull(harnessIdForCommand("/bin/zsh"))
         assertNull(harnessIdForCommand(""))
     }
@@ -65,6 +74,8 @@ class HostWorkspacesTest {
     @Test
     fun pathsTruncateInTheMiddle() {
         assertEquals("/a/b", middleTruncate("/a/b"))
+        assertEquals("", middleTruncate("/a/b", 0))
+        assertEquals("…", middleTruncate("/a/b", 1))
         val long = "/home/someone/git/some-very-long-project-name/src/main"
         val cut = middleTruncate(long, 24)
         assertEquals(24, cut.length)

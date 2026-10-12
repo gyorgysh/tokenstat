@@ -20,6 +20,12 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Starting the app and helper together keeps one stable pairing identity.
 - Remote connections recover when a peer stalls partway through the first encrypted frame, instead of leaving reads and writes stuck.
 - Windows routing settings preserve a preferred destination outside the fallback list, distinguish models and effort in the preferred picker, and tolerate invalid reset timestamps.
+- Usage reports reconcile recovered and live sessions before ranking sources, preserve provider totals across scans, and keep future-dated or extreme values from distorting calendars and charts.
+- Concurrent device and account updates preserve the latest owner and permissions. Repeated approval cannot restore a workspace grant after it has been revoked.
+- Chat, SSH, terminal and screen sessions reject late replies from an old host or account, retain final output, and cancel interrupted file transfers without sending data to a new destination.
+- Automation and workflow edits keep their drafts and run state across refreshes, account changes and delayed responses on desktop and mobile.
+- Installers and app updates preserve existing configuration and unrelated files during replacement or rollback. Windows archive and installer failures now stop packaging.
+- Android remote-screen gestures and keyboard shortcuts no longer turn pinches into clicks or lose modified letter keys. Apple and Windows client state fixes keep loading, navigation and saved work tied to the current view.
 
 ## [1.5.0] - 2026-10-11
 

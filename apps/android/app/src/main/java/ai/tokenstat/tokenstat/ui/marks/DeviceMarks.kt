@@ -26,7 +26,6 @@ import ai.tokenstat.tokenstat.ui.logic.DeviceCopy
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.TimeZone
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -213,23 +212,20 @@ fun sortMachines(
     }
 }
 
-private val serverDateParsers: List<SimpleDateFormat> = listOf(
-    "yyyy-MM-dd'T'HH:mm:ss.SSSX",
-    "yyyy-MM-dd'T'HH:mm:ssX",
-    "yyyy-MM-dd'T'HH:mm:ss.SSS",
-    "yyyy-MM-dd'T'HH:mm:ss",
-    "yyyy-MM-dd HH:mm:ss",
-).map {
-    SimpleDateFormat(it, Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
-        isLenient = false
-    }
-}
-
 fun parseServerDate(raw: String?): Date? {
     if (raw.isNullOrBlank()) return null
-    return serverDateParsers.firstNotNullOfOrNull { runCatching { it.parse(raw) }.getOrNull() }
+    val instant = runCatching { java.time.OffsetDateTime.parse(raw).toInstant() }.getOrNull()
+        ?: runCatching { java.time.LocalDateTime.parse(raw).toInstant(java.time.ZoneOffset.UTC) }.getOrNull()
+        ?: runCatching {
+            java.time.LocalDateTime.parse(raw, legacyServerDateFormat).toInstant(java.time.ZoneOffset.UTC)
+        }.getOrNull()
+        ?: return null
+    return runCatching { Date.from(instant) }.getOrNull()
 }
+
+private val legacyServerDateFormat = java.time.format.DateTimeFormatter
+    .ofPattern("uuuu-MM-dd HH:mm:ss", Locale.US)
+    .withResolverStyle(java.time.format.ResolverStyle.STRICT)
 
 /// "3 minutes ago", for a timestamp whose exact minute nobody reads. Nil when
 /// the string does not parse, so the caller decides what absence looks like.

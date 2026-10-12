@@ -155,7 +155,6 @@ pub struct TunnelSession {
     next_channel: AtomicU32,
     /// The writer thread's inbox. None while disconnected.
     writer: Mutex<Option<Writer>>,
-    writer_bytes: Arc<AtomicUsize>,
     /// The relay-dialled channels, for the host to answer.
     inbound_tx: Mutex<Option<mpsc::SyncSender<Arc<ChannelState>>>>,
     inbound_rx: Mutex<Option<mpsc::Receiver<Arc<ChannelState>>>>,
@@ -267,7 +266,6 @@ impl TunnelSession {
             token: Mutex::new(token.to_string()),
             next_channel: AtomicU32::new(1),
             writer: Mutex::new(None),
-            writer_bytes: Arc::new(AtomicUsize::new(0)),
             inbound_tx: Mutex::new(Some(inbound_tx)),
             inbound_rx: Mutex::new(Some(inbound_rx)),
             channels: Mutex::new(HashMap::new()),
@@ -357,12 +355,23 @@ impl TunnelSession {
         if self.stopped.load(Ordering::Relaxed) {
             return Err(RemoteError::Tunnel("tunnel is stopped".into()));
         }
-        let id = DIAL_ID_BASE + self.next_channel.fetch_add(1, Ordering::Relaxed);
+        let sequence = self
+            .next_channel
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+                next.checked_add(1)
+                    .filter(|next| *next <= u32::MAX - DIAL_ID_BASE)
+            })
+            .map_err(|_| RemoteError::Tunnel("channel identifiers exhausted".into()))?;
+        let id = DIAL_ID_BASE + sequence;
         let state = Arc::new(ChannelState::new(id));
-        self.channels
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, Arc::clone(&state));
+        {
+            let mut channels = self.channels.lock().unwrap_or_else(|e| e.into_inner());
+            ensure_running(self)?;
+            if channels.len() >= MAX_CHANNELS {
+                return Err(RemoteError::Tunnel("too many open channels".into()));
+            }
+            channels.insert(id, Arc::clone(&state));
+        }
         let open_payload = format!("{}:{}", hex(&peer), purpose.as_str());
         if let Err(error) = self.send_channel_frame(CH_OPEN, id, open_payload.as_bytes()) {
             self.forget_channel(&state);
@@ -374,7 +383,7 @@ impl TunnelSession {
         // unreachable.
         let deadline = Instant::now() + OPEN_TIMEOUT;
         let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
-        while !inner.opened && inner.error.is_none() && Instant::now() < deadline {
+        while !inner.opened && !inner.eof && inner.error.is_none() && Instant::now() < deadline {
             let (guard, _) = state
                 .cond
                 .wait_timeout(inner, Duration::from_millis(20))
@@ -382,14 +391,16 @@ impl TunnelSession {
             inner = guard;
         }
         let error = inner.error.clone();
-        let opened = inner.opened;
+        let opened = inner.opened && !inner.eof;
         drop(inner);
         if let Some(error) = error {
             self.forget_channel(&state);
             return Err(RemoteError::Tunnel(error));
         }
         if !opened {
-            self.forget_channel(&state);
+            if self.forget_channel(&state) {
+                let _ = self.queue_channel_frame(CH_CLOSE, id, &[], false);
+            }
             return Err(RemoteError::Tunnel(
                 "the relay did not pair the channel in time".into(),
             ));
@@ -401,6 +412,17 @@ impl TunnelSession {
     /// channels end with an error, which is what a daemon shutdown means.
     pub fn shutdown(&self) {
         self.stopped.store(true, Ordering::Relaxed);
+        mark_all_channels(self, "tunnel stopped");
+        forget_all_channels(self);
+        self.inbound_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        self.writer.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self.status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .connected = false;
         self.nudge();
         if let Some(stream) = self
             .connecting
@@ -492,6 +514,17 @@ impl TunnelSession {
     /// memory: a burst larger than that fails loudly rather than growing
     /// without bound.
     fn send_channel_frame(&self, op: u8, ch: u32, payload: &[u8]) -> Result<(), RemoteError> {
+        self.queue_channel_frame(op, ch, payload, true)
+    }
+
+    fn queue_channel_frame(
+        &self,
+        op: u8,
+        ch: u32,
+        payload: &[u8],
+        wait: bool,
+    ) -> Result<(), RemoteError> {
+        ensure_running(self)?;
         if payload.len() > MAX_OUTBOUND_QUEUE {
             return Err(RemoteError::Tunnel("channel frame is too large".into()));
         }
@@ -533,7 +566,7 @@ impl TunnelSession {
             match writer.sender.try_send(frame) {
                 Ok(()) => return Ok(()),
                 Err(mpsc::TrySendError::Full(returned)) => {
-                    if Instant::now() >= deadline {
+                    if !wait || self.stopped.load(Ordering::Relaxed) || Instant::now() >= deadline {
                         writer.bytes.fetch_sub(size, Ordering::AcqRel);
                         return Err(RemoteError::Tunnel("tunnel outbound queue is full".into()));
                     }
@@ -548,11 +581,17 @@ impl TunnelSession {
         }
     }
 
-    fn forget_channel(&self, state: &Arc<ChannelState>) {
-        self.channels
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&state.id);
+    fn forget_channel(&self, state: &Arc<ChannelState>) -> bool {
+        let mut channels = self.channels.lock().unwrap_or_else(|e| e.into_inner());
+        if channels
+            .get(&state.id)
+            .is_some_and(|current| Arc::ptr_eq(current, state))
+        {
+            channels.remove(&state.id);
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -591,7 +630,7 @@ impl ChannelTransport {
 
 impl Read for ChannelTransport {
     fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        if self.closed.load(Ordering::Relaxed) {
+        if output.is_empty() || self.closed.load(Ordering::Relaxed) {
             return Ok(0);
         }
         let timeout = *self.read_timeout.lock().unwrap_or_else(|e| e.into_inner());
@@ -638,6 +677,12 @@ impl Write for ChannelTransport {
         if self.closed.load(Ordering::Relaxed) {
             return Err(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"));
         }
+        {
+            let inner = self.state.inner.lock().unwrap_or_else(|e| e.into_inner());
+            if inner.eof || inner.error.is_some() {
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"));
+            }
+        }
         self.session
             .send_channel_frame(CH_DATA, self.state.id, input)
             .map_err(io::Error::other)?;
@@ -660,10 +705,13 @@ impl Transport for ChannelTransport {
         if self.closed.swap(true, Ordering::Relaxed) {
             return;
         }
-        let _ = self
-            .session
-            .send_channel_frame(CH_CLOSE, self.state.id, &[]);
-        self.session.forget_channel(&self.state);
+        // A reconnect can reuse an inbound ID. Dropping an old transport
+        // must neither erase nor close the new channel with that number.
+        if self.session.forget_channel(&self.state) {
+            let _ = self
+                .session
+                .queue_channel_frame(CH_CLOSE, self.state.id, &[], false);
+        }
         if let Ok(mut inner) = self.state.inner.lock() {
             inner.eof = true;
         }
@@ -904,6 +952,11 @@ fn handshake_relay(
     if let Some(session) = session {
         *session.connecting.lock().unwrap_or_else(|e| e.into_inner()) =
             Some(raw.try_clone().map_err(RemoteError::Io)?);
+        if let Err(error) = ensure_running(session) {
+            let _ = raw.shutdown(Shutdown::Both);
+            drop_connecting(session);
+            return Err(error);
+        }
     }
     let handshake = client_tls_with_config(request, stream, None, None);
     match handshake {
@@ -1000,8 +1053,9 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
     set_relay_nonblocking(&mut socket)?;
 
     let (writer_tx, writer_rx) = mpsc::sync_channel::<Vec<u8>>(OUTBOUND_FRAME_QUEUE);
-    let writer_bytes = Arc::clone(&session.writer_bytes);
-    writer_bytes.store(0, Ordering::Release);
+    // Each connection owns its accounting: old senders can still unwind
+    // after a reconnect, without subtracting from the new queue.
+    let writer_bytes = Arc::new(AtomicUsize::new(0));
     *session.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(Writer {
         sender: writer_tx,
         bytes: Arc::clone(&writer_bytes),
@@ -1152,7 +1206,11 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
             // channel's routing.
             let state = Arc::new(ChannelState::new(id));
             let mut queued = false;
-            if map.len() < MAX_CHANNELS && !live_duplicate(&map, id) {
+            if !session.stopped.load(Ordering::Relaxed)
+                && id < DIAL_ID_BASE
+                && map.len() < MAX_CHANNELS
+                && !live_duplicate(&map, id)
+            {
                 map.insert(id, Arc::clone(&state));
                 queued = session
                     .inbound_tx
@@ -1167,7 +1225,7 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
             }
             drop(map);
             if !queued {
-                let _ = session.send_channel_frame(CH_CLOSE, id, &[]);
+                let _ = session.queue_channel_frame(CH_CLOSE, id, &[], false);
             }
         }
         CH_DATA | CH_CLOSE | CH_ERROR => {
@@ -1300,6 +1358,105 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dropping_an_old_transport_does_not_close_a_reused_channel_id() {
+        let session = inert_session();
+        let old = Arc::new(ChannelState::new(1));
+        let current = Arc::new(ChannelState::new(1));
+        session
+            .channels
+            .lock()
+            .unwrap()
+            .insert(1, Arc::clone(&current));
+        let (tx, rx) = mpsc::sync_channel(2);
+        *session.writer.lock().unwrap() = Some(Writer {
+            sender: tx,
+            bytes: Arc::new(AtomicUsize::new(0)),
+        });
+        drop(ChannelTransport::new(Arc::clone(&session), old));
+        assert!(Arc::ptr_eq(
+            session.channels.lock().unwrap().get(&1).unwrap(),
+            &current
+        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "no CLOSE for the replacement channel"
+        );
+    }
+
+    #[test]
+    fn shutdown_wakes_channels_and_disconnects_the_inbound_receiver() {
+        let session = inert_session();
+        let state = Arc::new(ChannelState::new(1));
+        session
+            .channels
+            .lock()
+            .unwrap()
+            .insert(1, Arc::clone(&state));
+        let inbound = session.take_inbound().unwrap();
+        let mut transport = ChannelTransport::new(Arc::clone(&session), state);
+        transport
+            .set_read_timeout(Some(Duration::from_millis(10)))
+            .unwrap();
+        session.shutdown();
+        let error = transport.read(&mut [0]).unwrap_err();
+        assert_ne!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(matches!(
+            inbound.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        assert!(transport.write(b"x").is_err());
+        assert!(session.channels.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn late_outbound_acknowledgements_do_not_become_inbound_channels() {
+        let session = inert_session();
+        let inbound = session.take_inbound().unwrap();
+        dispatch_frame(&session, &opened_frame(DIAL_ID_BASE + 1));
+        assert!(inbound.try_recv().is_err());
+        assert!(session.channels.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_full_outbound_queue_cannot_block_the_io_threads_refusal() {
+        let session = inert_session();
+        let (tx, _rx) = mpsc::sync_channel(1);
+        let bytes = Arc::new(AtomicUsize::new(0));
+        *session.writer.lock().unwrap() = Some(Writer {
+            sender: tx,
+            bytes: Arc::clone(&bytes),
+        });
+        session.send_channel_frame(CH_DATA, 1, b"x").unwrap();
+        let before = bytes.load(Ordering::Relaxed);
+        let start = Instant::now();
+        dispatch_frame(&session, &opened_frame(DIAL_ID_BASE + 1));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert_eq!(bytes.load(Ordering::Relaxed), before);
+    }
+
+    #[test]
+    fn channel_limits_apply_to_outbound_dials_and_empty_reads_do_not_wait() {
+        let session = inert_session();
+        for id in 0..MAX_CHANNELS as u32 {
+            session
+                .channels
+                .lock()
+                .unwrap()
+                .insert(id, Arc::new(ChannelState::new(id)));
+        }
+        assert!(
+            session
+                .open_channel([0; 32], ChannelPurpose::Unknown)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("too many")
+        );
+        let mut transport = ChannelTransport::new(session, Arc::new(ChannelState::new(999)));
+        assert_eq!(transport.read(&mut []).unwrap(), 0);
+    }
+
+    #[test]
     fn denial_codes_become_sentences() {
         assert!(denial_message("DENIED legacy_token_rejected").contains("update tokenstat"));
         assert!(denial_message("DENIED not_on_this_plan").contains("paid-plan"));
@@ -1369,7 +1526,7 @@ mod tests {
         let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(2);
         *session.writer.lock().unwrap() = Some(Writer {
             sender: tx,
-            bytes: Arc::clone(&session.writer_bytes),
+            bytes: Arc::new(AtomicUsize::new(0)),
         });
         let n = 200u32;
         let producer = Arc::clone(&session);
@@ -1397,7 +1554,6 @@ mod tests {
             token: Mutex::new(String::new()),
             next_channel: AtomicU32::new(1),
             writer: Mutex::new(None),
-            writer_bytes: Arc::new(AtomicUsize::new(0)),
             inbound_tx: Mutex::new(Some(inbound_tx)),
             inbound_rx: Mutex::new(Some(inbound_rx)),
             channels: Mutex::new(HashMap::new()),

@@ -22,7 +22,7 @@ import SwiftUI
 /// watching the same loop.
 struct PersonaPastime: View {
     /// What a character has to choose from.
-    enum Repertoire {
+    enum Repertoire: Hashable {
         /// Nobody has asked for anything. It reads, it plays, it bounces off
         /// the walls, and every so often it gives up and has a nap.
         case leisure
@@ -139,11 +139,16 @@ struct PersonaPastime: View {
         return true
     }
 
+    private struct MotionTaskID: Hashable {
+        let moving: Bool
+        let repertoire: Repertoire
+    }
+
     var body: some View {
         PersonaMark(seed: seed, size: size, state: mood, pokeable: pokeable)
-            .task(id: canAnimate) {
+            .task(id: MotionTaskID(moving: canAnimate, repertoire: doing)) {
+                mood = doing.quiet
                 if canAnimate { await live() }
-                else if reduceMotion { mood = doing.quiet }
             }
     }
 

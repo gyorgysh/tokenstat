@@ -297,7 +297,7 @@ fun EditorDialog(
                 tabs = tabs,
                 selected = selected,
                 onSelect = { store.select(it.key) },
-                onClose = { store.close(it) },
+                onClose = { tab, discard -> store.close(tab, discard) },
                 onFiles = onDismiss,
             )
             if (loadError != null) Banner(loadError!!, BannerSeverity.DANGER)
@@ -332,7 +332,7 @@ private fun EditorTabStrip(
     tabs: List<EditorTab>,
     selected: EditorTab?,
     onSelect: (EditorTab) -> Unit,
-    onClose: (EditorTab) -> Boolean,
+    onClose: (EditorTab, Boolean) -> Boolean,
     onFiles: () -> Unit,
 ) {
     var confirming: EditorTab? by remember { mutableStateOf(null) }
@@ -345,7 +345,7 @@ private fun EditorTabStrip(
                 { onSelect(tab) },
             )
             TextButton(onClick = {
-                if (!onClose(tab)) confirming = tab
+                if (!tab.saving && !onClose(tab, false)) confirming = tab
             }) { Text("×", color = LocalTsColors.current.textSecondary) }
         }
     }
@@ -357,7 +357,7 @@ private fun EditorTabStrip(
             text = { Text(L10n.text("android.codeeditor.0_has_edits_that_are_not_saved_on_that_com.97573681", "${closing.key.path}")) },
             confirmButton = {
                 TextButton(onClick = {
-                    onClose(closing)
+                    onClose(closing, true)
                     confirming = null
                 }) { Text(L10n.text("android.codeeditor.discard.eb1a70e3")) }
             },
@@ -420,7 +420,7 @@ private fun EditorPane(
             tab.spansVersion += 1
         }
     }
-    LaunchedEffect(tab.text) { find.refresh(tab.text) }
+    LaunchedEffect(tab.text, find.query) { find.refresh(tab.text) }
 
     // Change marks come from the same `workspace.diff` the Changes panel
     // parsed, so the two cannot disagree. Reloads when the file opens and
@@ -437,7 +437,7 @@ private fun EditorPane(
     LaunchedEffect(tab.key) { reloadMarks() }
     LaunchedEffect(tab.isDirty) { if (!tab.isDirty) reloadMarks() }
 
-    val annotated = remember(tab.text, tab.spans, tab.spansVersion, find.query, find.matchCount) {
+    val annotated = remember(tab.text, tab.spans, tab.spansVersion, find.query, find.snapshot(), find.current) {
         buildAnnotated(tab.text, tab.spans, find, colors)
     }
     val starts = remember(tab.text) { EditorGutterMap.lineStarts(tab.text) }
@@ -487,9 +487,7 @@ private fun EditorPane(
                 firstDifference = firstDifference(tab.text, conflict),
                 onReload = { scope.launch { store.resolveConflict(model, tab, keepMine = false, hostLabel, onSavedFile) } },
                 onKeep = {
-                    tab.conflictHost = null
-                    tab.error = null
-                    scope.launch { store.save(model, tab, hostLabel, onSavedFile) }
+                    scope.launch { store.resolveConflict(model, tab, keepMine = true, hostLabel, onSavedFile) }
                 },
             )
         }

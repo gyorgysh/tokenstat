@@ -58,18 +58,6 @@ enum BridgeObserver {
     }
 }
 
-/// Envelope every method returns. One decoding path for success and failure.
-private struct Envelope<T: Decodable>: Decodable {
-    struct Failure: Decodable {
-        let code: String
-        let message: String
-    }
-
-    let ok: Bool
-    let result: T?
-    let error: Failure?
-}
-
 /// Swift face of the Rust core.
 ///
 /// Deliberately thin. It owns no state and caches nothing, because the Rust
@@ -203,7 +191,7 @@ enum Bridge {
         ) else { return nil }
         struct Spoken: Decodable { let protocolVersion: String }
         guard let envelope = try? JSONDecoder().decode(
-            Envelope<Spoken>.self, from: Data(response.utf8)
+            BridgeEnvelope<Spoken>.self, from: Data(response.utf8)
         ), envelope.ok, let spoken = envelope.result else { return nil }
         return spoken.protocolVersion
     }
@@ -352,9 +340,9 @@ enum Bridge {
         let data = Data(json.utf8)
 
         let decoder = JSONDecoder()
-        let envelope: Envelope<T>
+        let envelope: BridgeEnvelope<T>
         do {
-            envelope = try decoder.decode(Envelope<T>.self, from: data)
+            envelope = try decoder.decode(BridgeEnvelope<T>.self, from: data)
         } catch {
             // A failed call still decodes as an envelope, so reaching here means
             // the shape itself was wrong. Surface the raw payload: a protocol
@@ -796,9 +784,9 @@ enum Bridge {
                     patience: Patience.interactive
                 )
                 let data = Data(json.utf8)
-                let envelope: Envelope<T>
+                let envelope: BridgeEnvelope<T>
                 do {
-                    envelope = try JSONDecoder().decode(Envelope<T>.self, from: data)
+                    envelope = try JSONDecoder().decode(BridgeEnvelope<T>.self, from: data)
                 } catch {
                     throw BridgeError.decoding(method: method, underlying: "\(error) in \(json.prefix(400))")
                 }
@@ -819,11 +807,9 @@ enum Bridge {
 
     /// A call whose result may legitimately be `null`.
     ///
-    /// Separate from `invoke` rather than a generic over `T?`, because the
-    /// envelope's `result` is already optional: `Envelope<T?>` would nest two
-    /// optionals and a successful null would be indistinguishable from a
-    /// response that carried no result at all. Here `ok` alone decides whether
-    /// the call worked, and `null` means the answer is "nothing".
+    /// A convenience for callers naming the wrapped type. The generic
+    /// envelope also preserves successful null when T is Optional; here `ok`
+    /// alone decides whether the call worked and null means "nothing".
     private static func invokeOptional<T: Decodable>(
         _ method: String,
         _ params: [String: Any] = [:],
@@ -841,9 +827,9 @@ enum Bridge {
         )
         let data = Data(json.utf8)
 
-        let envelope: Envelope<T>
+        let envelope: BridgeEnvelope<T?>
         do {
-            envelope = try JSONDecoder().decode(Envelope<T>.self, from: data)
+            envelope = try JSONDecoder().decode(BridgeEnvelope<T?>.self, from: data)
         } catch {
             throw BridgeError.decoding(method: method, underlying: "\(error) in \(json.prefix(400))")
         }
@@ -855,7 +841,7 @@ enum Bridge {
                     ?? L10n.text("apple.bridge.the_core_rejected_the_call_without_saying.e1b9fc0b")
             )
         }
-        return envelope.result
+        return envelope.result ?? nil
     }
 
     private static func backgroundOptional<T: Decodable & Sendable>(
@@ -1682,7 +1668,7 @@ extension Bridge {
             params["name"] = name
         }
         if let peer {
-            return try await onPeer(peer, "chat.personaDraft", params, as: ChatPersonaDraft.self)
+            return try await onPeer(peer, "chat.personaDraft", params, patience: Patience.long, as: ChatPersonaDraft.self)
         }
         return try await background(
             "chat.personaDraft",

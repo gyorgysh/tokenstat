@@ -163,7 +163,7 @@ class TabCustomization(
         /// Tabs added by later builds join at the end rather than jumping
         /// the order somebody already arranged.
         fun resolveOrder(stored: List<String>?, allTabs: List<String>): List<String> {
-            val known = (stored ?: emptyList()).filter { allTabs.contains(it) }
+            val known = (stored ?: emptyList()).filter { allTabs.contains(it) }.distinct()
             return known + allTabs.filter { !known.contains(it) }
         }
 
@@ -173,8 +173,8 @@ class TabCustomization(
             order: List<String>,
             defaultHidden: Set<String>,
         ): Set<String> {
-            if (neverStored) return defaultHidden
-            return storedHidden.intersect(order.toSet())
+            val hidden = (if (neverStored) defaultHidden else storedHidden).intersect(order.toSet())
+            return if (order.isNotEmpty() && hidden.size == order.size) hidden - order.first() else hidden
         }
     }
 }
@@ -294,6 +294,7 @@ fun TabEditorSheet(tabs: List<TabDef>, customization: TabCustomization, onDismis
                     .nestedScroll(dragScrollGate)
                     .onSizeChanged { columnWidthPx = it.width }
                     .pointerInput(columnWidthPx, handleZonePx) {
+                        try {
                         awaitPointerEventScope {
                             val slop = viewConfiguration.touchSlop
                             while (true) {
@@ -342,6 +343,10 @@ fun TabEditorSheet(tabs: List<TabDef>, customization: TabCustomization, onDismis
                                     dragOffset = 0f
                                 }
                             }
+                        }
+                        } finally {
+                            dragging = null
+                            dragOffset = 0f
                         }
                     },
             ) {

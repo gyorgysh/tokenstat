@@ -94,7 +94,7 @@ fn save_in(dir: &Path, settings: &HostSettings) -> Result<(), String> {
     let _ = fs::create_dir_all(dir);
     let path = settings_path_in(dir);
     let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+    tokenstat_sync::snapshot::write_private_atomically(&path, &text).map_err(|e| e.to_string())
 }
 
 fn save(settings: &HostSettings) -> Result<(), String> {
@@ -632,8 +632,11 @@ fn set_policy(params: &str) -> Result<Value, String> {
     let p: Params = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     {
         let mut settings = lock_settings();
-        settings.always_on = p.always_on;
-        save(&settings)?;
+        let updated = HostSettings {
+            always_on: p.always_on,
+        };
+        save(&updated)?;
+        *settings = updated;
     }
     apply_now();
     #[cfg(windows)]

@@ -383,28 +383,12 @@ enum AppInstaller {
     }
 
     private static func run(_ tool: String, _ arguments: [String]) -> Output {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: tool)
-        task.arguments = arguments
-        let out = Pipe()
-        let err = Pipe()
-        task.standardOutput = out
-        task.standardError = err
         do {
-            try task.run()
+            let result = try ProcessOutput.run(tool, arguments)
+            return Output(status: result.status, output: result.output, errors: result.errors)
         } catch {
             return Output(status: -1, output: "", errors: error.localizedDescription)
         }
-        // Read before waiting: a tool that fills the pipe buffer blocks forever
-        // if nobody is draining it, and codesign is chatty.
-        let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
-        task.waitUntilExit()
-        return Output(
-            status: task.terminationStatus,
-            output: String(decoding: outData, as: UTF8.self),
-            errors: String(decoding: errData, as: UTF8.self)
-        )
     }
 
     private static func firstLine(_ text: String) -> String {

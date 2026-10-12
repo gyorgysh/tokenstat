@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::io::Write;
+use std::io::{Read, Seek, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -175,20 +175,15 @@ fn normalized_host(host: &str) -> Option<String> {
 }
 
 fn looks_like_ip(host: &str) -> bool {
-    // IPv4 dotted quad, e.g. 192.168.1.1 or 10.0.0.1
-    let parts: Vec<&str> = host.split('.').collect();
-    if parts.len() == 4
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
-    {
-        return parts
-            .iter()
-            .all(|p| p.parse::<u8>().is_ok() || p.parse::<u16>().is_ok_and(|n| n <= 255));
-    }
-    // IPv6 contains `:` but that is already rejected above; hex IPv6 without
-    // colons is indistinguishable from a hostname, so no extra check needed.
-    false
+    reqwest::Url::parse(&format!("https://{host}"))
+        .map(|url| {
+            url.host_str().is_none_or(|host| {
+                host.trim_matches(['[', ']'])
+                    .parse::<std::net::IpAddr>()
+                    .is_ok()
+            })
+        })
+        .unwrap_or(true)
 }
 
 fn storage_key(host: &str) -> String {
@@ -210,6 +205,13 @@ fn load_grant(host: &str) -> Result<Option<StoredGrant>, ForgeError> {
 }
 
 fn store_grant(host: &str, grant: &StoredGrant) -> Result<(), ForgeError> {
+    let _guard = refresh_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    store_grant_locked(host, grant)
+}
+
+fn store_grant_locked(host: &str, grant: &StoredGrant) -> Result<(), ForgeError> {
     let raw = serde_json::to_string(grant)?;
     keychain::store_token(&storage_key(host), &raw)?;
     forget_credentials();
@@ -231,51 +233,71 @@ struct Remembered {
     credential: Option<Credential>,
 }
 
-fn credential_cache() -> &'static std::sync::Mutex<HashMap<String, Remembered>> {
-    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Remembered>>> =
+#[derive(Default)]
+struct CredentialCache {
+    generation: u64,
+    entries: HashMap<String, Remembered>,
+}
+fn credential_cache() -> &'static std::sync::Mutex<CredentialCache> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<CredentialCache>> =
         std::sync::OnceLock::new();
-    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+    CACHE.get_or_init(|| std::sync::Mutex::new(CredentialCache::default()))
 }
 
 /// Forget what was found, because it has just changed.
 fn forget_credentials() {
-    credential_cache()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clear();
-}
-
-/// Find a credential without opening a browser or changing another tool's
-/// credential store. The first usable rung wins.
-pub fn credential(host: &str) -> Option<Credential> {
-    let host = normalized_host(host)?;
-    {
-        let cache = credential_cache()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(hit) = cache
-            .get(&host)
-            .filter(|hit| hit.at.elapsed() < CREDENTIAL_TTL)
-        {
-            return hit.credential.clone();
-        }
-    }
-    let found = discover(&host);
     let mut cache = credential_cache()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    cache.retain(|_, hit| hit.at.elapsed() < CREDENTIAL_TTL);
-    cache.insert(
-        host,
-        Remembered {
-            at: std::time::Instant::now(),
-            credential: found.clone(),
-        },
-    );
-    found
+    cache.generation = cache.generation.wrapping_add(1);
+    cache.entries.clear();
 }
 
-/// The rungs, walked once.
+pub fn credential(host: &str) -> Option<Credential> {
+    cached_credential(normalized_host(host)?, discover)
+}
+
+fn cached_credential(
+    host: String,
+    discover: impl Fn(&str) -> Option<Credential>,
+) -> Option<Credential> {
+    loop {
+        let generation = {
+            let cache = credential_cache()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(hit) = cache
+                .entries
+                .get(&host)
+                .filter(|hit| hit.at.elapsed() < CREDENTIAL_TTL)
+            {
+                return hit.credential.clone();
+            }
+            cache.generation
+        };
+        let found = discover(&host);
+        let mut cache = credential_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Discovery can involve a slow helper/network probe. A sign-out or
+        // new login while it was running must retire its old result.
+        if cache.generation != generation {
+            continue;
+        }
+        cache
+            .entries
+            .retain(|_, hit| hit.at.elapsed() < CREDENTIAL_TTL);
+        cache.entries.insert(
+            host,
+            Remembered {
+                at: std::time::Instant::now(),
+                credential: found.clone(),
+            },
+        );
+        return found;
+    }
+}
+
 fn discover(host: &str) -> Option<Credential> {
     let host = host.to_string();
     if let Ok(Some(grant)) = load_grant(&host) {
@@ -369,30 +391,60 @@ fn borrowed_token_usable(host: &str, token: &str) -> bool {
 }
 
 fn git_credential(host: &str) -> Option<String> {
-    let mut child = Command::new("git")
+    let input = format!("protocol=https\nhost={host}\n\n");
+    let mut command = Command::new("git");
+    command
         .args(["-c", "credential.interactive=false", "credential", "fill"])
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    child
-        .stdin
-        .take()?
-        .write_all(format!("protocol=https\nhost={host}\n\n").as_bytes())
-        .ok()?;
-    let out = child.wait_with_output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8(out.stdout).ok()?;
+        .env("GIT_TERMINAL_PROMPT", "0");
+    let stdout = credential_output(&mut command, input.as_bytes(), Duration::from_secs(5))?;
     stdout
         .lines()
         .find_map(|line| line.strip_prefix("password="))
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+// A credential helper can hang or inherit stdout into a long-lived process.
+// An anonymous private file avoids a pipe reader that outlives the deadline.
+fn credential_output(command: &mut Command, input: &[u8], timeout: Duration) -> Option<String> {
+    const CAP: u64 = 64 * 1024;
+    let mut output = tempfile::tempfile().ok()?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(output.try_clone().ok()?))
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let started = std::time::Instant::now();
+    let result = (|| {
+        child.stdin.take()?.write_all(input).ok()?;
+        loop {
+            if output.metadata().ok()?.len() > CAP || started.elapsed() >= timeout {
+                return None;
+            }
+            if let Some(status) = child.try_wait().ok()? {
+                if !status.success() {
+                    return None;
+                }
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        output.rewind().ok()?;
+        let mut text = String::new();
+        output.take(CAP + 1).read_to_string(&mut text).ok()?;
+        (text.len() as u64 <= CAP).then_some(text)
+    })();
+    // Reap on every early failure, including stdin and metadata errors.
+    let _ = child.kill();
+    let _ = child.wait();
+    result
 }
 
 pub fn device_start(host: &str) -> Result<DeviceLogin, ForgeError> {
@@ -485,6 +537,9 @@ pub fn set_token(host: &str, token: &str) -> Result<(), ForgeError> {
 
 pub fn sign_out(host: &str) -> Result<(), ForgeError> {
     let host = normalized_host(host).ok_or_else(|| ForgeError::Api("invalid host".into()))?;
+    let _guard = refresh_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     keychain::delete_token(&storage_key(&host))?;
     forget_credentials();
     Ok(())
@@ -531,7 +586,7 @@ fn refresh(host: &str, old: &StoredGrant) -> Result<StoredGrant, ForgeError> {
         grant.refresh_token = old.refresh_token.clone();
         grant.refresh_token_expires_at = old.refresh_token_expires_at;
     }
-    store_grant(host, &grant)?;
+    store_grant_locked(host, &grant)?;
     Ok(grant)
 }
 
@@ -619,6 +674,35 @@ fn reset_suffix(reset: Option<u64>) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn credential_helpers_are_bounded_and_reaped() {
+        let mut echo = std::process::Command::new("sh");
+        echo.args(["-c", "cat >/dev/null; printf 'password=test\n'"]);
+        assert_eq!(
+            super::credential_output(
+                &mut echo,
+                b"host=example.com\n\n",
+                std::time::Duration::from_secs(2)
+            )
+            .as_deref(),
+            Some("password=test\n")
+        );
+        let mut wait = std::process::Command::new("sh");
+        wait.args(["-c", "exec sleep 10"]);
+        let start = std::time::Instant::now();
+        assert!(
+            super::credential_output(&mut wait, b"", std::time::Duration::from_millis(50))
+                .is_none()
+        );
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+        let mut flood = std::process::Command::new("sh");
+        flood.args(["-c", "head -c 70000 /dev/zero"]);
+        assert!(
+            super::credential_output(&mut flood, b"", std::time::Duration::from_secs(2)).is_none()
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -671,5 +755,37 @@ mod tests {
             "HTTP 401: Bad credentials"
         );
         assert_eq!(api_message("", 503), "HTTP 503");
+    }
+    #[test]
+    fn numeric_ip_spellings_are_not_enterprise_hosts() {
+        for host in ["2130706433", "127.1", "0x7f000001", "0177.0.0.1"] {
+            assert!(normalized_host(host).is_none(), "{host}");
+        }
+    }
+
+    #[test]
+    fn a_login_change_retires_an_inflight_credential_discovery() {
+        let (started_send, started) = std::sync::mpsc::channel();
+        let (resume, resume_receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let calls = std::cell::Cell::new(0);
+            cached_credential("cache-retirement.example".into(), |_| {
+                let first = calls.get() == 0;
+                calls.set(calls.get() + 1);
+                if first {
+                    started_send.send(()).unwrap();
+                    resume_receive.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                Some(Credential {
+                    source: CredentialSource::Pasted,
+                    token: if first { "old" } else { "new" }.into(),
+                })
+            })
+            .unwrap()
+        });
+        started.recv_timeout(Duration::from_secs(5)).unwrap();
+        forget_credentials();
+        resume.send(()).unwrap();
+        assert_eq!(worker.join().unwrap().bearer(), "new");
     }
 }

@@ -22,6 +22,12 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     let id: String
     let peer: String
     let ownerScope = WorkSessionContext.shared.scope
+    private let ownerGeneration = WorkSessionContext.shared.generation
+    private var ownsSession: Bool {
+        ownerScope != nil && ownerScope == WorkSessionContext.shared.scope
+            && ownerGeneration == WorkSessionContext.shared.generation
+    }
+    private var mayOperate: Bool { ownsSession && !removed && !Task.isCancelled }
     private(set) var hostID: String
     let command: String
     let cwd: String
@@ -110,7 +116,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     }
 
     func attach(info: PtySessionInfo) {
-        guard isPending else { return }
+        guard isPending, ownsSession else { return }
         if removed && !closeWhenAttached { return }
         hostID = info.id
         liveInfo = info
@@ -123,7 +129,10 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         if closeWhenAttached || removed {
             let peer = peer
             let id = info.id
-            Task { try? await ClientRemote.ptyClose(peer: peer, id: id) }
+            Task {
+                guard self.ownsSession else { return }
+                try? await ClientRemote.ptyClose(peer: peer, id: id)
+            }
             endLocalWork()
             return
         }
@@ -137,10 +146,13 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         // the Mac's own terminal clamped to the phone's width. Giving up the
         // claim puts it straight back. Fire and forget: the host expires the
         // claim on its own, and closing a screen must not wait on the tunnel.
-        if !isPending, !hostID.isEmpty {
+        if ownsSession, !isPending, !hostID.isEmpty {
             let id = hostID
             let peer = peer
-            Task.detached { try? await ClientRemote.ptyDetach(peer: peer, id: id) }
+            Task {
+                guard self.ownsSession else { return }
+                try? await ClientRemote.ptyDetach(peer: peer, id: id)
+            }
         }
         endLocalWork()
     }
@@ -151,6 +163,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     /// Throws when the host never heard the close, so the caller can keep
     /// the row instead of pretending the process is gone.
     func close() async throws {
+        guard ownsSession, !Task.isCancelled else { throw CancellationError() }
         if isPending {
             closeWhenAttached = true
             removed = true
@@ -165,9 +178,10 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         do {
             try await ClientRemote.ptyClose(peer: peer, id: hostID)
         } catch {
-            transportError = error.localizedDescription
+            if ownsSession { transportError = error.localizedDescription }
             throw error
         }
+        guard ownsSession, !Task.isCancelled else { throw CancellationError() }
         alive = false
         exitCode = nil
         await updateLiveActivity(stopped: true)
@@ -191,13 +205,12 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     }
 
     func updateLiveActivity(stopped: Bool = false) async {
-        guard ownerScope != nil, ownerScope == WorkSessionContext.shared.scope,
-              var info = liveInfo else { return }
+        guard ownsSession, var info = liveInfo else { return }
         info.alive = alive
         info.exitCode = exitCode
         await LiveWorkController.shared.track(terminal: info, peer: peer,
             projectName: URL(fileURLWithPath: cwd).lastPathComponent, observedAt: observedAt, stopped: stopped,
-            mayStart: { !self.removed && self.alive && self.hostID == info.id })
+            mayStart: { self.mayOperate && self.alive && self.hostID == info.id })
     }
 
     /// A path change is not a dead process. Drop the last transport error so
@@ -209,7 +222,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     }
 
     private func start() {
-        guard !isPending else { return }
+        guard !isPending, mayOperate else { return }
         let bridgeID = hostID
         let peer = peer
         if writerTask == nil {
@@ -217,6 +230,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             writerTask = Task.detached(priority: .userInitiated) { [weak self] in
                 var lastError: String?
                 for await event in events {
+                    guard !Task.isCancelled, await self?.mayOperate == true else { break }
                     switch event {
                     case let .write(bytes):
                         let failure: String?
@@ -229,7 +243,8 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                         if failure != lastError {
                             lastError = failure
                             Task { @MainActor [weak self] in
-                                self?.transportError = failure
+                                guard let self, self.mayOperate else { return }
+                                self.transportError = failure
                             }
                         }
                     case let .resize(rows, cols):
@@ -293,14 +308,16 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         error: Error,
         failedReads: Int
     ) async -> Bool {
-        guard !removed else { return false }
+        guard mayOperate else { return false }
         let message = error.localizedDescription
         if transportError != message { transportError = message }
         guard failedReads.isMultiple(of: 8) else { return true }
         guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else {
+            guard mayOperate else { return false }
             if failedReads >= 40 {
                 do {
                     let sessions = try await ClientRemote.ptyList(peer: peer)
+                    guard mayOperate else { return false }
                     if !sessions.contains(where: { $0.id == id }) {
                         alive = false
                         await updateLiveActivity(stopped: true)
@@ -313,6 +330,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             }
             return true
         }
+        guard mayOperate else { return false }
         liveInfo = info
         if rows != info.rows { rows = info.rows }
         if cols != info.cols { cols = info.cols }
@@ -336,7 +354,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     @MainActor
     private func makePlan() -> Plan? {
-        guard !removed else { return nil }
+        guard mayOperate else { return nil }
         return Plan(
             offset: offset,
             waitMs: inForeground ? 250 : 0,
@@ -347,6 +365,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     @MainActor
     private func apply(_ chunk: PtyChunk) async -> Bool {
+        guard mayOperate else { return true }
         if outputPaused != chunk.paused { outputPaused = chunk.paused }
         if chunk.dropped > 0 { droppedOutput = true }
         if !chunk.bytes.isEmpty {
@@ -359,7 +378,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             let slice = 24 * 1024
             var start = 0
             while start < bytes.count {
-                guard !removed else { return true }
+                guard mayOperate else { return true }
                 let end = min(start + slice, bytes.count)
                 view.feedOutput(ArraySlice(bytes[start..<end]))
                 start = end
@@ -375,12 +394,13 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     /// to leave this screen saying Running until the next failed read.
     @MainActor
     private func checkLiveness(peer: String, id: String) async -> Bool {
-        guard !removed else { return false }
+        guard mayOperate else { return false }
         guard Date().timeIntervalSince(lastInfoAt) >= 0.25 else { return true }
         lastInfoAt = Date()
         guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else {
             return true
         }
+        guard mayOperate else { return false }
         liveInfo = info
         if rows != info.rows { rows = info.rows }
         if cols != info.cols { cols = info.cols }
@@ -432,7 +452,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         Task { @MainActor in
-            guard newCols > 0, newRows > 0 else { return }
+            guard mayOperate, newCols > 0, newRows > 0 else { return }
             // Against what was last announced, not against `rows`/`cols`. Those
             // are the host's answer, and the host's answer is the *agreed* size
             // across every viewer, which on a phone attached to a wider Mac is
@@ -498,7 +518,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     /// The same queue typing uses, so a tapped key and a typed one cannot
     /// arrive out of order.
     func sendBytes(_ bytes: [UInt8]) {
-        guard !bytes.isEmpty else { return }
+        guard mayOperate, !bytes.isEmpty else { return }
         eventStream.continuation.yield(.write(bytes))
     }
 
@@ -508,6 +528,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             // Ctrl armed on the bar applies to the key that is typed here, not
             // to a bar key. The fold and the clear happen on the main actor so
             // they cannot race the bar's toggle.
+            guard mayOperate else { return }
             var out = bytes
             if controlArmed {
                 controlArmed = false
@@ -526,6 +547,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     nonisolated func clipboardCopy(source: TerminalView, content: Data) {
         if let text = String(data: content, encoding: .utf8) {
             Task { @MainActor in
+                guard mayOperate else { return }
                 UIPasteboard.general.string = text
             }
         }
@@ -571,7 +593,8 @@ struct ClientTerminalScreen: View {
     @State private var showingWorkspace = false
 
     private func rememberTerminal() {
-        guard !session.hostID.hasPrefix("pending-") else { return }
+        guard session.ownerScope != nil, session.ownerScope == WorkSessionContext.shared.scope,
+              !session.hostID.hasPrefix("pending-") else { return }
         if let reference = session.workReference, reference.scope.kind == .account {
             navigation.showTerminal(reference, owner: session.id)
         }

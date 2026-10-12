@@ -136,8 +136,15 @@ pub fn parse_db(path: &Path) -> ParseOutput {
 
     let mut seen_response_ids = HashSet::new();
     for row in rows {
-        let Ok((idx, blob)) = row else {
-            continue;
+        let (idx, blob) = match row {
+            Ok(row) => row,
+            Err(error) => {
+                out.warnings.push(Warning::Unreadable {
+                    path: path.to_path_buf(),
+                    reason: error.to_string(),
+                });
+                continue;
+            }
         };
         let Some(event) = parse_gen_metadata(
             &blob,
@@ -353,6 +360,9 @@ impl<'a> ProtoReader<'a> {
         loop {
             let byte = *self.buf.get(self.pos)?;
             self.pos += 1;
+            if shift == 63 && byte > 1 {
+                return None;
+            }
             result |= u64::from(byte & 0x7f) << shift;
             if byte & 0x80 == 0 {
                 return Some(result);
@@ -475,6 +485,34 @@ mod tests {
         chat.extend(enc_len(19, model.as_bytes()));
 
         enc_len(1, &chat)
+    }
+
+    #[test]
+    fn overflowing_varints_are_rejected() {
+        let mut bytes = vec![0xff; 9];
+        bytes.push(2);
+        assert!(ProtoReader::new(&bytes).read_varint().is_none());
+        assert_eq!(
+            ProtoReader::new(&encode_varint(u64::MAX)).read_varint(),
+            Some(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn undecodable_rows_report_an_unreadable_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("invalid.db");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE gen_metadata (idx INTEGER, data BLOB);
+             INSERT INTO gen_metadata VALUES (0, 'invalid blob');",
+            )
+            .unwrap();
+        assert!(matches!(
+            parse_db(&path).warnings.as_slice(),
+            [Warning::Unreadable { .. }]
+        ));
     }
 
     #[test]

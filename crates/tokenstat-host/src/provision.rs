@@ -233,6 +233,14 @@ fn read_logs(lines: u32) -> Result<String, String> {
 
 #[cfg(any(target_os = "linux", all(test, unix)))]
 fn journal_output(command: &mut std::process::Command) -> Result<String, String> {
+    journal_output_with_timeout(command, std::time::Duration::from_secs(15))
+}
+
+#[cfg(any(target_os = "linux", all(test, unix)))]
+fn journal_output_with_timeout(
+    command: &mut std::process::Command,
+    timeout: std::time::Duration,
+) -> Result<String, String> {
     use std::process::Stdio;
     let mut child = command
         .stdout(Stdio::piped())
@@ -249,15 +257,14 @@ fn journal_output(command: &mut std::process::Command) -> Result<String, String>
     // only their tails: line counts do not bound an individual journal entry.
     std::thread::scope(|scope| {
         let errors = scope.spawn(move || output_tail(stderr));
-        let output = output_tail(stdout);
-        if output.is_err() {
-            let _ = child.kill();
-        }
-        let status = wait_bounded(&mut child).map_err(|error| error.to_string())?;
+        let output = scope.spawn(move || output_tail(stdout));
+        let status = wait_bounded(&mut child, timeout).map_err(|error| error.to_string())?;
         let errors = errors
             .join()
             .map_err(|_| "Journal error reader stopped")??;
-        let output = output?;
+        let output = output
+            .join()
+            .map_err(|_| "Journal output reader stopped")??;
         if !status.success() {
             return Err(format!("Could not read the journal: {}", errors.trim()));
         }
@@ -270,9 +277,12 @@ fn journal_output(command: &mut std::process::Command) -> Result<String, String>
 /// `journalctl` with a line count normally exits at once. If it does not,
 /// kill it and report that rather than blocking the caller forever.
 #[cfg(any(target_os = "linux", all(test, unix)))]
-fn wait_bounded(child: &mut std::process::Child) -> std::io::Result<std::process::ExitStatus> {
+fn wait_bounded(
+    child: &mut std::process::Child,
+    timeout: std::time::Duration,
+) -> std::io::Result<std::process::ExitStatus> {
     use std::time::{Duration, Instant};
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait()? {
             Some(status) => return Ok(status),
@@ -350,14 +360,14 @@ fn read_logs(lines: u32) -> Result<String, String> {
 /// Log files are unbounded; `read_to_string` on a multi-GB file OOMs the
 /// daemon for any allowed device. Read at most the final 512 KiB from the
 /// measured snapshot, then take lines from that window.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn bounded_tail(path: &std::path::Path, lines: u32) -> Result<Vec<String>, String> {
     let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
     let len = file.metadata().map_err(|error| error.to_string())?.len();
     tail_snapshot(&mut file, len, lines)
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", windows, test))]
 fn tail_snapshot(
     file: &mut (impl std::io::Read + std::io::Seek),
     len: u64,
@@ -390,7 +400,14 @@ fn tail_snapshot(
         .collect())
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(windows)]
+fn read_logs(lines: u32) -> Result<String, String> {
+    let local = std::env::var_os("LOCALAPPDATA").ok_or("No local application directory")?;
+    let path = std::path::PathBuf::from(local).join("tokenstat/logs/hostd.log");
+    Ok(bounded_tail(&path, lines)?.join("\n"))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn read_logs(_: u32) -> Result<String, String> {
     Err("This platform keeps the host's log somewhere this cannot read.".into())
 }
@@ -440,6 +457,19 @@ mod tests {
         assert!(text.ends_with("latest entry\n"));
         assert!(text.len() < 512 * 1024 + 64);
         assert_eq!(output_tail(b"small\n".as_slice()).unwrap(), "small\n");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_silent_journal_is_killed_before_waiting_for_pipe_eof() {
+        let mut command = std::process::Command::new("sleep");
+        command.arg("30");
+        let start = std::time::Instant::now();
+        let error =
+            journal_output_with_timeout(&mut command, std::time::Duration::from_millis(100))
+                .unwrap_err();
+        assert!(error.contains("timed out"), "{error}");
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]

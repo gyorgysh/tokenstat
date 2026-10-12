@@ -372,7 +372,12 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
             }
             if event::poll(Duration::from_millis(200))? {
                 app.dirty = true;
-                handle_event(&mut app, event::read()?)?;
+                if let Err(error) = handle_event(&mut app, event::read()?) {
+                    app.status = format!("{error:#}");
+                }
+            }
+            if app.should_quit || STOP_SIGNAL.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+                break;
             }
             if let Some(host) = app.pending_login_host.take() {
                 run_login_outside_tui(&mut terminal, &mut app, host.as_deref())?;
@@ -382,7 +387,7 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
                 start_sync(&mut app, Some(host.as_str()));
             }
             poll_sync_result(&mut app);
-            if app.should_quit {
+            if app.should_quit || STOP_SIGNAL.load(std::sync::atomic::Ordering::Relaxed) != 0 {
                 break;
             }
         }
@@ -390,6 +395,10 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
     })();
 
     drop(_guard);
+    let signal = STOP_SIGNAL.load(std::sync::atomic::Ordering::Relaxed);
+    if signal != 0 {
+        std::process::exit(128 + signal);
+    }
     result
 }
 
@@ -401,7 +410,10 @@ fn archive_needs_scan(last_scan_ms: Option<&str>, max_age: Duration) -> bool {
     let Ok(ms) = raw.parse::<i64>() else {
         return true;
     };
-    let age_ms = (jiff::Timestamp::now().as_millisecond() - ms).max(0) as u64;
+    let age_ms = jiff::Timestamp::now()
+        .as_millisecond()
+        .saturating_sub(ms)
+        .max(0) as u64;
     age_ms >= max_age.as_millis() as u64
 }
 
@@ -418,16 +430,14 @@ struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         restore_terminal();
+        restore_stop_signal_handlers();
     }
 }
 
-/// Restore the terminal and exit when the process is asked to stop.
-///
-/// SIGTERM (logout, `kill`) and SIGHUP (terminal closed) otherwise kill the
-/// process with the alternate screen and raw mode still active. The handler is
-/// a best effort: it does the same restore the guard does and then exits
-/// through `_exit`, which cannot run the guard's destructor or Rust's exit
-/// handlers.
+static STOP_SIGNAL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// Ask the main loop to restore the terminal and exit. Rust stdout and the
+/// terminal implementation use locks and must never run inside a signal handler.
 #[cfg(unix)]
 #[allow(unsafe_code)]
 fn install_signal_handlers() {
@@ -449,11 +459,20 @@ fn install_signal_handlers() {}
 #[cfg(unix)]
 #[allow(unsafe_code)]
 extern "C" fn handle_stop_signal(signal: libc::c_int) {
-    restore_terminal();
+    STOP_SIGNAL.store(signal, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn restore_stop_signal_handlers() {
     unsafe {
-        libc::_exit(128 + signal);
+        libc::signal(libc::SIGTERM, libc::SIG_DFL);
+        libc::signal(libc::SIGHUP, libc::SIG_DFL);
     }
 }
+
+#[cfg(not(unix))]
+fn restore_stop_signal_handlers() {}
 
 fn split_cmd(raw: &str) -> (&str, Vec<&str>) {
     let trimmed = raw.trim().trim_start_matches('/');
@@ -575,6 +594,16 @@ mod tests {
             .collect();
         store.insert_events(&events, &tz).unwrap();
         let mut app = App::load(&path, &tz).unwrap();
+        for args in [
+            vec!["--last", "0"],
+            vec!["--last", "-1"],
+            vec!["--last", "4294967295"],
+            vec!["--model"],
+            vec!["--project", "--last", "7"],
+        ] {
+            assert!(app.apply_filter_args(&args).is_err(), "{args:?}");
+            assert!(!filter_active(&app.filter));
+        }
         assert!(app.months.is_empty());
         assert!(app.projects.is_empty());
         assert_eq!(app.values.len(), 1);
@@ -638,6 +667,10 @@ mod tests {
     fn a_missing_last_scan_needs_a_refresh() {
         assert!(archive_needs_scan(None, AUTO_SCAN_MAX_AGE));
         assert!(archive_needs_scan(Some("not-a-number"), AUTO_SCAN_MAX_AGE));
+        assert!(archive_needs_scan(
+            Some(&i64::MIN.to_string()),
+            AUTO_SCAN_MAX_AGE
+        ));
     }
 
     #[test]

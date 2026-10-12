@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using System.Text.Json.Nodes;
 using Tokenstat.Design;
 using Tokenstat.Pages;
 using Tokenstat.Navigation;
@@ -8,6 +9,14 @@ var directory = Path.Combine(Path.GetTempPath(), "tokenstat-shell-test-" + Guid.
 Directory.CreateDirectory(directory);
 try
 {
+    var request = new System.Text.Json.Nodes.JsonObject { ["workspaceId"] = "remote:peer:folder", ["branch"] = "feature" };
+    var forwarded = RemoteWorkspaceParameters.Forward(request, "remote:peer:folder", "folder");
+    Check(forwarded["workspaceId"]!.GetValue<string>() == "folder" && forwarded["id"]!.GetValue<string>() == "folder"
+        && forwarded["branch"]!.GetValue<string>() == "feature", "Remote forge requests did not target the peer's workspace ID");
+    Check(request["workspaceId"]!.GetValue<string>() == "remote:peer:folder" && request["id"] is null,
+        "Forwarding changed the caller's reusable request");
+    Check(RemoteWorkspaceParameters.Forward(forwarded, "remote:peer:folder", "folder")["workspaceId"]!.GetValue<string>() == "folder",
+        "Already-native workspace ownership changed on forwarding");
     TerminalPaneSelectionTests.Run(directory);
     SidebarPreferencesTests.Run(directory);
     await TerminalSessionTests.RunAsync();
@@ -165,3 +174,10 @@ try
     Console.WriteLine("Shell widths: persistence, independent panels, malformed preferences and adaptive fit passed");
 }
 finally { Directory.Delete(directory, recursive: true); }
+
+Check(Format.Number(new JsonArray(), "count") == 0 && !Format.Flag(JsonValue.Create(true), "enabled"), "Malformed row shapes crashed numeric/boolean formatting");
+Check(Format.Number(new JsonObject { ["count"] = "NaN" }, "count") == 0 && Format.Number(new JsonObject { ["count"] = "Infinity" }, "count") == 0, "Non-finite host numbers reached native layout");
+Check(Format.Long(new JsonObject { ["count"] = "1e100" }, "count") == long.MaxValue, "Overflowing counters wrapped negative");
+Check(Format.Instant(long.MaxValue) is null && Format.Instant(long.MinValue) is null && Format.Instant(0) == DateTimeOffset.UnixEpoch, "Malformed timestamps crashed formatting or valid epoch was lost");
+
+Check(Format.Long(new JsonObject { ["count"] = 9007199254740993L }, "count") == 9007199254740993L, "Integral counters lost precision through double conversion");

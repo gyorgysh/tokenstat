@@ -74,6 +74,9 @@ const ID_FIELDS: &[&str] = &[
     "parentId",
     // The DeepSeek Harness nests its message id.
     "data.message.id",
+    "metadata.request_id",
+    "stream.id",
+    "agentId",
 ];
 
 /// Keys a Pi fixture may keep.
@@ -428,7 +431,7 @@ fn pricing_seed(out: &Path) -> Result<()> {
 }
 
 fn redact(input: &Path, out_dir: &Path, max_files: usize, profile: Profile) -> Result<()> {
-    let files: Vec<PathBuf> = if input.is_dir() {
+    let mut files: Vec<PathBuf> = if input.is_dir() {
         walkdir::WalkDir::new(input)
             .into_iter()
             .filter_map(Result::ok)
@@ -445,6 +448,7 @@ fn redact(input: &Path, out_dir: &Path, max_files: usize, profile: Profile) -> R
         vec![input.to_path_buf()]
     };
 
+    files.sort();
     std::fs::create_dir_all(out_dir)?;
     // Shared across files so an id appearing in two transcripts, which is
     // exactly the resume-duplicate case, maps to the same pseudonym in both.
@@ -452,6 +456,9 @@ fn redact(input: &Path, out_dir: &Path, max_files: usize, profile: Profile) -> R
     let mut written = 0;
 
     for (n, path) in files.iter().enumerate() {
+        if written >= max_files {
+            break;
+        }
         // The harness compresses its sessions. A fixture stays plain text, so
         // it can be read in a diff and so the guard in `tests/fixtures.rs` can
         // check it without a decoder.
@@ -501,6 +508,13 @@ struct Pseudonyms {
 
 impl Pseudonyms {
     fn get(&mut self, field: &str, original: &str) -> String {
+        // Parent references inhabit the same identifier namespace as their
+        // targets; otherwise redaction severs the transcript tree.
+        let field = match field {
+            "parentUuid" => "uuid",
+            "parentId" => "id",
+            field => field,
+        };
         let next = self.seen.len();
         self.seen
             .entry(format!("{field}:{original}"))
@@ -594,6 +608,25 @@ fn is_safe_string(path: &str, s: &str) -> bool {
             | "data.message.source.kind"
             | "data.message.source.provider"
             | "data.message.source.model"
+            | "time"
+            | "provider"
+            | "modelId"
+            | "role"
+            | "metadata.generation_model"
+            | "metadata.started_generation_at"
+            | "metadata.created_at"
+            | "metadata.finish_reason"
+            | "model"
+            | "authType"
+            | "source"
+            | "usageScope"
+            | "recorded_at"
+            | "record_type"
+            | "payload_type"
+            | "stream.kind"
+            | "payload.event.kind"
+            | "payload.event.model"
+            | "payload.event.finish_reason"
     )
 }
 
@@ -677,5 +710,80 @@ mod tests {
         // path is not what a version is, so it does not survive.
         assert!(!is_safe_string("version", "/Users/me/x"));
         assert!(is_safe_string("version", "2.1.219"));
+    }
+
+    #[test]
+    fn every_profile_retains_usage_discriminators_and_model_metadata() {
+        for (profile, input, expected) in [
+            (
+                Profile::Pi,
+                r#"{"type":"message","id":"secret-id","parentId":"secret-parent","provider":"anthropic","modelId":"claude","message":{"role":"assistant","model":"claude","usage":{"input":3}}}"#,
+                vec!["provider", "modelId", "message.role", "message.model"],
+            ),
+            (
+                Profile::Dsh,
+                r#"{"type":"assistant/message","time":"2026-10-12T00:00:00Z","data":{"message":{"id":"secret-id","role":"assistant","source":{"kind":"provider","provider":"deepseek","model":"deepseek-v4"}},"usage":{"inputTokens":3}}}"#,
+                vec!["time", "data.message.role", "data.message.source.model"],
+            ),
+            (
+                Profile::Devin,
+                r#"{"role":"assistant","metadata":{"request_id":"secret-id","generation_model":"swe-1-6","started_generation_at":"2026-10-12T00:00:00Z","created_at":"2026-10-12T00:00:00Z","finish_reason":"stop","metrics":{"output_tokens":3}}}"#,
+                vec![
+                    "role",
+                    "metadata.generation_model",
+                    "metadata.started_generation_at",
+                    "metadata.created_at",
+                    "metadata.finish_reason",
+                ],
+            ),
+            (
+                Profile::Qwen,
+                r#"{"id":"secret-id","sessionId":"secret-session","model":"qwen3-coder","authType":"qwen-oauth","source":"api","totalTokens":3,"outputTokens":3}"#,
+                vec!["model", "authType", "source"],
+            ),
+            (
+                Profile::Kimi,
+                r#"{"type":"usage.record","agentId":"secret-agent","model":"kimi-k2.5","usageScope":"turn","usage":{"output":3}}"#,
+                vec!["type", "model", "usageScope"],
+            ),
+            (
+                Profile::Muse,
+                r#"{"id":"secret-id","stream":{"kind":"session","id":"secret-stream"},"record_type":"event","payload_type":"runtime.session","payload":{"event":{"kind":"model_completed","model":"muse-spark","finish_reason":"stop","usage":{"output_tokens":3}}}}"#,
+                vec![
+                    "stream.kind",
+                    "record_type",
+                    "payload_type",
+                    "payload.event.kind",
+                    "payload.event.model",
+                    "payload.event.finish_reason",
+                ],
+            ),
+        ] {
+            let input = parse(input);
+            assert!(profile.keeps(&input));
+            let output = Value::Object(filter_object(
+                &input,
+                "",
+                profile.allow(),
+                &mut Pseudonyms::default(),
+            ));
+            for field in expected {
+                let pointer = format!("/{}", field.replace('.', "/"));
+                assert_eq!(
+                    output.pointer(&pointer),
+                    Value::Object(input.clone()).pointer(&pointer),
+                    "{field}"
+                );
+            }
+            assert!(!output.to_string().contains("secret-"));
+        }
+    }
+
+    #[test]
+    fn parent_references_keep_their_target_identity() {
+        let mut names = Pseudonyms::default();
+        assert_eq!(names.get("uuid", "a"), names.get("parentUuid", "a"));
+        assert_eq!(names.get("id", "b"), names.get("parentId", "b"));
+        assert_ne!(names.get("id", "a"), names.get("uuid", "a"));
     }
 }

@@ -732,6 +732,7 @@ internal sealed class HeatmapView : StackPanel
     private static Snapshot Parse(JsonNode calendar)
     {
         var snap = new Snapshot();
+        if (calendar is not JsonObject) return snap;
         if (calendar["rows"] is JsonArray rows)
         {
             foreach (var row in rows)
@@ -755,7 +756,7 @@ internal sealed class HeatmapView : StackPanel
                         cells.Add(new HeatDay(
                             date,
                             Long(cell, "value"),
-                            (int)Long(cell, "level"),
+                            (int)Math.Clamp(Long(cell, "level"), 0, 4),
                             Flag(cell, "locked")));
                     }
                 }
@@ -767,11 +768,10 @@ internal sealed class HeatmapView : StackPanel
         {
             width = Math.Max(width, cells.Count);
         }
-        snap.Weeks = (int)Long(calendar, "weeks");
-        if (snap.Weeks <= 0)
-        {
-            snap.Weeks = width;
-        }
+        var declaredWeeks = Long(calendar, "weeks");
+        // Metadata cannot create billions of empty columns on the UI thread.
+        // The supplied rows are the source of truth for available cells.
+        snap.Weeks = declaredWeeks > 0 ? (int)Math.Min(declaredWeeks, width) : width;
 
         if (calendar["months"] is JsonArray months)
         {
@@ -782,7 +782,9 @@ internal sealed class HeatmapView : StackPanel
                 {
                     continue;
                 }
-                snap.Months.Add(new HeatMonth((int)Long(month, "column"), name));
+                var column = Long(month, "column");
+                if (column >= 0 && column < snap.Weeks)
+                    snap.Months.Add(new HeatMonth((int)column, name));
             }
         }
         if (snap.Months.Count == 0)
@@ -795,7 +797,7 @@ internal sealed class HeatmapView : StackPanel
         snap.NoticeCode = Text(calendar, "noticeCode");
         snap.FetchedAtMs = Long(calendar, "fetchedAtMs");
         snap.HistoryLocked = Flag(calendar, "historyLocked");
-        snap.HistoryDays = Math.Max(1, (int)Long(calendar, "historyDays", 30));
+        snap.HistoryDays = (int)Math.Clamp(Long(calendar, "historyDays", 30), 1, int.MaxValue);
         return snap;
     }
 
@@ -898,22 +900,27 @@ internal sealed class HeatmapView : StackPanel
 
     private static long Long(JsonNode? node, string name, long fallback = 0)
     {
-        var value = node?[name];
+        if (node is not JsonObject) return fallback;
+        var value = node[name];
         if (value is null || value.GetValueKind() is JsonValueKind.Null or JsonValueKind.Undefined)
         {
             return fallback;
         }
+        if (value is JsonValue exact && exact.TryGetValue<long>(out var integer)) return integer;
+        static long Rounded(double number, long fallback) => !double.IsFinite(number) ? fallback
+            : number >= long.MaxValue ? long.MaxValue
+            : number <= long.MinValue ? long.MinValue : (long)Math.Round(number);
         try
         {
             return value.GetValueKind() switch
             {
-                JsonValueKind.Number => (long)Math.Round(value.GetValue<double>()),
+                JsonValueKind.Number => Rounded(value.GetValue<double>(), fallback),
                 JsonValueKind.String => double.TryParse(
                     value.GetValue<string>(),
                     NumberStyles.Any,
                     CultureInfo.InvariantCulture,
                     out double n)
-                    ? (long)Math.Round(n)
+                    ? Rounded(n, fallback)
                     : fallback,
                 JsonValueKind.True => 1,
                 JsonValueKind.False => 0,
@@ -927,5 +934,5 @@ internal sealed class HeatmapView : StackPanel
     }
 
     private static bool Flag(JsonNode? node, string name) =>
-        node?[name] is JsonValue v && v.GetValueKind() == JsonValueKind.True;
+        node is JsonObject && node[name] is JsonValue v && v.GetValueKind() == JsonValueKind.True;
 }

@@ -418,8 +418,8 @@ private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
 
     fun prepare() {
         if (line != null || working) return
+        working = true
         scope.launch {
-            working = true
             error = null
             runCatching {
                 // This device's public key, granted at install time. Absent
@@ -560,6 +560,12 @@ private fun SetupProjectStep(
     val machines = remember(state.account) { setupMachines(state.account) }
     var peer by remember { mutableStateOf(machines.singleOrNull()?.setupPeer()) }
     var route by remember { mutableStateOf<ProjectRoute?>(null) }
+    LaunchedEffect(machines) {
+        if (machines.none { it.setupPeer() == peer }) {
+            peer = machines.singleOrNull()?.setupPeer()
+            route = null
+        }
+    }
     BackHandler(enabled = route != null) { route = null }
     val hostLabel = machines.find { it.setupPeer() == peer }?.setupHostLabel() ?: L10n.text("android.setupwizard.the_machine.0bb5c22e")
     val hostId = machines.find { it.setupPeer() == peer }?.setupMachineId()
@@ -637,14 +643,16 @@ private fun SetupProjectStep(
             body = L10n.text("android.setupwizard.tokenstat_runs_git_on_the_machine_and_regi.1c501f13"),
             requirement = null,
             icon = { Icon(ActionIcon.Download.vector, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
-            onClick = { route = ProjectRoute.CLONE },
+            onClick = { if (peer != null) route = ProjectRoute.CLONE },
+            enabled = peer != null,
         )
         SetupDoorCard(
             title = L10n.text("android.setupwizard.a_folder_already_on_the_machine.d5432a67"),
             body = L10n.text("android.setupwizard.browse_the_machine_s_disk_and_register_a_f.e316c912"),
             requirement = null,
             icon = { Icon(ActionIcon.Source.vector, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
-            onClick = { route = ProjectRoute.EXISTING },
+            onClick = { if (peer != null) route = ProjectRoute.EXISTING },
+            enabled = peer != null,
         )
         Text(
             L10n.text("android.setupwizard.whichever_you_choose_the_machine_opens_wit.cc343316"),
@@ -741,9 +749,10 @@ private fun SetupDoorCard(
     requirement: String?,
     icon: @Composable () -> Unit,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     val colors = LocalTsColors.current
-    TsCard(Modifier.clickable(onClick = onClick)) {
+    TsCard(Modifier.clickable(enabled = enabled, onClick = onClick)) {
         Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
             icon()
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -935,6 +944,8 @@ private fun SetupCloudDoor(
                 Text(L10n.text("android.setupwizard.read_only_api_token.8a4f07c1"), style = TsType.caption, color = colors.textSecondary)
                 androidx.compose.material3.OutlinedTextField(
                     value = token,
+                    enabled = !working,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                     onValueChange = { token = it },
                     placeholder = { Text(L10n.text("android.setupwizard.paste_your_digitalocean_token.2e2aa61f")) },
                     singleLine = true,
@@ -955,6 +966,7 @@ private fun SetupCloudDoor(
                 Text(L10n.text("android.setupwizard.ssh_username.04940ab1"), style = TsType.caption, color = colors.textSecondary)
                 androidx.compose.material3.OutlinedTextField(
                     value = username,
+                    enabled = !working,
                     onValueChange = { username = it },
                     placeholder = { Text(L10n.text("android.setupwizard.ssh_username.04940ab1")) },
                     singleLine = true,
@@ -979,8 +991,9 @@ private fun SetupCloudDoor(
             TsAccentButton(
                 label = if (working) L10n.text("android.setupwizard.reading_the_list.0fd8ea35") else L10n.text("android.setupwizard.read_my_servers.0e3c3c94"),
                 onClick = {
+                    if (working) return@TsAccentButton
+                    working = true
                     scope.launch {
-                        working = true
                         error = null
                         runCatching {
                             model.core("ssh.provider.digitalOcean.import", buildJsonObject {

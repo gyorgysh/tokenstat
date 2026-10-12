@@ -21,7 +21,7 @@
 //! a larger permission than the commit button, not a smaller one.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
@@ -83,8 +83,8 @@ impl Peer {
 
 /// Every peer, on disk.
 ///
-/// Small enough to rewrite whole. Contention is not a concern: approvals
-/// happen at human speed.
+/// Small enough to rewrite whole. Use [`Self::update`] for changes so a
+/// handshake recording a name cannot overwrite a concurrent revocation.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PeerStore {
     #[serde(default)]
@@ -92,6 +92,45 @@ pub struct PeerStore {
 }
 
 const MAX_PENDING_PEERS: usize = 128;
+
+#[derive(PartialEq, Eq)]
+struct FileStamp {
+    modified: SystemTime,
+    created: Option<SystemTime>,
+    length: u64,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+}
+
+impl FileStamp {
+    fn read(path: &Path) -> Option<Self> {
+        let metadata = std::fs::metadata(path).ok()?;
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Some(Self {
+            modified: metadata.modified().ok()?,
+            created: metadata.created().ok(),
+            length: metadata.len(),
+            #[cfg(unix)]
+            device: metadata.dev(),
+            #[cfg(unix)]
+            inode: metadata.ino(),
+        })
+    }
+}
+
+struct CachedPeers {
+    path: PathBuf,
+    stamp: FileStamp,
+    store: Arc<PeerStore>,
+}
+
+fn cache() -> &'static Mutex<Option<CachedPeers>> {
+    static CACHE: OnceLock<Mutex<Option<CachedPeers>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
 
 impl PeerStore {
     /// The store, re-read only when the file has actually changed.
@@ -106,39 +145,50 @@ impl PeerStore {
     /// for output continuously, so the difference is the difference between a
     /// check that is affordable and one somebody removes later.
     pub fn cached() -> Result<Arc<Self>, IdentityError> {
-        /// The last read, and the file stamp it was read at.
-        type Cached = Mutex<Option<(SystemTime, Arc<PeerStore>)>>;
-        static CACHE: OnceLock<Cached> = OnceLock::new();
-        let cache = CACHE.get_or_init(|| Mutex::new(None));
+        Self::cached_at(&store_path()?)
+    }
 
-        let path = store_path()?;
+    fn cached_at(path: &Path) -> Result<Arc<Self>, IdentityError> {
+        // Keep lookup and publication together, so an older read cannot
+        // publish after a newer one or after a local write invalidates it.
+        let Ok(mut guard) = cache().lock() else {
+            return Self::load_at(path).map(Arc::new);
+        };
         // A store that does not exist yet has no peers, and a clock that will
         // not answer means re-reading, which is correct and merely slower.
-        let stamp = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        let stamp = FileStamp::read(path);
 
-        if let Ok(guard) = cache.lock()
-            && let Some((seen, store)) = guard.as_ref()
-            && Some(*seen) == stamp
+        if let Some(seen) = guard.as_ref()
+            && seen.path == path
+            && Some(&seen.stamp) == stamp.as_ref()
         {
-            return Ok(Arc::clone(store));
+            return Ok(Arc::clone(&seen.store));
         }
 
-        let store = Arc::new(Self::load()?);
-        if let (Ok(mut guard), Some(stamp)) = (cache.lock(), stamp) {
-            *guard = Some((stamp, Arc::clone(&store)));
-        }
+        let store = Arc::new(Self::load_at(path)?);
+        *guard = stamp.map(|stamp| CachedPeers {
+            path: path.to_path_buf(),
+            stamp,
+            store: Arc::clone(&store),
+        });
         Ok(store)
     }
 
     pub fn load() -> Result<Self, IdentityError> {
-        let path = store_path()?;
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let text = std::fs::read_to_string(&path).map_err(|e| IdentityError::Io {
-            path: path.display().to_string(),
-            source: e,
-        })?;
+        Self::load_at(&store_path()?)
+    }
+
+    fn load_at(path: &Path) -> Result<Self, IdentityError> {
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(source) => {
+                return Err(IdentityError::Io {
+                    path: path.display().to_string(),
+                    source,
+                });
+            }
+        };
         // A corrupt file must not lock the user out of their own machines, but
         // it also must not silently discard approvals. Treated as empty here
         // and left on disk, so an approval has to be given again and the
@@ -146,8 +196,46 @@ impl PeerStore {
         Ok(serde_json::from_str(&text).unwrap_or_default())
     }
 
-    pub fn save(&self) -> Result<(), IdentityError> {
-        let path = store_path()?;
+    /// Read and change the current peer list under a cross-process lock.
+    ///
+    /// Return the result and whether it needs writing. Connections that only
+    /// check existing trust avoid rewriting the store on every handshake.
+    pub fn update<T>(change: impl FnOnce(&mut Self) -> (T, bool)) -> Result<T, IdentityError> {
+        Self::update_at(&store_path()?, change)
+    }
+
+    fn update_at<T>(
+        path: &Path,
+        change: impl FnOnce(&mut Self) -> (T, bool),
+    ) -> Result<T, IdentityError> {
+        let lock_path = path.with_extension("lock");
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let io_error = |source| IdentityError::Io {
+            path: lock_path.display().to_string(),
+            source,
+        };
+        // Lock a separate stable file: peers.json is replaced atomically, so
+        // locking that inode would let the next writer bypass the held lock.
+        let lock = options.open(&lock_path).map_err(io_error)?;
+        lock.lock().map_err(io_error)?;
+        let mut store = Self::load_at(path)?;
+        let (result, changed) = change(&mut store);
+        if changed {
+            store.save_at(path)?;
+            if let Ok(mut cached) = cache().lock() {
+                *cached = None;
+            }
+        }
+        Ok(result)
+    }
+
+    fn save_at(&self, path: &Path) -> Result<(), IdentityError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| IdentityError::Io {
                 path: parent.display().to_string(),
@@ -200,7 +288,7 @@ impl PeerStore {
                 source: e,
             })?;
         }
-        std::fs::rename(&tmp, &path).map_err(|e| IdentityError::Io {
+        std::fs::rename(&tmp, path).map_err(|e| IdentityError::Io {
             path: path.display().to_string(),
             source: e,
         })?;
@@ -358,11 +446,11 @@ impl PeerStore {
 
     pub fn approve(&mut self, key: &PublicKey) -> bool {
         match self.peers.get_mut(&hex(key)) {
-            Some(peer) => {
+            Some(peer) if peer.trust != Trust::Approved => {
                 peer.trust = Trust::Approved;
                 true
             }
-            None => false,
+            _ => false,
         }
     }
 
@@ -370,11 +458,11 @@ impl PeerStore {
     /// that was turned away rather than arriving fresh next time.
     pub fn revoke(&mut self, key: &PublicKey) -> bool {
         match self.peers.get_mut(&hex(key)) {
-            Some(peer) => {
+            Some(peer) if peer.trust != Trust::Revoked => {
                 peer.trust = Trust::Revoked;
                 true
             }
-            None => false,
+            _ => false,
         }
     }
 
@@ -424,6 +512,77 @@ mod tests {
     fn an_unknown_peer_is_not_approved() {
         let store = PeerStore::default();
         assert!(!store.is_approved(&key(1)));
+    }
+
+    #[test]
+    fn repeated_trust_decisions_do_not_report_a_new_approval() {
+        let mut store = PeerStore::default();
+        store.seen(&key(1), "phone", None, "2026-10-12T00:00:00Z");
+        assert!(store.approve(&key(1)));
+        assert!(!store.approve(&key(1)));
+        assert!(store.revoke(&key(1)));
+        assert!(!store.revoke(&key(1)));
+        assert!(store.approve(&key(1)));
+    }
+
+    #[test]
+    fn concurrent_contacts_keep_every_peer_and_never_restore_revoked_trust() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("peers.json");
+        PeerStore::update_at(&path, |store| {
+            store.add_approved(&key(0), "phone", None, "2026-10-12T00:00:00Z");
+            ((), true)
+        })
+        .unwrap();
+        let barrier = std::sync::Barrier::new(24);
+        std::thread::scope(|scope| {
+            for n in 0..24 {
+                let path = &path;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    PeerStore::update_at(path, |store| {
+                        if n == 0 {
+                            assert!(store.revoke(&key(0)));
+                        } else {
+                            store.seen(
+                                &key(0),
+                                "renamed",
+                                Some("127.0.0.1:7878"),
+                                "2026-10-12T00:00:01Z",
+                            );
+                            store.seen(&key(n), "new peer", None, "2026-10-12T00:00:01Z");
+                        }
+                        ((), true)
+                    })
+                    .unwrap();
+                });
+            }
+        });
+        let store = PeerStore::load_at(&path).unwrap();
+        assert_eq!(store.list().len(), 24);
+        assert_eq!(store.get(&key(0)).unwrap().trust, Trust::Revoked);
+    }
+
+    #[test]
+    fn cached_trust_follows_replacement_even_with_the_same_modification_time() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("peers.json");
+        let mut store = PeerStore::default();
+        store.add_approved(&key(0), "phone", None, "2026-10-12T00:00:00Z");
+        store.save_at(&path).unwrap();
+        assert!(PeerStore::cached_at(&path).unwrap().is_approved(&key(0)));
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        store.revoke(&key(0));
+        // Bypass the in-process invalidation to model a second process.
+        store.save_at(&path).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert!(!PeerStore::cached_at(&path).unwrap().is_approved(&key(0)));
     }
 
     #[test]

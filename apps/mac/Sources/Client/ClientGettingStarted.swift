@@ -35,7 +35,8 @@ struct ClientGettingStarted: View {
     /// true of somebody's account, and naming the device makes it true of the
     /// thing in their hand.
     private var phoneName: String? {
-        account.account?.machines.first { !$0.isHost }?.displayName
+        guard let id = account.account?.thisMachineID, !id.isEmpty else { return nil }
+        return account.account?.machines.first { $0.machineID == id }?.displayName
     }
 
     var body: some View {

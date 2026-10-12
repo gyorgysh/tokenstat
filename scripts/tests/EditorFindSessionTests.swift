@@ -68,6 +68,16 @@ struct EditorFindSessionTests {
             check(find.matches.count == EditorFindSession.matchLimit, "matches are capped")
             check(find.truncated, "cap is honest")
             check(find.countLabel == "1 of 2000+", "capped count")
+            find.replaceText = "b"
+            check(find.replacingAll(in: String(repeating: "a ", count: 5000)) == String(repeating: "b ", count: 5000),
+                  "replace all edits every match beyond the highlight cap")
+            find.refresh(text: String(repeating: "a ", count: EditorFindSession.matchLimit))
+            check(!find.truncated, "an exact-cap match count does not claim extra results")
+            find.query = "\u{00e9}"
+            find.replaceText = "🧪"
+            check(find.replacingAll(in: "É e\u{0301} tail") == "🧪 🧪 tail", "replacement uses the same Unicode/case matching as find")
+            find.query = ""
+            check(find.replacingAll(in: "unchanged") == "unchanged", "empty query cannot insert replacement text")
         }
         do {
             // The UI order is buffer-first, query-second: the text view

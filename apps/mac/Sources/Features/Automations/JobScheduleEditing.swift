@@ -149,11 +149,13 @@ extension JobScheduleEditing {
 protocol JobBudgetEditing {
     var budgetMinutes: String { get set }
     var noTimeLimit: Bool { get set }
+    var loadedBudgetSeconds: UInt64? { get set }
 }
 
 extension JobBudgetEditing {
     var budgetSeconds: UInt64? {
         if noTimeLimit { return 0 }
+        if let loadedBudgetSeconds { return loadedBudgetSeconds }
         guard let minutes = UInt64(budgetMinutes.trimmingCharacters(in: .whitespacesAndNewlines)), minutes > 0 else {
             return nil
         }
@@ -168,5 +170,6 @@ extension JobBudgetEditing {
     mutating func loadBudget(seconds: UInt64) {
         noTimeLimit = seconds == 0
         budgetMinutes = noTimeLimit ? "180" : String(max(1, seconds / 60))
+        loadedBudgetSeconds = seconds
     }
 }

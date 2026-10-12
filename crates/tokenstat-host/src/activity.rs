@@ -221,7 +221,8 @@ fn watches() -> Vec<Watch> {
 /// a session adopted from a daemon that outlived the app has a command line
 /// and nothing else.
 fn harness_of(command: &str) -> Option<String> {
-    let name = command.rsplit('/').next().unwrap_or(command).trim();
+    let name = command.rsplit(['/', '\\']).next().unwrap_or(command).trim();
+    let name = name.strip_suffix(".exe").unwrap_or(name);
     // Every session gets a name, not only the three with transcripts we know
     // how to find. The name is what stops one agent's hook record from being
     // adopted by a different agent running in the same directory, so a shell
@@ -383,6 +384,7 @@ struct Proc {
 /// One `ps` for the whole table rather than one per session: the cost is the
 /// same whether one agent is running or ten, and a per-session call would
 /// scale a once-a-second sample by however many terminals are open.
+#[cfg(not(windows))]
 fn process_table() -> Option<HashMap<u32, Proc>> {
     let out = std::process::Command::new("ps")
         .args(["-axo", "pid=,ppid=,pcpu=,rss="])
@@ -408,6 +410,155 @@ fn process_table() -> Option<HashMap<u32, Proc>> {
         table.insert(pid, Proc { ppid, pcpu, rss });
     }
     Some(table)
+}
+
+#[cfg(windows)]
+fn process_table() -> Option<HashMap<u32, Proc>> {
+    windows_processes::table()
+}
+
+/// CPU uses 100 ns process ticks and wall time, expressed as percent of one
+/// core like ps. Creation time prevents a recycled PID from inheriting usage.
+#[cfg(any(windows, test))]
+fn process_cpu_percent(
+    previous: Option<(u64, u64)>,
+    created: u64,
+    ticks: u64,
+    elapsed: Duration,
+) -> f64 {
+    let Some((old_created, old_ticks)) = previous else {
+        return 0.0;
+    };
+    if created != old_created || ticks < old_ticks || elapsed.is_zero() {
+        return 0.0;
+    }
+    (ticks - old_ticks) as f64 / 100_000.0 / elapsed.as_secs_f64()
+}
+
+#[cfg(windows)]
+mod windows_processes {
+    use super::*;
+    use crate::win32::{self, FileTime};
+    use std::os::windows::io::AsRawHandle;
+
+    struct Samples {
+        at: Instant,
+        times: HashMap<u32, (u64, u64)>,
+    }
+
+    fn ticks(time: FileTime) -> u64 {
+        (u64::from(time.high) << 32) | u64::from(time.low)
+    }
+
+    pub(super) fn table() -> Option<HashMap<u32, Proc>> {
+        static PREVIOUS: OnceLock<Mutex<Option<Samples>>> = OnceLock::new();
+        let mut previous = PREVIOUS.get_or_init(|| Mutex::new(None)).lock().ok()?;
+        // The snapshot owns its kernel handle for exactly this enumeration.
+        let snapshot = unsafe { win32::handle_to_owned(win32::CreateToolhelp32Snapshot(2, 0)) }?;
+        let now = Instant::now();
+        let elapsed = previous
+            .as_ref()
+            .map(|p| now.duration_since(p.at))
+            .unwrap_or_default();
+        let mut entry: win32::ProcessEntry32 = unsafe { std::mem::zeroed() };
+        entry.size = std::mem::size_of::<win32::ProcessEntry32>() as u32;
+        if unsafe { win32::Process32FirstW(snapshot.as_raw_handle(), &mut entry) } == 0 {
+            return None;
+        }
+        let mut table = HashMap::new();
+        let mut times = HashMap::new();
+        loop {
+            let mut cpu = 0.0;
+            let mut rss = 0.0;
+            let process =
+                unsafe { win32::handle_to_owned(win32::OpenProcess(0x1000, 0, entry.pid)) };
+            if let Some(process) = process {
+                let zero = || FileTime { low: 0, high: 0 };
+                let (mut created, mut exited, mut kernel, mut user) =
+                    (zero(), zero(), zero(), zero());
+                if unsafe {
+                    win32::GetProcessTimes(
+                        process.as_raw_handle(),
+                        &mut created,
+                        &mut exited,
+                        &mut kernel,
+                        &mut user,
+                    )
+                } != 0
+                {
+                    let created = ticks(created);
+                    let used = ticks(kernel).saturating_add(ticks(user));
+                    let old = previous
+                        .as_ref()
+                        .and_then(|p| p.times.get(&entry.pid))
+                        .copied();
+                    cpu = process_cpu_percent(old, created, used, elapsed);
+                    times.insert(entry.pid, (created, used));
+                }
+                let mut memory: win32::ProcessMemoryCounters = unsafe { std::mem::zeroed() };
+                memory.size = std::mem::size_of::<win32::ProcessMemoryCounters>() as u32;
+                if unsafe {
+                    win32::K32GetProcessMemoryInfo(
+                        process.as_raw_handle(),
+                        &mut memory,
+                        memory.size,
+                    )
+                } != 0
+                {
+                    rss = memory.working_set as f64 / 1024.0;
+                }
+            }
+            // Keep inaccessible parents in the tree so accessible descendants
+            // still belong to the terminal that started them.
+            table.insert(
+                entry.pid,
+                Proc {
+                    ppid: entry.parent_pid,
+                    pcpu: cpu,
+                    rss,
+                },
+            );
+            if unsafe { win32::Process32NextW(snapshot.as_raw_handle(), &mut entry) } == 0 {
+                break;
+            }
+        }
+        *previous = Some(Samples { at: now, times });
+        Some(table)
+    }
+}
+
+#[cfg(test)]
+mod process_sampling_tests {
+    use super::*;
+
+    #[test]
+    fn process_cpu_tracks_elapsed_work_without_reusing_a_recycled_pid() {
+        let previous = Some((42, 10_000_000));
+        assert_eq!(
+            process_cpu_percent(previous, 42, 15_000_000, Duration::from_secs(1)),
+            50.0
+        );
+        assert_eq!(
+            process_cpu_percent(previous, 42, 30_000_000, Duration::from_secs(1)),
+            200.0
+        );
+        assert_eq!(
+            process_cpu_percent(previous, 43, 30_000_000, Duration::from_secs(1)),
+            0.0
+        );
+        assert_eq!(
+            process_cpu_percent(previous, 42, 1, Duration::from_secs(1)),
+            0.0
+        );
+        assert_eq!(
+            process_cpu_percent(previous, 42, 30_000_000, Duration::ZERO),
+            0.0
+        );
+        assert_eq!(
+            process_cpu_percent(None, 42, 30_000_000, Duration::from_secs(1)),
+            0.0
+        );
+    }
 }
 
 /// Parent → children index for one process table, built once per tick.
@@ -490,16 +641,7 @@ fn transcript_touched(harness: &str, cwd: &str) -> Option<Duration> {
         }
         // ~/.grok/sessions/<percent-encoded cwd>/
         "grok" => {
-            let encoded: String = cwd
-                .chars()
-                .map(|c| {
-                    if c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_' {
-                        c.to_string()
-                    } else {
-                        format!("%{:02X}", c as u32)
-                    }
-                })
-                .collect();
+            let encoded = percent_encoded_directory(cwd);
             format!("{home}/.grok/sessions/{encoded}").into()
         }
         // Codex keys its rollouts by date, not by workspace. A machine-wide
@@ -510,7 +652,19 @@ fn transcript_touched(harness: &str, cwd: &str) -> Option<Duration> {
         _ => return None,
     };
     let newest = newest_write_cached(&dir.to_string_lossy(), 1)?;
-    Some(SystemTime::now().duration_since(newest).unwrap_or_default())
+    SystemTime::now().duration_since(newest).ok()
+}
+
+fn percent_encoded_directory(cwd: &str) -> String {
+    cwd.bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_') {
+                (byte as char).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
 }
 
 /// The 1 Hz sampler used to walk the same Claude project dir once per live
@@ -531,6 +685,7 @@ fn newest_write_cached(dir: &str, depth: usize) -> Option<SystemTime> {
     }
     let value = newest_write(dir, depth);
     if let Ok(mut guard) = cache.lock() {
+        guard.retain(|_, entry| entry.at.elapsed() < Duration::from_secs(60));
         guard.insert(
             dir.to_string(),
             Cached {
@@ -673,7 +828,10 @@ fn hook_records() -> Vec<HookRecord> {
         {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(entry.path()) else {
+        if !meta.is_file() || meta.len() > 64 * 1024 {
+            continue;
+        }
+        let Ok(text) = read_hook(&entry.path()) else {
             continue;
         };
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
@@ -697,11 +855,11 @@ fn hook_records() -> Vec<HookRecord> {
             agent_pid: value
                 .get("agentPid")
                 .and_then(|v| v.as_u64())
-                .map(|v| v as u32),
+                .and_then(|v| u32::try_from(v).ok()),
             owner_pid: value
                 .get("ownerPid")
                 .and_then(|v| v.as_u64())
-                .map(|v| v as u32),
+                .and_then(|v| u32::try_from(v).ok()),
             working: state == "working",
             attention: waiting.then_some(Attention::Permission),
         });
@@ -709,9 +867,39 @@ fn hook_records() -> Vec<HookRecord> {
     out
 }
 
+fn read_hook(path: &std::path::Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::other("hook record is not a regular file"));
+    }
+    let mut text = String::new();
+    file.take(64 * 1024 + 1).read_to_string(&mut text)?;
+    if text.len() > 64 * 1024 {
+        return Err(std::io::Error::other("hook record is too large"));
+    }
+    Ok(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_encoding_uses_utf8_bytes_and_windows_commands_have_plain_names() {
+        assert_eq!(percent_encoded_directory("/界"), "%2F%E7%95%8C");
+        assert_eq!(
+            harness_of(r"C:\tools\claude.exe").as_deref(),
+            Some("claude")
+        );
+    }
 
     #[test]
     fn quiet_session_reads_idle() {

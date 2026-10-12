@@ -19,14 +19,19 @@ enum HostOwnerLock {
     private static var fd: Int32 = -1
 
     static func acquire() {
+        acquire(at: lockPath)
+    }
+
+    static func acquire(at path: String) {
         guard fd < 0 else { return }
-        let path = lockPath
         let parent = (path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(
             atPath: parent,
             withIntermediateDirectories: true
         )
-        let opened = open(path, O_RDWR | O_CREAT, 0o600)
+        // In-process terminals may outlive this app. An inherited descriptor
+        // would keep hostd's owner probe locked after the app has exited.
+        let opened = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
         guard opened >= 0 else { return }
         // Shared: two tokenstat processes (debug and the installed app) must
         // both count as an owner. hostd's exclusive probe fails while either
@@ -37,7 +42,7 @@ enum HostOwnerLock {
         }
         fd = opened
         let pid = String(ProcessInfo.processInfo.processIdentifier)
-        _ = pid.withCString { pointer in
+        pid.withCString { pointer in
             _ = ftruncate(fd, 0)
             _ = write(fd, pointer, strlen(pointer))
         }

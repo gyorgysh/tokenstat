@@ -26,8 +26,15 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, 
     var weeklyDays: Int
     var weeklyDayEdited: Bool
     var customDays: Int
-    var budgetMinutes: String
-    var noTimeLimit: Bool
+    // Preserve host seconds until the user edits the time limit. Optional for
+    // compatibility with drafts persisted before exact budgets were retained.
+    var loadedBudgetSeconds: UInt64? = nil
+    var budgetMinutes: String {
+        didSet { if budgetMinutes != oldValue { loadedBudgetSeconds = nil } }
+    }
+    var noTimeLimit: Bool {
+        didSet { if noTimeLimit != oldValue { loadedBudgetSeconds = nil } }
+    }
 
     static let weekdayNames = JobScheduleCopy.weekdayNames
     static let weekdayShort = JobScheduleCopy.weekdayShort
@@ -36,7 +43,7 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, 
     enum CodingKeys: String, CodingKey {
         case name, prompt, backend, model, effort, scheduleKind, intervalMinutes, intervalSeconds
         case intervalTouched, hour, minute, weekday, weeklyDays, weeklyDayEdited, customDays
-        case budgetMinutes, noTimeLimit
+        case budgetMinutes, noTimeLimit, loadedBudgetSeconds
         case workspaceID = "workspaceId"
     }
 
@@ -59,6 +66,7 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, 
         customDays = AutomationSchedule.weekdaysMask
         noTimeLimit = budgetSeconds == 0
         budgetMinutes = noTimeLimit ? "180" : String(max(1, budgetSeconds / 60))
+        loadedBudgetSeconds = budgetSeconds
     }
 
     init(_ job: Automation) {
@@ -88,6 +96,7 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, 
         }
         noTimeLimit = job.budgetSeconds == 0
         budgetMinutes = noTimeLimit ? "180" : String(max(1, job.budgetSeconds / 60))
+        loadedBudgetSeconds = job.budgetSeconds
     }
 
     var validation: String? {

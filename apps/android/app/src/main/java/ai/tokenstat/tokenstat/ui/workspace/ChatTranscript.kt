@@ -611,6 +611,7 @@ fun coalesceTranscript(
                     } else {
                         "edit-$callId"
                     }
+                    noteToolIndex(items.size, callId)
                     items.add(ChatDisplayItem.Edit(rowID, state))
                 } else {
                     val fallback = callId.ifEmpty { "end-${stamp(ev, items.size)}" }
@@ -618,11 +619,14 @@ fun coalesceTranscript(
                     val fallbackVerb = inner.str("verb") ?: ""
                     val presentation = refineMuseToolPresentation(eventBackend, fallbackVerb,
                         ChatToolState.clip(inner.str("target") ?: ""), inner.str("detail"))
+                    val occurrence = (toolStarts[fallback] ?: 0) + 1
+                    toolStarts[fallback] = occurrence
                     val rowID = if (ev.safeLong("seq") != null) {
                         "tool-${stamp(ev, items.size)}"
                     } else {
-                        "tool-$fallback"
+                        if (occurrence == 1) "tool-$fallback" else "tool-$fallback#$occurrence"
                     }
+                    noteToolIndex(items.size, callId)
                     items.add(
                         ChatDisplayItem.Tool(
                             rowID,

@@ -48,6 +48,7 @@ final class ClientWorkflowSession {
     private var pollTask: Task<Void, Never>?
     private var catchUpTask: Task<Void, Never>?
     private var pollingKey: String?
+    private var transcriptKey: String?
     private var loadGeneration = 0
     private var isVisible = false
     private var visibility = 0
@@ -275,6 +276,11 @@ final class ClientWorkflowSession {
             return
         }
         let key = "\(run.id):\(node)"
+        if transcriptKey != key {
+            transcriptKey = key
+            transcriptText = ""
+            transcriptOffset = 0
+        }
         if run.isLive {
             startPolling(runID: run.id, nodeID: node, key: key)
         } else {
@@ -328,13 +334,9 @@ final class ClientWorkflowSession {
     private func refreshRuns() async {
         do {
             let latest = try await service.workflowRuns(peer: peer)
+            guard !Task.isCancelled, isVisible else { return }
             runs = latest.filter { $0.workspaceID == workspaceID }
-            if let run = selectedRun, !run.isLive {
-                stopPolling()
-                if let node = transcriptNode(in: run) {
-                    startCatchUp(runID: run.id, nodeID: node)
-                }
-            }
+            syncWatching()
         } catch {
             // The next tick tries again.
         }
@@ -346,10 +348,7 @@ final class ClientWorkflowSession {
     }
 
     private func fetchUntilCaughtUp(runID: String, nodeID: String) async {
-        var slices = 0
-        while slices < 8 {
-            guard !Task.isCancelled else { return }
-            slices += 1
+        while !Task.isCancelled {
             let before = transcriptOffset
             await fetchTranscript(runID: runID, nodeID: nodeID)
             if Task.isCancelled || !stillWatching(runID: runID, nodeID: nodeID) { return }

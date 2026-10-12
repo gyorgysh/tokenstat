@@ -306,6 +306,7 @@ fn pump_tcp_connection(tcp: TcpStream, connection: Connection, access: StreamAcc
 /// The owning side of a proxy stream: dial the far machine's own loopback and
 /// bridge.
 fn pump_proxy(mut connection: Connection, host: &str, port: u16, access: StreamAccess) {
+    let host = if host == "[::1]" { "::1" } else { host };
     let tcp = match TcpStream::connect((host, port)) {
         Ok(tcp) => tcp,
         Err(error) => {
@@ -318,49 +319,6 @@ fn pump_proxy(mut connection: Connection, host: &str, port: u16, access: StreamA
     };
     let _ = tcp.set_nodelay(true);
     pump_tcp_connection(tcp, connection, access);
-}
-
-/// Open a proxy stream on a peer and claim a fresh connection for it.
-///
-/// The local half of `proxy.listen`: reserve with `stream.open` over the call
-/// channel, dial a fresh connection, and claim it with the stream handshake.
-pub(crate) fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Connection, String> {
-    let params = json!({"kind": "proxy", "host": host, "port": port});
-    let result = crate::remote::call_peer_result(peer, "stream.open", &params.to_string())?;
-    let token = result
-        .get("token")
-        .and_then(Value::as_str)
-        .ok_or("the peer's stream.open returned no token")?
-        .to_string();
-    let mut connection =
-        crate::remote::dial_peer_as(peer, tokenstat_remote::tunnel::ChannelPurpose::Ssh)?;
-    let handshake = json!({"stream": token});
-    connection
-        .send(handshake.to_string().as_bytes())
-        .map_err(|e| e.to_string())?;
-    Ok(connection)
-}
-
-/// Bridge a local TCP socket to a claimed stream connection. The local half
-/// of `proxy.listen`. HTTP is rewritten so a page served on the far
-/// machine's port still works when the browser is on this machine's
-/// random loopback port.
-pub(crate) fn pump_local(
-    tcp: TcpStream,
-    connection: Connection,
-    target_host: &str,
-    target_port: u16,
-    listen_port: u16,
-) {
-    crate::proxy_http::bridge(tcp, connection, target_host, target_port, listen_port);
-}
-
-/// Return a readable HTTP response when the tunnel or target service fails.
-/// Without this, WKWebView reports every proxy failure as a generic lost
-/// connection and hides the reason the user can act on.
-pub(crate) fn write_proxy_error(mut tcp: TcpStream, error: &str) {
-    let _ = tcp.write_all(proxy_error_response(error).as_bytes());
-    let _ = tcp.shutdown(std::net::Shutdown::Both);
 }
 
 fn proxy_error_response(error: &str) -> String {
@@ -413,10 +371,15 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
                     Err(_) => break,
                 }
             }
+            reader.close();
         })
     };
     let mut offset = 0u64;
-    let reader_id = format!("remote-stream:{session}");
+    static NEXT_READER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let reader_id = format!(
+        "remote-stream:{session}:{}",
+        NEXT_READER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
     loop {
         if writer.is_closed() {
             break;
@@ -492,7 +455,10 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
             Err(_) => return,
         };
         if let Some(existing) = map.get(&key) {
-            let active = existing.lock().ok().is_some_and(|guard| guard.active);
+            let active = existing
+                .lock()
+                .ok()
+                .is_some_and(|guard| guard.active || !guard.buffer.is_empty());
             if active {
                 return;
             }
@@ -508,7 +474,7 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
     }));
     match pty_subscriptions().lock() {
         Ok(mut map) => {
-            if map.contains_key(&key) {
+            if map.contains_key(&key) || map.len() >= 128 {
                 return;
             }
             map.insert(key.clone(), Arc::clone(&cache));
@@ -523,11 +489,11 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
             if let Ok(mut guard) = cache.lock() {
                 guard.active = false;
                 guard.writer = None;
-                guard.buffer.clear();
                 guard.space.notify_all();
             }
             if let Ok(mut map) = pty_subscriptions().lock()
                 && map.get(&key).is_some_and(|entry| Arc::ptr_eq(entry, cache))
+                && cache.lock().is_ok_and(|guard| guard.buffer.is_empty())
             {
                 map.remove(&key);
             }
@@ -584,12 +550,16 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
                     let Ok(frame) = serde_json::from_slice::<PtyFrame>(&data) else {
                         continue;
                     };
-                    let bytes = crate::base64::decode(&frame.data).unwrap_or_default();
+                    let Ok(bytes) = crate::base64::decode(&frame.data) else {
+                        break;
+                    };
                     let mut guard = match cache.lock() {
                         Ok(guard) => guard,
                         Err(_) => break,
                     };
-                    guard.buffer.extend_from_slice(&bytes);
+                    if !append_pty_frame(&mut guard, &frame, &bytes) {
+                        break;
+                    }
                     // The owning side is blocked while this cache is full, so
                     // output is never evicted to make room.
                 }
@@ -601,6 +571,23 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
     });
 }
 
+// Keep the owner's absolute offsets, including an already-trimmed first
+// frame. A missing range cannot be silently joined to older cached bytes.
+fn append_pty_frame(cache: &mut PtySubscription, frame: &PtyFrame, bytes: &[u8]) -> bool {
+    let Some(start) = frame.next_offset.checked_sub(bytes.len() as u64) else {
+        return false;
+    };
+    let end = cache.trimmed.saturating_add(cache.buffer.len() as u64);
+    if start > end {
+        cache.buffer.clear();
+        cache.trimmed = start;
+    }
+    let end = cache.trimmed.saturating_add(cache.buffer.len() as u64);
+    let skip = end.saturating_sub(start).min(bytes.len() as u64) as usize;
+    cache.buffer.extend_from_slice(&bytes[skip..]);
+    true
+}
+
 /// Serve a `pty.read` from the subscription cache when one is live. Returns
 /// None when there is no subscription or it has ended, so the caller falls
 /// back to forwarding the read to the peer.
@@ -608,14 +595,19 @@ pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<
     let key = format!("{peer}:{session}");
     let cache = pty_subscriptions().lock().ok()?.get(&key)?.clone();
     let mut guard = cache.lock().ok()?;
-    if !guard.active {
+    if !guard.active && guard.buffer.is_empty() {
         return None;
     }
-    let acknowledged = offset.saturating_sub(guard.trimmed) as usize;
+    let acknowledged = offset
+        .saturating_sub(guard.trimmed)
+        .min(guard.buffer.len() as u64) as usize;
     if acknowledged > 0 {
         let count = acknowledged.min(guard.buffer.len());
         guard.buffer.drain(..count);
         guard.trimmed += count as u64;
+    }
+    if !guard.active && guard.buffer.is_empty() {
+        return None;
     }
     let (start, take, next_offset, dropped) =
         cache_window(guard.buffer.len(), guard.trimmed, offset);
@@ -946,8 +938,46 @@ mod tests {
 
     use super::{
         PTY_LIST_TTL, READ_CHUNK_BYTES, cache_window, parse_handshake, proxy_error_response,
-        pump_local, pump_proxy, remote_pty_snapshot,
+        pump_proxy, remote_pty_snapshot,
     };
+
+    #[test]
+    fn cached_output_keeps_owner_offsets_and_drains_after_disconnect() {
+        let peer = "test-cache-offsets";
+        let session = "terminal";
+        let key = format!("{peer}:{session}");
+        let mut cache = super::PtySubscription {
+            buffer: Vec::new(),
+            trimmed: 0,
+            active: false,
+            writer: None,
+            space: std::sync::Arc::new(std::sync::Condvar::new()),
+        };
+        let frame = super::PtyFrame {
+            next_offset: 105,
+            dropped: 100,
+            data: String::new(),
+            paused: false,
+        };
+        assert!(super::append_pty_frame(&mut cache, &frame, b"hello"));
+        assert_eq!(cache.trimmed, 100);
+        // Replayed overlapping data is not appended a second time.
+        assert!(super::append_pty_frame(&mut cache, &frame, b"hello"));
+        assert_eq!(cache.buffer, b"hello");
+        super::pty_subscriptions().lock().unwrap().insert(
+            key.clone(),
+            std::sync::Arc::new(std::sync::Mutex::new(cache)),
+        );
+        let read = super::cached_pty_read(peer, session, 0).unwrap();
+        assert_eq!(read["nextOffset"], 105);
+        assert_eq!(read["dropped"], 100);
+        assert_eq!(
+            crate::base64::decode(read["data"].as_str().unwrap()).unwrap(),
+            b"hello"
+        );
+        assert!(super::cached_pty_read(peer, session, 105).is_none());
+        super::pty_subscriptions().lock().unwrap().remove(&key);
+    }
 
     fn entry(at_ms: i64, items: Vec<serde_json::Value>) -> super::PtyListEntry {
         super::PtyListEntry {
@@ -1201,7 +1231,7 @@ mod tests {
         let local_port = local.local_addr().expect("its port").port();
         let local_side = std::thread::spawn(move || {
             let (tcp, _) = local.accept().expect("a local client");
-            pump_local(tcp, connection, "127.0.0.1", echo_port, local_port);
+            crate::proxy_http::bridge(tcp, connection, "127.0.0.1", echo_port, local_port);
         });
 
         let mut client = TcpStream::connect(("127.0.0.1", local_port)).expect("connect locally");

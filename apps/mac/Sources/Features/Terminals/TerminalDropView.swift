@@ -333,6 +333,10 @@ final class TerminalDropView: TerminalSelectionView {
     private func persistIfFileReference(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        if trimmed.hasPrefix("/"), exists(URL(fileURLWithPath: trimmed)) {
+            let url = URL(fileURLWithPath: trimmed)
+            return persistCopy(url) ?? url.path
+        }
         if let parsed = URL(string: trimmed) {
             if parsed.isFileURL, let url = usableFileURL(parsed), exists(url) {
                 return persistCopy(url) ?? url.path
@@ -346,10 +350,6 @@ final class TerminalDropView: TerminalSelectionView {
                 if exists(url) { return persistCopy(url) ?? url.path }
             }
             return nil
-        }
-        if trimmed.hasPrefix("/"), exists(URL(fileURLWithPath: trimmed)) {
-            let url = URL(fileURLWithPath: trimmed)
-            return persistCopy(url) ?? url.path
         }
         return nil
     }

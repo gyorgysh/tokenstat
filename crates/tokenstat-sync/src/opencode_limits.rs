@@ -111,8 +111,12 @@ pub fn fetch() -> ProviderLimits {
 fn auth_token() -> Option<String> {
     if let Some(token) = std::env::var("PANTHEON_OPENCODE_API_KEY")
         .ok()
-        .or_else(|| std::env::var("OPENCODE_API_KEY").ok())
         .filter(|token| !token.trim().is_empty())
+        .or_else(|| {
+            std::env::var("OPENCODE_API_KEY")
+                .ok()
+                .filter(|token| !token.trim().is_empty())
+        })
     {
         return Some(token);
     }

@@ -15,6 +15,18 @@ internal sealed partial class ChatPage
     private const int FileChunkBytes = 512 * 1024;
     private const long FileMaximumBytes = 256L * 1024 * 1024;
     private CancellationTokenSource? _fileTransfer;
+    private Border? _fileProgress;
+    private void FileProgress(string text)
+    {
+        ClearFileProgress();
+        _fileProgress = Chrome.Banner(text, Theme.Accent, Symbol.Download);
+        _root.Children.Insert(Math.Min(1, _root.Children.Count), _fileProgress);
+    }
+    private void ClearFileProgress()
+    {
+        if (_fileProgress is not null) _root.Children.Remove(_fileProgress);
+        _fileProgress = null;
+    }
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> FileClaims = new();
 
     private async Task<bool> ConfirmFileRelayAsync(string name, long size, long? remaining = null)
@@ -37,11 +49,12 @@ internal sealed partial class ChatPage
         if (stream.Length is <= 0 or > FileMaximumBytes) throw new IOException(L10n.Text("common.chat_files_too_large"));
         var protocol = RemoteFeatureGate.ProtocolOf(await CallChatAsync("protocol", new JsonObject()));
         if (!current()) throw new OperationCanceledException();
-        if (protocol < 34)
+        if (protocol is null or < 34)
         {
             if (stream.Length > AttachmentCap) throw new IOException(L10n.Text("common.chat_route_unavailable"));
             var bytes = new byte[(int)stream.Length];
             await stream.ReadExactlyAsync(bytes);
+            if (!current()) throw new OperationCanceledException();
             var request = new JsonObject { ["id"] = chat, ["name"] = file.Name, ["data"] = Convert.ToBase64String(bytes), ["allowRelay"] = false };
             try { return await CallChatAsync("chat.attach", request); }
             catch (HostException error) when (error.Code == "relay_consent_required") { if (!await ConfirmFileRelayAsync(file.Name, bytes.Length) || !current()) throw new OperationCanceledException(); request["allowRelay"] = true; return await CallChatAsync("chat.attach", request); }
@@ -121,7 +134,7 @@ internal sealed partial class ChatPage
                     }
                     if (Format.Long(chunk, "offset") != offset + count) throw new IOException("Invalid file transfer response");
                     offset += count;
-                    Banner($"{file.Name} · {offset * 100 / stream.Length}%");
+                    FileProgress($"{file.Name} · {offset * 100 / stream.Length}%");
                 }
                 cancel.Token.ThrowIfCancellationRequested(); if (!current()) throw new OperationCanceledException();
                 var result = await CallChatAsync("chat.fileUploadFinish", new JsonObject { ["id"] = chat, ["transferId"] = transfer });
@@ -133,7 +146,7 @@ internal sealed partial class ChatPage
                 File.Delete(journal); throw;
             }
         }
-        finally { if (claim is not null) FileClaims.TryRemove(claim, out _); _fileTransfer = null; if (current()) RebuildComposerActions(); }
+        finally { ClearFileProgress(); if (claim is not null) FileClaims.TryRemove(claim, out _); _fileTransfer = null; if (current()) RebuildComposerActions(); }
     }
     private async Task DownloadFileAsync(DisplayItem item)
     {
@@ -173,7 +186,7 @@ internal sealed partial class ChatPage
             }
             await using (var output = new FileStream(temporary, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, FileChunkBytes, true))
             {
-                if (protocol < 34)
+                if (protocol is null or < 34)
                 {
                     var request = new JsonObject { ["id"] = chat, ["attachmentId"] = attachment, ["allowRelay"] = false };
                     JsonNode old;
@@ -200,7 +213,7 @@ internal sealed partial class ChatPage
                         var encoded = Format.Text(chunk, "data"); if (encoded.Length > 699052) throw new InvalidDataException("Invalid file chunk");
                         var bytes = Convert.FromBase64String(encoded);
                         if (bytes.Length == 0 || bytes.Length > FileChunkBytes || Format.Long(chunk, "offset") != offset || Format.Long(chunk, "nextOffset") != offset + bytes.Length || offset + bytes.Length > size) throw new InvalidDataException("Invalid file chunk");
-                        await output.WriteAsync(bytes, cancel.Token); hash.AppendData(bytes); offset += bytes.Length; Banner($"{item.Name} · {offset * 100 / size}%");
+                        await output.WriteAsync(bytes, cancel.Token); hash.AppendData(bytes); offset += bytes.Length; FileProgress($"{item.Name} · {offset * 100 / size}%");
                     }
                     if (Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant() != Format.Text(info, "sha256")) throw new InvalidDataException("File integrity check failed");
                 }
@@ -216,6 +229,6 @@ internal sealed partial class ChatPage
         catch (InvalidDataException error) { keepPartial = false; if (Current()) Banner(error.Message); }
         catch (FormatException error) { keepPartial = false; if (Current()) Banner(error.Message); }
         catch (Exception error) { if (Current()) Banner(error.Message); }
-        finally { _fileTransfer = null; if (!keepPartial) { try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { } } if (Current()) RebuildComposerActions(); }
+        finally { ClearFileProgress(); _fileTransfer = null; if (!keepPartial) { try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { } } if (Current()) RebuildComposerActions(); }
     }
 }

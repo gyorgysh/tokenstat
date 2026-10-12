@@ -143,22 +143,33 @@ impl Registry {
     /// Write via a temporary file and a rename, so a crash mid-write cannot
     /// leave a half-written list where a whole one used to be.
     pub fn save_to(&self, path: &Path) -> Result<(), RegistryError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| RegistryError::Io {
+        use std::io::Write;
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        std::fs::create_dir_all(parent).map_err(|source| RegistryError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+        let mut tmp =
+            tempfile::NamedTempFile::new_in(parent).map_err(|source| RegistryError::Io {
                 path: parent.to_path_buf(),
                 source,
             })?;
-        }
-        let tmp = path.with_extension("json.tmp");
         let body = serde_json::to_string_pretty(self)?;
-        std::fs::write(&tmp, body).map_err(|source| RegistryError::Io {
-            path: tmp.clone(),
-            source,
-        })?;
-        std::fs::rename(&tmp, path).map_err(|source| RegistryError::Io {
-            path: path.to_path_buf(),
-            source,
-        })
+        tmp.write_all(body.as_bytes())
+            .and_then(|()| tmp.as_file().sync_all())
+            .map_err(|source| RegistryError::Io {
+                path: tmp.path().to_path_buf(),
+                source,
+            })?;
+        tmp.persist(path)
+            .map(|_| ())
+            .map_err(|error| RegistryError::Io {
+                path: path.to_path_buf(),
+                source: error.error,
+            })
     }
 
     pub fn save(&self) -> Result<(), RegistryError> {
@@ -250,6 +261,26 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::canonicalize(&dir).unwrap()
+    }
+
+    #[test]
+    fn simultaneous_saves_publish_complete_independent_snapshots() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspaces.json");
+        std::thread::scope(|scope| {
+            for n in 0..16 {
+                let path = &path;
+                scope.spawn(move || {
+                    let registry = Registry {
+                        workspaces: vec![Workspace::new(PathBuf::from(format!("project-{n}")), n)],
+                    };
+                    for _ in 0..8 {
+                        registry.save_to(path).unwrap();
+                        assert_eq!(Registry::load_from(path).unwrap().workspaces.len(), 1);
+                    }
+                });
+            }
+        });
     }
 
     #[test]

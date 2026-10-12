@@ -248,9 +248,12 @@ pub fn parse_text(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
             .unwrap_or_else(|| "unknown".to_string());
         // The harness's own id for the message. A re-read lands on the same
         // row rather than adding a second one.
-        let id = match message.as_ref().and_then(|m| m.id.as_deref()) {
-            Some(id) if !id.is_empty() => EventId::derive(&["dsh", id]),
-            _ => EventId::derive(&["dsh", &session, &i.to_string()]),
+        let (id, confidence) = match message.as_ref().and_then(|m| m.id.as_deref()) {
+            Some(id) if !id.is_empty() => (EventId::derive(&["dsh", id]), Confidence::Exact),
+            _ => (
+                EventId::derive(&["dsh", &session, &i.to_string()]),
+                Confidence::Derived,
+            ),
         };
 
         out.events.push(UsageEvent {
@@ -261,23 +264,26 @@ pub fn parse_text(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
             session: session.clone(),
             project: project.clone(),
             counters: Counters {
-                input_fresh: Some(input),
+                input_fresh: usage.input,
                 cache_read: usage.cache_read,
                 // No such counter in this vendor's accounting. `None` says the
                 // source does not report it, where a zero would claim it does.
                 cache_write_5m: None,
                 cache_write_1h: None,
-                output: Some(output),
+                output: usage.output,
             },
             extras: Extras {
-                reasoning_within_output: usage.reasoning.filter(|&r| r > 0),
+                reasoning_within_output: usage
+                    .reasoning
+                    .filter(|&r| r > 0)
+                    .map(|r| usage.output.map_or(r, |output| r.min(output))),
                 web_search_requests: None,
                 web_fetch_requests: None,
             },
             // The log carries no cost and no plan marker, so this stays
             // unknown rather than being guessed from the provider's name.
             billing: BillingMode::Unknown,
-            confidence: Confidence::Exact,
+            confidence,
         });
     }
     out
@@ -337,6 +343,25 @@ mod tests {
 {"type":"assistant/chunk","seq":87,"time":1787182618000,"data":{"turn":2,"step":1,"chunk":{"type":"usage","usage":{"inputTokens":32,"outputTokens":123,"cacheReadTokens":7808,"reasoningTokens":54}}}}
 {"type":"assistant/message","seq":90,"time":1787182619000,"data":{"turn":2,"step":1,"message":{"role":"assistant","id":"dc10d80a","source":{"kind":"model","provider":"deepseek-official","model":"deepseek-v4-flash"}},"usage":{"inputTokens":32,"outputTokens":123,"cacheReadTokens":7808,"reasoningTokens":54}}}
 "#;
+
+    #[test]
+    fn absent_counters_and_derived_identity_are_reported_honestly() {
+        let out = parse_text(
+            &path(),
+            Path::new(ROOT),
+            r#"{"type":"assistant/message","data":{"usage":{"outputTokens":2,"reasoningTokens":9}}}"#,
+        );
+        let event = &out.events[0];
+        assert_eq!(event.counters.input_fresh, None);
+        assert_eq!(event.extras.reasoning_within_output, Some(2));
+        assert_eq!(event.confidence, Confidence::Derived);
+        let out = parse_text(
+            &path(),
+            Path::new(ROOT),
+            r#"{"type":"assistant/message","data":{"usage":{"inputTokens":2}}}"#,
+        );
+        assert_eq!(out.events[0].counters.output, None);
+    }
 
     #[test]
     fn reads_a_turn() {

@@ -75,6 +75,8 @@ internal sealed class TerminalSession
 
     private bool _starting;
 
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
+
     private string _slot;
 
     private TerminalSession(string workspaceId, string? sessionId)
@@ -111,7 +113,16 @@ internal sealed class TerminalSession
     /// there is nothing to verify), then poll. Safe to call on every
     /// navigation; a live loop is left alone.
     /// </summary>
-    public async Task AttachAsync(int rows, int cols)
+    public Task AttachAsync(int rows, int cols) => InLifecycleAsync(() => AttachCoreAsync(rows, cols));
+
+    private async Task InLifecycleAsync(Func<Task> action)
+    {
+        await _lifecycle.WaitAsync();
+        try { await action(); }
+        finally { _lifecycle.Release(); }
+    }
+
+    private async Task AttachCoreAsync(int rows, int cols)
     {
         if (Closed)
         {
@@ -164,7 +175,9 @@ internal sealed class TerminalSession
     /// expires the viewer claim on its own, so the detach is a courtesy
     /// that hands the remaining viewers their size back at once.
     /// </summary>
-    public async Task DetachAsync()
+    public Task DetachAsync() => InLifecycleAsync(DetachCoreAsync);
+
+    private async Task DetachCoreAsync()
     {
         _poll?.Cancel();
         _poll = null;
@@ -190,7 +203,9 @@ internal sealed class TerminalSession
     }
 
     /// <summary>Stop the process. Killing an already dead session is not an error.</summary>
-    public async Task KillAsync()
+    public Task KillAsync() => InLifecycleAsync(KillCoreAsync);
+
+    private async Task KillCoreAsync()
     {
         var id = Id;
         if (string.IsNullOrEmpty(id))
@@ -212,9 +227,11 @@ internal sealed class TerminalSession
     /// Kill and forget: the host buffer goes with it, and the workspace
     /// holds no session until the next visit spawns one.
     /// </summary>
-    public async Task CloseAsync()
+    public Task CloseAsync() => InLifecycleAsync(CloseCoreAsync);
+
+    private async Task CloseCoreAsync()
     {
-        await DetachAsync();
+        await DetachCoreAsync();
         var id = Id;
         if (!string.IsNullOrEmpty(id))
         {
@@ -237,9 +254,11 @@ internal sealed class TerminalSession
     }
 
     /// <summary>Start over in the same workspace after a close or an exit.</summary>
-    public async Task RespawnAsync(int rows, int cols)
+    public Task RespawnAsync(int rows, int cols) => InLifecycleAsync(() => RespawnCoreAsync(rows, cols));
+
+    private async Task RespawnCoreAsync(int rows, int cols)
     {
-        await DetachAsync();
+        await DetachCoreAsync();
         var oldId = Id;
         if (!string.IsNullOrEmpty(oldId)) ById.TryRemove(oldId, out _);
         ByWorkspace.TryRemove(_slot, out _);
@@ -381,7 +400,7 @@ internal sealed class TerminalSession
         RaiseChanged();
     }
 
-    private async Task RefreshInfoAsync()
+    private async Task RefreshInfoAsync(CancellationToken token = default)
     {
         var id = Id;
         if (string.IsNullOrEmpty(id))
@@ -401,10 +420,12 @@ internal sealed class TerminalSession
         }
         catch (Exception ex)
         {
+            if (token.IsCancellationRequested || id != Id || Closed) return;
             LastError = ex.Message;
             RaiseChanged();
             return;
         }
+        if (token.IsCancellationRequested || id != Id || Closed) return;
         ApplyInfo(info);
     }
 
@@ -476,7 +497,7 @@ internal sealed class TerminalSession
                 _failures++;
                 LastError = ex.Message;
                 RaiseChanged();
-                if (_failures % 8 == 0 && !await StillThereAsync(id))
+                if (_failures % 8 == 0 && !await StillThereAsync(id, token))
                 {
                     return;
                 }
@@ -538,7 +559,7 @@ internal sealed class TerminalSession
             if (_readsSinceInfo >= 40)
             {
                 _readsSinceInfo = 0;
-                await RefreshInfoAsync();
+                await RefreshInfoAsync(token);
                 if (Closed || token.IsCancellationRequested)
                 {
                     return;
@@ -553,7 +574,7 @@ internal sealed class TerminalSession
     /// list cannot distinguish a dead pty from an unavailable host, so only
     /// a list that answers and lacks the id marks the session stopped.
     /// </summary>
-    private async Task<bool> StillThereAsync(string id)
+    private async Task<bool> StillThereAsync(string id, CancellationToken token)
     {
         try
         {
@@ -564,6 +585,7 @@ internal sealed class TerminalSession
                     ["id"] = id,
                     ["viewer"] = TerminalViewer.Id,
                 });
+            if (token.IsCancellationRequested || id != Id || Closed) return true;
             ApplyInfo(info);
             return Alive;
         }
@@ -578,6 +600,7 @@ internal sealed class TerminalSession
         try
         {
             var listed = await AppServices.Host.CallAsync("pty.list");
+            if (token.IsCancellationRequested || id != Id || Closed) return true;
             var items = Format.Items(listed);
             if (items is null)
             {

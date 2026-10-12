@@ -454,7 +454,9 @@ mod windows {
         let mut context = ReasonContext {
             version: win32::POWER_REQUEST_CONTEXT_VERSION,
             flags: win32::POWER_REQUEST_CONTEXT_SIMPLE_STRING,
-            simple_reason_string: reason_wide().as_ptr(),
+            reason: win32::ReasonString {
+                simple: reason_wide().as_ptr(),
+            },
         };
         let handle = unsafe { win32::PowerCreateRequest(&mut context) };
         if handle.is_null() || handle == win32::INVALID_HANDLE_VALUE {

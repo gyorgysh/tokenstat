@@ -54,7 +54,7 @@ pub fn brief(events: &[Value], folder: &str, budget: usize) -> String {
     if folded.turns == 0 {
         return String::new();
     }
-    render(&folded, folder, budget)
+    render(&folded, folder, budget).0
 }
 
 fn fold(events: &[Value]) -> Folded {
@@ -92,7 +92,10 @@ fn fold(events: &[Value]) -> Folded {
                         let added = agent.get("added").and_then(Value::as_u64).unwrap_or(0);
                         let removed = agent.get("removed").and_then(Value::as_u64).unwrap_or(0);
                         if !path.is_empty() {
-                            push_unique(&mut folded.edits, format!("{path} +{added} −{removed}"));
+                            push_unique(
+                                &mut folded.edits,
+                                format!("{} +{added} −{removed}", one_line(path, 240)),
+                            );
                         }
                     }
                     Some("toolStart") => {
@@ -132,76 +135,83 @@ pub(crate) fn is_shell(verb: &str) -> bool {
         .any(|token| matches!(token, "sh" | "zsh" | "exec" | "run"))
 }
 
-fn render(folded: &Folded, folder: &str, budget: usize) -> String {
-    let mut out = String::new();
-    out.push_str(
+fn render(folded: &Folded, folder: &str, budget: usize) -> (String, usize) {
+    let mut out = String::from(
         "Handover: this conversation already ran with a different agent and you are \
          continuing it. Treat the summary below as what has happened so far. Do not \
          redo work that is listed as done, and do not mention or describe this note.\n",
     );
     if !folder.is_empty() {
-        out.push_str(&format!("\nFolder: {folder}"));
+        out.push_str(&format!("\nFolder: {}", one_line(folder, 240)));
     }
     out.push_str(&format!("\nTurns so far: {}\n", folded.turns));
-
-    // Sections in the order an agent needs them, and the asks are trimmed
-    // first because the earliest ones are the least likely to still matter.
-    let (asks, _) = fit(&folded.asks, budget.saturating_sub(fixed_cost(folded)));
-    section(&mut out, "What the person asked", &asks);
-    section(&mut out, "Files changed", &folded.edits);
-    section(&mut out, "Commands that ran", &folded.commands);
-    section(&mut out, "Refused by the person", &folded.refused);
-    if !folded.last_reply.is_empty() {
-        out.push_str("\nWhere it was left:\n");
-        out.push_str(&folded.last_reply);
-        out.push('\n');
+    if out.chars().count() >= budget {
+        return (out.chars().take(budget).collect(), folded.asks.len());
     }
-    out
+    let remaining = budget - out.chars().count();
+    let mut tail = String::new();
+    if !folded.last_reply.is_empty() {
+        tail.push_str("\nWhere it was left:\n");
+        tail.extend(folded.last_reply.chars().take(remaining / 4));
+        tail.push('\n');
+    }
+    // Tools and refusals can grow just as much as the conversation. Reserve
+    // half of the space after the reply for asks, including the newest one.
+    let available = remaining.saturating_sub(tail.chars().count());
+    let mut details = String::new();
+    for (title, items) in [
+        ("Files changed", &folded.edits),
+        ("Commands that ran", &folded.commands),
+        ("Refused by the person", &folded.refused),
+    ] {
+        let allowance = (available / 6).saturating_sub(title.chars().count() + 3);
+        let (kept, _) = fit(items, allowance, "earlier items not included");
+        section(&mut details, title, &kept);
+    }
+    let ask_budget = available
+        .saturating_sub(details.chars().count())
+        .saturating_sub("\nWhat the person asked:\n".chars().count());
+    let (asks, dropped) = fit(&folded.asks, ask_budget, "earlier turns not included");
+    section(&mut out, "What the person asked", &asks);
+    out.push_str(&details);
+    out.push_str(&tail);
+    (out.chars().take(budget).collect(), dropped)
 }
 
-/// Everything except the asks, which are the part that gets trimmed.
-fn fixed_cost(folded: &Folded) -> usize {
-    let list = |items: &[String]| items.iter().map(|item| item.len() + 3).sum::<usize>();
-    400 + list(&folded.edits)
-        + list(&folded.commands)
-        + list(&folded.refused)
-        + folded.last_reply.len()
-}
-
-/// Keep the newest asks, and say how many were dropped.
-///
-/// Newest rather than oldest: an agent joining now is answering what is being
-/// asked now. Saying the count out loud matters more than it looks, because an
-/// agent handed a silently truncated history will confidently describe a
-/// conversation it was only shown the end of.
-fn fit(asks: &[String], budget: usize) -> (Vec<String>, usize) {
-    let mut kept: Vec<String> = Vec::new();
-    let mut used = 0;
-    for ask in asks.iter().rev() {
-        let cost = ask.len() + 3;
-        if used + cost > budget && !kept.is_empty() {
+/// Keep the newest complete items and include the omission notice in the
+/// character budget. Byte counts unfairly discarded non-ASCII conversation.
+fn fit(items: &[String], budget: usize, omitted: &str) -> (Vec<String>, usize) {
+    let cost = |item: &String| item.chars().count() + 3;
+    if items.iter().map(cost).sum::<usize>() <= budget {
+        return (items.to_vec(), 0);
+    }
+    let notice_budget = format!("({} {omitted})", items.len()).chars().count() + 3;
+    let mut remaining = budget.saturating_sub(notice_budget);
+    let mut kept = Vec::new();
+    for item in items.iter().rev() {
+        let size = cost(item);
+        if size > remaining {
             break;
         }
-        used += cost;
-        kept.push(ask.clone());
+        remaining -= size;
+        kept.push(item.clone());
     }
     kept.reverse();
-    let dropped = asks.len() - kept.len();
-    if dropped > 0 {
-        kept.insert(0, format!("({dropped} earlier turns not included)"));
+    let dropped = items.len() - kept.len();
+    if notice_budget <= budget {
+        kept.insert(0, format!("({dropped} {omitted})"));
     }
     (kept, dropped)
 }
 
 /// How many early turns the fold leaves out of the brief. The handover
 /// points at a full export exactly then, so depth is one file read away.
-pub fn dropped_turns(events: &[Value], budget: usize) -> usize {
+pub fn dropped_turns(events: &[Value], folder: &str, budget: usize) -> usize {
     let folded = fold(events);
     if folded.turns == 0 {
         return 0;
     }
-    let (_, dropped) = fit(&folded.asks, budget.saturating_sub(fixed_cost(&folded)));
-    dropped
+    render(&folded, folder, budget).1
 }
 
 fn section(out: &mut String, title: &str, items: &[String]) {
@@ -444,6 +454,25 @@ mod tests {
     }
 
     #[test]
+    fn every_section_and_unicode_folder_respects_the_character_budget() {
+        let mut events = timeline();
+        for index in 0..500 {
+            events.push(json!({"kind":"agent", "event":{"kind":"edit", "path":format!("{index}{}", "界".repeat(400))}}));
+            events.push(json!({"kind":"approval", "approval":{"decision":"deny", "preview":format!("refusal {index}")}}));
+            events.push(json!({"kind":"agent", "event":{"kind":"toolStart", "verb":"bash", "target":format!("command {index}")}}));
+        }
+        events.push(json!({"kind":"user", "text":"Keep this newest request"}));
+        for budget in [0, 20, 500, 2_000, BUDGET] {
+            let text = brief(&events, &"界".repeat(10_000), budget);
+            assert!(text.chars().count() <= budget);
+            if budget >= 2_000 {
+                assert!(text.contains("Keep this newest request"));
+                assert!(text.contains("earlier items not included"));
+            }
+        }
+    }
+
+    #[test]
     fn the_agent_is_told_not_to_narrate_the_handover() {
         let text = brief(&timeline(), "/repo", BUDGET);
         assert!(text.contains("do not mention or describe this note"));
@@ -460,7 +489,7 @@ mod tests {
         assert!(text.contains("Bash cargo test"));
         assert!(text.contains("src/upload.rs +12 −3"));
         assert!(text.contains("Approval deny: rm -rf target"));
-        assert_eq!(dropped_turns(&timeline(), BUDGET), 0);
+        assert_eq!(dropped_turns(&timeline(), "/repo", BUDGET), 0);
     }
 
     #[test]
@@ -468,7 +497,7 @@ mod tests {
         let events: Vec<Value> = (0..200)
             .map(|index| json!({"kind": "user", "text": format!("question number {index} {}", "x".repeat(120))}))
             .collect();
-        assert!(dropped_turns(&events, 2_000) > 0);
+        assert!(dropped_turns(&events, "/repo", 2_000) > 0);
         let text = export_markdown(&events, "/repo");
         assert!(text.contains("question number 0"));
         assert!(text.contains("question number 199"));

@@ -103,7 +103,74 @@ pub(crate) struct SystemPowerStatus {
 pub(crate) struct ReasonContext {
     pub version: Dword,
     pub flags: Dword,
-    pub simple_reason_string: *const u16,
+    pub reason: ReasonString,
+}
+
+#[cfg_attr(test, allow(dead_code))]
+#[repr(C)]
+pub(crate) union ReasonString {
+    pub simple: *const u16,
+    detailed: std::mem::ManuallyDrop<DetailedReason>,
+}
+
+#[cfg_attr(test, allow(dead_code))]
+#[repr(C)]
+pub(crate) struct DetailedReason {
+    module: Handle,
+    reason_id: Dword,
+    string_count: Dword,
+    strings: *const *const u16,
+}
+
+#[cfg(feature = "local-host")]
+#[repr(C)]
+pub(crate) struct ProcessEntry32 {
+    pub size: Dword,
+    pub usage: Dword,
+    pub pid: Dword,
+    pub default_heap: usize,
+    pub module_id: Dword,
+    pub threads: Dword,
+    pub parent_pid: Dword,
+    pub base_priority: i32,
+    pub flags: Dword,
+    pub executable: [u16; 260],
+}
+
+#[cfg(feature = "local-host")]
+#[repr(C)]
+pub(crate) struct ProcessMemoryCounters {
+    pub size: Dword,
+    pub page_faults: Dword,
+    pub peak_working_set: usize,
+    pub working_set: usize,
+    pub peak_paged_pool: usize,
+    pub paged_pool: usize,
+    pub peak_nonpaged_pool: usize,
+    pub nonpaged_pool: usize,
+    pub pagefile: usize,
+    pub peak_pagefile: usize,
+}
+
+#[cfg(feature = "local-host")]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    pub(crate) fn CreateToolhelp32Snapshot(flags: Dword, pid: Dword) -> Handle;
+    pub(crate) fn Process32FirstW(snapshot: Handle, entry: *mut ProcessEntry32) -> Bool;
+    pub(crate) fn Process32NextW(snapshot: Handle, entry: *mut ProcessEntry32) -> Bool;
+    pub(crate) fn OpenProcess(access: Dword, inherit: Bool, pid: Dword) -> Handle;
+    pub(crate) fn GetProcessTimes(
+        process: Handle,
+        created: *mut FileTime,
+        exited: *mut FileTime,
+        kernel: *mut FileTime,
+        user: *mut FileTime,
+    ) -> Bool;
+    pub(crate) fn K32GetProcessMemoryInfo(
+        process: Handle,
+        counters: *mut ProcessMemoryCounters,
+        size: Dword,
+    ) -> Bool;
 }
 
 #[link(name = "kernel32")]

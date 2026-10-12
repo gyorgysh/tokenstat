@@ -80,8 +80,9 @@ fun orderVaultRecords(records: List<JsonObject>, localFolderIds: Set<String>): L
             sorted.add(record)
             folder.optStr("id")?.let { placed.add(it) }
         }
-        val readyIds = ready.mapNotNull { it.second.optStr("id") }.toSet()
-        remaining.removeAll { readyIds.contains(it.second.optStr("id")) }
+        // Even malformed folders must leave this pass. A missing id cannot
+        // unlock children, but must not keep the ordering loop alive forever.
+        remaining.removeAll(ready.toSet())
     }
     sorted.addAll(remaining.map { it.first })
     return sorted + rest

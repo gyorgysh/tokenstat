@@ -80,6 +80,17 @@ class TabCustomizationTest {
     }
 
     @Test
+    fun storedDuplicatesAndAllHiddenStillProduceOneUsableTab() {
+        val prefs = FakePrefs(order = listOf("home", "home", "machines"), hidden = all.toSet())
+        val customization = TabCustomization(prefs, all, emptySet())
+        assertEquals(all.size, customization.order.size)
+        assertEquals(all.size, customization.order.toSet().size)
+        assertEquals(listOf("home"), customization.visibleTabs)
+        assertFalse("home" in customization.hidden)
+        assertFalse(customization.setVisible(false, "home"))
+    }
+
+    @Test
     fun resetRestoresDefaults() {
         val prefs = FakePrefs()
         val customization = TabCustomization(prefs, all, setOf("ssh"))

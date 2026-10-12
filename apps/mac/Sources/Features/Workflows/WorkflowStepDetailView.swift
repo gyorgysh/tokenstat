@@ -24,6 +24,7 @@ struct WorkflowStepDetailView: View {
     @State private var addTarget = ""
     @State private var addWhen: WorkflowEdgeWhen = .ok
     @State private var loadedID: String?
+    @State private var loadedNode: WorkflowNode?
     @State private var applying = false
 
     var body: some View {
@@ -67,6 +68,9 @@ struct WorkflowStepDetailView: View {
             session.selectStep(id)
             addTarget = ""
             if let node { load(node) }
+        }
+        .onChange(of: node) { _, next in
+            if let next, next != loadedNode { load(next) }
         }
         .onDisappear { session.endGroupedStepEdit() }
     }
@@ -271,15 +275,17 @@ struct WorkflowStepDetailView: View {
                     }
                 }
             }
-            TextField(L10n.text("apple.workflowstepdetailview.times.0c0fd31c"), text: $loopTimes)
+            TextField(L10n.text("apple.workflowstepdetailview.times.0c0fd31c"), text: Binding(
+                get: { loopTimes },
+                set: { next in
+                    loopTimes = next
+                    write(node.id) { $0.times = UInt32(next) ?? 3 }
+                }
+            ))
                 .textFieldStyle(.themed)
                 #if os(iOS)
                 .keyboardType(.numberPad)
                 #endif
-                .onChange(of: loopTimes) { _, next in
-                    guard !applying else { return }
-                    write(node.id) { $0.times = UInt32(next) ?? 3 }
-                }
         }
         labeledField(L10n.text("apple.workflowstepdetailview.until.7caf856e"), text: $loopUntil) { next in
             write(node.id) { $0.until = next.isEmpty ? nil : next }
@@ -472,9 +478,10 @@ struct WorkflowStepDetailView: View {
 
     private func write(_ id: String, _ body: (inout WorkflowNode) -> Void) {
         guard !applying, loadedID == id else { return }
-        session.selectStep(id)
+        if session.selectedStepID != id { session.selectStep(id) }
         session.beginGroupedStepEdit()
         session.writeSelectedStep(body)
+        loadedNode = node
     }
 
     private func load(_ node: WorkflowNode) {
@@ -492,9 +499,8 @@ struct WorkflowStepDetailView: View {
         loopTimes = node.times.map { String($0) } ?? "3"
         loopUntil = node.until ?? ""
         loadedID = node.id
-        Task { @MainActor in
-            applying = false
-        }
+        loadedNode = node
+        applying = false
     }
 
     private static func headersText(_ headers: [String: String]?) -> String {

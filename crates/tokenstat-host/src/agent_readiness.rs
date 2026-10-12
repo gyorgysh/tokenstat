@@ -256,7 +256,11 @@ fn readiness_in(
     let Some(store) = STORES.iter().find(|store| store.id == id) else {
         return (Readiness::Unknown, None);
     };
-    let Some(path) = existing_store(store, home, env) else {
+    let path = match existing_store(store, home, env) {
+        Ok(path) => path,
+        Err(_) => return (Readiness::Unknown, None),
+    };
+    let Some(path) = path else {
         if store.keychain_on_macos && cfg!(target_os = "macos") {
             return (Readiness::Unknown, None);
         }
@@ -464,9 +468,20 @@ fn read_store(path: &Path) -> std::io::Result<String> {
     use std::io::Read;
     const MAX_BYTES: u64 = 1024 * 1024;
     let mut raw = String::new();
-    std::fs::File::open(path)?
-        .take(MAX_BYTES + 1)
-        .read_to_string(&mut raw)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::other(
+            "agent configuration is not a regular file",
+        ));
+    }
+    file.take(MAX_BYTES + 1).read_to_string(&mut raw)?;
     if raw.len() as u64 > MAX_BYTES {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -480,18 +495,31 @@ fn existing_store(
     store: &Store,
     home: &Path,
     env: &dyn Fn(&str) -> Option<PathBuf>,
-) -> Option<PathBuf> {
-    if let Some((var, file)) = store.home_var
+) -> std::io::Result<Option<PathBuf>> {
+    let candidates = if let Some((var, file)) = store.home_var
         && let Some(dir) = env(var)
     {
-        let candidate = dir.join(file);
-        return candidate.is_file().then_some(candidate);
+        vec![dir.join(file)]
+    } else {
+        store
+            .paths
+            .iter()
+            .map(|relative| home.join(relative))
+            .collect()
+    };
+    for candidate in candidates {
+        match std::fs::metadata(&candidate) {
+            Ok(meta) if meta.is_file() => return Ok(Some(candidate)),
+            Ok(_) => {
+                return Err(std::io::Error::other(
+                    "agent configuration is not a regular file",
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
     }
-    store
-        .paths
-        .iter()
-        .map(|relative| home.join(relative))
-        .find(|candidate| candidate.is_file())
+    Ok(None)
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -540,6 +568,16 @@ fn wire(id: &str, state: Readiness, expires: Option<i64>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_invalid_store_type_is_unknown_rather_than_a_missing_login() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".codex/auth.json")).unwrap();
+        assert_eq!(
+            readiness_in("codex", true, home.path(), 0, &no_env).0,
+            Readiness::Unknown
+        );
+    }
 
     #[test]
     fn malformed_and_oversized_stores_cannot_confirm_a_login() {

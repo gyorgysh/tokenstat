@@ -24,27 +24,12 @@ struct ClientPaywallView: View {
     @State private var webURL: URL?
     @State private var bill: ClientStoreInterval = .year
 
-    /// What a failed purchase says.
-    ///
-    /// A network fault during a purchase means the request never got anywhere,
-    /// and the one thing somebody needs to hear is that they were not charged.
-    /// Anything else keeps the store's own words: they are about the account
-    /// or the product, not about the connection.
-    private func purchaseFailureText(_ message: String) -> String {
-        let kind = NetworkClassifier.kind(code: "", message: message)
-        guard kind.isNetwork else { return message }
-        return L10n.text("apple.clientpaywallview.could_not_reach_the_store_so_nothing_was_c.511c677d")
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let message = store.errorMessage {
-                        // A purchase that could not reach anything has to say
-                        // plainly that no money moved. Anything vaguer and
-                        // somebody presses buy again.
-                        Text(purchaseFailureText(message))
+                        Text(message)
                             .font(ClientType.body)
                             .foregroundStyle(Theme.danger)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -401,19 +386,25 @@ struct ClientPaywallView: View {
 
     private struct CompareFeature: Identifiable {
         let label: String
-        let values: [String]
+        let values: [CompareValue]
         var id: String { label }
     }
 
+    private enum CompareValue {
+        case text(String)
+        case yes
+        case no
+    }
+
     private static let compareFeatures: [CompareFeature] = [
-        CompareFeature(label: L10n.text("common.devices"), values: ["2", "4", "6", "10"]),
-        CompareFeature(label: L10n.text("common.history"), values: ["30 days", "1 yr", L10n.text("apple.clientpaywallview.all.a52ace42"), L10n.text("apple.clientpaywallview.all.a52ace42")]),
-        CompareFeature(label: L10n.text("apple.clientpaywallview.terminal_ssh.501f07aa"), values: [L10n.text("common.no"), L10n.text("common.no"), L10n.text("common.yes"), L10n.text("common.yes")]),
-        CompareFeature(label: L10n.text("apple.clientpaywallview.view_screen.56dea3b5"), values: [L10n.text("common.no"), L10n.text("common.no"), L10n.text("common.no"), L10n.text("common.yes")]),
-        CompareFeature(label: L10n.text("apple.clientpaywallview.relay_traffic.250c5414"), values: [L10n.text("apple.clientpaywallview.100_mib.98243968"), L10n.text("apple.clientpaywallview.1_gib.7dd46450"), L10n.text("apple.clientpaywallview.5_gib.aa5f04aa"), L10n.text("apple.clientpaywallview.20_gib.4488c54a")]),
-        CompareFeature(label: L10n.text("apple.clientpaywallview.sync.8d261a37"), values: [L10n.text("apple.clientpaywallview.hourly.eab0cd8f"), "30 min", "10 min", "5 min"]),
-        CompareFeature(label: L10n.text("apple.clientpaywallview.mark.d7cda0ca"), values: [L10n.text("apple.clientpaywallview.none.dc937b59"), L10n.text("apple.clientpaywallview.star.e357d396"), L10n.text("apple.clientpaywallview.badge.002474e3"), L10n.text("apple.clientpaywallview.crown.29968c38")]),
-        CompareFeature(label: L10n.text("apple.clientpaywallview.read_api.178531ea"), values: [L10n.text("common.no"), L10n.text("common.no"), L10n.text("common.no"), L10n.text("common.yes")]),
+        CompareFeature(label: L10n.text("common.devices"), values: [.text("2"), .text("4"), .text("6"), .text("10")]),
+        CompareFeature(label: L10n.text("common.history"), values: [.text("30 days"), .text("1 yr"), .text(L10n.text("apple.clientpaywallview.all.a52ace42")), .text(L10n.text("apple.clientpaywallview.all.a52ace42"))]),
+        CompareFeature(label: L10n.text("apple.clientpaywallview.terminal_ssh.501f07aa"), values: [.no, .no, .yes, .yes]),
+        CompareFeature(label: L10n.text("apple.clientpaywallview.view_screen.56dea3b5"), values: [.no, .no, .no, .yes]),
+        CompareFeature(label: L10n.text("apple.clientpaywallview.relay_traffic.250c5414"), values: [.text(L10n.text("apple.clientpaywallview.100_mib.98243968")), .text(L10n.text("apple.clientpaywallview.1_gib.7dd46450")), .text(L10n.text("apple.clientpaywallview.5_gib.aa5f04aa")), .text(L10n.text("apple.clientpaywallview.20_gib.4488c54a"))]),
+        CompareFeature(label: L10n.text("apple.clientpaywallview.sync.8d261a37"), values: [.text(L10n.text("apple.clientpaywallview.hourly.eab0cd8f")), .text("30 min"), .text("10 min"), .text("5 min")]),
+        CompareFeature(label: L10n.text("apple.clientpaywallview.mark.d7cda0ca"), values: [.text(L10n.text("apple.clientpaywallview.none.dc937b59")), .text(L10n.text("apple.clientpaywallview.star.e357d396")), .text(L10n.text("apple.clientpaywallview.badge.002474e3")), .text(L10n.text("apple.clientpaywallview.crown.29968c38"))]),
+        CompareFeature(label: L10n.text("apple.clientpaywallview.read_api.178531ea"), values: [.no, .no, .no, .yes]),
     ]
 
     private var compare: some View {
@@ -481,20 +472,21 @@ struct ClientPaywallView: View {
     }
 
     @ViewBuilder
-    private func compareCell(_ value: String, isCurrent: Bool) -> some View {
+    private func compareCell(_ value: CompareValue, isCurrent: Bool) -> some View {
         Group {
-            if value == "Yes" {
+            switch value {
+            case .yes:
                 Image(systemName: "checkmark")
                     .font(Theme.font(12, weight: .bold))
                     .foregroundStyle(Theme.accent)
                     .accessibilityLabel(L10n.text("common.yes"))
-            } else if value == "No" {
+            case .no:
                 Image(systemName: "xmark")
                     .font(Theme.font(10, weight: .semibold))
                     .foregroundStyle(Color.secondary.opacity(0.4))
                     .accessibilityLabel(L10n.text("common.no"))
-            } else {
-                Text(value)
+            case .text(let label):
+                Text(label)
                     .font(ClientType.caption.weight(.medium))
                     .foregroundStyle(isCurrent ? Theme.accent : .primary)
                     .lineLimit(2)
@@ -534,7 +526,7 @@ struct ClientPaywallView: View {
             let text = end.formatted(date: .abbreviated, time: .omitted)
             return L10n.text("apple.clientpaywallview.renewal_is_off_you_keep_0_until_1.1a7747ba", "\(item.title)", "\(text)")
         }
-        if let raw = account?.billing?.periodEnd, let parsed = ISO8601DateFormatter().date(from: raw) {
+        if let raw = account?.billing?.periodEnd, let parsed = parseServerDate(raw) {
             let text = parsed.formatted(date: .abbreviated, time: .omitted)
             return L10n.text("apple.clientpaywallview.renewal_is_off_you_keep_0_until_1.1a7747ba", "\(item.title)", "\(text)")
         }

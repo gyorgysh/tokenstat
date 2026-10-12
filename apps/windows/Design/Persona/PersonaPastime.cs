@@ -94,8 +94,10 @@ internal sealed class PersonaPastime : Grid
         get => _doing;
         set
         {
+            if (_doing == value) return;
             _doing = value;
             _mark.State = Quiet(value);
+            if (IsLoaded) Start();
         }
     }
 

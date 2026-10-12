@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Exercise the actual mobile empty-history retry and offline-copy guards."""
 from pathlib import Path
 import subprocess
@@ -41,7 +42,7 @@ enum L10n { static func text(_ key: String) -> String { key } }
 ''' + cache + '''
 }
 @MainActor final class Reader {
-    var refreshing = false; let model = Model()
+    var isActive = true, refreshing = false; let model = Model()
 ''' + retry + '''
 }
 @main struct Check {

@@ -216,7 +216,14 @@ fn load() -> Result<(Store, bool), String> {
     let path = path();
     let marker = path.with_extension("repaired");
     let take_marker = || fs::remove_file(&marker).is_ok();
-    let file = match fs::File::open(&path) {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = match options.open(&path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok((Store::default(), take_marker()));
@@ -299,34 +306,28 @@ fn save_bounded(store: &mut Store, limit: u64) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let temp = path.with_extension("tmp");
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-    }
-    let mut file = options.open(&temp).map_err(|e| e.to_string())?;
+    let parent = path.parent().ok_or("invalid saved work path")?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    let file = temp.as_file_mut();
     {
         let mut writer = LimitedWriter {
-            inner: BufWriter::new(&mut file),
+            inner: BufWriter::new(&mut *file),
             remaining: limit,
         };
         serde_json::to_writer(&mut writer, store).map_err(|error| error.to_string())?;
         writer.flush().map_err(|error| error.to_string())?;
     }
     file.sync_all().map_err(|e| e.to_string())?;
-    drop(file);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temp, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
     }
     // Whatever happens next, the copy in memory no longer matches the file
     // until the rename below has landed and been measured.
     forget_parsed();
-    fs::rename(temp, &path).map_err(|e| e.to_string())?;
+    temp.persist(&path).map_err(|e| e.to_string())?;
     // Persist the replacement directory entry before acknowledging a removal
     // or clear, matching the durable-store convention on Unix platforms.
     #[cfg(unix)]
@@ -1318,6 +1319,17 @@ mod tests {
             let listed = list("s").expect("list");
             assert_eq!(listed["repaired"], json!(true));
             assert_eq!(listed["records"].as_array().unwrap().len(), 0);
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fifo_cache_is_refused_without_blocking() {
+        use std::os::unix::ffi::OsStrExt;
+        with_path(fresh_path(), || {
+            let name = std::ffi::CString::new(path().as_os_str().as_bytes()).unwrap();
+            assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+            assert!(list("s").unwrap_err().contains("regular file"));
         });
     }
 

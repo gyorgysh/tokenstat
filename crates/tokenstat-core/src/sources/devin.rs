@@ -261,7 +261,11 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         // unknown rather than becoming a zero it never measured.
         let cache_creation = row.cache_creation.map(|v| v.max(0.0) as u64);
         // A turn that was interrupted before the model answered writes zeroes.
-        if input.unwrap_or(0) == 0 && output.unwrap_or(0) == 0 && cache_read.unwrap_or(0) == 0 {
+        if input.unwrap_or(0) == 0
+            && output.unwrap_or(0) == 0
+            && cache_read.unwrap_or(0) == 0
+            && cache_creation.unwrap_or(0) == 0
+        {
             continue;
         }
         out.rows_seen += 1;
@@ -330,7 +334,11 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
                 web_fetch_requests: None,
             },
             billing: BillingMode::Unknown,
-            confidence: Confidence::Exact,
+            confidence: if row.request_id.as_deref().is_some_and(|id| !id.is_empty()) {
+                Confidence::Exact
+            } else {
+                Confidence::Derived
+            },
         });
     }
     out
@@ -468,6 +476,20 @@ mod tests {
         )
         .unwrap();
         path
+    }
+
+    #[test]
+    fn cache_creation_only_usage_is_retained_with_derived_identity() {
+        let path = temp_db();
+        rusqlite::Connection::open(&path).unwrap().execute_batch(
+            "DELETE FROM message_nodes;
+             INSERT INTO message_nodes (session_id, node_id, chat_message, created_at)
+             VALUES ('cheddar-windscreen', 1, '{\"metadata\":{\"metrics\":{\"output_tokens\":0,\"cache_creation_tokens\":100}}}', 1788260363);",
+        ).unwrap();
+        let out = parse_db(&path);
+        assert_eq!(out.events.len(), 1);
+        assert_eq!(out.events[0].counters.cache_write_5m, Some(100));
+        assert_eq!(out.events[0].confidence, Confidence::Derived);
     }
 
     #[test]

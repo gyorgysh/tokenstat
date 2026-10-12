@@ -21,12 +21,12 @@ mod tables;
 mod updates;
 
 pub use account::{
-    auth, device, fetch_reports, profile_login, profile_login_code, profile_logout, profile_sync,
-    profile_sync_scheduled, profile_sync_status,
+    auth, device, fetch_report_values, fetch_reports, profile_login, profile_login_code,
+    profile_logout, profile_sync, profile_sync_scheduled, profile_sync_status,
 };
 pub use reference::{budget, catalog, models_detail, plans, pricing};
 pub use setup::{SetupOptions, schedule, setup};
-pub use status::{doctor, empty_archive, empty_range, scan_report, statusline};
+pub use status::{doctor, empty_archive, empty_range, scan_report, scan_report_value, statusline};
 pub use summary::{heatmap, overview, wrapped};
 pub use tables::{blocks, export, grouped, monthly, sessions};
 pub use updates::{maybe_notify_update, self_update, self_update_scheduled, update_auto};
@@ -40,6 +40,25 @@ use crate::ui;
 pub(super) fn daily_tokens(days: &[Bucket]) -> Vec<(String, u64)> {
     days.iter()
         .map(|d| (d.key.clone(), d.counters.total()))
+        .collect()
+}
+
+/// Activity-only rows have no model/project/billing attribution. Include them
+/// only when they can truthfully contribute to this report's date window.
+pub(super) fn unmeasured_days(
+    store: &tokenstat_core::Store,
+    q: &tokenstat_core::Query,
+) -> Vec<String> {
+    if q.model.is_some() || q.project.is_some() || q.billing.is_some() {
+        return Vec::new();
+    }
+    store
+        .days_active_without_usage("claude_code")
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|day| {
+            q.since.as_ref().is_none_or(|s| day >= s) && q.until.as_ref().is_none_or(|u| day <= u)
+        })
         .collect()
 }
 
@@ -146,7 +165,12 @@ pub(super) fn today_summary(days: &[Bucket], values: &ValueMap, date: &str) -> S
         Some(day) => format!(
             "Today {date} · {} requests · {} in+out · {} tokens incl. cache · {} API value",
             ui::exact(day.events),
-            ui::tokens(day.counters.input_fresh.unwrap_or(0) + day.counters.output.unwrap_or(0)),
+            ui::tokens(
+                day.counters
+                    .input_fresh
+                    .unwrap_or(0)
+                    .saturating_add(day.counters.output.unwrap_or(0))
+            ),
             total_cell(&day.counters),
             values.get(date).copied().unwrap_or_default().cell()
         ),
@@ -160,7 +184,7 @@ pub(super) fn cache_cell(c: &Counters) -> String {
 }
 
 pub(super) fn csv_escape(s: &str) -> String {
-    if s.contains([',', '"', '\n']) {
+    if s.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
@@ -375,5 +399,38 @@ mod tests {
     fn log_derived_labels_cannot_carry_escape_sequences() {
         assert_eq!(sanitize_label("a\u{1b}[31mb"), "a\u{FFFD}[31mb");
         assert_eq!(sanitize_label("claude-opus-5"), "claude-opus-5");
+    }
+
+    #[test]
+    fn csv_quotes_carriage_returns() {
+        assert_eq!(csv_escape("one\rtwo"), "\"one\rtwo\"");
+    }
+
+    #[test]
+    fn unmeasured_activity_cannot_escape_report_scope() {
+        let store = tokenstat_core::Store::open_in_memory().unwrap();
+        let rows = ["2026-01-01", "2026-10-01"].map(|day| tokenstat_core::store::VendorDay {
+            day: day.into(),
+            messages: 1,
+            ..Default::default()
+        });
+        store
+            .record_vendor_days("claude_code", &rows, "2026-10-12")
+            .unwrap();
+        let query = tokenstat_core::Query {
+            since: Some("2026-10-01".into()),
+            ..Default::default()
+        };
+        assert_eq!(unmeasured_days(&store, &query), ["2026-10-01"]);
+        assert!(
+            unmeasured_days(
+                &store,
+                &tokenstat_core::Query {
+                    model: Some("m".into()),
+                    ..query
+                }
+            )
+            .is_empty()
+        );
     }
 }

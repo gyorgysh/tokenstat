@@ -206,16 +206,26 @@ struct PointerProbe: UIViewRepresentable {
         (view as? ProbeView)?.onHover = onHover
     }
 
+    static func dismantleUIView(_ view: UIView, coordinator: ()) {
+        (view as? ProbeView)?.removeProbe()
+    }
+
     final class ProbeView: UIView {
         var onHover: (() -> Void)?
         private var installed: UIHoverGestureRecognizer?
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
+            if installed?.view !== window { removeProbe() }
             guard let window, installed == nil else { return }
             let hover = UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:)))
             window.addGestureRecognizer(hover)
             installed = hover
+        }
+
+        func removeProbe() {
+            if let installed { installed.view?.removeGestureRecognizer(installed) }
+            installed = nil
         }
 
         @objc func hovered(_ recognizer: UIHoverGestureRecognizer) {

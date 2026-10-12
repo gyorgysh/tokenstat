@@ -36,7 +36,7 @@ if ($Rid -eq "win-arm64") {
     rustup target add $RustTarget | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "rustup target add $RustTarget failed (exit $LASTEXITCODE)" }
 }
-cargo build --release --locked --target $RustTarget -p tokenstat-host --bin tokenstat-hostd
+cargo build --release --locked --target-dir (Join-Path $Root "target") --target $RustTarget -p tokenstat-host --bin tokenstat-hostd
 if ($LASTEXITCODE -ne 0) { throw "hostd build failed for $RustTarget (exit $LASTEXITCODE)" }
 
 $Csproj = Join-Path $Root "apps\windows\Tokenstat.csproj"

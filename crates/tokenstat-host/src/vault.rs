@@ -513,7 +513,7 @@ fn clear_local(storage: &VaultStorage) -> Result<(), String> {
 fn clear_legacy_for_owner(storage: &VaultStorage, path: &std::path::Path) -> Result<(), String> {
     storage.ensure_current()?;
     let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
-    let bytes = match fs::read(path) {
+    let bytes = match read_vault_file(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.to_string()),
@@ -808,10 +808,34 @@ fn decrypt_snapshot(
     Ok(snapshot)
 }
 
+fn read_vault_file(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(path)?;
+    const CAP: u64 = 16 * 1024 * 1024;
+    if !file.metadata()?.is_file() || file.metadata()?.len() > CAP {
+        return Err(std::io::Error::other(
+            "Vault cache is not a bounded regular file",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(CAP + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > CAP {
+        return Err(std::io::Error::other("Vault cache exceeds its size limit"));
+    }
+    Ok(bytes)
+}
+
 fn read(storage: &VaultStorage) -> Result<VaultStore, String> {
     storage.ensure_current()?;
     let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
-    match fs::read(storage.path.clone()) {
+    match read_vault_file(&storage.path) {
         Ok(v) => {
             let store: VaultStore = serde_json::from_slice(&v).map_err(|e| e.to_string())?;
             if store.owner.as_ref() != Some(&storage.owner) {
@@ -849,9 +873,14 @@ fn write(storage: &VaultStorage, store: &VaultStore) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let mut file = options.open(&temp).map_err(|e| e.to_string())?;
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err("Vault temporary file is not a regular file".into());
+    }
     file.write_all(&serde_json::to_vec_pretty(&store).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     file.sync_all().map_err(|e| e.to_string())?;
@@ -914,7 +943,7 @@ fn legacy_baseline(
     owner: &VaultOwner,
     key: &[u8; 32],
 ) -> Result<Option<VaultStore>, String> {
-    let bytes = match fs::read(path) {
+    let bytes = match read_vault_file(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.to_string()),
@@ -1325,9 +1354,14 @@ fn operation_guard() -> Result<OperationGuard, String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let file = options.open(lock_path).map_err(|e| e.to_string())?;
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err("Vault lock is not a regular file".into());
+    }
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
@@ -1533,7 +1567,7 @@ fn dispatch_request(
                 .is_some_and(|value| value.password_wrap.is_none());
             let record_count =
                 if let (Some(remote), Some(key)) = (remote.as_ref(), cached_key(storage)) {
-                    match validate_remote(&local, remote, &key, false).and_then(|_| {
+                    match cache_remote(client, remote, &key, false).and_then(|_| {
                         decrypt_snapshot(&key, remote.revision, &remote.nonce, &remote.ciphertext)
                     }) {
                         Ok(snapshot) => snapshot.records.iter().filter(|r| !r.deleted).count(),
@@ -1546,7 +1580,7 @@ fn dispatch_request(
                 } else {
                     0
                 };
-            let locked = !needs_recreate && remote.is_some() && is_locked(storage);
+            let locked = !needs_recreate && created && is_locked(storage);
             let session_id = vault_session()
                 .lock()
                 .map_err(|_| "vault session lock poisoned")?
@@ -2181,6 +2215,20 @@ mod tests {
         forget_key(storage);
         assert!(cached_key(storage).is_none());
         clear_local(storage).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vault_cache_refuses_fifos_and_links_without_blocking() {
+        use std::os::unix::fs::symlink;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("fifo");
+        let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(read_vault_file(&path).is_err());
+        let link = directory.path().join("link");
+        symlink(&path, &link).unwrap();
+        assert!(read_vault_file(&link).is_err());
     }
 
     #[test]

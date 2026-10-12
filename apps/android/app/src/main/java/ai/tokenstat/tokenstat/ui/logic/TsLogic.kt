@@ -452,9 +452,19 @@ fun vaultPasswordProblems(password: String): List<String> {
     val scalars = password.codePoints().toArray()
     val out = mutableListOf<String>()
     if (scalars.size < 12) out += L10n.text("android.tslogic.at_least_12_characters.0ced89a6")
-    if (password.none { it.isUpperCase() }) out += L10n.text("android.tslogic.an_uppercase_letter.a61f4d4b")
+    if (scalars.none { Character.isUpperCase(it) }) out += L10n.text("android.tslogic.an_uppercase_letter.a61f4d4b")
     if (scalars.none { it in '0'.code..'9'.code }) out += L10n.text("android.tslogic.a_number.a3c9dfa2")
-    if (password.none { !it.isLetterOrDigit() && !it.isWhitespace() }) out += L10n.text("android.tslogic.a_special_character.9b79cde5")
+    if (scalars.none { scalar ->
+            // Rust's Unicode alphanumeric predicate includes alphabetic marks
+            // and all number categories, not only decimal digits.
+            val number = Character.getType(scalar) in setOf(
+                Character.DECIMAL_DIGIT_NUMBER.toInt(),
+                Character.LETTER_NUMBER.toInt(),
+                Character.OTHER_NUMBER.toInt(),
+            )
+            val whitespace = Character.isWhitespace(scalar) || Character.isSpaceChar(scalar) || scalar == 0x85
+            !Character.isAlphabetic(scalar) && !number && !whitespace
+        }) out += L10n.text("android.tslogic.a_special_character.9b79cde5")
     return out
 }
 

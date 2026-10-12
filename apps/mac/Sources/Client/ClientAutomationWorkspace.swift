@@ -447,7 +447,7 @@ struct ClientAutomationWorkspace: View {
     private var runContent: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(L10n.text("apple.clientautomationworkspace.run_details.7bbc3690")).font(ClientType.sectionTitle)
-            ClientAutomationActions(session: session, shortcutsEnabled: editor == nil && !showingHistory)
+            ClientAutomationActions(session: session, shortcutsEnabled: editor == nil && !showingHistory && !showingQueue)
             if let run = session.selectedRun {
                 StatusPill(status: run.status, text: run.endedLabel)
                 TranscriptView(

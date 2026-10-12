@@ -8,6 +8,36 @@ internal static class TerminalSessionTests
     internal static async Task RunAsync()
     {
         static void Check(bool value, string message) { if (!value) throw new Exception(message); }
+        var spawnStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishSpawn = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var spawnCalls = 0;
+        AppServices.Host.BeforeCall = async method =>
+        {
+            if (method != "pty.spawn") return;
+            Interlocked.Increment(ref spawnCalls);
+            spawnStarted.TrySetResult();
+            await finishSpawn.Task;
+        };
+        var shared = TerminalSession.For("concurrent-attach-" + Guid.NewGuid(), null);
+        var attach = shared.AttachAsync(30, 100);
+        await spawnStarted.Task;
+        var secondAttach = shared.AttachAsync(30, 100);
+        finishSpawn.SetResult();
+        await Task.WhenAll(attach, secondAttach);
+        Check(spawnCalls == 1, "Concurrent viewers spawned duplicate PTYs");
+        await shared.CloseAsync();
+
+        spawnStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        finishSpawn = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        shared = TerminalSession.For("close-during-spawn-" + Guid.NewGuid(), null);
+        attach = shared.AttachAsync(30, 100);
+        await spawnStarted.Task;
+        var close = shared.CloseAsync();
+        finishSpawn.SetResult();
+        await Task.WhenAll(attach, close);
+        Check(shared.Closed && !ReferenceEquals(shared, TerminalSession.For(shared.WorkspaceId, shared.Id)),
+            "A late spawn resurrected a closed terminal");
+        AppServices.Host.BeforeCall = null;
         // A spawned session also lives in the ById cache. Replacing it must
         // stop the old sidebar ID from resolving to the new shell.
         var workspace = "respawn-cache-" + Guid.NewGuid();
@@ -48,8 +78,10 @@ namespace Tokenstat
     }
     internal sealed class TerminalProtocolFixture
     {
-        internal Task<JsonNode> CallAsync(string method, JsonNode? parameters = null)
+        internal Func<string, Task>? BeforeCall { get; set; }
+        internal async Task<JsonNode> CallAsync(string method, JsonNode? parameters = null)
         {
+            if (BeforeCall is { } before) await before(method);
             JsonNode result = method switch
             {
                 "launcher.catalog" => new JsonArray(new JsonObject { ["id"] = "shell", ["command"] = "fixture-shell", ["args"] = new JsonArray() }),
@@ -60,7 +92,7 @@ namespace Tokenstat
                 "pty.detach" or "pty.close" or "pty.write" or "pty.kill" => new JsonObject(),
                 _ => throw new Exception("Unexpected terminal fixture method: " + method),
             };
-            return Task.FromResult(result);
+            return result;
         }
     }
 }

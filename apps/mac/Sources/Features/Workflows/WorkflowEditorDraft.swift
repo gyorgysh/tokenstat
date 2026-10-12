@@ -33,8 +33,15 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
     var weeklyDays: Int
     var weeklyDayEdited: Bool
     var customDays: Int
-    var budgetMinutes: String
-    var noTimeLimit: Bool
+    // Preserve host seconds until the user edits the time limit. Optional for
+    // compatibility with drafts persisted before exact budgets were retained.
+    var loadedBudgetSeconds: UInt64? = nil
+    var budgetMinutes: String {
+        didSet { if budgetMinutes != oldValue { loadedBudgetSeconds = nil } }
+    }
+    var noTimeLimit: Bool {
+        didSet { if noTimeLimit != oldValue { loadedBudgetSeconds = nil } }
+    }
     /// Graph-level fields the host sent that this client does not name.
     /// Nodes and edges carry their own. Saved with the draft so a round
     /// trip through this device cannot delete them.
@@ -43,7 +50,7 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
     enum CodingKeys: String, CodingKey {
         case name, starterID = "starterId", enabled, nodes, edges, scheduleKind
         case intervalMinutes, intervalSeconds, intervalTouched, hour, minute
-        case weekday, weeklyDays, weeklyDayEdited, customDays, budgetMinutes, noTimeLimit
+        case weekday, weeklyDays, weeklyDayEdited, customDays, budgetMinutes, noTimeLimit, loadedBudgetSeconds
         case workspaceID = "workspaceId", graphExtraFields
     }
 
@@ -66,6 +73,7 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
         customDays = AutomationSchedule.weekdaysMask
         noTimeLimit = budgetSeconds == 0
         budgetMinutes = noTimeLimit ? "180" : String(max(1, budgetSeconds / 60))
+        loadedBudgetSeconds = budgetSeconds
     }
 
     init(_ graph: WorkflowGraph) {
