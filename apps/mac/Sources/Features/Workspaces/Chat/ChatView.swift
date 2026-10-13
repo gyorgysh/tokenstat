@@ -847,6 +847,15 @@ struct ChatView: View {
             }
             #endif
             .onAppear {
+                #if os(macOS)
+                // A new scroll view cannot use the previous window's paging
+                // anchor, in-flight claim or first-pin throttle.
+                window.release()
+                window.rowFrames = [:]
+                window.fetching = false
+                window.followingEnd = true
+                lastSilentPinAt = .distantPast
+                #endif
                 follow.suppressed = !model.approvals.isEmpty
                 window.nearTopChanged = { measuringRows = $0 }
                 installRepin(proxy)
@@ -910,6 +919,15 @@ struct ChatView: View {
                 settleMood = nil
             }
         }
+        #if os(macOS)
+        // Archive row IDs repeat across chats. Reusing the native scroll
+        // view also reused its lazy layout estimates and scroll targets,
+        // sometimes leaving a loaded conversation entirely offscreen after
+        // arrow navigation. Keep the composer/pane, but give each selected
+        // window its own scroll view. Paging and streaming retain this one.
+        .id(ChatReadingIdentity(reference: model.currentReference,
+                                generation: model.selectionGeneration))
+        #endif
         }
     }
 

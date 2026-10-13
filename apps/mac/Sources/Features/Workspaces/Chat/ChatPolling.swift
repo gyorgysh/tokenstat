@@ -1,6 +1,35 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
+/// Opening callers share one replacement window. Cancelling a view waiter
+/// cannot discard the page another waiter still needs.
+@MainActor final class ChatOpeningRead<Owner: Equatable> {
+    private final class Flight {
+        let owner: Owner
+        var task: Task<Bool, Never>!
+        init(owner: Owner) { self.owner = owner }
+    }
+    private var flight: Flight?
+
+    func run(owner: Owner, operation: @escaping @MainActor @Sendable () async -> Bool) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        if let flight, flight.owner == owner { return await flight.task.value }
+        cancel()
+        let made = Flight(owner: owner)
+        flight = made
+        made.task = Task { await operation() }
+        let result = await made.task.value
+        if flight === made { flight = nil }
+        return result
+    }
+
+    func cancel() {
+        let previous = flight
+        flight = nil
+        previous?.task.cancel()
+    }
+}
+
 /// A bounded read lane. A refresh arriving during an older read retires its
 /// publication and requests one fresh pass, without parallel transport work.
 @MainActor final class ChatPollLane<Owner: Equatable> {

@@ -758,6 +758,7 @@ final class ChatModel {
         return steerOverlay.remember(owner: owner, conversationID: id, note: note, ifUnchangedSince: mutation)
     }
     @ObservationIgnored private var previewWarmTask: Task<Void, Never>?
+    @ObservationIgnored private let previewProjector = ChatTranscriptProjector()
     /// Chats waiting to be warmed, for one account, host and project.
     @ObservationIgnored private var warmQueue: [ChatConversation] = []
     @ObservationIgnored private var warmQueueOwner: String?
@@ -800,13 +801,17 @@ final class ChatModel {
             explicitPeer: folder == folderID ? peer : nil)
         do {
             let page = try await Bridge.chatEventPage(id: conversation.id, cursor: nil,
-                limit: ChatPaging.previewPageEvents, peer: route.peer)
+                limit: ChatPaging.previewPageEvents, peer: route.peer, includeUsage: false)
             guard !Task.isCancelled, WorkSessionContext.shared.scope == owner.scope,
                   continuityScope == owner.scope, previewCacheEpoch == epoch,
                   !recentMessages.contains(key),
                   !(folderID == folder && selected?.id == conversation.id) else { return }
-            let rows = ChatDisplayItem.coalesce(page.events,
-                defaultBackend: conversation.backend, running: conversation.running)
+            let rows = try await previewProjector.project(page.events,
+                backend: conversation.backend, running: conversation.running)
+            guard !Task.isCancelled, WorkSessionContext.shared.scope == owner.scope,
+                  continuityScope == owner.scope, previewCacheEpoch == epoch,
+                  !recentMessages.contains(key),
+                  !(folderID == folder && selected?.id == conversation.id) else { return }
             recentMessages.store(rows, for: key, speculative: true) { String(reflecting: $0).utf8.count }
             DiagnosticsLog.note("chat preview prepared source=hover rows=\(rows.count) held=\(recentMessages.contains(key))")
             Self.warmMarkdown(recentMessages.peek(key))
@@ -858,12 +863,15 @@ final class ChatModel {
                 defer { previewReads.remove(key) }
                 do {
                     let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
-                        limit: ChatPaging.previewPageEvents, peer: route.peer)
+                        limit: ChatPaging.previewPageEvents, peer: route.peer, includeUsage: false)
                     guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
                           previewCacheEpoch == epoch else { return }
                     if recentMessages.contains(key) || (folderID == folder && selected?.id == chat.id) { continue }
-                    let rows = ChatDisplayItem.coalesce(page.events,
-                        defaultBackend: chat.backend, running: chat.running)
+                    let rows = try await previewProjector.project(page.events,
+                        backend: chat.backend, running: chat.running)
+                    guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
+                          previewCacheEpoch == epoch else { return }
+                    if recentMessages.contains(key) || (folderID == folder && selected?.id == chat.id) { continue }
                     recentMessages.store(rows, for: key, speculative: true) {
                         String(reflecting: $0).utf8.count
                     }
@@ -943,7 +951,7 @@ final class ChatModel {
                 let epoch = self.previewCacheEpoch
                 do {
                     let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
-                        limit: ChatPaging.previewPageEvents, peer: peer)
+                        limit: ChatPaging.previewPageEvents, peer: peer, includeUsage: false)
                     guard !Task.isCancelled, self.folderID == folderID,
                           self.warmGeneration == generation,
                           WorkSessionContext.shared.scope == owner.scope else { break }
@@ -951,8 +959,14 @@ final class ChatModel {
                     guard self.selected?.id != chat.id,
                           !self.recentMessages.contains(key),
                           self.previewCacheEpoch == epoch else { continue }
-                    let rows = ChatDisplayItem.coalesce(page.events,
-                        defaultBackend: chat.backend, running: chat.running)
+                    let rows = try await self.previewProjector.project(page.events,
+                        backend: chat.backend, running: chat.running)
+                    guard !Task.isCancelled, self.folderID == folderID,
+                          self.warmGeneration == generation,
+                          WorkSessionContext.shared.scope == owner.scope else { break }
+                    guard self.selected?.id != chat.id,
+                          !self.recentMessages.contains(key),
+                          self.previewCacheEpoch == epoch else { continue }
                     self.recentMessages.store(rows, for: key, speculative: true) { String(reflecting: $0).utf8.count }
                     DiagnosticsLog.note("chat preview prepared source=recent rows=\(rows.count) held=\(self.recentMessages.contains(key))")
                     Self.warmMarkdown(self.recentMessages.peek(key))
@@ -1564,6 +1578,7 @@ final class ChatModel {
             // live page would have set, so the first poll picks the opening
             // turn up exactly as it does after any other open.
             openingConversation = false
+            liveWindowLoaded = true
             contextRevision = chat.sendRevision
             eventsEpoch &+= 1
             offset = 0
@@ -3687,6 +3702,10 @@ final class ChatModel {
     /// different windows of the same size would otherwise look like one.
     @ObservationIgnored private var eventsEpoch: UInt64 = 0
     @ObservationIgnored private var windowReplacementTicket: UUID?
+    @ObservationIgnored private var liveWindowLoaded = false
+    #if os(macOS)
+    @ObservationIgnored private let openingRead = ChatOpeningRead<UInt64>()
+    #endif
 
     private func beginWindowReplacement() -> UUID {
         let ticket = UUID()
@@ -3701,6 +3720,7 @@ final class ChatModel {
 
     /// Everything a window of the timeline is, forgotten in one place.
     private func forgetWindow() {
+        liveWindowLoaded = false
         windowReplacementTicket = nil
         eventsEpoch &+= 1
         offset = 0
@@ -3726,6 +3746,18 @@ final class ChatModel {
     /// scrolling back or following an explicit reading/search destination.
     @discardableResult
     private func openEvents(id: String, generation: UInt64, quiet: Bool = false) async -> Bool {
+        guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
+        #if os(macOS)
+        return await openingRead.run(owner: generation) { [weak self] in
+            guard let self else { return false }
+            return await self.readOpeningEvents(id: id, generation: generation, quiet: quiet)
+        }
+        #else
+        return await readOpeningEvents(id: id, generation: generation, quiet: quiet)
+        #endif
+    }
+
+    private func readOpeningEvents(id: String, generation: UInt64, quiet: Bool = false) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
         guard !pagingUnavailable else {
             return await loadEvents(id: id, reset: true, generation: generation, quiet: quiet)
@@ -3756,6 +3788,7 @@ final class ChatModel {
             // so. Otherwise a fully loaded conversation is indistinguishable
             // from one stuck mid-history. Empty chats stay quiet.
             reachedStart = !page.hasEarlier && !page.events.isEmpty
+            liveWindowLoaded = true
             finishWindowReplacement(replacement)
             warmMarkdown()
             settleNotifications()
@@ -3876,6 +3909,15 @@ final class ChatModel {
     private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false,
                             onFreshEvents: (([ChatTimelineEvent]) -> Void)? = nil) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
+        #if os(macOS)
+        if !reset, !liveWindowLoaded {
+            // An interrupted first open has no valid tail cursor. Retry the
+            // bounded newest page instead of treating an unread chat as empty.
+            openingConversation = true
+            defer { if selectionGeneration == generation { openingConversation = false } }
+            return await openEvents(id: id, generation: generation, quiet: quiet)
+        }
+        #endif
         guard reset || windowReplacementTicket == nil else { return false }
         let replacement = reset ? beginWindowReplacement() : nil
         let requestedEpoch = eventsEpoch
@@ -3888,6 +3930,12 @@ final class ChatModel {
             guard !Task.isCancelled, selectionMatches(id: id, generation: generation), requestedEpoch == eventsEpoch else { return false }
             guard reset || (requestedOffset == offset && requestedCursor == tailCursor) else { return false }
             if chunk.reset {
+                #if os(macOS)
+                // A full read already dropped its cursor. Finish this failed
+                // fallback so the next poll can retry, rather than awaiting
+                // the shared opening task that is waiting for this read.
+                guard !reset else { return false }
+                #endif
                 let opened = await openEvents(id: id, generation: generation, quiet: quiet)
                 if opened, selectionMatches(id: id, generation: generation) {
                     // A replacement can move the current row or leave it in
@@ -3915,6 +3963,7 @@ final class ChatModel {
                     canPublish: { requestedEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in chunk.events }) else { return false }
                 // A live page is the conversation again, not a copy of it.
                 savedCopy = nil
+                liveWindowLoaded = true
                 // The whole timeline, so there is nothing before it. Say so
                 // when there is something on screen; empty chats stay quiet.
                 earlierCursor = nil
@@ -4299,6 +4348,9 @@ final class ChatModel {
         }
         #endif
         pollWatcher.cancel()
+        #if os(macOS)
+        openingRead.cancel()
+        #endif
         cancelPollReads()
         attachmentPollLane.cancel()
         cadenceOwner = nil

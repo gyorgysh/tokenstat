@@ -1442,9 +1442,11 @@ extension Bridge {
         id: String,
         cursor: String?,
         limit: Int,
-        peer: String? = nil
+        peer: String? = nil,
+        includeUsage: Bool = true
     ) async throws -> ChatEventPage {
         var params: [String: Any] = ["id": id, "limit": limit, "stablePositions": true]
+        if !includeUsage { params["includeUsage"] = false }
         if let cursor { params["cursor"] = cursor }
         return try await chatInvoke(peer: peer, "chat.eventPage", params, as: ChatEventPage.self)
     }

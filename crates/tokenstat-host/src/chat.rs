@@ -2750,6 +2750,18 @@ impl Store {
         limit: usize,
         stable: bool,
     ) -> Result<EventPage, String> {
+        self.event_page_positions_with_usage(id, cursor, limit, stable, true)
+    }
+
+    /// Speculative message previews do not need an archive-wide usage scan.
+    pub fn event_page_positions_with_usage(
+        &self,
+        id: &str,
+        cursor: Option<&str>,
+        limit: usize,
+        stable: bool,
+        include_usage: bool,
+    ) -> Result<EventPage, String> {
         let _guard = self.transcript_guard()?;
         let chat = self.get(id)?;
         let path = self.events_path(id);
@@ -2780,7 +2792,7 @@ impl Store {
             // Only with the newest page. It is the whole conversation's
             // figure, it does not change as somebody reads backwards, and it
             // is the one thing here that has to look past the window.
-            usage: if cursor.is_none() || reset {
+            usage: if include_usage && (cursor.is_none() || reset) {
                 Some(self.conversation_usage(&chat, &path)?)
             } else {
                 None
@@ -6422,6 +6434,46 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "manual preview performance measurement"]
+    fn benchmark_message_preview_without_usage_scan() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "preview-benchmark");
+        store.save().unwrap();
+        let path = store.events_path("preview-benchmark");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let row = json!({"kind":"user", "text":"demo message ".repeat(40), "atMs":1});
+        let bytes = (row.to_string() + "\n").repeat(6_000);
+        fs::write(&path, &bytes).unwrap();
+        let full = store.event_page("preview-benchmark", None, 500).unwrap();
+        let preview = store
+            .event_page_positions_with_usage("preview-benchmark", None, 500, true, false)
+            .unwrap();
+        assert_eq!(full.events, preview.events);
+        for include_usage in [true, false] {
+            let start = std::time::Instant::now();
+            for _ in 0..20 {
+                std::hint::black_box(
+                    store
+                        .event_page_positions_with_usage(
+                            "preview-benchmark",
+                            None,
+                            500,
+                            true,
+                            include_usage,
+                        )
+                        .unwrap(),
+                );
+            }
+            eprintln!(
+                "preview benchmark: archive_bytes={} include_usage={include_usage} mean_ms={:.3}",
+                bytes.len(),
+                start.elapsed().as_secs_f64() * 1000.0 / 20.0
+            );
+        }
+    }
+
+    #[test]
     fn older_pages_walk_back_to_the_beginning_without_gaps_or_repeats() {
         let written = lines(437);
         let path = archive("walk", &written);
@@ -8185,6 +8237,14 @@ mod tests {
 
         // The same two records, read from the end instead of the beginning.
         let page = store.event_page("chat-test", None, 1).unwrap();
+        assert!(page.usage.is_some(), "normal opens still include usage");
+        let preview = store
+            .event_page_positions_with_usage("chat-test", None, 1, true, false)
+            .unwrap();
+        assert_eq!(preview.events, page.events);
+        assert_eq!(preview.cursor, page.cursor);
+        assert_eq!(preview.tail_cursor, page.tail_cursor);
+        assert!(preview.usage.is_none(), "previews omit the archive scan");
         assert_eq!(page.events.len(), 1);
         assert_eq!(page.next_offset, next, "live tailing carries on from here");
         assert!(page.has_earlier);

@@ -22,7 +22,7 @@ def failure(signature, name, returns):
     body = body[:body.rindex('\n        }')]
     return f'    func {name}(error: Error, id: String, generation: UInt64, requestedEpoch: UInt64, quiet: Bool = false) async{returns} {{' + body + '\n    }'
 failures = '\n'.join([
-    failure('    private func openEvents(', 'failedOpen', ' -> Bool'),
+    failure('    private func readOpeningEvents(', 'failedOpen', ' -> Bool'),
     failure('    private func loadEarlier(', 'failedEarlier', ''),
     failure('    private func loadEvents(', 'failedTail', ' -> Bool')
 ])

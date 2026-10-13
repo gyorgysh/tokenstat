@@ -1705,11 +1705,18 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                     payload["revision"] = revision.Value;
                     try
                     {
-                        await CallWorkbenchAsync("workflow.edit", new JsonObject
+                        var saved = await CallWorkbenchAsync("workflow.edit", new JsonObject
                         {
                             ["workflow"] = payload,
                             ["expectedRevision"] = revision.Value,
                         });
+                        // Keep edits made during the request on top of the
+                        // accepted revision, avoiding a conflict with ourselves.
+                        if (ReferenceEquals(_graph, savedGraph))
+                        {
+                            _detailRevision = WorkbenchOps.Revision(saved);
+                            _conflictId = null;
+                        }
                     }
                     catch (Exception ex) when (WorkbenchOps.IsConflict(ex))
                     {

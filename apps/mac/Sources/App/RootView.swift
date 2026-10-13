@@ -4870,7 +4870,7 @@ private struct ChatSidebarConversationRow: View {
 
     @State private var isHovering = false
     @State private var confirmsRemoval = false
-    @State private var controlsHovered = false
+    @State private var showingDetails = false
     @State private var renaming = false
     @State private var copying = false
     @State private var actionError: String?
@@ -4878,7 +4878,10 @@ private struct ChatSidebarConversationRow: View {
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            Button(action: select) {
+            Button {
+                showingDetails = false
+                select()
+            } label: {
                 HStack(spacing: Theme.Space.xs) {
                     HStack(spacing: Theme.Space.s) {
                         HarnessMark(id: conversation.backend, size: DisplayFit.dp(16))
@@ -4908,18 +4911,23 @@ private struct ChatSidebarConversationRow: View {
                 // Padding belongs to the label: every part of the highlighted
                 // row opens the chat, including its age and right-hand edge.
                 .padding(.leading, Self.markInset)
-                .padding(.trailing, Theme.Space.s + 2)
+                .padding(.trailing, Theme.Space.s + 2 + 28)
                 .frame(maxWidth: .infinity)
                 .frame(height: DisplayFit.dp(30))
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(conversation.title.isEmpty ? L10n.text("apple.rootview.untitled_conversation.31d248c4") : conversation.title)
-            // Only this small control intercepts clicks on the full row.
-            SidebarRowActions(name: conversation.title, visible: isHovering,
-                              canDelete: !conversation.running && !copying,
-                              deleteTitle: L10n.text("apple.rootview.delete_chat.93291d9c"), delete: { confirmsRemoval = true },
-                              hover: { controlsHovered = $0 }, actions: { menu })
+            // Reserve the info button's seat even before hover, so neither
+            // the title nor its status moves when the actions appear.
+            HStack(spacing: 4) {
+                SidebarRowActions(name: conversation.title, visible: isHovering,
+                                  canDelete: !conversation.running && !copying,
+                                  deleteTitle: L10n.text("apple.rootview.delete_chat.93291d9c"), delete: { confirmsRemoval = true },
+                                  hover: { _ in }, actions: { menu })
+                SidebarChatDetailButton(conversation: conversation, folder: folder, isPresented: $showingDetails)
+                    .disabled(renaming || confirmsRemoval || copying || actionError != nil)
+            }
             .padding(.trailing, Theme.Space.s + 2)
         }
         .background(
@@ -4940,10 +4948,9 @@ private struct ChatSidebarConversationRow: View {
             await warmPreview()
         }
         .sidebarContextMenu(items: { menu })
-        .sidebarHoverCard(hovering: isHovering,
-                          enabled: !renaming && !confirmsRemoval && !copying && actionError == nil,
-                          suppressOpening: controlsHovered) {
-            SidebarChatDetailCard(conversation: conversation, folder: folder)
+        .onChange(of: isSelected) { _, _ in showingDetails = false }
+        .onChange(of: SidebarMenuTracking.shared.active) { _, active in
+            if active { showingDetails = false }
         }
         .sheet(isPresented: $renaming) {
             SidebarRenameSheet(title: L10n.text("apple.rootview.rename_chat.26076241"), currentName: conversation.title, save: rename)

@@ -124,6 +124,40 @@ private struct SidebarGitDetail: View {
     }
 }
 
+/// Chat details are deliberate: opening a conversation or moving through the
+/// list never presents a card. The native popover stays open for reading.
+struct SidebarChatDetailButton: View {
+    let conversation: ChatConversation
+    let folder: WorkspaceFolder
+    @Binding var isPresented: Bool
+    @State private var hovering = false
+
+    private var label: String {
+        let title = conversation.title.isEmpty
+            ? L10n.text("apple.sidebarhovercard.untitled_conversation.31d248c4") : conversation.title
+        return L10n.text("apple.clientstates.details.45989de4") + ": " + title
+    }
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            Image(systemName: "info.circle")
+                .font(Theme.fit(12, weight: .medium))
+                .foregroundStyle(hovering || isPresented ? Theme.accent : Color.secondary)
+                .frame(width: 24, height: 24)
+                .background(hovering || isPresented ? Theme.accentSoft : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
+        .onHover { hovering = $0 }
+        .popover(isPresented: $isPresented, arrowEdge: .leading) {
+            SidebarChatDetailCard(conversation: conversation, folder: folder)
+        }
+    }
+}
+
 struct SidebarChatDetailCard: View {
     let conversation: ChatConversation
     let folder: WorkspaceFolder

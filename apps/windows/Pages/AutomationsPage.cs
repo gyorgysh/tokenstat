@@ -1100,6 +1100,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
     {
         if (_working) return;
         var editRevision = _editRevision;
+        var savedRevision = _detailRevision;
         var draft = _draft;
         if (draft is null || _selectedId is null)
         {
@@ -1127,11 +1128,18 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                 payload["revision"] = revision.Value;
                 try
                 {
-                    await CallWorkbenchAsync("automation.edit", new JsonObject
+                    var saved = await CallWorkbenchAsync("automation.edit", new JsonObject
                     {
                         ["job"] = payload,
                         ["expectedRevision"] = revision.Value,
                     });
+                    // Further typing keeps the draft dirty, but its next save
+                    // must build on the revision this save just accepted.
+                    if (_selectedId == id && _detailRevision == savedRevision)
+                    {
+                        _detailRevision = WorkbenchOps.Revision(saved);
+                        _conflictId = null;
+                    }
                 }
                 catch (Exception ex) when (WorkbenchOps.IsConflict(ex))
                 {

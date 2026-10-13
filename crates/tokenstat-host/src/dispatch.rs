@@ -659,6 +659,7 @@ struct ChatParams {
     cursor: Option<String>,
     tail_cursor: Option<String>,
     stable_positions: Option<bool>,
+    include_usage: Option<bool>,
     limit: Option<u32>,
 }
 
@@ -2352,11 +2353,12 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         // positions; updated clients opt into stable row identities and
         // reset-aware tailing.
         "chat.eventPage" => {
-            let page = store.event_page_positions(
+            let page = store.event_page_positions_with_usage(
                 &p.id.ok_or("chat.eventPage needs id")?,
                 p.cursor.as_deref(),
                 p.limit.unwrap_or(0) as usize,
                 p.stable_positions.unwrap_or(false),
+                p.include_usage.unwrap_or(true),
             )?;
             Ok(json!({
                 "events": page.events,

@@ -231,7 +231,7 @@ jobs:
       - name: Run the standalone client tests
         run: bash scripts/run-swift-tests.sh
 
-      - name: Mobile chat navigation and transcript continuity
+      - name: Chat navigation and transcript continuity
         run: |
           python3 scripts/check-chat-navigation.py
           python3 scripts/check-transcript-layout.py
@@ -242,6 +242,7 @@ jobs:
           python3 scripts/check-tunnel-recovery.py
           python3 scripts/check-chat-polling.py
           python3 scripts/check-chat-loading.py
+          python3 scripts/check-chat-opening.py
           python3 scripts/check-chat-empty-recovery.py
           python3 scripts/check-chat-send-context.py
           python3 scripts/check-chat-read-scope.py

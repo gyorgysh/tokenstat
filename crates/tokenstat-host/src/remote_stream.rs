@@ -595,9 +595,6 @@ pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<
     let key = format!("{peer}:{session}");
     let cache = pty_subscriptions().lock().ok()?.get(&key)?.clone();
     let mut guard = cache.lock().ok()?;
-    if !guard.active && guard.buffer.is_empty() {
-        return None;
-    }
     let acknowledged = offset
         .saturating_sub(guard.trimmed)
         .min(guard.buffer.len() as u64) as usize;
@@ -607,6 +604,16 @@ pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<
         guard.trimmed += count as u64;
     }
     if !guard.active && guard.buffer.is_empty() {
+        // The reader acknowledged the final output after the pump stopped.
+        // Release its slot without removing a concurrent replacement.
+        drop(guard);
+        if let Ok(mut map) = pty_subscriptions().lock()
+            && map
+                .get(&key)
+                .is_some_and(|entry| Arc::ptr_eq(entry, &cache))
+        {
+            map.remove(&key);
+        }
         return None;
     }
     let (start, take, next_offset, dropped) =
@@ -976,7 +983,13 @@ mod tests {
             b"hello"
         );
         assert!(super::cached_pty_read(peer, session, 105).is_none());
-        super::pty_subscriptions().lock().unwrap().remove(&key);
+        assert!(
+            !super::pty_subscriptions()
+                .lock()
+                .unwrap()
+                .contains_key(&key),
+            "a drained terminal must release its subscription slot"
+        );
     }
 
     fn entry(at_ms: i64, items: Vec<serde_json::Value>) -> super::PtyListEntry {
