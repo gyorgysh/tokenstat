@@ -80,10 +80,10 @@ for seq, row in enumerate(history): row['seq'] = seq + 1
 EVENTS['history'] = history
 
 def result(method, p):
-    if method == 'protocol': return {'protocolVersion': '34', 'version': '1.6.1'}
-    if method == 'info': return dict(protocolVersion='34', coreVersion='1.6.1', hasArchive=True,
+    if method == 'protocol': return {'protocolVersion': '34', 'version': '1.6.2'}
+    if method == 'info': return dict(protocolVersion='34', coreVersion='1.6.2', hasArchive=True,
                                      timezone='UTC', priceBookEffectiveFrom='2026-10-13', hasPrices=True)
-    if method == 'app.updateCheck': return dict(current='1.6.1', latest='1.6.1', newer=False,
+    if method == 'app.updateCheck': return dict(current='1.6.2', latest='1.6.2', newer=False,
                                                 htmlUrl='https://tokenstat.ai/download')
     if method == 'ping': return {'pong': True}
     if method == 'machine.identity': return {'key': 'ab' * 32, 'label': 'Demo Mac', 'fingerprint': 'DEMO-MAC'}

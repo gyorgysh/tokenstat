@@ -9,6 +9,20 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.6.2] - 2026-10-13
+
+### Changed
+
+- Mac chat details open from an info button beside each conversation, including the selected chat. The card stays open until dismissed, without appearing while browsing the sidebar.
+- Mac chat previews load more efficiently while browsing conversations.
+
+### Fixed
+
+- Mac chats no longer appear blank after switching between conversations with arrow keys or opening chats quickly.
+- Mac chat loading recovers from interrupted and failed reads without needing to switch away and return. A reset during recovery no longer leaves loading stuck.
+- Windows automation and workflow edits made while a save is in progress can be saved again without a false conflict.
+- Remote terminal sessions release unused memory after their final output has been read.
+
 ## [1.6.1] - 2026-10-13
 
 ### Changed

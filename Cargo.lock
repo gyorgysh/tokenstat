@@ -3570,7 +3570,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokenstat-cli"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "anstream",
  "anstyle",
@@ -3591,7 +3591,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-core"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "blake3",
  "directories",
@@ -3611,7 +3611,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-ffi"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "jni",
  "serde_json",
@@ -3623,7 +3623,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-highlight"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -3646,7 +3646,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-host"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "argon2",
  "cc",
@@ -3683,7 +3683,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-identity"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "blake3",
  "directories",
@@ -3698,7 +3698,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-mcp"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "anyhow",
  "serde",
@@ -3709,14 +3709,14 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-paths"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "directories",
 ]
 
 [[package]]
 name = "tokenstat-pty"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "base64 0.23.1",
  "portable-pty",
@@ -3727,7 +3727,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-remote"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -3739,7 +3739,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-sync"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3765,7 +3765,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-workspace"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "directories",
  "libc",
@@ -4658,7 +4658,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.6.1"
+version = "1.6.2"
 dependencies = [
  "anyhow",
  "serde_json",
