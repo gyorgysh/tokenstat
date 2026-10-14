@@ -1,8 +1,9 @@
 <div align="center">
 
-# tokenstat
-
-Monitor AI work, everywhere
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/header-dark.webp">
+  <img src="assets/header-light.webp" alt="tokenstat: monitor AI work, everywhere. Local-first, with CLI, macOS, iOS, iPadOS, Android, Windows and MCP clients" width="860">
+</picture>
 
 [![CI](https://github.com/gyorgysh/tokenstat/actions/workflows/ci.yml/badge.svg)](https://github.com/gyorgysh/tokenstat/actions/workflows/ci.yml)
 [![License: source-available](https://img.shields.io/badge/license-source--available-blue)](LICENSE)
@@ -25,7 +26,10 @@ along with the MCP server. The website at
 everything that runs on your machine.
 
 <p align="center">
-  <img src="assets/tui.webp" alt="tokenstat interactive Summary view: headline counters, an activity heatmap, and a per-model table with list-rate equivalents" width="860">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.webp">
+    <img src="assets/hero-light.webp" alt="The tokenstat macOS app showing projects, a year-long activity heatmap and per-tool plan limits, with the iPhone client beside it showing today's and this week's spend" width="860">
+  </picture>
 </p>
 
 <p align="center">
@@ -42,6 +46,17 @@ everything that runs on your machine.
 - **One schema.** Daily, weekly, monthly, and per-model views across every tool
 - **MCP.** Agents can ask their own spend over stdio, no hosted server
 - **Optional sync.** Sealed aggregates to `tokenstat.ai/<handle>` when you link an account ([live example](https://tokenstat.ai/gyorgy))
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/platforms-dark.webp">
+    <img src="assets/platforms-light.webp" alt="The same archive in four clients: the terminal interface, the macOS app, the iPhone app and the iPad app" width="860">
+  </picture>
+</p>
+
+<p align="center">
+  <em>One archive, one core. The terminal, the Mac, the phone and the tablet all read it.</em>
+</p>
 
 ## Supported sources
 
@@ -254,6 +269,10 @@ Bare `tokenstat` on a TTY opens a full-screen client with tabs, headline stats,
 and a command field. If the archive was last scanned more than 10 minutes ago,
 it rescans automatically on open. Piped use and `tokenstat summary` print the
 one-shot report.
+
+<p align="center">
+  <img src="assets/cli.webp" alt="tokenstat interactive Summary view: headline counters, an activity heatmap, and a per-model table with list-rate equivalents" width="860">
+</p>
 
 | Command | Shows |
 | --- | --- |
