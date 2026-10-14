@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """A local, synthetic desktop chat fixture. No provider, account, or user files."""
 import json
+import re
 import socket
 import socketserver
+import sys
 import time
 from pathlib import Path
 
@@ -40,6 +42,13 @@ EXAMPLES = [
      'Rewrite the getting-started guide around the first five minutes. Use a neutral example project and clear next steps.', [],
      'The guide now follows the first five minutes: open a project, choose an agent, ask for a small change, and review the result.\n\nEach step has one action and a visible outcome. The example uses a fictional notes app, and the final section explains where to find files, changes, and conversation history.\n\nI checked the links and removed the setup details that belong in the reference guide.'),
 ]
+if '--marketing' in sys.argv:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('product_photos', Path(__file__).with_name('prepare-product-photos.py'))
+    photos = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(photos)
+    EXAMPLES = [(key, title, backend, 'atlas' if project == 'tokenstat' else 'notebook', prompt, steps, answer)
+                for key, title, backend, project, prompt, steps, answer in photos.EXAMPLES]
 CHATS, EVENTS = [], {}
 for index, (identifier, title, backend, workspace, prompt, tools, answer) in enumerate(EXAMPLES):
     at = NOW - index * 3600000
@@ -49,6 +58,10 @@ for index, (identifier, title, backend, workspace, prompt, tools, answer) in enu
                       budgetSeconds=0, createdAtMs=at - 600000, updatedAtMs=at,
                       lastMessageAtMs=at, lastMessageAuthor='agent', sendRevision=1,
                       running=False, model=None, effort='medium', branch='feature/search'))
+    if '--marketing' in sys.argv:
+        CHATS[-1]['model'] = 'gpt-6.1-sol' if backend == 'codex' else 'claude-sonnet-4-6'
+        CHATS[-1]['effort'] = 'high'
+        CHATS[-1]['mode'] = 'plan' if identifier == 'plan' else 'execute'
     rows = [{'kind': 'user', 'text': prompt, 'atMs': at - 90000}]
     for number, (verb, name, output) in enumerate(tools):
         tool_id = f'{identifier}-tool-{number}'
@@ -64,11 +77,37 @@ for index, (identifier, title, backend, workspace, prompt, tools, answer) in enu
               'event': {'kind': 'usage', 'input': 18420, 'output': 2160, 'cacheRead': 42000, 'cacheWrite': 0, 'costUsd': 0.13}},
              {'kind': 'agent', 'backend': backend, 'atMs': at,
               'event': {'kind': 'done', 'status': 'completed'}}]
+    if '--marketing' in sys.argv:
+        rendered = []
+        for row in rows:
+            event = row.get('event', {})
+            if event.get('verb') == 'Edit' and event.get('kind') == 'toolEnd':
+                patch = ('@@ -18,3 +18,4 @@\n-const query = input;\n-if (input.length === 0) return [];\n'
+                         '+const query = input.trim();\n+if (!query) return [];\n+\n return rankResults(query, items);')
+                if identifier == 'feature':
+                    patch = ('@@ -40,2 +40,6 @@\n function onKeyDown(event: KeyboardEvent) {\n'
+                             '+  if (event.key === "ArrowDown") selectNext();\n'
+                             '+  if (event.key === "ArrowUp") selectPrevious();\n'
+                             '+  if (event.key === "Enter") openSelected();\n'
+                             '+  if (event.key === "Escape") closeAndRestoreFocus();\n }')
+                    if event['target'].startswith('tests/'):
+                        patch = ('@@ -1,0 +1,5 @@\n+it("restores focus on Escape", () => {\n'
+                                 '+  openSearch();\n+  pressKey("Escape");\n'
+                                 '+  expect(trigger).toHaveFocus();\n+});')
+                added = sum(line.startswith('+') for line in patch.splitlines())
+                removed = sum(line.startswith('-') for line in patch.splitlines())
+                rendered.append({'kind': 'agent', 'backend': backend, 'atMs': row['atMs'],
+                                 'event': {'kind': 'edit', 'callId': event['callId'], 'path': event['target'],
+                                           'added': added, 'removed': removed, 'patch': patch}})
+            rendered.append(row)
+        rows = rendered
     for seq, row in enumerate(rows): row['seq'] = seq + 1
     EVENTS[identifier] = rows
 
 # A deterministic long transcript exercises paging and scroll restoration.
 CHATS.append(dict(CHATS[0], id='history', title='Search implementation history', updatedAtMs=NOW - 14400000))
+if '--marketing' in sys.argv:
+    CHATS.pop()
 history = []
 for turn in range(450):
     history += [dict(kind='user', text=f'Iteration {turn + 1}: check the next search edge case.', atMs=NOW - (450 - turn) * 10000),
@@ -80,6 +119,14 @@ for seq, row in enumerate(history): row['seq'] = seq + 1
 EVENTS['history'] = history
 
 def result(method, p):
+    if method == 'highlight':
+        code = p.get('text', '')
+        spans = []
+        for match in re.finditer(r'\b(const|let|if|return|function|expect|it)\b|\b([A-Za-z_][A-Za-z_0-9]*)(?=\s*\()', code):
+            spans.append(dict(start=len(code[:match.start()].encode('utf-16-le')) // 2,
+                              len=len(match.group().encode('utf-16-le')) // 2,
+                              kind='keyword' if match.group(1) else 'function'))
+        return dict(language='TypeScript', spans=spans)
     if method == 'protocol': return {'protocolVersion': '34', 'version': '1.6.2'}
     if method == 'info': return dict(protocolVersion='34', coreVersion='1.6.2', hasArchive=True,
                                      timezone='UTC', priceBookEffectiveFrom='2026-10-13', hasPrices=True)

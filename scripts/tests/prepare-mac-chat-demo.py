@@ -10,15 +10,25 @@ Run mac-chat-demo.py in another terminal first, then run this script and:
 
 The generated app uses a separate preferences domain and a local fixture
 socket. Generated projects, copied sources and build output stay in target/.
+
+Use --live-projects for product captures with the existing tokenstat host:
+real project names, Git status, history, files and GitHub integration remain
+available. Only haynakoo is omitted from this capture app's project list;
+the installed app and registered workspace list are unchanged.
+This variant is generated in target/mac-chat-demo-live, separate from the
+synthetic fixture and its project.
 """
 import json
 import socket
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / 'target/mac-chat-demo'
+OUT = ROOT / ('target/mac-chat-demo-live' if '--live-projects' in sys.argv else 'target/mac-chat-demo')
 OUT.mkdir(parents=True, exist_ok=True)
 fixture = OUT / 'fixture.json'
+if '--live-projects' in sys.argv:
+    fixture.write_text(json.dumps({'socket': str(Path.home() / 'Library/Application Support/ai.tokenstat.tokenstat/host.sock')}))
 if not fixture.exists():
     raise SystemExit('Start scripts/tests/mac-chat-demo.py first.')
 try:
@@ -44,6 +54,11 @@ bridge = replace_member(bridge, '    static func connect() {', '''    static fun
         let fixture = try! JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: String]
         adopt(Route(transport: SocketTransport(path: fixture["socket"]!), isHosted: true))
     }''')
+if '--live-projects' in sys.argv:
+    bridge = replace_member(bridge, '    static func workspaces() async throws -> [WorkspaceFolder] {', '''    static func workspaces() async throws -> [WorkspaceFolder] {
+        let folders = try await background("workspace.list", as: [WorkspaceFolder].self)
+        return folders.filter { $0.name != "haynakoo" }
+    }''')
 (OUT / 'Bridge.swift').write_text(bridge)
 launch = (ROOT / 'apps/mac/Sources/App/LaunchState.swift').read_text()
 launch = replace_member(launch, '    func prepare() async {', '''    func prepare() async {
@@ -51,11 +66,37 @@ launch = replace_member(launch, '    func prepare() async {', '''    func prepar
         withAnimation(nil) { hostReady = true }
     }''')
 (OUT / 'LaunchState.swift').write_text(launch)
+capture = (ROOT / 'apps/mac/Sources/App/DebugUIHooks.swift').read_text()
+capture = replace_member(capture, '    private static func capture(to path: String) {', '''    private static func capture(to path: String) {
+        guard let window = shellWindow, let view = window.contentView,
+              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        // Capture the app and its native window buttons without compositor overlays.
+        if let context = NSGraphicsContext(bitmapImageRep: rep) {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            window.effectiveAppearance.performAsCurrentDrawingAppearance {
+                for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                    if let button = window.standardWindowButton(kind) {
+                        button.cell?.draw(withFrame: view.convert(button.bounds, from: button), in: view)
+                    }
+                }
+            }
+            NSGraphicsContext.restoreGraphicsState()
+        }
+        guard let data = rep.representation(using: .png, properties: [:]) else { return }
+        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    }''')
+(OUT / 'DebugUIHooks.swift').write_text(capture)
 (OUT / 'DesktopDemoApp.swift').write_text('''// Synthetic fixture entry point; never included in a shipping target.
 import SwiftUI
 import AppKit
 @main struct DesktopDemoApp: App {
-    init() { AppFonts.register(); BridgeLaunch.begin() }
+    init() {
+        UserDefaults.standard.set(380.0, forKey: "shell.sidebarWidth")
+        UserDefaults.standard.set(400.0, forKey: "shell.inspectorWidth")
+        AppFonts.register(); BridgeLaunch.begin(); DebugUIHooks.install()
+    }
     var body: some Scene {
         WindowGroup("tokenstat") {
             RootView().frame(minWidth: RootView.minimumContentWidth, minHeight: RootView.minimumContentHeight)
@@ -68,14 +109,15 @@ import AppKit
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
-        .defaultSize(width: 1600, height: 1000)
+        .defaultSize(width: 1684, height: 1083)
     }
 }
 ''')
 sources = [
-    {'path': str(ROOT / 'apps/mac/Sources'), 'excludes': ['Bridge/Bridge.swift', 'App/LaunchState.swift']},
+    {'path': str(ROOT / 'apps/mac/Sources'), 'excludes': ['Bridge/Bridge.swift', 'App/LaunchState.swift', 'App/DebugUIHooks.swift']},
     {'path': str(OUT / 'Bridge.swift')}, {'path': str(OUT / 'LaunchState.swift')},
     {'path': str(OUT / 'DesktopDemoApp.swift')},
+    {'path': str(OUT / 'DebugUIHooks.swift')},
     {'path': str(ROOT / 'apps/localization'), 'type': 'folder', 'buildPhase': 'resources'},
     {'path': str(ROOT / 'apps/mac/Resources'), 'buildPhase': 'resources'},
     {'path': str(ROOT / 'apps/mac/BrandResources'), 'buildPhase': 'resources'},
