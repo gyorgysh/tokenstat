@@ -311,9 +311,17 @@ jobs:
       - name: Build
         run: cargo build --workspace --all-features --locked
 
+      - name: Stage the shipping Windows terminal transport
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./scripts/stage-windows-conpty.ps1 -Out target/debug/deps
+          ./scripts/stage-windows-conpty.ps1 -Out target/debug
+
       - name: Test
         env:
           TOKENSTAT_SCREEN_FIXTURE: ${{ runner.temp }}/tokenstat-screen-fixture
+          TOKENSTAT_TEST_CONPTY_PROGRAM_STATUS: ${{ runner.os == 'Windows' && '1' || '' }}
         run: cargo test --workspace --all-features --locked
 
       - name: Test without the local half

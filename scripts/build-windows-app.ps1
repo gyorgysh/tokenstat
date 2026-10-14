@@ -68,6 +68,7 @@ if (-not (Test-Path -LiteralPath $hostd -PathType Leaf)) {
     throw "tokenstat-hostd.exe was not built for $RustTarget"
 }
 Copy-Item $hostd (Join-Path $PublishDir "tokenstat-hostd.exe") -Force
+& (Join-Path $Root "scripts/stage-windows-conpty.ps1") -Out $PublishDir -Arch $Arch
 Copy-Item (Join-Path $Root "scripts\install-host-task.ps1") (Join-Path $PublishDir "install-host-task.ps1") -Force
 Copy-Item (Join-Path $Root "LICENSE") (Join-Path $PublishDir "LICENSE") -Force
 Copy-Item (Join-Path $Root "README.md") (Join-Path $PublishDir "README.md") -Force

@@ -475,6 +475,8 @@ impl Manager {
                                 .unwrap_or_else(PoisonError::into_inner)
                                 .feed(bytes);
                             if !replies.is_empty() {
+                                #[cfg(windows)]
+                                let replies = program_status::conpty_reply(&replies);
                                 let mut w = writer.lock().unwrap_or_else(PoisonError::into_inner);
                                 let _ = w.write_all(&replies);
                                 let _ = w.flush();
@@ -2662,11 +2664,34 @@ mod tests {
     fn program_status_reaches_the_host_without_a_viewer_on_both_pty_backends() {
         use program_status::{Kind, State};
         let m = Manager::new();
+        #[cfg(unix)]
         let s = spawn(
             &m,
             r"printf '\033]7501;state=blocked:kind=permission:app=claude-code\007'; sleep 60",
-            "powershell.exe -NoLogo -NoProfile -Command \"[Console]::Write(([char]27).ToString() + ']7501;state=blocked:kind=permission:app=claude-code' + [char]7); Start-Sleep -Seconds 60\"",
+            "",
         );
+        #[cfg(windows)]
+        let s = m
+            .spawn(&Spawn {
+                command: std::env::current_exe()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+                args: vec![
+                    "--exact".into(),
+                    "tests::program_status_conpty_child".into(),
+                    "--nocapture".into(),
+                ],
+                cwd: std::env::temp_dir(),
+                workspace_id: None,
+                hidden: false,
+                rows: 24,
+                cols: 80,
+                no_color: false,
+                dark: None,
+                environment: vec![("TOKENSTAT_PTY_STATUS_CHILD".into(), "1".into())],
+            })
+            .unwrap();
         let received = wait_for(|| {
             m.info(&s.id)
                 .ok()
@@ -2675,8 +2700,57 @@ mod tests {
                     status.state == State::Blocked && status.kind == Some(Kind::Permission)
                 })
         });
+        #[cfg(windows)]
+        let required = std::env::var("TOKENSTAT_TEST_CONPTY_PROGRAM_STATUS").as_deref() == Ok("1");
+        #[cfg(not(windows))]
+        let required = true;
+        let output = m.read(&s.id, 0).unwrap().bytes;
         m.close(&s.id).unwrap();
-        assert!(received, "OSC 7501 must survive the native PTY/ConPTY path");
+        // Developer checkouts can use an older OS ConPTY. CI and the shipped
+        // Windows app stage the pinned runtime and require the full exchange.
+        assert!(
+            received || !required,
+            "OSC query, reply and status must survive the native PTY/ConPTY path: {}",
+            String::from_utf8_lossy(&output)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn program_status_conpty_child() {
+        if std::env::var("TOKENSTAT_PTY_STATUS_CHILD").as_deref() != Ok("1") {
+            return;
+        }
+        use std::ffi::c_void;
+        unsafe extern "system" {
+            fn GetStdHandle(kind: u32) -> *mut c_void;
+            fn GetConsoleMode(handle: *mut c_void, mode: *mut u32) -> i32;
+            fn SetConsoleMode(handle: *mut c_void, mode: u32) -> i32;
+        }
+        // Match a VT-aware CLI, without relying on a PowerShell profile or
+        // the runner's inherited console modes. Read the actual reply before
+        // reporting a state, so a one-way transport cannot pass this test.
+        unsafe {
+            let input = GetStdHandle(-10_i32 as u32);
+            let output = GetStdHandle(-11_i32 as u32);
+            let mut mode = 0;
+            assert_ne!(GetConsoleMode(input, &mut mode), 0);
+            assert_ne!(SetConsoleMode(input, (mode & !7) | 0x200), 0);
+            assert_ne!(GetConsoleMode(output, &mut mode), 0);
+            assert_ne!(SetConsoleMode(output, mode | 4 | 8), 0);
+        }
+        for query in [b"\x1b]7501;?\x07".as_slice(), b"\x1b]7501;?\x1b\\"] {
+            std::io::stdout().write_all(query).unwrap();
+            std::io::stdout().flush().unwrap();
+            let mut reply = vec![0; query.len()];
+            std::io::stdin().read_exact(&mut reply).unwrap();
+            assert_eq!(reply, query);
+        }
+        std::io::stdout()
+            .write_all(b"\x1b]7501;state=blocked:kind=permission:app=claude-code\x1b\\")
+            .unwrap();
+        std::io::stdout().flush().unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(10));
     }
 
     #[cfg(unix)]

@@ -14,6 +14,18 @@ use serde::Serialize;
 const SEQUENCE_LIMIT: usize = 4096;
 const RECORD_LIMIT: usize = 256;
 
+/// ConPTY discards OSC written as terminal input. Its Win32-input encoding
+/// delivers the fixed ASCII capability reply as literal character events.
+#[cfg(windows)]
+pub(crate) fn conpty_reply(bytes: &[u8]) -> Vec<u8> {
+    let mut reply = String::new();
+    for byte in bytes {
+        use std::fmt::Write;
+        let _ = write!(reply, "\x1b[0;0;{byte};1;0;1_");
+    }
+    reply.into_bytes()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
