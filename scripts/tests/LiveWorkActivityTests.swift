@@ -3,6 +3,11 @@
 import Foundation
 
 @main struct LiveWorkActivityTests {
+    private struct LegacyContentState: Decodable {
+        var phase: LiveWorkPhase
+        var updatedAt: Double
+    }
+
     static func main() throws {
         for phase in [LiveWorkPhase.working, .waiting, .idle, .done, .failed, .stopped] {
             let state = LiveWorkAttributes.ContentState(phase: phase, updatedAt: 1_791_283_200)
@@ -47,6 +52,23 @@ import Foundation
         assert(finished.displayPhase == .done, "Completed work must not be presented as idle.")
         let finishedState = LiveWorkAttributes.ContentState(phase: .idle, updatedAt: 1, overview: finished)
         assert(finishedState.displayPhase == .done)
+        assert(finishedState.displayPhase(stale: false) == .done)
+        assert(finishedState.displayPhase(stale: true) == .idle,
+               "A stale overview must show reconnecting even when its last result was done.")
+        var failedState = finishedState
+        failedState.overview?.done = 0
+        failedState.overview?.failed = 2
+        assert(failedState.displayPhase(stale: false) == .failed)
+        assert(failedState.displayPhase(stale: true) == .idle)
+        let legacyDone = LiveWorkAttributes.ContentState(phase: .done, updatedAt: 1)
+        assert(legacyDone.displayPhase(stale: true) == .done,
+               "A legacy completed activity must keep its final result when stale.")
+        let finishedWire = try JSONEncoder().encode(finishedState)
+        let finishedKeys = Set((try JSONSerialization.jsonObject(with: finishedWire) as! [String: Any]).keys)
+        assert(finishedKeys == ["phase", "updatedAt", "overview"], "Presentation changes must not alter the wire schema.")
+        let oldClient = try JSONDecoder().decode(LegacyContentState.self, from: finishedWire)
+        assert(oldClient.phase == .idle && oldClient.updatedAt == finishedState.updatedAt,
+               "An older app must keep receiving updates after the overview completes.")
         finished.failed = 1; finished.total = 3
         assert(finished.displayPhase == .failed)
         finished.working = 1; finished.total = 4

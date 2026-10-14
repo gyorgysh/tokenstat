@@ -14,6 +14,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Fixed
 
 - iPhone and iPad work overviews keep recently completed and failed chats and terminals visible for one hour, instead of dropping to zero when the last session finishes. Completed work has its own count and status, while new turns replace the previous result and resolved attention stays cleared.
+- Terminal results remain available in the work overview after signing in, including sessions started while signed out. A stale overview shows reconnecting in the Dynamic Island even when the last work completed.
 
 ## [1.6.3] - 2026-10-14
 

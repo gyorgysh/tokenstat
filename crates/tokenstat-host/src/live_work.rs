@@ -77,9 +77,17 @@ fn terminals() -> &'static Mutex<HashMap<String, Terminal>> {
 }
 
 pub(crate) fn start_terminal(info: &tokenstat_pty::SessionInfo) {
-    if info.hidden || !tokenstat_sync::push::begin_terminal_activity(&info.id) {
+    start_terminal_with(info, tokenstat_sync::push::begin_terminal_activity);
+}
+
+fn start_terminal_with(info: &tokenstat_pty::SessionInfo, begin: impl FnOnce(&str) -> bool) {
+    if info.hidden {
         return;
     }
+    // Local results belong in a later foreground overview even when no
+    // account was available at launch. Background pushes keep their original
+    // binding and never acquire credentials from a later sign-in.
+    begin(&info.id);
     let mut terminals = terminals()
         .lock()
         .unwrap_or_else(|error| error.into_inner());
@@ -373,6 +381,79 @@ pub(crate) fn stop_terminal(id: &str, close: bool) -> Result<(), tokenstat_pty::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signed_out_terminal_completion_is_retained() {
+        for code in [0, 3] {
+            signed_out_terminal_result(code);
+        }
+    }
+
+    fn signed_out_terminal_result(code: i32) {
+        let root = tempfile::tempdir().unwrap();
+        let manager = tokenstat_pty::manager();
+        let info = manager
+            .spawn(&tokenstat_pty::Spawn {
+                command: if cfg!(windows) { "cmd.exe" } else { "/bin/sh" }.into(),
+                args: if cfg!(windows) {
+                    vec!["/c".into(), format!("exit /b {code}")]
+                } else {
+                    vec!["-c".into(), format!("exit {code}")]
+                },
+                cwd: root.path().into(),
+                workspace_id: Some("completion-workspace".into()),
+                hidden: false,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: Vec::new(),
+            })
+            .unwrap();
+        // No credentials or network. An overview can be requested after sign-in.
+        start_terminal_with(&info, |_| false);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while manager.info(&info.id).unwrap().exit_code.is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        poll_terminals();
+        manager.close(&info.id).unwrap();
+        let completion = completed_terminals().lock().unwrap().remove(&info.id);
+        assert_eq!(
+            completion.map(|work| work.phase),
+            Some(if code == 0 { "done" } else { "failed" }),
+            "Local completion tracking must not depend on a legacy push binding."
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicitly_stopped_terminal_is_not_a_completion() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = tokenstat_pty::manager();
+        let info = manager
+            .spawn(&tokenstat_pty::Spawn {
+                command: "/bin/sleep".into(),
+                args: vec!["5".into()],
+                cwd: root.path().into(),
+                workspace_id: Some("stopped-workspace".into()),
+                hidden: false,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: Vec::new(),
+            })
+            .unwrap();
+        start_terminal_with(&info, |_| false);
+        stop_terminal(&info.id, false).unwrap();
+        poll_terminals();
+        manager.close(&info.id).unwrap();
+        assert!(
+            !completed_terminals().lock().unwrap().contains_key(&info.id),
+            "Stop must not become a failed or successful result on the next tick."
+        );
+    }
 
     #[test]
     fn terminal_completion_survives_close_without_repeating_or_guessing_success() {

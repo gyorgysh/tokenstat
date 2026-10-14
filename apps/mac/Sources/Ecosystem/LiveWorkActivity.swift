@@ -114,6 +114,11 @@ struct LiveWorkAttributes: Codable, Hashable, Sendable {
         var updatedAt: Double
         var overview: LiveWorkOverview? = nil
         var displayPhase: LiveWorkPhase { overview?.displayPhase ?? phase }
+        func displayPhase(stale: Bool) -> LiveWorkPhase {
+            // An overview stays live between turns. A past completion cannot
+            // establish its current status once the host stops reporting.
+            overview != nil && stale ? .idle : displayPhase
+        }
         var computersOffline: Bool {
             guard let overview else { return false }
             return overview.computers > 0 && overview.offline == overview.computers

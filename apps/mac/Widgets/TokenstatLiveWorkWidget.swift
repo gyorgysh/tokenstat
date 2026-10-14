@@ -15,7 +15,9 @@ struct TokenstatLiveWorkWidget: Widget {
                 .activitySystemActionForegroundColor(.white)
                 .widgetURL(URL(string: context.isStale ? context.attributes.route : context.attributes.preferredRoute(for: context.state)))
         } dynamicIsland: { context in
-            DynamicIsland {
+            let stale = context.isStale || context.state.computersOffline
+            let phase = context.state.displayPhase(stale: stale)
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 7) {
                         TokenstatWidgetMark(size: 20, fullColor: true).frame(width: 20, height: 20)
@@ -23,18 +25,18 @@ struct TokenstatLiveWorkWidget: Widget {
                     }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    LiveWorkStatus(phase: context.state.displayPhase, stale: context.isStale || context.state.computersOffline)
+                    LiveWorkStatus(phase: phase, stale: stale)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if let overview = context.state.overview {
-                        LiveWorkOverviewBody(attributes: context.attributes, overview: overview, stale: context.isStale || context.state.computersOffline)
+                        LiveWorkOverviewBody(attributes: context.attributes, overview: overview, stale: stale)
                             .padding(.top, 3)
                     } else { VStack(alignment: .leading, spacing: 8) {
                         Text(context.attributes.projectName).font(.headline).lineLimit(1).privacySensitive()
                         HStack {
-                            Text(LiveWorkStyle.detail(context.state.displayPhase, stale: context.isStale || context.state.computersOffline)).font(.caption).foregroundStyle(.secondary)
+                            Text(LiveWorkStyle.detail(phase, stale: stale)).font(.caption).foregroundStyle(.secondary)
                             Spacer(minLength: 8)
-                            LiveWorkElapsed(attributes: context.attributes, state: context.state, stale: context.isStale || context.state.computersOffline)
+                            LiveWorkElapsed(attributes: context.attributes, state: context.state, stale: stale)
                         }
                     }.padding(.top, 3) }
                 }
@@ -42,18 +44,18 @@ struct TokenstatLiveWorkWidget: Widget {
                 TokenstatWidgetMark(size: 18, decorative: false, fullColor: true).frame(width: 18, height: 18)
                     .accessibilityLabel("tokenstat")
             } compactTrailing: {
-                if let overview = context.state.overview, !(context.isStale || context.state.computersOffline) {
+                if let overview = context.state.overview, !stale {
                     Text("\(overview.waiting > 0 ? overview.waiting : overview.working > 0 ? overview.working : overview.total)")
                         .font(.caption.monospacedDigit().weight(.semibold))
                         .foregroundStyle(overview.waiting > 0 ? .orange : .white)
                         .accessibilityLabel("\(overview.waiting > 0 ? overview.waiting : overview.working > 0 ? overview.working : overview.total) \(overview.waiting > 0 ? "waiting" : overview.working > 0 ? "working" : "sessions")")
-                } else { LiveWorkSymbol(phase: context.state.displayPhase, stale: context.isStale || context.state.computersOffline).frame(width: 20) }
+                } else { LiveWorkSymbol(phase: phase, stale: stale).frame(width: 20) }
             } minimal: {
-                if context.state.displayPhase == .working && !(context.isStale || context.state.computersOffline) {
+                if phase == .working && !stale {
                     TokenstatWidgetMark(size: 20, decorative: false, fullColor: true).frame(width: 20, height: 20)
                         .accessibilityLabel("tokenstat working")
                 } else {
-                    LiveWorkSymbol(phase: context.state.displayPhase, stale: context.isStale || context.state.computersOffline)
+                    LiveWorkSymbol(phase: phase, stale: stale)
                 }
             }
             .widgetURL(URL(string: context.isStale ? context.attributes.route : context.attributes.preferredRoute(for: context.state)))
