@@ -45,6 +45,15 @@ struct LiveWorkOverview: Codable, Hashable, Sendable {
     var offline = 0
     var items: [LiveWorkOverviewItem] = []
     var phase: LiveWorkPhase { waiting > 0 ? .waiting : working > 0 ? .working : .idle }
+    // Completion is a presentation state. Keep the delivery phase idle so
+    // the combined activity can receive the next session or turn.
+    var displayPhase: LiveWorkPhase {
+        if waiting > 0 { return .waiting }
+        if working > 0 { return .working }
+        if idle > 0 { return .idle }
+        if failed > 0 { return .failed }
+        return done > 0 ? .done : .idle
+    }
     var remaining: Int { max(0, total - items.count) }
 
     enum CodingKeys: String, CodingKey { case working, waiting, idle, done, failed, total, computers, offline, items }
@@ -104,6 +113,7 @@ struct LiveWorkAttributes: Codable, Hashable, Sendable {
         // Explicit Unix seconds keep the APNs schema independent of Date encoders.
         var updatedAt: Double
         var overview: LiveWorkOverview? = nil
+        var displayPhase: LiveWorkPhase { overview?.displayPhase ?? phase }
         var computersOffline: Bool {
             guard let overview else { return false }
             return overview.computers > 0 && overview.offline == overview.computers

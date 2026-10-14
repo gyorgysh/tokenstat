@@ -9,6 +9,12 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.6.4]
+
+### Fixed
+
+- iPhone and iPad work overviews keep recently completed and failed chats and terminals visible for one hour, instead of dropping to zero when the last session finishes. Completed work has its own count and status, while new turns replace the previous result and resolved attention stays cleared.
+
 ## [1.6.3] - 2026-10-14
 
 ### Added

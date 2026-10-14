@@ -40,6 +40,19 @@ import Foundation
         var cleared = summary
         cleared.waiting = 0; cleared.working = 0; cleared.idle = 7
         assert(cleared.phase == .idle, "No working sessions is idle, not waiting.")
+        var finished = LiveWorkOverview()
+        finished.done = 2; finished.total = 2
+        finished.items = [.init(key: "finished", kind: .chat, phase: .done)]
+        assert(finished.phase == .idle, "Completion must not end an overview subscription.")
+        assert(finished.displayPhase == .done, "Completed work must not be presented as idle.")
+        let finishedState = LiveWorkAttributes.ContentState(phase: .idle, updatedAt: 1, overview: finished)
+        assert(finishedState.displayPhase == .done)
+        finished.failed = 1; finished.total = 3
+        assert(finished.displayPhase == .failed)
+        finished.working = 1; finished.total = 4
+        assert(finished.displayPhase == .working)
+        finished.waiting = 1; finished.total = 5
+        assert(finished.displayPhase == .waiting)
         let state = LiveWorkAttributes.ContentState(phase: .waiting, updatedAt: 1, overview: merged)
         let roundtrip = try JSONDecoder().decode(LiveWorkAttributes.ContentState.self, from: JSONEncoder().encode(state))
         assert(roundtrip == state)

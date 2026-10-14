@@ -534,6 +534,15 @@ pub struct Store {
     /// Blocking questions observed by this daemon. Answered questions remain
     /// known until the next user turn so a withdrawn answer can reopen them.
     question_attention: Mutex<HashMap<String, HashMap<String, bool>>>,
+    /// Short-lived final states for the work overview, independent of push tokens.
+    completed_work: Mutex<HashMap<String, CompletedWork>>,
+}
+
+#[derive(Clone)]
+struct CompletedWork {
+    revision: u64,
+    phase: &'static str,
+    finished_at: Instant,
 }
 
 /// How `send` finished. A suppressed follow-up is a note Stop already retired,
@@ -682,6 +691,7 @@ impl Store {
             suppress_follow_up: Mutex::new(HashSet::new()),
             parked_answers: Mutex::new(ParkedAnswers::default()),
             question_attention: Mutex::new(HashMap::new()),
+            completed_work: Mutex::new(HashMap::new()),
         }
     }
 
@@ -740,6 +750,7 @@ impl Store {
             suppress_follow_up: Mutex::new(HashSet::new()),
             parked_answers: Mutex::new(ParkedAnswers::default()),
             question_attention: Mutex::new(HashMap::new()),
+            completed_work: Mutex::new(HashMap::new()),
         };
         if recovery.is_some() {
             store.withdraw_orphaned_answers();
@@ -985,6 +996,87 @@ impl Store {
                 )
             })
             .collect()
+    }
+
+    fn remember_completed_work(&self, id: &str, revision: u64, phase: &'static str) {
+        if !matches!(phase, "done" | "failed") {
+            return;
+        }
+        let mut completed = self
+            .completed_work
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        completed.retain(|_, work| {
+            now.duration_since(work.finished_at) < crate::live_work::COMPLETION_LIFE
+        });
+        if completed
+            .get(id)
+            .is_some_and(|work| work.revision >= revision)
+        {
+            return;
+        }
+        completed.insert(
+            id.into(),
+            CompletedWork {
+                revision,
+                phase,
+                finished_at: now,
+            },
+        );
+        if completed.len() > 200
+            && let Some(oldest) = completed
+                .iter()
+                .min_by_key(|(_, work)| work.finished_at)
+                .map(|(id, _)| id.clone())
+        {
+            completed.remove(&oldest);
+        }
+    }
+
+    pub(crate) fn work_overview(&self) -> Vec<(String, String, String, &'static str)> {
+        let mut rows: Vec<_> = self
+            .live_work()
+            .into_iter()
+            .map(|(id, workspace, title, waiting)| {
+                (
+                    id,
+                    workspace,
+                    title,
+                    if waiting { "waiting" } else { "working" },
+                )
+            })
+            .collect();
+        let active: HashSet<_> = rows.iter().map(|row| row.0.clone()).collect();
+        let completed = {
+            let mut completed = self
+                .completed_work
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            completed
+                .retain(|_, work| work.finished_at.elapsed() < crate::live_work::COMPLETION_LIFE);
+            completed.clone()
+        };
+        for chat in self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+        {
+            if !chat.running
+                && !active.contains(&chat.id)
+                && let Some(work) = completed.get(&chat.id)
+                && work.revision == chat.run_revision.unwrap_or(chat.send_revision)
+            {
+                rows.push((
+                    chat.id.clone(),
+                    chat.workspace_id.clone(),
+                    chat.title.clone(),
+                    work.phase,
+                ));
+            }
+        }
+        rows
     }
 
     /// How many conversations sit in each workspace, for sidebar badges.
@@ -4249,15 +4341,13 @@ impl Store {
         } else {
             turn_status(exit, stopped)
         };
-        tokenstat_sync::push::activity_in_background(
-            id,
-            activity_revision,
-            match status {
-                "ok" => "done",
-                "stopped" => "stopped",
-                _ => "failed",
-            },
-        );
+        let phase = match status {
+            "ok" => "done",
+            "stopped" => "stopped",
+            _ => "failed",
+        };
+        self.remember_completed_work(id, activity_revision, phase);
+        tokenstat_sync::push::activity_in_background(id, activity_revision, phase);
         self.record_events(
             id,
             backend,
@@ -9987,6 +10077,77 @@ mod tests {
                 assert_eq!(store.get("revoked-send").unwrap().send_revision, 0);
             }
         });
+    }
+
+    #[test]
+    fn overview_keeps_final_turns_without_reopening_attention_or_old_runs() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "completed-overview");
+        store
+            .edit_conversation("completed-overview", |chat| {
+                chat.run_revision = Some(7);
+                chat.send_revision = 7;
+                chat.running = true;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(store.work_overview()[0].3, "working");
+        // Even a turn that finished between sampler ticks is retained.
+        store.remember_completed_work("completed-overview", 7, "done");
+        store.set_running("completed-overview", false).unwrap();
+        assert_eq!(store.work_overview()[0].3, "done");
+        assert!(store.live_work().is_empty());
+        store.question_attention.lock().unwrap().insert(
+            "completed-overview".into(),
+            HashMap::from([("question".into(), true)]),
+        );
+        assert_eq!(store.work_overview()[0].3, "waiting");
+        store.question_attention.lock().unwrap().clear();
+        assert_eq!(
+            store.work_overview()[0].3,
+            "done",
+            "Resolved attention must reveal the final result."
+        );
+        let ended_at = store.completed_work.lock().unwrap()["completed-overview"].finished_at;
+        store.remember_completed_work("completed-overview", 7, "done");
+        assert_eq!(
+            store.completed_work.lock().unwrap()["completed-overview"].finished_at,
+            ended_at
+        );
+        store
+            .edit_conversation("completed-overview", |chat| {
+                chat.run_revision = Some(8);
+                chat.send_revision = 8;
+                chat.running = true;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(store.work_overview()[0].3, "working");
+        store.set_running("completed-overview", false).unwrap();
+        assert!(
+            store.work_overview().is_empty(),
+            "The old result cannot describe a newer turn."
+        );
+        store.remember_completed_work("completed-overview", 8, "failed");
+        store.remember_completed_work("completed-overview", 7, "done");
+        assert_eq!(store.work_overview()[0].3, "failed");
+        store
+            .completed_work
+            .lock()
+            .unwrap()
+            .get_mut("completed-overview")
+            .unwrap()
+            .finished_at = Instant::now() - crate::live_work::COMPLETION_LIFE;
+        assert!(
+            store.work_overview().is_empty(),
+            "Polling must not extend completion retention."
+        );
+        store.remember_completed_work("completed-overview", 8, "stopped");
+        assert!(
+            store.work_overview().is_empty(),
+            "Stopping is not successful completion."
+        );
     }
 
     #[test]

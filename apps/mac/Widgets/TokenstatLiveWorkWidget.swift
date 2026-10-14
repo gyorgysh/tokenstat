@@ -23,7 +23,7 @@ struct TokenstatLiveWorkWidget: Widget {
                     }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    LiveWorkStatus(phase: context.state.phase, stale: context.isStale || context.state.computersOffline)
+                    LiveWorkStatus(phase: context.state.displayPhase, stale: context.isStale || context.state.computersOffline)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if let overview = context.state.overview {
@@ -32,7 +32,7 @@ struct TokenstatLiveWorkWidget: Widget {
                     } else { VStack(alignment: .leading, spacing: 8) {
                         Text(context.attributes.projectName).font(.headline).lineLimit(1).privacySensitive()
                         HStack {
-                            Text(LiveWorkStyle.detail(context.state.phase, stale: context.isStale || context.state.computersOffline)).font(.caption).foregroundStyle(.secondary)
+                            Text(LiveWorkStyle.detail(context.state.displayPhase, stale: context.isStale || context.state.computersOffline)).font(.caption).foregroundStyle(.secondary)
                             Spacer(minLength: 8)
                             LiveWorkElapsed(attributes: context.attributes, state: context.state, stale: context.isStale || context.state.computersOffline)
                         }
@@ -47,13 +47,13 @@ struct TokenstatLiveWorkWidget: Widget {
                         .font(.caption.monospacedDigit().weight(.semibold))
                         .foregroundStyle(overview.waiting > 0 ? .orange : .white)
                         .accessibilityLabel("\(overview.waiting > 0 ? overview.waiting : overview.working > 0 ? overview.working : overview.total) \(overview.waiting > 0 ? "waiting" : overview.working > 0 ? "working" : "sessions")")
-                } else { LiveWorkSymbol(phase: context.state.phase, stale: context.isStale || context.state.computersOffline).frame(width: 20) }
+                } else { LiveWorkSymbol(phase: context.state.displayPhase, stale: context.isStale || context.state.computersOffline).frame(width: 20) }
             } minimal: {
-                if context.state.phase == .working && !(context.isStale || context.state.computersOffline) {
+                if context.state.displayPhase == .working && !(context.isStale || context.state.computersOffline) {
                     TokenstatWidgetMark(size: 20, decorative: false, fullColor: true).frame(width: 20, height: 20)
                         .accessibilityLabel("tokenstat working")
                 } else {
-                    LiveWorkSymbol(phase: context.state.phase, stale: context.isStale || context.state.computersOffline)
+                    LiveWorkSymbol(phase: context.state.displayPhase, stale: context.isStale || context.state.computersOffline)
                 }
             }
             .widgetURL(URL(string: context.isStale ? context.attributes.route : context.attributes.preferredRoute(for: context.state)))
@@ -278,9 +278,18 @@ struct LiveWorkOverviewBody: View {
 
     private func counts(abbreviated: Bool) -> some View {
         HStack(spacing: 12) {
-            count(overview.working, label: "working", symbol: "ellipsis", color: .white, abbreviated: abbreviated)
-            count(overview.waiting, label: "waiting", symbol: "hand.raised.fill", color: overview.waiting > 0 ? .orange : .secondary, abbreviated: abbreviated)
-            count(overview.idle + overview.done, label: "idle", symbol: "pause.fill", color: .secondary, abbreviated: abbreviated)
+            if overview.working > 0 {
+                count(overview.working, label: "working", symbol: "ellipsis", color: .white, abbreviated: abbreviated)
+            }
+            if overview.waiting > 0 {
+                count(overview.waiting, label: "waiting", symbol: "hand.raised.fill", color: .orange, abbreviated: abbreviated)
+            }
+            if overview.idle > 0 || overview.total == 0 {
+                count(overview.idle, label: "idle", symbol: "pause.fill", color: .secondary, abbreviated: abbreviated)
+            }
+            if overview.done > 0 {
+                count(overview.done, label: "completed", symbol: "checkmark.circle.fill", color: .mint, abbreviated: abbreviated)
+            }
             if overview.failed > 0 {
                 count(overview.failed, label: "failed", symbol: "exclamationmark.circle", color: .orange, abbreviated: abbreviated)
             }

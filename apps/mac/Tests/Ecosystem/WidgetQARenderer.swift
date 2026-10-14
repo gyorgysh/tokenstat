@@ -108,6 +108,12 @@ import UniformTypeIdentifiers
         ]
         var idleOverview = LiveWorkOverview()
         idleOverview.computers = 2
+        var completedOverview = idleOverview
+        completedOverview.done = 2; completedOverview.total = 2
+        completedOverview.items = [
+            .init(key: "chat", kind: .chat, phase: .done),
+            .init(key: "idle", kind: .terminal, phase: .done),
+        ]
         var offlineOverview = idleOverview
         offlineOverview.offline = 1
         for (variant, width, height, textSize) in [
@@ -115,7 +121,7 @@ import UniformTypeIdentifiers
             ("narrow", 320, 160, .large), ("large-text", 320, 160, .xxxLarge),
             ("accessibility", 320, 160, .accessibility3),
         ] {
-            for (name, summary, stale) in [("mixed", overview, false), ("idle", idleOverview, false),
+            for (name, summary, stale) in [("mixed", overview, false), ("completed", completedOverview, false), ("idle", idleOverview, false),
                 ("offline", offlineOverview, false), ("reconnecting", overview, true)] {
                 let state = LiveWorkAttributes.ContentState(phase: summary.phase, updatedAt: now.timeIntervalSince1970, overview: summary)
                 let renderer = ImageRenderer(content: LiveWorkCard(attributes: overviewAttributes, state: state, stale: stale, interactive: false)

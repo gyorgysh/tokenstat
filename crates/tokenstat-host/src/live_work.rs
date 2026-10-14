@@ -3,9 +3,68 @@
 //! Push status for visible workspace terminals, independent of an attached
 //! frontend. The existing activity sampler supplies the single polling thread.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+pub(crate) const COMPLETION_LIFE: Duration = Duration::from_secs(3600);
+
+struct CompletedTerminal {
+    workspace_id: String,
+    phase: &'static str,
+    finished_at: Instant,
+}
+
+fn completed_terminals() -> &'static Mutex<HashMap<String, CompletedTerminal>> {
+    static COMPLETED: OnceLock<Mutex<HashMap<String, CompletedTerminal>>> = OnceLock::new();
+    COMPLETED.get_or_init(Default::default)
+}
+
+fn remember_completed_terminal(info: &tokenstat_pty::SessionInfo) {
+    let mut completed = completed_terminals()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    retain_completed_terminal(&mut completed, info, Instant::now());
+}
+
+fn retain_completed_terminal(
+    completed: &mut HashMap<String, CompletedTerminal>,
+    info: &tokenstat_pty::SessionInfo,
+    now: Instant,
+) {
+    let phase = if info.alive {
+        match info.program_status.as_ref().map(|status| status.state) {
+            Some(tokenstat_pty::program_status::State::Done) => "done",
+            Some(tokenstat_pty::program_status::State::Error) => "failed",
+            _ => return,
+        }
+    } else {
+        match info.exit_code {
+            Some(0) => "done",
+            Some(_) => "failed",
+            None => return,
+        }
+    };
+    if info.hidden || info.workspace_id.as_ref().is_none_or(|id| id.is_empty()) {
+        return;
+    }
+    completed.retain(|_, work| now.saturating_duration_since(work.finished_at) < COMPLETION_LIFE);
+    completed
+        .entry(info.id.clone())
+        .or_insert_with(|| CompletedTerminal {
+            workspace_id: info.workspace_id.clone().unwrap_or_default(),
+            phase,
+            finished_at: now,
+        });
+    if completed.len() > 200
+        && let Some(oldest) = completed
+            .iter()
+            .min_by_key(|(_, work)| work.finished_at)
+            .map(|(id, _)| id.clone())
+    {
+        completed.remove(&oldest);
+    }
+}
 
 struct Terminal {
     phase: &'static str,
@@ -49,7 +108,6 @@ fn terminal_phase(alive: bool, exit_code: Option<i32>, waiting: bool) -> Option<
 }
 
 pub(crate) fn poll_terminals() {
-    poll_overview();
     let ids: Vec<_> = terminals()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -89,9 +147,14 @@ pub(crate) fn poll_terminals() {
             tokenstat_sync::push::terminal_activity_in_background(&id, phase);
         }
         if matches!(phase, "done" | "failed" | "stopped") {
+            if let Some(info) = info.as_ref() {
+                remember_completed_terminal(info);
+            }
             terminals.remove(&id);
         }
     }
+    // Capture terminal endings before publishing the combined snapshot.
+    poll_overview();
 }
 
 struct Overview {
@@ -151,14 +214,14 @@ fn snapshot() -> (tokenstat_sync::push::WorkOverview, Vec<serde_json::Value>) {
     use tokenstat_sync::push::{WorkOverview, WorkOverviewItem};
     let machine = tokenstat_sync::config::ensure_machine_id().unwrap_or_default();
     let mut rows: Vec<(WorkOverviewItem, String, String, String)> = crate::chat::shared()
-        .live_work()
+        .work_overview()
         .into_iter()
-        .map(|(id, workspace, title, waiting)| {
+        .map(|(id, workspace, title, phase)| {
             (
                 WorkOverviewItem {
                     key: tokenstat_sync::push::overview_item_key(&machine, "chat", &id),
                     kind: "chat".into(),
-                    phase: if waiting { "waiting" } else { "working" }.into(),
+                    phase: phase.into(),
                 },
                 id,
                 workspace,
@@ -166,31 +229,52 @@ fn snapshot() -> (tokenstat_sync::push::WorkOverview, Vec<serde_json::Value>) {
             )
         })
         .collect();
-    rows.extend(
-        tokenstat_pty::manager()
-            .list()
-            .into_iter()
-            .filter(|info| {
-                info.alive
-                    && !info.hidden
-                    && info.workspace_id.as_ref().is_some_and(|id| !id.is_empty())
-            })
-            .map(|info| {
-                let phase = session_phase(&info);
-                (
-                    WorkOverviewItem {
-                        key: tokenstat_sync::push::overview_item_key(
-                            &machine, "terminal", &info.id,
-                        ),
-                        kind: "terminal".into(),
-                        phase: phase.into(),
-                    },
-                    info.id,
-                    info.workspace_id.unwrap_or_default(),
-                    String::new(),
-                )
-            }),
-    );
+    let sessions: Vec<_> = tokenstat_pty::manager()
+        .list()
+        .into_iter()
+        .filter(|info| {
+            info.alive
+                && !info.hidden
+                && info.workspace_id.as_ref().is_some_and(|id| !id.is_empty())
+        })
+        .collect();
+    {
+        let active: HashSet<_> = sessions.iter().map(|info| info.id.clone()).collect();
+        let mut completed = completed_terminals()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        completed.retain(|_, work| work.finished_at.elapsed() < COMPLETION_LIFE);
+        rows.extend(
+            completed
+                .iter()
+                .filter(|(id, _)| !active.contains(*id))
+                .map(|(id, work)| {
+                    (
+                        WorkOverviewItem {
+                            key: tokenstat_sync::push::overview_item_key(&machine, "terminal", id),
+                            kind: "terminal".into(),
+                            phase: work.phase.into(),
+                        },
+                        id.clone(),
+                        work.workspace_id.clone(),
+                        String::new(),
+                    )
+                }),
+        );
+    }
+    rows.extend(sessions.into_iter().map(|info| {
+        let phase = session_phase(&info);
+        (
+            WorkOverviewItem {
+                key: tokenstat_sync::push::overview_item_key(&machine, "terminal", &info.id),
+                kind: "terminal".into(),
+                phase: phase.into(),
+            },
+            info.id,
+            info.workspace_id.unwrap_or_default(),
+            String::new(),
+        )
+    }));
     rows.sort_by(|a, b| {
         priority(&a.0.phase)
             .cmp(&priority(&b.0.phase))
@@ -265,6 +349,9 @@ pub(crate) fn stop_terminal(id: &str, close: bool) -> Result<(), tokenstat_pty::
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let info = tokenstat_pty::manager().info(id).ok();
+    if let Some(info) = info.as_ref() {
+        remember_completed_terminal(info);
+    }
     if close {
         tokenstat_pty::manager().close(id)?;
     } else {
@@ -286,6 +373,70 @@ pub(crate) fn stop_terminal(id: &str, close: bool) -> Result<(), tokenstat_pty::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_completion_survives_close_without_repeating_or_guessing_success() {
+        let mut completed = HashMap::new();
+        let now = Instant::now();
+        let mut info = tokenstat_pty::SessionInfo {
+            id: "finished-terminal".into(),
+            command: "private command".into(),
+            cwd: "/private/path".into(),
+            workspace_id: Some("workspace".into()),
+            hidden: false,
+            rows: 24,
+            cols: 80,
+            alive: true,
+            exit_code: None,
+            total_bytes: 0,
+            last_activity_at_ms: None,
+            pid: None,
+            started_at_ms: 1,
+            program_status: None,
+        };
+        retain_completed_terminal(&mut completed, &info, now);
+        assert!(completed.is_empty());
+        info.alive = false;
+        retain_completed_terminal(&mut completed, &info, now);
+        assert!(
+            completed.is_empty(),
+            "EOF alone must not be called success."
+        );
+        info.exit_code = Some(0);
+        retain_completed_terminal(&mut completed, &info, now);
+        assert_eq!(completed[&info.id].phase, "done");
+        assert_eq!(completed[&info.id].workspace_id, "workspace");
+        retain_completed_terminal(&mut completed, &info, now + Duration::from_secs(60));
+        assert_eq!(
+            completed[&info.id].finished_at, now,
+            "Heartbeats cannot refresh completion age."
+        );
+        info.id = "failed-terminal".into();
+        info.exit_code = Some(2);
+        retain_completed_terminal(&mut completed, &info, now + COMPLETION_LIFE);
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[&info.id].phase, "failed");
+        info.id = "hidden-terminal".into();
+        info.hidden = true;
+        retain_completed_terminal(&mut completed, &info, now + COMPLETION_LIFE);
+        assert_eq!(completed.len(), 1);
+        // An interactive agent can finish a turn while its PTY stays alive.
+        // Closing that tab must retain the agent's reported result.
+        info.id = "completed-agent".into();
+        info.hidden = false;
+        info.alive = true;
+        info.exit_code = None;
+        info.program_status = Some(tokenstat_pty::program_status::ProgramStatus {
+            state: tokenstat_pty::program_status::State::Done,
+            kind: None,
+            progress: None,
+            app: None,
+            id: None,
+            revision: 1,
+        });
+        retain_completed_terminal(&mut completed, &info, now + COMPLETION_LIFE);
+        assert_eq!(completed[&info.id].phase, "done");
+    }
 
     #[test]
     fn terminal_status_distinguishes_waiting_success_and_failure() {
