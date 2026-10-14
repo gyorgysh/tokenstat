@@ -20,6 +20,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - Terminal attention notifications clear when the agent resumes or the process exits. Opening a prompt silences its notification while keeping its waiting state until the agent clears it.
 - Older mobile apps, hosts and websites retain the existing per-session Live Activity integration when the combined overview is unavailable.
+- App updates reject malformed UTF-8 ZIP entry names before writing those files.
 
 ### Security
 

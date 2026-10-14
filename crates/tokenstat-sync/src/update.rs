@@ -1829,25 +1829,29 @@ fn extract_zip(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
         let mut entry = zip
             .by_index(index)
             .map_err(|e| UpdateError::Message(format!("could not read zip entry: {e}")))?;
-        // The zip reader strips a leading root or drive prefix instead of
-        // refusing it:
-        // `/tmp/evil` comes back from `enclosed_name` as `tmp/evil` and lands
-        // in the sandbox renamed. That stays inside the sandbox, but this
-        // extractor promises a refusal, so absolute entries are rejected on
-        // the raw name before the crate gets to sanitize them.
-        if is_absolute_zip_name(entry.name()) {
+        // Explicitly refuse absolute names in either slash direction and
+        // Windows drive prefixes before the library validates the path.
+        // ZIP bit 11 declares UTF-8. Keep legacy CP437 names supported, but
+        // do not let a malformed UTF-8 name fall back to a different encoding.
+        if entry.flags().as_u16() & (1 << 11) != 0 && std::str::from_utf8(entry.name_raw()).is_err()
+        {
+            return Err(UpdateError::Message(
+                "zip entry name is not valid UTF-8; refusing to extract".into(),
+            ));
+        }
+        let raw_name = entry
+            .name()
+            .map_err(|e| UpdateError::Message(format!("could not read zip entry name: {e}")))?;
+        if is_absolute_zip_name(&raw_name) {
             return Err(UpdateError::Message(
                 "zip entry escapes its directory; refusing to extract".into(),
             ));
         }
         // `enclosed_name` returns None for `..` that climbs out: the same
         // traversal refusal as the tar path, from the crate itself.
-        let name = entry
-            .enclosed_name()
-            .ok_or_else(|| {
-                UpdateError::Message("zip entry escapes its directory; refusing to extract".into())
-            })?
-            .to_path_buf();
+        let name = entry.enclosed_name().ok_or_else(|| {
+            UpdateError::Message("zip entry escapes its directory; refusing to extract".into())
+        })?;
         reject_unsafe_archive_path(&name)?;
         // A symlink stored as a regular file would pass the traversal check
         // and then be skipped by the candidate search; refuse it up front so a
@@ -2548,6 +2552,52 @@ mod tests {
             let found = extract_binary(&archive, &dir).unwrap();
             assert_eq!(found, dir.join("extract").join(&name), "{tag}");
             assert_eq!(fs::read(found).unwrap(), b"binary", "{tag}");
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn zip_names_reject_invalid_utf8_and_preserve_legacy_encoding() {
+        use std::io::Write;
+        let binary = if cfg!(windows) {
+            "tokenstat.exe"
+        } else {
+            "tokenstat"
+        };
+        for (tag, utf8) in [("zip-invalid-utf8-name", true), ("zip-legacy-name", false)] {
+            let dir = scratch(tag);
+            let archive = dir.join("rel.zip");
+            let mut writer = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            writer
+                .start_file(format!("folder/{binary}"), options)
+                .unwrap();
+            writer.write_all(b"binary").unwrap();
+            writer.finish().unwrap();
+            let mut bytes = fs::read(&archive).unwrap();
+            let central = bytes
+                .windows(4)
+                .position(|w| w == [0x50, 0x4b, 0x01, 0x02])
+                .unwrap();
+            for flags_at in [6, central + 8] {
+                let flags = u16::from_le_bytes([bytes[flags_at], bytes[flags_at + 1]]) & !(1 << 11);
+                let flags = if utf8 { flags | (1 << 11) } else { flags };
+                bytes[flags_at..flags_at + 2].copy_from_slice(&flags.to_le_bytes());
+            }
+            // 0xff is invalid UTF-8, but a valid nonbreaking space in CP437.
+            bytes[30] = 0xff;
+            bytes[central + 46] = 0xff;
+            fs::write(&archive, &bytes).unwrap();
+            if utf8 {
+                let err = extract_binary(&archive, &dir).expect_err("invalid UTF-8 name must fail");
+                assert!(err.to_string().contains("zip entry name"), "{err}");
+                assert_eq!(fs::read_dir(dir.join("extract")).unwrap().count(), 0);
+            } else {
+                let found = extract_binary(&archive, &dir).unwrap();
+                assert_eq!(found, dir.join("extract").join("\u{a0}older").join(binary));
+                assert_eq!(fs::read(found).unwrap(), b"binary");
+            }
             let _ = fs::remove_dir_all(&dir);
         }
     }
