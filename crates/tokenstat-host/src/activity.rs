@@ -150,6 +150,8 @@ pub struct Watch {
     /// The harness id, when the launcher knew which one this is. Drives the
     /// transcript lookup, which is per-harness.
     pub harness: Option<String>,
+    pub started_at_ms: u64,
+    pub last_input_at_ms: u64,
 }
 
 struct Tracker {
@@ -210,6 +212,10 @@ fn watches() -> Vec<Watch> {
                 pid,
                 cwd: s.cwd.clone(),
                 harness: harness_of(&s.command),
+                started_at_ms: s.started_at_ms,
+                last_input_at_ms: tokenstat_pty::manager()
+                    .last_input_at_ms(&s.id)
+                    .unwrap_or(0),
             })
         })
         .collect()
@@ -261,7 +267,10 @@ fn tick() {
         let usage = subtree_usage(&table, &children, w.pid);
         let sample = usage.cpu_percent;
         let memory_mb = usage.memory_mb;
-        let hook = hooks.iter().find(|r| r.matches(w, &usage.pids));
+        let hook = hooks
+            .iter()
+            .filter(|r| r.matches(w, &usage.pids))
+            .max_by_key(|r| r.observed_at_ms);
         let hook_working = hook.map(|r| r.working);
         let evidence = w
             .harness
@@ -292,9 +301,8 @@ fn tick() {
             last_working.insert(w.pid, at);
         }
 
-        let attention = hook
-            .and_then(|r| r.attention)
-            .or_else(|| permission_prompt_for(w.pid));
+        // A lifecycle clear wins over an old prompt still in scrollback.
+        let attention = reported_attention(hook, || permission_prompt_for(w.pid));
         readings.insert(
             w.pid,
             Reading {
@@ -316,6 +324,16 @@ fn tick() {
 ///
 /// Grace is for quiet stretches between tokens. A lifecycle hook that said
 /// idle is authoritative and cancels it.
+fn reported_attention(
+    hook: Option<&HookRecord>,
+    fallback: impl FnOnce() -> Option<Attention>,
+) -> Option<Attention> {
+    match hook {
+        Some(record) => record.attention,
+        None => fallback(),
+    }
+}
+
 fn reported_activity(working: bool, within_grace: bool, hook_says_idle: bool) -> Activity {
     if working || (within_grace && !hook_says_idle) {
         Activity::Working
@@ -722,6 +740,7 @@ fn newest_write(dir: &str, depth: usize) -> Option<SystemTime> {
 
 /// A lifecycle-hook record: an agent saying what it is doing.
 struct HookRecord {
+    observed_at_ms: u64,
     cwd: Option<String>,
     agent: Option<String>,
     /// The pid the record is about, and the pid that owns it (an editor or
@@ -778,6 +797,11 @@ impl HookRecord {
     /// which is weak evidence but better than none, and cannot be worse than
     /// the CPU heuristic it is standing in for.
     fn matches(&self, watch: &Watch, subtree: &HashSet<u32>) -> bool {
+        if self.observed_at_ms < watch.started_at_ms
+            || self.attention.is_some() && self.observed_at_ms <= watch.last_input_at_ms
+        {
+            return false;
+        }
         if let Some(pid) = self.agent_pid {
             return subtree.contains(&pid);
         }
@@ -844,6 +868,12 @@ fn hook_records() -> Vec<HookRecord> {
         // while it waits for a yes is why nobody trusted the old indicator.
         let waiting = state == "waiting" || detail == Some("waiting-approval");
         out.push(HookRecord {
+            observed_at_ms: meta
+                .modified()
+                .ok()
+                .and_then(|at| at.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .map(|age| age.as_millis() as u64)
+                .unwrap_or(0),
             cwd: value
                 .get("cwd")
                 .and_then(|v| v.as_str())
@@ -977,11 +1007,14 @@ mod tests {
             pid: 1,
             cwd: "/work".into(),
             harness: harness.map(str::to_string),
+            started_at_ms: 0,
+            last_input_at_ms: 0,
         }
     }
 
     fn record(agent: Option<&str>) -> HookRecord {
         HookRecord {
+            observed_at_ms: 1,
             cwd: Some("/work".into()),
             agent: agent.map(str::to_string),
             agent_pid: None,
@@ -1004,6 +1037,44 @@ mod tests {
         assert!(
             !permission_prompt_in("checking file permissions on the tree"),
             "talking about permissions is not a prompt"
+        );
+    }
+
+    #[test]
+    fn lifecycle_clear_does_not_resurrect_a_prompt() {
+        let mut hook = record(Some("claude"));
+        assert_eq!(
+            reported_attention(Some(&hook), || Some(Attention::Permission)),
+            None
+        );
+        hook.attention = Some(Attention::Permission);
+        assert_eq!(
+            reported_attention(Some(&hook), || None),
+            Some(Attention::Permission)
+        );
+        assert_eq!(
+            reported_attention(None, || Some(Attention::Permission)),
+            Some(Attention::Permission)
+        );
+    }
+
+    #[test]
+    fn answered_or_previous_launch_hooks_cannot_pin_attention() {
+        let mut hook = record(Some("claude"));
+        hook.observed_at_ms = 100;
+        hook.attention = Some(Attention::Permission);
+        let mut session = watch(Some("claude"));
+        session.last_input_at_ms = 101;
+        assert!(!hook.matches(&session, &subtree(&[])));
+        hook.observed_at_ms = 102;
+        assert!(
+            hook.matches(&session, &subtree(&[])),
+            "a newly reported wait is still authoritative"
+        );
+        session.started_at_ms = 103;
+        assert!(
+            !hook.matches(&session, &subtree(&[])),
+            "a pooled or reused process must not adopt a previous launch"
         );
     }
 

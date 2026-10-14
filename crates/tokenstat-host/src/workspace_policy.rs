@@ -424,7 +424,8 @@ pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
         // A watching claim suppresses the push for one conversation, so only a
         // device that could have that conversation on screen may place one.
         "app.watching" => true,
-        "work.search"
+        "work.overview"
+        | "work.search"
         | "work.continuity.get"
         | "work.continuity.put"
         | "work.continuity.attachments" => true,
@@ -1265,6 +1266,7 @@ mod tests {
             "host.updateCheck",
             "host.updateApply",
             "host.liveWork",
+            "work.overview",
             "work.search",
             "work.continuity.get",
             "work.continuity.put",

@@ -35,6 +35,9 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::Serialize;
 
+pub mod program_status;
+use program_status::{ProgramStatus, Tracker as ProgramStatusTracker};
+
 /// How much output to keep per session.
 ///
 /// Enough that a client polling a few times a second never loses anything, and
@@ -95,6 +98,9 @@ pub struct SessionInfo {
     /// second old reported everything the last one spent.
     #[serde(default)]
     pub started_at_ms: u64,
+    /// Explicit OSC 7501 status. Independent of CPU and process liveness.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub program_status: Option<ProgramStatus>,
 }
 
 /// Output that was waiting.
@@ -242,11 +248,13 @@ struct Session {
     /// has to start here rather than at the end of the buffer. See
     /// `tail_since_input_for_pid`.
     input_mark: Arc<AtomicU64>,
+    last_input_at_ms: AtomicU64,
     last_activity: Arc<Mutex<Option<u64>>>,
     /// Front ends currently showing this session, by opaque client id.
     viewers: Mutex<HashMap<String, Viewer>>,
     read_offsets: Mutex<HashMap<String, u64>>,
     stream_readers: Mutex<HashSet<String>>,
+    program_status: Arc<Mutex<ProgramStatusTracker>>,
 }
 
 /// One front end showing a session, and the geometry it can display.
@@ -437,6 +445,7 @@ impl Manager {
         let exit_code = Arc::new(AtomicI32::new(i32::MIN));
         let last_activity = Arc::new(Mutex::new(None));
         let writer = Arc::new(Mutex::new(writer));
+        let program_status = Arc::new(Mutex::new(ProgramStatusTracker::default()));
 
         {
             let buffer = Arc::clone(&buffer);
@@ -444,6 +453,7 @@ impl Manager {
             let alive = Arc::clone(&alive);
             let last_activity = Arc::clone(&last_activity);
             let writer = Arc::clone(&writer);
+            let program_status = Arc::clone(&program_status);
             std::thread::spawn(move || {
                 let mut chunk = [0u8; 8 * 1024];
                 // Enough to catch a status request split across two reads.
@@ -460,6 +470,15 @@ impl Manager {
                         Ok(0) => break,
                         Ok(n) => {
                             let bytes = &chunk[..n];
+                            let replies = program_status
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .feed(bytes);
+                            if !replies.is_empty() {
+                                let mut w = writer.lock().unwrap_or_else(PoisonError::into_inner);
+                                let _ = w.write_all(&replies);
+                                let _ = w.flush();
+                            }
                             if wants_cursor_position(&mut tail, bytes) {
                                 let mut w = writer.lock().unwrap_or_else(PoisonError::into_inner);
                                 let _ = w.write_all(CURSOR_POSITION_REPLY);
@@ -478,6 +497,10 @@ impl Manager {
                     }
                 }
                 alive.store(false, Ordering::SeqCst);
+                program_status
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .process_exited();
                 buffer_space.notify_all();
             });
         }
@@ -496,6 +519,7 @@ impl Manager {
             total_bytes: 0,
             last_activity_at_ms: None,
             started_at_ms: now_ms(),
+            program_status: None,
         };
 
         let session = Arc::new(Session {
@@ -508,10 +532,12 @@ impl Manager {
             alive,
             exit_code,
             input_mark: Arc::new(AtomicU64::new(0)),
+            last_input_at_ms: AtomicU64::new(0),
             last_activity,
             viewers: Mutex::new(HashMap::new()),
             read_offsets: Mutex::new(HashMap::new()),
             stream_readers: Mutex::new(HashSet::new()),
+            program_status,
         });
 
         Ok((session, info))
@@ -589,6 +615,10 @@ impl Manager {
             // while we clear; the buffer lock serializes, and nothing the
             // client reads predates the handoff.
             clear_session_buffer(&shell);
+            *shell
+                .program_status
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = ProgramStatusTracker::default();
 
             // Reprint the prompt the clear just removed, so the pane opens on
             // a prompt rather than on blank space.
@@ -718,8 +748,6 @@ impl Manager {
     pub fn write(&self, id: &str, bytes: &[u8]) -> Result<(), PtyError> {
         let s = self.get(id)?;
         let mut w = s.writer.lock().unwrap_or_else(PoisonError::into_inner);
-        w.write_all(bytes)?;
-        w.flush()?;
         // Remember where the output stood when this keystroke went in, so a
         // question the person has just answered stops counting as one.
         let total = s
@@ -727,8 +755,21 @@ impl Manager {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .total;
+        w.write_all(bytes)?;
+        w.flush()?;
         s.input_mark.store(total, Ordering::Relaxed);
+        if !bytes.is_empty() {
+            s.last_input_at_ms.store(now_ms(), Ordering::Relaxed);
+        }
         Ok(())
+    }
+
+    /// Used only to reject a legacy waiting hook written before the person
+    /// answered. OSC status remains authoritative until the program clears it.
+    pub fn last_input_at_ms(&self, id: &str) -> Option<u64> {
+        self.get(id)
+            .ok()
+            .map(|session| session.last_input_at_ms.load(Ordering::Relaxed))
     }
 
     /// Tell the program its window changed, so it redraws at the new size.
@@ -1063,6 +1104,14 @@ impl Manager {
             .last_activity
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        let mut status = s
+            .program_status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !info.alive {
+            status.process_exited();
+        }
+        info.program_status = status.snapshot();
         info
     }
 
@@ -2607,6 +2656,49 @@ mod tests {
     /// A script that stays busy for roughly a minute without needing input.
     fn stay_busy(m: &Manager) -> SessionInfo {
         spawn(m, "sleep 60", "ping -n 61 127.0.0.1 > nul")
+    }
+
+    #[test]
+    fn program_status_reaches_the_host_without_a_viewer_on_both_pty_backends() {
+        use program_status::{Kind, State};
+        let m = Manager::new();
+        let s = spawn(
+            &m,
+            r"printf '\033]7501;state=blocked:kind=permission:app=claude-code\007'; sleep 60",
+            "powershell.exe -NoLogo -NoProfile -Command \"[Console]::Write(([char]27).ToString() + ']7501;state=blocked:kind=permission:app=claude-code' + [char]7); Start-Sleep -Seconds 60\"",
+        );
+        let received = wait_for(|| {
+            m.info(&s.id)
+                .ok()
+                .and_then(|s| s.program_status)
+                .is_some_and(|status| {
+                    status.state == State::Blocked && status.kind == Some(Kind::Permission)
+                })
+        });
+        m.close(&s.id).unwrap();
+        assert!(received, "OSC 7501 must survive the native PTY/ConPTY path");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn program_status_detection_is_answered_before_any_frontend_attaches() {
+        let m = Manager::new();
+        let s = spawn(
+            &m,
+            r#"stty -echo -icanon; printf '\033]7501;?\007'; reply=$(dd bs=1 count=9 2>/dev/null); expected=$(printf '\033]7501;?\007'); if [ "$reply" = "$expected" ]; then printf '\033]7501;state=done:app=claude-code\007'; fi"#,
+            "",
+        );
+        let received = wait_for(|| {
+            m.info(&s.id)
+                .ok()
+                .and_then(|s| s.program_status)
+                .is_some_and(|status| status.state == program_status::State::Done)
+        });
+        m.close(&s.id).unwrap();
+        assert!(
+            received,
+            "the process owner must answer capability detection"
+        );
     }
 
     // --- viewer-scoped sizing -----------------------------------------------

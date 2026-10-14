@@ -1952,6 +1952,20 @@ extension Bridge {
         _ = try await background("push.activity.unregister", ["token": token], as: PushRegistration.self)
     }
 
+    static func liveOverviewRegister(token: String, peers: [String], environment: String) async throws {
+        _ = try await background("push.activity.registerOverview",
+            ["token": token, "peers": peers, "environment": environment], as: PushRegistration.self)
+    }
+
+    static func liveOverviewSupported() async throws -> Bool {
+        struct Capabilities: Codable, Sendable { var overview: Bool }
+        return try await background("push.activity.capabilities", [:], as: Capabilities.self).overview
+    }
+
+    static func workOverview(peer: String) async throws -> LiveWorkHostOverview {
+        try await onPeer(peer, "work.overview", [:], as: LiveWorkHostOverview.self)
+    }
+
     /// Ask the account to send this device a test notification.
     ///
     /// Answers how many devices took it, and whether the server can send at

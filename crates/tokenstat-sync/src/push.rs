@@ -187,6 +187,127 @@ pub fn terminal_activity_key(terminal: &str) -> String {
     work_activity_key("terminal", terminal)
 }
 
+/// Fixed namespace for a host's public work summary. Names remain on the
+/// encrypted peer connection; APNs receives counts and opaque keys only.
+pub fn overview_activity_key() -> String {
+    work_activity_key("overview", "v1")
+}
+
+/// Per-host scope prevents two computers with the same local session id
+/// from sharing a row in the combined activity.
+pub fn overview_item_key(machine: &str, kind: &str, id: &str) -> String {
+    work_activity_key("overview-item", &format!("{machine}:{kind}:{id}"))
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkOverview {
+    pub working: u32,
+    pub waiting: u32,
+    pub idle: u32,
+    pub done: u32,
+    pub failed: u32,
+    pub total: u32,
+    pub items: Vec<WorkOverviewItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkOverviewItem {
+    pub key: String,
+    pub kind: String,
+    pub phase: String,
+}
+
+impl WorkOverview {
+    pub fn phase(&self) -> &'static str {
+        if self.waiting > 0 {
+            "waiting"
+        } else if self.working > 0 {
+            "working"
+        } else {
+            "idle"
+        }
+    }
+}
+
+pub fn register_overview_activity(
+    token: &str,
+    peers: &[String],
+    environment: &str,
+) -> Result<(), ProfileError> {
+    if !(64..=200).contains(&token.len())
+        || !token.len().is_multiple_of(2)
+        || !token.bytes().all(|b| b.is_ascii_hexdigit())
+        || peers.is_empty()
+        || peers.len() > 16
+        || peers
+            .iter()
+            .any(|peer| peer.len() != 64 || !peer.bytes().all(|b| b.is_ascii_hexdigit()))
+        || !matches!(environment, "sandbox" | "production")
+    {
+        return Err(ProfileError::Message(
+            "Invalid work overview registration.".into(),
+        ));
+    }
+    let host = resolve_api_host(None)?;
+    let bearer = keychain::load_token(&host)?
+        .ok_or_else(|| ProfileError::Message("Sign in first.".into()))?;
+    post(
+        &host,
+        &bearer,
+        "/api/v1/push/activity/registerOverview",
+        &serde_json::json!({
+            "token": token, "peers": peers, "environment": environment,
+            "machine": crate::config::ensure_machine_id()?,
+        }),
+    )
+    .map(|_| ())
+}
+
+pub fn begin_overview_activity() -> bool {
+    begin_work_activity(overview_activity_key(), 0)
+}
+
+pub fn overview_supported() -> Result<bool, ProfileError> {
+    let host = resolve_api_host(None)?;
+    let Some(bearer) = keychain::load_token(&host)? else {
+        return Ok(false);
+    };
+    let (status, text) = post_with_status(
+        &host,
+        &bearer,
+        "/api/v1/push/activity/capabilities",
+        &serde_json::json!({"machine": crate::config::ensure_machine_id()?}),
+    )?;
+    overview_supported_response(status.as_u16(), &text)
+}
+
+fn overview_supported_response(status: u16, text: &str) -> Result<bool, ProfileError> {
+    match status {
+        404 | 405 => Ok(false), // old server: keep individual activities
+        200..=299 => Ok(serde_json::from_str::<serde_json::Value>(text)
+            .ok()
+            .and_then(|value| value["overview"].as_bool())
+            .unwrap_or(false)),
+        _ => Err(ProfileError::Message(format!(
+            "Live Activity capabilities failed ({status})."
+        ))),
+    }
+}
+
+pub fn overview_activity_in_background(overview: WorkOverview) {
+    let runs = activity_runs()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(mut update) = runs.get(&overview_activity_key()).cloned() else {
+        return;
+    };
+    update.phase = overview.phase();
+    update.overview = Some(overview);
+    enqueue_activity(update);
+}
+
 fn work_activity_key(kind: &str, id: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(format!("{kind}:{id}"))
@@ -259,6 +380,7 @@ struct ActivityUpdate {
     key: String,
     revision: u64,
     phase: &'static str,
+    overview: Option<WorkOverview>,
 }
 
 fn activity_runs() -> &'static std::sync::Mutex<std::collections::HashMap<String, ActivityUpdate>> {
@@ -300,6 +422,7 @@ fn begin_work_activity(key: String, revision: u64) -> bool {
             key: key.clone(),
             revision,
             phase: "working",
+            overview: None,
         })
     })();
     let mut runs = activity_runs()
@@ -317,7 +440,7 @@ fn begin_work_activity(key: String, revision: u64) -> bool {
 }
 impl ActivityUpdate {
     fn terminal(&self) -> bool {
-        matches!(self.phase, "done" | "failed" | "stopped")
+        self.overview.is_none() && matches!(self.phase, "done" | "failed" | "stopped")
     }
     fn same_run(&self, other: &Self) -> bool {
         self.host == other.host
@@ -388,6 +511,10 @@ fn work_activity_in_background(key: &str, revision: u64, phase: &'static str) {
     let Some(update) = take_activity_update(&mut runs, key, revision, phase) else {
         return;
     };
+    enqueue_activity(update);
+}
+
+fn enqueue_activity(update: ActivityUpdate) {
     static QUEUE: std::sync::OnceLock<std::sync::Arc<ActivityQueue>> = std::sync::OnceLock::new();
     let queue = QUEUE.get_or_init(|| {
         let queue = std::sync::Arc::new(ActivityQueue::default());
@@ -423,15 +550,18 @@ fn work_activity_in_background(key: &str, revision: u64, phase: &'static str) {
                         {
                             break;
                         }
-                        let sent = post(
-                            &update.host,
-                            &update.bearer,
-                            "/api/v1/push/activity/update",
-                            &serde_json::json!({
-                                "machine": update.machine, "key": update.key,
-                                "revision": update.revision.to_string(), "phase": update.phase,
-                            }),
-                        );
+                        let mut body = serde_json::json!({
+                            "machine": update.machine, "key": update.key,
+                            "revision": update.revision.to_string(), "phase": update.phase,
+                        });
+                        let path = if let Some(overview) = &update.overview {
+                            body["overview"] =
+                                serde_json::to_value(overview).expect("public overview");
+                            "/api/v1/push/activity/overview"
+                        } else {
+                            "/api/v1/push/activity/update"
+                        };
+                        let sent = post(&update.host, &update.bearer, path, &body);
                         if sent.is_ok() || !update.terminal() {
                             break;
                         }
@@ -449,7 +579,6 @@ fn work_activity_in_background(key: &str, revision: u64, phase: &'static str) {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     queue_activity(&mut pending, update);
     drop(pending);
-    drop(runs);
     queue.changed.notify_one();
 }
 
@@ -459,6 +588,22 @@ fn post(
     path: &str,
     body: &serde_json::Value,
 ) -> Result<String, ProfileError> {
+    let (status, text) = post_with_status(host, bearer, path, body)?;
+    if !status.is_success() {
+        return Err(ProfileError::Message(format!(
+            "{path} failed ({status}): {}",
+            text.chars().take(200).collect::<String>()
+        )));
+    }
+    Ok(text)
+}
+
+fn post_with_status(
+    host: &str,
+    bearer: &str,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<(reqwest::StatusCode, String), ProfileError> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(5))
@@ -476,13 +621,7 @@ fn post(
         .map_err(|err| ProfileError::Message(err.to_string()))?;
     let status = resp.status();
     let text = capped_text(resp, 64 * 1024)?;
-    if !status.is_success() {
-        return Err(ProfileError::Message(format!(
-            "{path} failed ({status}): {}",
-            text.chars().take(200).collect::<String>()
-        )));
-    }
-    Ok(text)
+    Ok((status, text))
 }
 
 /// Read a response body through its `Read` impl with a hard cap.
@@ -547,6 +686,19 @@ fn notification_worker(
 mod tests {
     use super::*;
 
+    #[test]
+    fn old_servers_keep_the_existing_activity_path() {
+        assert!(!overview_supported_response(404, "<html>Not found</html>").unwrap());
+        assert!(!overview_supported_response(405, "").unwrap());
+        assert!(!overview_supported_response(200, r#"{"registered":true}"#).unwrap());
+        assert!(!overview_supported_response(200, "invalid").unwrap());
+        assert!(overview_supported_response(200, r#"{"overview":true}"#).unwrap());
+        assert!(
+            overview_supported_response(503, "").is_err(),
+            "an outage is not a permanent capability change"
+        );
+    }
+
     fn activity_fixture(key: &str, phase: &'static str) -> ActivityUpdate {
         ActivityUpdate {
             host: "fixture".into(),
@@ -555,6 +707,7 @@ mod tests {
             key: key.into(),
             revision: 1,
             phase,
+            overview: None,
         }
     }
 
@@ -611,6 +764,14 @@ mod tests {
 
     #[test]
     fn live_activity_keys_are_opaque_and_registration_is_validated_locally() {
+        assert_ne!(
+            overview_item_key("host-a", "terminal", "1"),
+            overview_item_key("host-b", "terminal", "1")
+        );
+        assert_ne!(
+            overview_item_key("host-a", "terminal", "1"),
+            overview_item_key("host-a", "chat", "1")
+        );
         let key = activity_key("conversation-fixture");
         assert_eq!(key.len(), 64);
         assert!(key.bytes().all(|b| b.is_ascii_hexdigit()));

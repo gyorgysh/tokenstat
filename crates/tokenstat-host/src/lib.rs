@@ -245,4 +245,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 33 adds `pulls.commitAvatars`, the public author pictures a
 /// history list draws for everyone who has one.
 /// Version 34 adds revision-checked chat recovery and cooperative runner stop.
-pub const PROTOCOL_VERSION: &str = "34";
+/// Version 35 adds the opt-in work overview across chats and terminals.
+pub const PROTOCOL_VERSION: &str = "35";

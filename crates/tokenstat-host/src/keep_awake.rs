@@ -84,7 +84,7 @@ pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
         // List polls. A client asking what is running is not somebody
         // working, and `ssh.session.list` runs on a timer: without this line
         // the poll alone would hold sleep open for as long as the app is open.
-        "workspace.list" | "pty.list" | "ssh.session.list" => false,
+        "workspace.list" | "pty.list" | "ssh.session.list" | "work.overview" => false,
         "workflow.list" | "workflow.get" | "workflow.runs" | "workflow.transcript" => false,
         // Polls inside the agent families. A Chat screen asks about events,
         // approvals and receipts on a timer, and an Automations or todo screen
@@ -489,6 +489,7 @@ mod tests {
     fn list_polls_do_not_count() {
         assert!(!counts_as_work("workspace.list", None));
         assert!(!counts_as_work("pty.list", None));
+        assert!(!counts_as_work("work.overview", None));
     }
 
     #[test]

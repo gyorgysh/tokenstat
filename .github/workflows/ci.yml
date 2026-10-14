@@ -228,6 +228,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Run the standalone client tests
         run: bash scripts/run-swift-tests.sh
 
@@ -252,6 +256,8 @@ jobs:
           python3 scripts/tests/chat-model-review.py
           python3 scripts/tests/screen-viewer-lifecycle.py
           python3 scripts/tests/terminal-final-output.py
+          python3 scripts/tests/terminal-program-status.py
+          python3 scripts/tests/live-work-compatibility.py
 
       - name: Validate Apple widget signing rules
         run: |

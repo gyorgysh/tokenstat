@@ -4475,6 +4475,7 @@ private struct StateBadge: View {
     /// you. On a working session the answer is always "just now", so the
     /// clock would be noise that redraws every second.
     var since: Date?
+    var statusLabel: String?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulsing = false
@@ -4484,12 +4485,14 @@ private struct StateBadge: View {
         case .working: return Theme.stateWorking
         case .starting: return Theme.stateWorking.opacity(0.5)
         case .needsAttention: return Theme.warning
-        case .stopped: return Theme.danger
+        case .stopped, .failed: return Theme.danger
+        case .done: return Theme.stateIdle
         case .idle, .none: return Theme.stateIdle
         }
     }
 
     private var label: String {
+        if let statusLabel { return statusLabel }
         switch state {
         case .none: return L10n.text("apple.rootview.no_sessions.f857df8f")
         case .working: return L10n.text("common.working")
@@ -4497,6 +4500,8 @@ private struct StateBadge: View {
         case .idle: return L10n.text("common.idle")
         case .needsAttention: return L10n.text("apple.rootview.needs_attention.c1ebc781")
         case .stopped: return L10n.text("apple.rootview.stopped.1a4f630a")
+        case .done: return L10n.text("common.done")
+        case .failed: return L10n.text("common.failed")
         }
     }
 
@@ -4506,6 +4511,7 @@ private struct StateBadge: View {
         switch state {
         case .working: return AnyShapeStyle(Theme.stateWorking)
         case .needsAttention: return AnyShapeStyle(Theme.warning)
+        case .failed: return AnyShapeStyle(Theme.danger)
         default: return AnyShapeStyle(.tertiary)
         }
     }
@@ -5290,7 +5296,7 @@ private struct ActiveSessionRow: View {
                         .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
                         .lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 0)
-                    StateBadge(state: session.state, since: session.lastOutputAt)
+                    StateBadge(state: session.state, since: session.lastOutputAt, statusLabel: session.statusLabel)
                         .opacity(isHovering ? 0 : 1)
                         .frame(minWidth: 26, alignment: .trailing)
                 }
@@ -5338,7 +5344,7 @@ private struct ActiveSessionRow: View {
         var fields = [
             SidebarDetailField(title: L10n.text("apple.rootview.project.98595978"), value: folder.name, symbol: "folder"),
             SidebarDetailField(title: L10n.text("apple.rootview.computer.76ed42d2"), value: folder.sidebarComputer, symbol: "laptopcomputer"),
-            SidebarDetailField(title: L10n.text("apple.rootview.status.920e413c"), value: session.state.label, symbol: "circle.dotted", tint: session.state == .needsAttention ? Theme.warning : session.state == .working || session.state == .starting ? Theme.stateWorking : Theme.controlGlyph),
+            SidebarDetailField(title: L10n.text("apple.rootview.status.920e413c"), value: session.statusLabel, symbol: "circle.dotted", tint: session.state == .needsAttention ? Theme.warning : session.state == .failed ? Theme.danger : session.state == .working || session.state == .starting ? Theme.stateWorking : Theme.controlGlyph),
             SidebarDetailField(title: L10n.text("apple.rootview.command.71316697"), value: session.command, symbol: "terminal", monospaced: true),
         ]
         if let meter = session.meter {

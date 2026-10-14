@@ -28,6 +28,9 @@ enum SessionState: Equatable {
     /// The process is waiting on the person: a permission prompt, a gate,
     /// or a failed step that paused the run.
     case needsAttention
+    /// A turn finished while the process remains available for the next one.
+    case done
+    case failed
     /// The process has exited.
     case stopped
 
@@ -38,6 +41,8 @@ enum SessionState: Equatable {
         case .working: return L10n.text("common.working")
         case .idle: return L10n.text("common.idle")
         case .needsAttention: return L10n.text("apple.terminalsession.needs_attention.c1ebc781")
+        case .done: return L10n.text("common.done")
+        case .failed: return L10n.text("common.failed")
         case .stopped: return L10n.text("apple.terminalsession.stopped.1a4f630a")
         }
     }
@@ -211,6 +216,15 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// What the session is doing right now. Updated at transition points, so
     /// a sidebar row only redraws when the state changes.
     private(set) var state: SessionState = .none
+    private(set) var programStatus: PtyProgramStatus?
+
+    var statusLabel: String {
+        if state == .needsAttention { return programStatus?.attentionLabel ?? state.label }
+        if state == .working, let progress = programStatus?.progress {
+            return "\(state.label) · \(progress)%"
+        }
+        return state.label
+    }
 
     /// Smoothed CPU of the session's process subtree, percent of one core,
     /// as measured by the host. `nil` until the sampler has a reading.
@@ -290,9 +304,8 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
                 Self.frameScheduler.setFocused(id)
                 // Coming to the front should not wait out a background delay.
                 wake()
-                // Putting this session on screen is the person answering the
-                // call. The badge is there to get them here, so it has done
-                // its job: see `acknowledgeAttention`.
+                // Seeing the prompt silences its notification; the host
+                // still owns the waiting/working state.
                 acknowledgeAttention()
             } else {
                 Self.frameScheduler.clearFocused(id)
@@ -377,7 +390,8 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
             activity: info.activity,
             cpuPercent: info.cpuPercent,
             memoryMb: info.memoryMb,
-            attention: info.attention
+            attention: info.attention,
+            programStatus: info.programStatus
         )
         applyMeter(from: info)
         // Adopted from the host: the process already exists, so the emulator
@@ -447,7 +461,8 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
             activity: info.activity,
             cpuPercent: info.cpuPercent,
             memoryMb: info.memoryMb,
-            attention: info.attention
+            attention: info.attention,
+            programStatus: info.programStatus
         )
         applyMeter(from: info)
         // Build the emulator now that a process exists. Before this there was
@@ -614,6 +629,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
 
     /// Stop polling. Called when the session is closed.
     func stop() {
+        clearAttention()
         removed = true
         // Give up this front end's claim on the session's size, so a phone
         // still watching it gets its own geometry back rather than staying
@@ -831,6 +847,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
                 if alive != info.alive {
                     alive = info.alive
                     if !info.alive {
+                        clearAttention()
                         idleCheckTask?.cancel()
                         idleCheckTask = nil
                         state = info.exitCode != nil ? .stopped : .none
@@ -841,11 +858,13 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
                         info.activity,
                         cpuPercent: info.cpuPercent,
                         memoryMb: info.memoryMb,
-                        attention: info.attention
+                        attention: info.attention,
+                        programStatus: info.programStatus
                     )
                     applyMeter(from: info)
                 }
                 if let code = info.exitCode {
+                    clearAttention()
                     exitCode = code
                     idleCheckTask?.cancel()
                     idleCheckTask = nil
@@ -1236,11 +1255,13 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         activity: String? = nil,
         cpuPercent: Double? = nil,
         memoryMb: Double? = nil,
-        attention: String? = nil
+        attention: String? = nil,
+        programStatus: PtyProgramStatus? = nil
     ) {
         idleCheckTask?.cancel()
         idleCheckTask = nil
         if !alive {
+            clearAttention()
             state = exitCode != nil ? .stopped : .none
             return
         }
@@ -1249,7 +1270,8 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
                 activity,
                 cpuPercent: cpuPercent,
                 memoryMb: memoryMb,
-                attention: attention
+                attention: attention,
+                programStatus: programStatus
             )
             return
         }
@@ -1273,15 +1295,30 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// is cancelled and never runs again for this session.
     /// Whether the person has already seen this call for attention.
     private var attentionAcknowledged = false
+    private var attentionRevision: UInt64?
+    private var hostNeedsAttention = false
+
+    private func clearAttention() {
+        if hostNeedsAttention { RunNotifications.shared.attentionHandled(sessionID: id) }
+        hostNeedsAttention = false
+        attentionAcknowledged = false
+        attentionRevision = nil
+    }
 
     private func applyActivity(
         _ activity: String?,
         cpuPercent: Double?,
         memoryMb: Double? = nil,
-        attention: String? = nil
+        attention: String? = nil,
+        programStatus: PtyProgramStatus? = nil
     ) {
         if activity == nil && attention == nil { return }
+        let reportedActivity = ["done", "error"].contains(programStatus?.state ?? "") ? programStatus?.state : activity
         if activity != nil { hostReportedActivity = true }
+        let newEpisode = attentionRevision != programStatus?.revision
+        if newEpisode { attentionAcknowledged = false }
+        attentionRevision = programStatus?.revision
+        if self.programStatus != programStatus { self.programStatus = programStatus }
         idleCheckTask?.cancel()
         idleCheckTask = nil
         // Store what is displayed, not what was measured. These arrive four
@@ -1296,16 +1333,21 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         let waiting = !(attention?.isEmpty ?? true)
         // The episode ends when the host stops reporting attention, and only
         // then can the next prompt raise the badge again.
-        if !waiting { attentionAcknowledged = false }
+        if !waiting { clearAttention() }
         let next: SessionState
-        if waiting, !attentionAcknowledged {
+        if waiting {
             next = .needsAttention
             // On the way in, not on every poll: the host repeats the attention
             // four times a second for as long as the question stands.
-            if state != .needsAttention { announceAttention() }
-        } else if activity == "working" {
+            if !attentionAcknowledged && (!hostNeedsAttention || newEpisode) { announceAttention() }
+            hostNeedsAttention = true
+        } else if reportedActivity == "working" {
             next = .working
-        } else if activity != nil {
+        } else if reportedActivity == "done" {
+            next = .done
+        } else if reportedActivity == "error" {
+            next = .failed
+        } else if reportedActivity != nil {
             next = .idle
         } else {
             return
@@ -1315,14 +1357,10 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
 
     /// Dismiss the current call for attention.
     ///
-    /// The badge asks the person to come and look. Once they have, it has
-    /// nothing left to say, and a row that keeps flagging a prompt the person
-    /// is reading is noise. The dismissal covers this episode only: the host
-    /// reporting no attention clears it, so the next prompt lights the row
-    /// again.
+    /// Silence this episode's notification. Keep the waiting state until
+    /// the host confirms that the prompt was answered or cleared.
     func acknowledgeAttention() {
         attentionAcknowledged = true
-        if state == .needsAttention { state = .idle }
         RunNotifications.shared.attentionHandled(sessionID: id)
     }
 

@@ -370,7 +370,39 @@ fn add_activity(item: &mut Value, siblings: &[(String, u64)]) {
             map.insert("attention".into(), json!(attention.as_str()));
         }
     }
+    add_program_status(item);
     add_meter(item, siblings);
+}
+
+/// The PTY owner validates reports before serialization. Explicit state wins
+/// even when CPU sampling failed or an old prompt remains in the output tail.
+#[cfg(feature = "local-host")]
+fn add_program_status(item: &mut Value) {
+    let Some(status) = item.get("programStatus") else {
+        return;
+    };
+    let activity = match status.get("state").and_then(Value::as_str) {
+        Some("working") => "working",
+        // Preserve the legacy two-state field for older frontends. Rich
+        // states are additive, inside programStatus.
+        Some("idle" | "blocked" | "done" | "error") => "idle",
+        _ => return,
+    };
+    let attention = (status.get("state").and_then(Value::as_str) == Some("blocked")).then(|| {
+        status
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("input")
+            .to_string()
+    });
+    if let Some(map) = item.as_object_mut() {
+        map.insert("activity".into(), json!(activity));
+        map.insert("activitySource".into(), json!("program"));
+        map.remove("attention");
+        if let Some(attention) = attention {
+            map.insert("attention".into(), json!(attention));
+        }
+    }
 }
 
 /// Other live processes of the same harness in the same folder, keyed by pty id.
@@ -1230,6 +1262,8 @@ fn owner_only_method(method: &str) -> bool {
                 | "push.unregister"
                 | "push.test"
                 | "push.activity.register"
+                | "push.activity.registerOverview"
+                | "push.activity.capabilities"
                 | "push.activity.unregister"
         )
 }
@@ -1853,6 +1887,21 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 &p.environment,
             )
             .envelope()?;
+            Ok(json!({"registered": true}))
+        }
+        "push.activity.capabilities" => {
+            Ok(json!({"overview": tokenstat_sync::push::overview_supported().envelope()?}))
+        }
+        "push.activity.registerOverview" => {
+            #[derive(Deserialize, Default)]
+            struct Params {
+                token: String,
+                peers: Vec<String>,
+                environment: String,
+            }
+            let p: Params = parse(params)?;
+            tokenstat_sync::push::register_overview_activity(&p.token, &p.peers, &p.environment)
+                .envelope()?;
             Ok(json!({"registered": true}))
         }
         "push.activity.unregister" => {
@@ -3944,6 +3993,7 @@ fn terminals(method: &str, params: &str) -> Option<Result<Value, String>> {
         && !method.starts_with("harness.")
         && !method.starts_with("stream.")
         && !method.starts_with("proxy.")
+        && method != "work.overview"
     {
         return None;
     }
@@ -3953,6 +4003,12 @@ fn terminals(method: &str, params: &str) -> Option<Result<Value, String>> {
 #[cfg(feature = "local-host")]
 fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
     match method {
+        "work.overview" => {
+            // An approved client opts this host into account-bound background
+            // heartbeats. Work labels return only over the encrypted tunnel.
+            crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
+            Ok(crate::live_work::overview())
+        }
         "pty.list" => {
             let include_remote = serde_json::from_str::<PtyListParams>(params.trim())
                 .map(|p| p.include_remote)
@@ -4771,6 +4827,33 @@ pub fn call_sessionless(method: &str, params: &str) -> Option<String> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn program_status_overrides_heuristics_and_preserves_resource_metrics() {
+        for (state, activity, attention) in [
+            ("working", "working", None),
+            ("idle", "idle", None),
+            ("done", "idle", None),
+            ("error", "idle", None),
+            ("blocked", "idle", Some("question")),
+        ] {
+            let mut value = json!({"activity": "working", "attention": "permission",
+                "cpuPercent": 75, "programStatus": {"state": state, "kind": "question"}});
+            add_program_status(&mut value);
+            assert_eq!(value["activity"], activity);
+            assert_eq!(value["attention"].as_str(), attention);
+            assert_eq!(value["cpuPercent"], 75);
+            assert_eq!(value["activitySource"], "program");
+        }
+        let mut value = json!({"activity": "working", "attention": "permission"});
+        let before = value.clone();
+        add_program_status(&mut value);
+        assert_eq!(value, before, "old tools retain their detector verdict");
+        let mut value = json!({"programStatus": {"state": "blocked"}});
+        add_program_status(&mut value);
+        assert_eq!(value["attention"], "input");
+    }
 
     #[cfg(feature = "local-host")]
     #[test]

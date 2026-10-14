@@ -42,6 +42,7 @@ enum RemoteHostFeature: Hashable {
     case terminalLiveActivities
     case commitAvatars
     case chatRecovery
+    case workOverview
 
     var title: String {
         switch self {
@@ -72,7 +73,7 @@ enum RemoteHostFeature: Hashable {
         case .chatFork: L10n.text("apple.clientremotefeaturegate.forking_chats.1181b97c")
         case .chatRemoveAll: L10n.text("apple.clientremotefeaturegate.deleting_all_chats.978c2f5e")
         case .steer: L10n.text("apple.clientremotefeaturegate.notes_on_the_next_step.a272bf5a")
-        case .liveActivities, .terminalLiveActivities: "Live Activities"
+        case .liveActivities, .terminalLiveActivities, .workOverview: "Live Activities"
         case .commitAvatars: "Author pictures"
         }
     }
@@ -142,6 +143,7 @@ enum RemoteHostFeature: Hashable {
         case .terminalLiveActivities: 32
         case .commitAvatars: 33
         case .chatRecovery: 34
+        case .workOverview: 35
         }
     }
 
@@ -174,7 +176,7 @@ enum RemoteHostFeature: Hashable {
         case .chatFork: "doc.on.doc"
         case .chatRemoveAll: "trash"
         case .steer: "text.bubble"
-        case .liveActivities, .terminalLiveActivities: "waveform"
+        case .liveActivities, .terminalLiveActivities, .workOverview: "waveform"
         case .commitAvatars: "person.crop.circle"
         case .chatRecovery: "arrow.clockwise"
         }

@@ -16,6 +16,7 @@ enum State { case none, working, stopped }
 struct Info {
     var rows = 24; var cols = 80; var alive = false; var exitCode: Int? = 0
     var activity: String?; var cpuPercent: Double?; var memoryMb: Double?; var attention: String?
+    var programStatus: String?
 }
 struct Chunk { var dropped = 0; var nextOffset: UInt64; var bytes: Data }
 @MainActor enum Bridge {
@@ -41,7 +42,8 @@ struct Chunk { var dropped = 0; var nextOffset: UInt64; var bytes: Data }
     var state = State.working, idleCheckTask: Task<Void, Never>?
     static let maxPollDelay = 400, minPollDelay = 16, renderHighWater = 8 * 1024 * 1024
     var received = Data()
-    func applyActivity(_ activity: String?, cpuPercent: Double?, memoryMb: Double?, attention: String?) {}
+    func applyActivity(_ activity: String?, cpuPercent: Double?, memoryMb: Double?, attention: String?, programStatus: String?) {}
+    func clearAttention() {}
     func applyMeter(from info: Info) {}
     func acceptBytes(_ bytes: Data) { received.append(bytes) }
 METHOD

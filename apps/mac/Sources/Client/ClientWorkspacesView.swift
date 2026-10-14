@@ -720,6 +720,10 @@ final class ClientWorkspacesModel {
             )
         }
         if hosts != nextHosts { hosts = nextHosts }
+        #if os(iOS)
+        let overviewNames = Dictionary(nextHosts.map { ($0.peerKey, $0.name) }, uniquingKeysWith: { first, _ in first })
+        Task { await LiveWorkController.shared.refreshOverview(peers: nextHosts.map(\.peerKey), names: overviewNames) }
+        #endif
         if let key = connectedKey {
             await reloadRemote(peerKey: key)
         }
@@ -941,6 +945,11 @@ final class ClientWorkspacesModel {
                 if sessions != nextSessions { sessions = nextSessions }
                 if recentChats != nextChats { recentChats = nextChats }
                 connectedKey = host.peerKey
+                #if os(iOS)
+                let overviewPeers = hosts.map(\.peerKey)
+                let overviewNames = Dictionary(hosts.map { ($0.peerKey, $0.name) }, uniquingKeysWith: { first, _ in first })
+                Task { await LiveWorkController.shared.refreshOverview(peers: overviewPeers, names: overviewNames) }
+                #endif
                 UserDefaults.standard.set(host.peerKey, forKey: "client.lastConnectedHost")
                 errorMessage = nil
                 infoMessage = nil
@@ -1142,6 +1151,11 @@ final class ClientWorkspacesModel {
         }
         if let newSessions, sessions != newSessions { sessions = newSessions }
         if let newChats, recentChats != newChats { recentChats = newChats }
+        #if os(iOS)
+        let overviewPeers = hosts.map(\.peerKey)
+        let overviewNames = Dictionary(hosts.map { ($0.peerKey, $0.name) }, uniquingKeysWith: { first, _ in first })
+        Task { await LiveWorkController.shared.refreshOverview(peers: overviewPeers, names: overviewNames) }
+        #endif
     }
 
     private func publishEcosystem(_ folders: [WorkspaceFolder], peer: String, host: String, lease: EcosystemPublicationLease?) {

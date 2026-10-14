@@ -4194,11 +4194,30 @@ struct TaskRunOutcome: Codable, Sendable {
 
 // MARK: - Terminals
 
+/// Validated OSC 7501 metadata, without program messages or task descriptions.
+struct PtyProgramStatus: Codable, Sendable, Hashable {
+    var state: String
+    var kind: String?
+    var progress: Int?
+    var app: String?
+    var id: String?
+    var revision: UInt64
+
+    var attentionLabel: String? {
+        guard state == "blocked" else { return nil }
+        switch kind {
+        case "permission": return L10n.text("common.needs_approval")
+        case "question": return L10n.text("common.needs_answer")
+        case "auth": return L10n.text("common.sign_in_required")
+        default: return nil
+        }
+    }
+}
+
 /// A pty session as the host reports it.
 ///
-/// The process is owned by the host, not by the app: a session survives the
-/// window closing, and a client that reconnects resumes by offset. Field names
-/// follow the Rust `SessionInfo`, which is the single definition of the shape.
+/// The host owns the process, so it survives closing a window. Field names
+/// follow the Rust `SessionInfo`, including optional metadata from newer hosts.
 struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     var id: String
     /// The command as launched, for a tab label.
@@ -4222,8 +4241,8 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     var lastActivityAtMs: Int64?
     /// Host process spawn time, so Live Activities retain elapsed time after reattachment.
     var startedAtMs: UInt64? = nil
-    /// What the host's detector says this session is doing: `working` or
-    /// `idle`. Absent when the sampler has not reached it yet, which is not
+    /// Legacy host activity: `working` or `idle`. Rich turn states are in programStatus.
+    /// Absent when the sampler has not reached it yet, which is not
     /// the same as idle and must not be shown as idle.
     var activity: String?
     /// Smoothed CPU of the process subtree, percent of one core. The number
@@ -4231,9 +4250,11 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     var cpuPercent: Double?
     /// Resident memory of the process subtree, in megabytes.
     var memoryMb: Double?
-    /// Why the person should look: `permission`, `gate`, or `error`.
+    /// Why the person should look: `permission`, `question`, `auth`, or `input`.
     /// Absent when nothing needs them. Not the same as idle.
     var attention: String?
+    /// Explicit terminal status. Program text is not part of this DTO.
+    var programStatus: PtyProgramStatus? = nil
     /// Lifetime tokens this session has used, from the live meter.
     /// Absent when the harness has no usable log yet. Never a fake zero.
     var tokens: UInt64?
@@ -4279,6 +4300,7 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
         case cpuPercent
         case memoryMb
         case attention
+        case programStatus
         case tokens
         case costMicros
         case costEstimated

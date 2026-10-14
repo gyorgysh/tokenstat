@@ -436,14 +436,42 @@ internal static class SidebarLive
     /// </summary>
     public static (string Label, Windows.UI.Color Tint) SessionState(JsonNode item)
     {
+        // Retained done/error records describe a turn. An exited process
+        // must not keep a Working/Idle badge from its last report.
+        if (Format.Text(item, "alive") == "false")
+        {
+            if (item["exitCode"] is null)
+                return (L10n.Text("windows.workbenchops.stopped.1a4f630a"), Theme.StateIdle);
+            return Format.Long(item, "exitCode") == 0
+                ? (L10n.Text("common.done"), Theme.StateIdle)
+                : (L10n.Text("common.failed"), Theme.Danger);
+        }
+        // Keep the compatibility field Working/Idle; completion is additive.
+        var programState = Format.Text(item["programStatus"], "state");
+        if (programState == "done") return (L10n.Text("common.done"), Theme.StateIdle);
+        if (programState == "error") return (L10n.Text("common.failed"), Theme.Danger);
         if (!string.IsNullOrEmpty(Format.Text(item, "attention")))
         {
-            return (L10n.Text("windows.sidebarlive.needs_attention.c1ebc781"), Theme.Warning);
+            var label = Format.Text(item, "attention") switch
+            {
+                "permission" => L10n.Text("common.needs_approval"),
+                "question" => L10n.Text("common.needs_answer"),
+                "auth" => L10n.Text("common.sign_in_required"),
+                _ => L10n.Text("windows.sidebarlive.needs_attention.c1ebc781"),
+            };
+            return (label, Theme.Warning);
+        }
+        if (Format.Text(item, "activity") == "working"
+            && item["programStatus"] is JsonObject status && status["progress"] is not null)
+        {
+            return (L10n.Text("common.working") + " · " + Format.Long(status, "progress") + "%", Theme.StateWorking);
         }
         return Format.Text(item, "activity") switch
         {
             "working" => (L10n.Text("common.working"), Theme.StateWorking),
             "idle" => (L10n.Text("common.idle"), Theme.StateIdle),
+            "done" => (L10n.Text("common.done"), Theme.StateIdle),
+            "error" => (L10n.Text("common.failed"), Theme.Danger),
             _ => (L10n.Text("windows.sidebarlive.starting.aeed4d26"), Theme.StateIdle),
         };
     }

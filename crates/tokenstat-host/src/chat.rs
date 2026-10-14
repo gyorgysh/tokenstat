@@ -531,6 +531,9 @@ pub struct Store {
     /// Answers that ride the parked note in `steers`. Never locked together
     /// with `steers`, for the same reason as `suppress_follow_up`.
     parked_answers: Mutex<ParkedAnswers>,
+    /// Blocking questions observed by this daemon. Answered questions remain
+    /// known until the next user turn so a withdrawn answer can reopen them.
+    question_attention: Mutex<HashMap<String, HashMap<String, bool>>>,
 }
 
 /// How `send` finished. A suppressed follow-up is a note Stop already retired,
@@ -678,6 +681,7 @@ impl Store {
             steers: Mutex::new(HashMap::new()),
             suppress_follow_up: Mutex::new(HashSet::new()),
             parked_answers: Mutex::new(ParkedAnswers::default()),
+            question_attention: Mutex::new(HashMap::new()),
         }
     }
 
@@ -735,6 +739,7 @@ impl Store {
             steers: Mutex::new(HashMap::new()),
             suppress_follow_up: Mutex::new(HashSet::new()),
             parked_answers: Mutex::new(ParkedAnswers::default()),
+            question_attention: Mutex::new(HashMap::new()),
         };
         if recovery.is_some() {
             store.withdraw_orphaned_answers();
@@ -945,6 +950,41 @@ impl Store {
         });
         rows.truncate(limit.min(50));
         rows
+    }
+
+    /// All active chats, without the recent-list cap or transcript reads.
+    pub(crate) fn live_work(&self) -> Vec<(String, String, String, bool)> {
+        let now = now_ms();
+        let mut waiting: HashSet<String> = self
+            .approvals
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|approval| approval.decision.is_none() && approval.expires_at_ms > now)
+            .map(|approval| approval.conversation_id.clone())
+            .collect();
+        waiting.extend(
+            self.question_attention
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+                .filter(|(_, questions)| questions.values().any(|open| *open))
+                .map(|(id, _)| id.clone()),
+        );
+        self.conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|chat| chat.running || waiting.contains(&chat.id))
+            .map(|chat| {
+                (
+                    chat.id.clone(),
+                    chat.workspace_id.clone(),
+                    chat.title.clone(),
+                    waiting.contains(&chat.id),
+                )
+            })
+            .collect()
     }
 
     /// How many conversations sit in each workspace, for sidebar badges.
@@ -4494,7 +4534,44 @@ impl Store {
             file.set_len(end).map_err(|e| e.to_string())?;
             return Err(error.to_string());
         }
+        self.observe_question_attention(id, event);
         Ok(())
+    }
+
+    fn observe_question_attention(&self, chat: &str, event: &StoredEvent) {
+        let mut attention = self
+            .question_attention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        match event {
+            StoredEvent::User { .. } => {
+                attention.remove(chat);
+            }
+            StoredEvent::Question {
+                id, blocking: true, ..
+            } => {
+                attention
+                    .entry(chat.into())
+                    .or_default()
+                    .insert(id.clone(), true);
+            }
+            StoredEvent::Answer { question_id, .. }
+            | StoredEvent::AnswerWithdrawn { question_id, .. } => {
+                if let Some(open) = attention
+                    .get_mut(chat)
+                    .and_then(|questions| questions.get_mut(question_id))
+                {
+                    *open = matches!(event, StoredEvent::AnswerWithdrawn { .. });
+                }
+            }
+            StoredEvent::Agent {
+                event: Event::Done { status, .. },
+                ..
+            } if status != "ok" => {
+                attention.remove(chat);
+            }
+            _ => {}
+        }
     }
 
     fn get(&self, id: &str) -> Result<Conversation, String> {
@@ -8144,6 +8221,68 @@ mod tests {
         );
         assert!(recent[0].needs_attention);
         assert_eq!(store.recent(1)[0].id, "chat-a1");
+        // A live overview counts every active chat, even setup-only chats and
+        // rows beyond the fifty-entry recents cap. Pending approval is exact.
+        {
+            let mut chats = store.conversations.lock().unwrap();
+            for index in 0..60 {
+                let mut chat = sample(&format!("chat-live-{index}"), "workspace-a");
+                chat.running = true;
+                chats.push(chat);
+            }
+        }
+        let live = store.live_work();
+        assert_eq!(live.len(), 61);
+        assert!(live.iter().any(|row| row.0 == "chat-a1" && row.3));
+
+        let question = StoredEvent::Question {
+            id: "question-b".into(),
+            question: "Choose?".into(),
+            options: vec![],
+            multiple: false,
+            default: None,
+            blocking: true,
+            backend: "claude".into(),
+            at_ms: now_ms(),
+        };
+        store.observe_question_attention("chat-b1", &question);
+        assert!(
+            store
+                .live_work()
+                .iter()
+                .any(|row| row.0 == "chat-b1" && row.3)
+        );
+        store.observe_question_attention(
+            "chat-b1",
+            &StoredEvent::Answer {
+                question_id: "question-b".into(),
+                text: "Yes".into(),
+                delivery: "sent".into(),
+                at_ms: now_ms(),
+            },
+        );
+        assert!(!store.live_work().iter().any(|row| row.0 == "chat-b1"));
+        store.observe_question_attention(
+            "chat-b1",
+            &StoredEvent::AnswerWithdrawn {
+                question_id: "question-b".into(),
+                at_ms: now_ms(),
+            },
+        );
+        assert!(
+            store
+                .live_work()
+                .iter()
+                .any(|row| row.0 == "chat-b1" && row.3)
+        );
+        store.observe_question_attention(
+            "chat-b1",
+            &StoredEvent::User {
+                text: "Continue".into(),
+                at_ms: now_ms(),
+            },
+        );
+        assert!(!store.live_work().iter().any(|row| row.0 == "chat-b1"));
 
         // A recents fetch must not serialize the sensitive/full conversation
         // record. These are the complete keys allowed on that route.

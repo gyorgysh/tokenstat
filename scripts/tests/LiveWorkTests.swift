@@ -25,7 +25,7 @@ import Foundation
             assert(EcosystemRoute(url: URL(string: invalid)!) == nil)
         }
         assert(LiveWorkPhase.terminal(alive: true, exitCode: nil, activity: "working", attention: nil) == .working)
-        assert(LiveWorkPhase.terminal(alive: true, exitCode: nil, activity: "idle", attention: nil) == .waiting)
+        assert(LiveWorkPhase.terminal(alive: true, exitCode: nil, activity: "idle", attention: nil) == .idle)
         assert(LiveWorkPhase.terminal(alive: true, exitCode: nil, activity: "working", attention: "permission") == .waiting)
         assert(LiveWorkPhase.terminal(alive: false, exitCode: 0, activity: "idle", attention: nil) == .done)
         assert(LiveWorkPhase.terminal(alive: false, exitCode: 1, activity: "idle", attention: nil) == .failed)

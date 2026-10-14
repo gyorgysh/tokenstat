@@ -84,12 +84,47 @@ import UniformTypeIdentifiers
             for (phase, stale) in [(LiveWorkPhase.working, false), (.waiting, false), (.done, false), (.failed, false), (.stopped, false), (.working, true)] {
                 let state = LiveWorkAttributes.ContentState(phase: phase, updatedAt: now.timeIntervalSince1970)
                 let filename = "live-work-\(stale ? "reconnecting" : phase.rawValue)\(variant.isEmpty ? "" : "-\(variant)").png"
-                let renderer = ImageRenderer(content: LiveWorkCard(attributes: variantAttributes, state: state, stale: stale)
+                let renderer = ImageRenderer(content: LiveWorkCard(attributes: variantAttributes, state: state, stale: stale, interactive: false)
                     .transaction { $0.animation = nil; $0.disablesAnimations = true }
                     .frame(width: width, height: height).background(Color.black)
                     .environment(\.colorScheme, .dark).environment(\.isLuminanceReduced, dimmed).environment(\.dynamicTypeSize, textSize))
                 renderer.scale = 2
                 exportLiveWork(renderer.cgImage, filename: filename, directory: directory, report: &report)
+            }
+        }
+        var overview = LiveWorkOverview()
+        overview.working = 3; overview.waiting = 1; overview.idle = 2; overview.total = 6; overview.computers = 2
+        overview.items = [
+            .init(key: "waiting", kind: .terminal, phase: .waiting),
+            .init(key: "chat", kind: .chat, phase: .working),
+            .init(key: "idle", kind: .terminal, phase: .idle),
+        ]
+        var overviewAttributes = attributes
+        overviewAttributes.overviewPeers = ["preview-a", "preview-b"]
+        overviewAttributes.overviewHints = [
+            "waiting": .init(name: "API · MacBook", route: attributes.route),
+            "chat": .init(name: "Website redesign · Studio", route: attributes.route),
+            "idle": .init(name: "Terminal · Studio", route: attributes.route),
+        ]
+        var idleOverview = LiveWorkOverview()
+        idleOverview.computers = 2
+        var offlineOverview = idleOverview
+        offlineOverview.offline = 1
+        for (variant, width, height, textSize) in [
+            ("", CGFloat(390), CGFloat(160), DynamicTypeSize.large),
+            ("narrow", 320, 160, .large), ("large-text", 320, 160, .xxxLarge),
+            ("accessibility", 320, 160, .accessibility3),
+        ] {
+            for (name, summary, stale) in [("mixed", overview, false), ("idle", idleOverview, false),
+                ("offline", offlineOverview, false), ("reconnecting", overview, true)] {
+                let state = LiveWorkAttributes.ContentState(phase: summary.phase, updatedAt: now.timeIntervalSince1970, overview: summary)
+                let renderer = ImageRenderer(content: LiveWorkCard(attributes: overviewAttributes, state: state, stale: stale, interactive: false)
+                    .transaction { $0.animation = nil; $0.disablesAnimations = true }
+                    .frame(width: width, height: height).background(Color.black)
+                    .environment(\.colorScheme, .dark).environment(\.dynamicTypeSize, textSize))
+                renderer.scale = 2
+                exportLiveWork(renderer.cgImage, filename: "work-overview-\(name)\(variant.isEmpty ? "" : "-\(variant)").png",
+                    directory: directory, report: &report)
             }
         }
         writeReport(&report, directory: directory, filename: reportFilename)
