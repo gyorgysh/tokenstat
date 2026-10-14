@@ -89,6 +89,10 @@ struct LiveWorkHostOverview: Codable, Sendable {
         var id: String
         var workspaceID: String
         var name: String
+        enum CodingKeys: String, CodingKey {
+            case key, kind, id, name
+            case workspaceID = "workspaceId"
+        }
     }
     var summary: LiveWorkOverview
     var hints: [Hint]

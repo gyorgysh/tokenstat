@@ -25,6 +25,11 @@ import Foundation
         let host = Data(#"{"working":2,"waiting":1,"idle":4,"done":0,"failed":0,"total":7,"items":[{"key":"b","kind":"chat","phase":"working"},{"key":"a","kind":"terminal","phase":"waiting"}]}"#.utf8)
         let summary = try JSONDecoder().decode(LiveWorkOverview.self, from: host)
         assert(summary.computers == 1 && summary.offline == 0)
+        let hint = try JSONDecoder().decode(LiveWorkHostOverview.Hint.self,
+            from: Data(#"{"key":"a","kind":"terminal","id":"terminal","workspaceId":"project","name":"Project"}"#.utf8))
+        assert(hint.workspaceID == "project")
+        let hintWire = try JSONSerialization.jsonObject(with: JSONEncoder().encode(hint)) as! [String: Any]
+        assert(hintWire["workspaceId"] as? String == "project" && hintWire["workspaceID"] == nil)
         var other = LiveWorkOverview()
         other.working = 3; other.total = 3
         other.items = [.init(key: "c", kind: .chat, phase: .working)]

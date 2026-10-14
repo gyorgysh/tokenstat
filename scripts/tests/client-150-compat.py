@@ -88,14 +88,16 @@ def main():
 
                     protocol = call("protocol", {})
                     require_fields(protocol, ["protocolVersion", "coreVersion"], "protocol")
-                    assert protocol["protocolVersion"] == "34", protocol
+                    # New host capabilities raise the protocol without
+                    # changing these older clients' request/response shapes.
+                    assert int(protocol["protocolVersion"]) >= 34, protocol
 
                     info = call("info", {})
                     require_fields(info, [
                         "protocolVersion", "coreVersion", "dbPath", "hasArchive", "timezone",
                         "priceBookEffectiveFrom", "hasPrices",
                     ], "info")
-                    assert info["protocolVersion"] == "34" and info["hasArchive"] is True
+                    assert info["protocolVersion"] == protocol["protocolVersion"] and info["hasArchive"] is True
 
                     folder = call("workspace.add", {"path": str(work)})
                     require_fields(folder, ["id", "path", "name", "addedAtMs", "exists"], "workspace.add")

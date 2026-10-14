@@ -215,7 +215,7 @@ fn snapshot() -> (tokenstat_sync::push::WorkOverview, Vec<serde_json::Value>) {
             let name = crate::workspaces::get(&workspace)
                 .map(|ws| ws.name)
                 .unwrap_or_else(|_| "Workspace".into());
-            serde_json::json!({"key":item.key,"kind":item.kind,"id":id,"workspaceID":workspace,
+            serde_json::json!({"key":item.key,"kind":item.kind,"id":id,"workspaceId":workspace,
             "name": if title.trim().is_empty() { name } else { title }})
         })
         .collect();

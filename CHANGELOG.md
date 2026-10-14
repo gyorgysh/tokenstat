@@ -9,6 +9,22 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.6.3] - 2026-10-14
+
+### Added
+
+- Mac and Windows terminals show status reported directly by supported agents, including working, completed and failed turns, requests for approval, answers or sign-in, and progress when available. Older agents keep the existing status detection.
+- iPhone and iPad Live Activities offer one work overview across connected computers, covering chats and terminals. See working, waiting and idle counts, with attention items first, shortcuts to known sessions, and offline computers clearly marked.
+
+### Fixed
+
+- Terminal attention notifications clear when the agent resumes or the process exits. Opening a prompt silences its notification while keeping its waiting state until the agent clears it.
+- Older mobile apps, hosts and websites retain the existing per-session Live Activity integration when the combined overview is unavailable.
+
+### Security
+
+- Updated the TLS library with upstream security fixes.
+
 ## [1.6.2] - 2026-10-13
 
 ### Changed
