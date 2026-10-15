@@ -51,6 +51,7 @@ struct ClientChatComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ChatSlashMenu(model: model)
             ChatFileProgressNotice(model: model)
             if model.savedCopy != nil {
                 Button(L10n.text("apple.clientchatcomposer.send_when_connected.c2aae57a"), .scheduled) { model.queueDraftWhenConnected() }
@@ -305,7 +306,8 @@ struct ClientChatComposer: View {
     private var cannotSend: Bool {
         // A saved copy is read and drafted in, never sent from: the banner
         // above says why, and the field stays editable for those drafts.
-        model.selectedBackendMissing || model.savedCopy != nil
+        if model.canHandleChatCommandLocally && !model.sending && model.stagingAttachments == 0 && model.unconfirmedSend == nil { return false }
+        return model.selectedBackendMissing || model.savedCopy != nil
             || model.stagingAttachments > 0
             || model.sending || model.unconfirmedSend != nil
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)

@@ -215,10 +215,11 @@ private final class ProtocolServer: @unchecked Sendable {
         }
         for pooled in [false, true] {
             for remote in [false, true] {
+              for operation in ["chat.send", "chat.compact"] {
                 let server = try ClosingServer()
                 let transport = pooled ? SocketTransport.connecting(to: server.path)! : SocketTransport(path: server.path)
-                let method = remote ? "remote.call" : "chat.send"
-                let params = remote ? #"{"peer":"fixture","method":"chat.send","params":{"id":"conversation"}}"# : #"{"id":"conversation"}"#
+                let method = remote ? "remote.call" : operation
+                let params = remote ? "{\"peer\":\"fixture\",\"method\":\"\(operation)\",\"params\":{\"id\":\"conversation\"}}" : #"{"id":"conversation"}"#
                 do {
                     _ = try transport.call(method: method, params: params, patience: 2)
                     assertionFailure("A lost send response was replayed")
@@ -226,6 +227,7 @@ private final class ProtocolServer: @unchecked Sendable {
                     assert(code == "delivery_unknown", code)
                 }
                 assert(server.requestCount() == 1)
+              }
             }
         }
         let urgent = try ClosingServer()

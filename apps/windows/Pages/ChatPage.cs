@@ -77,7 +77,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         FontSize = 20,
         FontWeight = FontWeights.SemiBold,
     };
-    private readonly StackPanel _costHost = new();
 
     private CancellationTokenSource? _poll;
     private string? _openId;
@@ -129,6 +128,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _pendingReveal = chatId;
         }
         _draft.PlaceholderText = L10n.Text("windows.chatpage.ask_about_this_folder.33b8b41b");
+        _draft.TextChanged += (_, _) => { _commandIndex = 0; _commandsDismissed = false; RenderCommandMenu(); };
         _draft.PreviewKeyDown += DraftOnPreviewKeyDown;
         PreviewKeyDown += PageOnPreviewKeyDown;
         _titleBox.LostFocus += async (_, _) =>
@@ -174,7 +174,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             else if (_openId is not null) StartPoll();
             else await ShowListAsync();
         };
-        Unloaded += (_, _) => { RememberDraft(); _openGeneration++; _poll?.Cancel(); };
+        Unloaded += (_, _) => { RememberDraft(); _openGeneration++; _poll?.Cancel(); _commandDialog?.Hide(); _inspection = null; _inspectionHost.Children.Clear(); };
         AutomationProperties.SetAutomationId(_draft, "chat.composer");
         AutomationProperties.SetAutomationId(_titleBox, "chat.title");
     }
@@ -280,39 +280,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 L10n.Text("windows.chatpage.approvals.2bfc3471"), L10n.Text("windows.chatpage.0_waiting.15f51b52", $"{_approvals.Count}"),
                 L10n.Text("windows.chatpage.answer_them_in_the_transcript.fd152eae")));
         }
-        _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.chatpage.spend.85f3d558"), InspectorSpend()));
+        Detach(_inspectionHost);
+        _inspector.Children.Add(_inspectionHost);
+        _ = RefreshInspectionAsync();
         _inspector.Children.Add(RoutingControls());
-    }
-
-    private string InspectorSpend()
-    {
-        long input = 0, output = 0;
-        double cost = 0;
-        foreach (var row in _events)
-        {
-            var ev = row?["event"];
-            if (Format.Text(ev, "kind") != "usage")
-            {
-                continue;
-            }
-            input += Format.Long(ev, "input");
-            output += Format.Long(ev, "output");
-            cost += Format.Number(ev, "costUsd");
-        }
-        if (_aggregateUsage is not null)
-        {
-            input = Format.Long(_aggregateUsage, "input");
-            output = Format.Long(_aggregateUsage, "output");
-            cost = Format.Number(_aggregateUsage, "cost");
-        }
-        if (input == 0 && output == 0)
-        {
-            return L10n.Text("windows.chatpage.nothing_counted_yet.b1c2a931");
-        }
-        var tokens = (_aggregateUsage is null && _hasEarlier ? L10n.Text("windows.chatpage.loaded_messages.ee1d2f1b") : "") + L10n.Text("windows.chatpage.0_in_1_out.9d9c3e33", $"{input:N0}", $"{output:N0}");
-        return cost > 0
-            ? $"{tokens} · {cost.ToString("C2", CultureInfo.GetCultureInfo("en-US"))}"
-            : tokens;
     }
 
     /// <summary>
@@ -738,7 +709,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Detach(_draft);
         Detach(_composerActions);
         Detach(_titleBox);
-        Detach(_costHost);
         Detach(_gitStrip);
         _root.Children.Clear();
         var chrome = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
@@ -1522,73 +1492,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void RefreshCost()
     {
-        _costHost.Children.Clear();
-        _costHost.Children.Add(CostMeter());
         RenderInspector();
-    }
-
-    private UIElement CostMeter()
-    {
-        long input = 0, output = 0, cache = 0;
-        double cost = 0;
-        var any = false;
-        foreach (var row in _events)
-        {
-            var ev = row?["event"];
-            if (Format.Text(ev, "kind") != "usage") continue;
-            any = true;
-            input += Format.Long(ev, "input");
-            output += Format.Long(ev, "output");
-            cache += Format.Long(ev, "cacheRead") + Format.Long(ev, "cacheWrite");
-            cost += Format.Number(ev, "costUsd");
-        }
-        if (_aggregateUsage is not null)
-        {
-            input = Format.Long(_aggregateUsage, "input");
-            output = Format.Long(_aggregateUsage, "output");
-            cache = Format.Long(_aggregateUsage, "cacheRead") + Format.Long(_aggregateUsage, "cacheWrite");
-            cost = Format.Number(_aggregateUsage, "cost");
-            any = Format.Long(_aggregateUsage, "turns") > 0;
-        }
-        var body = new StackPanel { Spacing = Theme.SpaceS };
-        if (!any)
-        {
-            body.Children.Add(Muted(L10n.Text("windows.chatpage.tokens_and_cost_show_up_after_a_turn.722fc82f")));
-            return Card(_aggregateUsage is null && _hasEarlier ? L10n.Text("windows.chatpage.loaded_messages.0202f0cd") : L10n.Text("windows.chatpage.this_conversation.0e82ebfc"), body);
-        }
-        var track = new Grid { Height = 6 };
-        track.Children.Add(new Border
-        {
-            Background = Theme.AccentSoftBrush,
-            CornerRadius = new CornerRadius(3),
-        });
-        var split = new Grid();
-        split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(input, GridUnitType.Star) });
-        split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(output, GridUnitType.Star) });
-        var inn = new Border { Background = Theme.AccentBrush, CornerRadius = new CornerRadius(3, 0, 0, 3) };
-        var outn = new Border { Background = Theme.Brush(static () => Theme.Secondary), CornerRadius = new CornerRadius(0, 3, 3, 0) };
-        Grid.SetColumn(outn, 1);
-        split.Children.Add(inn);
-        if (output > 0) split.Children.Add(outn);
-        else inn.CornerRadius = new CornerRadius(3);
-        track.Children.Add(split);
-        body.Children.Add(track);
-        var legend = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
-        legend.Children.Add(Fonts.Tabular(new TextBlock { Text = L10n.Text("windows.chatpage.in_0.b1de9d0d", $"{input:N0}"), FontSize = 12 }));
-        legend.Children.Add(Fonts.Tabular(new TextBlock { Text = L10n.Text("windows.chatpage.out_0.6b0d54dd", $"{output:N0}"), FontSize = 12 }));
-        if (cost > 0)
-        {
-            legend.Children.Add(Fonts.Tabular(new TextBlock
-            {
-                Text = cost.ToString("C2", CultureInfo.GetCultureInfo("en-US")),
-                Foreground = Theme.AccentBrush,
-                FontWeight = FontWeights.SemiBold,
-                FontSize = 12,
-            }));
-        }
-        body.Children.Add(legend);
-        if (cache > 0) body.Children.Add(Muted(L10n.Text("windows.chatpage.0_cached.60f9f8b8", $"{cache:N0}")));
-        return Card(_aggregateUsage is null && _hasEarlier ? L10n.Text("windows.chatpage.loaded_messages.0202f0cd") : L10n.Text("windows.chatpage.this_conversation.0e82ebfc"), body);
     }
 
     /// <summary>
@@ -1711,6 +1615,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         well.Children.Add(_draft);
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
+        Detach(_commandMenu);
+        context.Children.Add(new ScrollViewer { Content = _commandMenu, MaxHeight = 220 });
+        RenderCommandMenu();
         var row = _composerRow = new Grid { ColumnSpacing = Theme.SpaceS };
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -1767,6 +1674,17 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void DraftOnPreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        var matches = CommandMatches();
+        if (matches.Length > 0 && e.Key is VirtualKey.Up or VirtualKey.Down)
+        {
+            _commandIndex = (_commandIndex + (e.Key == VirtualKey.Down ? 1 : matches.Length - 1)) % matches.Length;
+            RenderCommandMenu();
+            if (_commandMenu.Children[_commandIndex] is FrameworkElement selected) selected.StartBringIntoView();
+            e.Handled = true; return;
+        }
+        if (matches.Length > 0 && e.Key == VirtualKey.Escape) { _commandsDismissed = true; RenderCommandMenu(); e.Handled = true; return; }
+        if (matches.Length > 0 && e.Key == VirtualKey.Enter && _draft.Text.Trim() != matches[_commandIndex].Name)
+        { _draft.Text = matches[_commandIndex].Name; _draft.SelectionStart = _draft.Text.Length; e.Handled = true; return; }
         if (e.Key == VirtualKey.Escape)
         {
             if (!Busy()) return;
@@ -2044,7 +1962,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         else
         {
             var send = ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.send.f6f4688f"), ActionIcon.Send, async (_, _) => await SendAsync());
-            send.IsEnabled = !OpenBackendMissing();
+            send.IsEnabled = true;
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(send, L10n.Text("windows.chatpage.send.f6f4688f"));
             AutomationProperties.SetAutomationId(send, "chat.send");
             ToolTipService.SetToolTip(send, L10n.Text("windows.chatpage.send.f6f4688f"));
@@ -2099,6 +2017,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         if (_opening) return;
         if (_openId is not string chat || _sending || _queueing || _fileTransfer is not null) return;
+        if (await ConsumeCommandAsync()) return;
         if (OpenBackendMissing()) return;
         var backend = Backend(Format.Text(_openChat, "backend"));
         // Only the CLI's own answer stops a send. A stored token past its
@@ -2122,7 +2041,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (!Current()) return;
             if (_outboxKey != key)
                 throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.reopen_this_conversation_with_its_original.bb0e73dd"));
-            if (await TryParkSteerAsync(chat, text, sendNext, attachmentIds)) return;
+            if (text != "/compact" && await TryParkSteerAsync(chat, text, sendNext, attachmentIds)) return;
             if (!Current()) return;
             if (_openChat?["sendRevision"] is null) throw new InvalidOperationException(L10n.Text("windows.chatpage.update_the_host_to_use_reliable_message_de.fcb58190"));
             var item = new QueuedChatMessage(Guid.NewGuid().ToString("N"), text, attachmentIds, Format.Long(_openChat, "sendRevision"));
@@ -2262,6 +2181,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             try
             {
                 await Task.Delay(Busy() ? 400 : 2000, token);
+                _ = RefreshInspectionAsync();
                 var wasBusy = Busy();
                 var historyGeneration = _historyGeneration;
                 var chunk = await CallChatAsync("chat.events", new JsonObject

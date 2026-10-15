@@ -188,7 +188,7 @@ internal sealed partial class ChatPage
                 return;
             }
             var attempted = ChatOutbox.Shared.Stage(key, candidate, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            var updated = await CallChatAsync("chat.send", new JsonObject
+            var updated = await CallChatAsync(ChatCommandRules.SendMethod(attempted.Text), new JsonObject
             {
                 ["id"] = chat, ["text"] = attempted.Text,
                 ["attachmentIds"] = new JsonArray(attempted.Attachments.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()),

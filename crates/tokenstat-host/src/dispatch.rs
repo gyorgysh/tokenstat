@@ -2241,9 +2241,13 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 &p.workspace_id.ok_or("chat.removeAll needs a workspaceId")?
             )?
         })),
-        "chat.send" => serde_json::to_value(store.send(
-            &p.id.ok_or("chat.send needs id")?,
-            &p.text.ok_or("chat.send needs text")?,
+        "chat.send" | "chat.compact" => serde_json::to_value(store.send(
+            &p.id.ok_or("chat send needs id")?,
+            &if method == "chat.compact" {
+                "/compact".to_owned()
+            } else {
+                p.text.ok_or("chat.send needs text")?
+            },
             &p.attachment_ids.unwrap_or_default(),
             p.client_message_id.as_deref(),
             p.client_message_created_at_ms,

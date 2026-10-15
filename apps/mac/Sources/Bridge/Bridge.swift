@@ -1355,7 +1355,7 @@ extension Bridge {
         }
         return try await chatInvoke(
             peer: peer,
-            "chat.send",
+            ChatCommandRules.sendMethod(text),
             params,
             as: ChatConversation.self
         )

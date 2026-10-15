@@ -1234,6 +1234,7 @@ struct ChatView: View {
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
         guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
+        if model.consumeChatCommand() { return }
         switch model.holdForSignIn(text, backend: chat.backend) {
         case .notNeeded: break
         case .refused: return

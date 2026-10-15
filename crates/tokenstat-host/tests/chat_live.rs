@@ -75,7 +75,7 @@ for line in sys.stdin:
    emit({'id':m['id'],'result':{'status':'applied'}})
    if count==2:
     emit({'method':'item/completed','params':{'item':{'id':'answer','type':'agentMessage','text':'Completed once.'}}})
-    emit({'method':'thread/tokenUsage/updated','params':{'tokenUsage':{'last':{'inputTokens':60},'modelContextWindow':200000,'total':{'inputTokens':100,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2}}}})
+    emit({'method':'thread/tokenUsage/updated','params':{'tokenUsage':{'last':{'inputTokens':60,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2},'modelContextWindow':200000,'total':{'inputTokens':100,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2}}}})
     emit({'method':'turn/completed','params':{'turn':{'id':'turn','status':'completed'}}})
   elif method=='thread/unsubscribe':
    emit({'id':m['id'],'result':{}});break
@@ -357,4 +357,83 @@ for line in sys.stdin:
         let state = String::from_utf8_lossy(&output.stdout);
         state.trim().is_empty() || state.trim().starts_with('Z')
     });
+}
+
+/// Manual compaction is a native operation on the resumed session. It must
+/// never create a normal model turn containing the literal slash command.
+#[test]
+fn compact_uses_the_native_protocol_and_surfaces_unsupported_versions() {
+    for (backend, refuse) in [("claude", false), ("codex", false), ("codex", true)] {
+        let root = tempfile::tempdir().unwrap();
+        let fake = root.path().join("fake-agent");
+        fs::write(&fake, format!(r##"#!/usr/bin/env python3
+import json,sys
+backend='{backend}'
+refuse={refuse}
+def emit(v): print(json.dumps(v),flush=True)
+for line in sys.stdin:
+ m=json.loads(line)
+ if backend=='claude':
+  if m.get('type')=='control_request': emit({{'type':'control_response','response':{{'request_id':m['request_id'],'subtype':'success'}}}})
+  elif m.get('type')=='user':
+   assert m['message']['content']==[{{'type':'text','text':'/compact'}}]
+   emit({{'type':'system','subtype':'compact_boundary','compact_metadata':{{'trigger':'manual','pre_tokens':40000}}}})
+   emit({{'type':'result','subtype':'success','is_error':False}});break
+ else:
+  method=m.get('method');p=m.get('params',{{}})
+  if method=='initialize': emit({{'id':m['id'],'result':{{}}}})
+  elif method=='initialized': pass
+  elif method=='thread/resume': emit({{'id':m['id'],'result':{{'thread':{{'id':'session'}}}}}})
+  elif method=='thread/compact/start':
+   assert p=={{'threadId':'session'}}
+   if refuse:
+    emit({{'id':m['id'],'error':{{'code':-32601,'message':'Native compaction unavailable'}}}});break
+   emit({{'id':m['id'],'result':{{}}}})
+   emit({{'method':'turn/started','params':{{'turn':{{'id':'compact'}}}}}})
+   emit({{'method':'turn/completed','params':{{'turn':{{'id':'compact','status':'completed'}}}}}})
+  elif method=='mcpServerStatus/list': emit({{'id':m['id'],'error':{{'code':-32601,'message':'unsupported'}}}})
+  elif method=='thread/unsubscribe': emit({{'id':m['id'],'result':{{}}}});break
+  else: raise Exception('Unexpected model prompt: '+method)
+"##, refuse=if refuse {"True"} else {"False"})).unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = root.path().join("config.json");
+        let argv = if backend == "claude" {
+            json!([
+                fake,
+                "-p",
+                "/compact",
+                "--resume",
+                "session",
+                "--output-format",
+                "stream-json",
+                "--verbose"
+            ])
+        } else {
+            json!([
+                fake, "exec", "resume", "session", "--json", "--", "/compact"
+            ])
+        };
+        fs::write(&config, json!({"backend":backend,"argv":argv}).to_string()).unwrap();
+        let output = fs::File::create(root.path().join("output")).unwrap();
+        let mut runner = Runner(
+            Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+                .args(["chat-live", config.to_str().unwrap()])
+                .stdin(Stdio::null())
+                .stdout(output)
+                .stderr(fs::File::create(root.path().join("stderr")).unwrap())
+                .spawn()
+                .unwrap(),
+        );
+        wait_for(|| runner.0.try_wait().unwrap().is_some());
+        assert_eq!(runner.0.wait().unwrap().success(), !refuse);
+        let output = fs::read_to_string(root.path().join("output")).unwrap();
+        assert_eq!(output.contains("Context compaction completed."), !refuse);
+        if refuse {
+            assert!(
+                fs::read_to_string(root.path().join("stderr"))
+                    .unwrap()
+                    .contains("Native compaction unavailable")
+            );
+        }
+    }
 }

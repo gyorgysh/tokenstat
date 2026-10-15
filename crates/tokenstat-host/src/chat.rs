@@ -1326,6 +1326,9 @@ impl Store {
     /// hands it over, and the turn keeps going. A second note replaces the
     /// first. Stop drops it.
     pub fn steer(&self, id: &str, text: &str) -> Result<(), String> {
+        if text.trim() == "/compact" {
+            return Err("Native compaction must run between turns, not as an agent note.".into());
+        }
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
@@ -2856,9 +2859,16 @@ impl Store {
         }
         snapshot.mcp_servers.sort_by(|a, b| a.name.cmp(&b.name));
         snapshot.mcp_servers.dedup_by(|a, b| a.name == b.name);
+        let usage = {
+            let _guard = self.transcript_guard()?;
+            self.conversation_usage(&chat, &self.events_path(id)).ok()
+        };
         Ok(json!({"backend":chat.backend, "model":model,
             "contextUsed":snapshot.context_used, "contextWindow":snapshot.context_window,
             "contextSource":snapshot.context_source, "windowSource":window_source,
+            "contextHistory":snapshot.context_history,
+            "contextBreakdown":snapshot.context_breakdown,
+            "usage":usage,
             "tools":snapshot.tools, "usedTools":snapshot.used_tools,
             "mcpServers":snapshot.mcp_servers, "mcpReported":snapshot.mcp_reported,
             "inventoryPartial":snapshot.inventory_partial,
@@ -2873,7 +2883,7 @@ impl Store {
         backend: &str,
         revision: u64,
         requested_model: Option<&str>,
-        snapshot: crate::chat_inspection::Snapshot,
+        mut snapshot: crate::chat_inspection::Snapshot,
     ) {
         let Ok(_lifecycle) = crate::work_handoff_store::lifecycle_lock(&self.root) else {
             return;
@@ -2895,6 +2905,33 @@ impl Store {
             || chat.model.as_deref() != requested_model
         {
             return;
+        }
+        snapshot.context_history = crate::chat_inspection::load(&directory.join("inspection.json"))
+            .filter(|s| {
+                s.backend == backend
+                    && s.requested_model.as_deref() == requested_model
+                    && s.snapshot.model == snapshot.model
+            })
+            .map(|s| s.snapshot.context_history)
+            .unwrap_or_default();
+        if let Some(tokens) = snapshot.context_used {
+            if snapshot
+                .context_history
+                .last()
+                .is_none_or(|point| point.tokens != tokens)
+            {
+                snapshot
+                    .context_history
+                    .push(crate::chat_inspection::ContextPoint {
+                        tokens,
+                        at_ms: now_ms(),
+                    });
+            }
+        }
+        if snapshot.context_history.len() > 24 {
+            snapshot
+                .context_history
+                .drain(..snapshot.context_history.len() - 24);
         }
         let record = crate::chat_inspection::Stored {
             backend: backend.into(),
@@ -3497,6 +3534,7 @@ impl Store {
     ) -> Result<SendOutcome, DispatchError> {
         crate::workspace_policy::require_current_access()?;
         let typed = text.trim();
+        let compact = typed == "/compact";
         if typed.is_empty() && attachment_ids.is_empty() {
             return Err("chat.send needs text or an attachment".into());
         }
@@ -3620,7 +3658,7 @@ impl Store {
         // not have this backend on PATH, and CI runners often have none.
         let runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
             .ok_or("This conversation is already running in another instance of tokenstat.")?;
-        if !routing_continuation {
+        if !routing_continuation && !compact {
             chat = self.router_return_locked(id, chat)?;
         }
         if crate::launcher::profile_installed(launcher_profile_id(&chat.backend)) == Some(false) {
@@ -3651,6 +3689,14 @@ impl Store {
                     .then_some(chat.resume_token.as_deref())
                     .flatten()
             });
+        if compact {
+            if !matches!(chat.backend.as_str(), "claude" | "codex") {
+                return Err("This agent does not expose native compaction in Tokenstat.".into());
+            }
+            if !attachment_ids.is_empty() || resume_token.is_none() {
+                return Err("Compact needs an existing agent session and no attachments.".into());
+            }
+        }
         let mut composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
             prompt,
             persona_name: &self.persona_name(&chat),
@@ -3671,7 +3717,7 @@ impl Store {
         // exactly once, to the agent that has just been handed a conversation
         // it did not have.
         let standing_due = standing_is_due(&chat, &composed.standing_fingerprint);
-        let handover = self.handover(&chat)?;
+        let handover = if compact { None } else { self.handover(&chat)? };
         let mut instructions = String::new();
         if standing_due {
             instructions.push_str(&composed.standing_text);
@@ -3683,7 +3729,11 @@ impl Store {
             instructions.push_str(&handover.brief);
         }
         let system_append = (!instructions.is_empty()).then_some(instructions.as_str());
-        let prompt = composed.user_text.as_str();
+        let prompt = if compact {
+            "/compact"
+        } else {
+            composed.user_text.as_str()
+        };
         // The daemon asks its own tool calls back through itself. A relative
         // PATH lookup would be wrong under launchd and inside the private
         // environment an agent CLI runs in, so this is the absolute path and
@@ -3875,6 +3925,11 @@ impl Store {
         let live_speed =
             crate::chat_live::Launch::prepare(&chat.backend, &argv, &safe_join(&self.root, id)?)?
                 .map(Arc::new);
+        if compact && live_speed.is_none() {
+            return Err(
+                "Update the agent CLI and use Tokenstat hostd to run native compaction.".into(),
+            );
+        }
         // Written before anything is started, so a host that dies between the
         // spawn and its answer leaves a record to reconcile against rather
         // than a message the next attempt would run a second time.
@@ -3883,7 +3938,9 @@ impl Store {
         // consumes it: another client must review the changed launch intent.
         let branch = tokenstat_workspace::git::current_branch(&workspace.path);
         crate::account_session::check_current()?;
-        self.router_arm_locked(id, &chat, routing_continuation)?;
+        if !compact {
+            self.router_arm_locked(id, &chat, routing_continuation)?;
+        }
         let activity_revision = self.edit_conversation(id, |current| {
             current.send_revision = next_send_revision(current.send_revision)?;
             current.run_revision = Some(current.send_revision);
@@ -3965,7 +4022,7 @@ impl Store {
             // Only once the process exists. A spawn that failed delivered nothing,
             // and marking it sent would silently drop this conversation's rules
             // from every later turn on that backend.
-            if standing_due {
+            if standing_due && !compact {
                 self.mark_standing_sent(id, &chat.backend, &composed.standing_fingerprint)?;
             }
             // The handover goes on the timeline, brief and all. It is text
@@ -4016,7 +4073,9 @@ impl Store {
                 )?;
             }
             self.mark_last_message(id, user_at, "user")?;
-            self.retitle_if_untitled(id, prompt)?;
+            if !compact {
+                self.retitle_if_untitled(id, prompt)?;
+            }
             // The person's own message is on the timeline. A note parked for
             // the turn this replaces must not ride the next tool of the new
             // one. A follow-up is that note, so it is left for the hooks.
@@ -4055,6 +4114,7 @@ impl Store {
             backend: chat.backend,
             requested_model: chat.model,
             revision: activity_revision,
+            maintenance: compact,
         };
         // Preserve the backend's original stream per turn. Structured events
         // are what the UI reads, but raw output lets a parser correction
@@ -4465,7 +4525,10 @@ impl Store {
             )
         });
         let limited = limit.is_some();
-        if !stopped && let Some(limit) = limit {
+        if !stopped
+            && !launch.maintenance
+            && let Some(limit) = limit
+        {
             let _ = self.router_observe(id, activity_revision, limit);
         }
         let status = if muse_sign_in_required || (limited && !stopped) {
@@ -8752,6 +8815,71 @@ mod tests {
     }
 
     #[test]
+    fn context_history_is_bounded_survives_reopening_and_tracks_reductions() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "history");
+        store
+            .edit_conversation("history", |chat| {
+                chat.run_revision = Some(1);
+                Ok(())
+            })
+            .unwrap();
+        for used in 1..=30 {
+            store.record_inspection(
+                "history",
+                "claude",
+                1,
+                None,
+                crate::chat_inspection::Snapshot {
+                    context_used: Some(used),
+                    ..Default::default()
+                },
+            );
+        }
+        let reopened = Store::load_at(root.path().join("chat"));
+        reopened.record_inspection(
+            "history",
+            "claude",
+            1,
+            None,
+            crate::chat_inspection::Snapshot {
+                context_used: Some(2),
+                ..Default::default()
+            },
+        );
+        let reply = reopened.inspection("history").unwrap();
+        let points = reply["contextHistory"].as_array().unwrap();
+        assert_eq!(points.len(), 24);
+        assert_eq!(points.last().unwrap()["tokens"], 2);
+        assert!(reply["usage"].is_object());
+        reopened.record_inspection(
+            "history",
+            "claude",
+            1,
+            None,
+            crate::chat_inspection::Snapshot {
+                model: Some("different-model".into()),
+                context_used: Some(5),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            reopened.inspection("history").unwrap()["contextHistory"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            reopened
+                .steer("history", "/compact")
+                .unwrap_err()
+                .contains("between turns")
+        );
+    }
+
+    #[test]
     fn inspection_is_scoped_to_backend_model_and_run_and_survives_reopening() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -8864,6 +8992,7 @@ mod tests {
             backend: "claude".into(),
             requested_model: None,
             revision: 3,
+            maintenance: false,
         };
         // The selected model changes after spawn, before the reader runs.
         store
@@ -8988,6 +9117,7 @@ mod tests {
                     backend: "codex".into(),
                     requested_model: None,
                     revision: 0,
+                    maintenance: false,
                 },
                 &pty,
                 &raw,
@@ -9190,6 +9320,7 @@ mod tests {
                 backend: "muse".into(),
                 requested_model: None,
                 revision: 0,
+                maintenance: false,
             },
             &process.id,
             &root.path().join("raw.ndjson"),

@@ -7,6 +7,7 @@ struct ChatContextCard: View {
     @Bindable var model: ChatModel
     @State private var inspection: ChatInspection?
     @State private var loaded = false
+    @State private var otherServersOpen = false
     @State private var inspectedOwner: Owner?
 
     private struct Owner: Hashable {
@@ -32,6 +33,7 @@ struct ChatContextCard: View {
             inspection = nil
             loaded = false
             inspectedOwner = requested
+            otherServersOpen = false
             guard !requested.saved, let id = requested.reference?.itemID else { loaded = true; return }
             let peer = model.peer
             while !Task.isCancelled, owner == requested {
@@ -54,8 +56,10 @@ struct ChatContextCard: View {
     }
 
     private var context: some View {
-        card(L10n.text("apple.chatcontext.context"), symbol: "chart.pie") {
+        card(L10n.text("common.chat.stats"), symbol: "chart.pie") {
             if let inspection = currentInspection {
+                Text(model.selected?.running == true ? L10n.text("common.running") : L10n.text("common.idle"))
+                    .font(Theme.caption).foregroundStyle(.secondary)
                 if let resolved = inspection.model {
                     Text(resolved).font(Theme.callout.weight(.medium)).textSelection(.enabled)
                 }
@@ -84,7 +88,19 @@ struct ChatContextCard: View {
                     }
                 }
                 if inspection.windowSource == "catalog" { note(L10n.text("apple.chatcontext.catalog_window")) }
-                if let tools = inspection.tools { toolList(tools, title: L10n.text("apple.chatcontext.available_tools", tools.count.formatted())) }
+                if let breakdown = inspection.contextBreakdown {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.text("common.chat.stats.last_prompt")).font(Theme.caption.weight(.medium))
+                        promptRow(L10n.text("common.chat.stats.input"), value: breakdown.input)
+                        promptRow(L10n.text("common.chat.stats.cache_read"), value: breakdown.cacheRead)
+                        promptRow(L10n.text("common.chat.stats.cache_write"), value: breakdown.cacheWrite)
+                        note(L10n.text("common.chat.stats.prompt_note"))
+                    }
+                }
+                if let history = inspection.contextHistory, history.count > 1 {
+                    ChatContextHistory(points: history)
+                }
+                if let tools = inspection.tools { toolList(tools, title: L10n.text("common.chat.stats.available_tools", tools.count.formatted())) }
                 if !inspection.usedTools.isEmpty { toolList(inspection.usedTools, title: L10n.text("apple.chatcontext.used_tools", inspection.usedTools.count.formatted())) }
                 if let stamp = inspection.observedAtMs {
                     Text(L10n.text("apple.chatcontext.reported_at", Date(timeIntervalSince1970: Double(stamp) / 1000).formatted(date: .abbreviated, time: .shortened)))
@@ -93,6 +109,8 @@ struct ChatContextCard: View {
             } else {
                 unavailable
             }
+            Divider().overlay(Theme.border)
+            ChatCostMeter(totals: model.turnUsage)
         }
     }
 
@@ -106,19 +124,16 @@ struct ChatContextCard: View {
                         note(inspection.mcpReported ? L10n.text("apple.chatcontext.no_reported_servers") : L10n.text("apple.chatcontext.no_configured_servers"))
                     }
                 } else {
-                    ForEach(inspection.mcpServers) { server in
-                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                                Text(server.name).font(Theme.callout.weight(.medium)).textSelection(.enabled)
-                                Spacer(minLength: 0)
-                                Text(status(server)).font(Theme.caption)
-                                    .foregroundStyle(inspection.hasLiveConnection(server, running: model.selected?.running == true) ? Theme.accent : Color.secondary)
-                            }
-                            if let tools = server.tools {
-                                toolList(tools, title: L10n.text("apple.chatcontext.server_tools", tools.count.formatted()))
-                            }
-                        }
-                        if server.id != inspection.mcpServers.last?.id { Divider().overlay(Theme.border) }
+                    let connected = inspection.mcpServers.filter { $0.source == "agent" && $0.status == "connected" }
+                    let others = inspection.mcpServers.filter { $0.source != "agent" || $0.status != "connected" }
+                    if !connected.isEmpty {
+                        Text(L10n.text("common.chat.stats.connected_servers", connected.count.formatted()))
+                            .font(Theme.caption).foregroundStyle(.secondary)
+                        ForEach(connected) { server in serverRow(server, inspection: inspection) }
+                    }
+                    if !others.isEmpty {
+                        ChatDisclosureRow(title: L10n.text("common.chat.stats.other_servers", others.count.formatted()), expanded: $otherServersOpen)
+                        if otherServersOpen { ForEach(others) { server in serverRow(server, inspection: inspection) } }
                     }
                 }
                 if inspection.inventoryPartial == true { note(L10n.text("apple.chatcontext.inventory_partial")) }
@@ -157,18 +172,33 @@ struct ChatContextCard: View {
         }
     }
 
-    private func toolList(_ tools: [String], title: String) -> some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                ForEach(tools, id: \.self) { tool in
-                    Text(tool).font(Theme.caption).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+    private func promptRow(_ title: String, value: UInt64) -> some View {
+        HStack { Text(title); Spacer(minLength: 8); Text(value.formatted()).monospacedDigit() }
+            .font(Theme.caption).foregroundStyle(.secondary)
+    }
+
+    private func serverRow(_ server: ChatInspection.Server, inspection: ChatInspection) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                Circle().fill(inspection.hasLiveConnection(server, running: model.selected?.running == true) ? Theme.accent : Color.secondary)
+                    .frame(width: 7, height: 7).padding(.top, 6)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(server.name.replacingOccurrences(of: "plugin:", with: "").replacingOccurrences(of: ":", with: " · "))
+                        .font(Theme.callout.weight(.medium)).textSelection(.enabled)
+                    Text(status(server)).font(Theme.caption).foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
             }
-        } label: {
-            Text(title).font(Theme.caption).foregroundStyle(.secondary)
+            if let tools = server.tools, !tools.isEmpty {
+                toolList(tools, title: L10n.text("apple.chatcontext.server_tools", tools.count.formatted()))
+            }
         }
-        .tint(Theme.controlGlyph)
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func toolList(_ tools: [String], title: String) -> some View {
+        ChatToolBrowser(tools: tools, title: title).id(owner)
     }
 
     private func note(_ text: String) -> some View {
@@ -185,5 +215,89 @@ struct ChatContextCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border))
+    }
+}
+
+/// A full-width, keyboard-accessible target; the chevron is only an indicator.
+struct ChatDisclosureRow: View {
+    let title: String
+    @Binding var expanded: Bool
+    var body: some View {
+        Button { expanded.toggle() } label: {
+            HStack {
+                Text(title).font(Theme.callout.weight(.medium))
+                Spacer(minLength: 8)
+                Image(systemName: expanded ? "chevron.up" : "chevron.down").font(Theme.caption)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(expanded ? L10n.text("common.collapse") : L10n.text("common.expand"))
+    }
+}
+
+private struct ChatToolBrowser: View {
+    let tools: [String]
+    let title: String
+    @State private var expanded = false
+    @State private var query = ""
+    @State private var selectedGroup: String?
+    private func group(_ tool: String) -> String {
+        guard tool.hasPrefix("mcp__") else { return L10n.text("common.chat.stats.agent_tools") }
+        return tool.dropFirst(5).components(separatedBy: "__").first ?? tool
+    }
+    private var groups: [String] { Array(Set(tools.map(group))).sorted() }
+    private var filtered: [String] {
+        tools.filter { (selectedGroup == nil || group($0) == selectedGroup) && (query.isEmpty || $0.localizedCaseInsensitiveContains(query)) }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ChatDisclosureRow(title: title, expanded: $expanded)
+            if expanded {
+                ForEach(groups, id: \.self) { name in
+                    Button { selectedGroup = selectedGroup == name ? nil : name } label: {
+                        HStack {
+                            Text(name).lineLimit(1)
+                            Spacer()
+                            Text(tools.filter { group($0) == name }.count.formatted()).monospacedDigit()
+                            if selectedGroup == name { Image(systemName: "checkmark") }
+                        }.font(Theme.caption).padding(8).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+                TextField(L10n.text("common.chat.stats.search_tools"), text: $query).textFieldStyle(.roundedBorder)
+                if selectedGroup != nil || !query.isEmpty {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(filtered, id: \.self) { Text($0).font(Theme.caption).textSelection(.enabled) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: 220)
+                }
+            }
+        }
+    }
+}
+
+private struct ChatContextHistory: View {
+    let points: [ChatInspection.ContextPoint]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L10n.text("common.chat.stats.history")).font(Theme.caption).foregroundStyle(.secondary)
+            GeometryReader { geometry in
+                let peak = max(1, Double(points.map(\.tokens).max() ?? 1))
+                Path { path in
+                    for (index, point) in points.enumerated() {
+                        let position = CGPoint(x: geometry.size.width * Double(index) / Double(max(1, points.count - 1)),
+                                               y: geometry.size.height * (1 - Double(point.tokens) / peak))
+                        if index == 0 { path.move(to: position) } else { path.addLine(to: position) }
+                    }
+                }.stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+            }.frame(height: 48).padding(.vertical, 4).accessibilityHidden(true)
+            HStack {
+                Text((points.first?.tokens ?? 0).formatted())
+                Spacer()
+                Text((points.last?.tokens ?? 0).formatted())
+            }.font(Theme.caption).monospacedDigit().foregroundStyle(.secondary)
+            Text(L10n.text("common.chat.stats.history_note")).font(Theme.caption).foregroundStyle(.tertiary)
+        }
     }
 }

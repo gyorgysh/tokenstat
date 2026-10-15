@@ -15,7 +15,7 @@ actor ChatReadFlights {
     static let reads: Set<String> = ["chat.list", "chat.recent", "chat.events", "chat.eventPage",
                                      "chat.approvals", "chat.instructions", "chat.inspection", "chat.personas"]
     static let mutations: Set<String> = ["chat.create", "chat.fork", "chat.update", "chat.remove", "chat.removeAll",
-        "chat.send", "chat.stop", "chat.recover", "chat.routing", "chat.routeAction", "chat.answerQuestion", "chat.steer", "chat.steerClear", "chat.steerDeliver",
+        "chat.send", "chat.compact", "chat.stop", "chat.recover", "chat.routing", "chat.routeAction", "chat.answerQuestion", "chat.steer", "chat.steerClear", "chat.steerDeliver",
         "chat.resolveApproval", "chat.personaSave", "chat.personaDefault", "chat.personaRemove"]
     private struct Domain: Hashable { let owner: Data; let peer: String? }
     private struct TypedKey: Hashable { let request: ChatReadKey; let type: String }

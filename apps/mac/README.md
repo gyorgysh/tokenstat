@@ -73,8 +73,13 @@ For Developer ID Mac builds, set `TOKENSTAT_MAC_PROFILE` and `TOKENSTAT_MAC_WIDG
 ## Chat inspector
 
 Context and MCP details use the host's read-only `chat.inspection` response.
-The card shows the latest reported prompt footprint, including cached input,
-separately from whole-conversation usage. Window sizes from the model catalog
+The combined statistics panel shows the latest reported prompt footprint,
+fresh/cache breakdown when reported, and archive-wide conversation totals.
+The usage bar includes fresh input, output, cache reads and cache writes.
+A bounded history plots the latest 24 context changes for the selected agent
+and model. Tools are grouped by source with searchable, bounded drilldowns;
+connected/reported MCP servers appear first and other states start collapsed.
+Disclosure rows are full-width buttons on every platform. Window sizes from the model catalog
 are labeled; agents that do not report context remain unknown. Agent-reported
 MCP states and tool inventories are distinct from entries found in that
 backend's host/project configuration. Configuration alone does not establish
@@ -82,6 +87,20 @@ availability in a chat. Idle/previous-turn connections are labeled as reports,
 and capped tool/server lists are marked partial. Snapshots are scoped to the selected backend, model and
 turn, and saved transcript copies do not query live connections. Older hosts
 keep chat working and show details as unavailable.
+
+The Mac, iPhone/iPad, Android and Windows composers offer `/compact`, `/status`,
+`/context`, `/usage`, `/mcp`, `/tools`, `/help`, and `/stop`. Type `/` to filter
+commands; selecting one fills the draft and Send executes it. On Mac/Windows,
+arrow keys select, Enter completes or executes, and Escape closes the menu.
+Read-only commands open the statistics panel without a model turn. Native
+compaction needs an existing Claude or Codex session, an up-to-date CLI and
+hostd, no attachments, and an idle chat. Codex uses `thread/compact/start`;
+Claude receives its native `/compact` command. A dedicated `chat.compact` RPC
+ensures older hosts refuse the operation instead of treating it as a prompt.
+Unsupported agents/CLI versions
+report a refusal instead of receiving a compaction prompt. Other agents retain
+the same read-only commands and stop action. See [Claude SDK commands](https://code.claude.com/docs/en/agent-sdk/slash-commands)
+and [Codex app-server](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md).
 
 Automatic attachment downloads allow 5 MiB. Local images bypass that transfer
 threshold and use downsampled previews that preserve transparency, including

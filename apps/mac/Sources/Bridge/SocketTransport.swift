@@ -241,7 +241,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
     /// `delivery_unknown` instead, because sending it again could commit,
     /// merge, delegate or type the same thing twice.
     private static let mutatingMethods: Set<String> = [
-        "chat.send",
+        "chat.send", "chat.compact",
         "workspace.commit",
         "todo.delegate",
         "automation.run",

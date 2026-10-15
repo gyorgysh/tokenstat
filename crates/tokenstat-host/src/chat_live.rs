@@ -232,6 +232,49 @@ struct Protocol {
     usage: Value,
 }
 
+/// App-server totals are cumulative across resumed turns. Emit only the
+/// increments observed during this launch, never the restored thread total.
+#[derive(Default)]
+struct CodexUsage {
+    previous: Option<Value>,
+    totals: [u64; 5],
+    invalid: bool,
+}
+impl CodexUsage {
+    fn observe(&mut self, usage: &Value, active: bool) -> Option<Value> {
+        let total = usage.get("total")?;
+        const FIELDS: [&str; 5] = [
+            "inputTokens",
+            "cachedInputTokens",
+            "cacheWriteInputTokens",
+            "outputTokens",
+            "reasoningOutputTokens",
+        ];
+        if active && !self.invalid {
+            let monotonic = self.previous.as_ref().is_some_and(|old| {
+                FIELDS
+                    .iter()
+                    .all(|key| total[*key].as_u64().unwrap_or(0) >= old[*key].as_u64().unwrap_or(0))
+            });
+            for (index, key) in FIELDS.iter().enumerate() {
+                let delta = if monotonic {
+                    total[*key].as_u64().unwrap_or(0)
+                        - self.previous.as_ref().unwrap()[*key].as_u64().unwrap_or(0)
+                } else {
+                    usage["last"][*key].as_u64().unwrap_or(0)
+                };
+                if let Some(next) = self.totals[index].checked_add(delta) {
+                    self.totals[index] = next;
+                } else {
+                    self.invalid = true;
+                }
+            }
+        }
+        self.previous = Some(total.clone());
+        (!self.invalid && active).then(|| json!({"input_tokens":self.totals[0], "cached_input_tokens":self.totals[1], "cache_write_input_tokens":self.totals[2], "output_tokens":self.totals[3], "reasoning_output_tokens":self.totals[4]}))
+    }
+}
+
 fn send(input: &mut impl Write, message: &Value) -> Result<(), String> {
     serde_json::to_writer(&mut *input, message).map_err(|error| error.to_string())?;
     input
@@ -307,7 +350,11 @@ fn codex_launch(argv: &[String]) -> Result<(Vec<String>, Value, Value), String> 
     }
     args.push("app-server".into());
     args.push("--stdio".into());
+    let compact = input.len() == 1 && input[0]["type"] == "text" && input[0]["text"] == "/compact";
     let mut turn = json!({"input":input});
+    if compact {
+        turn["tokenstatCompact"] = json!(true);
+    }
     if let Some(effort) = effort {
         turn["effort"] = json!(effort);
     }
@@ -592,6 +639,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         let startup_deadline = Instant::now() + Duration::from_secs(30);
         let mut initialized = false;
         let mut mcp_pages = 0;
+        let mut codex_usage = CodexUsage::default();
         let mut started = false;
         loop {
             let stop_requested = directory.join("stop").is_file();
@@ -637,6 +685,11 @@ pub fn run(path: &Path) -> Result<(), String> {
                     if message["is_error"] == true {
                         return Err("Claude reported a failed turn.".into());
                     }
+                    if initial == "/compact" {
+                        emit(
+                            &json!({"type":"assistant","message":{"content":[{"type":"text","text":"Context compaction completed."}]}}),
+                        )?;
+                    }
                     return Ok(());
                 } else {
                     emit(&message)?;
@@ -670,10 +723,14 @@ pub fn run(path: &Path) -> Result<(), String> {
                 emit(&json!({"type":"thread.started","thread_id":protocol.thread}))?;
                 emit(&json!({"type":"tokenstat.context","model":message["result"]["model"]}))?;
                 let mut params = initial.clone();
+                let compact = params["tokenstatCompact"] == true;
+                params.as_object_mut().unwrap().remove("tokenstatCompact");
                 params["threadId"] = json!(protocol.thread);
                 send(
                     &mut input,
-                    &json!({"id":"turn","method":"turn/start","params":params}),
+                    &json!({"id":if compact {"compact"} else {"turn"},
+                        "method":if compact {"thread/compact/start"} else {"turn/start"},
+                        "params":if compact {json!({"threadId":protocol.thread})} else {params}}),
                 )?;
                 // Reuse this thread's connections. Inventory must never
                 // delay turn/start or start an unrelated agent session.
@@ -682,6 +739,13 @@ pub fn run(path: &Path) -> Result<(), String> {
                     &json!({"id":"inspection-mcp","method":"mcpServerStatus/list",
                     "params":{"threadId":protocol.thread,"limit":100}}),
                 );
+            } else if message["id"] == "compact" {
+                if let Some(error) = message.get("error") {
+                    return Err(error["message"]
+                        .as_str()
+                        .unwrap_or("Native compaction is unavailable in this Codex version.")
+                        .into());
+                }
             } else if message["id"] == "inspection-mcp" {
                 if let Some(servers) = message["result"]["data"].as_array() {
                     emit(&codex_mcp_inventory(servers))?;
@@ -742,6 +806,11 @@ pub fn run(path: &Path) -> Result<(), String> {
                     )?;
                     return Err("Codex did not complete the turn.".into());
                 }
+                if initial["tokenstatCompact"] == true {
+                    emit(
+                        &json!({"type":"item.completed","item":{"id":"tokenstat-compact-result","type":"agent_message","text":"Context compaction completed."}}),
+                    )?;
+                }
                 emit(&json!({"type":"turn.completed","usage":protocol.usage}))?;
                 // Match exec's subscription cleanup. Closing protocol stdin
                 // afterward shuts down the thread and flushes its rollout.
@@ -763,13 +832,33 @@ pub fn run(path: &Path) -> Result<(), String> {
                 }
                 return Ok(());
             } else if message["method"] == "thread/tokenUsage/updated" {
-                let usage = &message["params"]["tokenUsage"];
+                let params = &message["params"];
+                if params["threadId"]
+                    .as_str()
+                    .is_some_and(|thread| thread != protocol.thread)
+                    || (!protocol.turn.is_empty()
+                        && params["turnId"]
+                            .as_str()
+                            .is_some_and(|turn| turn != protocol.turn))
+                {
+                    continue;
+                }
+                let usage = &params["tokenUsage"];
                 emit(
                     &json!({"type":"tokenstat.context", "contextUsed":usage["last"]["inputTokens"],
-                    "contextWindow":usage["modelContextWindow"]}),
+                    "contextWindow":usage["modelContextWindow"],
+                    "contextBreakdown":{
+                        "input":usage["last"]["inputTokens"].as_u64().and_then(|input| input.checked_sub(usage["last"]["cachedInputTokens"].as_u64().unwrap_or(0))).and_then(|input| input.checked_sub(usage["last"]["cacheWriteInputTokens"].as_u64().unwrap_or(0))),
+                        "cacheRead":usage["last"]["cachedInputTokens"].as_u64().unwrap_or(0),
+                        "cacheWrite":usage["last"]["cacheWriteInputTokens"].as_u64().unwrap_or(0)
+                    }}),
                 )?;
-                let total = &usage["total"];
-                protocol.usage = json!({"input_tokens":total["inputTokens"],"cached_input_tokens":total["cachedInputTokens"],"cache_write_input_tokens":total["cacheWriteInputTokens"],"output_tokens":total["outputTokens"],"reasoning_output_tokens":total["reasoningOutputTokens"]});
+                let turn = message["params"]["turnId"].as_str();
+                if protocol.turn.is_empty() || turn.is_none_or(|turn| turn == protocol.turn) {
+                    protocol.usage = codex_usage
+                        .observe(usage, !protocol.turn.is_empty())
+                        .unwrap_or(Value::Null);
+                }
             } else if matches!(
                 message["method"].as_str(),
                 Some("item/started" | "item/completed")
@@ -862,6 +951,29 @@ fn codex_item(item: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resumed_usage_counts_new_work_once_and_handles_compaction_resets() {
+        let mut usage = CodexUsage::default();
+        assert!(usage.observe(&json!({"total":{"inputTokens":1000,"cachedInputTokens":800,"outputTokens":100},"last":{"inputTokens":500}}), false).is_none());
+        let first = json!({"total":{"inputTokens":1100,"cachedInputTokens":850,"outputTokens":110},"last":{"inputTokens":100,"cachedInputTokens":50,"outputTokens":10}});
+        assert_eq!(usage.observe(&first, true).unwrap()["input_tokens"], 100);
+        assert_eq!(
+            usage.observe(&first, true).unwrap()["input_tokens"],
+            100,
+            "repeated notifications are snapshots"
+        );
+        let next = usage.observe(&json!({"total":{"inputTokens":20,"cachedInputTokens":10,"outputTokens":2},"last":{"inputTokens":20,"cachedInputTokens":10,"outputTokens":2}}), true).unwrap();
+        assert_eq!(next["input_tokens"], 120);
+        assert_eq!(next["cached_input_tokens"], 60);
+        assert_eq!(next["output_tokens"], 12);
+        let mut cold = CodexUsage::default();
+        assert_eq!(
+            cold.observe(&first, true).unwrap()["input_tokens"],
+            100,
+            "cold resume without a replay only counts the latest increment"
+        );
+    }
 
     #[test]
     fn codex_inventory_reports_truncated_tool_lists() {

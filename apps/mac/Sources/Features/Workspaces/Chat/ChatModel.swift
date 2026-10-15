@@ -630,6 +630,43 @@ final class ChatModel {
         return version >= (checkingReceipt ? 10 : RemoteHostFeature.confirmedSend.minimumProtocol)
     }
 
+    // MARK: Composer commands
+
+    var showingCommandStats = false
+    var chatCommandSelection = 0
+    var chatCommandsDismissed = false
+
+    func handleChatCommandKey(_ code: UInt16) -> Bool {
+        let matches = ChatCommandRules.matches(draft)
+        guard !chatCommandsDismissed, !matches.isEmpty else { return false }
+        if code == 53 { chatCommandsDismissed = true; return true }
+        guard code == 125 || code == 126 else { return false }
+        chatCommandSelection = (chatCommandSelection + (code == 125 ? 1 : matches.count - 1)) % matches.count
+        return true
+    }
+
+    var canHandleChatCommandLocally: Bool {
+        switch ChatCommandRules.action(draft, backend: selected?.backend, running: busy, attachments: !attachments.isEmpty) {
+        case .inspect, .complete, .refused: return true
+        case .stop: return savedCopy == nil
+        case .message, .compact: return false
+        }
+    }
+
+    func consumeChatCommand() -> Bool {
+        switch ChatCommandRules.action(draft, backend: selected?.backend, running: busy, attachments: !attachments.isEmpty, selection: chatCommandSelection) {
+        case .message, .compact: return false
+        case .complete(let command): draft = command
+        case .inspect: clearDraft(); showingCommandStats = true
+        case .stop: clearDraft(); Task { await stop() }
+        case .refused(.attachments): error = L10n.text("common.chat.command.no_attachments")
+        case .refused(.arguments): error = L10n.text("common.chat.command.no_arguments")
+        case .refused(.unsupported): error = L10n.text("common.chat.command.unsupported")
+        case .refused(.running): error = L10n.text("common.chat.command.idle")
+        }
+        return true
+    }
+
     /// Send what is in the composer.
     ///
     /// The composer is emptied by the caller and the stored copy is kept, so

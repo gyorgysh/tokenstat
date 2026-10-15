@@ -13,6 +13,10 @@ struct ChatInspection: Decodable, Sendable {
     var model: String?
     var contextUsed: UInt64?
     var contextWindow: UInt64?
+    struct ContextPoint: Decodable, Sendable { var tokens: UInt64; var atMs: Int64 }
+    struct PromptBreakdown: Decodable, Sendable { var input: UInt64; var cacheRead: UInt64; var cacheWrite: UInt64 }
+    var contextBreakdown: PromptBreakdown?
+    var contextHistory: [ContextPoint]?
     var contextSource: String?
     var windowSource: String?
     var tools: [String]?

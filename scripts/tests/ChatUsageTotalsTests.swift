@@ -9,6 +9,7 @@ enum Theme {
     static let callout = Font.callout
     static let accent = Color.orange
     static let secondary = Color.secondary
+    static let warning = Color.yellow
     static let accentSoft = Color.orange.opacity(0.1)
     static let panel = Color.clear
     static let border = Color.clear

@@ -45,9 +45,9 @@ enum ChatUsageSummary: Equatable {
     case unavailable
 }
 
-/// Quiet token and cost card for the inspector and the phone setup sheet.
+/// Conversation usage inside the shared context panel.
 ///
-/// In and out share one bar so the split is visible without a table. Cost
+/// Fresh input, output and cache share one proportional bar. Cost
 /// only appears when a figure is actually known, so a plan-covered turn is
 /// not drawn as money charged.
 struct ChatCostMeter: View {
@@ -59,23 +59,20 @@ struct ChatCostMeter: View {
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
             if case let .available(totals) = totals {
-                TokenSplitBar(input: totals.input, output: totals.output)
-                HStack(spacing: Theme.Space.m) {
-                    legend(color: Theme.accent, title: L10n.text("apple.chatcostmeter.in.8bc1d53c"), value: totals.input)
-                    legend(color: Theme.secondary, title: L10n.text("apple.chatcostmeter.out.9a3c5460"), value: totals.output)
-                    Spacer(minLength: 0)
-                    if totals.cost > 0 {
-                        Text(totals.cost, format: .currency(code: "USD").precision(.fractionLength(2...4)))
-                            .font(Theme.callout.weight(.semibold))
-                            .foregroundStyle(Theme.accent)
-                            .monospacedDigit()
-                    }
+                TokenSplitBar(input: totals.input, output: totals.output, cacheRead: totals.cacheRead, cacheWrite: totals.cacheWrite)
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    legend(color: Theme.accent, title: L10n.text("common.chat.stats.input"), value: totals.input)
+                    legend(color: Theme.secondary, title: L10n.text("common.chat.stats.output"), value: totals.output)
+                    legend(color: Theme.accent.opacity(0.55), title: L10n.text("common.chat.stats.cache_read"), value: totals.cacheRead)
+                    legend(color: Theme.warning, title: L10n.text("common.chat.stats.cache_write"), value: totals.cacheWrite)
                 }
-                if totals.cache > 0 {
-                    Text(L10n.text("apple.chatcostmeter.0_cached.60f9f8b8", "\(totals.cache.formatted())"))
-                        .font(Theme.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+                if totals.cost > 0 {
+                    HStack {
+                        Text(L10n.text("common.chat.stats.cost")).font(Theme.caption).foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Text(totals.cost, format: .currency(code: "USD").precision(.fractionLength(2...4)))
+                            .font(Theme.callout.weight(.semibold)).foregroundStyle(Theme.accent).monospacedDigit()
+                    }
                 }
             } else {
                 Text(totals == .unavailable
@@ -85,13 +82,6 @@ struct ChatCostMeter: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
@@ -132,14 +122,16 @@ struct ChatCostMeter: View {
     }
 }
 
-/// In versus out, as a single capsule. Empty stays a quiet track.
+/// All four token categories share one capsule. Empty stays a quiet track.
 private struct TokenSplitBar: View {
     let input: UInt64
     let output: UInt64
+    let cacheRead: UInt64
+    let cacheWrite: UInt64
 
     var body: some View {
         GeometryReader { geo in
-            let total = Double(input) + Double(output)
+            let total = Double(input) + Double(output) + Double(cacheRead) + Double(cacheWrite)
             Capsule()
                 .fill(Theme.accentSoft)
                 .overlay {
@@ -149,8 +141,9 @@ private struct TokenSplitBar: View {
                             Rectangle()
                                 .fill(Theme.accent)
                                 .frame(width: inWidth)
-                            Rectangle()
-                                .fill(Theme.secondary)
+                            Rectangle().fill(Theme.secondary).frame(width: geo.size.width * Double(output) / total)
+                            Rectangle().fill(Theme.accent.opacity(0.55)).frame(width: geo.size.width * Double(cacheRead) / total)
+                            Rectangle().fill(Theme.warning).frame(width: geo.size.width * Double(cacheWrite) / total)
                         }
                         .clipShape(Capsule())
                     }

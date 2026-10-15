@@ -4,6 +4,18 @@ using Tokenstat.Pages;
 
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
+foreach (var backend in new[] { "claude", "codex", "cursor", "muse", "opencode", "opencode2", "grok", "agy", "sh" }) {
+    foreach (var name in ChatCommandRules.Names.Where(n => n is not ("/compact" or "/stop")))
+        Check(ChatCommandRules.Evaluate(name, backend, true, false).Kind == ChatCommandRules.Kind.Inspect, "read commands must work without an idle backend");
+    Check(ChatCommandRules.Evaluate("/compact", backend, false, false).Kind == (backend is "claude" or "codex" ? ChatCommandRules.Kind.Compact : ChatCommandRules.Kind.Unsupported), "native compaction capabilities");
+}
+Check(ChatCommandRules.Evaluate("/sta", "sh", true, false).Completion == "/status", "prefix completion must not send a prompt");
+Check(ChatCommandRules.Evaluate("/compact", "codex", true, false).Kind == ChatCommandRules.Kind.Running, "compact cannot become a note");
+Check(ChatCommandRules.Evaluate("/status\nhello", "claude", false, false).Kind == ChatCommandRules.Kind.Arguments, "multiline command arguments must remain drafts");
+Check(ChatCommandRules.Evaluate("/status", "claude", false, true).Kind == ChatCommandRules.Kind.Attachments, "files must survive local commands");
+Check(ChatCommandRules.Evaluate("/usr/local/file", "sh", false, false).Kind == ChatCommandRules.Kind.Message, "literal paths are messages");
+Console.WriteLine("Windows chat commands: completion, backend capabilities, busy refusal and attachment preservation pass.");
+Check(ChatCommandRules.SendMethod(" /compact ") == "chat.compact" && ChatCommandRules.SendMethod("please /compact") == "chat.send", "older hosts must reject an unknown method instead of receiving a compaction prompt");
 var history = new ChatHistoryBuffer();
 var newest = Json("""{"events":[{"id":"recent"}],"nextOffset":900,"tailCursor":"tail-a","cursor":"older-a","hasEarlier":true,"usage":{"turns":10,"input":1000,"output":200,"cacheRead":10,"cacheWrite":20,"cost":1.5}}""");
 history.ApplyPage(newest, true);

@@ -165,6 +165,7 @@ struct ChatComposer: View {
             if !attachments.isEmpty {
                 strip
             }
+            ChatSlashMenu(model: model)
             field
             ComposerUtilityLayout(spacing: Theme.Space.s, controlsGap: Theme.Space.m) {
                 HStack(spacing: Theme.Space.s) {
@@ -353,6 +354,7 @@ struct ChatComposer: View {
             onSend: {
                 if model.selected?.id == chat.id, !cannotSend { onSend() }
             },
+            onCommandKey: { model.handleChatCommandKey($0) },
             onStop: {
                 if running { onStop() }
             },
@@ -405,7 +407,8 @@ struct ChatComposer: View {
     private var cannotSend: Bool {
         // A saved copy is read and drafted in, never sent from: the banner
         // above says why, and the field stays editable for those drafts.
-        model.selectedBackendMissing || model.savedCopy != nil
+        if model.canHandleChatCommandLocally && !model.sending && model.stagingAttachments == 0 && model.unconfirmedSend == nil { return false }
+        return model.selectedBackendMissing || model.savedCopy != nil
             || model.stagingAttachments > 0
             || model.sending
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)

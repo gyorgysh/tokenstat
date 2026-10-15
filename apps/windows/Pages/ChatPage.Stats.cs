@@ -1,0 +1,287 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using System.Globalization;
+using System.Text.Json.Nodes;
+using Microsoft.UI;
+using Microsoft.UI.Text;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
+using Tokenstat.Design;
+using Windows.Foundation;
+using Windows.System;
+
+namespace Tokenstat.Pages;
+
+internal sealed partial class ChatPage
+{
+    private readonly StackPanel _inspectionHost = new() { Spacing = Theme.SpaceM };
+    private JsonNode? _inspection;
+    private bool _inspectionRunning;
+    private string? _inspectionOwner;
+    private string? _inspectionFlight;
+    private DateTimeOffset _inspectionAt;
+    private readonly Dictionary<string, bool> _statsExpanded = new();
+    private readonly Dictionary<string, string> _statsQueries = new();
+    private readonly List<TextBox> _statsFilters = new();
+    private readonly StackPanel _commandMenu = new() { Spacing = 2 };
+    private int _commandIndex;
+    private bool _commandsDismissed;
+    private bool _commandInFlight;
+    private ContentDialog? _commandDialog;
+    private StackPanel? _commandDialogBody;
+    private string? _commandDialogOwner;
+
+    private static (string Name, string Detail)[] Commands() => [
+        ("/compact", L10n.Text("common.chat.command.compact")),
+        ("/status", L10n.Text("common.chat.command.status")),
+        ("/context", L10n.Text("common.chat.command.context")),
+        ("/usage", L10n.Text("common.chat.command.usage")),
+        ("/mcp", L10n.Text("common.chat.command.mcp")),
+        ("/tools", L10n.Text("common.chat.command.tools")),
+        ("/help", L10n.Text("common.chat.command.help")),
+        ("/stop", L10n.Text("common.chat.command.stop")),
+    ];
+    private (string Name, string Detail)[] CommandMatches()
+    {
+        var text = _draft.Text.Trim();
+        var names = ChatCommandRules.Matches(text);
+        return !_commandsDismissed ? Commands().Where(c => names.Contains(c.Name)).ToArray() : [];
+    }
+    private void RenderCommandMenu()
+    {
+        _commandMenu.Children.Clear();
+        var matches = CommandMatches();
+        _commandIndex = Math.Clamp(_commandIndex, 0, Math.Max(0, matches.Length - 1));
+        for (var index = 0; index < matches.Length; index++)
+        {
+            var command = matches[index];
+            var label = new StackPanel { Spacing = 3 };
+            label.Children.Add(new TextBlock { Text = command.Name, FontWeight = FontWeights.SemiBold });
+            label.Children.Add(Muted(command.Detail));
+            var button = new Button { Content = label,
+                HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, MinHeight = 44 };
+            if (index == _commandIndex) button.Background = Theme.AccentSoftBrush;
+            button.Click += (_, _) => { _draft.Text = command.Name; _draft.SelectionStart = _draft.Text.Length; _draft.Focus(FocusState.Programmatic); };
+            _commandMenu.Children.Add(button);
+        }
+    }
+    private async Task<bool> ConsumeCommandAsync()
+    {
+        var text = _draft.Text.Trim();
+        var action = ChatCommandRules.Evaluate(text, Format.Text(_openChat, "backend"), Busy(), _attachments.Count > 0, _commandIndex);
+        if (action.Kind is ChatCommandRules.Kind.Message or ChatCommandRules.Kind.Compact) return false;
+        if (action.Kind == ChatCommandRules.Kind.Complete) { _draft.Text = action.Completion!; _draft.SelectionStart = _draft.Text.Length; return true; }
+        var refusal = action.Kind switch {
+            ChatCommandRules.Kind.Attachments => L10n.Text("common.chat.command.no_attachments"),
+            ChatCommandRules.Kind.Arguments => L10n.Text("common.chat.command.no_arguments"),
+            ChatCommandRules.Kind.Unsupported => L10n.Text("common.chat.command.unsupported"),
+            ChatCommandRules.Kind.Running => L10n.Text("common.chat.command.idle"), _ => null,
+        };
+        if (refusal is not null) { Banner(refusal); return true; }
+        if (_commandInFlight) return true;
+        _commandInFlight = true;
+        var id = _openId;
+        var generation = _openGeneration;
+        var account = AppServices.AccountGeneration;
+        bool Current() => id == _openId && generation == _openGeneration && account == AppServices.AccountGeneration && IsLoaded;
+        try {
+            if (action.Kind == ChatCommandRules.Kind.Stop) await StopAsync();
+            else
+            {
+                await RefreshInspectionAsync(force: true);
+                if (id != _openId || generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded) return true;
+                var body = new StackPanel { Spacing = Theme.SpaceM };
+                _commandDialogBody = body;
+                _commandDialogOwner = InspectionOwner();
+                RenderCommandStats();
+                var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = L10n.Text("common.chat.stats.overview"),
+                    Content = new ScrollViewer { Content = body, MaxHeight = 600 }, CloseButtonText = L10n.Text("common.done") };
+                _commandDialog = dialog;
+                try { await dialog.ShowAsync(); }
+                finally { _commandDialog = null; _commandDialogBody = null; _commandDialogOwner = null; }
+            }
+            if (id == _openId && generation == _openGeneration && account == AppServices.AccountGeneration && _draft.Text.Trim() == text) _draft.Text = "";
+            return true;
+        } catch (Exception error) { if (Current()) Banner(error.Message); return true; }
+        finally { _commandInFlight = false; }
+    }
+    private string? InspectionOwner() => _openId is null ? null : $"{AppServices.AccountGeneration}/{_openGeneration}/{_openId}/{Format.Text(_openChat, "backend")}/{Format.Text(_openChat, "model")}";
+    private async Task RefreshInspectionAsync(bool force = false)
+    {
+        var owner = InspectionOwner();
+        if (owner is null || owner == _inspectionFlight) return;
+        if (_inspectionOwner != owner)
+        {
+            _inspectionOwner = owner; _inspection = null; _inspectionAt = default; _statsExpanded.Clear(); _statsQueries.Clear(); RenderInspection();
+        }
+        if (!force && DateTimeOffset.UtcNow - _inspectionAt < TimeSpan.FromSeconds(5)) return;
+        _inspectionFlight = owner;
+        try
+        {
+            var next = await CallChatAsync("chat.inspection", new JsonObject { ["id"] = _openId });
+            if (InspectionOwner() != owner || !IsLoaded || Format.Text(next, "backend") != Format.Text(_openChat, "backend")) return;
+            _inspectionAt = DateTimeOffset.UtcNow;
+            var running = Format.Flag(_openChat, "running");
+            if (!JsonNode.DeepEquals(next, _inspection) || _inspectionRunning != running) {
+                _inspection = next; _inspectionRunning = running; RenderInspection();
+            }
+        }
+        catch { if (InspectionOwner() == owner) { _inspectionAt = DateTimeOffset.UtcNow; _inspection = null; RenderInspection(); } }
+        finally { if (_inspectionFlight == owner) _inspectionFlight = null; }
+    }
+    private void RenderInspection()
+    {
+        var focused = _statsFilters.LastOrDefault(field => field.IsLoaded && field.FocusState != FocusState.Unfocused);
+        var filter = focused?.Tag as string;
+        var caret = focused?.SelectionStart ?? 0;
+        var length = focused?.SelectionLength ?? 0;
+        var owner = InspectionOwner();
+        _statsFilters.Clear();
+        _inspectionHost.Children.Clear(); AddStats(_inspectionHost);
+        if (_commandDialogBody is not null && _commandDialogOwner == InspectionOwner()) RenderCommandStats();
+        else _commandDialog?.Hide();
+        if (filter is not null && _statsFilters.LastOrDefault(field => Equals(field.Tag, filter)) is TextBox replacement)
+            DispatcherQueue.TryEnqueue(() => {
+                if (owner != InspectionOwner() || !_statsFilters.Contains(replacement) || !replacement.IsLoaded) return;
+                replacement.Focus(FocusState.Programmatic);
+                replacement.Select(Math.Min(caret, replacement.Text.Length), Math.Min(length, Math.Max(0, replacement.Text.Length - caret)));
+            });
+    }
+    private void RenderCommandStats()
+    {
+        if (_commandDialogBody is not StackPanel body) return;
+        body.Children.Clear(); AddStats(body);
+        body.Children.Add(new TextBlock { Text = L10n.Text("common.chat.commands"), FontWeight = FontWeights.SemiBold });
+        foreach (var command in Commands()) body.Children.Add(Muted(command.Name + " · " + command.Detail));
+        body.Children.Add(Muted(L10n.Text("common.chat.command.unsupported")));
+    }
+    private void AddStats(StackPanel target)
+    {
+        var data = _inspectionOwner == InspectionOwner() ? _inspection : null;
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(Muted(Format.Text(data, "model", Format.Text(_openChat, "backend"))));
+        body.Children.Add(Muted(Format.Flag(_openChat, "running") ? L10n.Text("common.running") : L10n.Text("common.idle")));
+        if (data is null) body.Children.Add(Muted(L10n.Text("common.chat.stats.unavailable")));
+        else
+        {
+            var used = Format.Number(data, "contextUsed");
+            var window = Format.Number(data, "contextWindow");
+            if (data["contextUsed"] is not null)
+            {
+                body.Children.Add(Fonts.Tabular(new TextBlock { Text = $"{used:N0} / {(window > 0 ? window.ToString("N0") : "—")}", FontSize = 22, FontWeight = FontWeights.SemiBold }));
+                if (window > 0) body.Children.Add(new ProgressBar { Minimum = 0, Maximum = 1, Value = Math.Clamp(used / window, 0, 1) });
+            }
+            else body.Children.Add(Muted(L10n.Text("common.chat.stats.no_data")));
+            if (data["contextBreakdown"] is JsonObject prompt) {
+                body.Children.Add(Muted(L10n.Text("common.chat.stats.last_prompt")));
+                body.Children.Add(Muted($"{L10n.Text("common.chat.stats.input")} · {Format.Number(prompt, "input"):N0}"));
+                body.Children.Add(Muted($"{L10n.Text("common.chat.stats.cache_read")} · {Format.Number(prompt, "cacheRead"):N0}"));
+                body.Children.Add(Muted($"{L10n.Text("common.chat.stats.cache_write")} · {Format.Number(prompt, "cacheWrite"):N0}"));
+                body.Children.Add(Muted(L10n.Text("common.chat.stats.prompt_note")));
+            }
+            if (Format.Text(data, "windowSource") == "catalog") body.Children.Add(Muted(L10n.Text("common.chat.stats.catalog_window")));
+            var history = AsArray(data, "contextHistory").Select(p => Format.Number(p, "tokens")).ToArray();
+            if (history.Length > 1)
+            {
+                body.Children.Add(Muted(L10n.Text("common.chat.stats.history")));
+                var canvas = new Canvas { Height = 48, HorizontalAlignment = HorizontalAlignment.Stretch };
+                var line = new Polyline { Stroke = Theme.AccentBrush, StrokeThickness = 2 };
+                canvas.Children.Add(line);
+                canvas.SizeChanged += (_, _) => {
+                    var peak = Math.Max(1, history.Max());
+                    line.Points = new PointCollection();
+                    for (var i = 0; i < history.Length; i++) line.Points.Add(new Point(canvas.ActualWidth * i / (history.Length - 1), 48 * (1 - history[i] / peak)));
+                };
+                body.Children.Add(canvas);
+                body.Children.Add(Muted($"{history.First():N0} → {history.Last():N0}"));
+                body.Children.Add(Muted(L10n.Text("common.chat.stats.history_note")));
+            }
+            if (data["usage"] is JsonObject usage) AppendUsage(body, usage);
+            if (data["tools"] is JsonArray tools) body.Children.Add(ToolBrowser(tools, L10n.Text("common.chat.stats.available_tools", tools.Count.ToString("N0")), "available"));
+            if (data["usedTools"] is JsonArray usedTools && usedTools.Count > 0) body.Children.Add(ToolBrowser(usedTools, L10n.Text("common.chat.stats.used_tools", usedTools.Count.ToString("N0")), "used"));
+            if (Format.Flag(data, "inventoryPartial")) body.Children.Add(Muted(L10n.Text("common.chat.stats.partial")));
+        }
+        if (data is null && _aggregateUsage is JsonObject cached) AppendUsage(body, cached);
+        target.Children.Add(Card(L10n.Text("common.chat.stats"), body));
+        if (data is null) return;
+        var servers = AsArray(data, "mcpServers").OfType<JsonObject>().ToArray();
+        var connected = servers.Where(s => Format.Text(s, "source") == "agent" && Format.Text(s, "status") == "connected").ToArray();
+        var mcp = new StackPanel { Spacing = Theme.SpaceS };
+        if (connected.Length > 0) mcp.Children.Add(Muted(L10n.Text("common.chat.stats.connected_servers", connected.Length.ToString("N0"))));
+        if (servers.Length == 0) mcp.Children.Add(Muted(L10n.Text("common.chat.stats.no_servers")));
+        foreach (var server in connected) mcp.Children.Add(ServerCard(server, Format.Flag(data, "currentRun") && Format.Flag(_openChat, "running")));
+        var others = new StackPanel { Spacing = Theme.SpaceS };
+        foreach (var server in servers.Except(connected)) others.Children.Add(ServerCard(server, false));
+        if (others.Children.Count > 0) mcp.Children.Add(StatsDisclosure(L10n.Text("common.chat.stats.other_servers", others.Children.Count.ToString("N0")), others, "other-servers"));
+        mcp.Children.Add(Muted(L10n.Text("common.chat.stats.reported")));
+        target.Children.Add(Card(L10n.Text("common.chat.stats.mcp_servers"), mcp));
+    }
+    private void AppendUsage(StackPanel body, JsonObject usage)
+    {
+        body.Children.Add(new TextBlock { Text = L10n.Text("common.chat.stats.conversation"), FontWeight = FontWeights.SemiBold });
+        var values = new[] { "input", "output", "cacheRead", "cacheWrite" }.Select(key => Math.Max(0, Format.Number(usage, key))).ToArray();
+        var labels = new[] { L10n.Text("common.chat.stats.input"), L10n.Text("common.chat.stats.output"), L10n.Text("common.chat.stats.cache_read"), L10n.Text("common.chat.stats.cache_write") };
+        var colors = new Brush[] { Theme.AccentBrush, Theme.Brush(static () => Theme.Secondary), Theme.AccentSoftBrush, Theme.Brush(static () => Theme.Warning) };
+        var bar = new Grid { Height = 8 };
+        for (var i = 0; i < values.Length; i++)
+        {
+            bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(values[i], GridUnitType.Star) });
+            var segment = new Border { Background = colors[i] }; Grid.SetColumn(segment, i); bar.Children.Add(segment);
+        }
+        body.Children.Add(bar);
+        for (var i = 0; i < labels.Length; i++) body.Children.Add(Muted($"{labels[i]} · {values[i]:N0}"));
+        var cost = Format.Number(usage, "cost");
+        if (cost > 0) body.Children.Add(Muted(L10n.Text("common.chat.stats.cost") + " · " + cost.ToString("C2", CultureInfo.GetCultureInfo("en-US"))));
+    }
+    private Expander StatsDisclosure(string title, UIElement content, string? identity = null)
+    {
+        var key = identity ?? title;
+        var view = new Expander { Header = title, Content = content, HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch, IsExpanded = _statsExpanded.GetValueOrDefault(key) };
+        view.Expanding += (_, _) => _statsExpanded[key] = true;
+        view.Collapsed += (_, _) => _statsExpanded[key] = false;
+        return view;
+    }
+    private UIElement ToolBrowser(JsonArray raw, string title, string scope)
+    {
+        var names = raw.Select(n => n?.GetValue<string>() ?? "").Where(n => n.Length > 0).Distinct().ToArray();
+        string Group(string name) => name.StartsWith("mcp__", StringComparison.Ordinal) ? name[5..].Split("__")[0] : L10n.Text("common.chat.stats.agent_tools");
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        var search = new TextBox { PlaceholderText = L10n.Text("common.chat.stats.search_tools"), Tag = scope, Text = _statsQueries.GetValueOrDefault(scope, "") };
+        _statsFilters.Add(search);
+        var results = new StackPanel { Spacing = Theme.SpaceS };
+        void Render()
+        {
+            results.Children.Clear();
+            foreach (var group in names.Where(n => n.Contains(search.Text, StringComparison.CurrentCultureIgnoreCase)).GroupBy(Group).OrderBy(g => g.Key))
+            {
+                var rows = new StackPanel { Spacing = Theme.SpaceS };
+                void Populate() {
+                    if (rows.Children.Count > 0) return;
+                    foreach (var name in group) rows.Children.Add(new TextBlock { Text = name, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, FontSize = 12 });
+                }
+                var disclosure = StatsDisclosure($"{group.Key} · {group.Count():N0}", new ScrollViewer { Content = rows, MaxHeight = 220 }, scope + "/" + group.Key);
+                disclosure.Expanding += (_, _) => Populate();
+                if (disclosure.IsExpanded) Populate();
+                results.Children.Add(disclosure);
+            }
+        }
+        search.TextChanged += (_, _) => { _statsQueries[scope] = search.Text; Render(); }; Render(); body.Children.Add(search); body.Children.Add(results);
+        return StatsDisclosure(title, body, scope);
+    }
+    private UIElement ServerCard(JsonNode server, bool live)
+    {
+        var body = new StackPanel { Spacing = 4 };
+        body.Children.Add(Muted(ServerStatus(Format.Text(server, "status"), live)));
+        if (server["tools"] is JsonArray tools && tools.Count > 0) body.Children.Add(ToolBrowser(tools, L10n.Text("common.chat.stats.available_tools", tools.Count.ToString("N0")), "server-tools:" + Format.Text(server, "name")));
+        return Card(Format.Text(server, "name").Replace("plugin:", "").Replace(":", " · "), body);
+    }
+    private static string ServerStatus(string status, bool live) => status switch {
+        "connected" => live ? L10n.Text("common.chat.stats.connected") : L10n.Text("common.chat.stats.reported_connected"),
+        "configured" => L10n.Text("common.chat.stats.configured"), "disabled" => L10n.Text("common.chat.stats.disabled"),
+        "starting" => L10n.Text("common.chat.stats.starting"), "authenticationRequired" => L10n.Text("common.chat.stats.authenticationRequired"),
+        "failed" => L10n.Text("common.chat.stats.failed"), "cancelled" => L10n.Text("common.chat.stats.cancelled"),
+        "notStarted" => L10n.Text("common.chat.stats.notStarted"), _ => L10n.Text("common.chat.stats.unknown"),
+    };
+}

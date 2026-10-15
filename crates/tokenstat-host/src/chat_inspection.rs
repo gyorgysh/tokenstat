@@ -7,8 +7,9 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-const ITEMS: usize = 256;
+const ITEMS: usize = 2048;
 const SERVERS: usize = 64;
+const SERVER_TOOLS: usize = 256;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -17,6 +18,8 @@ pub(crate) struct Snapshot {
     pub context_used: Option<u64>,
     pub context_window: Option<u64>,
     pub context_source: Option<String>,
+    pub context_history: Vec<ContextPoint>,
+    pub context_breakdown: Option<PromptBreakdown>,
     pub tools: Option<Vec<String>>,
     pub used_tools: Vec<String>,
     pub mcp_servers: Vec<Server>,
@@ -24,10 +27,59 @@ pub(crate) struct Snapshot {
     pub inventory_partial: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PromptBreakdown {
+    pub input: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+}
+
+fn prompt_breakdown(usage: &Value, separate: bool) -> Option<PromptBreakdown> {
+    let total = count(usage, &["input_tokens", "inputTokens", "input"])?;
+    let read = count(
+        usage,
+        &[
+            "cache_read_input_tokens",
+            "cache_read_tokens",
+            "cacheReadTokens",
+        ],
+    )
+    .or_else(|| usage.pointer("/cache/read").and_then(Value::as_u64))
+    .unwrap_or(0);
+    let write = count(
+        usage,
+        &[
+            "cache_creation_input_tokens",
+            "cache_write_tokens",
+            "cacheWriteTokens",
+        ],
+    )
+    .or_else(|| usage.pointer("/cache/write").and_then(Value::as_u64))
+    .unwrap_or(0);
+    Some(PromptBreakdown {
+        input: if separate {
+            total
+        } else {
+            total.checked_sub(read)?.checked_sub(write)?
+        },
+        cache_read: read,
+        cache_write: write,
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ContextPoint {
+    pub tokens: u64,
+    pub at_ms: i64,
+}
+
 pub(crate) struct Launch {
     pub backend: String,
     pub requested_model: Option<String>,
     pub revision: u64,
+    pub maintenance: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -71,6 +123,13 @@ fn names(value: &Value) -> Option<Vec<String>> {
     names.sort();
     names.dedup();
     Some(names)
+}
+
+fn server_names(value: &Value) -> Option<Vec<String>> {
+    names(value).map(|mut names| {
+        names.truncate(SERVER_TOOLS);
+        names
+    })
 }
 
 fn oversized(value: &Value, limit: usize) -> bool {
@@ -138,7 +197,7 @@ impl Snapshot {
                     servers
                         .iter()
                         .take(SERVERS)
-                        .any(|s| oversized(&s["tools"], ITEMS))
+                        .any(|s| oversized(&s["tools"], SERVER_TOOLS))
                 });
             if let Some(servers) = value["mcp_servers"].as_array() {
                 self.mcp_reported = true;
@@ -150,7 +209,7 @@ impl Snapshot {
                             name: name(server["name"].as_str()?)?,
                             status: status(server["status"].as_str()),
                             source: "agent".into(),
-                            tools: names(&server["tools"]),
+                            tools: server_names(&server["tools"]),
                         })
                     })
                     .collect();
@@ -165,6 +224,7 @@ impl Snapshot {
                 // Muse includes cache reads and writes in input_tokens.
                 if let Some(used) = prompt_tokens(&event["usage"], false) {
                     self.context_used = Some(used);
+                    self.context_breakdown = prompt_breakdown(&event["usage"], false);
                     self.context_source = Some("lastInput".into());
                 }
             }
@@ -182,6 +242,14 @@ impl Snapshot {
             if let Some(used) = value["contextUsed"].as_u64() {
                 self.context_used = Some(used);
                 self.context_source = Some("agent".into());
+                self.context_breakdown = serde_json::from_value(value["contextBreakdown"].clone())
+                    .ok()
+                    .filter(|b: &PromptBreakdown| {
+                        b.input
+                            .checked_add(b.cache_read)
+                            .and_then(|sum| sum.checked_add(b.cache_write))
+                            == Some(used)
+                    });
             }
             if let Some(window) = value["contextWindow"].as_u64().filter(|n| *n > 0) {
                 self.context_window = Some(window);
@@ -193,7 +261,7 @@ impl Snapshot {
                 self.inventory_partial |=
                     value["inventoryPartial"] == true || servers.len() > SERVERS;
                 for server in servers.iter().take(SERVERS) {
-                    self.inventory_partial |= oversized(&server["tools"], ITEMS);
+                    self.inventory_partial |= oversized(&server["tools"], SERVER_TOOLS);
                     let Some(server_name) = server["name"].as_str().and_then(name) else {
                         continue;
                     };
@@ -201,7 +269,7 @@ impl Snapshot {
                         name: server_name.clone(),
                         status: status(server["runtimeStatus"].as_str()),
                         source: "agent".into(),
-                        tools: names(&server["tools"]),
+                        tools: server_names(&server["tools"]),
                     };
                     if let Some(old) = self.mcp_servers.iter_mut().find(|s| s.name == server_name) {
                         let tools = entry.tools.or_else(|| old.tools.clone());
@@ -229,6 +297,10 @@ impl Snapshot {
             ) {
                 self.context_used = Some(used);
                 self.context_source = Some("lastInput".into());
+                self.context_breakdown = prompt_breakdown(
+                    usage,
+                    matches!(backend, "claude" | "opencode" | "opencode2"),
+                );
             }
         }
         if backend == "claude" && kind == "result" {
@@ -452,6 +524,14 @@ mod tests {
         s.observe("claude", &json!({"type":"assistant","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":3}}}));
         s.observe("claude", &json!({"type":"result","usage":{"input_tokens":9000},"modelUsage":{"model":{"contextWindow":200000}}}));
         assert_eq!(s.context_used, Some(33));
+        assert_eq!(
+            s.context_breakdown,
+            Some(PromptBreakdown {
+                input: 10,
+                cache_read: 20,
+                cache_write: 3
+            })
+        );
         assert_eq!(s.context_window, Some(200000));
         s.observe(
             "claude",
@@ -472,7 +552,7 @@ mod tests {
         assert_eq!(s.mcp_servers.len(), 2);
         assert_eq!(s.mcp_servers[1].tools, Some(vec!["usage".into()]));
         assert!(!serde_json::to_string(&s).unwrap().contains("secret"));
-        let many: Vec<_> = (0..1000).map(|i| format!("tool{i}")).collect();
+        let many: Vec<_> = (0..ITEMS + 1).map(|i| format!("tool{i}")).collect();
         s.observe(
             "cursor",
             &json!({"type":"system","subtype":"init","tools":many}),
@@ -482,6 +562,30 @@ mod tests {
             s.inventory_partial,
             "truncated tools must be labeled partial"
         );
+    }
+
+    #[test]
+    fn server_detail_caps_keep_the_complete_snapshot_readable() {
+        let names: Vec<_> = (0..ITEMS + 1)
+            .map(|i| format!("tool-{i:04}-{}", "x".repeat(140)))
+            .collect();
+        let servers: Vec<_> = (0..SERVERS)
+            .map(|i| json!({"name":format!("server-{i}"),"status":"connected","tools":names}))
+            .collect();
+        let mut snapshot = Snapshot::default();
+        snapshot.observe(
+            "claude",
+            &json!({"type":"system","subtype":"init","tools":names,"mcp_servers":servers}),
+        );
+        assert_eq!(snapshot.tools.as_ref().unwrap().len(), ITEMS);
+        assert!(
+            snapshot
+                .mcp_servers
+                .iter()
+                .all(|server| server.tools.as_ref().unwrap().len() == SERVER_TOOLS)
+        );
+        assert!(snapshot.inventory_partial);
+        assert!(serde_json::to_vec(&snapshot).unwrap().len() < 8 * 1024 * 1024);
     }
 
     #[test]

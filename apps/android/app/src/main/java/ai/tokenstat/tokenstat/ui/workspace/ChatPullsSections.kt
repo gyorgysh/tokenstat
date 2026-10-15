@@ -142,6 +142,7 @@ import ai.tokenstat.tokenstat.ui.components.TsSearchField
 import ai.tokenstat.tokenstat.ui.components.TsSimplePickerSheet
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
+import ai.tokenstat.tokenstat.ui.logic.ChatCommandRules
 import ai.tokenstat.tokenstat.ui.logic.ChatDelivery
 import ai.tokenstat.tokenstat.ui.logic.ChatSeat
 import ai.tokenstat.tokenstat.ui.logic.ChatHint
@@ -251,6 +252,7 @@ fun ChatSection(
     var pendingDelete by remember(projectOwner) { mutableStateOf<JsonObject?>(null) }
     var pendingRename by remember(projectOwner) { mutableStateOf<JsonObject?>(null) }
     var deleteAll by remember(projectOwner) { mutableStateOf(false) }
+    var showingStats by remember(projectOwner, openId) { mutableStateOf(false) }
     var showingSetup by remember(projectOwner) { mutableStateOf(false) }
     // Agent, model and effort, one tap from the composer the way the iPhone
     // reaches them. The list lives here rather than in the sheet, because the
@@ -825,7 +827,7 @@ fun ChatSection(
             val sent = runCatching {
                 model.workspaceSection(
                     peer,
-                    "chat.send",
+                    ChatCommandRules.sendMethod(live.text),
                     chatSendParams(
                         id, live.text, deliveryId, firstAttempt, live.expectedRevision,
                         live.attachments.map { it.id },
@@ -1070,6 +1072,27 @@ fun ChatSection(
         if (!ownsProject() || id in preparingIds || id in sendingIds) return
         preparingIds = preparingIds + id
         try {
+        val command = text.trim()
+        val chat = chats.firstOrNull { it.str("id") == id }
+        val action = ChatCommandRules.action(command, chat?.str("backend"), chat?.bol("running") == true, staged.isNotEmpty())
+        when (action.kind) {
+            ChatCommandRules.Kind.MESSAGE, ChatCommandRules.Kind.COMPACT -> Unit
+            ChatCommandRules.Kind.COMPLETE -> { draft = action.completion.orEmpty(); return }
+            ChatCommandRules.Kind.INSPECT, ChatCommandRules.Kind.STOP -> {
+                if (action.kind == ChatCommandRules.Kind.STOP) stopChat(id) else showingStats = true
+                if (openId == id && ownsProject() && draft.trim() == command) draft = ""
+                return
+            }
+            else -> {
+                sendError = when (action.kind) {
+                    ChatCommandRules.Kind.ATTACHMENTS -> L10n.text("common.chat.command.no_attachments")
+                    ChatCommandRules.Kind.ARGUMENTS -> L10n.text("common.chat.command.no_arguments")
+                    ChatCommandRules.Kind.RUNNING -> L10n.text("common.chat.command.idle")
+                    else -> L10n.text("common.chat.command.unsupported")
+                }
+                return
+            }
+        }
         val selectedBackend = backends.firstOrNull { it.str("id") == chats.firstOrNull { chat -> chat.str("id") == id }?.str("backend") }
         // Only the CLI's own answer stops a send. A stored token past its
         // expiry is routine (the CLI renews it), and an agent signed in with
@@ -1087,7 +1110,7 @@ fun ChatSection(
         // it even from a scrollback.
         pinToLatest()
         if (openId != id || !ownsProject()) return
-        if (staged.isEmpty() && tryParkSteer(id, clean)) return
+        if (clean != "/compact" && staged.isEmpty() && tryParkSteer(id, clean)) return
         // Uploaded first, and only then queued: a message that names a file
         // the host does not have yet is worse than a slower send. A refused
         // attachment stops the send with the draft intact. The ids travel on
@@ -1132,7 +1155,9 @@ fun ChatSection(
         } finally {
             deliveringFromComposer = null
         }
-        } finally {
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { if (ownsProject() && openId == id) sendError = failure.message }
+        finally {
             preparingIds = preparingIds - id
             if (fileTransferJob == kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]) {
                 fileTransferJob = null
@@ -2031,6 +2056,9 @@ fun ChatSection(
             }
         }
     }
+    if (showingStats) {
+        chats.firstOrNull { it.str("id") == openId }?.let { chat -> ChatStatsDialog(model, peer, chat) { showingStats = false } }
+    }
     if (showingSetup) {
         val id = openId
         if (id != null) {
@@ -2356,6 +2384,7 @@ private fun ChatSetupDialog(
                 TsSecondaryButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, small = true, onClick = onDismiss)
             }
             if (error != null) Banner(error!!, BannerSeverity.DANGER)
+            if (chat != null) ChatStatsPanel(model, peer, chat)
             if (chat != null) {
                 ChatRoutingControls(chat, backends,
                     { method, params -> model.workspaceSection(peer, method, params) },
@@ -2954,6 +2983,7 @@ internal fun ChatComposer(
     val focus = LocalFocusManager.current
     TsCard(Modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            ChatCommandMenu(draft, onDraft)
             // Nothing can be sent right now, so the offer is to keep it. The
             // twin of the button `ClientChatComposer` shows over a saved copy.
             if (offline) {

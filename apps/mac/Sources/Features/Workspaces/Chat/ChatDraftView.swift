@@ -16,6 +16,7 @@ struct ChatDraftView: NSViewRepresentable {
     var placeholder: String
     var enabled: Bool
     var onSend: () -> Void
+    var onCommandKey: (UInt16) -> Bool = { _ in false }
     var onStop: () -> Void = {}
     var onPasteAttachments: () -> Void = {}
 
@@ -35,6 +36,7 @@ struct ChatDraftView: NSViewRepresentable {
         let textView = ChatDraftTextView()
         textView.delegate = context.coordinator
         textView.draftSend = { context.coordinator.requestSend() }
+        textView.commandKey = onCommandKey
         textView.draftStop = onStop
         textView.pasteAttachments = onPasteAttachments
         textView.placeholder = placeholder
@@ -91,6 +93,7 @@ struct ChatDraftView: NSViewRepresentable {
         context.coordinator.onStop = onStop
         context.coordinator.selection = $selection
         textView.draftSend = { context.coordinator.requestSend() }
+        textView.commandKey = onCommandKey
         textView.draftStop = onStop
         textView.pasteAttachments = onPasteAttachments
         textView.placeholder = placeholder
@@ -350,6 +353,8 @@ final class ChatDraftTextView: NSTextView {
         draftSend?()
     }
 
+    var commandKey: (UInt16) -> Bool = { _ in false }
+
     override func keyDown(with event: NSEvent) {
         // Return confirms marked text and Escape cancels composition. Let
         // the input method finish before treating either as a chat action.
@@ -359,6 +364,7 @@ final class ChatDraftTextView: NSTextView {
             super.keyDown(with: event)
             return
         }
+        if commandKey(event.keyCode) { return }
         // Return (36) and keypad Enter (76). Command+Return also sends.
         // Escape (53) stops a running turn.
         if event.keyCode == 36 || event.keyCode == 76 {
