@@ -19,9 +19,10 @@ extension ChatModel {
         fileRelayName = nil
         continuation?.resume(returning: answer)
     }
-    func updateFileProgress(_ progress: Double, name: String, reference: WorkReference, generation: UInt64? = nil) throws {
+    func updateFileProgress(_ progress: Double, name: String, reference: WorkReference, generation: UInt64? = nil, foreground: Bool = true) throws {
         guard currentReference == reference, WorkCacheAccess.canSave(reference), savedCopy == nil,
               generation == nil || generation == selectionGeneration else { throw CancellationError() }
+        guard foreground else { return }
         guard !fileTransferCancelled else { throw CancellationError() }
         fileTransferProgress = progress
         fileTransferName = name

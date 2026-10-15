@@ -4247,6 +4247,9 @@ final class ChatModel {
               userInitiated || !attemptedResponseAttachments.contains(attachment.id)
         else { return }
         guard let previewReference = currentReference, WorkCacheAccess.canRead(previewReference) else { return }
+        // Automatic previews have their own task and must not borrow an
+        // upload's progress, busy or cancellation state.
+        guard !userInitiated || !fileTransferInFlight else { return }
         let targetPeer = peer
         let memoryGeneration = attachmentCacheGeneration
         attemptedResponseAttachments.insert(attachment.id)
@@ -4293,15 +4296,22 @@ final class ChatModel {
         do {
             let data: Data
             if await RemoteHostFeature.chatRecovery.isSupported(peer: targetPeer) {
-                guard !fileTransferInFlight else { throw BridgeError.core(code: "file_transfer_busy", message: L10n.text("common.chat_files_busy")) }
-                fileTransferInFlight = true
-                fileTransferCancelled = false
-                defer { fileTransferName = nil; fileTransferInFlight = false }
+                if userInitiated {
+                    guard !fileTransferInFlight else {
+                        attemptedResponseAttachments.remove(attachment.id)
+                        return
+                    }
+                    fileTransferInFlight = true
+                    fileTransferCancelled = false
+                }
+                defer {
+                    if userInitiated { fileTransferName = nil; fileTransferInFlight = false }
+                }
                 let url = try await Bridge.downloadChatFile(id: id, attachmentID: attachment.id, peer: targetPeer,
                     confirmRelay: { [weak self] remaining in guard userInitiated else { return false }; return await self?.confirmFileRelay(name: attachment.name, size: attachment.size, remaining: remaining) ?? false },
                     progress: { [weak self] value in
                         guard let self else { throw CancellationError() }
-                        try await self.updateFileProgress(value, name: attachment.name, reference: previewReference, generation: generation)
+                        try await self.updateFileProgress(value, name: attachment.name, reference: previewReference, generation: generation, foreground: userInitiated)
                     })
                 guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference, WorkCacheAccess.canSave(previewReference), memoryGeneration == attachmentCacheGeneration else {
                     try? FileManager.default.removeItem(at: url); return
@@ -4330,9 +4340,16 @@ final class ChatModel {
             if currentReference == previewReference, WorkCacheAccess.canSave(previewReference) {
                 await WorkSavedPreview.save(reference: previewReference, attachment: attachment, data: data)
             }
+        } catch is CancellationError {
+            // Navigation, Cancel and declined relay consent are not broken
+            // files. Keep the card available for an explicit download.
         } catch {
             guard !Task.isCancelled, selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
                   currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
+            if case BridgeError.core(code: "file_transfer_busy", message: _) = error {
+                attemptedResponseAttachments.remove(attachment.id)
+                return
+            }
             responseAttachmentErrors[attachment.id] = Self.downloadFailure(error)
         }
     }

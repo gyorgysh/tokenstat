@@ -112,8 +112,8 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
     var responseAttachmentFiles: [String: URL] = [:]
     var fileTransferInFlight = false, fileTransferCancelled = false, fileTransferName: String?
     func confirmFileRelay(name: String, size: UInt64?, remaining: UInt64? = nil) async -> Bool { false }
-    func updateFileProgress(_ value: Double, name: String, reference: Reference, generation: UInt64? = nil) throws {
-        guard !fileTransferCancelled, currentReference == reference, WorkCacheAccess.canSave(reference), generation == nil || selectionGeneration == generation else { throw CancellationError() }
+    func updateFileProgress(_ value: Double, name: String, reference: Reference, generation: UInt64? = nil, foreground: Bool = true) throws {
+        guard (!foreground || !fileTransferCancelled), currentReference == reference, WorkCacheAccess.canSave(reference), generation == nil || selectionGeneration == generation else { throw CancellationError() }
     }
     var conversationUsage: Usage?, usageThrough: UInt64?
     var deliveringSteer: String?, deliveringSteerToken: UInt64?
