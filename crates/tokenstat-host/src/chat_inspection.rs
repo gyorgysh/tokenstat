@@ -111,14 +111,13 @@ fn names(value: &Value) -> Option<Vec<String>> {
             .filter_map(name)
             .take(ITEMS)
             .collect()
-    } else if let Some(items) = value.as_object() {
+    } else {
+        let items = value.as_object()?;
         items
             .keys()
             .filter_map(|key| name(key))
             .take(ITEMS)
             .collect()
-    } else {
-        return None;
     };
     names.sort();
     names.dedup();
@@ -215,18 +214,16 @@ impl Snapshot {
                     .collect();
             }
         }
-        if muse_model {
-            if let Some(event) = value.pointer("/payload/event") {
-                self.model = event["model"]
-                    .as_str()
-                    .and_then(name)
-                    .or_else(|| self.model.clone());
-                // Muse includes cache reads and writes in input_tokens.
-                if let Some(used) = prompt_tokens(&event["usage"], false) {
-                    self.context_used = Some(used);
-                    self.context_breakdown = prompt_breakdown(&event["usage"], false);
-                    self.context_source = Some("lastInput".into());
-                }
+        if muse_model && let Some(event) = value.pointer("/payload/event") {
+            self.model = event["model"]
+                .as_str()
+                .and_then(name)
+                .or_else(|| self.model.clone());
+            // Muse includes cache reads and writes in input_tokens.
+            if let Some(used) = prompt_tokens(&event["usage"], false) {
+                self.context_used = Some(used);
+                self.context_breakdown = prompt_breakdown(&event["usage"], false);
+                self.context_source = Some("lastInput".into());
             }
         }
         if agy_init {
@@ -255,30 +252,29 @@ impl Snapshot {
                 self.context_window = Some(window);
             }
         }
-        if kind == "tokenstat.mcp" {
-            if let Some(servers) = value["servers"].as_array() {
-                self.mcp_reported = true;
-                self.inventory_partial |=
-                    value["inventoryPartial"] == true || servers.len() > SERVERS;
-                for server in servers.iter().take(SERVERS) {
-                    self.inventory_partial |= oversized(&server["tools"], SERVER_TOOLS);
-                    let Some(server_name) = server["name"].as_str().and_then(name) else {
-                        continue;
-                    };
-                    let entry = Server {
-                        name: server_name.clone(),
-                        status: status(server["runtimeStatus"].as_str()),
-                        source: "agent".into(),
-                        tools: server_names(&server["tools"]),
-                    };
-                    if let Some(old) = self.mcp_servers.iter_mut().find(|s| s.name == server_name) {
-                        let tools = entry.tools.or_else(|| old.tools.clone());
-                        *old = Server { tools, ..entry };
-                    } else if self.mcp_servers.len() < SERVERS {
-                        self.mcp_servers.push(entry);
-                    } else {
-                        self.inventory_partial = true;
-                    }
+        if kind == "tokenstat.mcp"
+            && let Some(servers) = value["servers"].as_array()
+        {
+            self.mcp_reported = true;
+            self.inventory_partial |= value["inventoryPartial"] == true || servers.len() > SERVERS;
+            for server in servers.iter().take(SERVERS) {
+                self.inventory_partial |= oversized(&server["tools"], SERVER_TOOLS);
+                let Some(server_name) = server["name"].as_str().and_then(name) else {
+                    continue;
+                };
+                let entry = Server {
+                    name: server_name.clone(),
+                    status: status(server["runtimeStatus"].as_str()),
+                    source: "agent".into(),
+                    tools: server_names(&server["tools"]),
+                };
+                if let Some(old) = self.mcp_servers.iter_mut().find(|s| s.name == server_name) {
+                    let tools = entry.tools.or_else(|| old.tools.clone());
+                    *old = Server { tools, ..entry };
+                } else if self.mcp_servers.len() < SERVERS {
+                    self.mcp_servers.push(entry);
+                } else {
+                    self.inventory_partial = true;
                 }
             }
         }
@@ -290,37 +286,38 @@ impl Snapshot {
             ("opencode" | "opencode2", "step_finish") => value.pointer("/part/tokens"),
             _ => None,
         };
-        if let Some(usage) = usage {
-            if let Some(used) = prompt_tokens(
+        if let Some(usage) = usage
+            && let Some(used) = prompt_tokens(
                 usage,
                 matches!(backend, "claude" | "opencode" | "opencode2"),
-            ) {
-                self.context_used = Some(used);
-                self.context_source = Some("lastInput".into());
-                self.context_breakdown = prompt_breakdown(
-                    usage,
-                    matches!(backend, "claude" | "opencode" | "opencode2"),
-                );
-            }
+            )
+        {
+            self.context_used = Some(used);
+            self.context_source = Some("lastInput".into());
+            self.context_breakdown = prompt_breakdown(
+                usage,
+                matches!(backend, "claude" | "opencode" | "opencode2"),
+            );
         }
-        if backend == "claude" && kind == "result" {
-            if let Some(models) = value["modelUsage"].as_object() {
-                // Mixed-model turns do not have a single unambiguous window.
-                let selected = self
-                    .model
-                    .as_ref()
-                    .and_then(|model| models.get(model))
-                    .or_else(|| {
-                        (models.len() == 1)
-                            .then(|| models.values().next())
-                            .flatten()
-                    });
-                if let Some(window) = selected
-                    .and_then(|v| v["contextWindow"].as_u64())
-                    .filter(|n| *n > 0)
-                {
-                    self.context_window = Some(window);
-                }
+        if backend == "claude"
+            && kind == "result"
+            && let Some(models) = value["modelUsage"].as_object()
+        {
+            // Mixed-model turns do not have a single unambiguous window.
+            let selected = self
+                .model
+                .as_ref()
+                .and_then(|model| models.get(model))
+                .or_else(|| {
+                    (models.len() == 1)
+                        .then(|| models.values().next())
+                        .flatten()
+                });
+            if let Some(window) = selected
+                .and_then(|v| v["contextWindow"].as_u64())
+                .filter(|n| *n > 0)
+            {
+                self.context_window = Some(window);
             }
         }
         *self != previous

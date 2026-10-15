@@ -32,6 +32,18 @@ impl Store {
         created_at: i64,
         revision: u64,
     ) -> Result<Conversation, DispatchError> {
+        self.steer_send_with_attachments(id, text, &[], client_id, created_at, revision)
+    }
+
+    pub fn steer_send_with_attachments(
+        &self,
+        id: &str,
+        text: &str,
+        attachment_ids: &[String],
+        client_id: &str,
+        created_at: i64,
+        revision: u64,
+    ) -> Result<Conversation, DispatchError> {
         validate_record_id(id)?;
         if !crate::chat_receipts::valid_id(client_id) {
             return Err("that clientMessageId is not usable".into());
@@ -41,14 +53,23 @@ impl Store {
         crate::workspace_policy::require_current_access()?;
         let chat = self.current_send_conversation(id)?;
         let text = text.trim();
-        if text.is_empty() || text.chars().count() > STEER_NOTE_MAX_CHARS || text.starts_with('/') {
+        if (text.is_empty() && attachment_ids.is_empty())
+            || text.chars().count() > STEER_NOTE_MAX_CHARS
+            || text.starts_with('/')
+        {
             return Err(
-                "Steer needs a short text message, without attachments or slash commands.".into(),
+                "Steer needs a short message or attachments, without slash commands.".into(),
             );
+        }
+        if attachment_ids.len() > 20 {
+            return Err("a message can have at most 20 attachments".into());
         }
         let key =
             crate::chat_receipts::key(crate::request_context::remote_peer().as_deref(), client_id);
-        let digest = format!("{}:steer", crate::chat_receipts::digest(text, &[]));
+        let digest = format!(
+            "{}:steer",
+            crate::chat_receipts::digest(text, attachment_ids)
+        );
         let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms())
             .map_err(DispatchError::delivery_unknown)?;
         if let Some(receipt) = ledger.get(&key) {
@@ -72,6 +93,18 @@ impl Store {
         }
         let (pty, live) = self.native_steer(id).filter(|_| chat.running)
             .ok_or_else(|| DispatchError::new("steer_unavailable", "This turn cannot accept live input now. Your message is saved; send it after the turn finishes."))?;
+        let attachments = self.attachment_paths(id, attachment_ids)?;
+        let prompt = if text.is_empty() {
+            "Review the attached files."
+        } else {
+            text
+        };
+        let input = crate::chat_turn::user_text(prompt, &attachments, &chat.backend);
+        let images: Vec<_> = attachments
+            .iter()
+            .filter(|path| crate::chat_turn::native_attachment(&chat.backend, path))
+            .cloned()
+            .collect();
         self.write_receipt(
             id,
             &key,
@@ -90,7 +123,7 @@ impl Store {
                 .map_err(DispatchError::delivery_unknown)?;
             return Err(error);
         }
-        match live.steer(&pty, text) {
+        match live.steer(&pty, &input, &images) {
             Ok(()) => {}
             Err(crate::chat_live::SteerError::Refused(error)) => {
                 self.drop_receipt(id, &key)
@@ -111,6 +144,17 @@ impl Store {
             },
         )
         .map_err(DispatchError::delivery_unknown)?;
+        for (attachment_id, path) in attachment_ids.iter().zip(&attachments) {
+            self.append(
+                id,
+                &StoredEvent::Agent {
+                    event: attachment_event(attachment_id, path),
+                    at_ms,
+                    backend: chat.backend.clone(),
+                },
+            )
+            .map_err(DispatchError::delivery_unknown)?;
+        }
         OpenOptions::new()
             .read(true)
             .open(self.events_path(id))

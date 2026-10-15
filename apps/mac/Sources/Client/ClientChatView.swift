@@ -1045,19 +1045,21 @@ struct ClientChatThread: View {
                 if !model.pendingQueue.isEmpty {
                     let queueOwner = model.currentReference
                     let queueCanSteer = model.busy && model.selected?.nativeSteer == true
+                    let queueCanSteerAttachments = model.selected?.nativeSteerAttachments == true
                     ChatQueueStrip(
                         items: model.pendingQueue,
                         owner: queueOwner,
                         paused: model.queuePaused,
                         offline: model.savedCopy != nil,
                         canSteer: queueCanSteer,
+                        canSteerAttachments: queueCanSteerAttachments,
                         onChange: { item, text in model.updateQueued(item, text: text, owner: queueOwner) },
                         onRemove: { model.removeQueued($0, owner: queueOwner) },
                         onSendNow: { item in
                             showNewest()
                             resumeLatest()
                             followPulse += 1
-                            Task { await model.sendNow(item, owner: queueOwner, steerOnly: queueCanSteer && item.attachments.isEmpty && !item.text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")) }
+                            Task { await model.sendNow(item, owner: queueOwner, steerOnly: queueCanSteer && (item.attachments.isEmpty || queueCanSteerAttachments) && !item.text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")) }
                         },
                         onMove: { model.moveQueued(from: $0, to: $1, owner: queueOwner) }
                     )
@@ -1080,7 +1082,7 @@ struct ClientChatThread: View {
                     running: model.busy,
                     sendsAsNote: model.sendsAsNote,
                     placeholder: model.sendsAsNote
-                        ? L10n.text("apple.clientchatview.add_a_note_for_the_next_step.4778177a")
+                        ? (model.selected?.nativeSteer == true ? L10n.text("common.chat.steer_placeholder") : L10n.text("apple.clientchatview.add_a_note_for_the_next_step.4778177a"))
                         : (model.busy
                             ? L10n.text("apple.clientchatview.send_after_this_turn.012fc8c3")
                             : L10n.text("apple.clientchatview.ask_about_0.35c322e7", "\(folderName.isEmpty ? L10n.text("apple.clientchatview.this_folder.9d6325c8") : folderName)")),

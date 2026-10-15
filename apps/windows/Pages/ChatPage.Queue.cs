@@ -62,7 +62,7 @@ internal sealed partial class ChatPage
                 }
                 else
                 {
-                    var steerForItem = Busy() && Format.Flag(_openChat, "nativeSteer") && item.Attachments.Length == 0 && !item.Text.TrimStart().StartsWith("/", StringComparison.Ordinal);
+                    var steerForItem = Busy() && Format.Flag(_openChat, "nativeSteer") && (item.Attachments.Length == 0 || Format.Flag(_openChat, "nativeSteerAttachments")) && !item.Text.TrimStart().StartsWith("/", StringComparison.Ordinal);
                     actions.Children.Add(ActionIconGlyph.Button(steerForItem ? L10n.Text("common.chat.steer") : L10n.Text("common.chat_send_latest"), ActionIcon.Run, async (_, _) =>
                     {
                         try

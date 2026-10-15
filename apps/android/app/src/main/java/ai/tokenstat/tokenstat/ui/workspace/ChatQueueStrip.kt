@@ -68,6 +68,7 @@ fun ChatQueueStrip(
     paused: Boolean,
     offline: Boolean,
     canSteer: Boolean = false,
+    canSteerAttachments: Boolean = false,
     onChange: (QueuedMessage, String) -> Unit,
     onRemove: (QueuedMessage) -> Unit,
     onSendNow: (QueuedMessage) -> Unit,
@@ -111,6 +112,7 @@ fun ChatQueueStrip(
                 compact = true,
                 offline = offline,
                 canSteer = canSteer,
+                canSteerAttachments = canSteerAttachments,
                 onChange = { onChange(next, it) },
                 onRemove = { onRemove(next) },
                 onSendNow = { onSendNow(next) },
@@ -121,7 +123,8 @@ fun ChatQueueStrip(
         ChatPendingSheet(
             items = items,
             offline = offline,
-                canSteer = canSteer,
+            canSteer = canSteer,
+            canSteerAttachments = canSteerAttachments,
             onChange = onChange,
             onRemove = onRemove,
             onSendNow = onSendNow,
@@ -140,6 +143,7 @@ private fun ChatPendingSheet(
     items: List<QueuedMessage>,
     offline: Boolean,
     canSteer: Boolean = false,
+    canSteerAttachments: Boolean = false,
     onChange: (QueuedMessage, String) -> Unit,
     onRemove: (QueuedMessage) -> Unit,
     onSendNow: (QueuedMessage) -> Unit,
@@ -212,7 +216,8 @@ private fun ChatPendingSheet(
                             item = item,
                             compact = false,
                             offline = offline,
-                canSteer = canSteer,
+                            canSteer = canSteer,
+                            canSteerAttachments = canSteerAttachments,
                             onChange = { onChange(item, it) },
                             onRemove = { onRemove(item) },
                             onSendNow = { onSendNow(item) },
@@ -238,6 +243,7 @@ private fun ChatQueueRow(
     compact: Boolean,
     offline: Boolean,
     canSteer: Boolean = false,
+    canSteerAttachments: Boolean = false,
     onChange: (String) -> Unit,
     onRemove: () -> Unit,
     onSendNow: () -> Unit,
@@ -303,7 +309,7 @@ private fun ChatQueueRow(
                 label = when {
                     item.needsReceipt -> L10n.text("android.chatqueuestrip.check_delivery.b8e3662d")
                     item.delivery == ChatDelivery.NeedsReview -> L10n.text("common.chat_send_latest")
-                    canSteer && item.attachments.isEmpty() && !item.text.trimStart().startsWith("/") -> L10n.text("common.chat.steer")
+                    canSteer && (item.attachments.isEmpty() || canSteerAttachments) && !item.text.trimStart().startsWith("/") -> L10n.text("common.chat.steer")
                     else -> L10n.text("android.chatqueuestrip.send_now.58803287")
                 },
                 icon = if (item.delivery == ChatDelivery.NeedsReview) {

@@ -2716,6 +2716,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var pendingSteer: String?
     /// Volatile capability from the host: this exact running CLI accepts live input.
     var nativeSteer: Bool? = nil
+    var nativeSteerAttachments: Bool? = nil
     var routing: ChatRoutingState? = nil
     /// The branch the conversation's last turn started or ended on, and
     /// the pull request the host last saw for it. Both absent on a host
@@ -2748,7 +2749,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case personaID = "personaId"
         case model, effort, fastMode, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
-        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, runRevision, runStartedAtMs, pendingSteer, nativeSteer
+        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, runRevision, runStartedAtMs, pendingSteer, nativeSteer, nativeSteerAttachments
         case branch, pull, routing
     }
 
@@ -2780,6 +2781,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         routing = try? c.decodeIfPresent(ChatRoutingState.self, forKey: .routing)
         pendingSteer = try c.decodeIfPresent(String.self, forKey: .pendingSteer)
         nativeSteer = try c.decodeIfPresent(Bool.self, forKey: .nativeSteer)
+        nativeSteerAttachments = try c.decodeIfPresent(Bool.self, forKey: .nativeSteerAttachments)
         branch = try c.decodeIfPresent(String.self, forKey: .branch)
         // Decoration: a pull request shape this client cannot read must not
         // cost it the conversation.
@@ -2814,6 +2816,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         try c.encodeIfPresent(routing, forKey: .routing)
         try c.encodeIfPresent(pendingSteer, forKey: .pendingSteer)
         try c.encodeIfPresent(nativeSteer, forKey: .nativeSteer)
+        try c.encodeIfPresent(nativeSteerAttachments, forKey: .nativeSteerAttachments)
         try c.encodeIfPresent(branch, forKey: .branch)
         try c.encodeIfPresent(pull, forKey: .pull)
     }

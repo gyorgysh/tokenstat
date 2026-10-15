@@ -7,6 +7,8 @@ struct ChatContextCard: View {
     @Bindable var model: ChatModel
     @State private var inspection: ChatInspection?
     @State private var loaded = false
+    @State private var contextOpen = false
+    @State private var serversOpen = false
     @State private var otherServersOpen = false
     @State private var inspectedOwner: Owner?
 
@@ -33,6 +35,8 @@ struct ChatContextCard: View {
             inspection = nil
             loaded = false
             inspectedOwner = requested
+            contextOpen = false
+            serversOpen = false
             otherServersOpen = false
             guard !requested.saved, let id = requested.reference?.itemID else { loaded = true; return }
             let peer = model.peer
@@ -56,7 +60,7 @@ struct ChatContextCard: View {
     }
 
     private var context: some View {
-        card(L10n.text("common.chat.stats"), symbol: "chart.pie", showsStatus: true) {
+        card(L10n.text("common.chat.stats"), symbol: "chart.pie", expanded: $contextOpen, showsStatus: true) {
             if let inspection = currentInspection {
                 if let resolved = inspection.model {
                     Text(resolved).font(Theme.callout.weight(.medium)).textSelection(.enabled)
@@ -77,7 +81,7 @@ struct ChatContextCard: View {
                             .accessibilityLabel(L10n.text("apple.chatcontext.context"))
                             .accessibilityValue(fraction.formatted(.percent.precision(.fractionLength(0))))
                     }
-                    note(L10n.text("apple.chatcontext.last_prompt"))
+                    if contextOpen { note(L10n.text("apple.chatcontext.last_prompt")) }
                 } else {
                     note(L10n.text("apple.chatcontext.context_unknown"))
                     if let window = inspection.contextWindow {
@@ -85,35 +89,39 @@ struct ChatContextCard: View {
                             .font(Theme.callout).monospacedDigit()
                     }
                 }
-                if inspection.windowSource == "catalog" { note(L10n.text("apple.chatcontext.catalog_window")) }
-                if let breakdown = inspection.contextBreakdown {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(L10n.text("common.chat.stats.last_prompt")).font(Theme.caption.weight(.medium))
-                        promptRow(L10n.text("common.chat.stats.input"), value: breakdown.input)
-                        promptRow(L10n.text("common.chat.stats.cache_read"), value: breakdown.cacheRead)
-                        promptRow(L10n.text("common.chat.stats.cache_write"), value: breakdown.cacheWrite)
-                        note(L10n.text("common.chat.stats.prompt_note"))
+                if contextOpen {
+                    if inspection.windowSource == "catalog" { note(L10n.text("apple.chatcontext.catalog_window")) }
+                    if let breakdown = inspection.contextBreakdown {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(L10n.text("common.chat.stats.last_prompt")).font(Theme.caption.weight(.medium))
+                            promptRow(L10n.text("common.chat.stats.input"), value: breakdown.input)
+                            promptRow(L10n.text("common.chat.stats.cache_read"), value: breakdown.cacheRead)
+                            promptRow(L10n.text("common.chat.stats.cache_write"), value: breakdown.cacheWrite)
+                            note(L10n.text("common.chat.stats.prompt_note"))
+                        }
                     }
-                }
-                if let history = inspection.contextHistory, history.count > 1 {
-                    ChatContextHistory(points: history)
-                }
-                if let tools = inspection.tools { toolList(tools, title: L10n.text("common.chat.stats.available_tools", tools.count.formatted())) }
-                if !inspection.usedTools.isEmpty { toolList(inspection.usedTools, title: L10n.text("apple.chatcontext.used_tools", inspection.usedTools.count.formatted())) }
-                if let stamp = inspection.observedAtMs {
-                    Text(L10n.text("apple.chatcontext.reported_at", Date(timeIntervalSince1970: Double(stamp) / 1000).formatted(date: .abbreviated, time: .shortened)))
-                        .font(Theme.caption).foregroundStyle(.tertiary)
+                    if let history = inspection.contextHistory, history.count > 1 {
+                        ChatContextHistory(points: history)
+                    }
+                    if let tools = inspection.tools { toolList(tools, title: L10n.text("common.chat.stats.available_tools", tools.count.formatted())) }
+                    if !inspection.usedTools.isEmpty { toolList(inspection.usedTools, title: L10n.text("apple.chatcontext.used_tools", inspection.usedTools.count.formatted())) }
+                    if let stamp = inspection.observedAtMs {
+                        Text(L10n.text("apple.chatcontext.reported_at", Date(timeIntervalSince1970: Double(stamp) / 1000).formatted(date: .abbreviated, time: .shortened)))
+                            .font(Theme.caption).foregroundStyle(.tertiary)
+                    }
                 }
             } else {
                 unavailable
             }
-            Divider().overlay(Theme.border)
-            ChatCostMeter(totals: model.turnUsage)
+            if contextOpen {
+                Divider().overlay(Theme.border)
+                ChatCostMeter(totals: model.turnUsage)
+            }
         }
     }
 
     private var servers: some View {
-        card(L10n.text("apple.chatcontext.mcp_servers"), symbol: "puzzlepiece.extension") {
+        card(L10n.text("apple.chatcontext.mcp_servers"), symbol: "puzzlepiece.extension", expanded: $serversOpen) {
             if let inspection = currentInspection {
                 if inspection.mcpServers.isEmpty {
                     if inspection.mcpReported && inspection.inventoryPartial == true {
@@ -125,13 +133,18 @@ struct ChatContextCard: View {
                     let connected = inspection.mcpServers.filter { $0.source == "agent" && $0.status == "connected" }
                     let others = inspection.mcpServers.filter { $0.source != "agent" || $0.status != "connected" }
                     if !connected.isEmpty {
-                        Text(L10n.text("common.chat.stats.connected_servers", connected.count.formatted()))
+                        Text(inspection.currentRun == true && model.selected?.running == true ? L10n.text("common.chat.stats.live_servers", connected.count.formatted()) : L10n.text("common.chat.stats.connected_servers", connected.count.formatted()))
                             .font(Theme.caption).foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(connected) { server in serverRow(server) }
+                        if serversOpen {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(connected) { server in serverRow(server) }
+                            }
                         }
                     }
-                    if !others.isEmpty {
+                    if !serversOpen && !others.isEmpty {
+                        note(L10n.text("common.chat.stats.other_servers", others.count.formatted()))
+                    }
+                    if serversOpen && !others.isEmpty {
                         ChatDisclosureRow(title: L10n.text("common.chat.stats.other_servers", others.count.formatted()), expanded: $otherServersOpen)
                         if otherServersOpen {
                             VStack(alignment: .leading, spacing: 0) {
@@ -140,11 +153,13 @@ struct ChatContextCard: View {
                         }
                     }
                 }
-                if inspection.inventoryPartial == true { note(L10n.text("apple.chatcontext.inventory_partial")) }
-                if inspection.mcpServers.contains(where: { $0.source == "configuration" }) {
-                    note(L10n.text("apple.chatcontext.configuration_note"))
-                } else if inspection.mcpReported {
-                    note(L10n.text("apple.chatcontext.connection_note"))
+                if serversOpen {
+                    if inspection.inventoryPartial == true { note(L10n.text("apple.chatcontext.inventory_partial")) }
+                    if inspection.mcpServers.contains(where: { $0.source == "configuration" }) {
+                        note(L10n.text("apple.chatcontext.configuration_note"))
+                    } else if inspection.mcpReported {
+                        note(L10n.text("apple.chatcontext.connection_note"))
+                    }
                 }
             } else {
                 unavailable
@@ -197,21 +212,21 @@ struct ChatContextCard: View {
     }
 
     private func serverRow(_ server: ChatInspection.Server) -> some View {
-        let reportedConnected = server.source == "agent" && server.status == "connected"
+        let name = server.name.replacingOccurrences(of: "plugin:", with: "").replacingOccurrences(of: ":", with: " · ")
+        let connected = server.source == "agent" && server.status == "connected"
+        let live = currentInspection?.hasLiveConnection(server, running: model.selected?.running == true) == true
         return VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
-                Circle().fill(reportedConnected ? Theme.accent : Color.secondary)
+                Circle().fill(live ? Theme.accent : connected ? Theme.accent.opacity(0.45) : Color.secondary)
                     .frame(width: 7, height: 7).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(server.name.replacingOccurrences(of: "plugin:", with: "").replacingOccurrences(of: ":", with: " · "))
+                    Text(name)
                         .font(Theme.callout.weight(.medium)).textSelection(.enabled)
-                        .accessibilityValue(status(server))
-                    if !reportedConnected {
-                        Text(status(server)).font(Theme.caption).foregroundStyle(.secondary)
-                    }
+                    Text(status(server)).font(Theme.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-            }.frame(minHeight: 28)
+            }.frame(minHeight: 28).accessibilityElement(children: .ignore)
+                .accessibilityLabel(name).accessibilityValue(status(server))
             if let tools = server.tools, !tools.isEmpty {
                 toolList(tools, title: L10n.text("apple.chatcontext.server_tools", tools.count.formatted()))
             }
@@ -228,19 +243,25 @@ struct ChatContextCard: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func card<Content: View>(_ title: String, symbol: String, showsStatus: Bool = false, @ViewBuilder content: () -> Content) -> some View {
+    private func card<Content: View>(_ title: String, symbol: String, expanded: Binding<Bool>, showsStatus: Bool = false, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(alignment: .firstTextBaseline) {
-                Label(title, systemImage: symbol).font(Theme.callout.weight(.semibold))
-                if showsStatus {
+            Button { expanded.wrappedValue.toggle() } label: {
+                HStack(alignment: .firstTextBaseline) {
+                    Label(title, systemImage: symbol).font(Theme.callout.weight(.semibold))
                     Spacer(minLength: 8)
-                    Text(model.selected?.running == true ? L10n.text("common.running") : L10n.text("common.idle"))
-                        .font(Theme.caption.weight(.medium)).fixedSize()
-                        .foregroundStyle(model.selected?.running == true ? Theme.accent : Color.secondary)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Theme.accentSoft, in: Capsule())
+                    if showsStatus {
+                        Text(model.selected?.running == true ? L10n.text("common.running") : L10n.text("common.idle"))
+                            .font(Theme.caption.weight(.medium)).fixedSize()
+                            .foregroundStyle(model.selected?.running == true ? Theme.accent : Color.secondary)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Theme.accentSoft, in: Capsule())
+                    }
+                    Image(systemName: expanded.wrappedValue ? "chevron.up" : "chevron.down").font(Theme.caption).foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded.wrappedValue ? L10n.text("common.collapse") : L10n.text("common.expand"))
             content()
         }
         .padding(Theme.Space.m)

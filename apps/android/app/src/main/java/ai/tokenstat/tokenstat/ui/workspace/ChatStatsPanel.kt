@@ -107,8 +107,10 @@ internal fun chatCommands() = listOf(
             }
         }
     }
+    var contextOpen by remember(peer, id, backend, requestedModel) { mutableStateOf(false) }
+    var serversOpen by remember(peer, id, backend, requestedModel) { mutableStateOf(false) }
     val data = inspection
-    StatsCard(L10n.text("common.chat.stats"), status = if (chat.bol("running")) L10n.text("common.running") else L10n.text("common.idle")) {
+    StatsCard(L10n.text("common.chat.stats"), expanded = contextOpen, onToggle = { contextOpen = !contextOpen }, status = if (chat.bol("running")) L10n.text("common.running") else L10n.text("common.idle")) {
         if (data == null) {
             if (!loaded) CircularProgressIndicator(Modifier.size(20.dp))
             else Text(L10n.text("common.chat.stats.unavailable"))
@@ -132,62 +134,67 @@ internal fun chatCommands() = listOf(
                     val fraction = (used / window).coerceIn(0.0, 1.0).toFloat()
                     LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth(), color = LocalTsColors.current.accent)
                 }
-                Text(L10n.text("common.chat.stats.context"), style = MaterialTheme.typography.bodySmall)
+                if (contextOpen) Text(L10n.text("common.chat.stats.context"), style = MaterialTheme.typography.bodySmall)
             } else Text(L10n.text("common.chat.stats.no_data"), style = MaterialTheme.typography.bodySmall)
-            (data["contextBreakdown"] as? JsonObject)?.let { split ->
-                Text(L10n.text("common.chat.stats.last_prompt"), fontWeight = FontWeight.Medium)
-                StatRow(L10n.text("common.chat.stats.input"), number(split["input"]?.jsonPrimitive?.doubleOrNull ?: 0.0))
-                StatRow(L10n.text("common.chat.stats.cache_read"), number(split["cacheRead"]?.jsonPrimitive?.doubleOrNull ?: 0.0))
-                StatRow(L10n.text("common.chat.stats.cache_write"), number(split["cacheWrite"]?.jsonPrimitive?.doubleOrNull ?: 0.0))
-                Text(L10n.text("common.chat.stats.prompt_note"), style = MaterialTheme.typography.bodySmall)
-            }
-            if (data.str("windowSource") == "catalog") Text(L10n.text("common.chat.stats.catalog_window"), style = MaterialTheme.typography.bodySmall)
-            val history = (data["contextHistory"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("tokens")?.jsonPrimitive?.doubleOrNull }
-            if (history.size > 1) {
-                Text(L10n.text("common.chat.stats.history"), style = MaterialTheme.typography.bodySmall)
-                val color = LocalTsColors.current.accent
-                Canvas(Modifier.fillMaxWidth().height(48.dp)) {
-                    val peak = history.max().coerceAtLeast(1.0)
-                    history.zipWithNext().forEachIndexed { index, (a, b) ->
-                        drawLine(color, Offset(size.width * index / (history.size - 1), size.height * (1 - a / peak).toFloat()),
-                            Offset(size.width * (index + 1) / (history.size - 1), size.height * (1 - b / peak).toFloat()), strokeWidth = 2.dp.toPx())
+            if (contextOpen) {
+                (data["contextBreakdown"] as? JsonObject)?.let { split ->
+                    Text(L10n.text("common.chat.stats.last_prompt"), fontWeight = FontWeight.Medium)
+                    StatRow(L10n.text("common.chat.stats.input"), number(split["input"]?.jsonPrimitive?.doubleOrNull ?: 0.0))
+                    StatRow(L10n.text("common.chat.stats.cache_read"), number(split["cacheRead"]?.jsonPrimitive?.doubleOrNull ?: 0.0))
+                    StatRow(L10n.text("common.chat.stats.cache_write"), number(split["cacheWrite"]?.jsonPrimitive?.doubleOrNull ?: 0.0))
+                    Text(L10n.text("common.chat.stats.prompt_note"), style = MaterialTheme.typography.bodySmall)
+                }
+                if (data.str("windowSource") == "catalog") Text(L10n.text("common.chat.stats.catalog_window"), style = MaterialTheme.typography.bodySmall)
+                val history = (data["contextHistory"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("tokens")?.jsonPrimitive?.doubleOrNull }
+                if (history.size > 1) {
+                    Text(L10n.text("common.chat.stats.history"), style = MaterialTheme.typography.bodySmall)
+                    val color = LocalTsColors.current.accent
+                    Canvas(Modifier.fillMaxWidth().height(48.dp)) {
+                        val peak = history.max().coerceAtLeast(1.0)
+                        history.zipWithNext().forEachIndexed { index, (a, b) ->
+                            drawLine(color, Offset(size.width * index / (history.size - 1), size.height * (1 - a / peak).toFloat()),
+                                Offset(size.width * (index + 1) / (history.size - 1), size.height * (1 - b / peak).toFloat()), strokeWidth = 2.dp.toPx())
+                        }
                     }
+                    Text("${number(history.first())} → ${number(history.last())}", style = MaterialTheme.typography.bodySmall)
+                    Text(L10n.text("common.chat.stats.history_note"), style = MaterialTheme.typography.bodySmall)
                 }
-                Text("${number(history.first())} → ${number(history.last())}", style = MaterialTheme.typography.bodySmall)
-                Text(L10n.text("common.chat.stats.history_note"), style = MaterialTheme.typography.bodySmall)
-            }
-            (data["usage"] as? JsonObject)?.let { usage ->
-                HorizontalDivider()
-                Text(L10n.text("common.chat.stats.conversation"), fontWeight = FontWeight.SemiBold)
-                val values = listOf("input", "output", "cacheRead", "cacheWrite").map { usage[it]?.jsonPrimitive?.doubleOrNull?.coerceAtLeast(0.0) ?: 0.0 }
-                val labels = listOf(L10n.text("common.chat.stats.input"), L10n.text("common.chat.stats.output"), L10n.text("common.chat.stats.cache_read"), L10n.text("common.chat.stats.cache_write"))
-                val colors = listOf(LocalTsColors.current.accent, LocalTsColors.current.textSecondary, LocalTsColors.current.accent.copy(alpha = .5f), LocalTsColors.current.warning)
-                Row(Modifier.fillMaxWidth().height(8.dp)) {
-                    val total = values.sum().coerceAtLeast(1.0)
-                    values.forEachIndexed { index, value -> if (value > 0) Box(Modifier.weight((value / total).toFloat().coerceAtLeast(.00001f)).fillMaxHeight().background(colors[index])) }
+                (data["usage"] as? JsonObject)?.let { usage ->
+                    HorizontalDivider()
+                    Text(L10n.text("common.chat.stats.conversation"), fontWeight = FontWeight.SemiBold)
+                    val values = listOf("input", "output", "cacheRead", "cacheWrite").map { usage[it]?.jsonPrimitive?.doubleOrNull?.coerceAtLeast(0.0) ?: 0.0 }
+                    val labels = listOf(L10n.text("common.chat.stats.input"), L10n.text("common.chat.stats.output"), L10n.text("common.chat.stats.cache_read"), L10n.text("common.chat.stats.cache_write"))
+                    val colors = listOf(LocalTsColors.current.accent, LocalTsColors.current.textSecondary, LocalTsColors.current.accent.copy(alpha = .5f), LocalTsColors.current.warning)
+                    Row(Modifier.fillMaxWidth().height(8.dp)) {
+                        val total = values.sum().coerceAtLeast(1.0)
+                        values.forEachIndexed { index, value -> if (value > 0) Box(Modifier.weight((value / total).toFloat().coerceAtLeast(.00001f)).fillMaxHeight().background(colors[index])) }
+                    }
+                    UsageMetrics(labels, values, colors)
+                    val cost = usage["cost"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                    if (cost > 0) StatRow(L10n.text("common.chat.stats.cost"), NumberFormat.getCurrencyInstance(java.util.Locale.US).format(cost))
                 }
-                UsageMetrics(labels, values, colors)
-                val cost = usage["cost"]?.jsonPrimitive?.doubleOrNull ?: 0.0
-                if (cost > 0) StatRow(L10n.text("common.chat.stats.cost"), NumberFormat.getCurrencyInstance(java.util.Locale.US).format(cost))
+                tools(data["tools"])?.let { ToolGroups(it, L10n.text("common.chat.stats.available_tools", "${it.size}")) }
+                tools(data["usedTools"])?.takeIf { it.isNotEmpty() }?.let { ToolGroups(it, L10n.text("common.chat.stats.used_tools", "${it.size}")) }
+                if (data.bol("inventoryPartial")) Text(L10n.text("common.chat.stats.partial"), style = MaterialTheme.typography.bodySmall)
             }
-            tools(data["tools"])?.let { ToolGroups(it, L10n.text("common.chat.stats.available_tools", "${it.size}")) }
-            tools(data["usedTools"])?.takeIf { it.isNotEmpty() }?.let { ToolGroups(it, L10n.text("common.chat.stats.used_tools", "${it.size}")) }
-            if (data.bol("inventoryPartial")) Text(L10n.text("common.chat.stats.partial"), style = MaterialTheme.typography.bodySmall)
         }
     }
-    if (data != null) StatsCard(L10n.text("common.chat.stats.mcp_servers")) {
+    if (data != null) StatsCard(L10n.text("common.chat.stats.mcp_servers"), expanded = serversOpen, onToggle = { serversOpen = !serversOpen }) {
         val servers = (data["mcpServers"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
         val connected = servers.filter { it.str("source") == "agent" && it.str("status") == "connected" }
         val others = servers - connected.toSet()
-        if (connected.isNotEmpty()) Text(L10n.text("common.chat.stats.connected_servers", "${connected.size}"), style = MaterialTheme.typography.bodySmall)
+        if (connected.isNotEmpty()) Text(if (data.bol("currentRun") && chat.bol("running")) L10n.text("common.chat.stats.live_servers", "${connected.size}") else L10n.text("common.chat.stats.connected_servers", "${connected.size}"), style = MaterialTheme.typography.bodySmall)
         if (servers.isEmpty()) Text(L10n.text("common.chat.stats.no_servers"), style = MaterialTheme.typography.bodySmall)
-        if (connected.isNotEmpty()) Column {
-            connected.forEach { server -> key(server.str("name")) { ServerRow(server, data.bol("currentRun") && chat.bol("running")) } }
+        if (!serversOpen && others.isNotEmpty()) Text(L10n.text("common.chat.stats.other_servers", "${others.size}"), style = MaterialTheme.typography.bodySmall)
+        if (serversOpen) {
+            if (connected.isNotEmpty()) Column {
+                connected.forEach { server -> key(server.str("name")) { ServerRow(server, data.bol("currentRun") && chat.bol("running")) } }
+            }
+            if (others.isNotEmpty()) StatsDisclosure(L10n.text("common.chat.stats.other_servers", "${others.size}")) {
+                Column { others.forEach { server -> key(server.str("name")) { ServerRow(server, false) } } }
+            }
+            Text(L10n.text("common.chat.stats.reported"), style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary)
         }
-        if (others.isNotEmpty()) StatsDisclosure(L10n.text("common.chat.stats.other_servers", "${others.size}")) {
-            Column { others.forEach { server -> key(server.str("name")) { ServerRow(server, false) } } }
-        }
-        Text(L10n.text("common.chat.stats.reported"), style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary)
     }
 }
 
@@ -215,10 +222,10 @@ private fun toolGroup(name: String): String = if (name.startsWith("mcp__")) name
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.size(7.dp).background(if (connected) LocalTsColors.current.accent else LocalTsColors.current.textSecondary, CircleShape))
+            Box(Modifier.size(7.dp).background(if (connected && live) LocalTsColors.current.accent else if (connected) LocalTsColors.current.accent.copy(alpha = .45f) else LocalTsColors.current.textSecondary, CircleShape))
             Column(Modifier.weight(1f).semantics(mergeDescendants = true) { stateDescription = status }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(server.str("name").orEmpty().removePrefix("plugin:").replace(":", " · "), fontWeight = FontWeight.Medium)
-                if (!connected) Text(status, style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary)
+                Text(status, style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary)
             }
         }
         tools(server["tools"])?.takeIf { it.isNotEmpty() }?.let { ToolGroups(it, L10n.text("common.chat.stats.available_tools", "${it.size}")) }
@@ -259,13 +266,16 @@ internal fun serverStatus(status: String?, live: Boolean) = when (status) {
         }
     }
 }
-@Composable private fun StatsCard(title: String, status: String? = null, content: @Composable ColumnScope.() -> Unit) {
+@Composable private fun StatsCard(title: String, expanded: Boolean, onToggle: () -> Unit, status: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Surface(shape = RoundedCornerShape(12.dp), color = LocalTsColors.current.panel) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onToggle)
+                .semantics { stateDescription = L10n.text(if (expanded) "common.collapse" else "common.expand") },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                 if (status != null) Text(status, style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary,
                     modifier = Modifier.background(LocalTsColors.current.accent.copy(alpha = .12f), CircleShape).padding(horizontal = 8.dp, vertical = 3.dp))
+                Text(if (expanded) "⌃" else "⌄")
             }
             content()
         }

@@ -1105,7 +1105,7 @@ fun ChatSection(
         // Only the CLI's own answer stops a send. A stored token past its
         // expiry is routine (the CLI renews it), and an agent signed in with
         // an environment key has no login file at all.
-        val liveInput = chat?.bol("running") == true && chat.bol("nativeSteer") && staged.isEmpty()
+        val liveInput = chat?.bol("running") == true && chat.bol("nativeSteer") && (staged.isEmpty() || chat.bol("nativeSteerAttachments"))
         if (!liveInput && selectedBackend?.bol("signInVerified") == true && selectedBackend.str("readiness") in listOf("needsSignIn", "expired")) {
             error = L10n.text("android.agentsetup.draft_kept", selectedBackend?.str("label") ?: "")
             return
@@ -1160,7 +1160,10 @@ fun ChatSection(
         try {
             // This explicit new intent can proceed while an older, uncertain
             // delivery remains available for review in Pending.
-            if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) deliver(item, stopCurrent = false)
+            // Keep the action chosen before upload: an ended turn must not
+            // turn a Steer tap into a new prompt or an interruption.
+            if (liveInput && !clean.startsWith("/")) deliver(item, stopCurrent = false, steerCurrent = true)
+            else if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) deliver(item, stopCurrent = false)
         } finally {
             deliveringFromComposer = null
         }
@@ -1198,7 +1201,7 @@ fun ChatSection(
         }
         authorized = authorized + item.id
         val chat = chats.firstOrNull { it.str("id") == id }
-        val steer = steerOnly || (chat?.bol("running") == true && chat.bol("nativeSteer") && candidate.attachments.isEmpty() && !candidate.text.trimStart().startsWith("/"))
+        val steer = steerOnly || (chat?.bol("running") == true && chat.bol("nativeSteer") && (candidate.attachments.isEmpty() || chat.bol("nativeSteerAttachments")) && !candidate.text.trimStart().startsWith("/"))
         deliver(candidate, stopCurrent = !steer, steerCurrent = steer)
     }
     LaunchedEffect(projectOwner) { loadChats() }
@@ -1792,7 +1795,7 @@ fun ChatSection(
                 TextButton(onClick = { setupError = null }) { Text(L10n.text("android.chatpullssections.dismiss.48845bff")) }
             }
             val runningTurn = openChat?.bol("running") == true
-            val noteForStep = (runningTurn && openChat?.bol("nativeSteer") == true && staged.isEmpty()) || ChatSteer.promisesNote(
+            val noteForStep = (runningTurn && openChat?.bol("nativeSteer") == true && (staged.isEmpty() || openChat.bol("nativeSteerAttachments"))) || ChatSteer.promisesNote(
                 runningTurn,
                 staged.isEmpty(),
                 openChat?.str("backend"),
@@ -1814,6 +1817,7 @@ fun ChatSection(
             ChatQueueStrip(
                 items = pendingQueue,
                 canSteer = runningTurn && openChat?.bol("nativeSteer") == true,
+                canSteerAttachments = openChat?.bol("nativeSteerAttachments") == true,
                 // Paused when the next message is not one this session was
                 // asked to send: a reopened queue waits to be told. Read
                 // from what the strip shows, so the in-flight send hiding
@@ -1837,7 +1841,7 @@ fun ChatSection(
                     }
                 },
                 onSendNow = { item ->
-                    val steerOnly = runningTurn && openChat?.bol("nativeSteer") == true && item.attachments.isEmpty() && !item.text.trimStart().startsWith("/")
+                    val steerOnly = runningTurn && openChat?.bol("nativeSteer") == true && (item.attachments.isEmpty() || openChat.bol("nativeSteerAttachments")) && !item.text.trimStart().startsWith("/")
                     scope.launch { sendNow(item, steerOnly = steerOnly) }
                 },
                 onMove = { from, to ->
@@ -1870,7 +1874,7 @@ fun ChatSection(
                 chat = chats.firstOrNull { it.str("id") == openId },
                 draft = draft,
                 onDraft = { draft = it },
-                hint = ChatHint.hint(folderName, sending || runningTurn, note = noteForStep),
+                hint = if (noteForStep && openChat?.bol("nativeSteer") == true) L10n.text("common.chat.steer_placeholder") else ChatHint.hint(folderName, sending || runningTurn, note = noteForStep),
                 sending = sending,
                 parking = parkingSteer,
                 sendLabel = if (noteForStep && openChat?.bol("nativeSteer") == true) L10n.text("common.chat.steer") else if (noteForStep) L10n.text("android.chatpullssections.add_a_note_for_the_next_step.4778177a") else L10n.text("android.chatpullssections.send.f6f4688f"),

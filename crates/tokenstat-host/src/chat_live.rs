@@ -128,7 +128,12 @@ impl Launch {
 
     /// Additional input goes to the existing CLI, never through interrupt or
     /// turn/start. A missing acknowledgement must never trigger a resend.
-    pub(crate) fn steer(&self, pty: &str, text: &str) -> Result<(), SteerError> {
+    pub(crate) fn steer(
+        &self,
+        pty: &str,
+        text: &str,
+        images: &[PathBuf],
+    ) -> Result<(), SteerError> {
         if !self.ready_for_steer() {
             return Err(SteerError::Refused(
                 "This agent is still starting. Try steering after its first step.".into(),
@@ -146,7 +151,7 @@ impl Launch {
         let response = self.directory.path().join(format!("response-{id}.json"));
         write_json(
             &request,
-            &json!({"id":id,"steer":text,"expires":now_ms()+10_000}),
+            &json!({"id":id,"steer":text,"images":images,"expires":now_ms()+10_000}),
         )
         .map_err(SteerError::Unknown)?;
         let until = Instant::now() + Duration::from_secs(10);
@@ -617,7 +622,14 @@ impl Protocol {
                     if self.backend == "claude" {
                         json!({"type":"user","uuid":uuid,"session_id":"","message":{"role":"user","content":[{"type":"text","text":text}]},"parent_tool_use_id":null})
                     } else {
-                        json!({"id":id,"method":"turn/steer","params":{"threadId":self.thread,"expectedTurnId":self.turn,"clientUserMessageId":uuid,"input":[{"type":"text","text":text}]}})
+                        let mut input = vec![json!({"type":"text","text":text})];
+                        if let Some(images) = request["images"].as_array() {
+                            for path in images {
+                                let path = path.as_str().ok_or("invalid steering image path")?;
+                                input.push(json!({"type":"localImage","path":path}));
+                            }
+                        }
+                        json!({"id":id,"method":"turn/steer","params":{"threadId":self.thread,"expectedTurnId":self.turn,"clientUserMessageId":uuid,"input":input}})
                     }
                 } else {
                     let fast = request["fast"].as_bool().ok_or("invalid speed request")?;

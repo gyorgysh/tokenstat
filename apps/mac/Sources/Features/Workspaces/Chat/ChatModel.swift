@@ -162,6 +162,8 @@ final class ChatModel {
     /// Only one message waits: a second is refused and its words stay in the
     /// draft, which is cleared only once the first is safely queued.
     func holdForSignIn(_ text: String, backend backendID: String) -> SignInHold {
+        if busy && selected?.nativeSteer == true && (attachments.isEmpty || nativeSteerAcceptsAttachments)
+            && !text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/") { return .notNeeded }
         guard needsSignIn(backendID) else { return .notNeeded }
         guard signInQueuedMessage == nil else {
             backendRefreshError = L10n.text("apple.agentsetup.finish_saved")
@@ -2356,7 +2358,7 @@ final class ChatModel {
                 queued = try ChatOutboxStore.shared.items(for: owner)
             } catch { self.error = L10n.text("apple.chatmodel.the_pending_message_changed_reopen_it_befo.3d158d7b"); return }
         }
-        let steer = steerOnly || (!forceStop && busy && selected?.nativeSteer == true && candidate.attachments.isEmpty && !candidate.text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"))
+        let steer = steerOnly || (!forceStop && busy && selected?.nativeSteer == true && (candidate.attachments.isEmpty || nativeSteerAcceptsAttachments) && !candidate.text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"))
         _ = await deliverQueued(candidate, stopCurrent: !steer, steerCurrent: steer)
     }
 
@@ -3022,8 +3024,12 @@ final class ChatModel {
     /// Local hosts are always current. A remote one only promises a note
     /// after a probe or a successful steer. Until then the placeholder stays
     /// the queue, and the send itself may still try.
+    var nativeSteerAcceptsAttachments: Bool {
+        selected?.nativeSteer == true && selected?.nativeSteerAttachments == true
+    }
+
     var sendsAsNote: Bool {
-        guard busy, attachments.isEmpty, stagingAttachments == 0, savedCopy == nil else { return false }
+        guard busy, (attachments.isEmpty || nativeSteerAcceptsAttachments), stagingAttachments == 0, savedCopy == nil else { return false }
         guard steerAutonomy, steerBackend else { return false }
         if selected?.nativeSteer == true { return true }
         if let peer, !peer.isEmpty { return remoteSteer == true }
@@ -3049,7 +3055,7 @@ final class ChatModel {
     /// enqueue the same words.
     func beginBusyNote(_ text: String) -> BusyNoteStart {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || !attachments.isEmpty || savedCopy != nil
+        if (trimmed.isEmpty && attachments.isEmpty) || (!attachments.isEmpty && !nativeSteerAcceptsAttachments) || savedCopy != nil
             || stagingAttachments > 0 || sending
             || !steerAutonomy || !steerBackend
             || (remoteSteer == false && selected?.nativeSteer != true) {
@@ -3061,7 +3067,7 @@ final class ChatModel {
         busyNoteSubmission = ChatDraftSubmission(
             conversationID: selected.id, peer: peer, scope: reference.scope,
             reference: reference, generation: selectionGeneration,
-            text: trimmed, draftText: draft, attachments: [],
+            text: trimmed, draftText: draft, attachments: attachments,
             messageID: draftMessageID, expectedRevision: contextRevision
         )
         let token = noteSendStarted()
@@ -3155,6 +3161,9 @@ final class ChatModel {
             }
             authorizedQueueItems.insert(messageID)
             if draft == submission.draftText && attachments == submission.attachments {
+                attachments = []
+                attachmentPreviews = [:]
+                missingDraftAttachments = []
                 clearDraft()
             } else {
                 ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference, newMessage: true)

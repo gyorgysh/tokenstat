@@ -2018,7 +2018,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (_opening) return;
         if (_openId is not string chat || _sending || _queueing || _fileTransfer is not null) return;
         if (await ConsumeCommandAsync()) return;
-        var liveInput = !sendNext && Busy() && Format.Flag(_openChat, "nativeSteer") && _attachments.Count == 0;
+        var liveInput = !sendNext && Busy() && Format.Flag(_openChat, "nativeSteer") && (_attachments.Count == 0 || Format.Flag(_openChat, "nativeSteerAttachments"));
         if (!liveInput && OpenBackendMissing()) return;
         var backend = Backend(Format.Text(_openChat, "backend"));
         // Only the CLI's own answer stops a send. A stored token past its
@@ -2059,7 +2059,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _outboxKey = key; _authorizedQueue.Add(item.Id);
             if (_draft.Text.Trim() == text) _draft.Text = "";
             _attachments.RemoveAll(file => attachmentIds.Contains(file.Id));
-            await DrainQueueAsync(messageId: item.Id, steerCurrent: !sendNext && Busy() && Format.Flag(_openChat, "nativeSteer") && attachmentIds.Length == 0 && !text.StartsWith("/", StringComparison.Ordinal));
+            await DrainQueueAsync(messageId: item.Id, steerCurrent: liveInput && !text.StartsWith("/", StringComparison.Ordinal));
             if (Current()) { PaintConversation(); StartPoll(); }
         }
         catch (Exception ex) { if (Current()) Banner(ex.Message); }

@@ -211,5 +211,7 @@
   "common.chat.stats.cost": "Reported cost",
   "common.chat.stats.overview": "Chat overview",
   "common.chat.steer": "Steer",
+  "common.chat.steer_placeholder": "Steer the active turn…",
+  "common.chat.stats.live_servers": "Connected · {0}",
   "common.chat.steer_help": "Adds context to the current turn without stopping it."
 }

@@ -32,9 +32,10 @@ fn wait_for(mut ready: impl FnMut() -> bool) {
 #[test]
 fn live_controls_apply_without_restarting_or_resending_a_turn() {
     for backend in ["claude", "codex"] {
-        let root = tempfile::tempdir().unwrap();
-        let fake = root.path().join("fake-agent");
-        fs::write(&fake, r##"#!/usr/bin/env python3
+        for with_image in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let fake = root.path().join("fake-agent");
+            fs::write(&fake, r##"#!/usr/bin/env python3
 import sys,json,os,uuid
 backend=sys.argv[1]
 def emit(v): print(json.dumps(v),flush=True)
@@ -55,7 +56,9 @@ for line in sys.stdin:
    if m['message']['content'][0]['text']=='literal prompt':
     emit({'type':'system','subtype':'init','session_id':'session'})
    else:
-    assert m['message']['content'][0]['text']=='Additional context.'
+    text=m['message']['content'][0]['text']
+    assert text.startswith('Additional context.')
+    if '\n' in text: assert os.path.isfile(text.split('\n')[-1])
     assert uuid.UUID(m['uuid']).version==4
     pending=m
     emit({'type':'result','subtype':'success','is_error':False})
@@ -78,7 +81,10 @@ for line in sys.stdin:
    emit({'id':m['id'],'result':{'data':[{'name':'godot-mcp','runtimeStatus':'connected','tools':{'scene':{'inputSchema':{'private':'secret'}}}}],'nextCursor':None}})
   elif method=='turn/steer':
    assert p['threadId']=='session' and p['expectedTurnId']=='turn'
-   assert p['input']==[{'type':'text','text':'Additional context.'}]
+   assert p['input'][0]=={'type':'text','text':'Additional context.'}
+   if len(p['input'])>1:
+    assert p['input'][1]['type']=='localImage' and os.path.isfile(p['input'][1]['path'])
+    assert len(p['input'])==2
    assert uuid.UUID(p['clientUserMessageId']).version==4
    emit({'id':m['id'],'result':{'turnId':'turn'}})
   elif method=='turn/settings/update':
@@ -94,115 +100,131 @@ for line in sys.stdin:
   else:
    raise Exception('unexpected prompt or restart')
 "##).unwrap();
-        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
-        // An argument-selecting shim keeps the production launch translator
-        // under test: it does not learn a fake CLI-specific argv convention.
-        let shim = root.path().join("shim");
-        fs::write(
-            &shim,
-            format!("#!/bin/sh\nexec '{}' {backend} \"$@\"\n", fake.display()),
-        )
-        .unwrap();
-        fs::set_permissions(&shim, fs::Permissions::from_mode(0o700)).unwrap();
-        let argv = if backend == "claude" {
-            json!([
-                shim,
-                "--settings",
-                "{\"fastMode\":false}",
-                "-p",
-                "literal prompt",
-                "--output-format",
-                "stream-json",
-                "--verbose"
-            ])
-        } else {
-            json!([
-                shim,
-                "exec",
-                "--dangerously-bypass-hook-trust",
-                "--sandbox",
-                "read-only",
-                "resume",
-                "session",
-                "--json",
-                "--",
-                "literal prompt"
-            ])
-        };
-        let config = root.path().join("config.json");
-        fs::write(&config, json!({"backend":backend,"argv":argv}).to_string()).unwrap();
-        let output = fs::File::create(root.path().join("output")).unwrap();
-        let mut runner = Runner(
-            Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
-                .args(["chat-live", config.to_str().unwrap()])
-                .stdin(Stdio::null())
-                .stdout(output)
-                .stderr(fs::File::create(root.path().join("stderr")).unwrap())
-                .spawn()
-                .unwrap(),
-        );
-        wait_for(|| {
-            assert!(
-                runner.0.try_wait().unwrap().is_none(),
-                "{backend}: {}",
-                fs::read_to_string(root.path().join("stderr")).unwrap()
+            fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+            // An argument-selecting shim keeps the production launch translator
+            // under test: it does not learn a fake CLI-specific argv convention.
+            let shim = root.path().join("shim");
+            fs::write(
+                &shim,
+                format!("#!/bin/sh\nexec '{}' {backend} \"$@\"\n", fake.display()),
+            )
+            .unwrap();
+            fs::set_permissions(&shim, fs::Permissions::from_mode(0o700)).unwrap();
+            let argv = if backend == "claude" {
+                json!([
+                    shim,
+                    "--settings",
+                    "{\"fastMode\":false}",
+                    "-p",
+                    "literal prompt",
+                    "--output-format",
+                    "stream-json",
+                    "--verbose"
+                ])
+            } else {
+                json!([
+                    shim,
+                    "exec",
+                    "--dangerously-bypass-hook-trust",
+                    "--sandbox",
+                    "read-only",
+                    "resume",
+                    "session",
+                    "--json",
+                    "--",
+                    "literal prompt"
+                ])
+            };
+            let config = root.path().join("config.json");
+            fs::write(&config, json!({"backend":backend,"argv":argv}).to_string()).unwrap();
+            let output = fs::File::create(root.path().join("output")).unwrap();
+            let mut runner = Runner(
+                Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+                    .args(["chat-live", config.to_str().unwrap()])
+                    .stdin(Stdio::null())
+                    .stdout(output)
+                    .stderr(fs::File::create(root.path().join("stderr")).unwrap())
+                    .spawn()
+                    .unwrap(),
             );
-            root.path().join("ready.json").is_file()
-        });
-        let steer_id = "00000000000040008000000000000001";
-        let request = root.path().join(format!("request-{steer_id}.json"));
-        fs::write(
-            request.with_extension("tmp"),
-            json!({"id":steer_id,"steer":"Additional context.","expires":u64::MAX}).to_string(),
-        )
-        .unwrap();
-        fs::rename(request.with_extension("tmp"), request).unwrap();
-        let response = root.path().join(format!("response-{steer_id}.json"));
-        wait_for(|| response.exists());
-        let accepted: Value = serde_json::from_slice(&fs::read(response).unwrap()).unwrap();
-        assert_eq!(accepted["ok"], true, "{backend}: {accepted}");
-        for (id, fast) in [("a".repeat(32), true), ("b".repeat(32), false)] {
-            let request = root.path().join(format!("request-{id}.json"));
+            wait_for(|| {
+                assert!(
+                    runner.0.try_wait().unwrap().is_none(),
+                    "{backend}: {}",
+                    fs::read_to_string(root.path().join("stderr")).unwrap()
+                );
+                root.path().join("ready.json").is_file()
+            });
+            let image = root.path().join("steering image.png");
+            fs::write(&image, b"\x89PNG\r\n\x1a\nimage").unwrap();
+            let text = if with_image && backend == "claude" {
+                format!(
+                    "Additional context.\n\nFiles attached to this message:\n{}",
+                    image.display()
+                )
+            } else {
+                "Additional context.".into()
+            };
+            let images = if with_image && backend == "codex" {
+                vec![image]
+            } else {
+                vec![]
+            };
+            let steer_id = "00000000000040008000000000000001";
+            let request = root.path().join(format!("request-{steer_id}.json"));
             fs::write(
                 request.with_extension("tmp"),
-                json!({"id":id,"fast":fast,"expires":u64::MAX}).to_string(),
+                json!({"id":steer_id,"steer":text,"images":images,"expires":u64::MAX}).to_string(),
             )
             .unwrap();
             fs::rename(request.with_extension("tmp"), request).unwrap();
-            let response = root.path().join(format!("response-{id}.json"));
+            let response = root.path().join(format!("response-{steer_id}.json"));
             wait_for(|| response.exists());
-            let value: Value = serde_json::from_slice(&fs::read(response).unwrap()).unwrap();
-            assert_eq!(value["ok"], true, "{backend}: {value}");
-        }
-        wait_for(|| runner.0.try_wait().unwrap().is_some());
-        assert!(
-            runner.0.wait().unwrap().success(),
-            "{backend} runner failed"
-        );
-        let output = fs::read_to_string(root.path().join("output")).unwrap();
-        assert_eq!(
-            output.matches("Completed once.").count(),
-            1,
-            "{backend}: {output}"
-        );
-        if backend == "codex" {
-            let rows: Vec<Value> = output
-                .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
-                .collect();
-            assert_eq!(rows.last().unwrap()["usage"]["cached_input_tokens"], 40);
-            let context = rows
-                .iter()
-                .find(|row| row["type"] == "tokenstat.context" && row["contextUsed"] == 60)
+            let accepted: Value = serde_json::from_slice(&fs::read(response).unwrap()).unwrap();
+            assert_eq!(accepted["ok"], true, "{backend}: {accepted}");
+            for (id, fast) in [("a".repeat(32), true), ("b".repeat(32), false)] {
+                let request = root.path().join(format!("request-{id}.json"));
+                fs::write(
+                    request.with_extension("tmp"),
+                    json!({"id":id,"fast":fast,"expires":u64::MAX}).to_string(),
+                )
                 .unwrap();
-            assert_eq!(context["contextWindow"], 200000);
-            let mcp = rows
-                .iter()
-                .find(|row| row["type"] == "tokenstat.mcp")
-                .unwrap();
-            assert_eq!(mcp["servers"][0]["name"], "godot-mcp");
-            assert_eq!(mcp["servers"][0]["tools"], json!(["scene"]));
-            assert!(!mcp.to_string().contains("secret"));
+                fs::rename(request.with_extension("tmp"), request).unwrap();
+                let response = root.path().join(format!("response-{id}.json"));
+                wait_for(|| response.exists());
+                let value: Value = serde_json::from_slice(&fs::read(response).unwrap()).unwrap();
+                assert_eq!(value["ok"], true, "{backend}: {value}");
+            }
+            wait_for(|| runner.0.try_wait().unwrap().is_some());
+            assert!(
+                runner.0.wait().unwrap().success(),
+                "{backend} runner failed"
+            );
+            let output = fs::read_to_string(root.path().join("output")).unwrap();
+            assert_eq!(
+                output.matches("Completed once.").count(),
+                1,
+                "{backend}: {output}"
+            );
+            if backend == "codex" {
+                let rows: Vec<Value> = output
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+                assert_eq!(rows.last().unwrap()["usage"]["cached_input_tokens"], 40);
+                let context = rows
+                    .iter()
+                    .find(|row| row["type"] == "tokenstat.context" && row["contextUsed"] == 60)
+                    .unwrap();
+                assert_eq!(context["contextWindow"], 200000);
+                let mcp = rows
+                    .iter()
+                    .find(|row| row["type"] == "tokenstat.mcp")
+                    .unwrap();
+                assert_eq!(mcp["servers"][0]["name"], "godot-mcp");
+                assert_eq!(mcp["servers"][0]["tools"], json!(["scene"]));
+                assert!(!mcp.to_string().contains("secret"));
+            }
         }
     }
 }

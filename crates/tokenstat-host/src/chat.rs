@@ -1603,6 +1603,7 @@ impl Store {
                 continue;
             };
             object.insert("nativeSteer".into(), Value::Bool(native_steer));
+            object.insert("nativeSteerAttachments".into(), Value::Bool(native_steer));
             if let Some(note) = note {
                 object.insert("pendingSteer".into(), Value::String(note));
             }
@@ -2918,19 +2919,18 @@ impl Store {
             })
             .map(|s| s.snapshot.context_history)
             .unwrap_or_default();
-        if let Some(tokens) = snapshot.context_used {
-            if snapshot
+        if let Some(tokens) = snapshot.context_used
+            && snapshot
                 .context_history
                 .last()
                 .is_none_or(|point| point.tokens != tokens)
-            {
-                snapshot
-                    .context_history
-                    .push(crate::chat_inspection::ContextPoint {
-                        tokens,
-                        at_ms: now_ms(),
-                    });
-            }
+        {
+            snapshot
+                .context_history
+                .push(crate::chat_inspection::ContextPoint {
+                    tokens,
+                    at_ms: now_ms(),
+                });
         }
         if snapshot.context_history.len() > 24 {
             snapshot
@@ -7162,162 +7162,235 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[cfg(unix)]
     #[test]
     fn native_steering_is_receipted_once_without_stopping_the_turn() {
-        for outcome in [Some(true), Some(false), None] {
-            let root = tempfile::tempdir().unwrap();
-            let store = Store::at(root.path().join("chat"));
-            conversation_for_receipts(&store, "steering");
-            store
-                .edit_conversation("steering", |chat| {
-                    chat.autonomy = "bypass".into();
-                    Ok(())
-                })
-                .unwrap();
-            store.set_running("steering", true).unwrap();
-            let mailbox = tempfile::tempdir().unwrap();
-            let directory = mailbox.path().to_path_buf();
-            fs::write(directory.join("ready.json"), "true").unwrap();
-            let manager = tokenstat_pty::manager();
-            let process = manager
-                .spawn(&tokenstat_pty::Spawn {
-                    command: "/bin/sleep".into(),
-                    args: vec!["30".into()],
-                    cwd: root.path().into(),
-                    workspace_id: None,
-                    hidden: true,
-                    rows: 24,
-                    cols: 80,
-                    no_color: true,
-                    dark: None,
-                    environment: Vec::new(),
-                })
-                .unwrap();
-            store
-                .active
-                .lock()
-                .unwrap()
-                .insert("steering".into(), process.id.clone());
-            store.live_speed.lock().unwrap().insert(
-                "steering".into(),
-                (
-                    process.id.clone(),
-                    Arc::new(crate::chat_live::Launch::test_mailbox(mailbox)),
-                ),
-            );
-            let response_dir = directory.clone();
-            let process_id = process.id.clone();
-            let responder = std::thread::spawn(move || {
-                let until = Instant::now() + Duration::from_secs(5);
-                loop {
-                    for entry in fs::read_dir(&response_dir).unwrap().flatten() {
-                        let name = entry.file_name().to_string_lossy().into_owned();
-                        if let Some(id) = name
-                            .strip_prefix("request-")
-                            .and_then(|name| name.strip_suffix(".json"))
-                        {
-                            let request: Value =
-                                serde_json::from_slice(&fs::read(entry.path()).unwrap()).unwrap();
-                            assert_eq!(request["steer"], "Keep working and include tests.");
-                            assert_eq!(&id[12..13], "4");
-                            assert!(matches!(&id[16..17], "8" | "9" | "a" | "b"));
-                            if let Some(accepted) = outcome {
-                                fs::write(
-                                    response_dir.join(format!("response-{id}.json")),
-                                    json!({"ok":accepted,"error":"refused"}).to_string(),
-                                )
-                                .unwrap();
-                            } else {
-                                tokenstat_pty::manager().kill(&process_id).unwrap();
-                            }
-                            return;
-                        }
-                    }
-                    assert!(Instant::now() < until);
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-            });
-            let result = store.steer_send(
-                "steering",
-                "Keep working and include tests.",
-                "steer-message",
-                now_ms(),
-                0,
-            );
-            responder.join().unwrap();
-            assert_eq!(manager.info(&process.id).unwrap().alive, outcome.is_some());
-            assert!(!directory.join("stop").exists());
-            assert!(!store.killed.lock().unwrap().contains("steering"));
-            if outcome == Some(true) {
-                assert!(result.as_ref().unwrap().running);
+        for backend in ["claude", "codex"] {
+            for outcome in [Some(true), Some(false), None] {
+                let root = tempfile::tempdir().unwrap();
+                let store = Store::at(root.path().join("chat"));
+                conversation_for_receipts(&store, "steering");
                 store
-                    .steer_send(
+                    .edit_conversation("steering", |chat| {
+                        chat.autonomy = "bypass".into();
+                        chat.backend = backend.into();
+                        Ok(())
+                    })
+                    .unwrap();
+                let attachment = store
+                    .attach(
                         "steering",
-                        "Keep working and include tests.",
-                        "steer-message",
-                        now_ms(),
-                        0,
+                        "context.png",
+                        "iVBORw0KGgo=",
+                        Some("image/png".into()),
                     )
                     .unwrap();
+                let attachment_ids = vec![attachment.id.clone()];
+                let attachment_path = store
+                    .attachment_paths("steering", &attachment_ids)
+                    .unwrap()
+                    .remove(0);
+                store.set_running("steering", true).unwrap();
+                let mailbox = tempfile::tempdir().unwrap();
+                let directory = mailbox.path().to_path_buf();
+                fs::write(directory.join("ready.json"), "true").unwrap();
+                let manager = tokenstat_pty::manager();
+                let process = manager
+                    .spawn(&tokenstat_pty::Spawn {
+                        command: "/bin/sleep".into(),
+                        args: vec!["30".into()],
+                        cwd: root.path().into(),
+                        workspace_id: None,
+                        hidden: true,
+                        rows: 24,
+                        cols: 80,
+                        no_color: true,
+                        dark: None,
+                        environment: Vec::new(),
+                    })
+                    .unwrap();
+                store
+                    .active
+                    .lock()
+                    .unwrap()
+                    .insert("steering".into(), process.id.clone());
+                store.live_speed.lock().unwrap().insert(
+                    "steering".into(),
+                    (
+                        process.id.clone(),
+                        Arc::new(crate::chat_live::Launch::test_mailbox(mailbox)),
+                    ),
+                );
                 assert!(
                     store
-                        .steer_send("steering", "Different text", "steer-message", now_ms(), 0)
+                        .steer_send_with_attachments(
+                            "steering",
+                            "test",
+                            &["missing".into()],
+                            "missing-file",
+                            now_ms(),
+                            0
+                        )
                         .is_err()
                 );
-                let events = store.events("steering", 0).unwrap();
-                let users: Vec<_> = events
-                    .0
-                    .iter()
-                    .filter(|event| event["kind"] == "user")
-                    .collect();
-                assert_eq!(users.len(), 1);
-                assert_eq!(users[0]["steer"], true);
-                assert_eq!(
+                assert!(store.receipt("steering", "missing-file").unwrap().is_none());
+                let response_dir = directory.clone();
+                let process_id = process.id.clone();
+                let responder = std::thread::spawn(move || {
+                    let until = Instant::now() + Duration::from_secs(5);
+                    loop {
+                        for entry in fs::read_dir(&response_dir).unwrap().flatten() {
+                            let name = entry.file_name().to_string_lossy().into_owned();
+                            if let Some(id) = name
+                                .strip_prefix("request-")
+                                .and_then(|name| name.strip_suffix(".json"))
+                            {
+                                let request: Value =
+                                    serde_json::from_slice(&fs::read(entry.path()).unwrap())
+                                        .unwrap();
+                                if backend == "codex" {
+                                    assert_eq!(request["steer"], "Keep working and include tests.");
+                                    assert_eq!(request["images"], json!([attachment_path]));
+                                } else {
+                                    assert!(
+                                        request["steer"]
+                                            .as_str()
+                                            .unwrap()
+                                            .ends_with(attachment_path.to_str().unwrap())
+                                    );
+                                    assert_eq!(request["images"], json!([]));
+                                }
+                                assert_eq!(&id[12..13], "4");
+                                assert!(matches!(&id[16..17], "8" | "9" | "a" | "b"));
+                                if let Some(accepted) = outcome {
+                                    fs::write(
+                                        response_dir.join(format!("response-{id}.json")),
+                                        json!({"ok":accepted,"error":"refused"}).to_string(),
+                                    )
+                                    .unwrap();
+                                } else {
+                                    tokenstat_pty::manager().kill(&process_id).unwrap();
+                                }
+                                return;
+                            }
+                        }
+                        assert!(Instant::now() < until);
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                });
+                let result = store.steer_send_with_attachments(
+                    "steering",
+                    "Keep working and include tests.",
+                    &attachment_ids,
+                    "steer-message",
+                    now_ms(),
+                    0,
+                );
+                responder.join().unwrap();
+                assert_eq!(manager.info(&process.id).unwrap().alive, outcome.is_some());
+                assert!(!directory.join("stop").exists());
+                assert!(!store.killed.lock().unwrap().contains("steering"));
+                if outcome == Some(true) {
+                    assert!(result.as_ref().unwrap().running);
                     store
-                        .receipt("steering", "steer-message")
-                        .unwrap()
-                        .unwrap()
-                        .state,
-                    crate::chat_receipts::ReceiptState::Accepted
-                );
-            } else if outcome == Some(false) {
-                assert_eq!(result.as_ref().unwrap_err().code, "steer_refused");
-                assert!(
-                    store
-                        .receipt("steering", "steer-message")
-                        .unwrap()
-                        .is_none()
-                );
+                        .steer_send_with_attachments(
+                            "steering",
+                            "Keep working and include tests.",
+                            &attachment_ids,
+                            "steer-message",
+                            now_ms(),
+                            0,
+                        )
+                        .unwrap();
+                    assert!(
+                        store
+                            .steer_send_with_attachments(
+                                "steering",
+                                "Different text",
+                                &attachment_ids,
+                                "steer-message",
+                                now_ms(),
+                                0
+                            )
+                            .is_err()
+                    );
+                    let events = store.events("steering", 0).unwrap();
+                    let users: Vec<_> = events
+                        .0
+                        .iter()
+                        .filter(|event| event["kind"] == "user")
+                        .collect();
+                    assert_eq!(users.len(), 1);
+                    assert_eq!(users[0]["steer"], true);
+                    assert_eq!(
+                        events
+                            .0
+                            .iter()
+                            .filter(|event| event["event"]["kind"] == "attachment")
+                            .count(),
+                        1
+                    );
+                    assert!(
+                        store
+                            .steer_send(
+                                "steering",
+                                "Keep working and include tests.",
+                                "steer-message",
+                                now_ms(),
+                                0
+                            )
+                            .is_err(),
+                        "Same text with different attachments is a different receipt"
+                    );
+                    assert_eq!(
+                        store
+                            .receipt("steering", "steer-message")
+                            .unwrap()
+                            .unwrap()
+                            .state,
+                        crate::chat_receipts::ReceiptState::Accepted
+                    );
+                } else if outcome == Some(false) {
+                    assert_eq!(result.as_ref().unwrap_err().code, "steer_refused");
+                    assert!(
+                        store
+                            .receipt("steering", "steer-message")
+                            .unwrap()
+                            .is_none()
+                    );
+                }
+                if outcome.is_none() {
+                    assert_eq!(
+                        result.as_ref().unwrap_err().code,
+                        crate::error::DELIVERY_UNKNOWN
+                    );
+                    let again = store
+                        .steer_send_with_attachments(
+                            "steering",
+                            "Keep working and include tests.",
+                            &attachment_ids,
+                            "steer-message",
+                            now_ms(),
+                            0,
+                        )
+                        .unwrap_err();
+                    assert_eq!(again.code, crate::error::DELIVERY_UNKNOWN);
+                    assert_eq!(
+                        fs::read_dir(&directory)
+                            .unwrap()
+                            .flatten()
+                            .filter(|entry| entry
+                                .file_name()
+                                .to_string_lossy()
+                                .starts_with("request-"))
+                            .count(),
+                        1
+                    );
+                }
+                if outcome.is_some() {
+                    manager.kill(&process.id).unwrap();
+                }
+                manager.close(&process.id).unwrap();
             }
-            if outcome.is_none() {
-                assert_eq!(
-                    result.as_ref().unwrap_err().code,
-                    crate::error::DELIVERY_UNKNOWN
-                );
-                let again = store
-                    .steer_send(
-                        "steering",
-                        "Keep working and include tests.",
-                        "steer-message",
-                        now_ms(),
-                        0,
-                    )
-                    .unwrap_err();
-                assert_eq!(again.code, crate::error::DELIVERY_UNKNOWN);
-                assert_eq!(
-                    fs::read_dir(&directory)
-                        .unwrap()
-                        .flatten()
-                        .filter(|entry| entry.file_name().to_string_lossy().starts_with("request-"))
-                        .count(),
-                    1
-                );
-            }
-            if outcome.is_some() {
-                manager.kill(&process.id).unwrap();
-            }
-            manager.close(&process.id).unwrap();
         }
     }
 

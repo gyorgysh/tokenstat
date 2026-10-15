@@ -331,7 +331,7 @@ struct ChatComposer: View {
                     Button(sendTitle, .send, action: onSend)
                         .buttonStyle(AccentButtonStyle(small: true))
                         .environment(\.compactActions, true)
-                        .help(sendsAsNote ? L10n.text("apple.chatcomposer.the_agent_reads_this_on_its_next_step.aab7b1c7") : running ? L10n.text("apple.chatcomposer.waits_until_this_turn_finishes_stop_and_se.2df81427") : L10n.text("apple.chatcomposer.send.f6f4688f"))
+                        .help(sendsAsNote ? (model.selected?.nativeSteer == true ? L10n.text("common.chat.steer_help") : L10n.text("apple.chatcomposer.the_agent_reads_this_on_its_next_step.aab7b1c7")) : running ? L10n.text("apple.chatcomposer.waits_until_this_turn_finishes_stop_and_se.2df81427") : L10n.text("apple.chatcomposer.send.f6f4688f"))
                         .contextMenu {
                             if running {
                                 Button(L10n.text("apple.chatcomposer.stop_and_send_now.8ad0a50d"), .send, action: onSendNow)

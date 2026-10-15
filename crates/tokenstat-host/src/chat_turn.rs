@@ -252,7 +252,7 @@ pub fn file_rule(output_dir: &Path) -> String {
 /// does not. Backends with an attachment flag get nothing here at all: naming
 /// the same file twice, once natively and once in prose, is how a model ends
 /// up describing its own attachments back to you.
-fn user_text(prompt: &str, attachments: &[PathBuf], backend: &str) -> String {
+pub(crate) fn user_text(prompt: &str, attachments: &[PathBuf], backend: &str) -> String {
     let attachments: Vec<_> = attachments
         .iter()
         .filter(|path| !native_attachment(backend, path))
