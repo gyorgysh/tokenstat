@@ -8,6 +8,7 @@ import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsDangerButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
+import ai.tokenstat.tokenstat.ui.logic.ChatCommandRules
 import ai.tokenstat.tokenstat.ui.logic.ChatDelivery
 import ai.tokenstat.tokenstat.ui.logic.ChatOutboxRules
 import ai.tokenstat.tokenstat.ui.logic.QueuedMessage
@@ -227,7 +228,7 @@ private fun ChatPendingSheet(
                 }
             }
             Text(
-                if (canSteer) L10n.text("common.chat.steer_help") else L10n.text("android.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"),
+                if (canSteer && items.any { ChatCommandRules.canSteer(it.text, it.attachments.isNotEmpty(), canSteerAttachments) }) L10n.text("common.chat.steer_help") else L10n.text("android.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
@@ -309,7 +310,7 @@ private fun ChatQueueRow(
                 label = when {
                     item.needsReceipt -> L10n.text("android.chatqueuestrip.check_delivery.b8e3662d")
                     item.delivery == ChatDelivery.NeedsReview -> L10n.text("common.chat_send_latest")
-                    canSteer && (item.attachments.isEmpty() || canSteerAttachments) && !item.text.trimStart().startsWith("/") -> L10n.text("common.chat.steer")
+                    canSteer && ChatCommandRules.canSteer(item.text, item.attachments.isNotEmpty(), canSteerAttachments) -> L10n.text("common.chat.steer")
                     else -> L10n.text("android.chatqueuestrip.send_now.58803287")
                 },
                 icon = if (item.delivery == ChatDelivery.NeedsReview) {

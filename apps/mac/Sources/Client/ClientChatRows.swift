@@ -57,11 +57,18 @@ struct ClientChatEventRow: View {
         case let .user(text):
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 Spacer(minLength: 36)
-                Text(text)
-                    .font(Theme.chatBody)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    if item.isSteer {
+                        Label(L10n.text("common.chat.steer"), systemImage: "arrow.triangle.branch")
+                            .font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent)
+                            .help(L10n.text("common.chat.steer_help"))
+                    }
+                    Text(text)
+                        .font(Theme.chatBody)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
                     .padding(Theme.Space.m)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .contextMenu {
@@ -225,16 +232,21 @@ private struct ClientChatResponseAttachment: View {
             .accessibilityLabel(
                 data == nil && file == nil ? L10n.text("apple.clientchatrows.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.clientchatrows.open_0.e71b4013", "\(attachment.name)")
             )
-            .task(id: data) {
-                guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
+            .task(id: imageSource) {
+                guard attachment.mediaType?.hasPrefix("image/") == true else { return }
                 // SwiftUI restarts a row's task when it re-enters the viewport.
                 // Keep its decoded image and geometry on those appearances.
-                guard decodedData != data else { return }
+                let source = imageSource
+                guard decodedSource != source else { return }
                 let result = await Task.detached(priority: .userInitiated) {
-                    ClientChatImageDims.thumbnail(of: data).map { UIImage(cgImage: $0) }
+                    let thumbnail: Data?
+                    if let data = source.data { thumbnail = ChatThumbnail.make(from: data, maxPixel: 1024, preservingAlpha: true) }
+                    else if let file = source.file { thumbnail = ChatThumbnail.make(from: file, maxPixel: 1024, preservingAlpha: true) }
+                    else { thumbnail = nil }
+                    return thumbnail.flatMap { UIImage(data: $0) }
                 }.value
                 guard !Task.isCancelled else { return }
-                decodedData = data
+                decodedSource = source
                 decodedImage = result
             }
     }
@@ -292,15 +304,22 @@ private struct ClientChatResponseAttachment: View {
     }
 
     @State private var decodedImage: UIImage?
-    @State private var decodedData: Data?
+    @State private var decodedSource: ImageSource?
+    private struct ImageSource: Hashable {
+        let data: Data?
+        let file: URL?
+    }
+    private var imageSource: ImageSource { ImageSource(data: data, file: file) }
     // Header metadata is available before the async task starts, so the first
     // layout already has the final image box. Pixels only paint its overlay.
     private var imageAspect: CGFloat? {
-        guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return nil }
-        return ClientChatImageDims.aspect(of: data)
+        guard attachment.mediaType?.hasPrefix("image/") == true else { return nil }
+        if let data { return ChatImageDims.aspect(of: data) }
+        if let file { return ChatImageDims.aspect(of: file) }
+        return nil
     }
 
-    private var image: UIImage? { decodedData == data ? decodedImage : nil }
+    private var image: UIImage? { decodedSource == imageSource ? decodedImage : nil }
 
     private var detail: String {
         if let downloadError { return downloadError }
@@ -319,44 +338,6 @@ private struct ClientChatResponseAttachment: View {
         return "doc"
     }
 
-}
-
-/// Image dimensions from the file header, without decoding pixels. Used to
-/// reserve an attachment row's frame before its image arrives, so the decode
-/// landing shifts no layout mid-scroll.
-private enum ClientChatImageDims {
-    private static let cache: NSCache<NSData, NSNumber> = {
-        let cache = NSCache<NSData, NSNumber>()
-        cache.countLimit = 32
-        cache.totalCostLimit = 32 * 1024 * 1024
-        return cache
-    }()
-
-    static func thumbnail(of data: Data) -> CGImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData,
-            [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: 1024,
-            kCGImageSourceShouldCacheImmediately: true
-        ] as CFDictionary)
-    }
-
-    static func aspect(of data: Data) -> CGFloat? {
-        let key = data as NSData
-        if let cached = cache.object(forKey: key) { return CGFloat(cached.doubleValue) }
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = props[kCGImagePropertyPixelWidth] as? Double,
-              let height = props[kCGImagePropertyPixelHeight] as? Double,
-              width > 0, height > 0
-        else { return nil }
-        let orientation = props[kCGImagePropertyOrientation] as? Int ?? 1
-        let aspect = (5...8).contains(orientation) ? height / width : width / height
-        cache.setObject(NSNumber(value: aspect), forKey: key, cost: data.count)
-        return aspect
-    }
 }
 
 /// The point where a conversation changed hands, and what the incoming agent

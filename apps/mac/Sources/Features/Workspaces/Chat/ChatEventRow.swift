@@ -327,7 +327,7 @@ func diffColoredText(_ patch: String, lineLimit: Int) -> (text: AttributedString
 /// Image dimensions from the file header, without decoding pixels. Used to
 /// reserve an attachment row's frame before its image arrives, so the decode
 /// landing shifts no layout mid-scroll.
-private enum ChatImageDims {
+enum ChatImageDims {
     private static let cache: NSCache<NSData, NSNumber> = {
         let cache = NSCache<NSData, NSNumber>()
         cache.countLimit = 32

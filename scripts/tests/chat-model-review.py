@@ -11,7 +11,7 @@ creation = source[source.index('    private var createSingleflight'):source.inde
 usage = source[source.index('    var turnUsage:'):source.index('    var hasStarted:')].replace('@ObservationIgnored ', '')
 approval = source[source.index('    func approvalIsPending'):source.index('    /// Workspace ownership does not require')]
 cost = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatCostMeter.swift').read_text()
-cost = cost[cost.index('struct ChatUsageTotals:'):cost.index('/// Quiet token and cost card')]
+cost = cost[cost.index('struct ChatUsageTotals:'):cost.index('struct ChatCostMeter:')]
 fixture = r'''
 import Foundation
 struct ChatConversation: Sendable { var workspace: UInt64 }

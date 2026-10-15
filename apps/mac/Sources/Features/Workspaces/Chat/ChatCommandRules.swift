@@ -4,6 +4,13 @@ import Foundation
 enum ChatCommandRules {
     static let names = ["/compact", "/status", "/context", "/usage", "/mcp", "/tools", "/help", "/stop"]
     static func sendMethod(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) == "/compact" ? "chat.compact" : "chat.send" }
+    /// Match the native endpoint's payload limits before offering Steer.
+    /// Rust counts Unicode scalar values rather than Swift grapheme clusters.
+    static func canSteer(_ text: String, attachments: Bool, acceptsAttachments: Bool) -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (!text.isEmpty || attachments) && (!attachments || acceptsAttachments)
+            && !text.hasPrefix("/") && text.unicodeScalars.count <= 1_500
+    }
     enum Refusal: Equatable { case attachments, arguments, unsupported, running }
     enum Action: Equatable { case message, complete(String), inspect, stop, compact, refused(Refusal) }
     static func matches(_ draft: String) -> [String] {

@@ -249,6 +249,8 @@ jobs:
           python3 scripts/check-chat-opening.py
           python3 scripts/check-chat-empty-recovery.py
           python3 scripts/check-chat-send-context.py
+          python3 scripts/check-chat-preview-loading.py
+          python3 scripts/check-chat-steer-submission.py
           python3 scripts/check-chat-read-scope.py
           python3 scripts/check-watching-scope.py
           python3 scripts/check-vault-scope.py

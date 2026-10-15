@@ -76,7 +76,7 @@ internal sealed partial class ChatPage
         if (SteerUnsupported()) return false;
         if (!_steerProtocol.TryGetValue(SteerPeerKey(), out var protocol)) return false;
         if (protocol < RemoteFeatureGate.SteerMinProtocol) return false;
-        if (Format.Flag(_openChat, "nativeSteer")) return _attachments.Count == 0 || Format.Flag(_openChat, "nativeSteerAttachments");
+        if (Format.Flag(_openChat, "nativeSteer")) return ChatCommandRules.CanSteer(_draft.Text, _attachments.Count > 0, Format.Flag(_openChat, "nativeSteerAttachments"));
         if (_attachments.Count > 0) return false;
         var backend = Format.Text(_openChat, "backend");
         if (backend is not ("claude" or "codex" or "cursor" or "muse")) return false;

@@ -989,7 +989,9 @@ fun ChatSection(
         val noteOwner = projectOwner?.conversation(id) ?: return true
         val noteDraft = model.chatComposers.capture(noteOwner)
         val chat = chats.firstOrNull { it.str("id") == id }
-        val native = chat?.bol("running") == true && chat.bol("nativeSteer") && staged.isEmpty() && !text.startsWith("/")
+        val native = chat?.bol("running") == true && chat.bol("nativeSteer") && staged.isEmpty() &&
+            ChatCommandRules.canSteer(text, attachments = false, acceptsAttachments = false)
+        if (chat?.bol("nativeSteer") == true && !native) return false
         if (!native && !ChatSteer.canAttempt(
                 chat?.bol("running") == true,
                 text,
@@ -1105,7 +1107,8 @@ fun ChatSection(
         // Only the CLI's own answer stops a send. A stored token past its
         // expiry is routine (the CLI renews it), and an agent signed in with
         // an environment key has no login file at all.
-        val liveInput = chat?.bol("running") == true && chat.bol("nativeSteer") && (staged.isEmpty() || chat.bol("nativeSteerAttachments"))
+        val liveInput = chat?.bol("running") == true && chat.bol("nativeSteer") &&
+            ChatCommandRules.canSteer(command, staged.isNotEmpty(), chat.bol("nativeSteerAttachments"))
         if (!liveInput && selectedBackend?.bol("signInVerified") == true && selectedBackend.str("readiness") in listOf("needsSignIn", "expired")) {
             error = L10n.text("android.agentsetup.draft_kept", selectedBackend?.str("label") ?: "")
             return
@@ -1162,7 +1165,7 @@ fun ChatSection(
             // delivery remains available for review in Pending.
             // Keep the action chosen before upload: an ended turn must not
             // turn a Steer tap into a new prompt or an interruption.
-            if (liveInput && !clean.startsWith("/")) deliver(item, stopCurrent = false, steerCurrent = true)
+            if (liveInput) deliver(item, stopCurrent = false, steerCurrent = true)
             else if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) deliver(item, stopCurrent = false)
         } finally {
             deliveringFromComposer = null
@@ -1201,7 +1204,8 @@ fun ChatSection(
         }
         authorized = authorized + item.id
         val chat = chats.firstOrNull { it.str("id") == id }
-        val steer = steerOnly || (chat?.bol("running") == true && chat.bol("nativeSteer") && (candidate.attachments.isEmpty() || chat.bol("nativeSteerAttachments")) && !candidate.text.trimStart().startsWith("/"))
+        val steer = steerOnly || (chat?.bol("running") == true && chat.bol("nativeSteer") &&
+            ChatCommandRules.canSteer(candidate.text, candidate.attachments.isNotEmpty(), chat.bol("nativeSteerAttachments")))
         deliver(candidate, stopCurrent = !steer, steerCurrent = steer)
     }
     LaunchedEffect(projectOwner) { loadChats() }
@@ -1795,7 +1799,9 @@ fun ChatSection(
                 TextButton(onClick = { setupError = null }) { Text(L10n.text("android.chatpullssections.dismiss.48845bff")) }
             }
             val runningTurn = openChat?.bol("running") == true
-            val noteForStep = (runningTurn && openChat?.bol("nativeSteer") == true && (staged.isEmpty() || openChat.bol("nativeSteerAttachments"))) || ChatSteer.promisesNote(
+            val noteForStep = if (openChat?.bol("nativeSteer") == true) {
+                runningTurn && ChatCommandRules.canSteer(draft, staged.isNotEmpty(), openChat.bol("nativeSteerAttachments"))
+            } else ChatSteer.promisesNote(
                 runningTurn,
                 staged.isEmpty(),
                 openChat?.str("backend"),
@@ -1841,7 +1847,8 @@ fun ChatSection(
                     }
                 },
                 onSendNow = { item ->
-                    val steerOnly = runningTurn && openChat?.bol("nativeSteer") == true && (item.attachments.isEmpty() || openChat.bol("nativeSteerAttachments")) && !item.text.trimStart().startsWith("/")
+                    val steerOnly = runningTurn && openChat?.bol("nativeSteer") == true &&
+                        ChatCommandRules.canSteer(item.text, item.attachments.isNotEmpty(), openChat.bol("nativeSteerAttachments"))
                     scope.launch { sendNow(item, steerOnly = steerOnly) }
                 },
                 onMove = { from, to ->

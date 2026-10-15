@@ -22,6 +22,7 @@ members = '\n'.join(member(signature) for signature in [
     '    private var steerBackend:', '    private var steerAutonomy:',
     '    enum BusyNoteStart', '    func beginBusyNote(',
     '    enum SignInHold', '    func holdForSignIn(',
+    '    func finishBusyNote(', '    func consumeChatCommand(',
 ])
 stub = '''import Foundation
 enum L10n { static func text(_ key: String) -> String { key } }
@@ -33,6 +34,12 @@ struct Conversation {
     var backend = "claude"
     var autonomy = "bypass"
     var mode = "execute"
+}
+enum RemoteHostFeature { case steer; var minimumProtocol: Int { 1 } }
+@MainActor enum Bridge {
+    static var steerCalls = 0
+    static func peerProtocolVersion(_ peer: String) async throws -> Int { 99 }
+    static func steerChat(id: String, text: String, peer: String?) async throws { steerCalls += 1 }
 }
 @MainActor final class WorkSessionContext {
     static let shared = WorkSessionContext()
@@ -57,16 +64,32 @@ struct Conversation {
     var busyNoteToken: UInt64?
     var signInQueuedMessage: Bool? = nil
     var backendRefreshError: String? = nil
+    var error: String? = nil
+    var showingCommandStats = false
+    var chatCommandSelection = 0
+    var stopped: [String] = []
+    var queuedSubmission: ChatDraftSubmission?
+    var queuedAsSteer: Bool?
     func needsSignIn(_ backend: String) -> Bool { true }
     func enqueue(_ text: String, awaitingSignIn: Bool) -> Bool? { signInQueuedMessage = true; return true }
     func clearDraft() { draft = "" }
     func saveDraftNow() {}
     func noteSendStarted() -> UInt64 { sending = true; return 1 }
+    func noteSendFinished(_ token: UInt64) { sending = false }
+    func queueBusyNote(_ submission: ChatDraftSubmission, deliverAsSteer: Bool = false) {
+        queuedSubmission = submission; queuedAsSteer = deliverAsSteer
+    }
+    func rememberSteerMutation(_ reference: WorkReference, note: String?) {}
+    func parkLocalSteer(_ text: String) {}
+    func isUnknownMethod(_ error: Error) -> Bool { false }
+    func hostMessage(_ error: Error) -> String { error.localizedDescription }
+    static func steerFallsBack(_ message: String) -> Bool { false }
+    func stop() async { if let selected { stopped.append(selected.id) } }
 '''
 tests = '''
 }
 @main enum Tests {
-    @MainActor static func main() {
+    @MainActor static func main() async {
         let model = Model()
         assert(model.sendsAsNote)
         guard case .notNeeded = model.holdForSignIn(model.draft, backend: "claude") else { fatalError("Stale sign-in status must not block an already active native CLI") }
@@ -93,7 +116,45 @@ tests = '''
         guard case .queue = uploading.beginBusyNote(uploading.draft) else { fatalError("Unfinished uploads cannot be steered") }
         let imageOnly = Model()
         guard case .steering = imageOnly.beginBusyNote("") else { fatalError("Image-only steering must retain the attachment") }
-        print("Steering submission: image reservation, changed draft, older/stale hosts and unfinished uploads passed")
+        for draft in ["/usr/local/file", String(repeating: "a", count: 1_501), String(repeating: "👩‍💻", count: 501)] {
+            let literal = Model()
+            literal.draft = draft
+            assert(!literal.sendsAsNote, "The composer must not offer unsupported steering payloads")
+            guard case .queue = literal.beginBusyNote(draft) else { fatalError("Literal paths and long prompts must wait for a normal turn") }
+            assert(literal.busyNoteSubmission == nil && !literal.sending)
+        }
+        for nativeStillPresent in [false, true] {
+            let retired = Model()
+            guard case let .steering(token) = retired.beginBusyNote(retired.draft) else { fatalError() }
+            retired.selected?.nativeSteer = nativeStillPresent
+            retired.selected?.nativeSteerAttachments = false
+            retired.selected?.autonomy = "standard"
+            retired.remoteSteer = true
+            await retired.finishBusyNote(token)
+            assert(retired.queuedSubmission?.attachments == retired.attachments && retired.queuedAsSteer == false,
+                   "A retiring native capability must queue the complete attached payload")
+            assert(Bridge.steerCalls == 0, "The legacy text hook cannot receive a reserved attached message")
+        }
+        let command = Model()
+        command.attachments = []
+        command.draft = "/stop"
+        assert(command.consumeChatCommand())
+        command.selected?.id = "other-chat"
+        command.selectionGeneration += 1
+        for _ in 0..<20 { await Task.yield() }
+        assert(command.stopped.isEmpty, "A deferred stop command cannot target a newly selected conversation")
+        let unchanged = Model()
+        unchanged.attachments = []
+        unchanged.draft = "/stop"
+        assert(unchanged.consumeChatCommand())
+        for _ in 0..<100 where unchanged.stopped.isEmpty { await Task.yield() }
+        assert(unchanged.stopped == ["chat"], "An unchanged stop command still stops its captured chat")
+        let saved = Model()
+        saved.savedCopy = true
+        saved.attachments = []
+        saved.draft = "/stop"
+        assert(saved.consumeChatCommand() && saved.draft == "/stop" && saved.stopped.isEmpty)
+        print("Steering submission: payload limits, attachment capability changes, reservation and stop-command ownership passed")
     }
 }
 '''
@@ -104,5 +165,7 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-steer-submission-') as work:
     subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5',
         '-module-cache-path', str(work / 'cache'), '-o', str(work / 'test'), str(swift),
         str(root / 'apps/mac/Sources/Features/Work/WorkReference.swift'),
-        str(root / 'apps/mac/Sources/Features/Work/ChatDraftSubmission.swift')], check=True)
+        str(root / 'apps/mac/Sources/Features/Work/ChatDraftSubmission.swift'),
+        str(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatSteerContext.swift'),
+        str(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatCommandRules.swift')], check=True)
     subprocess.run([str(work / 'test')], check=True)

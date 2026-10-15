@@ -114,7 +114,7 @@ struct ChatContextCard: View {
                 unavailable
             }
             if contextOpen {
-                Divider().overlay(Theme.border)
+                ThemeRule()
                 ChatCostMeter(totals: model.turnUsage)
             }
         }
@@ -317,7 +317,7 @@ private struct ChatToolBrowser: View {
                         }.font(Theme.caption).padding(8).contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
-                TextField(L10n.text("common.chat.stats.search_tools"), text: $query).textFieldStyle(.roundedBorder)
+                TextField(L10n.text("common.chat.stats.search_tools"), text: $query).textFieldStyle(.themedSmall)
                 if selectedGroup != nil || !query.isEmpty {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {

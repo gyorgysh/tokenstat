@@ -4,6 +4,12 @@ package ai.tokenstat.tokenstat.ui.logic
 internal object ChatCommandRules {
     val names = listOf("/compact", "/status", "/context", "/usage", "/mcp", "/tools", "/help", "/stop")
     fun sendMethod(text: String) = if (text.trim() == "/compact") "chat.compact" else "chat.send"
+    // Match Rust's Unicode scalar limit rather than UTF-16 code units.
+    fun canSteer(draft: String, attachments: Boolean, acceptsAttachments: Boolean): Boolean {
+        val text = draft.trim()
+        return (text.isNotEmpty() || attachments) && (!attachments || acceptsAttachments) &&
+            !text.startsWith("/") && text.codePointCount(0, text.length) <= 1_500
+    }
     enum class Kind { MESSAGE, COMPLETE, INSPECT, STOP, COMPACT, ATTACHMENTS, ARGUMENTS, UNSUPPORTED, RUNNING }
     data class Action(val kind: Kind, val completion: String? = null)
     fun matches(draft: String): List<String> {

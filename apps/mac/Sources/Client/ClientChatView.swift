@@ -1059,7 +1059,9 @@ struct ClientChatThread: View {
                             showNewest()
                             resumeLatest()
                             followPulse += 1
-                            Task { await model.sendNow(item, owner: queueOwner, steerOnly: queueCanSteer && (item.attachments.isEmpty || queueCanSteerAttachments) && !item.text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")) }
+                            let steerOnly = queueCanSteer && ChatCommandRules.canSteer(item.text,
+                                attachments: !item.attachments.isEmpty, acceptsAttachments: queueCanSteerAttachments)
+                            Task { await model.sendNow(item, owner: queueOwner, steerOnly: steerOnly) }
                         },
                         onMove: { model.moveQueued(from: $0, to: $1, owner: queueOwner) }
                     )

@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using System.Text;
+
 namespace Tokenstat.Pages;
 
 internal static class ChatCommandRules
 {
     internal static readonly string[] Names = ["/compact", "/status", "/context", "/usage", "/mcp", "/tools", "/help", "/stop"];
     internal static string SendMethod(string text) => text.Trim() == "/compact" ? "chat.compact" : "chat.send";
+    // Rust counts Unicode scalar values rather than UTF-16 code units.
+    internal static bool CanSteer(string draft, bool attachments, bool acceptsAttachments)
+    {
+        var text = draft.Trim();
+        return (text.Length > 0 || attachments) && (!attachments || acceptsAttachments)
+            && !text.StartsWith('/') && text.EnumerateRunes().Count() <= 1_500;
+    }
     internal enum Kind { Message, Complete, Inspect, Stop, Compact, Attachments, Arguments, Unsupported, Running }
     internal readonly record struct Action(Kind Kind, string? Completion = null);
     internal static string[] Matches(string draft)

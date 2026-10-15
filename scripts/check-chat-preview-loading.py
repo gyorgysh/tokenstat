@@ -42,6 +42,8 @@ enum RemoteHostFeature { case chatRecovery; func isSupported(peer: String?) asyn
     static var beforeProgress: (() -> Void)?
     static var failure: Error?
     static var calls = 0
+    static var downloadedBytes = 3
+    static var downloadedFiles: [URL] = []
     static func downloadChatFile(id: String, attachmentID: String, peer: String?,
         confirmRelay: @escaping @Sendable (UInt64?) async -> Bool,
         progress: @escaping @Sendable (Double) async throws -> Void) async throws -> URL {
@@ -51,6 +53,12 @@ enum RemoteHostFeature { case chatRecovery; func isSupported(peer: String?) asyn
         try await progress(1)
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try Data([1,2,3]).write(to: file)
+        if downloadedBytes > 3 {
+            let handle = try FileHandle(forWritingTo: file)
+            try handle.truncate(atOffset: UInt64(downloadedBytes))
+            try handle.close()
+        }
+        downloadedFiles.append(file)
         return file
     }
     struct Payload { var data: String }
@@ -79,6 +87,7 @@ tests = '''
 }
 @main enum Tests {
     @MainActor static func main() async {
+        defer { for file in Bridge.downloadedFiles { try? FileManager.default.removeItem(at: file) } }
         let background = Model()
         background.fileTransferInFlight = true
         background.fileTransferName = "upload.png"
@@ -120,7 +129,15 @@ tests = '''
         Bridge.beforeProgress = { moved.selectionGeneration += 1; moved.currentReference = WorkReference(itemID: "other") }
         await moved.loadResponseAttachment(ChatAttachment(), id: "chat", generation: 1, userInitiated: false)
         assert(moved.responseAttachmentData.isEmpty && moved.responseAttachmentErrors.isEmpty, "A late preview cannot publish into another chat")
-        print("Preview loading: concurrent upload, separate cancellation, busy retry, real errors and changed selection passed")
+        Bridge.beforeProgress = nil
+        Bridge.downloadedBytes = ChatInbox.maxBytes + 1
+        for archivedSize: UInt64? in [nil, 3] {
+            let large = Model()
+            await large.loadResponseAttachment(ChatAttachment(size: archivedSize), id: "chat", generation: 1, userInitiated: false)
+            assert(large.responseAttachmentData.isEmpty && large.responseAttachmentFiles["image"] != nil,
+                   "A large downloaded image must stay file-backed when archive size is missing or understated")
+        }
+        print("Preview loading: concurrent transfer isolation, retry, ownership and actual file-size bounds passed")
     }
 }
 '''

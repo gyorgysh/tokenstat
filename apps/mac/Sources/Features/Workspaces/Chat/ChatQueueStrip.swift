@@ -357,7 +357,8 @@ private struct ChatQueueRow: View {
     @State private var draft = ""
 
     private var steersCurrentTurn: Bool {
-        canSteer && (item.attachments.isEmpty || canSteerAttachments) && !item.text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
+        canSteer && ChatCommandRules.canSteer(item.text, attachments: !item.attachments.isEmpty,
+                                              acceptsAttachments: canSteerAttachments)
     }
 
     var body: some View {

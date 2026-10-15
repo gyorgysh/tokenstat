@@ -162,8 +162,8 @@ final class ChatModel {
     /// Only one message waits: a second is refused and its words stay in the
     /// draft, which is cleared only once the first is safely queued.
     func holdForSignIn(_ text: String, backend backendID: String) -> SignInHold {
-        if busy && selected?.nativeSteer == true && (attachments.isEmpty || nativeSteerAcceptsAttachments)
-            && !text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/") { return .notNeeded }
+        if busy && selected?.nativeSteer == true && ChatCommandRules.canSteer(text,
+            attachments: !attachments.isEmpty, acceptsAttachments: nativeSteerAcceptsAttachments) { return .notNeeded }
         guard needsSignIn(backendID) else { return .notNeeded }
         guard signInQueuedMessage == nil else {
             backendRefreshError = L10n.text("apple.agentsetup.finish_saved")
@@ -660,7 +660,14 @@ final class ChatModel {
         case .message, .compact: return false
         case .complete(let command): draft = command
         case .inspect: clearDraft(); showingCommandStats = true
-        case .stop: clearDraft(); Task { await stop() }
+        case .stop:
+            guard savedCopy == nil, let reference = currentReference else { return true }
+            let generation = selectionGeneration
+            clearDraft()
+            Task {
+                guard currentReference == reference, selectionGeneration == generation else { return }
+                await stop()
+            }
         case .refused(.attachments): error = L10n.text("common.chat.command.no_attachments")
         case .refused(.arguments): error = L10n.text("common.chat.command.no_arguments")
         case .refused(.unsupported): error = L10n.text("common.chat.command.unsupported")
@@ -2358,7 +2365,9 @@ final class ChatModel {
                 queued = try ChatOutboxStore.shared.items(for: owner)
             } catch { self.error = L10n.text("apple.chatmodel.the_pending_message_changed_reopen_it_befo.3d158d7b"); return }
         }
-        let steer = steerOnly || (!forceStop && busy && selected?.nativeSteer == true && (candidate.attachments.isEmpty || nativeSteerAcceptsAttachments) && !candidate.text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"))
+        let steer = steerOnly || (!forceStop && busy && selected?.nativeSteer == true
+            && ChatCommandRules.canSteer(candidate.text, attachments: !candidate.attachments.isEmpty,
+                                         acceptsAttachments: nativeSteerAcceptsAttachments))
         _ = await deliverQueued(candidate, stopCurrent: !steer, steerCurrent: steer)
     }
 
@@ -3031,7 +3040,10 @@ final class ChatModel {
     var sendsAsNote: Bool {
         guard busy, (attachments.isEmpty || nativeSteerAcceptsAttachments), stagingAttachments == 0, savedCopy == nil else { return false }
         guard steerAutonomy, steerBackend else { return false }
-        if selected?.nativeSteer == true { return true }
+        if selected?.nativeSteer == true {
+            return ChatCommandRules.canSteer(draft, attachments: !attachments.isEmpty,
+                                             acceptsAttachments: nativeSteerAcceptsAttachments)
+        }
         if let peer, !peer.isEmpty { return remoteSteer == true }
         return true
     }
@@ -3061,6 +3073,8 @@ final class ChatModel {
             || (remoteSteer == false && selected?.nativeSteer != true) {
             return .queue
         }
+        if selected?.nativeSteer == true && !ChatCommandRules.canSteer(trimmed,
+            attachments: !attachments.isEmpty, acceptsAttachments: nativeSteerAcceptsAttachments) { return .queue }
         guard let selected, let reference = currentReference,
               reference.scope == WorkSessionContext.shared.scope else { return .queue }
         saveDraftNow()
@@ -3097,8 +3111,14 @@ final class ChatModel {
         let id = submission.conversationID
         let asked = submission.peer
         do {
-            if selected?.nativeSteer == true {
-                queueBusyNote(submission, deliverAsSteer: true)
+            // A poll can retire a native run after its payload was reserved.
+            // The legacy hook accepts text only, so keep attached messages
+            // intact in the outbox when that capability disappears.
+            if selected?.nativeSteer == true || !submission.attachments.isEmpty {
+                let native = selected?.nativeSteer == true
+                    && ChatCommandRules.canSteer(submission.text, attachments: !submission.attachments.isEmpty,
+                                                  acceptsAttachments: nativeSteerAcceptsAttachments)
+                queueBusyNote(submission, deliverAsSteer: native)
                 return
             }
             if let asked, !asked.isEmpty, remoteSteer != true {
@@ -4316,7 +4336,11 @@ final class ChatModel {
                 guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference, WorkCacheAccess.canSave(previewReference), memoryGeneration == attachmentCacheGeneration else {
                     try? FileManager.default.removeItem(at: url); return
                 }
-                if (attachment.size ?? 0) > UInt64(ChatInbox.maxBytes) {
+                // Archive metadata can omit or understate a file's size.
+                // Use the completed file before deciding to read it into RAM.
+                let downloadedSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+                guard let downloadedSize, downloadedSize > 0 else { throw CocoaError(.fileReadCorruptFile) }
+                if downloadedSize > ChatInbox.maxBytes {
                     let cached = try await ChatAttachmentCache.shared.writeFile(url, reference: previewReference, attachment: attachment.id, epoch: cacheEpoch)
                     guard !Task.isCancelled, selectionMatches(id: id, generation: generation),
                           currentReference == previewReference, WorkCacheAccess.canRead(previewReference),

@@ -59,7 +59,7 @@ enum BridgeError: Error { case core(code: String, message: String) }
 @MainActor enum Bridge {
     static let status = Wire(), approvals = Wire(), usage = Wire(), attachments = Wire(), capability = Wire()
     static var statusReply = [ChatConversation(id: "chat", running: true)]
-    static var approvalReply = ["approval"], descriptorReads = 0
+    static var approvalReply = ["approval"], descriptorReads = 0, downloadedBytes = 4
     static func peerProtocolVersion(_ peer: String) async throws -> Int { try await capability.read(); return 99 }
     static func chats(workspaceID: String, peer: String?) async throws -> [ChatConversation] { try await status.read(); return statusReply }
     static func chatApprovals(id: String, peer: String?) async throws -> [String] { try await approvals.read(); return approvalReply }
@@ -70,6 +70,9 @@ enum BridgeError: Error { case core(code: String, message: String) }
         try await progress(1)
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try Data("file".utf8).write(to: file)
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.truncate(atOffset: UInt64(downloadedBytes))
+        try handle.close()
         return file
     }
 }
@@ -256,6 +259,7 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
         precondition(canceledReservation.deliveries.isEmpty && canceledReservation.finishes == [1] && canceledReservation.deliveringSteerToken == nil)
         // The real modern branch keeps large replies on disk and clears its transfer state.
         RemoteHostFeature.modernFiles = true
+        Bridge.downloadedBytes = 200
         let modern = Model()
         let modernFile = ChatAttachment(id: "video", name: "video.mov", mediaType: "video/quicktime", size: 200)
         let download = Task { await modern.loadResponseAttachment(modernFile, id: "chat", generation: 1, userInitiated: true) }

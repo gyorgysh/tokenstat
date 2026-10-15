@@ -93,6 +93,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private bool _running;
     private bool _setupExpanded;
     private bool _suppress;
+    private bool _composerSteering;
     private JsonArray _chats = new();
     private readonly ChatSteerOverlay _steerOverlay = new();
     private JsonArray _backends = new();
@@ -128,7 +129,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _pendingReveal = chatId;
         }
         _draft.PlaceholderText = L10n.Text("windows.chatpage.ask_about_this_folder.33b8b41b");
-        _draft.TextChanged += (_, _) => { _commandIndex = 0; _commandsDismissed = false; RenderCommandMenu(); };
+        _draft.TextChanged += (_, _) => {
+            _commandIndex = 0; _commandsDismissed = false; RenderCommandMenu();
+            if (Format.Flag(_openChat, "nativeSteer") && SteerKnownAvailable() != _composerSteering) RebuildComposerActions();
+        };
         _draft.PreviewKeyDown += DraftOnPreviewKeyDown;
         PreviewKeyDown += PageOnPreviewKeyDown;
         _titleBox.LostFocus += async (_, _) =>
@@ -1931,9 +1935,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RefreshFastModeButton();
         RefreshComposerHint();
         _composerActions.Children.Clear();
+        _composerSteering = false;
         if (Busy())
         {
-            var steering = SteerKnownAvailable();
+            var steering = _composerSteering = SteerKnownAvailable();
             var queue = ActionIconGlyph.PrimaryButton(steering && Format.Flag(_openChat, "nativeSteer") ? L10n.Text("common.chat.steer") : steering ? L10n.Text("windows.chatpage.next_step.298a9207") : L10n.Text("windows.chatpage.queue.3b2fe03e"), ActionIcon.Send, async (_, _) => await SendAsync());
             var tip = steering
                 ? L10n.Text("windows.chatpage.the_agent_reads_this_on_its_next_step.aab7b1c7")
@@ -2018,7 +2023,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (_opening) return;
         if (_openId is not string chat || _sending || _queueing || _fileTransfer is not null) return;
         if (await ConsumeCommandAsync()) return;
-        var liveInput = !sendNext && Busy() && Format.Flag(_openChat, "nativeSteer") && (_attachments.Count == 0 || Format.Flag(_openChat, "nativeSteerAttachments"));
+        var liveInput = !sendNext && Busy() && Format.Flag(_openChat, "nativeSteer")
+            && ChatCommandRules.CanSteer(_draft.Text, _attachments.Count > 0, Format.Flag(_openChat, "nativeSteerAttachments"));
         if (!liveInput && OpenBackendMissing()) return;
         var backend = Backend(Format.Text(_openChat, "backend"));
         // Only the CLI's own answer stops a send. A stored token past its
@@ -2059,7 +2065,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _outboxKey = key; _authorizedQueue.Add(item.Id);
             if (_draft.Text.Trim() == text) _draft.Text = "";
             _attachments.RemoveAll(file => attachmentIds.Contains(file.Id));
-            await DrainQueueAsync(messageId: item.Id, steerCurrent: liveInput && !text.StartsWith("/", StringComparison.Ordinal));
+            await DrainQueueAsync(messageId: item.Id, steerCurrent: liveInput);
             if (Current()) { PaintConversation(); StartPoll(); }
         }
         catch (Exception ex) { if (Current()) Banner(ex.Message); }

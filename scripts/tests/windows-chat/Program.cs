@@ -4,6 +4,18 @@ using Tokenstat.Pages;
 
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
+Check(ChatCommandRules.CanSteer("  include tests  ", false, false), "trimmed short drafts can steer");
+Check(!ChatCommandRules.CanSteer(" /usr/local/file ", false, false)
+    && !ChatCommandRules.CanSteer("/unknown argument", true, true), "slash-leading literals must queue instead of being rejected by native steering");
+Check(ChatCommandRules.CanSteer(new string('x', 1500), false, false)
+    && !ChatCommandRules.CanSteer(new string('x', 1501), false, false), "native steering accepts exactly 1500 Unicode scalars");
+Check(ChatCommandRules.CanSteer(string.Concat(Enumerable.Repeat("😀", 1500)), false, false)
+    && !ChatCommandRules.CanSteer(string.Concat(Enumerable.Repeat("😀", 1501)), false, false)
+    && !ChatCommandRules.CanSteer(string.Concat(Enumerable.Repeat("e\u0301", 751)), false, false), "steering limits count scalars rather than UTF-16 units or graphemes");
+Check(!ChatCommandRules.CanSteer("  ", false, true) && ChatCommandRules.CanSteer("  ", true, true)
+    && !ChatCommandRules.CanSteer("include tests", true, false)
+    && !ChatCommandRules.CanSteer(new string('x', 1501), true, true), "attachments require capability and preserve the text limit");
+Console.WriteLine("Windows native steering: literal paths, scalar limits and attachment eligibility pass.");
 foreach (var backend in new[] { "claude", "codex", "cursor", "muse", "opencode", "opencode2", "grok", "agy", "sh" }) {
     foreach (var name in ChatCommandRules.Names.Where(n => n is not ("/compact" or "/stop")))
         Check(ChatCommandRules.Evaluate(name, backend, true, false).Kind == ChatCommandRules.Kind.Inspect, "read commands must work without an idle backend");

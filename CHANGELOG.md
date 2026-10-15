@@ -11,15 +11,25 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ## [1.6.4]
 
+### Added
+
+- Chat composers on Mac, iPhone, iPad, Android and Windows offer slash commands for context, usage, tools, MCP servers, stopping work and native Claude/Codex compaction.
+- Chat inspectors combine context and conversation usage, recent context history, tool groups and reported MCP connections in compact, expandable panels.
+- Supported Claude and Codex chats accept steering messages, including attachments, during the current turn and mark them on the transcript.
+
 ### Fixed
 
 - iPhone and iPad work overviews keep recently completed and failed chats and terminals visible for one hour, instead of dropping to zero when the last session finishes. Completed work has its own count and status, while new turns replace the previous result and resolved attention stays cleared.
 - Terminal results remain available in the work overview after signing in, including sessions started while signed out. A stale overview shows reconnecting in the Dynamic Island even when the last work completed.
 - Closing an old terminal result keeps its original expiry time, and idle terminals no longer hide failed work in the Dynamic Island.
+- Pull and Push dialogs stay open when the Mac inspector automatically hides in a narrow window.
+- Chat sends recover in long and resumed conversations. Automatic image previews no longer share an upload's cancellation or progress state, and large images use file-backed previews on Mac, iPhone and iPad.
+- Native compaction remains a maintenance operation in plan mode and after instruction changes. Steering preserves pending questions, retains attachments when capabilities change, and queues messages that exceed the agent's steering limits. A deferred Stop command stays tied to its original chat.
 
 ### Changed
 
 - Updated Rust, Android and Windows dependencies, terminal renderers and build tools. HTTP requests retain the existing certificate trust policy across the library upgrade.
+- Automatic chat attachment previews allow files up to 5 MiB; local images bypass that threshold and preserve transparency in bounded previews.
 
 ### Security
 

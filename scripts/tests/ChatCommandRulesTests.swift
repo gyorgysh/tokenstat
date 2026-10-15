@@ -23,6 +23,16 @@ import Foundation
         precondition(R.action("please /compact", backend: "codex", running: false, attachments: false) == .message)
         precondition(R.action("/", backend: "codex", running: false, attachments: false, selection: 999) == .complete("/stop"))
         precondition(R.action("/stop", backend: "sh", running: true, attachments: false) == .stop)
+        precondition(R.canSteer("text", attachments: false, acceptsAttachments: false))
+        precondition(R.canSteer("", attachments: true, acceptsAttachments: true))
+        precondition(!R.canSteer("", attachments: false, acceptsAttachments: true))
+        precondition(!R.canSteer("text", attachments: true, acceptsAttachments: false))
+        precondition(!R.canSteer(" /usr/local/file ", attachments: false, acceptsAttachments: true))
+        precondition(R.canSteer(String(repeating: "a", count: 1_500), attachments: false, acceptsAttachments: true))
+        precondition(!R.canSteer(String(repeating: "a", count: 1_501), attachments: false, acceptsAttachments: true))
+        let joinedEmoji = String(repeating: "👩‍💻", count: 501)
+        precondition(joinedEmoji.count == 501 && !R.canSteer(joinedEmoji, attachments: false, acceptsAttachments: true),
+                     "Native steering must match the host's Unicode scalar limit")
         print("Chat commands: backend capabilities, local actions, completion, attachment protection and literal paths passed")
     }
 }

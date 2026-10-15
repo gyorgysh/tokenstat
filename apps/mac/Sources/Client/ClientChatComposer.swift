@@ -283,7 +283,7 @@ struct ClientChatComposer: View {
         }
         .modifier(ChatSendStyle())
         .environment(\.compactActions, true)
-        .accessibilityLabel(sendsAsNote ? L10n.text("apple.clientchatcomposer.add_a_note_for_the_next_step.4778177a") : sendTitle)
+        .accessibilityLabel(sendsAsNote && model.selected?.nativeSteer != true ? L10n.text("apple.clientchatcomposer.add_a_note_for_the_next_step.4778177a") : sendTitle)
         .contextMenu {
             if running {
                 Button(L10n.text("apple.clientchatcomposer.stop_and_send_now.8ad0a50d"), .send, action: sendNowTapped)
@@ -292,6 +292,7 @@ struct ClientChatComposer: View {
     }
 
     private var sendTitle: String {
+        if sendsAsNote && model.selected?.nativeSteer == true { return L10n.text("common.chat.steer") }
         if sendsAsNote { return L10n.text("apple.clientchatcomposer.next_step.298a9207") }
         return running ? L10n.text("apple.clientchatcomposer.send_after_this_turn.012fc8c3") : L10n.text("apple.clientchatcomposer.send.f6f4688f")
     }

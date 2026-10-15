@@ -72,6 +72,9 @@ ALLOWED = [
     # repeated down a list.
     ("Design/SearchablePicker.swift", "Button { isPresented = true } label:"),
     ("Design/SearchablePicker.swift", "Button { pick(choice.value) } label:"),
+    # Slash-command completions are option rows: the command spelling and
+    # description are the label, like the searchable picker choices above.
+    ("Features/Workspaces/Chat/ChatSlashMenu.swift", "Button { model.draft = command.id } label:"),
     # The attachment card. Its whole surface is the file: a type glyph, the
     # name, and a Download or Open label that already carries an ActionIcon.
     ("Client/ClientChatRows.swift", "Button { if let file { onOpenFile(file) } else if let data { onOpen(data) } else { onDownload() } } label:"),

@@ -493,23 +493,34 @@ for line in sys.stdin:
 "##, refuse=if refuse {"True"} else {"False"})).unwrap();
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
         let config = root.path().join("config.json");
-        let argv = if backend == "claude" {
-            json!([
-                fake,
-                "-p",
-                "/compact",
-                "--resume",
-                "session",
-                "--output-format",
-                "stream-json",
-                "--verbose"
-            ])
-        } else {
-            json!([
-                fake, "exec", "resume", "session", "--json", "--", "/compact"
-            ])
-        };
-        fs::write(&config, json!({"backend":backend,"argv":argv}).to_string()).unwrap();
+        // Exercise the same command constructor as Store::send. Codex plan
+        // mode and changed standing rules both decorate the prompt, but
+        // neither may turn maintenance into a normal inference request.
+        let mut argv = tokenstat_host::automations::chat_agent_command(
+            backend,
+            "/compact",
+            None,
+            None,
+            3600,
+            tokenstat_host::automations::ChatLaunch {
+                resume: Some("session"),
+                bypass: false,
+                mode: "plan",
+                hook_helper: None,
+                system_append: Some("The person's updated standing rules."),
+                agy_customization_dir: None,
+                cursor_plugin_dir: None,
+                grok_allow_rules: &[],
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        argv[0] = fake.to_string_lossy().into_owned();
+        fs::write(
+            &config,
+            json!({"backend":backend,"argv":argv,"compact":true}).to_string(),
+        )
+        .unwrap();
         let output = fs::File::create(root.path().join("output")).unwrap();
         let mut runner = Runner(
             Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))

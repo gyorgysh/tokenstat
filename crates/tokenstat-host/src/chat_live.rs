@@ -29,6 +29,8 @@ extern "C" fn stopped(_: libc::c_int) {
 struct Config {
     backend: String,
     argv: Vec<String>,
+    #[serde(default)]
+    compact: bool,
 }
 
 pub(crate) struct Launch {
@@ -197,6 +199,7 @@ impl Launch {
         backend: &str,
         argv: &[String],
         parent: &Path,
+        compact: bool,
     ) -> Result<Option<Self>, String> {
         if argv.is_empty() {
             return Err("missing agent command".into());
@@ -216,12 +219,13 @@ impl Launch {
             &Config {
                 backend: backend.into(),
                 argv: original,
+                compact,
             },
         )?;
         let helper = std::env::current_exe().map_err(|error| error.to_string())?;
         Ok(Some(Self {
             directory,
-            accepts_steer: argv.last().is_none_or(|prompt| prompt.trim() != "/compact"),
+            accepts_steer: !compact,
             argv: vec![
                 helper.to_string_lossy().into_owned(),
                 "chat-live".into(),
@@ -725,7 +729,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         return Err("missing agent command".into());
     }
     let directory = path.parent().ok_or("missing live control directory")?;
-    let (args, mut setup, initial) = match config.backend.as_str() {
+    let (args, mut setup, mut initial) = match config.backend.as_str() {
         "codex" => codex_launch(&config.argv)?,
         "claude" => {
             let (args, prompt) = claude_launch(&config.argv)?;
@@ -733,6 +737,16 @@ pub fn run(path: &Path) -> Result<(), String> {
         }
         _ => return Err("unsupported live agent".into()),
     };
+    // A launch's standing rules and plan-mode instructions can wrap its
+    // prompt. Maintenance is an explicit operation, so it must not depend on
+    // recognizing the decorated prompt or start an ordinary model turn.
+    if config.compact {
+        if config.backend == "codex" {
+            initial["tokenstatCompact"] = json!(true);
+        } else {
+            initial = json!("/compact");
+        }
+    }
     if config.backend == "codex" {
         // Like exec, each turn uses the workspace it was launched in. A
         // resumed thread may remember a directory that has since moved.

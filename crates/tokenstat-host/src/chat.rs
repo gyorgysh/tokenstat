@@ -3926,9 +3926,13 @@ impl Store {
             &mut argv,
             &response_output_dir,
         )?;
-        let live_speed =
-            crate::chat_live::Launch::prepare(&chat.backend, &argv, &safe_join(&self.root, id)?)?
-                .map(Arc::new);
+        let live_speed = crate::chat_live::Launch::prepare(
+            &chat.backend,
+            &argv,
+            &safe_join(&self.root, id)?,
+            compact,
+        )?
+        .map(Arc::new);
         if compact && live_speed.is_none() {
             return Err(
                 "Update the agent CLI and use Tokenstat hostd to run native compaction.".into(),
@@ -4834,7 +4838,7 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         match event {
-            StoredEvent::User { .. } => {
+            StoredEvent::User { steer: false, .. } => {
                 attention.remove(chat);
             }
             StoredEvent::Question {
@@ -8777,6 +8781,21 @@ mod tests {
                 .live_work()
                 .iter()
                 .any(|row| row.0 == "chat-b1" && row.3)
+        );
+        store.observe_question_attention(
+            "chat-b1",
+            &StoredEvent::User {
+                steer: true,
+                text: "Additional context for the current turn.".into(),
+                at_ms: now_ms(),
+            },
+        );
+        assert!(
+            store
+                .live_work()
+                .iter()
+                .any(|row| row.0 == "chat-b1" && row.3),
+            "Live steering does not answer the agent's pending question."
         );
         store.observe_question_attention(
             "chat-b1",
