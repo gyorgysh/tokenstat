@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
 import ai.tokenstat.tokenstat.notifications.NotificationOpen
 import ai.tokenstat.tokenstat.ClientState
 import ai.tokenstat.tokenstat.billing.PlayBillingManager
@@ -841,6 +842,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                                 pendingWorkOwner = null
                             },
                             onSetupWizard = { wizardOpen = true },
+                            onManageDevices = { selected = Destination.Devices },
                             onOpenDevice = { id ->
                                 pendingDeviceId = id
                                 selected = Destination.Devices
@@ -2980,10 +2982,17 @@ private fun WorkspacesScreen(
     stores: HomeStores? = null,
     onPendingConsumed: () -> Unit = {},
     onSetupWizard: (() -> Unit)? = null,
+    onManageDevices: () -> Unit = {},
     onOpenDevice: (String) -> Unit = {},
     tabBarScroll: NestedScrollConnection? = null,
 ) {
     val navigationOwner = HomeStores.pinIdentity(state.account)
+    val newChatOwner = ProjectOwner.from(state.account, "unselected", "new-chat")?.accountScope?.plus("|new-chat")
+    val newChatDraftRevision by model.chatComposers.revision.collectAsStateWithLifecycle()
+    val newChatFailure by model.chatComposers.failure.collectAsStateWithLifecycle()
+    val newChatDraft = remember(newChatOwner, newChatDraftRevision) { model.chatComposers.snapshot(newChatOwner).text }
+    var newChatOpen by rememberSaveable(navigationOwner) { mutableStateOf(false) }
+    var newChatRequest by remember(navigationOwner) { mutableStateOf<ai.tokenstat.tokenstat.ui.workspace.NewChatRequest?>(null) }
     // The host list the iOS model keeps: hosts only, without this phone
     // (by account id and by its own key, for records that predate kinds),
     // and without keyless records, which cannot be dialled.
@@ -3012,6 +3021,8 @@ private fun WorkspacesScreen(
     val session = model.workspacesConnection
     val storedHost by session.host.collectAsStateWithLifecycle()
     val connectedPeer by session.connectedPeer.collectAsStateWithLifecycle()
+    var newChatRepository by rememberSaveable(navigationOwner, connectedPeer) { mutableStateOf<String?>(null) }
+    var newChatSetup by remember(navigationOwner, connectedPeer) { mutableStateOf<ai.tokenstat.tokenstat.ui.workspace.NewChatSetup?>(null) }
     val allowed by session.allowed.collectAsStateWithLifecycle()
     val folders by session.folders.collectAsStateWithLifecycle()
     val sessions by session.sessions.collectAsStateWithLifecycle()
@@ -3403,7 +3414,7 @@ private fun WorkspacesScreen(
             onFolder = { selectedFolderId = it.string("id"); initialSection = null; pendingChatId = null; pendingOpenConversation = false },
             onSession = { openSession(it) },
             onChat = { openChat(it) },
-            onNewChat = { choosingFor = "Chat" },
+            onNewChat = { newChatOpen = true },
             onNewSession = { choosingFor = "Sessions" },
             onChooseFolder = { picking = true },
             onClone = { cloning = true },
@@ -3424,7 +3435,7 @@ private fun WorkspacesScreen(
             onClose = { cloning = false },
             onCloned = { id ->
                 cloning = false
-                pendingSelectFolderId = id
+                if (newChatOpen) newChatRepository = id else pendingSelectFolderId = id
                 folderRefresh += 1
             },
         )
@@ -3436,8 +3447,29 @@ private fun WorkspacesScreen(
             onClose = { picking = false },
             onAdded = { folder ->
                 picking = false
-                pendingSelectFolderId = folder.string("id")
+                if (newChatOpen) newChatRepository = folder.string("id") else pendingSelectFolderId = folder.string("id")
                 folderRefresh += 1
+            },
+        )
+    } else if (newChatOpen) {
+        ai.tokenstat.tokenstat.ui.workspace.NewChatScreen(
+            model = model, accountOwner = newChatOwner, initialSetup = newChatSetup, onSetup = { newChatSetup = it },
+            draft = newChatDraft,
+            onDraft = { model.chatComposers.update(newChatOwner, model.chatComposers.snapshot(newChatOwner).copy(text = it)) },
+            hosts = hosts, connectedPeer = connectedPeer, connecting = connectingPeer != null,
+            folders = folders.filterIsInstance<JsonObject>(), selectedRepository = newChatRepository,
+            onRepository = { newChatRepository = it }, onHost = { machine -> newChatRepository = null; scope.launch { connect(machine) } },
+            onManageDevices = onManageDevices,
+            onAdd = { picking = true }, onClose = { newChatOpen = false }, error = newChatFailure?.takeIf { it.owner == newChatOwner }?.message ?: error,
+            onSend = {
+                val peer = connectedPeer
+                val repository = folders.filterIsInstance<JsonObject>().firstOrNull { it.string("id") == newChatRepository }
+                val owner = if (peer != null && repository != null) ProjectOwner.from(model.state.value.account, peer, repository.string("id").orEmpty()) else null
+                val source = model.chatComposers.capture(newChatOwner)
+                if (owner != null && peer != null && repository != null && newChatSetup != null && newChatOwner == owner.accountScope + "|new-chat" && source.owner == newChatOwner) {
+                    newChatRequest = ai.tokenstat.tokenstat.ui.workspace.NewChatRequest(peer, repository.string("id").orEmpty(), owner.accountScope, source, setup = newChatSetup)
+                    selectedFolderId = repository.string("id"); initialSection = "Chat"; pendingChatId = null; pendingOpenConversation = false; newChatOpen = false
+                }
             },
         )
     } else if (request != null && boundHost != null) {
@@ -3471,6 +3503,9 @@ private fun WorkspacesScreen(
                     onOpenProject = ::openRegisteredProject,
                     initialChatId = pendingChatId,
                     openConversationOnAppear = pendingOpenConversation,
+                    newChatRequest = newChatRequest,
+                    onNewChatHandled = { token -> if (newChatRequest?.id == token) newChatRequest = null },
+                    onNewChat = { newChatRepository = boundFolder.string("id"); newChatOpen = true },
                 )
             }
         }
@@ -3867,6 +3902,9 @@ private fun WorkspaceDetail(
     onOpenProject: (JsonObject) -> Unit = {},
     initialChatId: String? = null,
     openConversationOnAppear: Boolean = false,
+    newChatRequest: ai.tokenstat.tokenstat.ui.workspace.NewChatRequest? = null,
+    onNewChatHandled: (String) -> Unit = {},
+    onNewChat: (() -> Unit)? = null,
 ) {
     WorkspaceHub(
         model = model,
@@ -3882,6 +3920,9 @@ private fun WorkspaceDetail(
         onOpenProject = onOpenProject,
         initialChatId = initialChatId,
         openConversationOnAppear = openConversationOnAppear,
+        newChatRequest = newChatRequest,
+        onNewChatHandled = onNewChatHandled,
+        onNewChat = onNewChat,
     )
 }
 

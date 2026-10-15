@@ -472,7 +472,7 @@ class PortedLogicTest {
         assertEquals("Terminal in My folder", RecentPlaces.title(termIn.first()))
         // Path-shaped names never land in the store.
         val bad = RecentPlaces.record(emptyList(), "peer1", "ws1", "/tmp/evil", RecentPlaces.Kind.WORKSPACE, null, 1000L)
-        assertEquals("Project", bad.first().workspaceName)
+        assertEquals("Repository", bad.first().workspaceName)
         // A chat without an item id is not a place.
         assertEquals(0, RecentPlaces.record(emptyList(), "peer1", "ws1", "X", RecentPlaces.Kind.CHAT, null, 1000L).size)
         // Twenty at most, newest first.

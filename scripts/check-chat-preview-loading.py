@@ -52,7 +52,14 @@ actor ChatAttachmentCache {
     func readFile(reference: WorkReference, attachment: String, size: UInt64?) -> URL? { nil }
     func read(reference: WorkReference, attachment: String) -> Data? { nil }
     func write(_ data: Data, reference: WorkReference, attachment: String, epoch: UInt64) -> Bool { true }
-    func writeFile(_ file: URL, reference: WorkReference, attachment: String, epoch: UInt64) throws -> URL { file }
+    var failWriteFile = false
+    func failFileWrites(_ fail: Bool) { failWriteFile = fail }
+    func writeFile(_ file: URL, reference: WorkReference, attachment: String, epoch: UInt64) throws -> URL {
+        if failWriteFile { throw CocoaError(.fileWriteNoPermission) }
+        let cached = file.appendingPathExtension("cached")
+        try FileManager.default.moveItem(at: file, to: cached)
+        return cached
+    }
 }
 enum ChatInbox { static let maxBytes = 6 * 1024 * 1024 }
 enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: UInt64?, isLocalImage: Bool) -> Bool { true } }
@@ -72,7 +79,7 @@ enum RemoteHostFeature { case chatRecovery; func isSupported(peer: String?) asyn
         try await progress(1)
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try Data([1,2,3]).write(to: file)
-        if downloadedBytes > 3 {
+        if downloadedBytes != 3 {
             let handle = try FileHandle(forWritingTo: file)
             try handle.truncate(atOffset: UInt64(downloadedBytes))
             try handle.close()
@@ -120,7 +127,10 @@ tests = '''
 }
 @main enum Tests {
     @MainActor static func main() async {
-        defer { for file in Bridge.downloadedFiles { try? FileManager.default.removeItem(at: file) } }
+        defer { for file in Bridge.downloadedFiles {
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(at: file.appendingPathExtension("cached"))
+        } }
         let background = Model()
         background.fileTransferInFlight = true
         background.fileTransferName = "upload.png"
@@ -169,7 +179,23 @@ tests = '''
             await large.loadResponseAttachment(ChatAttachment(size: archivedSize), id: "chat", generation: 1, userInitiated: false)
             assert(large.responseAttachmentData.isEmpty && large.responseAttachmentFiles["image"] != nil,
                    "A large downloaded image must stay file-backed when archive size is missing or understated")
+            assert(FileManager.default.fileExists(atPath: large.responseAttachmentFiles["image"]!.path),
+                   "Cleaning transfer scratch files cannot delete the cached original")
         }
+        await ChatAttachmentCache.shared.failFileWrites(true)
+        let failedCache = Model()
+        await failedCache.loadResponseAttachment(ChatAttachment(), id: "chat", generation: 1, userInitiated: false)
+        assert(failedCache.responseAttachmentErrors["image"] == "failed")
+        assert(!FileManager.default.fileExists(atPath: Bridge.downloadedFiles.last!.path),
+               "A failed file-cache publication must remove the transfer scratch file")
+        await ChatAttachmentCache.shared.failFileWrites(false)
+        Bridge.downloadedBytes = 0
+        let emptyDownload = Model()
+        await emptyDownload.loadResponseAttachment(ChatAttachment(), id: "chat", generation: 1, userInitiated: false)
+        assert(emptyDownload.responseAttachmentErrors["image"] == "failed")
+        assert(!FileManager.default.fileExists(atPath: Bridge.downloadedFiles.last!.path),
+               "Rejected empty downloads must remove the transfer scratch file")
+        Bridge.downloadedBytes = 3
         let waiting = Model()
         waiting.fileTransferInFlight = true
         let lightbox = Viewer(waiting)

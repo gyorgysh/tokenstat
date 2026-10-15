@@ -12,18 +12,22 @@ internal static class ChatImageGallery
     {
         var linked = new Dictionary<string, List<ChatPage.DisplayItem>>();
         var moved = new HashSet<int>();
+        var owners = new Dictionary<(string Scope, string Call), string>();
         for (var index = 0; index < items.Count; index++)
         {
             var image = items[index];
+            void Remember(ChatPage.DisplayItem tool)
+            {
+                if (!string.IsNullOrEmpty(tool.ToolCallId)) owners[(tool.AttachmentScope, tool.ToolCallId)] = image.Id;
+            }
+            if (image.Kind is ChatPage.ItemKind.Tool or ChatPage.ItemKind.Edit) Remember(image);
+            else if (image.Kind == ChatPage.ItemKind.Group && image.Group is { Open: false } group)
+                foreach (var member in group.Members) Remember(member);
             if (!IsImage(image) || string.IsNullOrEmpty(image.ToolCallId)) continue;
-            var tool = items.FirstOrDefault(item => item.ToolCallId == image.ToolCallId && item.AttachmentScope == image.AttachmentScope
-                && item.Kind is ChatPage.ItemKind.Tool or ChatPage.ItemKind.Edit);
-            var toolId = tool.Id;
-            var owner = string.IsNullOrEmpty(toolId) ? -1 : items.FindIndex(item => item.Id == toolId && item.Kind is ChatPage.ItemKind.Tool or ChatPage.ItemKind.Edit);
-            if (owner < 0) owner = items.FindIndex(item => item.Kind == ChatPage.ItemKind.Group
-                && item.Group is { Open: false } group && group.Members.Any(member => member.ToolCallId == image.ToolCallId && member.AttachmentScope == image.AttachmentScope));
-            if (owner < 0) continue; // Older/paged archives keep an ordinary gallery.
-            if (!linked.TryGetValue(items[owner].Id, out var images)) linked[items[owner].Id] = images = [];
+            // Provenance can identify only a preceding step. Reused call IDs
+            // belong to their most recent preceding start, including folded starts.
+            if (!owners.TryGetValue((image.AttachmentScope, image.ToolCallId), out var owner)) continue;
+            if (!linked.TryGetValue(owner, out var images)) linked[owner] = images = [];
             if (!images.Any(prior => prior.Id == image.Id)) images.Add(image);
             moved.Add(index);
         }

@@ -13,6 +13,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Added
 
+- New chat opens a dedicated composer with a repository picker and the existing Add repository flow on Mac, iPhone/iPad, Android and Windows. The Repositories section groups Git checkouts and ordinary folders. Opening the landing page or choosing a repository does not create an empty conversation. Open chat supports image/file-first messages without starting a model turn.
 - Chat composers on Mac, iPhone, iPad, Android and Windows offer slash commands for context, usage, tools, MCP servers, stopping work and native Claude/Codex compaction.
 - Chat inspectors combine context and conversation usage, recent context history, tool groups and reported MCP connections in compact, expandable panels.
 - Chats show reported goals, plan steps and subagent tasks in a compact activity summary and expandable inspector on Mac, iPhone/iPad, Android and Windows. `/goal`, `/plan` and `/subagents` open the details without starting a model turn. Live counts and historical reports stay distinct, and backend sections that are not reported remain unknown.
@@ -29,9 +30,12 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Native compaction remains a maintenance operation in plan mode and after instruction changes. Steering preserves pending questions, retains attachments when capabilities change, and queues messages that exceed the agent's steering limits. A deferred Stop command stays tied to its original chat.
 - Context inspectors label token usage and capacity, preserve the last reported capacity for the same model during active turns, and keep history and conversation totals behind compact disclosures.
 - Mac chats accept image and file drops throughout the transcript, including message text, images and empty space. One highlight covers the full chat area and composer on Mac and iPad. Screenshot drops can use their image pixels when a temporary file URL is unavailable.
+- Context and MCP reports share one scoped reader and retire live status when a view becomes inactive. Image thumbnails stay attached to the preceding tool in their own turn and backend, interrupted tools stop holding chats busy, and session goals survive model changes without carrying over old context or subagents.
+- Native screenshots retain returned image bytes when temporary output paths disappear, and verified extensionless image files can appear in galleries.
 
 ### Changed
 
+- Conversation settings, chat detail, routing, agent behavior and instructions use compact summary cards with full-row disclosures across clients.
 - Updated Rust, Android and Windows dependencies, terminal renderers and build tools. HTTP requests retain the existing certificate trust policy across the library upgrade.
 - Automatic chat attachment previews allow files up to 5 MiB; local images bypass that threshold and preserve transparency in bounded previews.
 

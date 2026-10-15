@@ -399,6 +399,7 @@ fun coalesceTranscript(
             // older turn, including histories recorded by older hosts.
             if (!ev.bol("steer")) {
                 closeRunningTools(failed = false, at = atMsOf(ev, inner), detail = L10n.text("android.chattranscript.interrupted.132d124d"))
+                toolIndexes.clear()
                 editRevisions.clear()
             }
             items.add(

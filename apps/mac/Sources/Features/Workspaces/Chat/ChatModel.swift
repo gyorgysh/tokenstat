@@ -20,6 +20,19 @@ final class ChatModel {
     }
 
     private static let launchChoiceKey = "chat.lastLaunchChoice.v1"
+    /// Set only on an isolated landing-page reader, before its first create.
+    var newChatChoice: ChatStartDraft.AgentChoice?
+
+    static func newChatDefaults(backends: [ChatBackend]) -> ChatStartDraft.AgentChoice? {
+        let saved = UserDefaults.standard.data(forKey: launchChoiceKey)
+            .flatMap { try? JSONDecoder().decode(LaunchChoice.self, from: $0) }
+        let available = backends.filter { $0.installed != false && $0.id != "sh" }
+        guard let chosen = available.first(where: { $0.id == saved?.backend })
+            ?? available.first(where: { $0.id == "codex" }) ?? available.first else { return nil }
+        return .init(backend: chosen.id,
+                     model: chosen.models.contains(saved?.model ?? "") ? saved?.model : nil,
+                     effort: chosen.efforts.contains(saved?.effort ?? "") ? saved?.effort : nil)
+    }
     var chats: [ChatConversation] = [] {
         didSet { noteRunningChats() }
     }
@@ -691,6 +704,20 @@ final class ChatModel {
     /// the words exist somewhere at every moment. They come back on a refusal,
     /// and on a machine that did not answer they come back with a note saying
     /// so rather than a claim in either direction.
+    /// The landing page transfers into a fresh conversation, then uses the
+    /// same command, sign-in and durable-send reservation as its composer.
+    func sendInitialDraft() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let selected, !busy, !sending else { return }
+        if consumeChatCommand() { return }
+        switch holdForSignIn(text, backend: selected.backend) {
+        case .notNeeded: break
+        case .held, .refused: return
+        }
+        guard holdDraftForSending(text) else { return }
+        await sendFromComposer()
+    }
+
     func sendFromComposer() async {
         guard let submission = heldSubmission else { return }
         let outer = composerSendToken
@@ -1815,12 +1842,25 @@ final class ChatModel {
             }
             let saved = lastLaunchChoice
             let available = backends.filter { $0.installed != false && $0.id != "sh" }
-            let chosen = available.first { $0.id == saved?.backend }
-                ?? available.first { $0.id == "codex" }
-                ?? available.first
-                ?? backends.first { $0.id != "sh" }
-            let model = chosen?.models.contains(saved?.model ?? "") == true ? saved?.model : nil
-            let effort = chosen?.efforts.contains(saved?.effort ?? "") == true ? saved?.effort : nil
+            let chosen: ChatBackend?
+            if let requested = newChatChoice {
+                guard let explicit = available.first(where: { $0.id == requested.backend }),
+                      requested.model == nil || explicit.models.contains(requested.model!),
+                      requested.effort == nil || explicit.efforts.contains(requested.effort!) else {
+                    error = L10n.text("apple.chatmodel.can_t_check_agents_on_this_computer_reconn.49c16d28")
+                    return nil
+                }
+                chosen = explicit
+            } else {
+                chosen = available.first { $0.id == saved?.backend }
+                    ?? available.first { $0.id == "codex" }
+                    ?? available.first
+                    ?? backends.first { $0.id != "sh" }
+            }
+            let model = newChatChoice != nil ? newChatChoice?.model
+                : (chosen?.models.contains(saved?.model ?? "") == true ? saved?.model : nil)
+            let effort = newChatChoice != nil ? newChatChoice?.effort
+                : (chosen?.efforts.contains(saved?.effort ?? "") == true ? saved?.effort : nil)
             let chat = try await Bridge.createChat(
                 workspaceID: workspaceID,
                 backend: chosen?.id ?? "claude",
@@ -4341,9 +4381,8 @@ final class ChatModel {
                         guard let self else { throw CancellationError() }
                         try await self.updateFileProgress(value, name: attachment.name, reference: previewReference, generation: generation, foreground: userInitiated)
                     })
-                guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference, WorkCacheAccess.canSave(previewReference), memoryGeneration == attachmentCacheGeneration else {
-                    try? FileManager.default.removeItem(at: url); return
-                }
+                defer { try? FileManager.default.removeItem(at: url) }
+                guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference, WorkCacheAccess.canSave(previewReference), memoryGeneration == attachmentCacheGeneration else { return }
                 // Archive metadata can omit or understate a file's size.
                 // Use the completed file before deciding to read it into RAM.
                 let downloadedSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
@@ -4356,7 +4395,6 @@ final class ChatModel {
                     responseAttachmentFiles[attachment.id] = cached
                     return
                 }
-                defer { try? FileManager.default.removeItem(at: url) }
                 data = try Data(contentsOf: url)
             } else {
                 let payload = try await Bridge.chatAttachment(id: id, attachmentID: attachment.id, peer: targetPeer, confirmRelay: { [weak self] in guard userInitiated else { return false }; return await self?.confirmFileRelay(name: attachment.name, size: attachment.size) ?? false })

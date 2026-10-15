@@ -59,7 +59,7 @@ pieces += [r'''
     @MainActor static func main() async throws {
         let wire = Data(#"{"backend":"codex","model":"model","tools":null,"usedTools":[],"mcpServers":[],"mcpReported":false,"currentRun":true,"activity":{"goal":null,"plan":[],"agents":[{"id":"worker","status":"running","source":"agent"}],"goalReported":false,"planReported":false,"agentsReported":true,"partial":false,"live":true}}"#.utf8)
         let report = try JSONDecoder().decode(ChatInspection.self, from: wire)
-        for change in ["chat", "account", "backend", "model", "run", "selection", "saved", "access"] {
+        for change in ["chat", "account", "backend", "model", "run", "selection", "running", "saved", "access"] {
             let model = ChatModel()
             let task = Task { await model.watchActivity() }
             let next = await request()
@@ -70,6 +70,7 @@ pieces += [r'''
             case "model": model.selected?.model = "different"
             case "run": model.selected?.runRevision = 2
             case "selection": model.selectionGeneration += 1
+            case "running": model.selected?.running = false
             case "saved": model.savedCopy = true
             default: WorkCacheAccess.readable = false
             }
@@ -92,9 +93,23 @@ pieces += [r'''
         let next = await request()
         next.resume(returning: report)
         await settle()
-        precondition(model.activityIsLive && model.currentActivityRead?.inspection?.activity?.agents.count == 1)
+        precondition(model.activityIsLive && model.inspectionIsLive && model.currentActivityRead?.inspection?.activity?.agents.count == 1)
+        let olderHost = ChatModel()
+        olderHost.selected?.runRevision = nil
+        var oldReport = report
+        oldReport.activity = nil
+        olderHost.activityRead = ChatActivityRead(owner: olderHost.activityOwner, inspection: oldReport, loaded: true)
+        precondition(olderHost.inspectionIsLive && !olderHost.activityIsLive,
+                     "Older hosts can report live MCP connections without an activity payload")
+        olderHost.retireActivityRead()
+        precondition(!olderHost.inspectionIsLive && olderHost.currentActivityRead?.inspection != nil,
+                     "A backgrounded MCP report must remain historical")
+        olderHost.activityRead?.failed = false
+        olderHost.selected?.running = false
+        precondition(!olderHost.inspectionIsLive && olderHost.currentActivityRead == nil,
+                     "Run transitions invalidate context even when older hosts omit runRevision")
         model.retireActivityRead()
-        precondition(!model.activityIsLive, "Backgrounding must invalidate live state before an in-flight read returns")
+        precondition(!model.activityIsLive && !model.inspectionIsLive, "Backgrounding must invalidate live state before an in-flight read returns")
         task.cancel(); await task.value
         precondition(!model.activityIsLive && model.currentActivityRead?.inspection != nil,
                      "Stopping visibility polling must revoke live state while retaining the report")
@@ -102,7 +117,7 @@ pieces += [r'''
         precondition(!model.activityIsLive, "A completed turn cannot keep subagents live")
         model.selected?.running = true
         model.activityRead?.failed = true
-        precondition(!model.activityIsLive && model.currentActivityRead?.inspection != nil,
+        precondition(!model.activityIsLive && !model.inspectionIsLive && model.currentActivityRead?.inspection != nil,
                      "A disconnected report stays readable without claiming live agents")
         let saved = ChatModel(); saved.savedCopy = true
         let before = Bridge.calls

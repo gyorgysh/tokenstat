@@ -10,12 +10,18 @@ internal data class ChatActivityAgent(val id: String, val name: String?, val tas
     fun displayStatus(live: Boolean) = if (!live && status in setOf("pending", "running", "waiting")) "unknown" else status
 }
 internal data class ChatActivityData(val goal: ChatActivityGoal?, val plan: List<ChatActivityStep>, val agents: List<ChatActivityAgent>,
-    val planSource: String?, val goalReported: Boolean, val planReported: Boolean, val agentsReported: Boolean, val partial: Boolean, val live: Boolean) {
+    val planSource: String?, val goalReported: Boolean, val planReported: Boolean, val agentsReported: Boolean, val partial: Boolean, val live: Boolean,
+    val observedAtMs: Long?) {
     val hasContent get() = goal != null || plan.isNotEmpty() || agents.isNotEmpty()
     // A retained running status is historical once its owning run is gone.
     val runningAgents get() = if (live && agentsReported && agents.none { it.status == "unknown" }) agents.count { it.status == "running" } else null
     val completedSteps get() = plan.count { it.status == "completed" }
+    val headline get() = goal?.objective?.takeIf { it.isNotBlank() } ?: plan.firstOrNull { it.status == "inProgress" }?.text
 }
+
+internal fun chatActivityProgress(used: Double?, budget: Double?): Float? =
+    if (used != null && used.isFinite() && used >= 0 && budget != null && budget.isFinite() && budget > 0)
+        (used / budget).coerceIn(0.0, 1.0).toFloat() else null
 
 internal fun chatActivityData(inspection: JsonObject?, chat: JsonObject?): ChatActivityData? {
     val raw = inspection?.get("activity") as? JsonObject ?: return null
@@ -38,5 +44,6 @@ internal fun chatActivityData(inspection: JsonObject?, chat: JsonObject?): ChatA
         ChatActivityAgent(id, it.text("name"), it.text("task"), status(it.text("status"), setOf("pending", "running", "waiting", "completed", "failed", "stopped")), it.text("model"), it.text("source"))
     }
     return ChatActivityData(goal, plan, agents, raw.text("planSource"), goalReported, planReported, agentsReported, raw.flag("partial"),
-        raw.flag("live") && inspection.flag("currentRun") && chat?.flag("running") == true)
+        raw.flag("live") && inspection.flag("currentRun") && chat?.flag("running") == true,
+        (inspection["observedAtMs"] as? JsonPrimitive)?.longOrNull?.takeIf { it in 0..253402300799999 })
 }

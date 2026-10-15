@@ -47,4 +47,16 @@ class ChatActivityDataTest {
         assertEquals("unknown", activity.agents.single().status)
         assertFalse(activity.live)
     }
+    @Test fun planOnlyReportsKeepTheirCurrentStepAndFreshness() {
+        val activity = chatActivityData(json("""{"observedAtMs":1720000000000,"activity":{"planReported":true,"plan":[{"text":"Build","status":"completed"},{"text":"Review the patch","status":"inProgress"}]}}"""), null)!!
+        assertEquals("Review the patch", activity.headline)
+        assertEquals(1720000000000, activity.observedAtMs)
+        for (stamp in listOf("-1", "9223372036854775807", "\"bad\""))
+            assertNull(chatActivityData(json("""{"observedAtMs":$stamp,"activity":{}}"""), null)!!.observedAtMs)
+        assertEquals(1f, chatActivityProgress(20.0, 10.0))
+        assertEquals(0f, chatActivityProgress(0.0, 10.0))
+        assertNull(chatActivityProgress(null, 10.0))
+        assertNull(chatActivityProgress(1.0, 0.0))
+        assertNull(chatActivityProgress(Double.NaN, 10.0))
+    }
 }

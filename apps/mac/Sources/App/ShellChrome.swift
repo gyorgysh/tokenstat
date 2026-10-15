@@ -295,7 +295,7 @@ enum RailPlace: String, CaseIterable, Identifiable, Hashable {
             case .todo: return .tasks
             case .notes: return .notes
             case .workflows, .automations: return .automations
-            case .account: return nil
+            case .account, .newChat: return nil
             }
         case .workspace, .workspacesOverview: return .projects
         case .ssh, .sshTerminals: return .ssh

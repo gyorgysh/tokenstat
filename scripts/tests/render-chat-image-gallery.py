@@ -50,7 +50,7 @@ pieces += ['''
 enum SyntaxKind { case keyword, string, number, constant, comment, type, function, attribute, property, markup, variable, `operator`, punctuation, unknown }
 struct WorkReference: Hashable { let id = "synthetic-gallery"; let itemID: String? = "synthetic-gallery" }
 struct ChatAttachment: Hashable, Sendable { let id: String; let name: String; let mediaType: String?; var size: UInt64? = nil }
-struct QAConversation { var backend = "claude"; var model: String? = "synthetic-model"; var running = true }
+struct QAConversation { var backend = "claude"; var model: String? = "synthetic-model"; var runRevision: UInt64? = 1; var running = true }
 @MainActor enum GalleryQAState { static var expanded = false }
 @MainActor @Observable final class WorkSessionContext { static let shared = WorkSessionContext(); var scope: String? = "gallery-qa" }
 enum WorkCacheAccess { static func canRead(_ reference: WorkReference) -> Bool { true } }
@@ -63,6 +63,9 @@ enum WorkCacheAccess { static func canRead(_ reference: WorkReference) -> Bool {
     var savedCopy: Bool? = nil
     var selected: QAConversation? = QAConversation()
     var peer: String? = nil
+    var selectionGeneration: UInt64 = 1
+    var activityRead: ChatActivityRead?
+    var busy: Bool { selected?.running == true }
     var turnUsage: ChatUsageSummary = .available(.init(input: 40000, output: 20000, cacheRead: 180000, cacheWrite: 12000, cost: 0.18))
     var fileRelayPresenter: UUID?
     var fileTransferInFlight = false
@@ -80,6 +83,9 @@ enum Bridge {
     }
 }
 ''']
+activity_path = 'apps/mac/Sources/Features/Workspaces/Chat/ChatActivityView.swift'
+pieces += [declaration(activity_path, marker) for marker in [
+    'struct ChatActivityOwner:', 'struct ChatActivityRead {', 'extension ChatModel {']]
 pieces += [(root / 'apps/mac/Sources/Bridge/ChatInspection.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatCostMeter.swift').read_text()]
 context = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatContextCard.swift').read_text()
@@ -124,6 +130,8 @@ pieces += [r'''
     func render() async throws {
         AppFonts.register()
         let model = ChatModel()
+        model.activityRead = ChatActivityRead(owner: model.activityOwner,
+            inspection: try await Bridge.chatInspection(id: "synthetic-gallery", peer: nil), loaded: true)
         var files: [ChatAttachment] = []
         for index in 0..<9 {
             let file = ChatAttachment(id: "qa-\(index)", name: index == 1 ? "portrait-layout-with-a-long-descriptive-file-name.png" : "workspace-\(index + 1).png", mediaType: "image/png")

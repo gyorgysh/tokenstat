@@ -4,6 +4,13 @@ using Tokenstat.Pages;
 
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
+Check(!NewChatSetup.ShouldSend("") && !NewChatSetup.ShouldSend(" \n ") && NewChatSetup.ShouldSend("Review this"),
+    "explicit empty Open chat creates the normal composer without dispatching a model prompt; nonempty drafts retain Send");
+var selectedNewChatSetup = new NewChatSetup("codex", "model", "high");
+Check(selectedNewChatSetup.IsAvailable(Json("""{"id":"codex","models":["model"],"efforts":["high"]}""")), "older descriptors without installed flag still validate explicit new-chat selections");
+foreach (var descriptor in new[] { """{"id":"claude","models":["model"],"efforts":["high"]}""", """{"id":"codex","installed":false,"models":["model"],"efforts":["high"]}""", """{"id":"codex","models":["other-model"],"efforts":["high"]}""", """{"id":"codex","models":["model"],"efforts":["low"]}""" })
+    Check(!selectedNewChatSetup.IsAvailable(Json(descriptor)), "a changed agent, model, effort or installation cannot silently replace the captured landing setup");
+Check(!selectedNewChatSetup.IsAvailable(null) && new NewChatSetup("codex", null, null).IsAvailable(Json("""{"id":"codex"}""")), "absent agents fail while explicitly chosen default settings require no invented model");
 const long imageFileMaximum = 256L * 1024 * 1024;
 Check(ChatImagePolicy.DownloadLimit(false, true, imageFileMaximum) == 5L * 1024 * 1024,
     "automatic remote image previews use the separate 5 MiB policy");
@@ -68,6 +75,19 @@ var galleryGroup = new ChatPage.DisplayItem { Id = "group", Kind = ChatPage.Item
     Group = new ChatStepGroup { Open = false, Members = [galleryTool], MemberIds = [galleryTool.Id] } };
 var groupedGallery = ChatImageGallery.Compose([galleryGroup, GalleryImage("result", "call")]);
 Check(groupedGallery.Count == 2 && groupedGallery[1].ToolCallId == "group", "closed step groups retain linked image thumbnails");
+var beforeTool = ChatImageGallery.Compose([GalleryImage("before", "call"), galleryTool]);
+Check(beforeTool.Count == 2 && beforeTool[0].Images![0].Id == "before" && string.IsNullOrEmpty(beforeTool[0].ToolCallId),
+    "an image with no preceding owner never moves onto a later step");
+var laterTool = galleryTool; laterTool.Id = "tool-two";
+var repeatedCallGallery = ChatImageGallery.Compose([galleryTool, GalleryImage("first-output", "call"), laterTool, GalleryImage("second-output", "call")]);
+Check(repeatedCallGallery.Count == 4 && repeatedCallGallery[1].Images!.Single().Id == "first-output"
+    && repeatedCallGallery[3].Images!.Single().Id == "second-output", "reused call IDs belong to their most recent preceding step");
+var beforeGroup = ChatImageGallery.Compose([GalleryImage("before-group", "call"), galleryGroup]);
+Check(beforeGroup.Count == 2 && string.IsNullOrEmpty(beforeGroup[0].ToolCallId), "a folded future step cannot claim an earlier image");
+var laterGroup = galleryGroup; laterGroup.Id = "later-group"; laterGroup.Group = new ChatStepGroup { Open = false, Members = [laterTool], MemberIds = [laterTool.Id] };
+var repeatedGrouped = ChatImageGallery.Compose([galleryGroup, GalleryImage("first-group-output", "call"), laterGroup, GalleryImage("second-group-output", "call")]);
+Check(repeatedGrouped.Count == 4 && repeatedGrouped[1].Images!.Single().Id == "first-group-output"
+    && repeatedGrouped[3].Images!.Single().Id == "second-group-output", "reused calls in closed groups keep their own output");
 foreach (var scope in new[] { "another-turn/backend", "turn/another-backend" })
 {
     var orphan = ChatImageGallery.Compose([galleryTool, new() { Kind = ChatPage.ItemKind.Assistant, Id = "reply" }, GalleryImage("result", "call", scope)]);
@@ -99,6 +119,35 @@ Check(toolOwnership.TryResolve("turn/muse", "historical-call", out var museOwner
     "exact scoped ends retain their own original backend even when call IDs collide");
 toolOwnership.Clear();
 Check(!toolOwnership.TryResolve("next-turn/codex", "historical-call", out _), "user-turn boundaries retire historical call fallbacks");
+var interruptedTools = new List<ChatPage.DisplayItem> {
+    new() { Id = "interrupted-tool", Kind = ChatPage.ItemKind.Tool, Running = true },
+    new() { Id = "interrupted-edit", Kind = ChatPage.ItemKind.Edit, Running = true, Detail = "Keep recorded output" },
+    new() { Id = "completed-tool", Kind = ChatPage.ItemKind.Tool, Running = false, Failed = true },
+};
+toolOwnership.Remember("old-turn/codex", "codex", "tool", 0);
+toolOwnership.Remember("old-turn/codex", "codex", "edit", 1);
+toolOwnership.Remember("old-turn/codex", "codex", "done", 2);
+toolOwnership.CloseRunning(interruptedTools, failed: false, detail: "Interrupted");
+toolOwnership.Clear();
+Check(interruptedTools.All(item => !item.Running) && interruptedTools[0].Detail == "Interrupted"
+    && interruptedTools[1].Detail == "Keep recorded output" && interruptedTools[2].Failed,
+    "ordinary user boundaries close interrupted tools and merged edits before retiring their owners");
+var repeatedOwners = new ChatToolCalls();
+Check(repeatedOwners.Remember("turn/codex", "codex", "reused", 0) == 1
+    && repeatedOwners.Remember("turn/codex", "codex", "reused", 1) == 2, "repeated starts keep a distinct stable occurrence for transcript row IDs");
+var concurrent = new List<ChatPage.DisplayItem> {
+    new() { Kind = ChatPage.ItemKind.Tool, Running = true }, new() { Kind = ChatPage.ItemKind.Edit, Running = true },
+};
+Check(repeatedOwners.TryResolve("turn/codex", "reused", out var firstConcurrent, index => concurrent[index].Running) && firstConcurrent.Index == 0,
+    "a repeated call end closes the oldest still-running start");
+var completedConcurrent = concurrent[0]; completedConcurrent.Running = false; concurrent[0] = completedConcurrent;
+Check(repeatedOwners.TryResolve("turn/old-backend-stamp", "reused", out var nextConcurrent, index => concurrent[index].Running)
+    && nextConcurrent.Index == 1 && nextConcurrent.Backend == "codex", "the unique historical namespace still resolves the next running repeated start");
+repeatedOwners.CloseRunning(concurrent, failed: true, detail: "Cancelled");
+Check(concurrent.All(item => !item.Running) && !concurrent[0].Failed && concurrent[1].Failed,
+    "closing interrupted repeated starts preserves terminal rows and closes every remaining tool or merged edit");
+Check(repeatedOwners.TryResolve("turn/codex", "reused", out var repeatedEnd, index => concurrent[index].Running) && repeatedEnd.Index == 1,
+    "duplicate ends with no running starts resolve the newest recorded occurrence");
 Console.WriteLine("Windows tool ownership: historical backend stamps, original Muse metadata, scoped collisions and user-turn retirement pass.");
 Check(ChatCommandRules.CanSteer("  include tests  ", false, false), "trimmed short drafts can steer");
 Check(!ChatCommandRules.CanSteer(" /usr/local/file ", false, false)
@@ -146,6 +195,14 @@ foreach (var command in new[] { "/goal", "/plan", "/subagents" })
     Check(ChatCommandRules.Evaluate(command + " make one", "codex", false, false).Kind == ChatCommandRules.Kind.Arguments, "activity command arguments cannot create native goals or execute commands");
 }
 Console.WriteLine("Windows chat activity: reported-only metrics, old hosts, stale runs, unknown states and local read-only commands pass.");
+var planOnly = ChatActivityData.Read(Json("""{"observedAtMs":1720000000000,"activity":{"planReported":true,"plan":[{"text":"Build","status":"completed"},{"text":"Review the patch","status":"inProgress"}]}}"""), null)!;
+Check(planOnly.Headline == "Review the patch" && planOnly.ObservedAtMs == 1720000000000, "plan-only activity keeps its current step and report freshness");
+Check(ChatActivityData.Read(Json("""{"observedAtMs":-1,"activity":{}}"""), null)!.ObservedAtMs is null
+    && ChatActivityData.Read(Json("""{"observedAtMs":9223372036854775807,"activity":{}}"""), null)!.ObservedAtMs is null,
+    "invalid report timestamps cannot crash local date formatting");
+Check(ChatActivityData.Progress(20, 10) == 1 && ChatActivityData.Progress(0, 10) == 0
+    && ChatActivityData.Progress(null, 10) is null && ChatActivityData.Progress(1, 0) is null
+    && ChatActivityData.Progress(double.NaN, 10) is null, "budget progress is bounded and remains absent for unreported usage or invalid limits");
 Check(ChatCommandRules.SendMethod(" /compact ") == "chat.compact" && ChatCommandRules.SendMethod("please /compact") == "chat.send", "older hosts must reject an unknown method instead of receiving a compaction prompt");
 var history = new ChatHistoryBuffer();
 var newest = Json("""{"events":[{"id":"recent"}],"nextOffset":900,"tailCursor":"tail-a","cursor":"older-a","hasEarlier":true,"usage":{"turns":10,"input":1000,"output":200,"cacheRead":10,"cacheWrite":20,"cost":1.5}}""");

@@ -268,6 +268,13 @@ struct ClientSidebarRoot: View {
     private var list: some View {
         List {
             Section {
+                Button {
+                    navigation.openNewChat()
+                } label: {
+                    Label(L10n.text("apple.clientchatview.new_chat.db18382a"), systemImage: "square.and.pencil")
+                        .font(Theme.font(15)).frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain)
                 ForEach(tabCustomization.visibleTabs) { tab in
                     Button {
                         navigation.chooseNavigation()

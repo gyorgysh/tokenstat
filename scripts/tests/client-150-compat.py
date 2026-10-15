@@ -7,6 +7,7 @@ Keep this fixture when changing the host: protocol 34 clients are already in
 the field and must continue to speak to newer hosts.
 """
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -69,7 +70,7 @@ def main():
                     time.sleep(0.05)
 
             with connection:
-                with connection.makefile("rwb", buffering=0) as stream:
+                with connection.makefile("rb") as stream:
                     request_id = 0
 
                     def call(method, params):
@@ -78,7 +79,9 @@ def main():
                         # v1.5.0 SocketTransport and HostClient use this line
                         # framing and require an echoed id and ok/result envelope.
                         request = {"id": request_id, "method": method, "params": params}
-                        stream.write((json.dumps(request, separators=(",", ":")) + "\n").encode())
+                        # SocketIO.write may accept only part of a large
+                        # request. Ship the entire legacy line before waiting.
+                        connection.sendall((json.dumps(request, separators=(",", ":")) + "\n").encode())
                         line = stream.readline()
                         assert line, f"hostd closed the connection on {method}"
                         answer = json.loads(line)
@@ -123,6 +126,45 @@ def main():
                     for row in chats:
                         require_fields(row, required_chat, "chat.list")
                     assert isinstance(call("chat.recent", {"limit": 50}), list)
+
+                    # Clients predating chunked transfers still use these
+                    # methods. A newer host must retain their byte envelope,
+                    # including files above the new automatic-preview limit.
+                    payload = b"legacy attachment\n" + bytes(5 * 1024 * 1024)
+                    encoded = base64.b64encode(payload).decode()
+                    attachment = call("chat.attach", {
+                        "id": chat["id"], "name": "legacy.bin",
+                        "mediaType": "application/octet-stream", "data": encoded,
+                    })
+                    require_fields(attachment, ["id", "name", "mediaType", "size"], "chat.attach")
+                    assert attachment["name"] == "legacy.bin" and attachment["size"] == len(payload)
+                    downloaded = call("chat.attachment", {
+                        "id": chat["id"], "attachmentId": attachment["id"],
+                    })
+                    require_fields(downloaded, ["attachment", "data"], "chat.attachment")
+                    require_fields(downloaded["attachment"], ["id", "name", "mediaType", "size"], "chat.attachment descriptor")
+                    assert base64.b64decode(downloaded["data"], validate=True) == payload
+
+                    # Later released clients use inspection without knowing
+                    # about activity. Preserve every required field while
+                    # allowing additive goal/plan/subagent data beside it.
+                    inspection = call("chat.inspection", {"id": chat["id"]})
+                    require_fields(inspection, [
+                        "backend", "usedTools", "mcpServers", "mcpReported", "currentRun",
+                    ], "chat.inspection")
+                    assert inspection["backend"] == "codex"
+                    assert isinstance(inspection["usedTools"], list)
+                    assert isinstance(inspection["mcpServers"], list)
+                    assert type(inspection["mcpReported"]) is bool
+                    assert type(inspection["currentRun"]) is bool
+                    # Omit newer stablePositions/includeUsage parameters,
+                    # exactly as older clients do.
+                    tail = call("chat.events", {"id": chat["id"], "offset": 0})
+                    require_fields(tail, ["events", "nextOffset"], "chat.events")
+                    assert isinstance(tail["events"], list) and type(tail["nextOffset"]) is int
+                    page = call("chat.eventPage", {"id": chat["id"], "limit": 10})
+                    require_fields(page, ["events", "nextOffset", "hasEarlier", "reset"], "chat.eventPage")
+                    assert isinstance(page["events"], list) and page["events"] == tail["events"]
                     call("config.limitsSync", {"enabled": False, "skip": [
                         "codex", "claude_code", "cursor", "grok", "opencode", "antigravity",
                     ]})
@@ -139,7 +181,7 @@ def main():
                             "label", "scope", "percent", "resetsAtMs", "severity",
                         ], "usage.limits window")
                         assert window["severity"] == "normal"
-            print("1.5.0 client wire compatibility: protocol, info, workspaces, chats, limits OK")
+            print("Legacy client wire compatibility: protocol, workspaces, chats, attachment bytes, inspection, timeline and limits OK")
         finally:
             process.terminate()
             try:

@@ -23,7 +23,6 @@ struct ChatSetupHeader: View {
                 form
             }
         }
-        .disabled(model.savedCopy != nil)
         .onAppear { enforceBypassOnly() }
         .onChange(of: chat.backend) { _, _ in enforceBypassOnly() }
     }
@@ -67,37 +66,41 @@ struct ChatSetupHeader: View {
     }
 
     private var agentForm: some View {
-        ChatSetupSection(title: L10n.text("common.chat_agent_behavior"), icon: .run) {
-            if showsIntro {
-                Text(L10n.text("apple.chatsetupheader.how_this_chat_should_work.b5eec3c8"))
+        ChatSetupSection(title: L10n.text("common.chat_agent_behavior"), icon: .run,
+                         summary: [backend?.label ?? chat.backend, chat.model, chat.effort].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
+                         initiallyExpanded: showsIntro) {
+            Group {
+                if showsIntro {
+                    Text(L10n.text("apple.chatsetupheader.how_this_chat_should_work.b5eec3c8"))
+                        .font(Theme.callout.weight(.semibold))
+                    Text(L10n.text("apple.chatsetupheader.these_stay_here_until_the_first_message_af.61e86a8e"))
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                agentRow
+                if !model.personas.isEmpty {
+                    personaRow
+                }
+                ThemeRule()
+                Text(L10n.text("common.chat_working_style"))
                     .font(Theme.callout.weight(.semibold))
-                Text(L10n.text("apple.chatsetupheader.these_stay_here_until_the_first_message_af.61e86a8e"))
+                SegmentedCapsulePicker(
+                    options: [
+                        (value: "plan", label: L10n.text("apple.chatsetupheader.plan.fa8ed0bd"), symbol: ActionIcon.plan.symbol),
+                        (value: "execute", label: L10n.text("apple.chatsetupheader.execute.e3a67d95"), symbol: "hammer"),
+                    ],
+                    selection: modeBinding
+                )
+                .disabled(chat.running)
+                Toggle(L10n.text("apple.chatsetupheader.work_without_asking.dde89661"), isOn: bypassBinding)
+                    .toggleStyle(.brandCheckbox)
+                    .disabled(chat.running || isBypassOnly)
+                Text(ChatGateCopy.explanation(backend?.gateTier, bypass: chat.autonomy == "bypass"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            agentRow
-            if !model.personas.isEmpty {
-                personaRow
-            }
-            ThemeRule()
-            Text(L10n.text("common.chat_working_style"))
-                .font(Theme.callout.weight(.semibold))
-            SegmentedCapsulePicker(
-                options: [
-                    (value: "plan", label: L10n.text("apple.chatsetupheader.plan.fa8ed0bd"), symbol: ActionIcon.plan.symbol),
-                    (value: "execute", label: L10n.text("apple.chatsetupheader.execute.e3a67d95"), symbol: "hammer"),
-                ],
-                selection: modeBinding
-            )
-            .disabled(chat.running)
-            Toggle(L10n.text("apple.chatsetupheader.work_without_asking.dde89661"), isOn: bypassBinding)
-                .toggleStyle(.brandCheckbox)
-                .disabled(chat.running || isBypassOnly)
-            Text(ChatGateCopy.explanation(backend?.gateTier, bypass: chat.autonomy == "bypass"))
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            }.disabled(model.savedCopy != nil)
         }
     }
 
@@ -985,41 +988,65 @@ struct ChatAgentAvailabilityNotice: View {
     }
 }
 
-/// One hierarchy for the setup cards on Mac and iPhone: a visible header,
-/// a dividing rule, and a consistently spaced form body.
+/// Settings share the compact disclosure anatomy used by context and activity.
 struct ChatSetupSection<Content: View>: View {
     let title: String
     let icon: ActionIcon
     var subtitle: String? = nil
-    @ViewBuilder var content: Content
+    var summary: String? = nil
+    let content: Content
+    @State private var expanded: Bool
+
+    init(title: String, icon: ActionIcon, subtitle: String? = nil, summary: String? = nil,
+         initiallyExpanded: Bool = false, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.subtitle = subtitle
+        self.summary = summary
+        self.content = content()
+        _expanded = State(initialValue: initiallyExpanded)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: Theme.Space.s) {
-                Image(systemName: icon.symbol)
-                    .font(Theme.callout.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 30, height: 30)
-                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8))
-                    .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Button { expanded.toggle() } label: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(Theme.callout.weight(.semibold))
-                    if let subtitle {
-                        Text(subtitle).font(Theme.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: Theme.Space.s) {
+                        Image(systemName: icon.symbol).accessibilityHidden(true)
+                        Text(title)
+                        Spacer(minLength: 8)
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(Theme.caption).foregroundStyle(.secondary).accessibilityHidden(true)
+                    }.font(Theme.callout.weight(.semibold))
+                    if let summary, !summary.isEmpty {
+                        Text(summary).font(Theme.caption).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
                     }
                 }
+                .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.rowHighlight)
-            ThemeRule()
-            VStack(alignment: .leading, spacing: Theme.Space.m) { content }
-                .padding(Theme.Space.m)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded ? L10n.text("common.collapse") : L10n.text("common.expand"))
+            if expanded {
+                if let subtitle {
+                    Text(subtitle).font(Theme.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                VStack(alignment: .leading, spacing: Theme.Space.s) { content }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border))
+        .padding(Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+    }
+    private var rowHeight: CGFloat {
+        #if os(macOS)
+        28
+        #else
+        44
+        #endif
     }
 }

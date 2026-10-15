@@ -30,6 +30,7 @@ enum LaunchPreferences { static let restoresLocation = false }
 @MainActor final class WorkSessionContext {
     static let shared = WorkSessionContext()
     var scope: WorkReference.Scope?
+    var generation: UInt64 = 1
 }
 enum WorkDestinationResolver {
     static func sameConversation(_ a: WorkReference?, _ b: WorkReference?) -> Bool {
@@ -185,6 +186,15 @@ tests = '''
         let beforeAccount = nav.chatActionTicket()
         WorkSessionContext.shared.scope = .account(origin: "https://test.example", handle: "bob")!
         precondition(!nav.acceptsChatAction(beforeAccount))
+        // New chat is a separate, account-owned writing surface. Opening
+        // or canceling it must not request a conversation or lose its draft.
+        nav.openNewChat(repositoryID: "remote:mac:p")
+        precondition(nav.showingNewChat && nav.newChatDraft.repositoryID == "remote:mac:p"
+                     && nav.newChatDraft.pending == nil)
+        nav.newChatDraft.text = "Keep this while choosing a folder"
+        nav.showingNewChat = false
+        nav.openNewChat()
+        precondition(nav.newChatDraft.text == "Keep this while choosing a folder")
         print("Mobile navigation: passive restoration, cover return, nested pushes, in-place selection/list Back, fallback provenance, inactive terminal dismissal, stale Fork/layout/account delivery and guarded system Back passed")
     }
 }
@@ -195,6 +205,7 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-chat-navigation-') as directo
     files = ['Client/ClientChatLayoutHandoff.swift', 'Client/ClientChatSession.swift',
              'Features/Workspaces/Chat/Singleflight.swift', 'Features/Work/ChatDraftTransition.swift',
              'Features/Work/WorkReference.swift', 'Features/Work/WorkMobileRoute.swift', 'Design/L10n.swift']
+    files.append('Features/Workspaces/Chat/ChatStartDraft.swift')
     binary = Path(directory) / 'checks'
     subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', '-o', str(binary),
                     str(path), *[str(sources / file) for file in files]], check=True)

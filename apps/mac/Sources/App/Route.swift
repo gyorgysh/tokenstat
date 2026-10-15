@@ -101,9 +101,9 @@ enum Route: Hashable {
     /// task one list over had a whole pane for the same thing.
     var hasInspector: Bool {
         #if os(macOS)
-        globalSection != .account && globalSection != .notes && workspaceSection != .notes
+        globalSection != .account && globalSection != .newChat && globalSection != .notes && workspaceSection != .notes
         #else
-        globalSection != .account
+        globalSection != .account && globalSection != .newChat
         #endif
     }
 }
@@ -111,6 +111,7 @@ enum Route: Hashable {
 /// The machine-wide screens.
 enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
     case home
+    case newChat
     case insights
     case machines
     case todo
@@ -134,6 +135,7 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
     var label: String {
         switch self {
         case .home: return L10n.text("common.home")
+        case .newChat: return L10n.text("apple.rootview.new_chat.db18382a")
         case .todo: return L10n.text("common.tasks")
         case .notes: return L10n.text("common.notes")
         case .automations: return L10n.text("common.automations")
@@ -147,6 +149,7 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
     var symbol: String {
         switch self {
         case .home: return "square.grid.3x3.fill"
+        case .newChat: return "square.and.pencil"
         case .todo: return "checklist"
         case .notes: return "note.text"
         case .automations: return "bolt.fill"

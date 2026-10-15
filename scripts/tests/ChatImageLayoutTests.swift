@@ -41,8 +41,17 @@ import ImageIO
         let metadata = ChatImageMetadata()
         let original = await metadata.dimensions(data: png, file: nil)
         precondition(original == .init(width: 37, height: 83))
-        let rotated = await metadata.dimensions(data: try image(width: 37, height: 83, orientation: 6), file: nil)
-        precondition(rotated == .init(width: 83, height: 37), "EXIF rotation must also rotate the gallery's aspect")
+        for orientation in 1...8 {
+            let encoded = try image(width: 37, height: 83, orientation: orientation)
+            let source = CGImageSourceCreateWithData(encoded as CFData, nil)!
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as! [CFString: Any]
+            precondition((properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue == orientation,
+                         "The fixture must contain the requested EXIF orientation")
+            let rotated = await metadata.dimensions(data: encoded, file: nil)
+            let expected = (5...8).contains(orientation)
+                ? ChatImageDimensions(width: 83, height: 37) : ChatImageDimensions(width: 37, height: 83)
+            precondition(rotated == expected, "EXIF rotation must also rotate the gallery's aspect")
+        }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -58,13 +67,32 @@ import ImageIO
         print("Image layout: justified rows, width/height bounds, touch targets, native singles and metadata orientation/replacement passed")
     }
 
+    // A minimal, uncompressed RGB TIFF keeps the fixture independent of
+    // ImageIO encoder versions, which can normalize orientation on write.
     static func image(width: Int, height: Int, orientation: Int = 1) throws -> Data {
-        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
-            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        let bytes = NSMutableData()
-        let destination = CGImageDestinationCreateWithData(bytes, "public.tiff" as CFString, 1, nil)!
-        CGImageDestinationAddImage(destination, context.makeImage()!, [kCGImagePropertyOrientation: orientation] as CFDictionary)
-        precondition(CGImageDestinationFinalize(destination))
-        return bytes as Data
+        var bytes = Data()
+        func u16(_ value: Int) { bytes.append(contentsOf: [UInt8(value & 255), UInt8((value >> 8) & 255)]) }
+        func u32(_ value: Int) { u16(value & 65535); u16((value >> 16) & 65535) }
+        func entry(_ tag: Int, _ type: Int, _ count: Int, _ value: Int) {
+            u16(tag); u16(type); u32(count); u32(value)
+        }
+        let count = 11, bitsOffset = 8 + 2 + 11 * 12 + 4, pixelOffset = bitsOffset + 6
+        bytes.append(contentsOf: [0x49, 0x49]); u16(42); u32(8)
+        u16(count)
+        entry(256, 4, 1, width)
+        entry(257, 4, 1, height)
+        entry(258, 3, 3, bitsOffset)
+        entry(259, 3, 1, 1)
+        entry(262, 3, 1, 2)
+        entry(273, 4, 1, pixelOffset)
+        entry(274, 3, 1, orientation)
+        entry(277, 3, 1, 3)
+        entry(278, 4, 1, height)
+        entry(279, 4, 1, width * height * 3)
+        entry(284, 3, 1, 1)
+        u32(0)
+        u16(8); u16(8); u16(8)
+        bytes.append(Data(repeating: 0, count: width * height * 3))
+        return bytes
     }
 }

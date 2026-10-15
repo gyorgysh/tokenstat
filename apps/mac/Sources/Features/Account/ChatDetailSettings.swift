@@ -73,6 +73,11 @@ struct ChatDetailSettings: View {
     @State private var preference = ChatDetailPreference.shared
 
     var body: some View {
+        if model != nil {
+            ChatSetupSection(title: L10n.text("apple.chatdetail.title"), icon: .comment,
+                             subtitle: L10n.text("apple.chatdetail.subtitle"),
+                             summary: ChatDetailPreference.label(preference.level)) { rows }
+        } else {
         #if os(macOS)
         Card(
             title: L10n.text("apple.chatdetail.title"),
@@ -93,6 +98,7 @@ struct ChatDetailSettings: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
         #endif
+        }
     }
 
     private var rows: some View {

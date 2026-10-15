@@ -25,6 +25,8 @@ THEME = ROOT / "Design" / "Theme.swift"
 # Large viewers and native iOS-only surfaces. Task sheets do not belong here.
 VIEWERS = {
     "ScreenViewerView",
+    # A resizable lightbox with its own image navigation and file toolbar.
+    "ChatImageViewer",
 }
 
 SURFACE = re.compile(r"ThemedSheet\s*\(|ModalHeader\s*\(|\.modalFrame\s*\(")

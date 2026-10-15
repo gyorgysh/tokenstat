@@ -456,6 +456,7 @@ internal sealed partial class ChatPage
                 {
                     ChatDetailPreference.Level = level;
                     RebuildTranscript(full: true);
+                    RenderInspector();
                 };
                 menu.Items.Add(choice);
             }

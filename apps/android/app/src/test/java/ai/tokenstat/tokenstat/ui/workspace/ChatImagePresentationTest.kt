@@ -96,6 +96,31 @@ class ChatImagePresentationTest {
         assertEquals(2, chatImageRows(aroundLinked, aroundLinked).rows.filterIsInstance<ChatDisplayItem.ImageGallery>().size)
     }
 
+    @Test fun returningBackendCannotClaimImagesFromBeforeAHandoff() {
+        val step = tool("same").copy(state = tool("same").state.copy(backend = "claude"))
+        val output = image("returned", "same").copy(backend = "claude")
+        for (boundary in listOf(ChatDisplayItem.Handoff("handoff", "codex", "Continue"), ChatDisplayItem.TurnSeparator("backend", "codex"))) {
+            val raw = listOf(step, boundary, output)
+            val result = chatImageRows(raw, raw)
+            assertTrue(result.toolImages.isEmpty())
+            assertEquals(listOf(output), result.rows.filterIsInstance<ChatDisplayItem.ImageGallery>().single().images)
+        }
+    }
+
+    @Test fun newUserTurnRetiresUnambiguousToolFallbacksButSteeringKeepsThem() {
+        fun event(backend: String, kind: String) = buildJsonObject {
+            put("backend", backend)
+            put("event", buildJsonObject { put("kind", kind); put("callId", "same"); put("verb", "Read"); put("detail", backend); put("ok", true) })
+        }
+        for (steer in listOf(false, true)) {
+            val user = buildJsonObject { put("kind", "user"); put("text", "Continue"); put("steer", steer) }
+            val tools = coalesceTranscript(listOf(event("claude", "toolStart"), user, event("codex", "toolEnd"))).filterIsInstance<ChatDisplayItem.Tool>()
+            assertEquals(if (steer) 1 else 2, tools.size)
+            assertEquals(if (steer) "codex" else "claude", tools.first().state.detail)
+            if (!steer) assertEquals("codex", tools.last().state.backend)
+        }
+    }
+
     @Test fun coalescerKeepsSameNamedToolsAndMergedEditsInTheirBackendNamespace() {
         fun event(backend: String, kind: String, verb: String = "Read") = buildJsonObject {
             put("backend", backend)

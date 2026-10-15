@@ -452,15 +452,8 @@ private struct ClientChatContent: View {
 
     private func create() async {
         guard visible, !Task.isCancelled, publicationLayout == navigation.stackGeneration else { return }
-        navigation.chooseWithinChat(session: session, presentationID: presentationID)
-        publicationIntent = navigation.chatHandoff.intent
-        let intent = publicationIntent
-        let reader = model
-        guard let created = await reader.create(), !Task.isCancelled, visible,
-              publicationLayout == navigation.stackGeneration, intent == navigation.chatHandoff.intent,
-              session.model === reader, reader.selected?.id == created.id,
-              reader.folderID == workspaceID else { return }
-        opened = created
+        model.saveDraftNow()
+        navigation.openNewChat(repositoryID: "remote:\(peer):\(workspaceID)")
     }
 
     /// A notification named this conversation. Only consume it if it is in
@@ -1549,8 +1542,11 @@ struct ClientChatThread: View {
     private var setupSheet: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.l) {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let chat {
+                        ChatContextCard(model: model)
+                        ChatActivityCard(model: model)
+                        ChatDetailSettings(model: model)
                         ChatSetupHeader(
                             model: model,
                             chat: chat,
@@ -1558,8 +1554,6 @@ struct ClientChatThread: View {
                             showsIntro: false
                         )
                         ChatInstructionsCard(model: model, chat: chat)
-                        ChatContextCard(model: model)
-                        ChatActivityCard(model: model)
                         Button(L10n.text("apple.clientchatview.personas.fa2ea3fb"), .persona) { showingPersonas = true }
                             .buttonStyle(SecondaryButtonStyle())
                     }

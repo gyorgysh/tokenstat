@@ -22,6 +22,7 @@ internal fun chatImageRows(folded: List<ChatDisplayItem>, raw: List<ChatDisplayI
     raw.forEach { item ->
         when (item) {
             is ChatDisplayItem.User -> if (!item.isSteer) toolsInTurn.clear()
+            is ChatDisplayItem.Handoff, is ChatDisplayItem.TurnSeparator -> toolsInTurn.clear()
             is ChatDisplayItem.Tool -> toolsInTurn[item.state.backend to item.state.callId] = item.id
             is ChatDisplayItem.Edit -> item.state.callId?.let { toolsInTurn[item.state.backend to it] = item.id }
             is ChatDisplayItem.Attachment -> item.callId?.let { toolsInTurn[item.backend to it] }?.let { imageTools[item.id] = it }

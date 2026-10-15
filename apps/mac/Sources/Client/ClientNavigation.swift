@@ -44,6 +44,8 @@ final class ClientNavigationModel {
     func chooseNavigation() {
         guard !restoringLayout else { return }
         chatHandoff.navigate()
+        showingNewChat = false
+        newChatDraft.retire()
         pushedChat = nil
         restoredChatReader = nil
         visibleChat = nil
@@ -68,6 +70,15 @@ final class ClientNavigationModel {
         pushedChats = pushes
         restoredChatReader = fallback
     }
+    var showingNewChat = false
+    let newChatDraft = ChatStartDraft()
+    func openNewChat(repositoryID: String? = nil) {
+        chooseNavigation()
+        newChatDraft.activate(scope: WorkSessionContext.shared.scope,
+                              session: WorkSessionContext.shared.generation, repositoryID: repositoryID)
+        showingNewChat = true
+    }
+
     var showWorkSearch = false
     var ecosystemSearchTerm = ""
 

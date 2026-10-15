@@ -2814,12 +2814,23 @@ impl Store {
                 .unwrap_or_else(PoisonError::into_inner);
             self.verified_conversation(&known.workspace_id, id, &chats)?
         };
-        let stored = crate::chat_inspection::load(&directory.join("inspection.json"))
-            .filter(|s| s.backend == chat.backend && s.requested_model == chat.model);
-        let mut snapshot = stored
+        let backend_stored = crate::chat_inspection::load(&directory.join("inspection.json"))
+            .filter(|s| s.backend == chat.backend);
+        let stored = backend_stored
             .as_ref()
-            .map(|s| s.snapshot.clone())
-            .unwrap_or_default();
+            .filter(|s| s.requested_model == chat.model);
+        let mut snapshot = stored.map(|s| s.snapshot.clone()).unwrap_or_default();
+        // Selecting another model does not replace the backend session's
+        // goal. Reuse only that durable activity when its session is known;
+        // context and per-run activity still belong to the selected model.
+        if stored.is_none()
+            && let Some(previous) = backend_stored.as_ref().filter(|s| {
+                s.snapshot.session_id.is_some() && s.snapshot.session_id == chat.resume_token
+            })
+        {
+            snapshot.activity.goal = previous.snapshot.activity.goal.clone();
+            snapshot.activity.goal_reported = previous.snapshot.activity.goal_reported;
+        }
         let model = snapshot.model.clone().or_else(|| chat.model.clone());
         let mut window_source = snapshot.context_window.map(|_| {
             if snapshot.context_window_inherited {
@@ -2923,17 +2934,20 @@ impl Store {
             return;
         }
         let previous = crate::chat_inspection::load(&directory.join("inspection.json"))
-            .filter(|s| s.backend == backend && s.requested_model.as_deref() == requested_model);
+            .filter(|s| s.backend == backend);
         // Goals belong to the backend session and can remain active between
         // turns. A fresh parser's lack of telemetry must not clear a goal.
         // Plans and agents remain owned by this parser's single run.
         if !snapshot.activity.goal_reported
             && let Some(previous) = previous.as_ref()
             && snapshot.session_id == previous.snapshot.session_id
+            && (snapshot.session_id.is_some()
+                || previous.requested_model.as_deref() == requested_model)
         {
             snapshot.activity.goal = previous.snapshot.activity.goal.clone();
             snapshot.activity.goal_reported = previous.snapshot.activity.goal_reported;
         }
+        let previous = previous.filter(|s| s.requested_model.as_deref() == requested_model);
         let last_window = snapshot
             .model
             .as_ref()
@@ -4464,7 +4478,9 @@ impl Store {
         if let Some(stored) = prior_directory
             .and_then(|directory| crate::chat_inspection::load(&directory.join("inspection.json")))
             .filter(|stored| {
-                stored.backend == backend && stored.requested_model.as_deref() == launch_model
+                stored.backend == backend
+                    && (stored.requested_model.as_deref() == launch_model
+                        || stored.snapshot.session_id.is_some())
             })
         {
             parser.inherit_goal(&stored.snapshot);
@@ -7592,6 +7608,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn stopping_a_live_turn_requests_its_mailbox_before_killing_the_pty() {
         let root = tempfile::tempdir().unwrap();
@@ -9345,7 +9362,7 @@ mod tests {
             })
             .unwrap();
         let png = b"\x89PNG\r\n\x1a\nfixture";
-        let path = root.path().join("screen.png");
+        let path = root.path().join("screen");
         fs::write(&path, png).unwrap();
         store.record_tool_images(
             "images",
@@ -9620,25 +9637,58 @@ mod tests {
             .edit_conversation(id, |chat| {
                 chat.backend = "cursor".into();
                 chat.run_revision = Some(1);
+                chat.resume_token = Some("native-session".into());
                 Ok(())
             })
             .unwrap();
-        let mut initial = crate::chat_inspection::Snapshot::default();
-        initial.session_id = Some("native-session".into());
+        let mut initial = crate::chat_inspection::Snapshot {
+            session_id: Some("native-session".into()),
+            ..Default::default()
+        };
         initial.observe("cursor", &json!({"type":"tool_call","subtype":"completed","tool_call":{"createGoalToolCall":{"args":{"objective":"Ship"},"result":{"success":{}}}}}));
         store.record_inspection(id, "cursor", 1, None, initial);
-        for (revision, session, goal_status, expected, reported) in [
-            (2, "native-session", Some(3), Some("completed"), true),
-            (3, "replacement-session", None, None, false),
-            (4, "replacement-session", Some(4), None, true),
+        for (revision, session, model, goal_status, expected, reported) in [
+            (2, "native-session", None, Some(2), Some("paused"), true),
+            (
+                3,
+                "native-session",
+                Some("next-model"),
+                Some(3),
+                Some("completed"),
+                true,
+            ),
+            (
+                4,
+                "replacement-session",
+                Some("next-model"),
+                None,
+                None,
+                false,
+            ),
+            (
+                5,
+                "replacement-session",
+                Some("next-model"),
+                Some(4),
+                None,
+                true,
+            ),
         ] {
             store
                 .edit_conversation(id, |chat| {
                     chat.run_revision = Some(revision);
                     chat.running = true;
+                    chat.model = model.map(str::to_owned);
                     Ok(())
                 })
                 .unwrap();
+            if revision == 3 {
+                assert_eq!(
+                    store.inspection(id).unwrap()["activity"]["goal"]["status"],
+                    "paused",
+                    "changing models retains the current backend session's goal"
+                );
+            }
             let mut record =
                 json!({"type":"system","subtype":"init","session_id":session}).to_string() + "\n";
             if let Some(goal_status) = goal_status {
@@ -9662,7 +9712,7 @@ mod tests {
                 id,
                 &crate::chat_inspection::Launch {
                     backend: "cursor".into(),
-                    requested_model: None,
+                    requested_model: model.map(str::to_owned),
                     revision,
                     maintenance: false,
                 },

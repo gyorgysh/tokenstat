@@ -52,11 +52,14 @@ struct ChatRoutingSection: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     private var policy: ChatRoutingPolicy { chat.routing?.policy ?? ChatRoutingPolicy() }
+    private var summary: String {
+        L10n.text(policy.enabled
+            ? (policy.waitForReset ? "common.chat_route_combined_mode" : "common.chat_route_fallback_mode")
+            : (policy.waitForReset ? "common.chat_route_wait_mode" : "common.chat_route_manual"))
+    }
     var body: some View {
         ChatSetupSection(title: L10n.text("common.chat_routing"), icon: .settings,
-                         subtitle: L10n.text("common.chat_routing_intro")) {
-            Text(policy.enabled ? (policy.waitForReset ? L10n.text("common.chat_route_combined_mode") : L10n.text("common.chat_route_fallback_mode")) : (policy.waitForReset ? L10n.text("common.chat_route_wait_mode") : L10n.text("common.chat_route_manual")))
-                .font(Theme.caption).foregroundStyle(.secondary)
+                         subtitle: L10n.text("common.chat_routing_intro"), summary: summary) {
             if !policy.routes.isEmpty {
                 Text(policy.routes.map { model.backend(for: $0.backend)?.label ?? $0.backend }.joined(separator: " → "))
                     .font(Theme.caption).fixedSize(horizontal: false, vertical: true)

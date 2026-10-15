@@ -53,6 +53,7 @@ struct ChatInspector: View {
                         }
                         .padding(Theme.Space.m)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .id(model.currentReference)
                     }
                     .onAppear { titleDraft = chat.title }
                     .onChange(of: chat.id) { _, _ in titleDraft = chat.title }
@@ -106,7 +107,7 @@ struct ChatInspector: View {
     }
 
     private func identity(_ chat: ChatConversation) -> some View {
-        group(L10n.text("apple.chatinspector.conversation.ccca1817")) {
+        group(L10n.text("apple.chatinspector.conversation.ccca1817"), summary: chat.title, icon: .comment) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField(L10n.text("apple.chatinspector.title.7e8cd205"), text: $titleDraft)
                     .themedFieldBox()
@@ -129,7 +130,7 @@ struct ChatInspector: View {
 
     @ViewBuilder
     private var folderCard: some View {
-        group(L10n.text("apple.chatinspector.folder.74ccd433")) {
+        group(L10n.text("apple.chatinspector.folder.74ccd433"), summary: folder?.name, icon: .reveal) {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text(folder?.name ?? L10n.text("apple.chatinspector.this_project.d0f62545"))
                     .font(Theme.callout.weight(.medium))
@@ -146,7 +147,9 @@ struct ChatInspector: View {
     }
 
     private func allowlist(_ chat: ChatConversation) -> some View {
-        group(L10n.text("apple.chatinspector.always_allowed.94387772")) {
+        group(L10n.text("apple.chatinspector.always_allowed.94387772"), summary: chat.allowedTools.isEmpty && chat.allowedShellPrefixes.isEmpty
+              ? L10n.text("apple.chatinspector.nothing_is_remembered_yet.d523b614")
+              : L10n.text("common.chat.inspector.allowed_summary", chat.allowedTools.count.formatted(), chat.allowedShellPrefixes.count.formatted())) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Text(L10n.text("apple.chatinspector.always_allow_on_a_permission_card_writes_h.b50406cc"))
                     .font(Theme.caption)
@@ -206,8 +209,8 @@ struct ChatInspector: View {
         }
     }
 
-    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        ChatSetupSection(title: title, icon: .settings) { content() }
+    private func group<Content: View>(_ title: String, summary: String? = nil, icon: ActionIcon = .settings, @ViewBuilder content: () -> Content) -> some View {
+        ChatSetupSection(title: title, icon: icon, summary: summary) { content() }
     }
 
     private func change(_ chat: ChatConversation, operation: @escaping @MainActor () async -> Void) {

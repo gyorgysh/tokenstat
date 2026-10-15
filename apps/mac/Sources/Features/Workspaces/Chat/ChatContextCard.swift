@@ -1,67 +1,31 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Reads only while visible. A result belongs to the chat, backend and model
-/// that requested it; navigating or opening a saved copy cancels publication.
+/// Context, tools and activity share the chat's visible inspection reader.
+/// Its run-scoped owner and foreground lease also govern MCP live status.
 struct ChatContextCard: View {
     @Bindable var model: ChatModel
-    @State private var inspection: ChatInspection?
-    @State private var loaded = false
     @State private var contextOpen = false
     @State private var serversOpen = false
     @State private var otherServersOpen = false
     @State private var promptOpen = false
     @State private var historyOpen = false
     @State private var conversationOpen = false
-    @State private var inspectedOwner: Owner?
-
-    private struct Owner: Hashable {
-        var reference: WorkReference?
-        var backend: String?
-        var model: String?
-        var saved: Bool
-    }
-    private var owner: Owner {
-        Owner(reference: model.currentReference, backend: model.selected?.backend,
-              model: model.selected?.model, saved: model.savedCopy != nil)
-    }
-
-    private var currentInspection: ChatInspection? { inspectedOwner == owner ? inspection : nil }
+    private var owner: ChatActivityOwner { model.activityOwner }
+    private var currentInspection: ChatInspection? { model.currentActivityRead?.inspection }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             context
             servers
         }
-        .task(id: owner) {
-            let requested = owner
-            inspection = nil
-            loaded = false
-            inspectedOwner = requested
+        .onChange(of: owner) { _, _ in
             contextOpen = false
             serversOpen = false
             otherServersOpen = false
             promptOpen = false
             historyOpen = false
             conversationOpen = false
-            guard !requested.saved, let id = requested.reference?.itemID else { loaded = true; return }
-            let peer = model.peer
-            while !Task.isCancelled, owner == requested {
-                do {
-                    let next = try await Bridge.chatInspection(id: id, peer: peer)
-                    guard !Task.isCancelled, owner == requested, next.backend == requested.backend else { return }
-                    inspection = next
-                    loaded = true
-                } catch {
-                    guard !Task.isCancelled, owner == requested else { return }
-                    inspection = nil
-                    loaded = true
-                    // An older host can still run this chat. Do not keep
-                    // sending an unsupported method every five seconds.
-                    if case let BridgeError.core(code, _) = error, code == "unknown_method" { return }
-                }
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
-            }
         }
     }
 
@@ -157,7 +121,7 @@ struct ChatContextCard: View {
                     if !serversOpen {
                         HStack(spacing: 6) {
                             Circle().fill(Theme.accent).frame(width: 6, height: 6).accessibilityHidden(true)
-                            Text(inspection.currentRun && model.selected?.running == true
+                            Text(model.inspectionIsLive
                                  ? L10n.text("common.chat.stats.connected_count", connected.count.formatted())
                                  : L10n.text("common.chat.stats.connected_servers", connected.count.formatted()))
                             Spacer(minLength: 8)
@@ -188,7 +152,7 @@ struct ChatContextCard: View {
     }
 
     @ViewBuilder private var unavailable: some View {
-        if !loaded || inspectedOwner != owner {
+        if model.currentActivityRead?.loaded == false {
             ProgressView().controlSize(.small)
         } else {
             note(owner.saved ? L10n.text("apple.chatcontext.saved_unavailable") : L10n.text("apple.chatcontext.host_unavailable"))
@@ -198,7 +162,7 @@ struct ChatContextCard: View {
     private func status(_ server: ChatInspection.Server) -> String {
         switch server.status {
         case "connected":
-            return currentInspection?.hasLiveConnection(server, running: model.selected?.running == true) == true
+            return currentInspection?.hasLiveConnection(server, running: model.inspectionIsLive) == true
                 ? L10n.text("apple.chatcontext.connected") : L10n.text("apple.chatcontext.reported_connected")
         case "configured": return L10n.text("apple.chatcontext.configured")
         case "disabled": return L10n.text("apple.chatcontext.disabled")
@@ -225,7 +189,7 @@ struct ChatContextCard: View {
     private func serverRow(_ server: ChatInspection.Server) -> some View {
         let name = server.name.replacingOccurrences(of: "plugin:", with: "").replacingOccurrences(of: ":", with: " · ")
         let connected = server.source == "agent" && server.status == "connected"
-        let live = currentInspection?.hasLiveConnection(server, running: model.selected?.running == true) == true
+        let live = currentInspection?.hasLiveConnection(server, running: model.inspectionIsLive) == true
         return VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
                 Circle().fill(live ? Theme.accent : connected ? Theme.accent.opacity(0.45) : Color.secondary)

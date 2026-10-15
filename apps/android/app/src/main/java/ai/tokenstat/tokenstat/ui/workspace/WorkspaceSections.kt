@@ -165,6 +165,9 @@ fun WorkspaceSection(
     conversationNonce: Int = 0,
     onStartChat: () -> Unit = {},
     machineId: String? = null,
+    newChatRequest: NewChatRequest? = null,
+    onNewChatHandled: (String) -> Unit = {},
+    onNewChat: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     var data by remember(peer, workspace, section) { mutableStateOf<JsonElement?>(null) }
@@ -192,7 +195,7 @@ fun WorkspaceSection(
     val reload: () -> Unit = { scope.launch { load() } }
     when (section) {
         "Sessions" -> SessionsSection(model, peer, workspace, folderName, hostLabel, data, error, loading, onOpenTerminal, reload, onOpenSection, onStartChat, modifier)
-        "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel, onChatOpened, initialChatId, openConversationOnAppear, conversationNonce, machineId = machineId, onOpenSection = onOpenSection)
+        "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel, onChatOpened, initialChatId, openConversationOnAppear, conversationNonce, machineId = machineId, onOpenSection = onOpenSection, newChatRequest = newChatRequest, onNewChatHandled = onNewChatHandled, onNewChat = onNewChat)
         "Pulls" -> PullsSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel)
         "Changes" -> ChangesSection(model, peer, workspace, modifier, folderName, hostLabel, protocol, onChanged = reload)
         "History" -> HistorySection(model, peer, workspace, modifier, folderName, hostLabel)

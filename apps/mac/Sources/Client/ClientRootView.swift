@@ -389,6 +389,9 @@ struct ClientRootView: View {
 
     private var rootPresentations: some View {
         rootLifecycle
+        .fullScreenCover(isPresented: Binding(get: { navigation.showingNewChat }, set: { navigation.showingNewChat = $0 })) {
+            ClientNewChatScreen()
+        }
         .fullScreenCover(item: Binding(
             get: { savedAccess.reader },
             set: { if $0 == nil { savedAccess.endReading() } }

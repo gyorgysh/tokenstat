@@ -8,7 +8,7 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 source = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatModel.swift').read_text()
 
-def member(signature):
+def member(signature, source=source):
     start = source.index(signature)
     brace = source.index('{', start)
     end, depth = brace + 1, 1
@@ -22,8 +22,10 @@ members = '\n'.join(member(signature) for signature in [
     '    private var steerBackend:', '    private var steerAutonomy:',
     '    enum BusyNoteStart', '    func beginBusyNote(',
     '    enum SignInHold', '    func holdForSignIn(',
-    '    func finishBusyNote(', '    func consumeChatCommand(',
+    '    func finishBusyNote(', '    func consumeChatCommand(', '    func sendInitialDraft(',
 ])
+activity = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatActivityView.swift').read_text()
+activity_section = member('enum ChatActivitySection:', activity)
 stub = '''import Foundation
 enum L10n { static func text(_ key: String) -> String { key } }
 struct ChatAttachment: Equatable { let id: String }
@@ -66,11 +68,18 @@ enum RemoteHostFeature { case steer; var minimumProtocol: Int { 1 } }
     var backendRefreshError: String? = nil
     var error: String? = nil
     var showingCommandStats = false
+    var showingActivity = false
+    var activitySection: ChatActivitySection?
     var chatCommandSelection = 0
     var stopped: [String] = []
     var queuedSubmission: ChatDraftSubmission?
     var queuedAsSteer: Bool?
-    func needsSignIn(_ backend: String) -> Bool { true }
+    var needsAuthentication = true
+    var initialSends = 0
+    var reservedInitialText: String?
+    func needsSignIn(_ backend: String) -> Bool { needsAuthentication }
+    func holdDraftForSending(_ text: String) -> Bool { reservedInitialText = text; return true }
+    func sendFromComposer() async { initialSends += 1 }
     func enqueue(_ text: String, awaitingSignIn: Bool) -> Bool? { signInQueuedMessage = true; return true }
     func clearDraft() { draft = "" }
     func saveDraftNow() {}
@@ -135,6 +144,48 @@ tests = '''
                    "A retiring native capability must queue the complete attached payload")
             assert(Bridge.steerCalls == 0, "The legacy text hook cannot receive a reserved attached message")
         }
+        for running in [false, true] {
+            for savedCopy in [false, true] {
+                for name in ["/goal", "/plan", "/subagents", "/status", "/context", "/usage", "/mcp", "/tools", "/help"] {
+                    let readonly = Model()
+                    readonly.attachments = []
+                    readonly.busy = running
+                    readonly.savedCopy = savedCopy ? true : nil
+                    readonly.draft = name
+                    assert(readonly.consumeChatCommand() && readonly.draft.isEmpty)
+                    let section = ChatActivitySection(command: name)
+                    assert(readonly.showingActivity == (section != nil)
+                           && readonly.activitySection == section
+                           && readonly.showingCommandStats == (section == nil),
+                           "Read-only commands must open their requested local inspection without sending a model turn")
+                    assert(readonly.queuedSubmission == nil && readonly.stopped.isEmpty && !readonly.sending)
+                }
+            }
+        }
+        assert(Bridge.steerCalls == 0)
+        let initial = Model()
+        initial.busy = false; initial.attachments = []; initial.needsAuthentication = false
+        initial.draft = "  Start from the landing page  "
+        let emptyInitial = Model()
+        emptyInitial.draft = ""
+        await emptyInitial.sendInitialDraft()
+        assert(emptyInitial.initialSends == 0 && emptyInitial.reservedInitialText == nil,
+               "Open chat with an empty prompt cannot start a model turn")
+        await initial.sendInitialDraft()
+        assert(initial.initialSends == 1 && initial.reservedInitialText == "Start from the landing page",
+               "Landing Send must use the existing composer reservation exactly once")
+        let initialSignIn = Model()
+        initialSignIn.busy = false; initialSignIn.attachments = []
+        await initialSignIn.sendInitialDraft()
+        assert(initialSignIn.signInQueuedMessage == true && initialSignIn.initialSends == 0,
+               "Landing Send must preserve the existing sign-in hold")
+        for commandName in ["/goal", "/plan", "/subagents"] {
+            let readonly = Model()
+            readonly.busy = false; readonly.attachments = []; readonly.draft = commandName
+            await readonly.sendInitialDraft()
+            assert(readonly.showingActivity && readonly.initialSends == 0 && readonly.reservedInitialText == nil,
+                   "Landing read-only commands cannot become paid model messages")
+        }
         let command = Model()
         command.attachments = []
         command.draft = "/stop"
@@ -161,7 +212,7 @@ tests = '''
 with tempfile.TemporaryDirectory(prefix='tokenstat-steer-submission-') as work:
     work = Path(work)
     swift = work / 'Tests.swift'
-    swift.write_text(stub + members + tests)
+    swift.write_text(activity_section + '\n' + stub + members + tests)
     subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5',
         '-module-cache-path', str(work / 'cache'), '-o', str(work / 'test'), str(swift),
         str(root / 'apps/mac/Sources/Features/Work/WorkReference.swift'),

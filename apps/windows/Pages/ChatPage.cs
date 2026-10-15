@@ -178,8 +178,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             AppServices.AccountChanged += ImagesAccountChanged;
             RemoteWorkspaces.Changed -= ImagesPeerChanged;
             RemoteWorkspaces.Changed += ImagesPeerChanged;
-            if (_newChatRequested) { _newChatRequested = false; await CreateAsync(); }
-            else if (_openId is string id && _opening) await OpenAsync(id);
+            if (_openId is string id && _opening) await OpenAsync(id);
             else if (_openId is not null) StartPoll();
             else await ShowListAsync();
         };
@@ -216,7 +215,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             Buttons.ToolbarIcon(
                 ActionIcon.Create,
                 L10n.Text("windows.chatpage.start_a_chat.d80b1888"),
-                async (_, _) => await CreateAsync()),
+                async (_, _) => await BeginNewChatAsync()),
         };
     }
 
@@ -250,45 +249,52 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             return;
         }
         var chat = _openChat;
+        var conversation = new StackPanel { Spacing = Theme.SpaceS };
         var backend = Backend(Format.Text(chat, "backend"));
-        _inspector.Children.Add(new TextBlock
+        conversation.Children.Add(new TextBlock
         {
             Text = Format.Text(chat, "title", L10n.Text("windows.chatpage.new_chat.db18382a")),
             FontWeight = FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
-        _inspector.Children.Add(new TextBlock
+        conversation.Children.Add(new TextBlock
         {
             Text = Format.Flag(chat, "running") ? L10n.Text("common.running") : L10n.Text("common.idle"),
             Foreground = Format.Flag(chat, "running") ? Theme.AccentBrush : Theme.Brush(static () => Theme.StateIdle),
         });
-        _inspector.Children.Add(Chrome.InspectorField(
+        conversation.Children.Add(Chrome.InspectorField(
             L10n.Text("windows.chatpage.agent.11b39c93"), Format.Text(backend, "label", Format.Text(chat, "backend", L10n.Text("windows.chatpage.agent.11b39c93")))));
         var model = Format.Text(chat, "model");
         if (!string.IsNullOrEmpty(model))
         {
-            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.chatpage.model.5e2c614c"), model));
+            conversation.Children.Add(Chrome.InspectorField(L10n.Text("windows.chatpage.model.5e2c614c"), model));
         }
         var effort = Format.Text(chat, "effort");
         if (!string.IsNullOrEmpty(effort))
         {
-            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.chatpage.effort.4387e5d3"), effort));
+            conversation.Children.Add(Chrome.InspectorField(L10n.Text("windows.chatpage.effort.4387e5d3"), effort));
         }
-        _inspector.Children.Add(Chrome.InspectorField(
+        conversation.Children.Add(Chrome.InspectorField(
             L10n.Text("windows.chatpage.mode.5e23ec6a"), Format.Text(chat, "mode") == "plan" ? L10n.Text("windows.chatpage.plan.fa8ed0bd") : L10n.Text("windows.chatpage.execute.e3a67d95")));
         var personaId = Format.Text(chat, "personaId");
         if (!string.IsNullOrEmpty(personaId))
         {
             var persona = FindPersona(personaId);
-            _inspector.Children.Add(Chrome.InspectorField(
+            conversation.Children.Add(Chrome.InspectorField(
                 L10n.Text("windows.chatpage.persona.31bdeef9"), Format.Text(persona, "name", L10n.Text("windows.chatpage.preset.7252e7ce"))));
         }
         if (_approvals.Count > 0)
         {
-            _inspector.Children.Add(Chrome.InspectorField(
+            conversation.Children.Add(Chrome.InspectorField(
                 L10n.Text("windows.chatpage.approvals.2bfc3471"), L10n.Text("windows.chatpage.0_waiting.15f51b52", $"{_approvals.Count}"),
                 L10n.Text("windows.chatpage.answer_them_in_the_transcript.fd152eae")));
         }
+        _inspector.Children.Add(CollapsibleStatsCard(L10n.Text("windows.chatpage.conversation.8b34dbc2"), "conversation",
+            new TextBlock { Text = Format.Text(chat, "title") + " · " + L10n.Text(Format.Flag(chat, "running") ? "common.running" : "common.idle"),
+                FontSize = 11, Opacity = .7, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }, conversation));
+        var detailControls = new StackPanel { Spacing = Theme.SpaceS }; detailControls.Children.Add(DetailButton());
+        var detailKey = "windows.chatdetail." + ChatDetailPreference.Level.ToString().ToLowerInvariant();
+        _inspector.Children.Add(CollapsibleStatsCard(L10n.Text("windows.chatdetail.title"), "chat-detail", Muted(L10n.Text(detailKey)), detailControls));
         Detach(_inspectionHost);
         _inspector.Children.Add(_inspectionHost);
         _ = RefreshInspectionAsync();
@@ -346,7 +352,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     public Task ShowChatsAsync()
     {
-        _newChatRequested = false;
         _pendingReveal = null;
         return ShowListAsync();
     }
@@ -410,7 +415,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     L10n.Text("windows.chatpage.start_a_chat.d80b1888"),
                     L10n.Text("windows.chatpage.ask_an_agent_to_explore_plan_or_work_in_th.ebcac953"),
                     ActionIcon.Comment,
-                    ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.new_chat.db18382a"), ActionIcon.Create, async (_, _) => await CreateAsync())));
+                    ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.new_chat.db18382a"), ActionIcon.Create, async (_, _) => await BeginNewChatAsync())));
                 return;
             }
             var list = new StackPanel { Spacing = Theme.SpaceS };
@@ -468,7 +473,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         });
         Grid.SetColumn(titles, 1);
         row.Children.Add(titles);
-        var create = ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.new_chat.db18382a"), ActionIcon.Create, async (_, _) => await CreateAsync());
+        var create = ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.new_chat.db18382a"), ActionIcon.Create, async (_, _) => await BeginNewChatAsync());
         AutomationProperties.SetAutomationId(create, "chat.list.create");
         Grid.SetColumn(create, 2);
         row.Children.Add(create);
@@ -541,33 +546,45 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return agent + " · " + mode;
     }
 
-    private bool _newChatRequested;
     private bool _creatingChat;
 
-    public async Task BeginNewChatAsync()
+    public Task BeginNewChatAsync()
     {
-        if (!IsLoaded) { _newChatRequested = true; return; }
-        await CreateAsync();
+        AppServices.OpenNewChat?.Invoke(_workspaceId);
+        return Task.CompletedTask;
     }
 
-    private async Task CreateAsync()
+    internal async Task StartNewChatWithDraftAsync(string text, NewChatSetup setup, Func<bool> ownsRequest, Action accepted)
     {
-        if (_creatingChat) return;
+        if (!IsLoaded || !ownsRequest()) return;
+        var created = await CreateAsync(setup);
+        if (!IsLoaded || !ownsRequest() || created is null || _openId != created || _opening || _draft.Text.Length > 0 || _attachments.Count > 0) return;
+        _draft.Text = text;
+        RememberDraft();
+        accepted(); // The writing now belongs to the new conversation, including refused sends.
+        if (NewChatSetup.ShouldSend(text)) await SendAsync();
+    }
+
+    private async Task<string?> CreateAsync(NewChatSetup? setup = null)
+    {
+        if (_creatingChat) return null;
         _creatingChat = true;
         try
         {
             var generation = _openGeneration;
+            var account = AppServices.AccountGeneration;
             // Choosing a new agent needs its catalog; opening history does not.
             var backends = CallChatAsync("chat.backends");
             var personas = CallChatAsync("chat.personas", new JsonObject { ["workspaceId"] = _workspaceId });
             await Task.WhenAll(backends, personas);
-            if (generation != _openGeneration || !IsLoaded) return;
+            if (generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded) return null;
             _backends = AsArray(backends.Result);
             _personas = AsArray(personas.Result, "personas");
             await RefreshCatalogAsync(refreshMenus: false);
-            if (generation != _openGeneration || !IsLoaded) return;
+            if (generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded) return null;
             var saved = ChatLaunchChoice.Load();
-            var chosen = DefaultBackend(saved?.Backend);
+            var chosen = setup is null ? DefaultBackend(saved?.Backend) : _backends.FirstOrDefault(backend => Format.Text(backend, "id") == setup.Backend && Installed(backend));
+            if (setup is not null && !setup.IsAvailable(chosen)) throw new InvalidOperationException(L10n.Text("common.new_chat.setup_changed"));
             var request = new JsonObject
             {
                 ["workspaceId"] = _workspaceId,
@@ -585,7 +602,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             };
             // The rest of the last setup travels when this agent still
             // offers it. A model or effort it no longer lists is dropped.
-            if (saved is not null && Format.Text(chosen, "id") == saved.Backend)
+            if (setup is not null)
+            {
+                if (setup.Model is not null) request["model"] = setup.Model;
+                if (setup.Effort is not null) request["effort"] = setup.Effort;
+            }
+            else if (saved is not null && Format.Text(chosen, "id") == saved.Backend)
             {
                 if (Offers(chosen, "models", saved.Model)) request["model"] = saved.Model;
                 if (Offers(chosen, "efforts", saved.Effort)) request["effort"] = saved.Effort;
@@ -594,12 +616,15 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var created = await CallChatAsync("chat.create", request);
             ChatLaunchChoice.Save(created);
             AppServices.NotifyConversationsChanged();
-            if (generation != _openGeneration || !IsLoaded) return;
-            await OpenAsync(Format.Text(created, "id"), created);
+            if (generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded) return null;
+            var id = Format.Text(created, "id");
+            await OpenAsync(id, created);
+            return account == AppServices.AccountGeneration && IsLoaded && _openId == id ? id : null;
         }
         catch (Exception ex)
         {
             Banner(ex.Message);
+            return null;
         }
         finally { _creatingChat = false; }
     }
@@ -824,7 +849,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         var setup = new StackPanel { Spacing = Theme.SpaceM };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(setup, L10n.Text("windows.chatpage.setup.7013af4c"));
-        setup.Children.Add(SetupSection(L10n.Text("common.chat_agent_behavior"), body, ActionIcon.Run));
+        setup.Children.Add(SetupSection(L10n.Text("common.chat_agent_behavior"), body, ActionIcon.Run,
+            string.Join(" · ", new[] { Format.Text(backend, "label", backendId), Format.Text(chat, "model"), Format.Text(chat, "mode") == "plan" ? L10n.Text("windows.chatpage.plan.fa8ed0bd") : L10n.Text("windows.chatpage.execute.e3a67d95") }.Where(value => value.Length > 0))));
         setup.Children.Add(InstructionsCard(
             Format.Text(chat, "systemPrompt"),
             Format.Text(backend, "label", L10n.Text("windows.chatpage.this_agent.15af7e1b")),
@@ -891,7 +917,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             _ = LoadInstructionsAsync(chatId, agent, note, added);
         }
-        return SetupSection(L10n.Text("windows.chatpage.instructions.934652dc"), stack, ActionIcon.Docs);
+        return SetupSection(L10n.Text("windows.chatpage.instructions.934652dc"), stack, ActionIcon.Docs, systemPrompt.Split('\n').FirstOrDefault());
     }
 
     private async Task LoadInstructionsAsync(string chatId, string agent, TextBlock note, TextBlock added)
@@ -2514,6 +2540,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 FlushText();
                 FlushThinking();
                 if (!Format.Flag(row, "steer")) {
+                    tools.CloseRunning(items, failed: false, detail: "");
                     attachmentTurn = "user-" + Format.Text(row, "seq", Format.Long(row, "atMs").ToString(CultureInfo.InvariantCulture) + ":" + items.Count);
                     tools.Clear();
                 }
@@ -2609,10 +2636,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     var callId = Format.Text(ev, "callId");
                     if (string.IsNullOrEmpty(callId)) callId = "tool-" + items.Count;
                     var toolScope = attachmentTurn + "/" + Format.Text(row, "backend", Format.Text(_openChat, "backend"));
-                    tools.Remember(toolScope, Format.Text(row, "backend", Format.Text(_openChat, "backend")), callId, items.Count);
+                    var occurrence = tools.Remember(toolScope, Format.Text(row, "backend", Format.Text(_openChat, "backend")), callId, items.Count);
                     items.Add(new DisplayItem
                     {
-                        Id = "tool-" + toolScope + "/" + callId,
+                        Id = "tool-" + toolScope + "/" + callId + (occurrence > 1 ? "#" + occurrence : ""),
                         ToolCallId = callId,
                         AttachmentScope = toolScope,
                         Kind = ItemKind.Tool,
@@ -2627,7 +2654,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     FlushText();
                     FlushThinking();
                     var endId = Format.Text(ev, "callId");
-                    if (tools.TryResolve(attachmentTurn + "/" + Format.Text(row, "backend", Format.Text(_openChat, "backend")), endId, out var owner))
+                    if (tools.TryResolve(attachmentTurn + "/" + Format.Text(row, "backend", Format.Text(_openChat, "backend")), endId, out var owner,
+                        index => index >= 0 && index < items.Count && items[index].Running))
                     {
                         var index = owner.Index;
                         var tool = items[index];
@@ -2713,7 +2741,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 case "failed":
                     FlushText();
                     FlushThinking();
-                    CloseRunningTools(items, tools, true, Format.Text(ev, "text"));
+                    tools.CloseRunning(items, true, Format.Text(ev, "text"));
                     items.Add(new DisplayItem
                     {
                         Id = "failed-" + items.Count,
@@ -2727,7 +2755,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     FlushThinking();
                     var status = Format.Text(ev, "status");
                     var failed = status is "cancelled" or "canceled" or "error";
-                    CloseRunningTools(items, tools, failed, failed ? status : "");
+                    tools.CloseRunning(items, failed, failed ? status : "");
                     break;
                 }
             }
@@ -2735,24 +2763,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         FlushText();
         FlushThinking();
         return items;
-    }
-
-    private static void CloseRunningTools(List<DisplayItem> items, ChatToolCalls tools, bool failed, string detail)
-    {
-        foreach (var index in tools.Indices)
-        {
-            if (index < 0 || index >= items.Count) continue;
-            var tool = items[index];
-            // An edit merged into its call's row is still that call.
-            if (tool.Kind is not (ItemKind.Tool or ItemKind.Edit) || !tool.Running) continue;
-            tool.Running = false;
-            tool.Failed = failed;
-            if (string.IsNullOrEmpty(tool.Detail) && !string.IsNullOrEmpty(detail))
-            {
-                tool.Detail = detail;
-            }
-            items[index] = tool;
-        }
     }
 
     private bool Busy()
@@ -2823,26 +2833,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         TextWrapping = TextWrapping.Wrap,
     };
 
-    /// Setup cards share a tinted, marked header and a separate form gutter.
-    private static Border SetupSection(string title, UIElement body, ActionIcon icon, string? subtitle = null)
+    /// Compact summary and a full-width disclosure, shared with context cards.
+    private Border SetupSection(string title, UIElement body, ActionIcon icon, string? subtitle = null)
     {
-        var card = Chrome.Card(title, body, subtitle, mark: Chrome.CardMark(icon));
-        var content = (StackPanel)card.Child;
-        var heading = content.Children[0];
-        content.Children.Clear();
-        content.Spacing = 0;
-        content.Children.Add(new Border
-        {
-            Background = Theme.AccentSoftBrush,
-            BorderBrush = Theme.BorderBrush,
-            BorderThickness = new Thickness(0, 0, 0, 1),
-            CornerRadius = new CornerRadius(Theme.CardRadius, Theme.CardRadius, 0, 0),
-            Padding = new Thickness(Theme.CardPadding),
-            Child = heading,
-        });
-        content.Children.Add(new Border { Padding = new Thickness(Theme.CardPadding), Child = body });
-        card.Padding = new Thickness(0);
-        return card;
+        return CollapsibleStatsCard(title, "setup/" + title, new TextBlock { Text = subtitle ?? "", FontSize = 11, Opacity = .7,
+            TextTrimming = TextTrimming.CharacterEllipsis }, (FrameworkElement)body);
     }
 
     private static Border Card(string title, UIElement body) => Chrome.Card(title, body);

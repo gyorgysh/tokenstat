@@ -28,6 +28,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -69,6 +70,7 @@ internal fun chatCommands() = listOf(
 }
 
 @Composable internal fun ChatStatsDialog(model: AppViewModel, peer: String, chat: JsonObject, inspection: ChatInspectionSnapshot? = null, activitySection: String? = null, onDismiss: () -> Unit) {
+    val account by model.state.collectAsStateWithLifecycle()
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(shape = RoundedCornerShape(20.dp), color = LocalTsColors.current.background,
             modifier = Modifier.fillMaxWidth(.94f).fillMaxHeight(.86f)) {
@@ -78,7 +80,7 @@ internal fun chatCommands() = listOf(
                     TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
                 }
                 if (activitySection != null) {
-                    val snapshot = inspection ?: rememberChatInspection(model, peer, chat, model.state.value.account)
+                    val snapshot = inspection ?: rememberChatInspection(model, peer, chat, account.account)
                     ChatActivityPanel(snapshot.data, chat, activitySection, initiallyExpanded = true, loaded = snapshot.loaded)
                 } else ChatStatsPanel(model, peer, chat, inspection)
                 StatsDisclosure(L10n.text("common.chat.commands")) {
@@ -90,6 +92,13 @@ internal fun chatCommands() = listOf(
 }
 
 internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Boolean)
+
+@Composable internal fun ChatSetupDisclosure(title: String, summary: String?, owner: String?, content: @Composable ColumnScope.() -> Unit) {
+    var expanded by remember(owner, title) { mutableStateOf(false) }
+    StatsCard(title, expanded, { expanded = !expanded }, subtitle = summary) {
+        if (expanded) Column(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    }
+}
 
 @Composable internal fun rememberChatInspection(model: AppViewModel, peer: String, chat: JsonObject?, owner: Any? = null, enabled: Boolean = true): ChatInspectionSnapshot {
     val id = chat?.str("id")
@@ -122,7 +131,8 @@ internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Bo
 }
 
 @Composable internal fun ChatStatsPanel(model: AppViewModel, peer: String, chat: JsonObject, inspection: ChatInspectionSnapshot? = null, activitySection: String? = null) {
-    val snapshot = inspection ?: rememberChatInspection(model, peer, chat, model.state.value.account)
+    val account by model.state.collectAsStateWithLifecycle()
+    val snapshot = inspection ?: rememberChatInspection(model, peer, chat, account.account)
     ChatInspectionCards(snapshot.data, chat, snapshot.loaded, activitySection)
 }
 

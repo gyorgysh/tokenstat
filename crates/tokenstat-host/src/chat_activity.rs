@@ -134,8 +134,8 @@ fn codex_agent_status(value: &Value) -> String {
     }
     // Legacy Rust enum payloads carry terminal detail under one variant
     // key. Only the key is used; result and error text are never copied.
-    if let Some(object) = value.as_object().filter(|object| object.len() == 1) {
-        if let Some(key) = object.keys().next().filter(|key| {
+    if let Some(object) = value.as_object().filter(|object| object.len() == 1)
+        && let Some(key) = object.keys().next().filter(|key| {
             matches!(
                 key.as_str(),
                 "pendingInit"
@@ -146,9 +146,9 @@ fn codex_agent_status(value: &Value) -> String {
                     | "shutdown"
                     | "notFound"
             )
-        }) {
-            return agent_status(&json!(key));
-        }
+        })
+    {
+        return agent_status(&json!(key));
     }
     "unknown".into()
 }
@@ -303,7 +303,14 @@ impl Activity {
                             Some("started") => "running",
                             Some("completed") => "completed",
                             Some("interrupted") => "stopped",
-                            _ => "unknown",
+                            // Interaction is activity, not a lifecycle
+                            // transition. Keep the last attested status.
+                            _ => self
+                                .agents
+                                .iter()
+                                .find(|agent| agent.id == agent_id)
+                                .map(|agent| agent.status.as_str())
+                                .unwrap_or("unknown"),
                         };
                         self.agent(Agent {
                             id: agent_id,
@@ -372,8 +379,14 @@ impl Activity {
             let status = state
                 .map(codex_agent_status)
                 .or_else(|| {
-                    (singular.as_ref() == Some(&agent_id))
+                    (singular.as_ref() == Some(&agent_id) && !item["agentStatus"].is_null())
                         .then(|| codex_agent_status(&item["agentStatus"]))
+                })
+                .or_else(|| {
+                    self.agents
+                        .iter()
+                        .find(|agent| agent.id == agent_id)
+                        .map(|agent| agent.status.clone())
                 })
                 .unwrap_or_else(|| "unknown".into());
             let task = matches!(
@@ -410,91 +423,92 @@ impl Activity {
     fn claude(&mut self, value: &Value) {
         // Subagent assistant records use parent_tool_use_id. Their todos are
         // not the main agent's plan.
-        if value["type"] == "assistant" && value["parent_tool_use_id"].is_null() {
-            if let Some(blocks) = value.pointer("/message/content").and_then(Value::as_array) {
-                for block in blocks.iter().take(CALLS) {
-                    if block["type"] != "tool_use" {
-                        continue;
-                    }
-                    let Some(call_id) = id(&block["id"]) else {
-                        continue;
-                    };
-                    let Some(tool) = block["name"].as_str() else {
-                        continue;
-                    };
-                    let input = &block["input"];
-                    match tool {
-                        "TodoWrite" => {
-                            if let Some(todos) = input["todos"].as_array() {
-                                self.partial |= todos.len() > STEPS;
-                                let todos: Vec<_> = todos.iter().take(STEPS).filter_map(|step| Some(json!({
+        if value["type"] == "assistant"
+            && value["parent_tool_use_id"].is_null()
+            && let Some(blocks) = value.pointer("/message/content").and_then(Value::as_array)
+        {
+            for block in blocks.iter().take(CALLS) {
+                if block["type"] != "tool_use" {
+                    continue;
+                }
+                let Some(call_id) = id(&block["id"]) else {
+                    continue;
+                };
+                let Some(tool) = block["name"].as_str() else {
+                    continue;
+                };
+                let input = &block["input"];
+                match tool {
+                    "TodoWrite" => {
+                        if let Some(todos) = input["todos"].as_array() {
+                            self.partial |= todos.len() > STEPS;
+                            let todos: Vec<_> = todos.iter().take(STEPS).filter_map(|step| Some(json!({
                                     "content":text(&step["content"], 1000)?, "status":step_status(&step["status"])
                                 }))).collect();
-                                self.remember(call_id, tool, json!({"todos":todos}));
-                            }
+                            self.remember(call_id, tool, json!({"todos":todos}));
                         }
-                        "Agent" | "Task" => {
-                            self.agent(Agent {
-                                id: call_id.clone(),
-                                name: text(&input["name"], 160)
-                                    .or_else(|| text(&input["subagent_type"], 160)),
-                                task: text(&input["description"], 1200)
-                                    .or_else(|| text(&input["prompt"], 1200)),
-                                status: "pending".into(),
-                                model: text(&input["model"], 160),
-                                source: "tool".into(),
-                            });
-                            // Only a small allowlist survives the call join.
-                            self.remember(
-                                call_id,
-                                tool,
-                                json!({"run_in_background":input["run_in_background"]}),
-                            );
-                        }
-                        "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet" => {
-                            self.remember(call_id, tool, json!({"taskId":id(&input["taskId"]),
-                                "subject":text(&input["subject"], 1000), "status":text(&input["status"], 40)}));
-                        }
-                        _ => {}
                     }
+                    "Agent" | "Task" => {
+                        self.agent(Agent {
+                            id: call_id.clone(),
+                            name: text(&input["name"], 160)
+                                .or_else(|| text(&input["subagent_type"], 160)),
+                            task: text(&input["description"], 1200)
+                                .or_else(|| text(&input["prompt"], 1200)),
+                            status: "pending".into(),
+                            model: text(&input["model"], 160),
+                            source: "tool".into(),
+                        });
+                        // Only a small allowlist survives the call join.
+                        self.remember(
+                            call_id,
+                            tool,
+                            json!({"run_in_background":input["run_in_background"]}),
+                        );
+                    }
+                    "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet" => {
+                        self.remember(call_id, tool, json!({"taskId":id(&input["taskId"]),
+                                "subject":text(&input["subject"], 1000), "status":text(&input["status"], 40)}));
+                    }
+                    _ => {}
                 }
             }
         }
-        if value["type"] == "user" {
-            if let Some(blocks) = value.pointer("/message/content").and_then(Value::as_array) {
-                for block in blocks.iter().take(CALLS) {
-                    if block["type"] != "tool_result" {
-                        continue;
+        if value["type"] == "user"
+            && let Some(blocks) = value.pointer("/message/content").and_then(Value::as_array)
+        {
+            for block in blocks.iter().take(CALLS) {
+                if block["type"] != "tool_result" {
+                    continue;
+                }
+                let Some(call_id) = id(&block["tool_use_id"]) else {
+                    continue;
+                };
+                let Some(call) = self.calls.remove(&call_id) else {
+                    continue;
+                };
+                if call.tool == "TodoWrite" && block["is_error"] != true {
+                    self.plan(&call.input["todos"], "content", "tool");
+                }
+                if matches!(
+                    call.tool.as_str(),
+                    "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet"
+                ) && block["is_error"] != true
+                {
+                    self.claude_tasks(&call, &value["tool_use_result"], block);
+                }
+                let agent_id = call.input["agentId"].as_str().unwrap_or(&call_id);
+                if let Some(agent) = self.agents.iter_mut().find(|agent| agent.id == agent_id) {
+                    agent.status = if block["is_error"] == true {
+                        "failed"
+                    } else if call.input["run_in_background"] == true {
+                        // Background launch completion is not child
+                        // completion. Keep a native status if known.
+                        agent.status.as_str()
+                    } else {
+                        "completed"
                     }
-                    let Some(call_id) = id(&block["tool_use_id"]) else {
-                        continue;
-                    };
-                    let Some(call) = self.calls.remove(&call_id) else {
-                        continue;
-                    };
-                    if call.tool == "TodoWrite" && block["is_error"] != true {
-                        self.plan(&call.input["todos"], "content", "tool");
-                    }
-                    if matches!(
-                        call.tool.as_str(),
-                        "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet"
-                    ) && block["is_error"] != true
-                    {
-                        self.claude_tasks(&call, &value["tool_use_result"], block);
-                    }
-                    let agent_id = call.input["agentId"].as_str().unwrap_or(&call_id);
-                    if let Some(agent) = self.agents.iter_mut().find(|agent| agent.id == agent_id) {
-                        agent.status = if block["is_error"] == true {
-                            "failed"
-                        } else if call.input["run_in_background"] == true {
-                            // Background launch completion is not child
-                            // completion. Keep a native status if known.
-                            agent.status.as_str()
-                        } else {
-                            "completed"
-                        }
-                        .into();
-                    }
+                    .into();
                 }
             }
         }
@@ -869,19 +883,19 @@ impl Activity {
             }
         }
         let create = &map["createGoalToolCall"];
-        if create["result"]["success"].is_object() {
-            if let Some(objective) = text(&create["args"]["objective"], 4000) {
-                self.goal = Some(Goal {
-                    objective,
-                    status: "active".into(),
-                    token_budget: None,
-                    tokens_used: None,
-                    time_budget_seconds: None,
-                    time_used_seconds: None,
-                    source: "tool".into(),
-                });
-                self.goal_reported = true;
-            }
+        if create["result"]["success"].is_object()
+            && let Some(objective) = text(&create["args"]["objective"], 4000)
+        {
+            self.goal = Some(Goal {
+                objective,
+                status: "active".into(),
+                token_budget: None,
+                tokens_used: None,
+                time_budget_seconds: None,
+                time_used_seconds: None,
+                source: "tool".into(),
+            });
+            self.goal_reported = true;
         }
         let update = &map["updateGoalToolCall"];
         if update["result"]["success"].is_object() {
@@ -930,12 +944,12 @@ impl Activity {
         else {
             return;
         };
-        if let Some(provisional) = provisional.filter(|provisional| provisional != &agent_id) {
-            if let Some(index) = self.agents.iter().position(|agent| agent.id == provisional) {
-                let mut agent = self.agents.remove(index);
-                agent.id = agent_id.clone();
-                self.agent(agent);
-            }
+        if let Some(provisional) = provisional.filter(|provisional| provisional != &agent_id)
+            && let Some(index) = self.agents.iter().position(|agent| agent.id == provisional)
+        {
+            let mut agent = self.agents.remove(index);
+            agent.id = agent_id.clone();
+            self.agent(agent);
         }
         let status = if result["error"].is_object() {
             "failed"
@@ -1110,6 +1124,24 @@ mod tests {
                 .unwrap()
                 .contains("private result")
         );
+    }
+
+    #[test]
+    fn codex_agent_interactions_preserve_the_last_reported_lifecycle_status() {
+        let mut activity = Activity::default();
+        activity.observe("codex", &json!({"type":"item.completed","item":{"type":"sub_agent_activity","agentThreadId":"child","agentPath":"reviewer","kind":"started"}}));
+        for item in [
+            json!({"type":"sub_agent_activity","agentThreadId":"child","agentPath":"reviewer","kind":"interacted"}),
+            json!({"type":"collab_agent_tool_call","tool":"sendMessage","status":"completed","receiverThreadIds":["child"],"agentsStates":{}}),
+            json!({"type":"collab_tool_call","tool":"sendInput","status":"completed","receiverThreadId":"child"}),
+        ] {
+            activity.observe("codex", &json!({"type":"item.completed","item":item}));
+            assert_eq!(activity.agents[0].status, "running");
+        }
+        activity.observe("codex", &json!({"type":"item.completed","item":{"type":"collab_agent_tool_call","tool":"wait","receiverThreadIds":["child"],"agentsStates":{"child":{"status":"completed"}}}}));
+        assert_eq!(activity.agents[0].status, "completed");
+        activity.observe("codex", &json!({"type":"item.completed","item":{"type":"sub_agent_activity","agentThreadId":"child","agentPath":"reviewer","kind":"interacted"}}));
+        assert_eq!(activity.agents[0].status, "completed");
     }
 
     #[test]

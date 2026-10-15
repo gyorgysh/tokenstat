@@ -37,6 +37,8 @@ struct RootView: View {
     /// latest turn, with the empty state's character on screen in between.
     @State private var mountedChatFolder: String?
     @State private var showingChatOverview = false
+    @State private var chatStart = ChatStartDraft()
+    @State private var chatStartAdd: (owner: ChatStartDraft.Owner, repositories: Set<String>)?
     /// The folder whose pull requests are mounted, for the same reason. A
     /// list that reloads from GitHub on every visit is a skeleton every visit,
     /// and the filters and the open pull go back to their defaults with it.
@@ -579,7 +581,7 @@ struct RootView: View {
         .sheet(isPresented: $showWorkSearch, onDismiss: { ecosystemSearchTerm = "" }) {
             DesktopWorkSearchPresentation(account: account, workspaces: workspaces, open: openSearchWork, initialQuery: ecosystemSearchTerm)
         }
-        .sheet(isPresented: $workspaces.isAddSheetPresented) {
+        .sheet(isPresented: $workspaces.isAddSheetPresented, onDismiss: finishChatStartAdd) {
             AddWorkspaceSheet(model: workspaces, machines: account.account?.machines ?? [])
         }
         #if os(macOS)
@@ -1576,7 +1578,7 @@ struct RootView: View {
                 #endif
             case .global(.insights):
                 ScopedInsightsInspector(model: model) { closeInspector() }
-            case .global(.account):
+            case .global(.account), .global(.newChat):
                 EmptyView()
             case .workspacesOverview:
                 WorkspacesOverviewPlaceholder(onClose: { closeInspector() })
@@ -2212,22 +2214,11 @@ struct RootView: View {
             }
             .padding(.horizontal, Theme.Space.m)
             .chromeBarMetrics()
-            SidebarMenuRow(
+            SidebarRow(
                 label: L10n.text("apple.rootview.new_chat.db18382a"),
-                symbol: "square.and.pencil",
-                help: L10n.text("apple.rootview.choose_which_project_the_new_chat_belongs.e9b181c8")
-            ) {
-                if workspaces.folders.isEmpty {
-                    Button(L10n.text("apple.rootview.add_project.43079d4a"), .create) { workspaces.requestAdd() }
-                } else {
-                    Section(L10n.text("apple.rootview.start_a_chat_in.5761d474")) {
-                        ForEach(workspaces.folders) { folder in
-                            Button("\(folder.name) · \(folder.machineLabel ?? L10n.text("apple.rootview.this_mac.79a4aefc"))", .create) { startNewChat(in: folder) }
-                                .help(folder.path)
-                        }
-                    }
-                }
-            }
+                symbol: "square.and.pencil", trailing: "",
+                isSelected: route.isGlobal(.newChat)
+            ) { startNewChat() }
             SidebarRow(
                 label: L10n.text("common.search"),
                 symbol: "magnifyingglass",
@@ -2239,34 +2230,67 @@ struct RootView: View {
         .padding(.bottom, Theme.Space.xs)
     }
 
-    /// Where New chat starts one: the project on screen, else the last one
-    /// opened, else the first in the list.
-    private var newChatFolder: WorkspaceFolder? {
-        let id = route.workspaceID ?? workspaces.selectedID
-        return workspaces.folders.first { $0.id == id } ?? workspaces.folders.first
+    /// Opening and repository selection are local. A conversation is created
+    /// only after Send or Open chat captures the landing page's account and draft.
+    private func startNewChat(in chosen: WorkspaceFolder? = nil) {
+        chat.saveDraftNow()
+        chatStart.activate(scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation,
+                           repositoryID: chosen?.id)
+        navigate(to: .global(.newChat))
     }
 
-    /// Open the project's chat and start a conversation in it.
-    ///
-    /// The chat model binds to a folder when its pane loads it, and `create`
-    /// makes the conversation in whichever folder is bound, so this waits for
-    /// the pane to take the folder before asking. With no project at all the
-    /// honest first step is adding one.
-    private func startNewChat(in chosen: WorkspaceFolder? = nil) {
-        guard let folder = chosen ?? newChatFolder else {
-            workspaces.requestAdd()
+    private var newChatPage: some View {
+        ChatStartPage(draft: chatStart, repositories: workspaces.folders,
+                      onAdd: {
+                          if let owner = chatStart.owner {
+                              chatStartAdd = (owner, Set(workspaces.folders.map(\.id)))
+                          }
+                          workspaces.requestAdd()
+                      }, onSend: { Task { await sendNewChat() } })
+            .onAppear {
+                chatStart.activate(scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation)
+            }
+            .onChange(of: WorkSessionContext.shared.generation) { _, generation in
+                chatStart.activate(scope: WorkSessionContext.shared.scope, session: generation)
+            }
+            .onDisappear { chatStart.retire(); chatStartAdd = nil }
+    }
+
+    private func finishChatStartAdd() {
+        defer { chatStartAdd = nil }
+        guard let request = chatStartAdd, route.isGlobal(.newChat), chatStart.owner == request.owner,
+              let selected = workspaces.selectedID, !request.repositories.contains(selected),
+              workspaces.folders.contains(where: { $0.id == selected }) else { return }
+        chatStart.repositoryID = selected
+    }
+
+    private func sendNewChat() async {
+        guard let submission = chatStart.begin(available: Set(workspaces.folders.map(\.id))) else { return }
+        defer { chatStart.failed(submission, message: nil) }
+        func current() -> Bool {
+            !Task.isCancelled && route.isGlobal(.newChat)
+                && chatStart.accepts(submission, scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation)
+                && workspaces.folders.contains(where: { $0.id == submission.repositoryID })
+        }
+        let reader = ChatModel()
+        reader.newChatChoice = submission.agent
+        await reader.load(workspaceID: submission.repositoryID, selectFirst: false)
+        guard current() else { return }
+        guard reader.error == nil, reader.isReady(for: submission.repositoryID),
+              let created = await reader.create() else {
+            chatStart.failed(submission, message: reader.error ?? L10n.text("apple.chatview.chat_unavailable.a45aae80"))
             return
         }
-        setProjectExpanded(folder.id, true)
-        openSection(.chat, in: folder.id) { showingChatOverview = false }
-        Task {
-            for _ in 0..<60 {
-                if chat.folderID == folder.id, !chat.isLoading { break }
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-            guard chat.folderID == folder.id, route.workspaceID == folder.id else { return }
-            _ = await chat.create()
-        }
+        // Persist to this new conversation before exposing it to navigation.
+        // Existing conversation drafts are owned by the previous model.
+        reader.draft = submission.text
+        reader.saveDraftNow()
+        guard current(), reader.selected?.id == created.id else { return }
+        chat.saveDraftNow()
+        chat = reader
+        chatStart.transferred(submission)
+        openSection(.chat, in: submission.repositoryID)
+        await reader.sendInitialDraft()
     }
 
     /// Every registered folder, each opening onto its chats and sessions.
@@ -2780,6 +2804,7 @@ struct RootView: View {
                     git: folder?.git,
                     onBranchChanged: { await workspaces.refresh() },
                     onReviewChanges: { revealChanges(in: id, path: $0) },
+                    onNewChat: { startNewChat(in: folder) },
                     showingOverview: $showingChatOverview,
                     isActive: showsChat
                 )
@@ -2875,6 +2900,8 @@ struct RootView: View {
                 workspaceIsRemote: folder?.isRemote == true
             )
             #endif
+        case .global(.newChat):
+            newChatPage
         case .global(.home):
             HomeView(
                 model: home,

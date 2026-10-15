@@ -329,6 +329,9 @@ fun WorkspaceHub(
     onOpenProject: (JsonObject) -> Unit = {},
     initialChatId: String? = null,
     openConversationOnAppear: Boolean = false,
+    newChatRequest: NewChatRequest? = null,
+    onNewChatHandled: (String) -> Unit = {},
+    onNewChat: (() -> Unit)? = null,
 ) {
     var worktreeBusy by remember { mutableStateOf(false) }
     val colors = ai.tokenstat.tokenstat.ui.theme.LocalTsColors.current
@@ -471,6 +474,9 @@ fun WorkspaceHub(
                 onChatOpened = onRecordChat,
                 initialChatId = initialChatId,
                 openConversationOnAppear = openConversationOnAppear,
+                newChatRequest = newChatRequest,
+                onNewChatHandled = onNewChatHandled,
+                onNewChat = onNewChat,
                 conversationNonce = chatNonce,
                 onStartChat = { openSection = "Chat"; chatNonce += 1 },
                 machineId = host.str("id"),

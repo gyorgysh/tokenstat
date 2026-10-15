@@ -559,11 +559,14 @@ actor ChatAttachmentCache {
         return true
     }
 
-    func readFile(reference: WorkReference, attachment: String, size: UInt64?) -> URL? {
+    func readFile(reference: WorkReference, attachment: String, size _: UInt64?) -> URL? {
         guard let root = file(reference: reference, attachment: attachment)?.appendingPathExtension("file"),
               let urls = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]), urls.count == 1,
               let url = urls.first, let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]),
-              values.isRegularFile == true, values.fileSize.map(UInt64.init) == size,
+              // This cache publishes only completed, SHA-verified downloads.
+              // Archive sizes may be missing or stale; the immutable attachment
+              // ID identifies the file, just as it does for byte-backed entries.
+              values.isRegularFile == true, (values.fileSize ?? 0) > 0,
               let date = values.contentModificationDate, Date().timeIntervalSince(date) < lifetime else { return nil }
         try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
         return url

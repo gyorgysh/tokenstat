@@ -93,13 +93,18 @@ impl Collector {
                         }
                     }
                     Some("image_generation") if item["status"] == "completed" => {
-                        if let Some(path) = item["savedPath"]
+                        // Native results can include both durable response
+                        // bytes and a temporary saved path. Prefer the bytes
+                        // so a removed or inaccessible path cannot hide them.
+                        if let Some(data) = item["result"].as_str() {
+                            self.inline(call, data);
+                        }
+                        if !self.captured_calls.contains(call)
+                            && let Some(path) = item["savedPath"]
                             .as_str()
                             .or_else(|| item["saved_path"].as_str())
                         {
                             self.file(call, path);
-                        } else if let Some(data) = item["result"].as_str() {
-                            self.inline(call, data);
                         }
                     }
                     Some("mcp_tool_call" | "dynamic_tool_call") => {
@@ -144,12 +149,7 @@ impl Collector {
     }
 
     fn file(&mut self, call: &str, path: &str) {
-        if call.is_empty()
-            || call.len() > 512
-            || path.len() > 8192
-            || !image_extension(Path::new(path))
-            || self.count >= IMAGE_COUNT
-        {
+        if call.is_empty() || call.len() > 512 || path.len() > 8192 || self.count >= IMAGE_COUNT {
             return;
         }
         let key = format!("{call}:file:{path}");
@@ -374,6 +374,51 @@ mod tests {
             collector.take().len(),
             1,
             "only the explicit successful read may archive the path"
+        );
+    }
+
+    #[test]
+    fn native_image_evidence_accepts_extensionless_file_paths() {
+        let mut collector = Collector::default();
+        for (call, item) in [
+            (
+                "view",
+                json!({"type":"image_view","id":"view","path":"preview"}),
+            ),
+            (
+                "generate",
+                json!({"type":"image_generation","id":"generate","savedPath":"generated","status":"completed"}),
+            ),
+        ] {
+            collector.observe(
+                "codex",
+                &json!({"type":"item.completed","item":item}),
+                &[Event::ToolEnd {
+                    call_id: call.into(),
+                    ok: true,
+                    detail: None,
+                }],
+            );
+        }
+        let images = collector.take();
+        assert_eq!(images.len(), 2);
+        assert!(matches!(&images[0].source, Source::File(path) if path == Path::new("preview")));
+        assert!(matches!(&images[1].source, Source::File(path) if path == Path::new("generated")));
+    }
+
+    #[test]
+    fn native_generated_bytes_survive_an_unavailable_saved_path() {
+        let bytes = b"\x89PNG\r\n\x1a\nfixture";
+        let mut collector = Collector::default();
+        let record = json!({"type":"item.completed","item":{"type":"image_generation","id":"generate","savedPath":"/removed/generated.png","status":"completed","result":crate::base64::encode(bytes)}});
+        collector.observe("codex", &record, &[]);
+        let images = collector.take();
+        assert_eq!(images.len(), 1);
+        assert!(matches!(&images[0].source, Source::Bytes(data) if data == bytes));
+        collector.observe("codex", &record, &[]);
+        assert!(
+            collector.take().is_empty(),
+            "a replay does not fall back to the same image's path"
         );
     }
 

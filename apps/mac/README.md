@@ -70,6 +70,18 @@ Regenerate provisioning profiles after changing assignments. The existing iOS ar
 
 For Developer ID Mac builds, set `TOKENSTAT_MAC_PROFILE` and `TOKENSTAT_MAC_WIDGET_PROFILE` to authorized app/extension profiles. Release CI uses `DEVELOPER_ID_PROFILE_BASE64` and `DEVELOPER_ID_WIDGET_PROFILE_BASE64`. `scripts/sign-mac-app.py` validates App Group authorization and signs the extension before the app. Properly signed installations are required for shared-container behavior.
 
+## Starting a chat
+
+Repositories groups the folders registered on this computer and connected
+hosts, including Git checkouts and ordinary folders. New chat opens a dedicated
+composer with a repository picker. Add repository uses the existing folder
+selection and registration flow. Opening this screen, choosing a repository,
+or canceling folder selection does not create a conversation; Send hands the
+prompt to the normal chat creation and delivery path. With an empty prompt,
+Open chat creates the normal composer for image/file-first messages without
+starting a model turn. Repository identifiers,
+host requests and saved sidebar preferences retain their existing formats.
+
 ## Chat inspector
 
 Context and MCP details use the host's read-only `chat.inspection` response.

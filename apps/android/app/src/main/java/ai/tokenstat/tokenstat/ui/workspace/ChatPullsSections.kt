@@ -100,6 +100,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.ensureActive
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -194,6 +196,9 @@ fun ChatSection(
     conversationNonce: Int = 0,
     machineId: String? = null,
     onOpenSection: (String) -> Unit = {},
+    newChatRequest: NewChatRequest? = null,
+    onNewChatHandled: (String) -> Unit = {},
+    onNewChat: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val client by model.state.collectAsStateWithLifecycle()
@@ -202,6 +207,8 @@ fun ChatSection(
     var chats by remember(projectOwner) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var openId by remember(projectOwner) { mutableStateOf<String?>(null) }
     var creating by remember(projectOwner) { mutableStateOf(false) }
+    var pendingNewChatSend by remember(projectOwner) { mutableStateOf<Triple<String, String, String>?>(null) }
+    var startedNewChatSend by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
     var didOpenConversation by remember(workspace, openConversationOnAppear, conversationNonce) { mutableStateOf(false) }
     var events by remember(projectOwner, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
     val history = remember(projectOwner, openId) { ChatHistoryWindow() }
@@ -602,8 +609,9 @@ fun ChatSection(
     }
     // Create, then open what was created. A "New chat" button that lands
     // back on the list created the chat and hid it in the same motion.
-    suspend fun createAndOpen() {
-        if (creating) return
+    suspend fun createAndOpen(setup: NewChatSetup? = null): String? {
+        if (creating) return null
+        var createdId: String? = null
         creating = true
         // The agent list first. Without it there is nothing to check the
         // remembered agent against, and a new chat opened on the fallback
@@ -612,12 +620,15 @@ fun ChatSection(
         if (backends.isEmpty()) {
             runCatching {
                 model.workspaceSection(peer, "chat.backends", buildJsonObject {})
-            }.onSuccess { backends = asObjects(it) }
+            }.onSuccess { backends = asObjects(it) }.onFailure { if (it is CancellationException) { creating = false; throw it } }
         }
         runCatching {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!ownsProject()) return@runCatching null
             val saved = launchChoice.read()
-            val backendId = LaunchDefaults.backend(saved, backends)
+            val backendId = setup?.backend ?: LaunchDefaults.backend(saved, backends)
             val backend = backends.firstOrNull { it.str("id") == backendId }
+            check(setup == null || setup.isAvailable(backends)) { L10n.text("common.new_chat.setup_changed") }
             model.workspaceSection(peer, "chat.create", buildJsonObject {
                 put("workspaceId", workspace)
                 put("backend", backendId)
@@ -632,18 +643,21 @@ fun ChatSection(
                     "autonomy",
                     LaunchDefaults.autonomy(saved, chatAgentForcesBypass(backends, backendId)),
                 )
-                LaunchDefaults.model(saved, backend)?.let { put("model", it) }
-                LaunchDefaults.effort(saved, backend)?.let { put("effort", it) }
+                (if (setup != null) setup.model else LaunchDefaults.model(saved, backend))?.let { put("model", it) }
+                (if (setup != null) setup.effort else LaunchDefaults.effort(saved, backend))?.let { put("effort", it) }
             }) as? JsonObject
         }.onSuccess { created ->
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (!ownsProject()) return@onSuccess
             val id = created?.str("id")
+            createdId = id
             loadChats()
             openId = id ?: chats.maxByOrNull {
                 (it["updatedAtMs"] as? JsonPrimitive)?.longOrNull ?: 0L
             }?.str("id")
-        }.onFailure { if (ownsProject()) error = friendlyError(it.message).message }
+        }.onFailure { if (it is CancellationException) { creating = false; throw it }; if (ownsProject()) error = friendlyError(it.message).message }
         creating = false
+        return createdId
     }
     // Instant, like the Apple chase: an animated walk through a lazy list
     // lands on estimated heights and stops short, so Jump takes one press.
@@ -1215,6 +1229,25 @@ fun ChatSection(
         deliver(candidate, stopCurrent = !steer, steerCurrent = steer)
     }
     LaunchedEffect(projectOwner) { loadChats() }
+    LaunchedEffect(projectOwner, newChatRequest?.id) {
+        val request = newChatRequest ?: return@LaunchedEffect
+        androidx.compose.runtime.snapshotFlow { loading }.first { !it }
+        if (!ownsProject() || !request.claim(projectOwner?.accountScope, peer, workspace)) return@LaunchedEffect
+        try {
+            val id = createAndOpen(request.setup) ?: return@LaunchedEffect
+            if (!ownsProject() || openId != id) return@LaunchedEffect
+            val target = projectOwner?.conversation(id) ?: return@LaunchedEffect
+            if (model.chatComposers.hasWriting(target) || !model.chatComposers.update(target, request.source.snapshot)) return@LaunchedEffect
+            model.chatComposers.clearIfUnchanged(request.source.owner, request.source)
+            if (request.shouldSend) pendingNewChatSend = Triple(request.id, id, request.source.snapshot.text)
+        } finally { onNewChatHandled(request.id) }
+    }
+    LaunchedEffect(projectOwner, openId, composerKey, pendingNewChatSend?.first) {
+        val pending = pendingNewChatSend ?: return@LaunchedEffect
+        if (openId != pending.second || composerKey != projectOwner?.conversation(pending.second) || !ownsProject() || pending.first in startedNewChatSend) return@LaunchedEffect
+        startedNewChatSend = startedNewChatSend + pending.first
+        try { send(pending.third) } finally { if (pendingNewChatSend?.first == pending.first) pendingNewChatSend = null }
+    }
     // A navigation that named a conversation: open exactly it, even when
     // this folder's list is already on screen.
     LaunchedEffect(initialChatId, projectOwner) {
@@ -1368,7 +1401,7 @@ fun ChatSection(
                     icon = ActionIcon.Create.vector,
                     small = true,
                     enabled = !creating,
-                    onClick = { scope.launch { createAndOpen() } },
+                    onClick = { if (onNewChat != null) onNewChat() else scope.launch { createAndOpen() } },
                 )
                 TsSecondaryButton(
                     label = L10n.text("common.refresh"),
@@ -1388,7 +1421,7 @@ fun ChatSection(
                             label = if (creating) L10n.text("android.chatpullssections.starting.bbe5fc3b") else L10n.text("android.chatpullssections.new_chat.db18382a"),
                             small = true,
                             enabled = !creating,
-                            onClick = { scope.launch { createAndOpen() } },
+                            onClick = { if (onNewChat != null) onNewChat() else scope.launch { createAndOpen() } },
                         )
                     },
                 )
@@ -2110,6 +2143,8 @@ fun ChatSection(
                 onPickAgent = { showingAgent = true },
                 onDismiss = { showingSetup = false },
                 onChanged = { scope.launch { loadChats() } },
+                detail = detail,
+                onDetail = { detail = it; detailStore.setLevel(it) },
             )
         }
     }
@@ -2316,6 +2351,8 @@ private fun ChatSetupDialog(
     onDismiss: () -> Unit,
     onChanged: () -> Unit,
     inspection: ChatInspectionSnapshot? = null,
+    detail: ChatDetail = ChatDetail.Standard,
+    onDetail: (ChatDetail) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var brief by remember { mutableStateOf<String?>(null) }
@@ -2422,6 +2459,13 @@ private fun ChatSetupDialog(
                 TsSecondaryButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, small = true, onClick = onDismiss)
             }
             if (error != null) Banner(error!!, BannerSeverity.DANGER)
+            ChatSetupDisclosure(L10n.text("android.chatpullssections.conversation.ccca1817"), chat?.str("title"), chatId) {
+                Text(L10n.text(if (chat?.bol("running") == true) "common.running" else "common.idle"), style = MaterialTheme.typography.bodySmall)
+                Text(chatAgentSummary(backends, chat), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+            }
+            ChatSetupDisclosure(L10n.text("android.chatdetail.title"), chatDetailLabel(detail), chatId) {
+                ChatDetail.entries.forEach { level -> TextButton(onClick = { onDetail(level) }, modifier = Modifier.fillMaxWidth()) { Text(chatDetailLabel(level)) } }
+            }
             if (chat != null) ChatStatsPanel(model, peer, chat, inspection)
             if (chat != null) {
                 ChatRoutingControls(chat, backends,
@@ -2431,6 +2475,7 @@ private fun ChatSetupDialog(
             if (loading) {
                 Text(L10n.text("android.chatpullssections.loading.ba3bbbe1"), color = colors.textSecondary)
             } else {
+                ChatSetupDisclosure(L10n.text("common.chat_agent_behavior"), chatAgentSummary(backends, chat), chatId) {
                 // Who answers, in one field. The three settings behind it are
                 // one list with one filter, rather than three dropdowns that
                 // each hold a scroll of their own.
@@ -2508,8 +2553,8 @@ private fun ChatSetupDialog(
                 }
                 // What the person wrote, and what tokenstat adds, kept apart:
                 // only one of the two is theirs to change.
-                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    SectionLabel(L10n.text("android.chatpullssections.brief.ac40ae1e"))
+                }
+                ChatSetupDisclosure(L10n.text("android.chatpullssections.brief.ac40ae1e"), brief?.lineSequence()?.firstOrNull(), chatId) {
                     Text(
                         brief?.ifBlank { null } ?: L10n.text("android.chatpullssections.no_brief_the_agent_gets_the_folder_and_you.5d32d831"),
                         style = TextStyle(fontSize = 14.sp),
@@ -2517,8 +2562,7 @@ private fun ChatSetupDialog(
                     )
                 }
                 added?.ifBlank { null }?.let {
-                    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        SectionLabel(L10n.text("android.chatpullssections.what_tokenstat_adds.358d9a68"))
+                    ChatSetupDisclosure(L10n.text("android.chatpullssections.what_tokenstat_adds.358d9a68"), it.lineSequence().firstOrNull(), chatId) {
                         Text(it, style = TextStyle(fontSize = 13.sp), color = colors.textSecondary)
                         Text(
                             when (channel) {
@@ -2535,6 +2579,7 @@ private fun ChatSetupDialog(
                 // Which persona new chats in this folder inherit, including
                 // none. A row rather than a mark on whichever persona is open,
                 // so there is a way to say "none of them".
+                ChatSetupDisclosure(L10n.text("android.chatpullssections.new_chats_here.cc6a9bf2"), personas.firstOrNull { it.id == defaultId }?.name ?: L10n.text("android.chatpullssections.no_persona.cce53fca"), chatId) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -2552,6 +2597,7 @@ private fun ChatSetupDialog(
                         summary = personas.firstOrNull { it.id == defaultId }?.name ?: L10n.text("android.chatpullssections.no_persona.cce53fca"),
                         onOpen = { pickingDefault = true },
                     )
+                }
                 }
             }
         }

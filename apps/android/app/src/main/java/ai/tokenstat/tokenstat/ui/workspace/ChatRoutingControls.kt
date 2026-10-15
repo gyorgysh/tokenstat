@@ -212,10 +212,12 @@ internal fun ChatRoutingControls(
                     }
                 }
             }
-        if (showSection) TsCard(
+        if (showSection) ChatSetupDisclosure(
             title = L10n.text("common.chat_routing"),
-            subtitle = L10n.text("common.chat_routing_intro"),
-            mark = "mark_workflow",
+            summary = L10n.text(if (policy?.bol("enabled") == true) {
+                if (policy.bol("waitForReset")) "common.chat_route_combined_mode" else "common.chat_route_fallback_mode"
+            } else if (policy?.bol("waitForReset") == true) "common.chat_route_wait_mode" else "common.chat_route_manual"),
+            owner = chat.routeText("id"),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text(

@@ -69,11 +69,12 @@ internal sealed partial class ChatPage
         }
         var routing = new StackPanel { Spacing = Theme.SpaceS };
         var routePolicy = snapshot?["routing"]?["policy"];
-        routing.Children.Add(Muted(Format.Flag(routePolicy, "enabled") ? Format.Flag(routePolicy, "waitForReset") ? L10n.Text("common.chat_route_combined_mode") : L10n.Text("common.chat_route_fallback_mode") : Format.Flag(routePolicy, "waitForReset") ? L10n.Text("common.chat_route_wait_mode") : L10n.Text("common.chat_route_manual")));
+        var mode = Format.Flag(routePolicy, "enabled") ? Format.Flag(routePolicy, "waitForReset") ? L10n.Text("common.chat_route_combined_mode") : L10n.Text("common.chat_route_fallback_mode") : Format.Flag(routePolicy, "waitForReset") ? L10n.Text("common.chat_route_wait_mode") : L10n.Text("common.chat_route_manual");
+        routing.Children.Add(Muted(mode));
         if (routePolicy?["routes"] is JsonArray destinations && destinations.Count > 0) routing.Children.Add(Muted(string.Join(" → ", destinations.Select(d => Format.Text(d, "backend")))));
         if (Format.Flag(routePolicy, "returnPreferred")) routing.Children.Add(Muted(L10n.Text("common.chat_route_preferred", Format.Text(routePolicy?["preferred"] ?? snapshot?["routing"]?["preferred"], "backend", Format.Text(snapshot, "backend")))));
         routing.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("common.chat_route_setup"), ActionIcon.Settings, async (_, _) => await ShowRoutingAsync()));
-        body.Children.Add(SetupSection(L10n.Text("common.chat_routing"), routing, ActionIcon.Settings, L10n.Text("common.chat_routing_intro")));
+        body.Children.Add(SetupSection(L10n.Text("common.chat_routing"), routing, ActionIcon.Settings, mode));
         return body;
     }
 

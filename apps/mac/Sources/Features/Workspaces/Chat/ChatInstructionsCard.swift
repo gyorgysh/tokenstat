@@ -24,7 +24,8 @@ struct ChatInstructionsCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ChatSetupSection(title: L10n.text("apple.chatinstructionscard.instructions.934652dc"), icon: .docs) {
+        ChatSetupSection(title: L10n.text("apple.chatinstructionscard.instructions.934652dc"), icon: .docs,
+                         summary: chat.systemPrompt.isEmpty ? L10n.text("apple.chatinstructionscard.how_should_this_agent_behave.6cee0aaf") : chat.systemPrompt) {
 
             ThemedEditor(text: $draft, font: Theme.callout, minHeight: 76, maxHeight: 220)
                 .disabled(model.savedCopy != nil)

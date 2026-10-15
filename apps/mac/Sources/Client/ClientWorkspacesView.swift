@@ -204,6 +204,11 @@ struct ClientWorkspacesView: View {
                 customizing = true
             }
             .navigationTitle(L10n.text("common.projects"))
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(L10n.text("apple.clientchatview.new_chat.db18382a"), .create) { navigation.openNewChat() }
+                }
+            }
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
                 await ClientRefresh.pull("workspaces") {
@@ -411,7 +416,7 @@ struct ClientWorkspacesView: View {
                 hostName: host.name,
                 folders: model.folders,
                 chats: model.recentChats,
-                onNewChat: { starting = .chat }
+                onNewChat: { navigation.openNewChat() }
             )
             .padding(.top, Theme.Space.s)
         case .sessions:

@@ -49,6 +49,13 @@ struct ChatAttachmentCacheTests {
         require(try Data(contentsOf: completed) == bytes, "Completed resumed download starts a fresh retention period")
         let cachedVideo = await reopened.readFile(reference: reference(), attachment: "video", size: UInt64(bytes.count))
         require(cachedVideo?.standardizedFileURL == completed.standardizedFileURL, "Resumed download remains reusable")
+        for archivedSize: UInt64? in [nil, 1, UInt64(bytes.count + 1)] {
+            let cached = await reopened.readFile(reference: reference(), attachment: "video", size: archivedSize)
+            require(cached?.standardizedFileURL == completed.standardizedFileURL,
+                    "Completed file cache must remain reusable when archived size is missing or inaccurate")
+        }
+        require(await reopened.readFile(reference: reference("other-host"), attachment: "video", size: nil) == nil,
+                "Archive size fallback cannot cross host ownership")
         let expired = ChatAttachmentCache(directory: root, lifetime: 0)
         require(await expired.read(reference: reference(), attachment: "file") == nil, "Expired cache miss")
 

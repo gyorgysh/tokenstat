@@ -17,6 +17,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.text.NumberFormat
+import java.text.DateFormat
+import java.util.Date
 import kotlinx.serialization.json.JsonObject
 
 private fun activityText(key: String, vararg args: String): String {
@@ -36,7 +38,7 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
     }
     if (data.planReported && data.plan.isNotEmpty()) add(activityText("steps", "${data.completedSteps}", "${data.plan.size}"))
     if (data.agentsReported && data.agents.isNotEmpty()) add(data.runningAgents?.let { activityText("running_agents", "$it") } ?: activityText("agents", "${data.agents.size}"))
-    data.goal?.objective?.takeIf { it.isNotBlank() }?.let(::add)
+    data.headline?.takeIf { it.isNotBlank() }?.let(::add)
 }.joinToString(" · ").ifBlank { activityText("no_activity") }
 
 @Composable internal fun ChatActivitySummary(data: ChatActivityData?, onOpen: () -> Unit) {
@@ -91,6 +93,7 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
                         else if (data.plan.isEmpty()) ActivityNote(activityText("none"))
                         else {
                             ActivityNote(activityText("steps", "${data.completedSteps}", "${data.plan.size}"))
+                            ActivityProgress(data.completedSteps.toFloat() / data.plan.size)
                             data.plan.forEachIndexed { index, step ->
                                 Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Icon(if (step.status == "completed") ActionIcon.Done.vector else if (step.status == "inProgress") ActionIcon.Run.vector else ActionIcon.Scheduled.vector,
@@ -117,6 +120,7 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
                         }
                     }
                     if (data.partial) ActivityNote(activityText("partial"))
+                    data.observedAtMs?.let { ActivityNote(activityText("last_reported", DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(it)))) }
                 }
             }
         }
@@ -131,6 +135,10 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
         Text(activityText(label), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = LocalTsColors.current.textSecondary)
         Text(value, style = MaterialTheme.typography.labelSmall)
     }
+    chatActivityProgress(used, budget)?.let { ActivityProgress(it) }
+}
+@Composable private fun ActivityProgress(fraction: Float) {
+    LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth().height(4.dp))
 }
 @Composable private fun ActivitySection(title: String, initiallyExpanded: Boolean, status: String? = null, content: @Composable ColumnScope.() -> Unit) {
     var expanded by remember(title, initiallyExpanded) { mutableStateOf(initiallyExpanded) }

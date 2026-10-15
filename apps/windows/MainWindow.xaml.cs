@@ -35,6 +35,8 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<RailPlace, Button> _pinnedNavigation = new();
     private readonly NavigationViewItem _sshGroup = SshGroup();
     private string _automationRoute = "global:Automations";
+    private NewChatPage? _newChatPage;
+    private long _newChatAccount = -1;
     private readonly Frame _frame = new();
     /// <summary>
     /// The content area behind the frame. Opaque Background tone, so the
@@ -367,6 +369,7 @@ public sealed partial class MainWindow : Window
             NavigateTo("global:Machines");
             SetContent(new MachinesPage(id), preserveSelection: true);
         });
+        AppServices.OpenNewChat = OpenNewChat;
         AppServices.OpenWorkspace = (workspaceId, section) =>
         {
             DispatcherQueue.TryEnqueue(() =>
@@ -726,10 +729,7 @@ public sealed partial class MainWindow : Window
         {
             // Finish the native row's selection before opening its action.
             await Task.Yield();
-            NavigateTo("ws:" + id + ":Chat");
-            var workbench = WorkspaceTabs(id);
-            try { await workbench.WhenLoadedAsync(async () => { if (workbench.ActivePage is ChatPage chat) await chat.BeginNewChatAsync(); }); }
-            catch (OperationCanceledException) { /* The folder was left before it loaded. */ }
+            OpenNewChat(id);
         }
         ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.new_chat.db18382a"), NewChat);
         WorkPinMenu.Add(menu, id, "", name, name);
@@ -1352,6 +1352,30 @@ public sealed partial class MainWindow : Window
 
     private void Show(string tag)
     {
+        if (tag == "global:NewChat")
+        {
+            if (_newChatPage is null || _newChatAccount != AppServices.AccountGeneration) {
+                _newChatAccount = AppServices.AccountGeneration;
+                _newChatPage = new NewChatPage(NewChatRepositories, async () => {
+                    var generation = AppServices.AccountGeneration;
+                    var added = await WorkspaceAddDialog.ShowAsync(_newChatPage!);
+                    if (generation != AppServices.AccountGeneration) return null;
+                    _foldersLoaded = false; await TryLoadFoldersAsync(); return added;
+                }, repository => RemoteWorkspaces.CallWorkspaceAsync(repository.Id, "chat.backends", new JsonObject()), async (repository, text, setup, owns, accepted) => {
+                    if (!owns() || !ReferenceEquals(_frame.Content, _newChatPage)) return;
+                    NavigateTo("ws:" + repository.Id + ":Chat");
+                    var workbench = WorkspaceTabs(repository.Id);
+                    await workbench.WhenLoadedAsync(async () => {
+                        if (workbench.ActivePage is not ChatPage chat) return;
+                        bool Current() => owns() && ReferenceEquals(_frame.Content, workbench) && ReferenceEquals(workbench.ActivePage, chat);
+                        if (Current()) await chat.StartNewChatWithDraftAsync(text, setup, Current, accepted);
+                    });
+                });
+            }
+            SetContent(_newChatPage, preserveSelection: true);
+            _ = RefreshNewChatRepositoriesAsync(_newChatPage);
+            return;
+        }
         if (tag == "workspaces:add")
         {
             _ = AddWorkspaceAsync();
@@ -2337,40 +2361,30 @@ public sealed partial class MainWindow : Window
         var content = new StackPanel { Spacing = 0, Margin = new Thickness(0, 0, 0, Theme.SpaceM) };
         content.Children.Add(new Border { Height = DetailBar.Height,
             Padding = new Thickness(Theme.SpaceM, 0, Theme.SpaceM, 3), Child = Marks.Wordmark() });
-        var menu = new MenuFlyout();
-        menu.Opening += (_, _) =>
-        {
-            menu.Items.Clear();
-            void AddProject(string id, string name, string machine, string path)
-            {
-                var item = new MenuFlyoutItem { Text = name + " · " + machine };
-                ToolTipService.SetToolTip(item, path);
-                item.Click += async (_, _) =>
-                {
-                    NavigateTo("ws:" + id + ":Chat");
-                    var workbench = WorkspaceTabs(id);
-                    try { await workbench.WhenLoadedAsync(async () => { if (workbench.ActivePage is ChatPage page) await page.BeginNewChatAsync(); }); }
-                    catch (OperationCanceledException) { /* The folder was left before it loaded. */ }
-                };
-                menu.Items.Add(item);
-            }
-            foreach (var folder in _localFolders)
-            {
-                var id = Format.Text(folder, "id");
-                if (id.Length > 0) AddProject(id, Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), Format.Text(folder, "path"));
-            }
-            foreach (var folder in RemoteWorkspaces.CachedFolders())
-                AddProject(folder.Id, folder.Name, folder.MachineLabel, folder.Path);
-            if (menu.Items.Count == 0)
-                menu.Items.Add(new MenuFlyoutItem { Text = L10n.Text("windows.mainwindow_xaml.add_a_project_first.cc9bc2c9"), IsEnabled = false });
-        };
-        var create = SidebarChrome.Row(L10n.Text("windows.mainwindow_xaml.new_chat.db18382a"), ActionIcon.Edit, (_, _) => { });
-        create.Flyout = menu;
+        var create = SidebarChrome.Row(L10n.Text("windows.mainwindow_xaml.new_chat.db18382a"), ActionIcon.Edit, (_, _) => OpenNewChat());
         create.HorizontalAlignment = HorizontalAlignment.Stretch;
         ToolTipService.SetToolTip(create, L10n.Text("windows.mainwindow_xaml.choose_which_project_the_new_chat_belongs.e9b181c8"));
         content.Children.Add(create);
         content.Children.Add(SidebarChrome.Row(L10n.Text("common.search"), ActionIcon.Search, (_, _) => OpenSearch(), "Ctrl+K"));
         return content;
+    }
+
+    private IReadOnlyList<NewChatRepository> NewChatRepositories() => _localFolders
+        .Where(folder => Format.Text(folder, "id").Length > 0)
+        .Select(folder => new NewChatRepository(Format.Text(folder, "id"), Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), Format.Text(folder, "path")))
+        .Concat(RemoteWorkspaces.CachedFolders().Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.Path))).ToArray();
+
+    private void OpenNewChat(string? repository = null)
+    {
+        NavigateTo("global:NewChat");
+        _newChatPage?.RefreshRepositories(repository);
+    }
+
+    private async Task RefreshNewChatRepositoriesAsync(NewChatPage page)
+    {
+        var account = AppServices.AccountGeneration;
+        await TryLoadFoldersAsync();
+        if (account == AppServices.AccountGeneration && ReferenceEquals(_frame.Content, page)) page.RefreshRepositories();
     }
 
     /// <summary>

@@ -12,6 +12,7 @@ struct ChatActivityOwner: Hashable {
     var model: String?
     var revision: UInt64?
     var selection: UInt64
+    var running: Bool
     var saved: Bool
 }
 
@@ -26,7 +27,8 @@ struct ChatActivityRead {
 extension ChatModel {
     var activityOwner: ChatActivityOwner {
         ChatActivityOwner(reference: currentReference, backend: selected?.backend, model: selected?.model,
-                          revision: selected?.runRevision, selection: selectionGeneration, saved: savedCopy != nil)
+                          revision: selected?.runRevision, selection: selectionGeneration,
+                          running: selected?.running == true, saved: savedCopy != nil)
     }
 
     var currentActivityRead: ChatActivityRead? {
@@ -35,10 +37,13 @@ extension ChatModel {
         return read
     }
 
-    var activityIsLive: Bool {
+    var inspectionIsLive: Bool {
         let read = currentActivityRead
-        return read?.failed == false && read?.inspection?.currentRun == true
-            && read?.inspection?.activity?.live == true && selected?.running == true
+        return read?.failed == false && read?.inspection?.currentRun == true && selected?.running == true
+    }
+
+    var activityIsLive: Bool {
+        inspectionIsLive && currentActivityRead?.inspection?.activity?.live == true
     }
 
     func retireActivityRead() {

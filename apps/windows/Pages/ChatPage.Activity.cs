@@ -84,7 +84,7 @@ internal sealed partial class ChatPage
         if (data.PlanReported && data.Plan.Length > 0) values.Add(ActivityText("steps", data.CompletedSteps.ToString("N0"), data.Plan.Length.ToString("N0")));
         if (data.AgentsReported && data.Agents.Length > 0) values.Add(data.RunningAgents is int running
             ? ActivityText("running_agents", running.ToString("N0")) : ActivityText("agents", data.Agents.Length.ToString("N0")));
-        if (data.Goal is { Objective.Length: > 0 } objective) values.Add(objective.Objective);
+        if (!string.IsNullOrWhiteSpace(data.Headline)) values.Add(data.Headline);
         return values.Count == 0 ? ActivityText("no_activity") : string.Join(" · ", values);
     }
     private void RenderActivitySummary()
@@ -154,6 +154,7 @@ internal sealed partial class ChatPage
             else
             {
                 planBody.Children.Add(Muted(ActivityText("steps", data.CompletedSteps.ToString("N0"), data.Plan.Length.ToString("N0"))));
+                planBody.Children.Add(ActivityProgress((double)data.CompletedSteps / data.Plan.Length));
                 for (var i = 0; i < data.Plan.Length; i++)
                 {
                     var step = data.Plan[i];
@@ -178,6 +179,7 @@ internal sealed partial class ChatPage
             }
             body.Children.Add(ActivityDisclosure(ActivityText("subagents"), scope + "subagents", agentBody, section is "subagents" or "all"));
             if (data.Partial) body.Children.Add(Muted(ActivityText("partial")));
+            if (data.ObservedAtMs is long stamp) body.Children.Add(Muted(ActivityText("last_reported", DateTimeOffset.FromUnixTimeMilliseconds(stamp).ToLocalTime().ToString("g"))));
         }
         var summary = data is null ? ActivityText("unavailable") : ActivitySummary(data);
         return ActivityDisclosure(ActivityText("title"), scope + "activity", body, expanded, summary, card: true);
@@ -211,5 +213,8 @@ internal sealed partial class ChatPage
         string Amount(double? value) => value is not double amount ? ActivityText("not_reported") : seconds ? ActivityText("seconds", amount.ToString("N0")) : amount.ToString("N0");
         var text = budget is null ? Amount(used) : ActivityText("progress", Amount(used), Amount(budget));
         body.Children.Add(StatsMetric(ActivityText(label), text));
+        if (ChatActivityData.Progress(used, budget) is double fraction) body.Children.Add(ActivityProgress(fraction));
     }
+    private static ProgressBar ActivityProgress(double fraction) => new() { Minimum = 0, Maximum = 1, Value = fraction,
+        Height = 4, MinHeight = 0, IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Stretch };
 }

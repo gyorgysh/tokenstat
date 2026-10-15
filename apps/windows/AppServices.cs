@@ -71,6 +71,7 @@ internal static class AppServices
     /// in its folder's chat.
     /// </summary>
     public static Action<string, string>? OpenConversation { get; set; }
+    public static Action<string?>? OpenNewChat { get; set; }
 
     /// <summary>
     /// Open Insights for one calendar day (yyyy-MM-dd) from Home's inspector.
