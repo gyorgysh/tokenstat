@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.workspace
 
 internal const val CHAT_IMAGE_PREVIEW_BYTES = 5L * 1024 * 1024
+internal const val CHAT_IMAGE_GALLERY_EDGE = 1280
 
 internal fun chatImageAutomaticPreviewAllowed(size: Long?, route: String?): Boolean =
     route == "direct" && size != null && size in 1..CHAT_IMAGE_PREVIEW_BYTES
@@ -65,5 +66,43 @@ internal fun chatImageDecodeSize(width: Int, height: Int, maxEdge: Int): Pair<In
     return maxOf(1, (width * scale).toInt()) to maxOf(1, (height * scale).toInt())
 }
 
-internal fun chatImageGridColumns(count: Int): Int = if (count <= 1) 1 else 2
+internal fun chatImageGridColumns(count: Int): Int = if (count <= 3) count.coerceAtLeast(1) else 2
 internal fun chatImageVisibleCount(count: Int): Int = count.coerceIn(0, 4)
+
+internal data class ChatImageRowGeometry(
+    val indexes: List<Int>,
+    val widths: List<Float>,
+    val height: Float,
+    val gap: Float,
+)
+
+/** Justified rows in dp. Thumbnail dimensions never depend on these results. */
+internal fun chatImageGalleryGeometry(aspects: List<Double?>, availableWidth: Float): List<ChatImageRowGeometry> {
+    if (aspects.isEmpty() || !availableWidth.isFinite() || availableWidth <= 0) return emptyList()
+    val width = availableWidth.coerceAtMost(640f)
+    val count = chatImageVisibleCount(aspects.size)
+    val columns = minOf(chatImageGridColumns(count), ((width + 4f) / 52f).toInt().coerceAtLeast(1))
+    val ratios = aspects.take(count).map { it?.takeIf { ratio -> ratio.isFinite() && ratio > 0 }?.coerceIn(.65, 2.2) ?: 1.5 }
+    return (0 until count).toList().chunked(columns).map { indexes ->
+        val gap = if (indexes.size == 1) 0f else 4f
+        val room = width - gap * (indexes.size - 1)
+        val minimum = minOf(48.0, room.toDouble() / indexes.size)
+        val widths = DoubleArray(indexes.size)
+        val remaining = indexes.indices.toMutableSet()
+        var freeWidth = room.toDouble()
+        // Freeze narrow cells at a usable touch width, then distribute the
+        // rest proportionally. Normal 3-up phone rows still fit in one row.
+        while (remaining.isNotEmpty()) {
+            val total = remaining.sumOf { ratios[indexes[it]] }
+            val small = remaining.filter { freeWidth * ratios[indexes[it]] / total < minimum }
+            if (small.isEmpty()) {
+                remaining.forEach { widths[it] = freeWidth * ratios[indexes[it]] / total }
+                break
+            }
+            small.forEach { widths[it] = minimum; freeWidth -= minimum; remaining.remove(it) }
+        }
+        val cap = if (aspects.size == 1) 300.0 else 240.0
+        val height = indexes.indices.minOf { widths[it] / ratios[indexes[it]] }.coerceIn(48.0, cap)
+        ChatImageRowGeometry(indexes, widths.map(Double::toFloat), height.toFloat(), gap)
+    }
+}

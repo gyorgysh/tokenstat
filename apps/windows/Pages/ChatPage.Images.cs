@@ -60,59 +60,89 @@ internal sealed partial class ChatPage
         var images = gallery.Images?.ToArray() ?? [];
         if (images.Length == 0) return new Border();
         var tool = !string.IsNullOrEmpty(gallery.ToolCallId);
-        var columns = tool ? Math.Min(images.Length, 4) : images.Length == 1 ? 1 : 2;
-        var width = tool ? Math.Min(images.Length, 4) * 78 : images.Length == 1 ? 300 : 606;
-        var grid = new Grid { ColumnSpacing = 6, RowSpacing = 6, HorizontalAlignment = HorizontalAlignment.Left,
-            Width = width, MaxWidth = width };
-        for (var column = 0; column < columns; column++) grid.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
         var count = Math.Min(images.Length, ChatImageGallery.VisibleLimit);
-        var rows = (count + columns - 1) / columns;
-        for (var row = 0; row < rows; row++) grid.RowDefinitions.Add(new() { Height = new GridLength(tool ? 58 : images.Length > 2 ? 148 : 200) });
+        var aspects = Enumerable.Repeat(ChatImageLayout.FallbackAspect, count).ToArray();
+        var tiles = new List<Button>(count);
+        var canvas = new Canvas { HorizontalAlignment = HorizontalAlignment.Left };
+        var host = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, Children = { canvas } };
+        var availableWidth = _transcript.ActualWidth > 0 ? _transcript.ActualWidth : ChatImageLayout.MaximumWidth;
+        void Layout()
+        {
+            var geometry = ChatImageLayout.Measure(aspects, availableWidth, tool);
+            canvas.Width = geometry.Width; canvas.Height = geometry.Height;
+            foreach (var tile in geometry.Tiles)
+            {
+                var button = tiles[tile.Index];
+                button.Width = tile.Width; button.Height = tile.Height;
+                Canvas.SetLeft(button, tile.X); Canvas.SetTop(button, tile.Y);
+            }
+        }
         for (var index = 0; index < count; index++)
         {
             var selected = index;
             var item = images[index];
             var image = new Image { Stretch = Stretch.Uniform };
-            var tile = new Grid { Background = Theme.AccentSoftBrush };
-            tile.Children.Add(new TextBlock { Text = item.Name, FontSize = 11, TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(8), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center });
-            tile.Children.Add(image);
+            var placeholder = ActionIcon.Preview.Icon();
+            placeholder.Opacity = .3;
+            placeholder.HorizontalAlignment = HorizontalAlignment.Center;
+            placeholder.VerticalAlignment = VerticalAlignment.Center;
+            var tile = new Grid { Background = Theme.PanelBrush };
+            tile.Children.Add(placeholder); tile.Children.Add(image);
             if (index == count - 1 && images.Length > count)
             {
                 tile.Children.Add(new Border { Background = Theme.PanelBrush, CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(8, 4, 8, 4), Margin = new Thickness(6), HorizontalAlignment = HorizontalAlignment.Right,
                     VerticalAlignment = VerticalAlignment.Bottom, Child = new TextBlock { Text = L10n.Text("common.chat.images.more", (images.Length - count).ToString("N0")) } });
             }
-            var button = new Button { Content = tile, Padding = new Thickness(0), BorderThickness = new Thickness(0),
+            var button = new Button { Content = tile, Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Theme.PanelBrush,
+                MinWidth = tool ? 0 : ChatImageLayout.MinimumTile, MinHeight = tool ? 0 : ChatImageLayout.MinimumTile,
                 HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch,
                 CornerRadius = new CornerRadius(8) };
             ToolTipService.SetToolTip(button, item.Name);
             AutomationProperties.SetName(button, L10n.Text("common.chat.images.open") + " · " + item.Name + " · " + L10n.Text("common.chat.images.count", images.Length.ToString()));
-            image.Loaded += async (_, _) => { _imageViews.Add(image); await LoadImageThumbnailAsync(image, item); };
-            image.Unloaded += (_, _) => { _imageViews.Remove(image); image.Source = null; };
+            var loadRevision = 0;
+            image.Loaded += async (_, _) => {
+                var requested = ++loadRevision;
+                _imageViews.Add(image);
+                await LoadImageThumbnailAsync(image, item, tool ? 192u : 1280u, () => requested == loadRevision, aspect => {
+                    aspects[selected] = aspect;
+                    placeholder.Visibility = Visibility.Collapsed;
+                    if (!tool) Layout();
+                });
+            };
+            image.Unloaded += (_, _) => {
+                loadRevision++; _imageViews.Remove(image); image.Source = null; placeholder.Visibility = Visibility.Visible;
+            };
             button.Click += async (_, _) => await ShowImageGalleryAsync(images, selected);
-            Grid.SetColumn(button, index % columns); Grid.SetRow(button, index / columns); grid.Children.Add(button);
+            tiles.Add(button); canvas.Children.Add(button);
         }
-        // Let two-column galleries shrink with the transcript, keeping their
-        // bounded row heights instead of expanding to original image sizes.
-        var host = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, Children = { grid } };
-        host.SizeChanged += (_, _) => grid.Width = Math.Max(1, Math.Min(width, host.ActualWidth));
+        // Geometry changes resize these existing tiles. They never rebuild the
+        // transcript or restart an image download as metadata arrives.
+        host.SizeChanged += (_, args) => {
+            if (Math.Abs(args.NewSize.Width - args.PreviousSize.Width) < .1) return;
+            availableWidth = args.NewSize.Width; Layout();
+        };
+        Layout();
         return host;
     }
-    private async Task LoadImageThumbnailAsync(Image image, DisplayItem item)
+    private async Task LoadImageThumbnailAsync(Image image, DisplayItem item, uint decodeEdge, Func<bool> loadIsCurrent, Action<double> decoded)
     {
         var owner = ImageOwner();
+        bool Current() => ImageOwner() == owner && image.IsLoaded && loadIsCurrent();
         try
         {
             var file = await ImageFileAsync(item, false);
-            if (file is null || ImageOwner() != owner || !image.IsLoaded) return;
-            var bitmap = await DecodeImageAsync(file, 600);
-            if (ImageOwner() == owner && image.IsLoaded) image.Source = bitmap;
+            if (file is null || !Current()) return;
+            var aspect = ChatImageLayout.FallbackAspect;
+            var bitmap = await DecodeImageAsync(file, decodeEdge, value => aspect = value);
+            if (!Current()) return;
+            image.Source = bitmap;
+            decoded(aspect);
         }
         catch { /* A file tile and its explicit viewer action remain available. */ }
     }
-    private static async Task<BitmapImage> DecodeImageAsync(string path, uint edge)
+    private static async Task<BitmapImage> DecodeImageAsync(string path, uint edge, Action<double>? aspectReady = null)
     {
         var file = await StorageFile.GetFileFromPathAsync(path);
         using var stream = await file.OpenReadAsync();
@@ -126,6 +156,7 @@ internal sealed partial class ChatPage
         };
         stream.Seek(0);
         await bitmap.SetSourceAsync(stream);
+        aspectReady?.Invoke(ChatImageLayout.Aspect(decoder.OrientedPixelWidth, decoder.OrientedPixelHeight));
         return bitmap;
     }
     private async Task<string?> ImageFileAsync(DisplayItem item, bool userInitiated, CancellationToken? requestToken = null)

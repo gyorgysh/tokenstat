@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -25,6 +26,7 @@ import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -39,21 +41,26 @@ class ChatImageLayoutTest {
         val folder = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "gallery-layout-qa").apply { mkdirs() }
         return images.associate { image ->
             image.attachmentId to File(folder, image.name).also { file ->
-                val bitmap = Bitmap.createBitmap(480, 320, Bitmap.Config.ARGB_8888)
+                val (width, height) = when (image.attachmentId) {
+                    "1" -> 320 to 480
+                    "2", "3" -> 960 to 360
+                    else -> 480 to 320
+                }
+                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(bitmap)
                 val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.argb(160, 45, 155, 125) }
-                canvas.drawRoundRect(40f, 40f, 440f, 280f, 36f, 36f, paint)
+                canvas.drawRoundRect(30f, 30f, width - 30f, height - 30f, 24f, 24f, paint)
                 paint.color = android.graphics.Color.WHITE; paint.textSize = 44f
-                canvas.drawText(image.name, 72f, 178f, paint)
+                canvas.drawText(if (width > height) "Landscape" else "Portrait", 44f, height / 2f, paint)
                 file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 bitmap.recycle()
             }
         }
     }
 
-    private fun show(content: @Composable () -> Unit) {
+    private fun show(width: Dp = 352.dp, content: @Composable () -> Unit) {
         compose.setContent { TsTheme(DarkColors) { MaterialTheme(colorScheme = DarkColors.toColorScheme(), typography = TsType.typography) {
-            Surface(Modifier.fillMaxSize()) { Column(Modifier.width(352.dp).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
+            Surface(Modifier.fillMaxSize()) { Column(Modifier.width(width).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
         } } }
     }
 
@@ -63,15 +70,50 @@ class ChatImageLayoutTest {
         show {
             Box(Modifier.testTag("single")) { ChatImageTiles(images.take(1), files) { selected = it } }
             Box(Modifier.testTag("pair")) { ChatImageTiles(images.take(2), files) { selected = it } }
+            Box(Modifier.width(280.dp).testTag("three")) { ChatImageTiles(images.drop(1).take(3), files) { selected = it } }
             Box(Modifier.testTag("overflow")) { ChatImageTiles(images, files) { selected = it } }
         }
         compose.onNodeWithTag("single").assertIsDisplayed()
-        assertTrue(height("single") <= 230.dp)
-        assertTrue(height("pair") <= 170.dp)
-        assertTrue(height("overflow") <= 250.dp)
+        assertTrue(height("single") <= 325.dp)
+        assertTrue(height("pair") <= 265.dp)
+        assertTrue(height("overflow") <= 510.dp)
+        fun threeBounds() = images.drop(1).take(3).map { image ->
+            compose.onNode(hasContentDescription(L10n.text("common.chat.images.view", image.name)) and hasAnyAncestor(hasTestTag("three")),
+                useUnmergedTree = true).getUnclippedBoundsInRoot()
+        }
+        compose.waitUntil(10_000) {
+            val bounds = threeBounds()
+            (bounds[0].right - bounds[0].left).value <= 49f && bounds.drop(1).all { (it.right - it.left).value >= 111f }
+        }
+        val three = threeBounds()
+        assertTrue(three.all { it.right - it.left >= 48.dp && it.bottom - it.top >= 48.dp })
+        assertEquals(three[0].top.value, three[1].top.value, .5f)
+        assertEquals(three[0].top.value, three[2].top.value, .5f)
+        assertTrue(three[0].right <= three[1].left && three[1].right <= three[2].left)
+        assertTrue(three.last().right <= compose.onNodeWithTag("three").getUnclippedBoundsInRoot().right)
+        compose.onAllNodesWithText(L10n.text("common.chat.images.count", "3")).assertCountEquals(1)
         compose.onNodeWithText(L10n.text("common.chat.images.more", "2")).assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(3, selected) }
         screenshot("android-chat-galleries")
+    }
+
+    @Test fun tabletGalleryUses640DpWithoutAnEmptyCellForThreeImages() {
+        val metrics = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics
+        assumeTrue(metrics.widthPixels / metrics.density >= 672)
+        val files = fixtures()
+        show(width = 704.dp) {
+            Box(Modifier.testTag("wide-three")) { ChatImageTiles(images.take(3), files) {} }
+            Box(Modifier.testTag("wide-overflow")) { ChatImageTiles(images, files) {} }
+        }
+        val bounds = compose.onNodeWithTag("wide-three").getUnclippedBoundsInRoot()
+        assertEquals(640f, (bounds.right - bounds.left).value, .5f)
+        fun lastBounds() = compose.onNode(hasContentDescription(L10n.text("common.chat.images.view", images[2].name)) and hasAnyAncestor(hasTestTag("wide-three")),
+            useUnmergedTree = true).getUnclippedBoundsInRoot()
+        compose.waitUntil(10_000) { lastBounds().let { (it.right - it.left).value >= 315f } }
+        val last = lastBounds()
+        assertEquals(bounds.right.value, last.right.value, .5f)
+        assertTrue(height("wide-three") <= 265.dp)
+        screenshot("android-chat-galleries-tablet")
     }
 
     @Test fun viewerNavigatesZoomsAndClosesWithOriginalFileActions() {

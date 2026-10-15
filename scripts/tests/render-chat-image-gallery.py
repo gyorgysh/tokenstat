@@ -6,12 +6,17 @@ The accessory QA app uses its own bundle/preferences domain, no sockets, and
 an offscreen window. It never launches or touches the running tokenstat app.
 """
 from pathlib import Path
+import argparse
 import shutil
 import subprocess
 import sys
 
 root = Path(__file__).resolve().parents[2]
-output = Path(sys.argv[1] if len(sys.argv) > 1 else root / 'target/chat-image-qa').resolve()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('output', nargs='?', type=Path, default=root / 'target/chat-image-qa')
+parser.add_argument('--fixture', action='append', type=Path, default=[], help='Read-only local image; repeat to render a set')
+args = parser.parse_args()
+output = args.output.resolve()
 output.mkdir(parents=True, exist_ok=True)
 app = output / 'ImageGalleryQA.app'
 (app / 'Contents/MacOS').mkdir(parents=True, exist_ok=True)
@@ -81,6 +86,7 @@ context = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatContextCard.swi
 for name in ['contextOpen', 'serversOpen', 'otherServersOpen', 'promptOpen', 'historyOpen', 'conversationOpen']:
     context = context.replace(name + ' = false', name + ' = GalleryQAState.expanded')
 pieces += [context]
+pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageLayout.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageGallery.swift').read_text()]
 pieces += [r'''
 @MainActor final class GalleryQARunner: NSObject, NSApplicationDelegate {
@@ -128,18 +134,36 @@ pieces += [r'''
             } else { model.responseAttachmentData[file.id] = data }
             files.append(file)
         }
+        var localFiles: [ChatAttachment] = []
+        for (index, path) in CommandLine.arguments.dropFirst(2).enumerated() {
+            // Names are intentionally generic; source paths never enter PNGs.
+            let file = ChatAttachment(id: "local-\(index)", name: "image.png", mediaType: "image/png")
+            model.responseAttachmentFiles[file.id] = URL(fileURLWithPath: path)
+            localFiles.append(file)
+        }
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 480, height: 440), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         for dark in [false, true] {
             window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-            for count in [1, 2, 3, 4, 9] {
-                let view = VStack(alignment: .leading, spacing: 12) {
-                    Text("Image attachments").font(Theme.callout.weight(.semibold))
-                    ChatImageGallery(resources: model.imageResources(for: Array(files.prefix(count))))
-                    Spacer(minLength: 0)
-                }.padding(20).frame(width: 480, height: count > 2 ? 420 : 280).background(Theme.background)
-                try await capture(AnyView(view), size: CGSize(width: 480, height: count > 2 ? 420 : 280),
-                    name: "gallery-\(count)-\(dark ? "dark" : "light")", window: window)
+            for width: CGFloat in [320, 480, 760] {
+                for count in [1, 2, 3, 4, 9] {
+                    let view = VStack(alignment: .leading, spacing: 12) {
+                        Text("Image attachments").font(Theme.callout.weight(.semibold))
+                        ChatImageGallery(resources: model.imageResources(for: Array(files.prefix(count))))
+                        Spacer(minLength: 0)
+                    }.padding(20).frame(width: width, height: count > 3 ? 560 : 390).background(Theme.background)
+                    try await capture(AnyView(view), size: CGSize(width: width, height: count > 3 ? 560 : 390),
+                        name: "gallery-\(count)-\(Int(width))-\(dark ? "dark" : "light")", window: window)
+                }
+                if !localFiles.isEmpty, width != 480 {
+                    let view = VStack(alignment: .leading, spacing: 12) {
+                        Text("Image attachments").font(Theme.callout.weight(.semibold))
+                        ChatImageGallery(resources: model.imageResources(for: localFiles))
+                        Spacer(minLength: 0)
+                    }.padding(20).frame(width: width, height: 330).background(Theme.background)
+                    try await capture(AnyView(view), size: CGSize(width: width, height: 330),
+                        name: "local-gallery-\(Int(width))-\(dark ? "dark" : "light")", window: window)
+                }
             }
             let compact = VStack(alignment: .leading, spacing: 8) {
                 Label("Read · 4 images", systemImage: "chevron.right").font(Theme.callout)
@@ -160,7 +184,7 @@ pieces += [r'''
             }
         }
         window.orderOut(nil)
-        print("Rendered 22 production gallery/lightbox/context QA images to \(output.path)")
+        print("Rendered production gallery/lightbox/context QA images to \(output.path)")
     }
     func capture(_ view: AnyView, size: CGSize, name: String, window: NSWindow) async throws {
         let hosting = NSHostingView(rootView: view)
@@ -191,4 +215,4 @@ subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', '-module-c
     str(swift), str(root / 'apps/mac/Sources/Design/AppFonts.swift'), str(root / 'apps/mac/Sources/Design/ActionIcon.swift'),
     str(root / 'apps/mac/Sources/Design/L10n.swift'), str(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatFileStaging.swift'),
     '-o', str(binary)], check=True)
-subprocess.run([str(binary), str(output)], check=True, timeout=90)
+subprocess.run([str(binary), str(output), *(str(path.resolve()) for path in args.fixture)], check=True, timeout=120)

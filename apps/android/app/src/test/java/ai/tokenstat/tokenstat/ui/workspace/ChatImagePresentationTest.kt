@@ -16,7 +16,7 @@ class ChatImagePresentationTest {
             val gallery = chatImageRows(raw, raw).rows.single() as ChatDisplayItem.ImageGallery
             assertEquals(raw, gallery.images)
             assertEquals(minOf(count, 4), chatImageVisibleCount(count))
-            assertEquals(if (count == 1) 1 else 2, chatImageGridColumns(count))
+            assertEquals(if (count <= 3) count else 2, chatImageGridColumns(count))
         }
         val text = ChatDisplayItem.Assistant("reply", "Between images", "codex")
         val file = image("document").copy(mediaType = "application/pdf")
@@ -119,7 +119,50 @@ class ChatImagePresentationTest {
         assertFalse(chatImageAutomaticPreviewAllowed(1, "relay"))
         assertFalse(chatImageAutomaticPreviewAllowed(1, null))
         assertEquals(512 to 256, chatImageDecodeSize(4096, 2048, 512))
+        assertEquals(1280 to 720, chatImageDecodeSize(4096, 2304, CHAT_IMAGE_GALLERY_EDGE))
         assertEquals(1 to 2048, chatImageDecodeSize(1, Int.MAX_VALUE, 2048))
         assertEquals(120 to 80, chatImageDecodeSize(120, 80, 512))
+    }
+
+    @Test fun justifiedRowsUseAllAvailableWidthAndKeepThreeImagesTogether() {
+        for (count in 1..8) {
+            val rows = chatImageGalleryGeometry(List(count) { 1.5 }, 360f)
+            assertEquals(if (count <= 3) 1 else 2, rows.size)
+            assertEquals((0 until minOf(count, 4)).toList(), rows.flatMap { it.indexes })
+            rows.forEach { row ->
+                assertEquals(360f, row.widths.sum() + row.gap * (row.indexes.size - 1), .001f)
+                assertTrue(row.height in 48f..if (count == 1) 300f else 240f)
+                assertTrue(row.widths.all { it >= 48f })
+            }
+        }
+        val three = chatImageGalleryGeometry(listOf(1.0, 2.0, 1.0), 400f).single()
+        assertEquals(listOf(0, 1, 2), three.indexes)
+        assertEquals(three.widths[0] * 2, three.widths[1], .001f)
+        assertEquals(three.widths[0], three.widths[2], .001f)
+        assertEquals(98f, three.height, .001f)
+    }
+
+    @Test fun mixedAspectThreeUpKeepsEveryTileAtLeast48Dp() {
+        val row = chatImageGalleryGeometry(listOf(.65, 2.2, 2.2), 280f).single()
+        assertEquals(listOf(48f, 112f, 112f), row.widths)
+        assertTrue(row.height >= 48f)
+        val narrow = chatImageGalleryGeometry(listOf(.65, 2.2, 2.2), 100f)
+        assertEquals(listOf(listOf(0, 1), listOf(2)), narrow.map { it.indexes })
+        assertTrue(narrow.all { it.widths.all { width -> width >= 48f } && it.height >= 48f })
+    }
+
+    @Test fun galleryGeometryCapsTabletWidthAndHandlesMissingOrExtremeDimensions() {
+        val single = chatImageGalleryGeometry(listOf(.1), 1200f).single()
+        assertEquals(listOf(640f), single.widths)
+        assertEquals(300f, single.height, 0f)
+        val defaults = chatImageGalleryGeometry(listOf(null, Double.NaN, Double.POSITIVE_INFINITY), 320f).single()
+        assertEquals(defaults.widths[0], defaults.widths[1], .001f)
+        assertEquals(defaults.widths[0], defaults.widths[2], .001f)
+        val clamped = chatImageGalleryGeometry(listOf(.01, 200.0), 500f).single()
+        assertEquals(.65 / 2.2, clamped.widths[0].toDouble() / clamped.widths[1], .00001)
+        assertTrue(clamped.height <= 240)
+        assertTrue(chatImageGalleryGeometry(listOf(1.0), 0f).isEmpty())
+        assertTrue(chatImageGalleryGeometry(listOf(1.0), Float.NaN).isEmpty())
+        assertTrue(chatImageGalleryGeometry(emptyList(), 320f).isEmpty())
     }
 }

@@ -41,6 +41,11 @@ struct ChatImageGallery: View {
     let resources: [ChatImageResource]
     var compact = false
     @Environment(\.presentChatImages) private var present
+    @State private var dimensions: [String: ChatImageDimensions] = [:]
+    private struct MetadataRequest: Hashable { let id: String; let file: URL?; let bytes: Int? }
+    private var metadataRequests: [MetadataRequest] {
+        resources.prefix(4).map { MetadataRequest(id: $0.attachment.id, file: $0.file, bytes: $0.data?.count) }
+    }
 
     var body: some View {
         Group {
@@ -51,19 +56,28 @@ struct ChatImageGallery: View {
                     }
                 }
             } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: resources.count == 1 ? 1 : 2), spacing: 6) {
-                    ForEach(Array(resources.prefix(4).enumerated()), id: \.element.attachment.id) { index, resource in
-                        VStack(alignment: .leading, spacing: 4) {
-                            tile(resource, index: index).aspectRatio(resources.count == 1 ? 1.65 : 1.4, contentMode: .fit)
-                            Text(resource.attachment.name).font(Theme.caption).foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.middle)
+                VStack(alignment: .leading, spacing: 5) {
+                    ChatImageRowsLayout(dimensions: resources.prefix(4).map { dimensions[$0.attachment.id] }) {
+                        ForEach(Array(resources.prefix(4).enumerated()), id: \.element.attachment.id) { index, resource in
+                            tile(resource, index: index)
                         }
                     }
+                    Text(resources.count == 1 ? resources[0].attachment.name : L10n.text("common.chat.images.count", "\(resources.count)"))
+                        .font(Theme.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
-                .frame(maxWidth: resources.count == 1 ? 300 : 420, alignment: .leading)
+                .frame(maxWidth: 640, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: metadataRequests) {
+            guard !compact else { return }
+            var loaded: [String: ChatImageDimensions] = [:]
+            for resource in resources.prefix(4) {
+                loaded[resource.attachment.id] = await ChatImageMetadata.shared.dimensions(data: resource.data, file: resource.file)
+                guard !Task.isCancelled else { return }
+            }
+            dimensions = loaded
+        }
     }
 
     private var compactSize: CGFloat {
@@ -78,7 +92,7 @@ struct ChatImageGallery: View {
         Button {
             present?(resources.map(\.attachment), resource.attachment.id)
         } label: {
-            ChatImageSurface(resource: resource, maxPixel: compact ? 192 : 720)
+            ChatImageSurface(resource: resource, maxPixel: compact ? 192 : 1280)
                 .overlay(alignment: .bottomTrailing) {
                     if index == 3, resources.count > 4 {
                         Text(L10n.text("common.chat.images.more", "\(resources.count - 4)"))
@@ -98,37 +112,34 @@ struct ChatImageGallery: View {
     }
 }
 
+private struct ChatImageRowsLayout: Layout {
+    let dimensions: [ChatImageDimensions?]
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        ChatImageGalleryGeometry(width: proposal.width ?? 640, dimensions: dimensions).size
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let geometry = ChatImageGalleryGeometry(width: bounds.width, dimensions: dimensions)
+        for (index, frame) in geometry.frames.enumerated() where index < subviews.count {
+            subviews[index].place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                anchor: .topLeading, proposal: ProposedViewSize(frame.size))
+        }
+    }
+}
+
 /// Decode a bounded, alpha-preserving image away from the UI executor.
-/// The fixed preview box never changes when pixels arrive.
+/// The layout proposal bounds the preview; decoded pixels do not size it.
 private struct ChatImageSurface: View {
     let resource: ChatImageResource
     var maxPixel: CGFloat = 3072
-    var showsTransparencyGrid = true
     @State private var decoded: Image?
     @State private var decodedSource: Source?
     private struct Source: Hashable { let data: Data?; let file: URL?; let maxPixel: CGFloat }
     private var source: Source { Source(data: resource.data, file: resource.file, maxPixel: maxPixel) }
-    private static let checker: Image = {
-        guard let context = CGContext(data: nil, width: 32, height: 32, bitsPerComponent: 8, bytesPerRow: 128,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-            return Image(systemName: "square.fill")
-        }
-        context.setFillColor(CGColor(gray: 1, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
-        context.fill(CGRect(x: 16, y: 16, width: 16, height: 16))
-        guard let image = context.makeImage() else { return Image(systemName: "square.fill") }
-        return Image(decorative: image, scale: 1)
-    }()
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 Theme.panel
-                if showsTransparencyGrid {
-                    Color.primary.opacity(0.035)
-                        .mask { Rectangle().fill(ImagePaint(image: Self.checker, scale: 1)) }
-                        .accessibilityHidden(true)
-                }
                 if decodedSource == source, let decoded {
                     decoded.resizable().scaledToFit()
                         .frame(width: geometry.size.width, height: geometry.size.height)
@@ -254,7 +265,7 @@ private struct ChatImageViewer: View {
     private var viewport: some View {
         GeometryReader { geometry in
             ScrollView([.horizontal, .vertical]) {
-                ChatImageSurface(resource: resource, showsTransparencyGrid: false)
+                ChatImageSurface(resource: resource)
                     .frame(width: max(1, geometry.size.width) * zoom, height: max(1, geometry.size.height) * zoom)
                     .accessibilityLabel(attachment.name)
             }

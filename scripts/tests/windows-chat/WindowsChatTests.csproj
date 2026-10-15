@@ -19,6 +19,7 @@
     <Compile Include="../../../apps/windows/Pages/SeatStep.cs" Link="SeatStep.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatPage.Items.cs" Link="ChatPage.Items.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatImageGallery.cs" Link="ChatImageGallery.cs" />
+    <Compile Include="../../../apps/windows/Pages/ChatImageLayout.cs" Link="ChatImageLayout.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatImagePolicy.cs" Link="ChatImagePolicy.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatToolCalls.cs" Link="ChatToolCalls.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatPage.Slice.cs" Link="ChatPage.Slice.cs" />

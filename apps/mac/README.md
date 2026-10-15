@@ -108,8 +108,9 @@ and [Codex app-server](https://github.com/openai/codex/blob/main/codex-rs/app-se
 Automatic attachment downloads allow 5 MiB. Local images bypass that transfer
 threshold and use downsampled previews that preserve transparency, including
 file-backed originals.
-Images share bounded galleries: one preview, side-by-side pairs, or a four-cell
-grid with an overflow count. The image viewer provides navigation, zoom, Open
+Images share bounded galleries with proportional thumbnails on a quiet
+background. One, two or three images share a row; larger sets use two paired
+rows with an overflow count. The image viewer provides navigation, zoom, Open
 and Save. Explicit image reads and structured tool-image results carry their
 tool-call identity, so thumbnails appear beside that step, including collapsed
 groups. Older or unmatched records remain ordinary galleries. Remote resource

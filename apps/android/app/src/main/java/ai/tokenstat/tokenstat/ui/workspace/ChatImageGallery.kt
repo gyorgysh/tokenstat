@@ -25,9 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -165,34 +163,39 @@ internal fun ChatImageGallery(
     if (compact) {
         Column(Modifier.width(68.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             visible.take(1).forEachIndexed { i, image ->
-                ImageTile(image, files[image.attachmentId], image.attachmentId in busyIds,
+                ImageTile(image, imageBitmap(files[image.attachmentId], 512), image.attachmentId in busyIds,
                     Modifier.size(64.dp), extra = images.size - 1) { onView(i) }
             }
         }
     } else {
-        Column(Modifier.widthIn(max = 320.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            val columns = chatImageGridColumns(images.size)
-            visible.chunked(columns).forEachIndexed { row, batch ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    batch.forEachIndexed { column, image ->
-                        val i = row * columns + column
-                        ImageTile(image, files[image.attachmentId], image.attachmentId in busyIds,
-                            Modifier.weight(1f).height(if (images.size == 1) 200.dp else if (images.size == 2) 140.dp else 108.dp),
-                            extra = if (i == 3) images.size - 4 else 0) { onView(i) }
+        // Each bounded thumbnail is decoded once off the UI thread. Its
+        // dimensions can refine the default aspect once, without a measure /
+        // decode feedback loop or synchronous metadata reads during layout.
+        val bitmaps = visible.map { image -> key(image.attachmentId) { imageBitmap(files[image.attachmentId], CHAT_IMAGE_GALLERY_EDGE) } }
+        val aspects = bitmaps.map { bitmap -> bitmap?.let { it.width.toDouble() / it.height } }
+        BoxWithConstraints(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
+            val rows = chatImageGalleryGeometry(aspects, maxWidth.value)
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                rows.forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(row.gap.dp)) {
+                        row.indexes.forEachIndexed { column, i ->
+                            val image = visible[i]
+                            ImageTile(image, bitmaps[i], image.attachmentId in busyIds,
+                                Modifier.width(row.widths[column].dp).height(row.height.dp),
+                                extra = if (i == 3) images.size - 4 else 0) { onView(i) }
+                        }
                     }
-                    if (batch.size < columns) Spacer(Modifier.weight(1f))
                 }
+                Text(if (images.size == 1) images.first().name else L10n.text("common.chat.images.count", "${images.size}"),
+                    style = MaterialTheme.typography.labelSmall, color = LocalTsColors.current.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text(if (images.size == 1) images.first().name else L10n.text("common.chat.images.count", "${images.size}"),
-                style = MaterialTheme.typography.labelSmall, color = LocalTsColors.current.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
-@Composable private fun ImageTile(image: ChatDisplayItem.Attachment, file: File?, busy: Boolean, modifier: Modifier, extra: Int, onClick: () -> Unit) {
-    Box(modifier.clip(RoundedCornerShape(8.dp)).imageCheckerboard().clickable(onClick = onClick)
+@Composable private fun ImageTile(image: ChatDisplayItem.Attachment, bitmap: ImageBitmap?, busy: Boolean, modifier: Modifier, extra: Int, onClick: () -> Unit) {
+    Box(modifier.clip(RoundedCornerShape(8.dp)).background(LocalTsColors.current.panel).clickable(onClick = onClick)
         .semantics { contentDescription = L10n.text("common.chat.images.view", image.name) }, contentAlignment = Alignment.Center) {
-        val bitmap = imageBitmap(file, 512)
         if (bitmap != null) Image(bitmap, image.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
         else if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         else Icon(ActionIcon.Attach.vector, image.name, tint = LocalTsColors.current.textSecondary)
@@ -203,14 +206,14 @@ internal fun ChatImageGallery(
 }
 
 @Composable private fun imageBitmap(file: File?, maxEdge: Int): ImageBitmap? {
-    val bitmap by produceState<ImageBitmap?>(null, file, maxEdge) {
-        value = if (file == null) null else withContext(Dispatchers.IO) {
-            runCatching {
-                decodeChatImage(file, maxEdge).asImageBitmap()
-            }.getOrNull()
+    return key(file, maxEdge) {
+        val bitmap by produceState<ImageBitmap?>(null) {
+            value = if (file == null) null else withContext(Dispatchers.IO) {
+                runCatching { decodeChatImage(file, maxEdge).asImageBitmap() }.getOrNull()
+            }
         }
+        bitmap
     }
-    return bitmap
 }
 
 internal fun decodeChatImage(file: File, maxEdge: Int): android.graphics.Bitmap =
@@ -219,14 +222,6 @@ internal fun decodeChatImage(file: File, maxEdge: Int): android.graphics.Bitmap 
         decoder.setTargetSize(width, height)
         decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
     }
-
-private fun Modifier.imageCheckerboard() = drawBehind {
-    val tile = 10.dp.toPx()
-    drawRect(Color(0xFFDDDEE0))
-    for (y in 0..(size.height / tile).toInt()) for (x in 0..(size.width / tile).toInt()) {
-        if ((x + y) % 2 == 0) drawRect(Color(0xFFF2F2F3), Offset(x * tile, y * tile), Size(tile, tile))
-    }
-}
 
 @Composable internal fun ChatImageViewer(
     image: ChatDisplayItem.Attachment, index: Int, count: Int, file: File?, busy: Boolean, failure: String?,
@@ -252,7 +247,7 @@ private fun Modifier.imageCheckerboard() = drawBehind {
                     }
                     IconButton(onClick = onDismiss) { Icon(ActionIcon.Dismiss.vector, L10n.text("common.close")) }
                 }
-                Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(8.dp)).imageCheckerboard()
+                Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(LocalTsColors.current.panel)
                     .onSizeChanged { viewport = it }, contentAlignment = Alignment.Center) {
                     val bitmap = imageBitmap(file, 2048)
                     if (bitmap != null) Image(bitmap, image.name,
@@ -267,7 +262,7 @@ private fun Modifier.imageCheckerboard() = drawBehind {
                         contentScale = ContentScale.Fit)
                     else if (busy) CircularProgressIndicator(Modifier.size(28.dp))
                     else Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(L10n.text("common.chat.images.unavailable"), color = Color.DarkGray)
+                        Text(L10n.text("common.chat.images.unavailable"), color = LocalTsColors.current.textSecondary)
                         TextButton(onClick = onLoad) { Text(L10n.text("common.chat.images.load")) }
                     }
                 }

@@ -13,6 +13,47 @@ Check(ChatImagePolicy.DownloadLimit(false, false, imageFileMaximum) == imageFile
     "local automatic previews and explicit viewer downloads retain the file-backed limit");
 Check(ChatImagePolicy.DownloadLimit(false, true, 1024) == 1024, "the remote preview policy cannot raise a smaller file limit");
 Console.WriteLine("Windows image preview policy: separate remote automatic limit and local/explicit file-backed limits pass.");
+var tripleLayout = ChatImageLayout.Measure([2, 1, 1.5], 1000);
+Check(tripleLayout.Tiles.Count == 3 && tripleLayout.Tiles.All(tile => tile.Y == 0)
+    && Math.Abs(tripleLayout.Width - 640) < .001 && Math.Abs(tripleLayout.Tiles[0].Width / tripleLayout.Tiles[1].Width - 2) < .001,
+    "three images share one width-capped row with source-proportional tile widths");
+var portraitLayout = ChatImageLayout.Measure([.75], 1000);
+Check(portraitLayout.Height == 300 && portraitLayout.Width == 225, "single portraits retain their aspect within a 300-pixel height");
+var wideLayout = ChatImageLayout.Measure([3], 1000);
+Check(Math.Abs(wideLayout.Width - 640) < .001 && wideLayout.Height <= 300,
+    "single landscape images use available width while remaining height-bounded");
+var clampedLayout = ChatImageLayout.Measure([.1, 10], 640);
+Check(Math.Abs(clampedLayout.Tiles[0].Width / clampedLayout.Tiles[1].Width - .65 / 2.2) < .001,
+    "extreme aspect ratios are bounded without changing source image stretching");
+var pairedLayout = ChatImageLayout.Measure([1.8, 1.2, 1, 1.5, 2], 640);
+Check(pairedLayout.Tiles.Count == 4 && pairedLayout.Tiles.GroupBy(tile => tile.Y).Select(row => row.Count()).SequenceEqual(new[] { 2, 2 })
+    && pairedLayout.Tiles.All(tile => tile.Height <= 240) && pairedLayout.Height <= 486,
+    "four or more images use two bounded paired rows and leave overflow to the count badge");
+foreach (var available in new[] { 1d, 150, 320, 640, 1000, double.NaN })
+{
+    var geometry = ChatImageLayout.Measure([double.NaN, 0, double.PositiveInfinity], available);
+    Check(double.IsFinite(geometry.Width) && double.IsFinite(geometry.Height)
+        && geometry.Width <= Math.Min(double.IsFinite(available) ? Math.Max(44, available) : 640, 640) + .001
+        && geometry.Tiles.All(tile => tile.Width >= 44 - .001 && tile.Height >= 44 && tile.X >= 0 && tile.X + tile.Width <= geometry.Width + .001),
+        "fallback metadata produces finite positive geometry even in narrow layouts");
+    Check(geometry.Tiles.Max(tile => tile.Width) - geometry.Tiles.Min(tile => tile.Width) < .001,
+        "unknown image dimensions use the same 1.2 fallback aspect");
+}
+var mixedTouchLayout = ChatImageLayout.Measure([.65, 2.2, 2.2], 280);
+Check(mixedTouchLayout.Tiles.All(tile => tile.Y == 0 && tile.Width >= 44 && tile.Height >= 44)
+    && mixedTouchLayout.Tiles[0].Width == 44 && Math.Abs(mixedTouchLayout.Width - 280) < .001
+    && Math.Abs(mixedTouchLayout.Tiles[1].Width - mixedTouchLayout.Tiles[2].Width) < .001,
+    "mixed-aspect three-up rows reserve narrow touch targets before proportionally sharing remaining width");
+var narrowTouchLayout = ChatImageLayout.Measure([.65, 2.2, 2.2], 140);
+Check(narrowTouchLayout.Tiles.Select(tile => tile.Y).Distinct().Count() == 2
+    && narrowTouchLayout.Tiles.All(tile => tile.Width >= 44 && tile.Height >= 44),
+    "columns decrease only when a row cannot fit 44-pixel targets and their gaps");
+var stripLayout = ChatImageLayout.Measure([.65, 2.2, 1, 1.5], 640, compact: true);
+Check(stripLayout.Height == 58 && stripLayout.Width == 312 && stripLayout.Tiles.Select(tile => tile.Width).Distinct().Count() == 1,
+    "tool thumbnails retain their compact equal-width strip");
+Check(ChatImageLayout.Measure([], 640).Tiles.Count == 0 && ChatImageLayout.Aspect(1280, 720) == 1280d / 720
+    && ChatImageLayout.Aspect(100, 0) == 1.2, "empty galleries and missing source dimensions have explicit fallbacks");
+Console.WriteLine("Windows gallery geometry: aspect-weighted 1–3 rows, paired overflow rows, narrow bounds, metadata fallbacks and compact tool strips pass.");
 static ChatPage.DisplayItem GalleryImage(string id, string call = "", string scope = "turn/backend") => new() {
     Id = id, Kind = ChatPage.ItemKind.Attachment, Name = id + ".png", MediaType = "image/png", ToolCallId = call, AttachmentScope = scope,
 };
