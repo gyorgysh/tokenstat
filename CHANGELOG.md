@@ -15,6 +15,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - Chat composers on Mac, iPhone, iPad, Android and Windows offer slash commands for context, usage, tools, MCP servers, stopping work and native Claude/Codex compaction.
 - Chat inspectors combine context and conversation usage, recent context history, tool groups and reported MCP connections in compact, expandable panels.
+- Chats show reported goals, plan steps and subagent tasks in a compact activity summary and expandable inspector on Mac, iPhone/iPad, Android and Windows. `/goal`, `/plan` and `/subagents` open the details without starting a model turn. Live counts and historical reports stay distinct, and backend sections that are not reported remain unknown.
 - Supported Claude and Codex chats accept steering messages, including attachments, during the current turn and mark them on the transcript.
 - Chat images use compact galleries with proportional thumbnails, a quiet background and a viewer with image navigation, zoom, Open and Save. Sets of up to three share a row; larger sets use paired rows and an overflow count. Explicit image reads and structured tool-image results appear as thumbnails beside their tool step.
 

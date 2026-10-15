@@ -11,6 +11,9 @@ struct ChatSlashCommand: Identifiable {
         .init(id: "/usage", detail: L10n.text("common.chat.command.usage")),
         .init(id: "/mcp", detail: L10n.text("common.chat.command.mcp")),
         .init(id: "/tools", detail: L10n.text("common.chat.command.tools")),
+        .init(id: "/goal", detail: L10n.text("common.chat.activity.command_goal")),
+        .init(id: "/plan", detail: L10n.text("common.chat.activity.command_plan")),
+        .init(id: "/subagents", detail: L10n.text("common.chat.activity.command_subagents")),
         .init(id: "/help", detail: L10n.text("common.chat.command.help")),
         .init(id: "/stop", detail: L10n.text("common.chat.command.stop")),
     ] }

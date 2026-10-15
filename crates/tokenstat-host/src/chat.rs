@@ -2870,6 +2870,10 @@ impl Store {
         }
         snapshot.mcp_servers.sort_by(|a, b| a.name.cmp(&b.name));
         snapshot.mcp_servers.dedup_by(|a, b| a.name == b.name);
+        let current_run = stored
+            .as_ref()
+            .is_some_and(|s| Some(s.run_revision) == chat.run_revision);
+        snapshot.activity.presentation(current_run, chat.running);
         let usage = {
             let _guard = self.transcript_guard()?;
             self.conversation_usage(&chat, &self.events_path(id)).ok()
@@ -2883,8 +2887,9 @@ impl Store {
             "tools":snapshot.tools, "usedTools":snapshot.used_tools,
             "mcpServers":snapshot.mcp_servers, "mcpReported":snapshot.mcp_reported,
             "inventoryPartial":snapshot.inventory_partial,
+            "activity":snapshot.activity,
             "observedAtMs":stored.as_ref().map(|s| s.observed_at_ms),
-            "currentRun":stored.as_ref().is_some_and(|s| Some(s.run_revision) == chat.run_revision),
+            "currentRun":current_run,
         }))
     }
 
@@ -2919,6 +2924,16 @@ impl Store {
         }
         let previous = crate::chat_inspection::load(&directory.join("inspection.json"))
             .filter(|s| s.backend == backend && s.requested_model.as_deref() == requested_model);
+        // Goals belong to the backend session and can remain active between
+        // turns. A fresh parser's lack of telemetry must not clear a goal.
+        // Plans and agents remain owned by this parser's single run.
+        if !snapshot.activity.goal_reported
+            && let Some(previous) = previous.as_ref()
+            && snapshot.session_id == previous.snapshot.session_id
+        {
+            snapshot.activity.goal = previous.snapshot.activity.goal.clone();
+            snapshot.activity.goal_reported = previous.snapshot.activity.goal_reported;
+        }
         let last_window = snapshot
             .model
             .as_ref()
@@ -4437,6 +4452,23 @@ impl Store {
         let launch_model = launch.requested_model.as_deref();
         let activity_revision = launch.revision;
         let mut parser = Parser::new(backend);
+        let prior_directory = self.get(id).ok().and_then(|known| {
+            let chats = self
+                .conversations
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            self.verified_conversation(&known.workspace_id, id, &chats)
+                .ok()
+                .map(|(directory, _)| directory)
+        });
+        if let Some(stored) = prior_directory
+            .and_then(|directory| crate::chat_inspection::load(&directory.join("inspection.json")))
+            .filter(|stored| {
+                stored.backend == backend && stored.requested_model.as_deref() == launch_model
+            })
+        {
+            parser.inherit_goal(&stored.snapshot);
+        }
         let reader = format!("chat:{id}");
         let mut offset = 0;
         let mut activity_tick: Option<Instant> = None;
@@ -9507,6 +9539,147 @@ mod tests {
             !root.path().join("chat/inspection").exists(),
             "late metadata cannot recreate a deleted conversation"
         );
+    }
+
+    #[test]
+    fn activity_survives_reload_and_keeps_durable_goal_separate_from_run_activity() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "activity");
+        store
+            .edit_conversation("activity", |chat| {
+                chat.backend = "codex".into();
+                chat.run_revision = Some(3);
+                Ok(())
+            })
+            .unwrap();
+        let mut snapshot = crate::chat_inspection::Snapshot::default();
+        snapshot.observe("codex", &json!({"type":"tokenstat.activity","kind":"goal","goal":{"objective":"Ship","status":"active","tokensUsed":0}}));
+        snapshot.observe("codex", &json!({"type":"tokenstat.activity","kind":"plan","plan":[{"step":"Verify","status":"inProgress"}]}));
+        snapshot.observe("codex", &json!({"type":"item.completed","item":{"type":"collab_agent_tool_call","tool":"spawnAgent","status":"completed","receiverThreadIds":["child"],"agentsStates":{"child":{"status":"running"}}}}));
+        store.record_inspection("activity", "codex", 3, None, snapshot.clone());
+        let reopened = Store::load_at(root.path().join("chat"));
+        let archived = reopened.inspection("activity").unwrap();
+        assert_eq!(archived["activity"]["goal"]["status"], "active");
+        assert_eq!(archived["activity"]["agents"][0]["status"], "unknown");
+        assert_eq!(archived["activity"]["live"], false);
+        assert_eq!(archived["activity"]["plan"][0]["text"], "Verify");
+        reopened
+            .edit_conversation("activity", |chat| {
+                chat.running = true;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            reopened.inspection("activity").unwrap()["activity"]["agents"][0]["status"],
+            "running"
+        );
+        reopened
+            .edit_conversation("activity", |chat| {
+                chat.run_revision = Some(4);
+                Ok(())
+            })
+            .unwrap();
+        let reserved = reopened.inspection("activity").unwrap();
+        assert_eq!(reserved["activity"]["goal"]["objective"], "Ship");
+        assert_eq!(reserved["activity"]["plan"], json!([]));
+        assert_eq!(reserved["activity"]["agents"], json!([]));
+        reopened.record_inspection(
+            "activity",
+            "codex",
+            4,
+            None,
+            crate::chat_inspection::Snapshot::default(),
+        );
+        reopened.record_inspection("activity", "codex", 3, None, snapshot);
+        let current = reopened.inspection("activity").unwrap();
+        assert_eq!(current["activity"]["live"], true);
+        assert_eq!(current["activity"]["goal"]["objective"], "Ship");
+        assert_eq!(current["activity"]["planReported"], false);
+        assert_eq!(current["activity"]["agentsReported"], false);
+        reopened
+            .edit_conversation("activity", |chat| {
+                chat.model = Some("different".into());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            reopened.inspection("activity").unwrap()["activity"]["goalReported"],
+            false
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fresh_drainers_apply_cursor_status_only_goal_updates_to_the_same_session() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        let id = "cursor-goal";
+        conversation_for_receipts(&store, id);
+        store
+            .edit_conversation(id, |chat| {
+                chat.backend = "cursor".into();
+                chat.run_revision = Some(1);
+                Ok(())
+            })
+            .unwrap();
+        let mut initial = crate::chat_inspection::Snapshot::default();
+        initial.session_id = Some("native-session".into());
+        initial.observe("cursor", &json!({"type":"tool_call","subtype":"completed","tool_call":{"createGoalToolCall":{"args":{"objective":"Ship"},"result":{"success":{}}}}}));
+        store.record_inspection(id, "cursor", 1, None, initial);
+        for (revision, session, goal_status, expected, reported) in [
+            (2, "native-session", Some(3), Some("completed"), true),
+            (3, "replacement-session", None, None, false),
+            (4, "replacement-session", Some(4), None, true),
+        ] {
+            store
+                .edit_conversation(id, |chat| {
+                    chat.run_revision = Some(revision);
+                    chat.running = true;
+                    Ok(())
+                })
+                .unwrap();
+            let mut record =
+                json!({"type":"system","subtype":"init","session_id":session}).to_string() + "\n";
+            if let Some(goal_status) = goal_status {
+                record.push_str(&json!({"type":"tool_call","subtype":"completed","tool_call":{"updateGoalToolCall":{"args":{"status":goal_status},"result":{"success":{"status":goal_status}}}}}).to_string());
+            }
+            let process = tokenstat_pty::manager()
+                .spawn(&tokenstat_pty::Spawn {
+                    command: "/usr/bin/printf".into(),
+                    args: vec!["%s\n".into(), record],
+                    cwd: root.path().into(),
+                    workspace_id: None,
+                    hidden: true,
+                    rows: 24,
+                    cols: 80,
+                    no_color: true,
+                    dark: None,
+                    environment: vec![],
+                })
+                .unwrap();
+            Arc::clone(&store).drain(
+                id,
+                &crate::chat_inspection::Launch {
+                    backend: "cursor".into(),
+                    requested_model: None,
+                    revision,
+                    maintenance: false,
+                },
+                &process.id,
+                &root.path().join(format!("raw-{revision}.ndjson")),
+                &root.path().join("output"),
+                None,
+            );
+            let reply = store.inspection(id).unwrap();
+            assert_eq!(reply["activity"]["goalReported"], reported);
+            match expected {
+                Some(status) => assert_eq!(reply["activity"]["goal"]["status"], status),
+                None => assert!(reply["activity"]["goal"].is_null()),
+            }
+            assert_eq!(reply["activity"]["planReported"], false);
+            assert_eq!(reply["activity"]["agentsReported"], false);
+        }
     }
 
     #[cfg(unix)]

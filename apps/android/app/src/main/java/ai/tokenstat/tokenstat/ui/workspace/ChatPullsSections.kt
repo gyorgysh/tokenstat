@@ -253,6 +253,7 @@ fun ChatSection(
     var pendingRename by remember(projectOwner) { mutableStateOf<JsonObject?>(null) }
     var deleteAll by remember(projectOwner) { mutableStateOf(false) }
     var showingStats by remember(projectOwner, openId) { mutableStateOf(false) }
+    var activitySection by remember(projectOwner, openId) { mutableStateOf<String?>(null) }
     var showingSetup by remember(projectOwner) { mutableStateOf(false) }
     // Agent, model and effort, one tap from the composer the way the iPhone
     // reaches them. The list lives here rather than in the sheet, because the
@@ -303,6 +304,8 @@ fun ChatSection(
     /// Its answer is the truthful one.
     var hostReachable by remember(projectOwner) { mutableStateOf(true) }
     val offline = !hostReachable
+    val inspectedChat = chats.firstOrNull { it.str("id") == openId }
+    val chatInspection = rememberChatInspection(model, peer, inspectedChat, projectOwner, enabled = projectOwner != null && !offline)
     var queued by remember(projectOwner) { mutableStateOf<List<QueuedMessage>>(emptyList()) }
     /// Which queued messages this session may send without being asked again.
     ///
@@ -1089,7 +1092,10 @@ fun ChatSection(
             ChatCommandRules.Kind.MESSAGE, ChatCommandRules.Kind.COMPACT -> Unit
             ChatCommandRules.Kind.COMPLETE -> { draft = action.completion.orEmpty(); return }
             ChatCommandRules.Kind.INSPECT, ChatCommandRules.Kind.STOP -> {
-                if (action.kind == ChatCommandRules.Kind.STOP) stopChat(id) else showingStats = true
+                if (action.kind == ChatCommandRules.Kind.STOP) stopChat(id) else {
+                    activitySection = when (command) { "/goal" -> "goal"; "/plan" -> "plan"; "/subagents" -> "subagents"; else -> null }
+                    showingStats = true
+                }
                 if (openId == id && ownsProject() && draft.trim() == command) draft = ""
                 return
             }
@@ -1880,6 +1886,7 @@ fun ChatSection(
             ChatGitStrip(model, peer, workspace, openChat, protocol, projectOwner, offline, sending || runningTurn) {
                 onOpenSection("Changes")
             }
+            ChatActivitySummary(chatActivityData(chatInspection.data, openChat)) { activitySection = "all"; showingStats = true }
             ChatComposer(
                 chat = chats.firstOrNull { it.str("id") == openId },
                 draft = draft,
@@ -2086,7 +2093,7 @@ fun ChatSection(
         }
     }
     if (showingStats) {
-        chats.firstOrNull { it.str("id") == openId }?.let { chat -> ChatStatsDialog(model, peer, chat) { showingStats = false } }
+        chats.firstOrNull { it.str("id") == openId }?.let { chat -> ChatStatsDialog(model, peer, chat, chatInspection, activitySection) { showingStats = false } }
     }
     if (showingSetup) {
         val id = openId
@@ -2096,6 +2103,7 @@ fun ChatSection(
                 peer = peer,
                 workspace = workspace,
                 chatId = id,
+                inspection = chatInspection,
                 hostLabel = hostLabel,
                 chat = chats.firstOrNull { it.str("id") == id },
                 backends = backends,
@@ -2307,6 +2315,7 @@ private fun ChatSetupDialog(
     onPickAgent: () -> Unit,
     onDismiss: () -> Unit,
     onChanged: () -> Unit,
+    inspection: ChatInspectionSnapshot? = null,
 ) {
     val scope = rememberCoroutineScope()
     var brief by remember { mutableStateOf<String?>(null) }
@@ -2413,7 +2422,7 @@ private fun ChatSetupDialog(
                 TsSecondaryButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, small = true, onClick = onDismiss)
             }
             if (error != null) Banner(error!!, BannerSeverity.DANGER)
-            if (chat != null) ChatStatsPanel(model, peer, chat)
+            if (chat != null) ChatStatsPanel(model, peer, chat, inspection)
             if (chat != null) {
                 ChatRoutingControls(chat, backends,
                     { method, params -> model.workspaceSection(peer, method, params) },

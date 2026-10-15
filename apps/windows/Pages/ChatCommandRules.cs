@@ -5,7 +5,7 @@ namespace Tokenstat.Pages;
 
 internal static class ChatCommandRules
 {
-    internal static readonly string[] Names = ["/compact", "/status", "/context", "/usage", "/mcp", "/tools", "/help", "/stop"];
+    internal static readonly string[] Names = ["/compact", "/status", "/context", "/usage", "/mcp", "/tools", "/goal", "/plan", "/subagents", "/help", "/stop"];
     internal static string SendMethod(string text) => text.Trim() == "/compact" ? "chat.compact" : "chat.send";
     // Rust counts Unicode scalar values rather than UTF-16 code units.
     internal static bool CanSteer(string draft, bool attachments, bool acceptsAttachments)

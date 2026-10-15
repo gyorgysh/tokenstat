@@ -2,7 +2,7 @@
 package ai.tokenstat.tokenstat.ui.logic
 
 internal object ChatCommandRules {
-    val names = listOf("/compact", "/status", "/context", "/usage", "/mcp", "/tools", "/help", "/stop")
+    val names = listOf("/compact", "/status", "/context", "/usage", "/mcp", "/tools", "/goal", "/plan", "/subagents", "/help", "/stop")
     fun sendMethod(text: String) = if (text.trim() == "/compact") "chat.compact" else "chat.send"
     // Match Rust's Unicode scalar limit rather than UTF-16 code units.
     fun canSteer(draft: String, attachments: Boolean, acceptsAttachments: Boolean): Boolean {

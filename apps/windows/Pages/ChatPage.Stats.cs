@@ -40,6 +40,9 @@ internal sealed partial class ChatPage
         ("/usage", L10n.Text("common.chat.command.usage")),
         ("/mcp", L10n.Text("common.chat.command.mcp")),
         ("/tools", L10n.Text("common.chat.command.tools")),
+        ("/goal", L10n.Text("common.chat.activity.command_goal")),
+        ("/plan", L10n.Text("common.chat.activity.command_plan")),
+        ("/subagents", L10n.Text("common.chat.activity.command_subagents")),
         ("/help", L10n.Text("common.chat.command.help")),
         ("/stop", L10n.Text("common.chat.command.stop")),
     ];
@@ -90,6 +93,12 @@ internal sealed partial class ChatPage
             if (action.Kind == ChatCommandRules.Kind.Stop) await StopAsync();
             else
             {
+                if (text is "/goal" or "/plan" or "/subagents")
+                {
+                    await ShowActivityAsync(text[1..]);
+                    if (Current() && _draft.Text.Trim() == text) _draft.Text = "";
+                    return true;
+                }
                 await RefreshInspectionAsync(force: true);
                 if (id != _openId || generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded) return true;
                 var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -107,29 +116,32 @@ internal sealed partial class ChatPage
         } catch (Exception error) { if (Current()) Banner(error.Message); return true; }
         finally { _commandInFlight = false; }
     }
-    private string? InspectionOwner() => _openId is null ? null : $"{AppServices.AccountGeneration}/{_openGeneration}/{_openId}/{Format.Text(_openChat, "backend")}/{Format.Text(_openChat, "model")}";
+    private string? InspectionOwner() => _openId is null ? null : $"{AppServices.AccountGeneration}/{_openGeneration}/{_openId}/{Format.Text(_openChat, "backend")}/{Format.Text(_openChat, "model")}/{_workspaceId}/{_openChat?["runRevision"] ?? _openChat?["sendRevision"]}";
     private async Task RefreshInspectionAsync(bool force = false)
     {
         var owner = InspectionOwner();
-        if (owner is null || owner == _inspectionFlight) return;
+        var visibility = _inspectionVisibilityGeneration;
+        var flight = $"{owner}/{visibility}";
+        if (!IsLoaded || !_inspectionPeerAvailable || App.CurrentWindow is MainWindow { IsForeground: false } || owner is null || flight == _inspectionFlight) return;
         if (_inspectionOwner != owner)
         {
-            _inspectionOwner = owner; _inspection = null; _inspectionAt = default; _statsExpanded.Clear(); _statsQueries.Clear(); RenderInspection();
+            _inspectionOwner = owner; _inspection = null; _inspectionLiveLease = false; _inspectionAt = default; _statsExpanded.Clear(); _statsQueries.Clear(); RenderInspection();
         }
         if (!force && DateTimeOffset.UtcNow - _inspectionAt < TimeSpan.FromSeconds(5)) return;
-        _inspectionFlight = owner;
+        _inspectionFlight = flight;
         try
         {
             var next = await CallChatAsync("chat.inspection", new JsonObject { ["id"] = _openId });
-            if (InspectionOwner() != owner || !IsLoaded || Format.Text(next, "backend") != Format.Text(_openChat, "backend")) return;
+            if (InspectionOwner() != owner || visibility != _inspectionVisibilityGeneration || !IsLoaded || !_inspectionPeerAvailable || App.CurrentWindow is MainWindow { IsForeground: false } || Format.Text(next, "backend") != Format.Text(_openChat, "backend")) return;
             _inspectionAt = DateTimeOffset.UtcNow;
             var running = Format.Flag(_openChat, "running");
-            if (!JsonNode.DeepEquals(next, _inspection) || _inspectionRunning != running) {
+            var renewed = !_inspectionLiveLease; _inspectionLiveLease = true;
+            if (renewed || !JsonNode.DeepEquals(next, _inspection) || _inspectionRunning != running) {
                 _inspection = next; _inspectionRunning = running; RenderInspection();
             }
         }
-        catch { if (InspectionOwner() == owner) { _inspectionAt = DateTimeOffset.UtcNow; _inspection = null; RenderInspection(); } }
-        finally { if (_inspectionFlight == owner) _inspectionFlight = null; }
+        catch { if (InspectionOwner() == owner && visibility == _inspectionVisibilityGeneration) { _inspectionAt = DateTimeOffset.UtcNow; _inspection = null; _inspectionLiveLease = false; RenderInspection(); } }
+        finally { if (_inspectionFlight == flight) _inspectionFlight = null; }
     }
     private void RenderInspection()
     {
@@ -140,6 +152,7 @@ internal sealed partial class ChatPage
         var owner = InspectionOwner();
         _statsFilters.Clear();
         _inspectionHost.Children.Clear(); AddStats(_inspectionHost);
+        RenderActivitySummary();
         if (_commandDialogBody is not null && _commandDialogOwner == InspectionOwner()) RenderCommandStats();
         else _commandDialog?.Hide();
         if (filter is not null && _statsFilters.LastOrDefault(field => Equals(field.Tag, filter)) is TextBox replacement)
@@ -152,14 +165,17 @@ internal sealed partial class ChatPage
     private void RenderCommandStats()
     {
         if (_commandDialogBody is not StackPanel body) return;
-        body.Children.Clear(); AddStats(body);
+        body.Children.Clear();
+        if (_commandActivitySection is not null) { body.Children.Add(ActivityCard(CurrentInspection, expanded: true, section: _commandActivitySection)); return; }
+        AddStats(body);
         body.Children.Add(new TextBlock { Text = L10n.Text("common.chat.commands"), FontWeight = FontWeights.SemiBold });
         foreach (var command in Commands()) body.Children.Add(Muted(command.Name + " · " + command.Detail));
         body.Children.Add(Muted(L10n.Text("common.chat.command.unsupported")));
     }
     private void AddStats(StackPanel target)
     {
-        var data = _inspectionOwner == InspectionOwner() ? _inspection : null;
+        var data = CurrentInspection;
+        target.Children.Add(ActivityCard(data));
         var summary = new StackPanel { Spacing = 3 };
         var details = new StackPanel { Spacing = 6 };
         var model = Format.Text(data, "model", Format.Text(_openChat, "model", Format.Text(_openChat, "backend")));

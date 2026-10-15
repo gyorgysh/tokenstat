@@ -79,6 +79,11 @@ for line in sys.stdin:
   elif method=='mcpServerStatus/list':
    assert p['threadId']=='session'
    emit({'id':m['id'],'result':{'data':[{'name':'godot-mcp','runtimeStatus':'connected','tools':{'scene':{'inputSchema':{'private':'secret'}}}}],'nextCursor':None}})
+  elif method=='thread/goal/get':
+   assert p=={'threadId':'session'}
+   # A live update wins if the initial read's response arrives afterward.
+   emit({'method':'thread/goal/updated','params':{'threadId':'session','goal':{'threadId':'session','objective':'Finish current work','status':'active','tokensUsed':10,'tokenBudget':None,'timeUsedSeconds':2}}})
+   emit({'id':m['id'],'result':{'goal':{'threadId':'session','objective':'Stale goal read','status':'paused'}}})
   elif method=='turn/steer':
    assert p['threadId']=='session' and p['expectedTurnId']=='turn'
    assert p['input'][0]=={'type':'text','text':'Additional context.'}
@@ -92,10 +97,15 @@ for line in sys.stdin:
    assert p['serviceTier']==('priority' if count==0 else 'default');count+=1
    emit({'id':m['id'],'result':{'status':'applied'}})
    if count==2:
-    emit({'method':'item/completed','params':{'item':{'id':'answer','type':'agentMessage','text':'Completed once.'}}})
-    emit({'method':'thread/tokenUsage/updated','params':{'tokenUsage':{'last':{'inputTokens':60,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2},'modelContextWindow':200000,'total':{'inputTokens':100,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2}}}})
-    emit({'method':'turn/completed','params':{'turn':{'id':'turn','status':'completed'}}})
+    emit({'method':'turn/plan/updated','params':{'threadId':'someone-else','turnId':'turn','plan':[{'step':'Wrong plan','status':'pending'}]}})
+    emit({'method':'turn/plan/updated','params':{'threadId':'session','turnId':'turn','plan':[{'step':'Verify current work','status':'inProgress'}]}})
+    emit({'method':'item/completed','params':{'threadId':'someone-else','turnId':'turn','item':{'id':'wrong','type':'agentMessage','text':'Foreign output'}}})
+    emit({'method':'item/completed','params':{'threadId':'session','turnId':'turn','item':{'id':'agent','type':'collabAgentToolCall','tool':'spawnAgent','status':'completed','senderThreadId':'session','receiverThreadIds':['child'],'prompt':'Review parser','agentsStates':{'child':{'status':'running'}}}}})
+    emit({'method':'item/completed','params':{'threadId':'session','turnId':'turn','item':{'id':'answer','type':'agentMessage','text':'Completed once.'}}})
+    emit({'method':'thread/tokenUsage/updated','params':{'threadId':'session','turnId':'turn','tokenUsage':{'last':{'inputTokens':60,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2},'modelContextWindow':200000,'total':{'inputTokens':100,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2}}}})
+    emit({'method':'turn/completed','params':{'threadId':'session','turn':{'id':'turn','status':'completed'}}})
   elif method=='thread/unsubscribe':
+   emit({'method':'thread/goal/updated','params':{'threadId':'session','goal':{'threadId':'session','objective':'Finish current work','status':'complete','tokensUsed':100,'tokenBudget':None,'timeUsedSeconds':3}}})
    emit({'id':m['id'],'result':{}});break
   else:
    raise Exception('unexpected prompt or restart')
@@ -211,7 +221,11 @@ for line in sys.stdin:
                     .lines()
                     .map(|line| serde_json::from_str(line).unwrap())
                     .collect();
-                assert_eq!(rows.last().unwrap()["usage"]["cached_input_tokens"], 40);
+                let done = rows
+                    .iter()
+                    .find(|row| row["type"] == "turn.completed")
+                    .unwrap();
+                assert_eq!(done["usage"]["cached_input_tokens"], 40);
                 let context = rows
                     .iter()
                     .find(|row| row["type"] == "tokenstat.context" && row["contextUsed"] == 60)
@@ -224,6 +238,25 @@ for line in sys.stdin:
                 assert_eq!(mcp["servers"][0]["name"], "godot-mcp");
                 assert_eq!(mcp["servers"][0]["tools"], json!(["scene"]));
                 assert!(!mcp.to_string().contains("secret"));
+                let goal = rows
+                    .iter()
+                    .find(|row| row["type"] == "tokenstat.activity" && row["kind"] == "goal")
+                    .unwrap();
+                assert_eq!(goal["goal"]["objective"], "Finish current work");
+                let final_goal = rows.iter().rev().find(|row| row["kind"] == "goal").unwrap();
+                assert_eq!(final_goal["goal"]["status"], "complete");
+                assert_eq!(final_goal["goal"]["tokensUsed"], 100);
+                assert!(!output.contains("Stale goal read"));
+                assert!(!output.contains("Wrong plan"));
+                assert!(!output.contains("Foreign output"));
+                assert!(
+                    rows.iter().any(|row| row["kind"] == "plan"
+                        && row["plan"][0]["step"] == "Verify current work")
+                );
+                assert!(
+                    rows.iter()
+                        .any(|row| row["item"]["type"] == "collab_agent_tool_call")
+                );
             }
         }
     }
@@ -344,7 +377,7 @@ for line in sys.stdin:
  if method=='initialize':emit({'id':m['id'],'result':{}})
  elif method=='initialized':pass
  elif method=='thread/resume':emit({'id':m['id'],'result':{'thread':{'id':'session'}}})
- elif method=='mcpServerStatus/list':emit({'id':m['id'],'error':{'code':-32601,'message':'unsupported'}})
+ elif method in ('mcpServerStatus/list','thread/goal/get'):emit({'id':m['id'],'error':{'code':-32601,'message':'unsupported'}})
  elif method=='turn/start':
   with (root/'history').open('w') as f:f.write('custom_tool_call\n')
   emit({'id':m['id'],'result':{'turn':{'id':'turn'}}})
@@ -354,7 +387,7 @@ for line in sys.stdin:
   # Persisting a cancelled tool can exceed the PTY kill's 200ms signal grace.
   time.sleep(0.4)
   with (root/'history').open('a') as f:f.write('custom_tool_call_output: aborted by user\n')
-  emit({'method':'item/completed','params':{'item':{'id':'tool','type':'commandExecution','status':'failed','command':'sleep 60','aggregatedOutput':'aborted by user'}}})
+  emit({'method':'item/completed','params':{'threadId':'session','turnId':'turn','item':{'id':'tool','type':'commandExecution','status':'failed','command':'sleep 60','aggregatedOutput':'aborted by user'}}})
   emit({'method':'turn/completed','params':{'threadId':'session','turn':{'id':'turn','status':'interrupted'}}})
  else:raise Exception('stop must not restart or replay the turn')
 # EOF must get a chance to complete the server's final rollout flush too.
@@ -407,7 +440,7 @@ for line in sys.stdin:
  if method=='initialize':emit({'id':m['id'],'result':{}})
  elif method=='initialized':pass
  elif method=='thread/resume':emit({'id':m['id'],'result':{'thread':{'id':'session'}}})
- elif method=='mcpServerStatus/list':emit({'id':m['id'],'error':{'code':-32601,'message':'unsupported'}})
+ elif method in ('mcpServerStatus/list','thread/goal/get'):emit({'id':m['id'],'error':{'code':-32601,'message':'unsupported'}})
  elif method=='turn/start':
   child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])
   (root/'tool.pid').write_text(str(child.pid))
@@ -485,9 +518,9 @@ for line in sys.stdin:
    if refuse:
     emit({{'id':m['id'],'error':{{'code':-32601,'message':'Native compaction unavailable'}}}});break
    emit({{'id':m['id'],'result':{{}}}})
-   emit({{'method':'turn/started','params':{{'turn':{{'id':'compact'}}}}}})
-   emit({{'method':'turn/completed','params':{{'turn':{{'id':'compact','status':'completed'}}}}}})
-  elif method=='mcpServerStatus/list': emit({{'id':m['id'],'error':{{'code':-32601,'message':'unsupported'}}}})
+   emit({{'method':'turn/started','params':{{'threadId':'session','turn':{{'id':'compact'}}}}}})
+   emit({{'method':'turn/completed','params':{{'threadId':'session','turn':{{'id':'compact','status':'completed'}}}}}})
+  elif method in ('mcpServerStatus/list','thread/goal/get'): emit({{'id':m['id'],'error':{{'code':-32601,'message':'unsupported'}}}})
   elif method=='thread/unsubscribe': emit({{'id':m['id'],'result':{{}}}});break
   else: raise Exception('Unexpected model prompt: '+method)
 "##, refuse=if refuse {"True"} else {"False"})).unwrap();

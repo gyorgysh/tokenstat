@@ -637,6 +637,9 @@ final class ChatModel {
     // MARK: Composer commands
 
     var showingCommandStats = false
+    var showingActivity = false
+    var activitySection: ChatActivitySection?
+    var activityRead: ChatActivityRead?
     var chatCommandSelection = 0
     var chatCommandsDismissed = false
 
@@ -661,7 +664,11 @@ final class ChatModel {
         switch ChatCommandRules.action(draft, backend: selected?.backend, running: busy, attachments: !attachments.isEmpty, selection: chatCommandSelection) {
         case .message, .compact: return false
         case .complete(let command): draft = command
-        case .inspect: clearDraft(); showingCommandStats = true
+        case .inspect:
+            let section = ChatActivitySection(command: draft.trimmingCharacters(in: .whitespacesAndNewlines))
+            clearDraft()
+            if let section { activitySection = section; showingActivity = true }
+            else { showingCommandStats = true }
         case .stop:
             guard savedCopy == nil, let reference = currentReference else { return true }
             let generation = selectionGeneration

@@ -43,6 +43,9 @@ internal fun chatCommands() = listOf(
     "/usage" to L10n.text("common.chat.command.usage"),
     "/mcp" to L10n.text("common.chat.command.mcp"),
     "/tools" to L10n.text("common.chat.command.tools"),
+    "/goal" to L10n.text("common.chat.activity.command_goal"),
+    "/plan" to L10n.text("common.chat.activity.command_plan"),
+    "/subagents" to L10n.text("common.chat.activity.command_subagents"),
     "/help" to L10n.text("common.chat.command.help"),
     "/stop" to L10n.text("common.chat.command.stop"),
 )
@@ -65,16 +68,19 @@ internal fun chatCommands() = listOf(
     }
 }
 
-@Composable internal fun ChatStatsDialog(model: AppViewModel, peer: String, chat: JsonObject, onDismiss: () -> Unit) {
+@Composable internal fun ChatStatsDialog(model: AppViewModel, peer: String, chat: JsonObject, inspection: ChatInspectionSnapshot? = null, activitySection: String? = null, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(shape = RoundedCornerShape(20.dp), color = LocalTsColors.current.background,
             modifier = Modifier.fillMaxWidth(.94f).fillMaxHeight(.86f)) {
             Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(L10n.text("common.chat.stats.overview"), Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Text(L10n.text(if (activitySection != null) "common.chat.activity.title" else "common.chat.stats.overview"), Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                     TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
                 }
-                ChatStatsPanel(model, peer, chat)
+                if (activitySection != null) {
+                    val snapshot = inspection ?: rememberChatInspection(model, peer, chat, model.state.value.account)
+                    ChatActivityPanel(snapshot.data, chat, activitySection, initiallyExpanded = true, loaded = snapshot.loaded)
+                } else ChatStatsPanel(model, peer, chat, inspection)
                 StatsDisclosure(L10n.text("common.chat.commands")) {
                     chatCommands().forEach { (command, detail) -> Text("$command · $detail", style = MaterialTheme.typography.bodySmall) }
                 }
@@ -83,36 +89,50 @@ internal fun chatCommands() = listOf(
     }
 }
 
-@Composable internal fun ChatStatsPanel(model: AppViewModel, peer: String, chat: JsonObject) {
-    val id = chat.str("id") ?: return
-    val backend = chat.str("backend")
-    val requestedModel = chat.str("model")
-    var inspection by remember(peer, id, backend, requestedModel) { mutableStateOf<JsonObject?>(null) }
-    var loaded by remember(peer, id, backend, requestedModel) { mutableStateOf(false) }
+internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Boolean)
+
+@Composable internal fun rememberChatInspection(model: AppViewModel, peer: String, chat: JsonObject?, owner: Any? = null, enabled: Boolean = true): ChatInspectionSnapshot {
+    val id = chat?.str("id")
+    val backend = chat?.str("backend")
+    val requestedModel = chat?.str("model")
+    val revision = chat?.get("runRevision") ?: chat?.get("sendRevision")
+    var inspection by remember(owner, peer, id, backend, requestedModel, revision) { mutableStateOf<JsonObject?>(null) }
+    var loaded by remember(owner, peer, id, backend, requestedModel, revision) { mutableStateOf(false) }
+    var liveLease by remember(owner, peer, id, backend, requestedModel, revision) { mutableStateOf(false) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(peer, id, backend, requestedModel, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                try {
-                    val next = model.workspaceSection(peer, "chat.inspection", buildJsonObject { put("id", id) }) as? JsonObject
-                    currentCoroutineContext().ensureActive()
-                    if (next?.str("backend") == backend) inspection = next
-                    loaded = true
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { inspection = null; loaded = true }
-                delay(5000)
-            }
+    LaunchedEffect(owner, peer, id, backend, requestedModel, revision, lifecycle, enabled) {
+        if (!enabled || id == null) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            try {
+                while (true) {
+                    try {
+                        val next = model.workspaceSection(peer, "chat.inspection", buildJsonObject { put("id", id) }) as? JsonObject
+                        currentCoroutineContext().ensureActive()
+                        if (next?.str("backend") == backend) { inspection = next; liveLease = true }
+                        loaded = true
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { inspection = null; loaded = true; liveLease = false }
+                    delay(5000)
+                }
+            } finally { liveLease = false }
         }
     }
-    ChatInspectionCards(inspection, chat, loaded)
+    val current = if (!enabled || !liveLease) inspection?.let { JsonObject(it + ("currentRun" to JsonPrimitive(false))) } else inspection
+    return ChatInspectionSnapshot(current, loaded)
 }
 
-@Composable internal fun ChatInspectionCards(data: JsonObject?, chat: JsonObject, loaded: Boolean = true) {
+@Composable internal fun ChatStatsPanel(model: AppViewModel, peer: String, chat: JsonObject, inspection: ChatInspectionSnapshot? = null, activitySection: String? = null) {
+    val snapshot = inspection ?: rememberChatInspection(model, peer, chat, model.state.value.account)
+    ChatInspectionCards(snapshot.data, chat, snapshot.loaded, activitySection)
+}
+
+@Composable internal fun ChatInspectionCards(data: JsonObject?, chat: JsonObject, loaded: Boolean = true, activitySection: String? = null) {
     val id = chat.str("id")
     val backend = chat.str("backend")
     val requestedModel = chat.str("model")
     var contextOpen by remember(id, backend, requestedModel) { mutableStateOf(false) }
     var serversOpen by remember(id, backend, requestedModel) { mutableStateOf(false) }
+    ChatActivityPanel(data, chat, activitySection, loaded = loaded)
     val metrics = chatContextMetrics(data)
     StatsCard(L10n.text("common.chat.stats.context"), contextOpen, { contextOpen = !contextOpen },
         subtitle = data?.str("model") ?: requestedModel ?: backend) {

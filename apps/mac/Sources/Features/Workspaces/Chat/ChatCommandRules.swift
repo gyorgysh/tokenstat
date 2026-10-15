@@ -2,7 +2,7 @@
 import Foundation
 
 enum ChatCommandRules {
-    static let names = ["/compact", "/status", "/context", "/usage", "/mcp", "/tools", "/help", "/stop"]
+    static let names = ["/compact", "/status", "/context", "/usage", "/mcp", "/tools", "/goal", "/plan", "/subagents", "/help", "/stop"]
     static func sendMethod(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) == "/compact" ? "chat.compact" : "chat.send" }
     /// Match the native endpoint's payload limits before offering Steer.
     /// Rust counts Unicode scalar values rather than Swift grapheme clusters.

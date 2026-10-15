@@ -945,6 +945,7 @@ struct ClientChatThread: View {
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
         }
         .chatImageViewer(model: model)
+        .chatActivityPresentation(model: model, active: isActive)
         .onDisappear {
             dropPresentation &+= 1
             model.saveDraftNow()
@@ -1078,6 +1079,9 @@ struct ClientChatThread: View {
                 if model.savedCopy == nil, folder != nil {
                     changesRow
                 }
+                ChatActivityStrip(model: model)
+                    .padding(.horizontal, Theme.Space.s)
+                    .padding(.bottom, Theme.Space.s)
                 ClientChatComposer(
                     model: model,
                     chat: chat,
@@ -1555,6 +1559,7 @@ struct ClientChatThread: View {
                         )
                         ChatInstructionsCard(model: model, chat: chat)
                         ChatContextCard(model: model)
+                        ChatActivityCard(model: model)
                         Button(L10n.text("apple.clientchatview.personas.fa2ea3fb"), .persona) { showingPersonas = true }
                             .buttonStyle(SecondaryButtonStyle())
                     }

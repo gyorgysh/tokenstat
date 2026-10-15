@@ -59,6 +59,8 @@ pub mod base64;
 #[cfg(feature = "local-host")]
 pub mod chat;
 #[cfg(feature = "local-host")]
+pub(crate) mod chat_activity;
+#[cfg(feature = "local-host")]
 pub mod chat_brain;
 #[cfg(feature = "local-host")]
 mod chat_edit_measure;

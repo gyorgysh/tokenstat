@@ -6,7 +6,7 @@ import Foundation
         typealias R = ChatCommandRules
         precondition(R.sendMethod(" /compact ") == "chat.compact")
         precondition(R.sendMethod("please /compact") == "chat.send")
-        precondition(R.matches("/").count == 8)
+        precondition(R.matches("/").count == 11)
         precondition(R.matches("/sta") == ["/status"])
         precondition(R.action("/sta", backend: "sh", running: true, attachments: false) == .complete("/status"))
         for backend in ["claude", "codex", "cursor", "muse", "opencode", "opencode2", "grok", "agy", "sh"] {
@@ -19,6 +19,11 @@ import Foundation
         precondition(R.action("/compact", backend: "codex", running: true, attachments: false) == .refused(.running))
         precondition(R.action("/status\nhello", backend: "claude", running: false, attachments: false) == .refused(.arguments))
         precondition(R.action("/status", backend: "claude", running: false, attachments: true) == .refused(.attachments))
+        precondition(R.action("/goal", backend: "codex", running: true, attachments: false) == .inspect,
+                     "Viewing a goal is read-only during a turn")
+        precondition(R.action("/goal pause", backend: "codex", running: false, attachments: false) == .refused(.arguments),
+                     "Activity inspection must not turn lifecycle commands into chat prompts")
+        precondition(R.matches("/sub") == ["/subagents"])
         precondition(R.action("/usr/local/file", backend: "sh", running: false, attachments: false) == .message)
         precondition(R.action("please /compact", backend: "codex", running: false, attachments: false) == .message)
         precondition(R.action("/", backend: "codex", running: false, attachments: false, selection: 999) == .complete("/stop"))

@@ -18,6 +18,19 @@ import Foundation
         let noTelemetry = Data(#"{"backend":"sh","contextUsed":null,"contextWindow":null,"tools":null,"usedTools":[],"mcpServers":[],"mcpReported":false,"currentRun":false}"#.utf8)
         let unknown = try JSONDecoder().decode(ChatInspection.self, from: noTelemetry)
         precondition(unknown.fraction == nil && unknown.contextUsed == nil && unknown.tools == nil)
+        precondition(unknown.activity == nil, "Hosts predating activity remain readable without inventing zero subagents")
+        let activityWire = Data(#"{"goal":{"objective":"Finish the migration","status":"active","tokenBudget":40000,"tokensUsed":12000,"timeUsedSeconds":45,"source":"agent"},"plan":[{"text":"Inspect","status":"completed"},{"text":"Implement","status":"inProgress"}],"planSource":"agent","agents":[{"id":"child","name":"Reviewer","task":"Check the migration","status":"running","model":"codex","source":"agent"}],"goalReported":true,"planReported":true,"agentsReported":true,"partial":false,"live":true}"#.utf8)
+        var activity = try JSONDecoder().decode(ChatInspection.Activity.self, from: activityWire)
+        precondition(activity.goal?.objective == "Finish the migration" && activity.goal?.tokensUsed == 12000)
+        precondition(activity.completedSteps == 1 && activity.runningAgents == 1 && activity.hasContent)
+        precondition(activity.agentStatus(activity.agents[0], live: false) == "unknown",
+                     "A failed refresh cannot keep an agent looking live")
+        activity.agents[0].status = "unknown"
+        precondition(activity.runningAgents == nil, "Known child identities without lifecycle cannot claim zero running")
+        activity.agents[0].status = "running"
+        activity.live = false
+        precondition(activity.runningAgents == nil && activity.agentStatus(activity.agents[0]) == "unknown",
+                     "Previous-run subagents are historical reports")
         var bounded = value
         bounded.contextWindow = 0
         precondition(bounded.fraction == nil, "A bad host denominator must not produce NaN or infinity")

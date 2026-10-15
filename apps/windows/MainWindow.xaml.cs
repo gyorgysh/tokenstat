@@ -25,6 +25,7 @@ public sealed partial class MainWindow : Window
     private static bool _windowMotionSuspended;
     internal static bool MotionSuspended => _windowMotionSuspended || ColumnResize.InProgress;
     private bool _windowActive = true;
+    internal bool IsForeground => _windowActive;
     private bool _resizing;
 
     private readonly NavigationView _nav = new();

@@ -364,6 +364,11 @@ struct ChatView: View {
                     if model.savedCopy == nil {
                         changesRow
                     }
+                    ChatActivityStrip(model: model)
+                        .frame(maxWidth: ReadingRoom.laneWidth)
+                        .padding(.horizontal, Theme.Space.l)
+                        .padding(.bottom, Theme.Space.s)
+                        .frame(maxWidth: .infinity)
                     ChatComposer(
                         model: model,
                         chat: chat,
@@ -459,6 +464,7 @@ struct ChatView: View {
         #endif
         .sheet(isPresented: $showingHandoff) { WorkHandoffSheet(chat: model) }
         .chatImageViewer(model: model)
+        .chatActivityPresentation(model: model, active: isActive && !showingOverview)
         // Asked again when the branch moves and when a turn ends, since an
         // agent may have just opened the pull request.
         .task(id: "\(workspaceID)|\(git?.branch ?? "")|\(model.busy)|\(isActive)") {

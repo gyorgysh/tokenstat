@@ -173,6 +173,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
         Loaded += async (_, _) =>
         {
+            AttachInspectionWindow();
             AppServices.AccountChanged -= ImagesAccountChanged;
             AppServices.AccountChanged += ImagesAccountChanged;
             RemoteWorkspaces.Changed -= ImagesPeerChanged;
@@ -182,7 +183,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             else if (_openId is not null) StartPoll();
             else await ShowListAsync();
         };
-        Unloaded += (_, _) => { AppServices.AccountChanged -= ImagesAccountChanged; RemoteWorkspaces.Changed -= ImagesPeerChanged; RememberDraft(); _openGeneration++; ResetImagePreviews(); _poll?.Cancel(); _commandDialog?.Hide(); _inspection = null; _inspectionHost.Children.Clear(); };
+        Unloaded += (_, _) => { DetachInspectionWindow(); AppServices.AccountChanged -= ImagesAccountChanged; RemoteWorkspaces.Changed -= ImagesPeerChanged; RememberDraft(); _openGeneration++; ResetImagePreviews(); _poll?.Cancel(); _commandDialog?.Hide(); _inspection = null; _inspectionHost.Children.Clear(); };
         AutomationProperties.SetAutomationId(_draft, "chat.composer");
         AutomationProperties.SetAutomationId(_titleBox, "chat.title");
     }
@@ -1624,6 +1625,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _setupScroll.Content = context;
         FitSetupViewport();
         well.Children.Add(_setupScroll);
+        Detach(_activitySummaryHost);
+        RenderActivitySummary();
+        well.Children.Add(_activitySummaryHost);
         well.Children.Add(_draft);
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
@@ -2165,6 +2169,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             // chat.update returns the saved record, which has no parked note.
             // Preserve the current note, which may have changed while awaiting.
             _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat);
+            _ = RefreshInspectionAsync();
             RefreshFastModeButton();
             ChatLaunchChoice.Save(_openChat);
             if (patch.ContainsKey("backend")) CheckSelectedSignIn();

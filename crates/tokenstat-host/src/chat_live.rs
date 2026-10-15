@@ -797,6 +797,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         let startup_deadline = Instant::now() + Duration::from_secs(30);
         let mut initialized = false;
         let mut mcp_pages = 0;
+        let mut goal_notified = false;
         let mut codex_usage = CodexUsage::default();
         let mut started = false;
         loop {
@@ -906,6 +907,13 @@ pub fn run(path: &Path) -> Result<(), String> {
                     &json!({"id":"inspection-mcp","method":"mcpServerStatus/list",
                     "params":{"threadId":protocol.thread,"limit":100}}),
                 );
+                // Read the existing session goal; this never creates or
+                // resumes a goal and must not delay the user's turn.
+                let _ = send(
+                    &mut input,
+                    &json!({"id":"inspection-goal","method":"thread/goal/get",
+                    "params":{"threadId":protocol.thread}}),
+                );
             } else if message["id"] == "compact" {
                 if let Some(error) = message.get("error") {
                     return Err(error["message"]
@@ -930,6 +938,16 @@ pub fn run(path: &Path) -> Result<(), String> {
                         );
                     }
                 }
+            } else if message["id"] == "inspection-goal" {
+                if let Some(activity) = codex_goal_reply(&message, &protocol.thread, goal_notified)
+                {
+                    emit(&activity)?;
+                }
+            } else if let Some(activity) =
+                crate::chat_activity::codex_notification(&message, &protocol.thread, &protocol.turn)
+            {
+                goal_notified |= activity["kind"] == "goal";
+                emit(&activity)?;
             } else if message["method"] == "mcpServer/startupStatus/updated" {
                 let params = &message["params"];
                 if params["threadId"].is_null() || params["threadId"] == protocol.thread {
@@ -947,6 +965,14 @@ pub fn run(path: &Path) -> Result<(), String> {
                     )?;
                 }
             } else if message["id"] == "turn" || message["method"] == "turn/started" {
+                if message["method"] == "turn/started"
+                    && (message["params"]["threadId"].as_str() != Some(protocol.thread.as_str())
+                        || (!protocol.turn.is_empty()
+                            && message["params"]["turn"]["id"].as_str()
+                                != Some(protocol.turn.as_str())))
+                {
+                    continue;
+                }
                 let turn = if message["id"] == "turn" {
                     &message["result"]["turn"]
                 } else {
@@ -967,18 +993,25 @@ pub fn run(path: &Path) -> Result<(), String> {
                 }
             } else if message["method"] == "turn/completed" {
                 let turn = &message["params"]["turn"];
-                if turn["status"] != "completed" {
+                if message["params"]["threadId"].as_str() != Some(protocol.thread.as_str())
+                    || turn["id"].as_str() != Some(protocol.turn.as_str())
+                {
+                    continue;
+                }
+                let completed = turn["status"] == "completed";
+                if !completed {
                     emit(
                         &json!({"type":"error","message":turn["error"]["message"].as_str().unwrap_or("Codex turn failed or was interrupted")}),
                     )?;
-                    return Err("Codex did not complete the turn.".into());
                 }
-                if initial["tokenstatCompact"] == true {
+                if completed && initial["tokenstatCompact"] == true {
                     emit(
                         &json!({"type":"item.completed","item":{"id":"tokenstat-compact-result","type":"agent_message","text":"Context compaction completed."}}),
                     )?;
                 }
-                emit(&json!({"type":"turn.completed","usage":protocol.usage}))?;
+                if completed {
+                    emit(&json!({"type":"turn.completed","usage":protocol.usage}))?;
+                }
                 // Match exec's subscription cleanup. Closing protocol stdin
                 // afterward shuts down the thread and flushes its rollout.
                 send(
@@ -993,20 +1026,41 @@ pub fn run(path: &Path) -> Result<(), String> {
                     }
                     match rx.recv_timeout(Duration::from_millis(40)) {
                         Ok(Ok(reply)) if reply["id"] == "shutdown" => break,
+                        Ok(Ok(reply)) => {
+                            // Goal accounting can settle after turn/completed.
+                            // Preserve owned activity while the existing,
+                            // bounded subscription shutdown flushes history.
+                            if let Some(activity) = crate::chat_activity::codex_notification(
+                                &reply,
+                                &protocol.thread,
+                                &protocol.turn,
+                            ) {
+                                goal_notified |= activity["kind"] == "goal";
+                                emit(&activity)?;
+                            } else if let Some(activity) =
+                                codex_goal_reply(&reply, &protocol.thread, goal_notified)
+                            {
+                                emit(&activity)?;
+                            } else if let Some(item) =
+                                codex_owned_item(&reply, &protocol.thread, &protocol.turn)
+                            {
+                                emit(&item)?;
+                            }
+                        }
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                         _ => {}
                     }
                 }
-                return Ok(());
+                return if completed {
+                    Ok(())
+                } else {
+                    Err("Codex did not complete the turn.".into())
+                };
             } else if message["method"] == "thread/tokenUsage/updated" {
                 let params = &message["params"];
-                if params["threadId"]
-                    .as_str()
-                    .is_some_and(|thread| thread != protocol.thread)
+                if params["threadId"].as_str() != Some(protocol.thread.as_str())
                     || (!protocol.turn.is_empty()
-                        && params["turnId"]
-                            .as_str()
-                            .is_some_and(|turn| turn != protocol.turn))
+                        && params["turnId"].as_str() != Some(protocol.turn.as_str()))
                 {
                     continue;
                 }
@@ -1026,15 +1080,9 @@ pub fn run(path: &Path) -> Result<(), String> {
                         .observe(usage, !protocol.turn.is_empty())
                         .unwrap_or(Value::Null);
                 }
-            } else if matches!(
-                message["method"].as_str(),
-                Some("item/started" | "item/completed")
-            ) {
-                if let Some(item) = codex_item(&message["params"]["item"]) {
-                    emit(
-                        &json!({"type":if message["method"] == "item/started" {"item.started"} else {"item.completed"},"item":item}),
-                    )?;
-                }
+            } else if let Some(item) = codex_owned_item(&message, &protocol.thread, &protocol.turn)
+            {
+                emit(&item)?;
             } else if message.get("id").is_some() && message["method"].is_string() {
                 // Match exec's noninteractive contract. Never silently grant a
                 // provider permission request or leave it parked indefinitely.
@@ -1077,6 +1125,31 @@ pub fn run(path: &Path) -> Result<(), String> {
     result
 }
 
+fn codex_goal_reply(message: &Value, thread: &str, goal_notified: bool) -> Option<Value> {
+    let result = &message["result"];
+    (message["id"] == "inspection-goal"
+        && !goal_notified
+        && message["error"].is_null()
+        && result.get("goal").is_some()
+        && (result["goal"].is_null() || result["goal"]["threadId"].as_str() == Some(thread)))
+    .then(|| json!({"type":"tokenstat.activity","kind":"goal","goal":result["goal"]}))
+}
+
+fn codex_owned_item(message: &Value, thread: &str, turn: &str) -> Option<Value> {
+    let method = message["method"].as_str()?;
+    if !matches!(method, "item/started" | "item/completed")
+        || turn.is_empty()
+        || message["params"]["threadId"].as_str() != Some(thread)
+        || (!turn.is_empty() && message["params"]["turnId"].as_str() != Some(turn))
+    {
+        return None;
+    }
+    let item = codex_item(&message["params"]["item"])?;
+    Some(
+        json!({"type":if method == "item/started" {"item.started"} else {"item.completed"},"item":item}),
+    )
+}
+
 fn codex_item(item: &Value) -> Option<Value> {
     let mut item = item.clone();
     let object = item.as_object_mut()?;
@@ -1090,6 +1163,9 @@ fn codex_item(item: &Value) -> Option<Value> {
         "imageView" => "image_view",
         "imageGeneration" => "image_generation",
         "dynamicToolCall" => "dynamic_tool_call",
+        "collabAgentToolCall" => "collab_agent_tool_call",
+        "collabToolCall" => "collab_tool_call",
+        "subAgentActivity" => "sub_agent_activity",
         _ => return None,
     };
     object.insert("type".into(), json!(kind));

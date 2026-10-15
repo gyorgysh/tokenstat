@@ -231,6 +231,12 @@ impl Parser {
         Some(self.inspection.clone())
     }
 
+    pub(crate) fn inherit_goal(&mut self, snapshot: &crate::chat_inspection::Snapshot) {
+        self.inspection.activity.goal = snapshot.activity.goal.clone();
+        self.inspection.activity.goal_reported = snapshot.activity.goal_reported;
+        self.inspection.session_id = snapshot.session_id.clone();
+    }
+
     pub(crate) fn take_images(&mut self) -> Vec<crate::chat_images::Image> {
         self.images.take()
     }
@@ -512,7 +518,6 @@ impl Parser {
         {
             self.limit = Some(limit);
         }
-        self.inspection_dirty |= self.inspection.observe(&self.backend, &value);
         let mut events = if self.backend == "muse" {
             self.events_muse(&value)
         } else {
@@ -582,7 +587,11 @@ impl Parser {
                 }
             }
         }
-        self.take_events(events)
+        let events = self.take_events(events);
+        // Session ownership is applied before a goal carried by this same
+        // record, so a new session can immediately report its own goal.
+        self.inspection_dirty |= self.inspection.observe(&self.backend, &value);
+        events
     }
 
     fn muse_auth_line(&mut self, line: &str) -> MuseAuthLine {
@@ -753,6 +762,19 @@ impl Parser {
                         continue;
                     }
                     self.last_session = Some(id.clone());
+                    if !id.is_empty() && id.len() <= 160 && !id.chars().any(char::is_control) {
+                        if self
+                            .inspection
+                            .session_id
+                            .as_ref()
+                            .is_some_and(|session| session != id)
+                        {
+                            self.inspection.activity.goal = None;
+                            self.inspection.activity.goal_reported = false;
+                        }
+                        self.inspection.session_id = Some(id.clone());
+                        self.inspection_dirty = true;
+                    }
                 }
                 Event::ToolStart {
                     call_id,

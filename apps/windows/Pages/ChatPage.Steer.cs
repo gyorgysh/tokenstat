@@ -200,6 +200,7 @@ internal sealed partial class ChatPage
             || !JsonNode.DeepEquals(_openChat?["routing"], latest?["routing"]);
         _openChat = latest;
         _running = Format.Flag(_openChat, "running");
+        if (_inspectionOwner != InspectionOwner() || _inspectionRunning != _running) RenderInspection();
         _started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
         if (_titleBox.FocusState == FocusState.Unfocused)
         {

@@ -91,8 +91,40 @@ and capped tool/server lists are marked partial. Snapshots are scoped to the sel
 turn, and saved transcript copies do not query live connections. Older hosts
 keep chat working and show details as unavailable.
 
+Chat activity has a compact summary above the composer and an expandable
+Activity panel in the inspector/setup view on Mac, iPhone/iPad, Android and
+Windows. It shows a reported goal, token/time budgets when supplied, plan
+steps, and subagent tasks and status. `/goal`, `/plan` and `/subagents` open
+those details locally; they do not create a goal, change its lifecycle, or
+send a prompt. Only current, successfully refreshed run reports show live
+subagent counts. Previous reports remain labeled, and an unreported section
+is distinct from a reported empty list. Saved transcript copies do not fetch
+live activity.
+
+The host accepts these verified protocol signals. Availability depends on the
+installed CLI and what it emits in this chat; a terminal slash command alone
+does not establish a headless telemetry channel.
+
+| Backend | Goal | Plan | Subagents |
+| --- | --- | --- | --- |
+| [Codex](https://learn.chatgpt.com/docs/app-server) | Persisted thread goal and budget | Turn plan updates | Collaboration items and child lifecycle |
+| [Claude](https://code.claude.com/docs/en/agent-sdk/subagents) | Not reported | Successful TodoWrite and task updates | Native local-agent task lifecycle |
+| [Cursor](https://cursor.com/docs/cli/reference/output-format) | Successful goal tool updates | Successful todo/plan tools | Task identity and reported foreground/background result |
+| [Muse](https://dev.meta.ai/docs/muse-code/extending) | Native goal control records | Todo snapshots | Subagent control lifecycle |
+| [Grok](https://docs.x.ai/build/cli/headless-scripting) | No verified headless goal record | ACP plan updates | ACP subagent lifecycle |
+| [OpenCode](https://opencode.ai/docs/tools/) | Not reported | Successful todowrite | Child session/task metadata |
+| [OpenCode 2](https://opencode.ai/docs/agents/) | Not reported | Only if a todo record is emitted | Task identity; lifecycle remains unknown when omitted |
+| [Antigravity](https://www.antigravity.google/docs/cli/headless/) | No verified headless goal record | Not reported | Explicit child identity; lifecycle remains unknown when omitted |
+
+Grok and Antigravity document `/goal` in their interactive interfaces, but
+Tokenstat does not infer a live goal from assistant prose or a tool named
+like a goal. Goal, plan and child state are bounded and stored with the chat's
+backend/model/run ownership. A completed spawn tool does not by itself mean
+that its child has finished.
+
 The Mac, iPhone/iPad, Android and Windows composers offer `/compact`, `/status`,
-`/context`, `/usage`, `/mcp`, `/tools`, `/help`, and `/stop`. Type `/` to filter
+`/context`, `/usage`, `/mcp`, `/tools`, `/goal`, `/plan`, `/subagents`, `/help`,
+and `/stop`. Type `/` to filter
 commands; selecting one fills the draft and Send executes it. On Mac/Windows,
 arrow keys select, Enter completes or executes, and Escape closes the menu.
 Read-only commands open the statistics panel without a model turn. Native

@@ -14,6 +14,9 @@ const SERVER_TOOLS: usize = 256;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct Snapshot {
+    pub activity: crate::chat_activity::Activity,
+    /// Internal durable identity, never exposed by the inspection response.
+    pub session_id: Option<String>,
     pub model: Option<String>,
     pub context_used: Option<u64>,
     pub context_window: Option<u64>,
@@ -165,6 +168,7 @@ fn prompt_tokens(usage: &Value, cache_is_separate: bool) -> Option<u64> {
 impl Snapshot {
     /// Called only on complete protocol records, never on text/tool payloads.
     pub fn observe(&mut self, backend: &str, value: &Value) -> bool {
+        let activity_changed = self.activity.observe(backend, value);
         let kind = value["type"].as_str().unwrap_or("");
         let init = kind == "system" && value["subtype"] == "init";
         let muse_model = backend == "muse"
@@ -185,7 +189,7 @@ impl Snapshot {
                     | ("opencode" | "opencode2", "step_finish")
             );
         if !relevant {
-            return false;
+            return activity_changed;
         }
         let previous = self.clone();
         if init {
@@ -321,7 +325,7 @@ impl Snapshot {
                 self.context_window = Some(window);
             }
         }
-        *self != previous
+        activity_changed || *self != previous
     }
 
     pub fn used_tool(&mut self, tool: &str) -> bool {

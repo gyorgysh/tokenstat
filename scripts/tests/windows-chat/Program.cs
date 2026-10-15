@@ -123,6 +123,29 @@ Check(ChatCommandRules.Evaluate("/status\nhello", "claude", false, false).Kind =
 Check(ChatCommandRules.Evaluate("/status", "claude", false, true).Kind == ChatCommandRules.Kind.Attachments, "files must survive local commands");
 Check(ChatCommandRules.Evaluate("/usr/local/file", "sh", false, false).Kind == ChatCommandRules.Kind.Message, "literal paths are messages");
 Console.WriteLine("Windows chat commands: completion, backend capabilities, busy refusal and attachment preservation pass.");
+Check(ChatActivityData.Read(Json("{}"), Json("{\"running\":true}")) is null, "old hosts do not imply empty or zero activity");
+var unreportedActivity = ChatActivityData.Read(Json("""{"currentRun":true,"activity":{"goalReported":false,"planReported":false,"agentsReported":false,"live":true,"goal":{"objective":"hidden","tokensUsed":0},"agents":[{"id":"hidden","status":"running"}]}}"""), Json("""{"running":true}"""))!;
+Check(!unreportedActivity.HasContent && unreportedActivity.Goal is null && unreportedActivity.RunningAgents is null, "unreported categories cannot manufacture goal or agent counts");
+var activityInspection = Json("""{"currentRun":true,"activity":{"goalReported":true,"planReported":true,"agentsReported":true,"live":true,"goal":{"objective":"Ship","status":"usageLimited","tokensUsed":0,"tokenBudget":-1,"timeUsedSeconds":"bad"},"plan":[{"text":"Build","status":"completed"},{"text":"Review","status":"other"}],"agents":[{"id":"one","status":"running"},{"id":"two","status":"completed"},{"name":"Missing ID"}]}}""");
+var activityData = ChatActivityData.Read(activityInspection, Json("""{"running":true}"""))!;
+Check(activityData.Goal!.Status == "usageLimited" && activityData.Goal.TokensUsed == 0 && activityData.Goal.TokenBudget is null && activityData.Goal.TimeUsedSeconds is null, "reported zero remains valid while missing or malformed budget metrics remain unknown");
+Check(activityData.CompletedSteps == 1 && activityData.Plan[1].Status == "unknown" && activityData.Agents.Length == 2 && activityData.RunningAgents == 1, "only valid recorded states contribute to activity progress");
+Check(activityData.Agents[0].DisplayStatus(false) == "unknown" && activityData.Agents[1].DisplayStatus(false) == "completed", "stale active agent statuses become unknown while recorded terminal statuses remain visible");
+Check(ChatActivityData.Read(activityInspection, Json("""{"running":false}"""))!.RunningAgents is null, "finished chats cannot retain a live running-agent count");
+activityInspection["currentRun"] = false;
+Check(ChatActivityData.Read(activityInspection, Json("""{"running":true}"""))!.RunningAgents is null, "a current chat cannot reactivate a retained previous-run agent");
+activityInspection["currentRun"] = true; activityInspection["activity"]!["live"] = false;
+Check(ChatActivityData.Read(activityInspection, Json("""{"running":true}"""))!.RunningAgents is null, "historical activity remains historical inside a running conversation");
+var unknownAgentLifecycle = Json("""{"currentRun":true,"activity":{"agentsReported":true,"live":true,"agents":[{"id":"one","status":"unknown"}]}}""");
+Check(ChatActivityData.Read(unknownAgentLifecycle, Json("""{"running":true}"""))!.RunningAgents is null, "known agent identities with unknown lifecycle do not imply zero running");
+unknownAgentLifecycle["activity"]!["agents"]![0]!["status"] = "completed";
+Check(ChatActivityData.Read(unknownAgentLifecycle, Json("""{"running":true}"""))!.RunningAgents == 0, "explicit terminal lifecycle can report a known zero running count");
+foreach (var command in new[] { "/goal", "/plan", "/subagents" })
+{
+    Check(ChatCommandRules.Evaluate(command, "sh", true, false).Kind == ChatCommandRules.Kind.Inspect, "activity commands are local read-only views on every backend");
+    Check(ChatCommandRules.Evaluate(command + " make one", "codex", false, false).Kind == ChatCommandRules.Kind.Arguments, "activity command arguments cannot create native goals or execute commands");
+}
+Console.WriteLine("Windows chat activity: reported-only metrics, old hosts, stale runs, unknown states and local read-only commands pass.");
 Check(ChatCommandRules.SendMethod(" /compact ") == "chat.compact" && ChatCommandRules.SendMethod("please /compact") == "chat.send", "older hosts must reject an unknown method instead of receiving a compaction prompt");
 var history = new ChatHistoryBuffer();
 var newest = Json("""{"events":[{"id":"recent"}],"nextOffset":900,"tailCursor":"tail-a","cursor":"older-a","hasEarlier":true,"usage":{"turns":10,"input":1000,"output":200,"cacheRead":10,"cacheWrite":20,"cost":1.5}}""");
