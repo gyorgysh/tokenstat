@@ -755,15 +755,15 @@ struct ClientChatThread: View {
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                 transcript(chat)
-                    .overlay {
-                        if dropExperienceVisible {
-                            ChatDropExperience()
-                        }
-                    }
                     .clientBottomBar(separated: true) {
                         bar(chat)
                             .padding(.top, Theme.Space.s)
                     }
+                    }
+                    .overlay {
+                        if dropExperienceVisible {
+                            ChatDropExperience()
+                        }
                     }
                     if showsToolsPane, let peer = model.peer, let workspace = model.workspaceID {
                         ThemeRule.vertical

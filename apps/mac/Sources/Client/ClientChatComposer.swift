@@ -119,18 +119,6 @@ struct ClientChatComposer: View {
         .clientFloatingBar()
         .padding(.horizontal, Theme.Space.s)
         .padding(.bottom, Theme.Space.s)
-        .overlay {
-            if dropTargeted {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Theme.accentSoft.opacity(0.94))
-                    .overlay {
-                        Text(L10n.text("apple.clientchatcomposer.drop_to_attach.34a7a637"))
-                            .font(ClientType.label.weight(.semibold))
-                            .foregroundStyle(Theme.accent)
-                    }
-                    .allowsHitTesting(false)
-            }
-        }
         .dropDestination(for: String.self) { items, _ in
             onDropText(items)
             return !items.isEmpty
@@ -152,7 +140,6 @@ struct ClientChatComposer: View {
             urlDropTargeted = targeted
             reportDropTarget()
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropTargeted)
         .fileImporter(
             isPresented: $importing,
             allowedContentTypes: [.item],

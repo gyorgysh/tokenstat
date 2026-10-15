@@ -189,15 +189,10 @@ struct ChatComposer: View {
         }
         #endif
         .padding(12)
-        .background(wellFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(wellStroke, lineWidth: anyDropTargeted ? 1.5 : 1)
-        }
-        .overlay {
-            if anyDropTargeted {
-                dropHint
-            }
+                .strokeBorder(Theme.border, lineWidth: 1)
         }
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: onDropProviders)
         #if os(macOS)
@@ -206,7 +201,6 @@ struct ChatComposer: View {
             Task { await ingest(providers: providers, owner: owner) }
         }
         #endif
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: anyDropTargeted)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: attachments.count)
         .onChange(of: acceptsDrops) { _, accepts in if !accepts { nativeDropTargeted = false } }
         .onChange(of: anyDropTargeted) { _, targeted in
@@ -375,29 +369,6 @@ struct ChatComposer: View {
             .submitLabel(.send)
             .onSubmit { if !cannotSend { onSend() } }
         #endif
-    }
-
-    private var dropHint: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(Theme.accentSoft.opacity(0.94))
-            .overlay {
-                HStack(spacing: Theme.Space.s) {
-                    Image(systemName: ActionIcon.attach.symbol)
-                        .font(Theme.font(15, weight: .semibold))
-                    Text(L10n.text("apple.chatcomposer.drop_to_attach.34a7a637"))
-                        .font(Theme.callout.weight(.semibold))
-                }
-                .foregroundStyle(Theme.accent)
-            }
-            .allowsHitTesting(false)
-    }
-
-    private var wellFill: Color {
-        anyDropTargeted ? Theme.accentSoft : Theme.panel
-    }
-
-    private var wellStroke: Color {
-        anyDropTargeted ? Theme.accent : Theme.border
     }
 
     private var sendTitle: String {

@@ -300,11 +300,6 @@ struct ChatView: View {
                     WorkHandoffOffer(chat: model) { showingHandoff = true }
                 }
                 transcript(chat)
-                    .overlay {
-                        if dropExperienceVisible {
-                            dropExperience
-                        }
-                    }
                 // A saved copy explains itself above the composer: what the
                 // rows are, when they were kept, and the way back to live.
                 if let copy = model.savedCopy {
@@ -410,11 +405,6 @@ struct ChatView: View {
                 }
             } else if model.isReady(for: workspaceID), model.chats.isEmpty {
                 empty
-                    .overlay {
-                        if dropExperienceVisible {
-                            dropExperience
-                        }
-                    }
             } else {
                 // Either nothing has been asked yet, or this folder's
                 // conversations are known and one is about to be picked.
@@ -447,6 +437,11 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $paneDropTargeted, receive: receive)
+        .overlay {
+            if dropExperienceVisible {
+                ChatDropExperience()
+            }
+        }
         .overlay(alignment: .topTrailing) {
             TransientToast(message: $dropNotice, severity: .warning)
                 .padding(.top, Theme.Space.m)
@@ -1308,10 +1303,6 @@ struct ChatView: View {
             && model.folderID == workspaceID && model.isReady(for: workspaceID)
             && (model.currentReference.map(WorkCacheAccess.canRead)
                 ?? (model.savedCopy == nil && model.selected == nil && model.chats.isEmpty))
-    }
-
-    private var dropExperience: some View {
-        ChatDropExperience()
     }
 
     @discardableResult
