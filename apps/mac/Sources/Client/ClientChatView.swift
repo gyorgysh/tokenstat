@@ -596,6 +596,8 @@ struct ClientChatThread: View {
     @State private var urlDropTargeted = false
     @State private var textDropTargeted = false
     @State private var dataDropTargeted = false
+    @State private var transcriptDropTargeted = false
+    @State private var dropPresentation: UInt64 = 0
     @State private var composerDropTargeted = false
     @State private var dropNotice: String?
     @State private var dropNoticeGeneration = 0
@@ -784,19 +786,17 @@ struct ClientChatThread: View {
         // already and any background of ours replaces it with a flat blur, so
         // that system gets nothing from us. Below 26 there is no bar to fight.
         .clientNavigationBarBackground()
+        .contentShape(Rectangle())
         .dropDestination(for: String.self) { items, _ in
             receive(items.map(ChatInboxDrop.text))
-            return !items.isEmpty
         } isTargeted: { textDropTargeted = $0 }
         .dropDestination(for: Data.self) { items, _ in
             let drops = items.compactMap(ChatInbox.imageDrop(from:))
-            receive(drops)
-            return !drops.isEmpty
+            return receive(drops)
         } isTargeted: { dataDropTargeted = $0 }
         .dropDestination(for: URL.self) { items, _ in
             let drops = ChatInbox.drops(from: items)
-            receive(drops)
-            return !drops.isEmpty
+            return receive(drops)
         } isTargeted: { urlDropTargeted = $0 }
         .overlay(alignment: .topTrailing) {
             TransientToast(message: $dropNotice, severity: .warning)
@@ -926,6 +926,7 @@ struct ClientChatThread: View {
             scrollAccess.refreshAttachment(retryVisibility: true)
         }
         .onChange(of: isActive) { _, active in
+            dropPresentation &+= 1
             updatePresence()
             if !active { model.saveDraftNow() }
         }
@@ -945,6 +946,7 @@ struct ClientChatThread: View {
         }
         .chatImageViewer(model: model)
         .onDisappear {
+            dropPresentation &+= 1
             model.saveDraftNow()
             traceViewport("disappear")
             retireViewport()
@@ -1248,6 +1250,7 @@ struct ClientChatThread: View {
                     }
                 }
             }
+            .chatDropSurface(enabled: acceptsDrops, isTargeted: $transcriptDropTargeted, receive: receive)
             .scrollDismissesKeyboard(.immediately)
             // No tap-to-dismiss gesture here: `.scrollDismissesKeyboard`
             // already hides the keyboard on scroll, and a transcript-wide
@@ -2085,17 +2088,51 @@ struct ClientChatThread: View {
     }
 
     private var dropExperienceVisible: Bool {
-        urlDropTargeted || textDropTargeted || dataDropTargeted || composerDropTargeted
+        acceptsDrops && (urlDropTargeted || textDropTargeted || dataDropTargeted || transcriptDropTargeted || composerDropTargeted)
     }
 
-    private func receive(_ drops: [ChatInboxDrop]) {
-        guard let owner = model.currentReference else { return }
+    private var acceptsDrops: Bool {
+        isActive && !model.sending && model.currentReference.map(WorkCacheAccess.canRead) == true
+    }
+
+    @discardableResult
+    private func receive(_ providers: [NSItemProvider]) -> Bool {
+        guard acceptsDrops, !providers.isEmpty, let owner = model.currentReference else { return false }
+        let presentation = dropPresentation
+        Task {
+            let drops = await ChatInbox.drops(from: providers)
+            defer {
+                for case let .attachment(item) in drops {
+                    if let file = item.file { try? FileManager.default.removeItem(at: file) }
+                }
+            }
+            guard !Task.isCancelled, dropPresentation == presentation, acceptsDrops,
+                  model.currentReference == owner else { return }
+            await receive(drops, owner: owner)
+        }
+        return true
+    }
+
+    @discardableResult
+    private func receive(_ drops: [ChatInboxDrop]) -> Bool {
+        guard acceptsDrops, !drops.isEmpty, let owner = model.currentReference else {
+            discardPreparedFiles(drops)
+            return false
+        }
         Task { await receive(drops, owner: owner) }
+        return true
+    }
+
+    private func discardPreparedFiles(_ drops: [ChatInboxDrop]) {
+        for case let .attachment(item) in drops {
+            if let file = item.file { try? FileManager.default.removeItem(at: file) }
+        }
     }
 
     private func receive(_ drops: [ChatInboxDrop], owner: WorkReference) async {
+        defer { discardPreparedFiles(drops) }
         for drop in drops {
-            guard isActive, !Task.isCancelled, model.currentReference == owner else { return }
+            guard isActive, !Task.isCancelled, model.currentReference == owner, WorkCacheAccess.canRead(owner) else { return }
             switch drop {
             case let .attachment(item):
                 await model.attach(item, to: owner)

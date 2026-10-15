@@ -113,12 +113,15 @@ struct ChatComposer: View {
     var onStop: () -> Void
     var onAttach: (ChatInboxItem, WorkReference) async -> Void
     var onRemove: (ChatAttachment) -> Void
-    var onDropProviders: ([NSItemProvider]) -> Void
+    var acceptsDrops = true
+    var onDropProviders: ([NSItemProvider]) -> Bool
     var onDropTargeted: (Bool) -> Void
 
     @State private var importOwner: WorkReference?
     @State private var importing = false
     @State private var dropTargeted = false
+    @State private var nativeDropTargeted = false
+    private var anyDropTargeted: Bool { dropTargeted || nativeDropTargeted }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -189,29 +192,24 @@ struct ChatComposer: View {
         .background(wellFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(wellStroke, lineWidth: dropTargeted ? 1.5 : 1)
+                .strokeBorder(wellStroke, lineWidth: anyDropTargeted ? 1.5 : 1)
         }
         .overlay {
-            if dropTargeted {
+            if anyDropTargeted {
                 dropHint
             }
         }
-        .onDrop(
-            of: ChatInbox.dropTypes,
-            isTargeted: $dropTargeted
-        ) { providers in
-            onDropProviders(providers)
-            return true
-        }
+        .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: onDropProviders)
         #if os(macOS)
         .onPasteCommand(of: [.image, .fileURL, .png, .jpeg, .pdf]) { providers in
             guard let owner = model.currentReference else { return }
             Task { await ingest(providers: providers, owner: owner) }
         }
         #endif
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropTargeted)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: anyDropTargeted)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: attachments.count)
-        .onChange(of: dropTargeted) { _, targeted in
+        .onChange(of: acceptsDrops) { _, accepts in if !accepts { nativeDropTargeted = false } }
+        .onChange(of: anyDropTargeted) { _, targeted in
             onDropTargeted(targeted)
         }
         .accessibilityElement(children: .contain)
@@ -351,6 +349,7 @@ struct ChatComposer: View {
             owner: model.currentReference,
             placeholder: placeholder,
             enabled: !model.sending,
+            acceptsAttachmentDrops: acceptsDrops,
             onSend: {
                 if model.selected?.id == chat.id, !cannotSend { onSend() }
             },
@@ -360,7 +359,9 @@ struct ChatComposer: View {
             },
             onPasteAttachments: {
                 ingest(items: ChatInbox.pasteboardItems())
-            }
+            },
+            onAttachmentDrop: onDropProviders,
+            onAttachmentDropTargeted: { nativeDropTargeted = $0 }
         )
         .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 160, alignment: .topLeading)
         .layoutPriority(1)
@@ -392,11 +393,11 @@ struct ChatComposer: View {
     }
 
     private var wellFill: Color {
-        dropTargeted ? Theme.accentSoft : Theme.panel
+        anyDropTargeted ? Theme.accentSoft : Theme.panel
     }
 
     private var wellStroke: Color {
-        dropTargeted ? Theme.accent : Theme.border
+        anyDropTargeted ? Theme.accent : Theme.border
     }
 
     private var sendTitle: String {

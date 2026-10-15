@@ -85,6 +85,67 @@ struct ChatAttachmentCacheTests {
         require([CGImageAlphaInfo.first, .last, .premultipliedFirst, .premultipliedLast].contains(inlinePixels.alphaInfo), "Inline preview preserves transparency")
         require(ChatThumbnail.make(from: root.appendingPathComponent("missing.png")) == nil, "Missing image fails gracefully")
 
+        // Floating screenshot drags can advertise a vanished file URL as
+        // well as valid pixels. Exercise the real provider decoding path.
+        let imageBytes = try Data(contentsOf: imageFile)
+        func provider(_ url: URL, pixels: Data? = nil, failsURL: Bool = false) -> NSItemProvider {
+            let provider = NSItemProvider()
+            provider.registerDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier, visibility: .all) { completion in
+                if failsURL { completion(nil, CocoaError(.fileReadNoSuchFile)) }
+                else { completion(url.dataRepresentation, nil) }
+                return nil
+            }
+            if let pixels {
+                provider.registerDataRepresentation(forTypeIdentifier: UTType.png.identifier, visibility: .all) { completion in
+                    completion(pixels, nil)
+                    return nil
+                }
+            }
+            return provider
+        }
+        let missing = root.appendingPathComponent("vanished-screenshot.png")
+        for failsURL in [false, true] {
+            let drops = await ChatInbox.drops(from: [provider(missing, pixels: imageBytes, failsURL: failsURL)])
+            guard drops.count == 1, case let .attachment(item) = drops[0] else {
+                fatalError("An unavailable screenshot URL must fall back to its image pixels")
+            }
+            require(item.data == imageBytes && item.mediaType == "image/png", "Fallback preserves the screenshot pixels")
+        }
+        let durable = root.appendingPathComponent("notes.txt")
+        let originalBytes = Data("Keep the selected file".utf8)
+        try originalBytes.write(to: durable)
+        let fileDrops = await ChatInbox.drops(from: [provider(durable, pixels: imageBytes)])
+        guard fileDrops.count == 1, case let .attachment(fileItem) = fileDrops[0] else {
+            fatalError("A readable file remains the preferred representation")
+        }
+        require(fileItem.name == "notes.txt" && fileItem.data == originalBytes, "Finder file retains its name and bytes")
+        let missingDrops = await ChatInbox.drops(from: [provider(missing)])
+        require(missingDrops.isEmpty, "A missing file without pixels is not inserted as a URL")
+        let failedFile = provider(missing, failsURL: true)
+        failedFile.registerDataRepresentation(forTypeIdentifier: UTType.plainText.identifier, visibility: .all) { completion in
+            completion(Data(missing.absoluteString.utf8), nil)
+            return nil
+        }
+        let failedDrops = await ChatInbox.drops(from: [failedFile])
+        require(failedDrops.isEmpty, "A failed file representation must not become a pasted file URL")
+        let pdfBytes = Data("%PDF-1.4\n%%EOF\n".utf8)
+        let pdf = NSItemProvider()
+        pdf.suggestedName = "report.pdf"
+        pdf.registerDataRepresentation(forTypeIdentifier: UTType.pdf.identifier, visibility: .all) { completion in
+            completion(pdfBytes, nil)
+            return nil
+        }
+        let pdfDrops = await ChatInbox.drops(from: [pdf])
+        guard pdfDrops.count == 1, case let .attachment(pdfItem) = pdfDrops[0] else {
+            fatalError("A PDF data drag must produce a file attachment")
+        }
+        require(pdfItem.name == "report.pdf" && pdfItem.mediaType == "application/pdf" && pdfItem.data == pdfBytes,
+            "PDF drag preserves its name, type and bytes")
+        let folderDrops = await ChatInbox.drops(from: [provider(root, pixels: imageBytes)])
+        guard folderDrops.count == 1, case .folder = folderDrops[0] else {
+            fatalError("A folder still reaches the existing folder explanation")
+        }
+
         require(ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 5_242_880), "5 MiB automatic")
         require(!ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 5_242_881), "Above 5 MiB manual")
         require(ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 200_000_000, isLocalImage: true), "Local images bypass network threshold")
@@ -105,6 +166,6 @@ struct ChatAttachmentCacheTests {
         require(!(await purgeCache.write(bytes, reference: reference(), attachment: "late", epoch: epoch)), "Late download cannot restore purge")
         require(await purgeCache.read(reference: reference(), attachment: "late") == nil, "Purged bytes stay absent")
         require(ChatCachePreferences.sizes.contains(5) && ChatCachePreferences.days.last == 30, "Supported settings")
-        print("Attachment cache and download policy checks passed")
+        print("Attachment imports, screenshot fallback, cache and download policy checks passed")
     }
 }

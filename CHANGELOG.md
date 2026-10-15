@@ -27,6 +27,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Chat sends recover in long and resumed conversations. Automatic image previews no longer share an upload's cancellation or progress state, and large images use file-backed previews on Mac, iPhone and iPad.
 - Native compaction remains a maintenance operation in plan mode and after instruction changes. Steering preserves pending questions, retains attachments when capabilities change, and queues messages that exceed the agent's steering limits. A deferred Stop command stays tied to its original chat.
 - Context inspectors label token usage and capacity, preserve the last reported capacity for the same model during active turns, and keep history and conversation totals behind compact disclosures.
+- Mac chats accept image and file drops throughout the transcript, including message text, images and empty space. Screenshot drops can use their image pixels when a temporary file URL is unavailable.
 
 ### Changed
 

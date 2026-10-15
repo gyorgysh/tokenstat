@@ -35,6 +35,31 @@ enum ChatInbox { static func pasteboardHasAttachment() -> Bool { false } }
         editor.commandKey = { _ in false }
         press(53)
         assert(stops == 1, "Escape outside the command menu still stops the turn")
-        print("Composer deferred Return ownership and command-key routing passed")
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("ai.tokenstat.draft-drop-tests." + UUID().uuidString))
+        defer { pasteboard.releaseGlobally() }
+        let first = NSPasteboardItem(), second = NSPasteboardItem()
+        let fileURL = URL(fileURLWithPath: "/temporary-screenshot.png").absoluteString
+        first.setString(fileURL, forType: .fileURL)
+        first.setData(Data([1, 2, 3]), forType: .png)
+        let privateType = NSPasteboard.PasteboardType("ai.tokenstat.test.unsupported-file-contents")
+        first.setData(Data([9]), forType: privateType)
+        second.setData(Data([4, 5]), forType: .tiff)
+        pasteboard.writeObjects([first, second])
+        let providers = ChatDraftTextView.attachmentProviders(from: pasteboard)
+        pasteboard.clearContents()
+        assert(providers.count == 2, "A native drop must preserve every dragged item")
+        assert(providers[0].registeredTypeIdentifiers.contains("public.file-url")
+            && providers[0].registeredTypeIdentifiers.contains("public.png"), "Transient screenshots retain URL and pixel alternatives")
+        assert(!providers[0].registeredTypeIdentifiers.contains(privateType.rawValue), "Private representations must not be eagerly materialized")
+        func bytes(_ provider: NSItemProvider, type: NSPasteboard.PasteboardType) async -> Data? {
+            await withCheckedContinuation { continuation in
+                provider.loadDataRepresentation(forTypeIdentifier: type.rawValue) { data, _ in continuation.resume(returning: data) }
+            }
+        }
+        let png = await bytes(providers[0], type: .png)
+        let tiff = await bytes(providers[1], type: .tiff)
+        assert(png == Data([1, 2, 3]) && tiff == Data([4, 5]), "Drop snapshots must survive the source pasteboard being cleared")
+        assert(!editor.acceptsAttachmentDrops, "Standalone editors must opt into attachment routing")
+        print("Composer deferred Return, command keys and native multi-item screenshot drop snapshots passed")
     }
 }

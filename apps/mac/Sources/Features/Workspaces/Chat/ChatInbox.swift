@@ -250,9 +250,22 @@ enum ChatInbox {
     }
 
     private static func drop(from provider: NSItemProvider) async -> ChatInboxDrop? {
-        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            guard let url = await url(from: provider, type: .fileURL) else { return nil }
-            return drop(from: url)
+        // Screenshot thumbnails can offer an unavailable file URL alongside
+        // readable pixels. Keep the original file when it works, then try
+        // the provider's other supported representations before giving up.
+        let offersFile = provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        if offersFile,
+           let url = await url(from: provider, type: .fileURL),
+           let result = drop(from: url)
+        {
+            return result
+        }
+        if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier),
+           let bytes = await data(from: provider, type: .pdf), !bytes.isEmpty
+        {
+            let suggested = ((provider.suggestedName ?? "document.pdf") as NSString).lastPathComponent
+            return .attachment(ChatInboxItem(data: bytes,
+                name: replacingExtension(usableName(suggested), with: "pdf"), mediaType: "application/pdf"))
         }
         let imageTypes: [UTType] = [.png, .jpeg, .gif, .webP, .heic, .tiff, .image]
         for type in imageTypes where provider.hasItemConformingToTypeIdentifier(type.identifier) {
@@ -264,6 +277,9 @@ enum ChatInbox {
                 )))
             }
         }
+        // An unreadable file may also advertise its path as plain text.
+        // Preserve file-drop intent instead of inserting that path as prose.
+        if offersFile { return nil }
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
            let url = await url(from: provider, type: .url)
         {

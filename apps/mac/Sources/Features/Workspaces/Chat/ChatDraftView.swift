@@ -3,6 +3,7 @@
 #if os(macOS)
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Multiline draft that sends on Return. Shift+Return inserts a newline.
 /// Escape stops a running turn.
@@ -15,10 +16,13 @@ struct ChatDraftView: NSViewRepresentable {
     var owner: WorkReference?
     var placeholder: String
     var enabled: Bool
+    var acceptsAttachmentDrops = false
     var onSend: () -> Void
     var onCommandKey: (UInt16) -> Bool = { _ in false }
     var onStop: () -> Void = {}
     var onPasteAttachments: () -> Void = {}
+    var onAttachmentDrop: ([NSItemProvider]) -> Bool = { _ in false }
+    var onAttachmentDropTargeted: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text, selection: $selection, owner: owner, onSend: onSend, onStop: onStop)
@@ -39,6 +43,9 @@ struct ChatDraftView: NSViewRepresentable {
         textView.commandKey = onCommandKey
         textView.draftStop = onStop
         textView.pasteAttachments = onPasteAttachments
+        textView.acceptsAttachmentDrops = enabled && acceptsAttachmentDrops
+        textView.dropAttachments = onAttachmentDrop
+        textView.attachmentDropTargeted = onAttachmentDropTargeted
         textView.placeholder = placeholder
         textView.isEditable = enabled
         textView.isSelectable = true
@@ -96,6 +103,9 @@ struct ChatDraftView: NSViewRepresentable {
         textView.commandKey = onCommandKey
         textView.draftStop = onStop
         textView.pasteAttachments = onPasteAttachments
+        textView.acceptsAttachmentDrops = enabled && acceptsAttachmentDrops
+        textView.dropAttachments = onAttachmentDrop
+        textView.attachmentDropTargeted = onAttachmentDropTargeted
         textView.placeholder = placeholder
         textView.isEditable = enabled
         // Everything below writes into the text view, and AppKit answers a
@@ -264,6 +274,10 @@ final class ChatDraftTextView: NSTextView {
     var draftSend: (() -> Void)?
     var draftStop: (() -> Void)?
     var pasteAttachments: (() -> Void)?
+    var acceptsAttachmentDrops = false
+    var dropAttachments: (([NSItemProvider]) -> Bool)?
+    var attachmentDropTargeted: ((Bool) -> Void)?
+    private var attachmentDragIsTargeted = false
     private(set) var handlingComposition = false
 
     /// Whether this draft view gives up the arrow keys to chat switching:
@@ -279,13 +293,16 @@ final class ChatDraftTextView: NSTextView {
     /// File and image drags belong to the composer well, which attaches them.
     /// Left alone, NSTextView swallows a drop on the text itself and inserts
     /// the path, while the same file dropped a few points above or below
-    /// attaches. Declining here lets the drop bubble to the well's `onDrop`,
-    /// so every point of the composer behaves the same way. Plain text drags
-    /// still go through, which is what makes moving words around work.
-    private static let attachmentImageTypes: [NSPasteboard.PasteboardType] = [
+    /// attaches. AppKit does not reliably bubble a declined native text drop
+    /// to SwiftUI, so forward attachments to the same guarded chat receiver.
+    /// Plain text stays native, including moving words within the draft.
+    private static let attachmentDataTypes: [NSPasteboard.PasteboardType] = [
         .png, .tiff,
         NSPasteboard.PasteboardType("public.jpeg"),
         NSPasteboard.PasteboardType("public.heic"),
+        NSPasteboard.PasteboardType("com.compuserve.gif"),
+        NSPasteboard.PasteboardType("org.webmproject.webp"),
+        .pdf,
     ]
 
     private static func isAttachmentDrag(_ pasteboard: NSPasteboard) -> Bool {
@@ -295,25 +312,76 @@ final class ChatDraftTextView: NSTextView {
         ) as? [URL], !urls.isEmpty {
             return true
         }
-        if attachmentImageTypes.contains(where: { pasteboard.data(forType: $0) != nil }) {
+        if pasteboard.availableType(from: attachmentDataTypes) != nil {
             return true
         }
         return NSImage(pasteboard: pasteboard) != nil
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if Self.isAttachmentDrag(sender.draggingPasteboard) { return [] }
+        if Self.isAttachmentDrag(sender.draggingPasteboard) { return attachmentOperation(sender) }
         return super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if Self.isAttachmentDrag(sender.draggingPasteboard) { return [] }
+        if Self.isAttachmentDrag(sender.draggingPasteboard) { return attachmentOperation(sender) }
         return super.draggingUpdated(sender)
     }
 
+    private func attachmentOperation(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let accepts = isEditable && acceptsAttachmentDrops && dropAttachments != nil
+            && sender.draggingSourceOperationMask.contains(.copy)
+        setAttachmentDropTargeted(accepts)
+        return accepts ? .copy : []
+    }
+
+    private func setAttachmentDropTargeted(_ targeted: Bool) {
+        guard attachmentDragIsTargeted != targeted else { return }
+        attachmentDragIsTargeted = targeted
+        attachmentDropTargeted?(targeted)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        setAttachmentDropTargeted(false)
+        super.draggingExited(sender)
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        setAttachmentDropTargeted(false)
+        super.draggingEnded(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if Self.isAttachmentDrag(sender.draggingPasteboard) { return attachmentOperation(sender) == .copy }
+        return super.prepareForDragOperation(sender)
+    }
+
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if Self.isAttachmentDrag(sender.draggingPasteboard) { return false }
+        if Self.isAttachmentDrag(sender.draggingPasteboard) {
+            defer { setAttachmentDropTargeted(false) }
+            guard attachmentOperation(sender) == .copy else { return false }
+            return dropAttachments?(Self.attachmentProviders(from: sender.draggingPasteboard)) ?? false
+        }
         return super.performDragOperation(sender)
+    }
+
+    /// Snapshot the drag's own representations before its pasteboard goes
+    /// away. File URLs stay metadata; the inbox prepares their files later.
+    /// Keep pixel alternatives alongside a URL for transient screenshots.
+    static func attachmentProviders(from pasteboard: NSPasteboard) -> [NSItemProvider] {
+        (pasteboard.pasteboardItems ?? []).compactMap { item in
+            let provider = NSItemProvider()
+            for type in item.types {
+                guard let contentType = UTType(type.rawValue),
+                      [.fileURL, .url, .image, .pdf, .plainText].contains(where: contentType.conforms(to:)) else { continue }
+                guard let data = item.data(forType: type) else { continue }
+                provider.registerDataRepresentation(forTypeIdentifier: type.rawValue, visibility: .all) { completion in
+                    completion(data, nil)
+                    return nil
+                }
+            }
+            return provider.registeredTypeIdentifiers.isEmpty ? nil : provider
+        }
     }
 
     override var intrinsicContentSize: NSSize {

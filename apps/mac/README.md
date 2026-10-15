@@ -115,6 +115,10 @@ and Save. Explicit image reads and structured tool-image results carry their
 tool-call identity, so thumbnails appear beside that step, including collapsed
 groups. Older or unmatched records remain ordinary galleries. Remote resource
 URLs and paths mentioned in output do not authorize local file reads.
+Images and files can be dropped across the chat pane, including the transcript
+and its empty margins, through the same attachment path as the composer.
+Screenshot thumbnails fall back to their image data if a temporary file URL
+is unavailable.
 Pull and Push dialogs are owned by the desktop window, so an inspector peek
 can auto-hide while a review remains open.
 

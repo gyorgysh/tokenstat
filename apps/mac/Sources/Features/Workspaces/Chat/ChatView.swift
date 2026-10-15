@@ -219,6 +219,8 @@ struct ChatView: View {
     /// screen. This id is what keeps those rows still.
     @State private var sliceAnchor: String?
     @State private var paneDropTargeted = false
+    @State private var transcriptDropTargeted = false
+    @State private var dropPresentation: UInt64 = 0
     @State private var composerDropTargeted = false
     /// Observed, so pinning from the sidebar or Home redraws the chrome
     /// without leaving the conversation.
@@ -386,6 +388,7 @@ struct ChatView: View {
                         onStop: { Task { await model.stop() } },
                         onAttach: { item, owner in await model.attach(item, to: owner) },
                         onRemove: { model.removeAttachment($0) },
+                        acceptsDrops: acceptsDrops,
                         onDropProviders: { providers in
                             receive(providers)
                         },
@@ -441,11 +444,9 @@ struct ChatView: View {
             }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
-        .onDrop(of: ChatInbox.dropTypes, isTargeted: $paneDropTargeted) { providers in
-            receive(providers)
-            return true
-        }
+        .chatDropSurface(enabled: acceptsDrops, isTargeted: $paneDropTargeted, receive: receive)
         .overlay(alignment: .topTrailing) {
             TransientToast(message: $dropNotice, severity: .warning)
                 .padding(.top, Theme.Space.m)
@@ -473,6 +474,7 @@ struct ChatView: View {
             branchPull = answer?.pull
         }
         .onChange(of: isActive) { _, active in
+            dropPresentation &+= 1
             if !active {
                 showingHandoff = false
                 model.saveDraftNow()
@@ -482,6 +484,7 @@ struct ChatView: View {
                 follow.active = true
             }
         }
+        .onChange(of: showingOverview) { _, _ in dropPresentation &+= 1 }
         .onChange(of: model.readingIdentity) { _, _ in
             // A sheet belongs to the conversation that opened it.
             showingHandoff = false
@@ -553,7 +556,7 @@ struct ChatView: View {
                 }
             }
         }
-        .onDisappear { model.saveDraftNow() }
+        .onDisappear { dropPresentation &+= 1; model.saveDraftNow() }
         // And the same fact to the host, which is the one deciding whether a
         // phone hears about this turn.
         .watching(conversationID: model.selected?.id, peer: model.peer,
@@ -716,6 +719,7 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
                 .chatScrollContent()
             }
+            .chatDropSurface(enabled: acceptsDrops, isTargeted: $transcriptDropTargeted, receive: receive)
             // Cover the build-up, do not hide the stack. Opacity 0 is how a
             // lazy stack skipped measuring the last prompt: those rows were
             // not visible, so they stayed at estimated height until a click
@@ -1296,37 +1300,59 @@ struct ChatView: View {
     }
 
     private var dropExperienceVisible: Bool {
-        paneDropTargeted || composerDropTargeted
+        acceptsDrops && (paneDropTargeted || transcriptDropTargeted || composerDropTargeted)
+    }
+
+    private var acceptsDrops: Bool {
+        isActive && !showingOverview && !model.sending
+            && model.folderID == workspaceID && model.isReady(for: workspaceID)
+            && (model.currentReference.map(WorkCacheAccess.canRead)
+                ?? (model.savedCopy == nil && model.selected == nil && model.chats.isEmpty))
     }
 
     private var dropExperience: some View {
         ChatDropExperience()
     }
 
-    private func receive(_ providers: [NSItemProvider]) {
+    @discardableResult
+    private func receive(_ providers: [NSItemProvider]) -> Bool {
+        guard acceptsDrops, !providers.isEmpty else { return false }
         let owner = model.currentReference
         let folder = model.folderID
         let peer = model.peer
         let scope = WorkSessionContext.shared.readingScope
+        let generation = model.selectionGeneration
+        let presentation = dropPresentation
         Task {
             let drops = await ChatInbox.drops(from: providers)
-            guard !drops.isEmpty else { return }
+            defer {
+                for case let .attachment(item) in drops {
+                    if let file = item.file { try? FileManager.default.removeItem(at: file) }
+                }
+            }
+            guard !Task.isCancelled, dropPresentation == presentation, acceptsDrops, !drops.isEmpty,
+                  model.folderID == folder, model.peer == peer,
+                  WorkSessionContext.shared.readingScope == scope else { return }
             var destination = owner
             if destination == nil {
                 guard model.currentReference == nil, model.folderID == folder, model.peer == peer,
+                      model.selectionGeneration == generation,
                       WorkSessionContext.shared.readingScope == scope else { return }
                 guard let created = await model.create(), let folder else { return }
-                guard model.folderID == folder, model.peer == peer,
+                guard !Task.isCancelled, dropPresentation == presentation, acceptsDrops, model.selected?.id == created.id,
+                      model.folderID == folder, model.peer == peer,
                       WorkSessionContext.shared.readingScope == scope else { return }
                 destination = model.draftReference(for: created.id, in: folder)
             }
             guard let destination else { return }
             await receive(drops, owner: destination)
         }
+        return true
     }
 
     private func receive(_ drops: [ChatInboxDrop], owner: WorkReference) async {
         for drop in drops {
+            guard !Task.isCancelled, WorkCacheAccess.canRead(owner) else { return }
             switch drop {
             case let .attachment(item):
                 await model.attach(item, to: owner)
