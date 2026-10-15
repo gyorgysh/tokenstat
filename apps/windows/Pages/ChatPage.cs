@@ -173,12 +173,16 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
         Loaded += async (_, _) =>
         {
+            AppServices.AccountChanged -= ImagesAccountChanged;
+            AppServices.AccountChanged += ImagesAccountChanged;
+            RemoteWorkspaces.Changed -= ImagesPeerChanged;
+            RemoteWorkspaces.Changed += ImagesPeerChanged;
             if (_newChatRequested) { _newChatRequested = false; await CreateAsync(); }
             else if (_openId is string id && _opening) await OpenAsync(id);
             else if (_openId is not null) StartPoll();
             else await ShowListAsync();
         };
-        Unloaded += (_, _) => { RememberDraft(); _openGeneration++; _poll?.Cancel(); _commandDialog?.Hide(); _inspection = null; _inspectionHost.Children.Clear(); };
+        Unloaded += (_, _) => { AppServices.AccountChanged -= ImagesAccountChanged; RemoteWorkspaces.Changed -= ImagesPeerChanged; RememberDraft(); _openGeneration++; ResetImagePreviews(); _poll?.Cancel(); _commandDialog?.Hide(); _inspection = null; _inspectionHost.Children.Clear(); };
         AutomationProperties.SetAutomationId(_draft, "chat.composer");
         AutomationProperties.SetAutomationId(_titleBox, "chat.title");
     }
@@ -351,6 +355,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RememberDraft();
         _poll?.Cancel();
         var generation = ++_openGeneration;
+        ResetImagePreviews();
         AbandonSteerDelivery();
         _opening = false;
         _openId = null;
@@ -638,6 +643,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RememberDraft();
         _poll?.Cancel();
         var generation = ++_openGeneration;
+        ResetImagePreviews();
         AbandonSteerDelivery();
         _opening = true;
         // Remove the previous conversation's controls before changing its id.
@@ -1056,6 +1062,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Edit => $"{item.Id}|{item.Path}|{item.Added}|{item.Removed}|{item.Patch}|{item.Running}|{item.Failed}|{item.Duration}|{CardExpanded(item)}",
         ItemKind.Approval => $"{item.Id}|{item.Pending}|{item.Approval?.ToJsonString()}",
         ItemKind.Attachment => $"{item.Id}|{item.Name}|{item.MediaType}|{item.Size}",
+        ItemKind.Gallery => $"{item.Id}|{string.Join(";", item.Images?.Select(image => image.Id + ":" + image.Name + ":" + image.Size) ?? [])}",
         ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}",
         ItemKind.Failed => $"{item.Id}|{item.Text}",
         ItemKind.Changes => $"{item.Id}|{string.Join(",", item.Changes?.Select(file => $"{file.Path}:{file.Added}:{file.Removed}") ?? Enumerable.Empty<string>())}|{_expandedCards.GetValueOrDefault(item.Id)}",
@@ -1071,7 +1078,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         // `raw` is every row, for the seat line, which must see a running
         // step whether or not it is folded away. `items` is what is drawn.
         var raw = Coalesce(_events);
-        var items = ChatDetailFold.Fold(raw, ChatDetailPreference.Level, _running, IsGroupOpen);
+        var items = ChatImageGallery.Compose(ChatDetailFold.Fold(raw, ChatDetailPreference.Level, _running, IsGroupOpen));
         _sliceOlder = SliceClamp(_sliceOlder, items.Count);
         var start = SliceStart(items.Count, _sliceOlder);
         var end = SliceEnd(items.Count, _sliceOlder);
@@ -1179,6 +1186,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Edit => EditRow(item),
         ItemKind.Approval => ApprovalCard(item),
         ItemKind.Attachment => AttachmentRow(item),
+        ItemKind.Gallery => ImageGalleryRow(item),
         ItemKind.Usage => UsageLine(item),
         ItemKind.Failed => FailedRow(item),
         ItemKind.Group when item.Group is { } group => StepGroupRow(item.Id, group),
@@ -2461,13 +2469,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private List<DisplayItem> Coalesce(JsonArray events)
     {
         var items = new List<DisplayItem>();
-        var tools = new Dictionary<string, int>();
-        var toolBackends = new Dictionary<int, string>();
+        var tools = new ChatToolCalls();
         var questions = new Dictionary<string, int>();
         var text = "";
         var textId = "";
         var thinking = "";
         var thinkingId = "";
+        var attachmentTurn = "prefix";
 
         void FlushText()
         {
@@ -2500,6 +2508,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             {
                 FlushText();
                 FlushThinking();
+                if (!Format.Flag(row, "steer")) {
+                    attachmentTurn = "user-" + Format.Text(row, "seq", Format.Long(row, "atMs").ToString(CultureInfo.InvariantCulture) + ":" + items.Count);
+                    tools.Clear();
+                }
                 items.Add(new DisplayItem
                 {
                     Id = "user-" + Format.Long(row, "atMs") + "-" + items.Count,
@@ -2591,11 +2603,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     FlushThinking();
                     var callId = Format.Text(ev, "callId");
                     if (string.IsNullOrEmpty(callId)) callId = "tool-" + items.Count;
-                    tools[callId] = items.Count;
-                    toolBackends[items.Count] = Format.Text(row, "backend", Format.Text(_openChat, "backend"));
+                    var toolScope = attachmentTurn + "/" + Format.Text(row, "backend", Format.Text(_openChat, "backend"));
+                    tools.Remember(toolScope, Format.Text(row, "backend", Format.Text(_openChat, "backend")), callId, items.Count);
                     items.Add(new DisplayItem
                     {
-                        Id = "tool-" + callId,
+                        Id = "tool-" + toolScope + "/" + callId,
+                        ToolCallId = callId,
+                        AttachmentScope = toolScope,
                         Kind = ItemKind.Tool,
                         // Empty when the event named no tool. The row then says Working.
                         Verb = Format.Text(ev, "verb"),
@@ -2608,8 +2622,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     FlushText();
                     FlushThinking();
                     var endId = Format.Text(ev, "callId");
-                    if (tools.TryGetValue(endId, out var index))
+                    if (tools.TryResolve(attachmentTurn + "/" + Format.Text(row, "backend", Format.Text(_openChat, "backend")), endId, out var owner))
                     {
+                        var index = owner.Index;
                         var tool = items[index];
                         tool.Running = false;
                         if (ev["ok"] is not null)
@@ -2618,7 +2633,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                         }
                         tool.Detail = Format.Text(ev, "detail");
                         var presentation = MuseToolPresentation.Refine(
-                            toolBackends.GetValueOrDefault(index, Format.Text(row, "backend", Format.Text(_openChat, "backend"))),
+                            owner.Backend,
                             tool.Verb, tool.Target, tool.Detail);
                         tool.Verb = presentation.Verb;
                         tool.Target = presentation.Target;
@@ -2644,17 +2659,19 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     };
                     // An edit announced as a tool call becomes that row, as on
                     // the Mac, rather than a second row for one change.
-                    if (tools.TryGetValue(Format.Text(ev, "callId"), out var announced)
-                        && items[announced] is { Kind: ItemKind.Tool, Verb: "Edit" or "NotebookEdit" } call
+                    if (tools.TryResolve(attachmentTurn + "/" + Format.Text(row, "backend", Format.Text(_openChat, "backend")), Format.Text(ev, "callId"), out var announced)
+                        && items[announced.Index] is { Kind: ItemKind.Tool, Verb: "Edit" or "NotebookEdit" } call
                         && (call.Target == edit.Path || string.IsNullOrEmpty(call.Target)))
                     {
                         edit.Id = call.Id;
+                        edit.ToolCallId = call.ToolCallId;
+                        edit.AttachmentScope = call.AttachmentScope;
                         edit.Running = call.Running;
                         edit.Failed = call.Failed;
                         edit.StartedAt = call.StartedAt;
                         edit.EndedAt = call.EndedAt;
                         edit.Duration = call.Duration;
-                        items[announced] = edit;
+                        items[announced.Index] = edit;
                     }
                     else
                     {
@@ -2684,6 +2701,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                         Name = string.IsNullOrEmpty(attachmentName) ? L10n.Text("windows.chatpage.attachment.040d2b36") : attachmentName,
                         MediaType = Format.Text(ev, "mediaType"),
                         Size = Format.Long(ev, "size"),
+                        ToolCallId = Format.Text(ev, "callId", Format.Text(ev, "call_id")),
+                        AttachmentScope = attachmentTurn + "/" + Format.Text(row, "backend", Format.Text(_openChat, "backend")),
                     });
                     break;
                 case "failed":
@@ -2713,9 +2732,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return items;
     }
 
-    private static void CloseRunningTools(List<DisplayItem> items, Dictionary<string, int> tools, bool failed, string detail)
+    private static void CloseRunningTools(List<DisplayItem> items, ChatToolCalls tools, bool failed, string detail)
     {
-        foreach (var index in tools.Values)
+        foreach (var index in tools.Indices)
         {
             if (index < 0 || index >= items.Count) continue;
             var tool = items[index];

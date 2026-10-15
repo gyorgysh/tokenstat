@@ -230,6 +230,12 @@ struct ChatDisplayItem: Identifiable, Equatable, Sendable {
     var groupID: String? = nil
     /// How a step under an open Compact line is drawn. Nil everywhere else.
     var plainStep: PlainStep? = nil
+    /// Presentation-only galleries. Raw attachment rows remain searchable.
+    var imageAttachments: [ChatAttachment] = []
+    /// Original attachment row anchors represented by this gallery.
+    var imageRowIDs: [String] = []
+    /// Backend provenance for explicit image/tool correlation.
+    var sourceBackend: String? = nil
 
     /// A Compact line already says what its step was, so a lone step drops
     /// its card and shows only what it produced. Several steps under one

@@ -17,6 +17,7 @@ struct ClientChatEventRow: View {
     let isPending: Bool
     let resolve: (ChatApproval, String) -> Void
     var attachmentFile: URL? = nil
+    var imageResources: [ChatImageResource] = []
     var openAttachmentFile: (ChatAttachment, URL) -> Void = { _, _ in }
     var attachmentIsLoading = false
     var attachmentError: String?
@@ -47,8 +48,23 @@ struct ClientChatEventRow: View {
     var reviewChanges: ((String?) -> Void)? = nil
 
     var body: some View {
-        content
-            .modifier(ChatGroupStepInset(nested: item.groupID != nil))
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            content
+            if !galleryResources.isEmpty {
+                ChatImageGallery(resources: galleryResources, compact: compactGallery)
+            }
+        }
+        .modifier(ChatGroupStepInset(nested: item.groupID != nil))
+    }
+
+    private var compactGallery: Bool { if case .attachment = item.kind { return false }; return true }
+    private var galleryResources: [ChatImageResource] {
+        if !imageResources.isEmpty { return imageResources }
+        if case let .attachment(file) = item.kind, file.mediaType?.hasPrefix("image/") == true {
+            return [ChatImageResource(attachment: file, data: attachmentData, file: attachmentFile,
+                                     loading: attachmentIsLoading, error: attachmentError)]
+        }
+        return []
     }
 
     @ViewBuilder
@@ -162,6 +178,8 @@ struct ClientChatEventRow: View {
             }
         case let .changes(changes):
             ChatTurnChangesCard(changes: changes, review: reviewChanges)
+        case let .attachment(attachment) where attachment.mediaType?.hasPrefix("image/") == true:
+            EmptyView()
         case let .attachment(attachment):
             // Same as the Mac: stable identity across polls. The revision
             // still redraws through Equatable; recreating collapsed the row.
@@ -498,6 +516,7 @@ extension ClientChatEventRow: Equatable {
             && lhs.answeringQuestion == rhs.answeringQuestion
             && lhs.canAnswerQuestions == rhs.canAnswerQuestions
             && (lhs.reviewChanges == nil) == (rhs.reviewChanges == nil)
+            && lhs.imageResources == rhs.imageResources
         else { return false }
         if case .attachment = lhs.item.kind {
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading

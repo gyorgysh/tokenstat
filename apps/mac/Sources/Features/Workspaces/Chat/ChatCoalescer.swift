@@ -390,6 +390,7 @@ extension ChatDisplayItem {
                         target: agent.target ?? "", detail: agent.detail
                     )
                     let fallbackVerb = presentation.verb
+                    toolBackends[items.count] = eventBackend ?? ""
                     items.append(
                         ChatDisplayItem(
                             id: "tool-\(event.seq != nil ? stamp(event, items.count) : fallback)",
@@ -475,9 +476,11 @@ extension ChatDisplayItem {
                                 id: id,
                                 name: agent.name.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.text("apple.chatmodel.attachment.040d2b36"),
                                 mediaType: agent.mediaType,
-                                size: agent.size
+                                size: agent.size,
+                                toolCallId: agent.callId
                             )
-                        )
+                        ),
+                        sourceBackend: eventBackend
                     )
                 )
             case "usage":
@@ -522,6 +525,12 @@ extension ChatDisplayItem {
         // Tool logs are history; only the host knows whether a process lives.
         if !running {
             closeRunningTools(failed: false, at: nil, detail: L10n.text("apple.chatmodel.ended_without_a_tool_result.da8d3680"))
+        }
+        // Tool rows are reconstructed as results arrive. Apply their original
+        // backend after closure so image attribution never follows the last
+        // backend that happened to emit an event with the same call id.
+        for (index, backend) in toolBackends where items.indices.contains(index) {
+            items[index].sourceBackend = backend.isEmpty ? nil : backend
         }
         return items
     }

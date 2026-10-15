@@ -10,6 +10,9 @@ struct ChatContextCard: View {
     @State private var contextOpen = false
     @State private var serversOpen = false
     @State private var otherServersOpen = false
+    @State private var promptOpen = false
+    @State private var historyOpen = false
+    @State private var conversationOpen = false
     @State private var inspectedOwner: Owner?
 
     private struct Owner: Hashable {
@@ -38,6 +41,9 @@ struct ChatContextCard: View {
             contextOpen = false
             serversOpen = false
             otherServersOpen = false
+            promptOpen = false
+            historyOpen = false
+            conversationOpen = false
             guard !requested.saved, let id = requested.reference?.itemID else { loaded = true; return }
             let peer = model.peer
             while !Task.isCancelled, owner == requested {
@@ -60,14 +66,13 @@ struct ChatContextCard: View {
     }
 
     private var context: some View {
-        card(L10n.text("common.chat.stats"), symbol: "chart.pie", expanded: $contextOpen, showsStatus: true) {
+        card(L10n.text("common.chat.stats.context"), symbol: "chart.pie", expanded: $contextOpen, showsStatus: true) {
             if let inspection = currentInspection {
-                if let resolved = inspection.model {
-                    Text(resolved).font(Theme.callout.weight(.medium)).textSelection(.enabled)
-                }
                 if let used = inspection.contextUsed {
                     HStack(alignment: .firstTextBaseline) {
-                        contextAmount(used, window: inspection.contextWindow)
+                        Text(L10n.text("common.chat.stats.in_context", used.formatted(.number.notation(.compactName))))
+                            .font(Theme.callout.weight(.medium)).monospacedDigit()
+                            .help(used.formatted())
                         Spacer(minLength: 8)
                         if let fraction = inspection.fraction {
                             Text(fraction.formatted(.percent.precision(.fractionLength(0))))
@@ -76,12 +81,15 @@ struct ChatContextCard: View {
                                 .fixedSize()
                         }
                     }
-                    if let fraction = inspection.fraction {
-                        ProgressView(value: fraction).tint(fraction > 0.9 ? Theme.warning : Theme.accent)
-                            .accessibilityLabel(L10n.text("apple.chatcontext.context"))
-                            .accessibilityValue(fraction.formatted(.percent.precision(.fractionLength(0))))
+                    if inspection.contextWindow != nil { ChatContextSplitBar(inspection: inspection) }
+                    if let window = inspection.contextWindow {
+                        HStack {
+                            Text(L10n.text("common.chat.stats.capacity", used.formatted(), window.formatted()))
+                            Spacer(minLength: 4)
+                        }.font(Theme.caption).foregroundStyle(.secondary).monospacedDigit()
+                    } else {
+                        note(L10n.text("common.chat.stats.window_unknown"))
                     }
-                    if contextOpen { note(L10n.text("apple.chatcontext.last_prompt")) }
                 } else {
                     note(L10n.text("apple.chatcontext.context_unknown"))
                     if let window = inspection.contextWindow {
@@ -90,32 +98,39 @@ struct ChatContextCard: View {
                     }
                 }
                 if contextOpen {
-                    if inspection.windowSource == "catalog" { note(L10n.text("apple.chatcontext.catalog_window")) }
-                    if let breakdown = inspection.contextBreakdown {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(L10n.text("common.chat.stats.last_prompt")).font(Theme.caption.weight(.medium))
-                            promptRow(L10n.text("common.chat.stats.input"), value: breakdown.input)
-                            promptRow(L10n.text("common.chat.stats.cache_read"), value: breakdown.cacheRead)
-                            promptRow(L10n.text("common.chat.stats.cache_write"), value: breakdown.cacheWrite)
-                            note(L10n.text("common.chat.stats.prompt_note"))
+                    ThemeRule()
+                    if let breakdown = inspection.contextBreakdown, let used = inspection.contextUsed {
+                        VStack(spacing: 5) {
+                            let denominator = max(used, inspection.contextWindow ?? used)
+                            contextLegend(L10n.text("common.chat.stats.input"), value: breakdown.input, total: denominator, color: Theme.accent)
+                            contextLegend(L10n.text("common.chat.stats.cache_read"), value: breakdown.cacheRead, total: denominator, color: Theme.accent.opacity(0.55))
+                            contextLegend(L10n.text("common.chat.stats.cache_write"), value: breakdown.cacheWrite, total: denominator, color: Theme.warning)
+                            if let window = inspection.contextWindow {
+                                contextLegend(L10n.text("common.chat.stats.remaining_context"), value: window > used ? window - used : 0, total: denominator, color: Theme.accentSoft)
+                            }
                         }
-                    }
-                    if let history = inspection.contextHistory, history.count > 1 {
-                        ChatContextHistory(points: history)
                     }
                     if let tools = inspection.tools { toolList(tools, title: L10n.text("common.chat.stats.available_tools", tools.count.formatted())) }
                     if !inspection.usedTools.isEmpty { toolList(inspection.usedTools, title: L10n.text("apple.chatcontext.used_tools", inspection.usedTools.count.formatted())) }
-                    if let stamp = inspection.observedAtMs {
-                        Text(L10n.text("apple.chatcontext.reported_at", Date(timeIntervalSince1970: Double(stamp) / 1000).formatted(date: .abbreviated, time: .shortened)))
-                            .font(Theme.caption).foregroundStyle(.tertiary)
+                    if let history = inspection.contextHistory, history.count > 1 {
+                        ChatDisclosureRow(title: L10n.text("common.chat.stats.history"), expanded: $historyOpen)
+                        if historyOpen { ChatContextHistory(points: history) }
+                    }
+                    ChatDisclosureRow(title: L10n.text("common.chat.stats.conversation"), expanded: $conversationOpen)
+                    if conversationOpen { ChatCostMeter(totals: model.turnUsage) }
+                    ChatDisclosureRow(title: L10n.text("common.chat.stats.details"), expanded: $promptOpen)
+                    if promptOpen {
+                        note(L10n.text("apple.chatcontext.last_prompt"))
+                        if inspection.windowSource == "catalog" { note(L10n.text("common.chat.stats.catalog_window")) }
+                        if inspection.windowSource == "previousAgent" { note(L10n.text("common.chat.stats.last_window")) }
+                        if let stamp = inspection.observedAtMs {
+                            Text(L10n.text("apple.chatcontext.reported_at", Date(timeIntervalSince1970: Double(stamp) / 1000).formatted(date: .abbreviated, time: .shortened)))
+                                .font(Theme.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             } else {
                 unavailable
-            }
-            if contextOpen {
-                ThemeRule()
-                ChatCostMeter(totals: model.turnUsage)
             }
         }
     }
@@ -133,16 +148,21 @@ struct ChatContextCard: View {
                     let connected = inspection.mcpServers.filter { $0.source == "agent" && $0.status == "connected" }
                     let others = inspection.mcpServers.filter { $0.source != "agent" || $0.status != "connected" }
                     if !connected.isEmpty {
-                        Text(inspection.currentRun == true && model.selected?.running == true ? L10n.text("common.chat.stats.live_servers", connected.count.formatted()) : L10n.text("common.chat.stats.connected_servers", connected.count.formatted()))
-                            .font(Theme.caption).foregroundStyle(.secondary)
                         if serversOpen {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(connected) { server in serverRow(server) }
                             }
                         }
                     }
-                    if !serversOpen && !others.isEmpty {
-                        note(L10n.text("common.chat.stats.other_servers", others.count.formatted()))
+                    if !serversOpen {
+                        HStack(spacing: 6) {
+                            Circle().fill(Theme.accent).frame(width: 6, height: 6).accessibilityHidden(true)
+                            Text(inspection.currentRun && model.selected?.running == true
+                                 ? L10n.text("common.chat.stats.connected_count", connected.count.formatted())
+                                 : L10n.text("common.chat.stats.connected_servers", connected.count.formatted()))
+                            Spacer(minLength: 8)
+                            if !others.isEmpty { Text(L10n.text("common.chat.stats.other_count", others.count.formatted())) }
+                        }.font(Theme.caption).foregroundStyle(.secondary)
                     }
                     if serversOpen && !others.isEmpty {
                         ChatDisclosureRow(title: L10n.text("common.chat.stats.other_servers", others.count.formatted()), expanded: $otherServersOpen)
@@ -191,24 +211,15 @@ struct ChatContextCard: View {
         }
     }
 
-    private func promptRow(_ title: String, value: UInt64) -> some View {
-        HStack { Text(title); Spacer(minLength: 8); Text(value.formatted()).monospacedDigit() }
-            .font(Theme.caption).foregroundStyle(.secondary)
-    }
-
-    private func contextAmount(_ used: UInt64, window: UInt64?) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(used.formatted()).font(Theme.title3.weight(.semibold)).monospacedDigit().fixedSize()
-                if let window {
-                    note(L10n.text("apple.chatcontext.of_tokens", window.formatted())).fixedSize()
-                }
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(used.formatted()).font(Theme.title3.weight(.semibold)).monospacedDigit()
-                if let window { note(L10n.text("apple.chatcontext.of_tokens", window.formatted())) }
-            }
-        }
+    private func contextLegend(_ title: String, value: UInt64, total: UInt64, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(title).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value.formatted()).monospacedDigit()
+            Text((total > 0 ? Double(value) / Double(total) : 0).formatted(.percent.precision(.fractionLength(0))))
+                .foregroundStyle(.secondary).monospacedDigit().frame(minWidth: 34, alignment: .trailing)
+        }.font(Theme.caption)
     }
 
     private func serverRow(_ server: ChatInspection.Server) -> some View {
@@ -219,12 +230,9 @@ struct ChatContextCard: View {
             HStack(spacing: Theme.Space.s) {
                 Circle().fill(live ? Theme.accent : connected ? Theme.accent.opacity(0.45) : Color.secondary)
                     .frame(width: 7, height: 7).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(name)
-                        .font(Theme.callout.weight(.medium)).textSelection(.enabled)
-                    Text(status(server)).font(Theme.caption).foregroundStyle(.secondary)
-                }
+                Text(name).font(Theme.caption.weight(.medium)).lineLimit(1).textSelection(.enabled)
                 Spacer(minLength: 0)
+                Text(status(server)).font(Theme.caption).foregroundStyle(.secondary).lineLimit(1)
             }.frame(minHeight: 28).accessibilityElement(children: .ignore)
                 .accessibilityLabel(name).accessibilityValue(status(server))
             if let tools = server.tools, !tools.isEmpty {
@@ -247,7 +255,12 @@ struct ChatContextCard: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Button { expanded.wrappedValue.toggle() } label: {
                 HStack(alignment: .firstTextBaseline) {
-                    Label(title, systemImage: symbol).font(Theme.callout.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label(title, systemImage: symbol).font(Theme.callout.weight(.semibold))
+                        if showsStatus, let name = currentInspection?.model {
+                            Text(name).font(Theme.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
                     Spacer(minLength: 8)
                     if showsStatus {
                         Text(model.selected?.running == true ? L10n.text("common.running") : L10n.text("common.idle"))
@@ -258,16 +271,42 @@ struct ChatContextCard: View {
                     }
                     Image(systemName: expanded.wrappedValue ? "chevron.up" : "chevron.down").font(Theme.caption).foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                .frame(maxWidth: .infinity, minHeight: chatDisclosureHeight, alignment: .leading).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityValue(expanded.wrappedValue ? L10n.text("common.collapse") : L10n.text("common.expand"))
             content()
         }
-        .padding(Theme.Space.m)
+        .padding(Theme.Space.s)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border))
+    }
+}
+
+private var chatDisclosureHeight: CGFloat {
+    #if os(macOS)
+    28
+    #else
+    44
+    #endif
+}
+
+/// Prompt categories occupy their real share of the reported context window.
+/// The unfilled track is available capacity, not a fabricated token category.
+private struct ChatContextSplitBar: View {
+    let inspection: ChatInspection
+    var body: some View {
+        GeometryReader { geometry in
+            Capsule().fill(Theme.accentSoft).overlay(alignment: .leading) {
+                HStack(spacing: 0) {
+                    ForEach(Array(inspection.contextSegments.enumerated()), id: \.offset) { index, fraction in
+                        Rectangle().fill(index == 0 ? Theme.accent : index == 1 ? Theme.accent.opacity(0.55) : Theme.warning)
+                            .frame(width: geometry.size.width * fraction)
+                    }
+                }.clipShape(Capsule())
+            }
+        }.frame(height: 5).accessibilityHidden(true)
     }
 }
 
@@ -282,7 +321,7 @@ struct ChatDisclosureRow: View {
                 Spacer(minLength: 8)
                 Image(systemName: expanded ? "chevron.up" : "chevron.down").font(Theme.caption)
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            .frame(maxWidth: .infinity, minHeight: chatDisclosureHeight, alignment: .leading).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityValue(expanded ? L10n.text("common.collapse") : L10n.text("common.expand"))
@@ -334,7 +373,6 @@ private struct ChatContextHistory: View {
     let points: [ChatInspection.ContextPoint]
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(L10n.text("common.chat.stats.history")).font(Theme.caption).foregroundStyle(.secondary)
             GeometryReader { geometry in
                 let peak = max(1, Double(points.map(\.tokens).max() ?? 1))
                 Path { path in
@@ -344,13 +382,12 @@ private struct ChatContextHistory: View {
                         if index == 0 { path.move(to: position) } else { path.addLine(to: position) }
                     }
                 }.stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
-            }.frame(height: 48).padding(.vertical, 4).accessibilityHidden(true)
+            }.frame(height: 36).padding(.vertical, 4).accessibilityHidden(true)
             HStack {
                 Text((points.first?.tokens ?? 0).formatted())
                 Spacer()
                 Text((points.last?.tokens ?? 0).formatted())
             }.font(Theme.caption).monospacedDigit().foregroundStyle(.secondary)
-            Text(L10n.text("common.chat.stats.history_note")).font(Theme.caption).foregroundStyle(.tertiary)
         }
     }
 }

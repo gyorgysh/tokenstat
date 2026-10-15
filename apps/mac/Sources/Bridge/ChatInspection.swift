@@ -35,4 +35,19 @@ struct ChatInspection: Decodable, Sendable {
         guard let contextUsed, let contextWindow, contextWindow > 0 else { return nil }
         return min(1, Double(contextUsed) / Double(contextWindow))
     }
+
+    /// Fractions of capacity, with a single used segment when categories
+    /// are absent or inconsistent. Never let malformed telemetry overfill.
+    var contextSegments: [Double] {
+        guard let used = contextUsed, let window = contextWindow, window > 0 else { return [] }
+        let denominator = Double(max(used, window))
+        if let split = contextBreakdown {
+            let (cached, firstOverflow) = split.cacheRead.addingReportingOverflow(split.cacheWrite)
+            let (total, secondOverflow) = cached.addingReportingOverflow(split.input)
+            if !firstOverflow, !secondOverflow, total == used {
+                return [split.input, split.cacheRead, split.cacheWrite].map { Double($0) / denominator }
+            }
+        }
+        return [Double(used) / denominator]
+    }
 }

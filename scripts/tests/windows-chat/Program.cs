@@ -4,6 +4,61 @@ using Tokenstat.Pages;
 
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
+const long imageFileMaximum = 256L * 1024 * 1024;
+Check(ChatImagePolicy.DownloadLimit(false, true, imageFileMaximum) == 5L * 1024 * 1024,
+    "automatic remote image previews use the separate 5 MiB policy");
+Check(ChatImagePolicy.DownloadLimit(false, false, imageFileMaximum) == imageFileMaximum
+    && ChatImagePolicy.DownloadLimit(true, true, imageFileMaximum) == imageFileMaximum
+    && ChatImagePolicy.DownloadLimit(true, false, imageFileMaximum) == imageFileMaximum,
+    "local automatic previews and explicit viewer downloads retain the file-backed limit");
+Check(ChatImagePolicy.DownloadLimit(false, true, 1024) == 1024, "the remote preview policy cannot raise a smaller file limit");
+Console.WriteLine("Windows image preview policy: separate remote automatic limit and local/explicit file-backed limits pass.");
+static ChatPage.DisplayItem GalleryImage(string id, string call = "", string scope = "turn/backend") => new() {
+    Id = id, Kind = ChatPage.ItemKind.Attachment, Name = id + ".png", MediaType = "image/png", ToolCallId = call, AttachmentScope = scope,
+};
+var ordinaryGallery = ChatImageGallery.Compose([GalleryImage("one"), GalleryImage("two"), GalleryImage("three"), GalleryImage("four"), GalleryImage("five")]);
+Check(ordinaryGallery.Count == 1 && ordinaryGallery[0].Images?.Count == 5 && ChatImageGallery.VisibleLimit == 4,
+    "consecutive images retain all viewer entries with only four visible thumbnails");
+var galleryTool = new ChatPage.DisplayItem { Id = "tool-one", Kind = ChatPage.ItemKind.Tool, ToolCallId = "call", AttachmentScope = "turn/backend" };
+var linkedGallery = ChatImageGallery.Compose([galleryTool, new() { Kind = ChatPage.ItemKind.Assistant, Id = "reply" }, GalleryImage("result", "call")]);
+Check(linkedGallery.Count == 3 && linkedGallery[1].Kind == ChatPage.ItemKind.Gallery && linkedGallery[1].Images![0].Id == "result"
+    && linkedGallery[2].Id == "reply", "explicit provenance places a thumbnail beside its step without a standalone duplicate");
+var galleryGroup = new ChatPage.DisplayItem { Id = "group", Kind = ChatPage.ItemKind.Group,
+    Group = new ChatStepGroup { Open = false, Members = [galleryTool], MemberIds = [galleryTool.Id] } };
+var groupedGallery = ChatImageGallery.Compose([galleryGroup, GalleryImage("result", "call")]);
+Check(groupedGallery.Count == 2 && groupedGallery[1].ToolCallId == "group", "closed step groups retain linked image thumbnails");
+foreach (var scope in new[] { "another-turn/backend", "turn/another-backend" })
+{
+    var orphan = ChatImageGallery.Compose([galleryTool, new() { Kind = ChatPage.ItemKind.Assistant, Id = "reply" }, GalleryImage("result", "call", scope)]);
+    Check(orphan[^1].Images![0].Id == "result" && string.IsNullOrEmpty(orphan[^1].ToolCallId), "reused call IDs cannot associate images across turns or backends");
+}
+var mixedGallery = ChatImageGallery.Compose([GalleryImage("one"), new() { Kind = ChatPage.ItemKind.Attachment, Id = "pdf", MediaType = "application/pdf" }, GalleryImage("two")]);
+Check(mixedGallery.Count == 3 && mixedGallery[1].Id == "pdf", "non-image attachments preserve ordering and their download rows");
+var separatedGalleries = ChatImageGallery.Compose([
+    GalleryImage("first", scope: "turn-one/muse"), GalleryImage("second", scope: "turn-one/muse"),
+    GalleryImage("backend-change", scope: "turn-one/codex"), GalleryImage("turn-change", scope: "turn-two/codex"),
+    GalleryImage("orphan-one", "call-one", "turn-two/codex"), GalleryImage("orphan-two", "call-two", "turn-two/codex"),
+    GalleryImage("orphan-two-more", "call-two", "turn-two/codex"),
+]);
+Check(separatedGalleries.Count == 5 && separatedGalleries[0].Images!.Count == 2 && separatedGalleries[^1].Images!.Count == 2,
+    "ordinary galleries break at backend, user-turn and distinct orphan-call boundaries");
+Console.WriteLine("Windows image galleries: bounded thumbnails, complete viewer lists, exact scoped provenance, folded groups and orphan fallback pass.");
+var toolOwnership = new ChatToolCalls();
+toolOwnership.Remember("turn/muse", "muse", "historical-call", 3);
+Check(toolOwnership.TryResolve("turn/codex", "historical-call", out var historicalOwner)
+    && historicalOwner.Index == 3 && historicalOwner.Scope == "turn/muse" && historicalOwner.Backend == "muse",
+    "an end stamped with the newer selected backend retains the unique original tool owner");
+Check(MuseToolPresentation.Refine(historicalOwner.Backend, "Bash Input", "", "{\"command\":\"cargo test\"}") == ("Bash", "cargo test"),
+    "historical Muse tool metadata is refined using the original backend");
+toolOwnership.Remember("turn/codex", "codex", "historical-call", 7);
+Check(!toolOwnership.TryResolve("turn/claude", "historical-call", out _),
+    "a mismatched backend cannot choose between two original call namespaces");
+Check(toolOwnership.TryResolve("turn/muse", "historical-call", out var museOwner) && museOwner.Index == 3 && museOwner.Backend == "muse"
+    && toolOwnership.TryResolve("turn/codex", "historical-call", out var codexOwner) && codexOwner.Index == 7 && codexOwner.Backend == "codex",
+    "exact scoped ends retain their own original backend even when call IDs collide");
+toolOwnership.Clear();
+Check(!toolOwnership.TryResolve("next-turn/codex", "historical-call", out _), "user-turn boundaries retire historical call fallbacks");
+Console.WriteLine("Windows tool ownership: historical backend stamps, original Muse metadata, scoped collisions and user-turn retirement pass.");
 Check(ChatCommandRules.CanSteer("  include tests  ", false, false), "trimmed short drafts can steer");
 Check(!ChatCommandRules.CanSteer(" /usr/local/file ", false, false)
     && !ChatCommandRules.CanSteer("/unknown argument", true, true), "slash-leading literals must queue instead of being rejected by native steering");

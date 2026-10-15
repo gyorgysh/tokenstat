@@ -16,6 +16,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Chat composers on Mac, iPhone, iPad, Android and Windows offer slash commands for context, usage, tools, MCP servers, stopping work and native Claude/Codex compaction.
 - Chat inspectors combine context and conversation usage, recent context history, tool groups and reported MCP connections in compact, expandable panels.
 - Supported Claude and Codex chats accept steering messages, including attachments, during the current turn and mark them on the transcript.
+- Chat images use compact galleries and a viewer with image navigation, zoom, Open and Save. Explicit image reads and structured tool-image results appear as thumbnails beside their tool step.
 
 ### Fixed
 
@@ -25,6 +26,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Pull and Push dialogs stay open when the Mac inspector automatically hides in a narrow window.
 - Chat sends recover in long and resumed conversations. Automatic image previews no longer share an upload's cancellation or progress state, and large images use file-backed previews on Mac, iPhone and iPad.
 - Native compaction remains a maintenance operation in plan mode and after instruction changes. Steering preserves pending questions, retains attachments when capabilities change, and queues messages that exceed the agent's steering limits. A deferred Stop command stays tied to its original chat.
+- Context inspectors label token usage and capacity, preserve the last reported capacity for the same model during active turns, and keep history and conversation totals behind compact disclosures.
 
 ### Changed
 

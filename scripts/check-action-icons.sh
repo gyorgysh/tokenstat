@@ -75,6 +75,9 @@ ALLOWED = [
     # Slash-command completions are option rows: the command spelling and
     # description are the label, like the searchable picker choices above.
     ("Features/Workspaces/Chat/ChatSlashMenu.swift", "Button { model.draft = command.id } label:"),
+    # The image itself is this tile's complete label; its placeholder already
+    # carries a photo/error glyph, and a second action mark obscures pixels.
+    ("Features/Workspaces/Chat/ChatImageGallery.swift", "present?(resources.map(\\.attachment), resource.attachment.id)"),
     # The attachment card. Its whole surface is the file: a type glyph, the
     # name, and a Download or Open label that already carries an ActionIcon.
     ("Client/ClientChatRows.swift", "Button { if let file { onOpenFile(file) } else if let data { onOpen(data) } else { onDownload() } } label:"),

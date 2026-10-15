@@ -67,6 +67,8 @@ mod chat_fast;
 #[cfg(feature = "local-host")]
 pub mod chat_gate;
 #[cfg(feature = "local-host")]
+pub(crate) mod chat_images;
+#[cfg(feature = "local-host")]
 pub(crate) mod chat_inspection;
 #[cfg(feature = "local-host")]
 pub mod chat_live;

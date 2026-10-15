@@ -265,7 +265,9 @@ internal suspend fun downloadChatFile(
     call: suspend (String, JsonObject) -> JsonElement,
     confirm: suspend (Long?) -> Boolean,
     progress: suspend (Float) -> Unit,
+    byteLimit: Long = FILE_MAX.toLong(),
 ): File {
+    require(byteLimit in 1..FILE_MAX.toLong())
     val protocol = call("protocol", buildJsonObject {}) as? JsonObject
     if ((HostContracts.protocolOf(protocol) ?: 0) < 34) {
         var relay = false
@@ -288,9 +290,9 @@ internal suspend fun downloadChatFile(
                 request()
             }
         val encoded = result.text("data")
-        require(encoded.length <= 16 * 1024 * 1024 + 4)
+        require(encoded.length <= minOf(16L * 1024 * 1024 + 4, ((byteLimit + 2) / 3) * 4))
         val bytes = Base64.decode(encoded, Base64.DEFAULT)
-        require(bytes.size <= 12 * 1024 * 1024)
+        require(bytes.size <= minOf(12L * 1024 * 1024, byteLimit))
         val name =
             File((result["attachment"] as? JsonObject)?.text("name").orEmpty()).name.takeIf {
                 it.isNotBlank() && it != "." && it != ".."
@@ -311,7 +313,7 @@ internal suspend fun downloadChatFile(
             as JsonObject
     val descriptor = info["attachment"] as JsonObject
     val size = descriptor.number("size")
-    require(size in 1..minOf(FILE_MAX.toLong(), caps.number("maxFileBytes"))) {
+    require(size in 1..minOf(byteLimit, caps.number("maxFileBytes"))) {
         L10n.text("common.chat_files_too_large")
     }
     var allowRelay = false

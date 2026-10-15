@@ -14,7 +14,7 @@ internal sealed partial class ChatPage
 {
     internal enum ItemKind
     {
-        User, Assistant, Thinking, Tool, Edit, Approval, Attachment, Usage, Failed,
+        User, Assistant, Thinking, Tool, Edit, Approval, Attachment, Gallery, Usage, Failed,
         /// <summary>Steps folded into one line by the chat's detail level.</summary>
         Group,
         /// <summary>A question the agent asked, with the answer once there is one.</summary>
@@ -44,6 +44,9 @@ internal sealed partial class ChatPage
         public string Name;
         public string MediaType;
         public long Size;
+        public string ToolCallId;
+        public string AttachmentScope;
+        public IReadOnlyList<DisplayItem>? Images;
         public long Input;
         public long Output;
         public double Cost;
@@ -75,6 +78,8 @@ internal sealed partial class ChatPage
             Patch = "";
             Name = "";
             MediaType = "";
+            ToolCallId = "";
+            AttachmentScope = "";
             GroupId = "";
         }
     }

@@ -37,7 +37,7 @@ fn directory(path: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-fn open_regular(path: &Path) -> Result<fs::File, String> {
+pub(super) fn open_regular(path: &Path) -> Result<fs::File, String> {
     regular(path)?;
     let mut options = OpenOptions::new();
     options.read(true);

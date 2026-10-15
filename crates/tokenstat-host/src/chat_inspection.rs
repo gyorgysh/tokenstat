@@ -17,6 +17,7 @@ pub(crate) struct Snapshot {
     pub model: Option<String>,
     pub context_used: Option<u64>,
     pub context_window: Option<u64>,
+    pub context_window_inherited: bool,
     pub context_source: Option<String>,
     pub context_history: Vec<ContextPoint>,
     pub context_breakdown: Option<PromptBreakdown>,
@@ -364,6 +365,14 @@ pub(crate) struct Stored {
     pub run_revision: u64,
     pub observed_at_ms: i64,
     pub snapshot: Snapshot,
+    #[serde(default)]
+    pub last_window: Option<ReportedWindow>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ReportedWindow {
+    pub model: String,
+    pub tokens: u64,
 }
 
 /// The same capped, nonblocking regular-file reader is used for external

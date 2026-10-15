@@ -462,6 +462,7 @@ struct ChatView: View {
         }
         #endif
         .sheet(isPresented: $showingHandoff) { WorkHandoffSheet(chat: model) }
+        .chatImageViewer(model: model)
         // Asked again when the branch moves and when a turn ends, since an
         // agent may have just opened the pull request.
         .task(id: "\(workspaceID)|\(git?.branch ?? "")|\(model.busy)|\(isActive)") {
@@ -644,6 +645,7 @@ struct ChatView: View {
                                         Task { await model.resolve(approval, choice: choice, owner: owner) }
                                     },
                                     attachmentFile: model.responseAttachmentFiles[attachmentID(for: item)],
+                                    imageResources: model.imageResources(for: item.imageAttachments),
                                     attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
                                     attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
                                     downloadAttachment: { attachment in

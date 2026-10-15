@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 // Compile with ChatTranscriptProjector.swift ChatCoalescer.swift ChatEvents.swift ChatDisplayItem.swift ChatTranscriptFold.swift ChatQuestion.swift MuseToolPresentation.swift.
 import Foundation
-struct ChatAttachment: Hashable, Sendable { var id: String; var name: String; var mediaType: String?; var size: UInt64? }
+struct ChatAttachment: Hashable, Sendable { var id: String; var name: String; var mediaType: String?; var size: UInt64?; var toolCallId: String? = nil }
 struct ChatApproval: Codable, Hashable, Sendable { var id: String; var decision: String? }
 @main struct ChatCoalescerTests {
     @MainActor static func main() async throws {
@@ -13,6 +13,16 @@ struct ChatApproval: Codable, Hashable, Sendable { var id: String; var decision:
         let steerRows = ChatDisplayItem.coalesce(steerEvents, running: true)
         precondition(steerRows.last?.isSteer == true)
         precondition(steerRows.contains { if case let .tool(tool) = $0.kind { return tool.running }; return false }, "Steering must not close an active tool")
+        let imageWire = Data(#"[{"kind":"agent","backend":"claude","event":{"kind":"attachment","id":"image","name":"image.png","mediaType":"image/png","callId":"read-image"}}]"#.utf8)
+        let imageRows = ChatDisplayItem.coalesce(try JSONDecoder().decode([ChatTimelineEvent].self, from: imageWire))
+        if case let .attachment(file) = imageRows.first?.kind {
+            precondition(file.toolCallId == "read-image", "Explicit image provenance must survive coalescing")
+            precondition(imageRows.first?.sourceBackend == "claude", "Image provenance must retain its backend scope")
+        } else { preconditionFailure("Image fixture did not produce an attachment") }
+        let backendWire = Data(#"[{"kind":"agent","seq":1,"backend":"claude","event":{"kind":"toolStart","callId":"shared","verb":"Read","target":"a.png"}},{"kind":"agent","seq":2,"backend":"codex","event":{"kind":"toolStart","callId":"shared","verb":"Read","target":"b.png"}},{"kind":"agent","seq":3,"backend":"codex","event":{"kind":"done","status":"success"}}]"#.utf8)
+        let backendRows = ChatDisplayItem.coalesce(try JSONDecoder().decode([ChatTimelineEvent].self, from: backendWire), running: false)
+        let toolSources = backendRows.compactMap { row -> String? in if case .tool = row.kind { return row.sourceBackend }; return nil }
+        precondition(toolSources == ["claude", "codex"], "Closing/reconstructing tools must preserve each original backend even with reused call ids")
         let projector = ChatTranscriptProjector()
         var cases = 0
         for seed in 1...250 {
@@ -48,7 +58,10 @@ struct ChatApproval: Codable, Hashable, Sendable { var id: String; var decision:
                 let actual = ChatDisplayItem.coalesce(events, defaultBackend: "codex", running: running)
                 let projected = try await projector.project(events, backend: "codex", running: running)
                 precondition(projected == actual, "Worker changed transcript rows")
-                precondition(reference == actual, "Mismatch seed \(seed), running \(running)")
+                // The legacy oracle predates additive image provenance;
+                // its tool/backend metadata is checked independently above.
+                let legacyRows = actual.map { row in var row = row; row.sourceBackend = nil; return row }
+                precondition(reference == legacyRows, "Mismatch seed \(seed), running \(running)")
                 cases += 1
             }
         }

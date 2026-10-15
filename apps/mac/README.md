@@ -76,6 +76,9 @@ Context and MCP details use the host's read-only `chat.inspection` response.
 The combined statistics panel shows the latest reported prompt footprint,
 fresh/cache breakdown when reported, and archive-wide conversation totals.
 The usage bar includes fresh input, output, cache reads and cache writes.
+The compact summary labels context tokens and capacity. A capacity reported
+for the same resolved model remains available between turns and is identified
+as a previous report; a missing capacity stays unknown.
 A bounded history plots the latest 24 context changes for the selected agent
 and model. Tools are grouped by source with searchable, bounded drilldowns;
 connected/reported MCP servers appear first and other states start collapsed.
@@ -105,6 +108,12 @@ and [Codex app-server](https://github.com/openai/codex/blob/main/codex-rs/app-se
 Automatic attachment downloads allow 5 MiB. Local images bypass that transfer
 threshold and use downsampled previews that preserve transparency, including
 file-backed originals.
+Images share bounded galleries: one preview, side-by-side pairs, or a four-cell
+grid with an overflow count. The image viewer provides navigation, zoom, Open
+and Save. Explicit image reads and structured tool-image results carry their
+tool-call identity, so thumbnails appear beside that step, including collapsed
+groups. Older or unmatched records remain ordinary galleries. Remote resource
+URLs and paths mentioned in output do not authorize local file reads.
 Pull and Push dialogs are owned by the desktop window, so an inspector peek
 can auto-hide while a review remains open.
 

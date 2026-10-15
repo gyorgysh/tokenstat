@@ -1855,6 +1855,7 @@ mod retirement_tests {
                 name: "old.zip".into(),
                 media_type: None,
                 size: 1,
+                call_id: None,
             }],
         );
         store
@@ -1876,6 +1877,7 @@ mod retirement_tests {
                     name: "video.mp4".into(),
                     media_type: None,
                     size: 1,
+                    call_id: None,
                 },
                 Event::Text {
                     delta: "Partial work".into(),

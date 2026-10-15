@@ -117,7 +117,18 @@ internal fun TranscriptItemRow(
     canAnswerQuestions: Boolean = true,
     /// Opens the folder's changes. Null where there is no folder to open.
     onReviewChanges: (() -> Unit)? = null,
+    toolImages: List<ChatDisplayItem.Attachment> = emptyList(),
 ) {
+    if (toolImages.isNotEmpty()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+            Box(Modifier.weight(1f)) {
+                TranscriptItemRow(item, model, peer, chatId, hostLabel, defaultAgentName, expandsOutput,
+                    onToggleGroup, canAnswerQuestions, onReviewChanges)
+            }
+            ChatImageGallery(toolImages, model, peer, chatId, hostLabel, compact = true)
+        }
+        return
+    }
     val scope = rememberCoroutineScope()
     when (item) {
         is ChatDisplayItem.Group ->
@@ -209,6 +220,7 @@ internal fun TranscriptItemRow(
             chatId = chatId,
             hostLabel = hostLabel,
         )
+        is ChatDisplayItem.ImageGallery -> ChatImageGallery(item.images, model, peer, chatId, hostLabel)
         is ChatDisplayItem.Question -> {
             var sending by remember(item.question.id) { mutableStateOf(false) }
             var error by remember(item.question.id) { mutableStateOf<String?>(null) }

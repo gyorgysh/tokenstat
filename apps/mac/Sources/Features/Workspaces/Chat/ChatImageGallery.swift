@@ -1,0 +1,409 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
+
+struct ChatImageResource: Equatable {
+    let attachment: ChatAttachment
+    var data: Data?
+    var file: URL?
+    var loading = false
+    var error: String?
+    var available: Bool { data != nil || file != nil }
+}
+
+extension ChatModel {
+    func imageResources(for files: [ChatAttachment]) -> [ChatImageResource] {
+        files.map { file in
+            ChatImageResource(attachment: file, data: responseAttachmentData[file.id],
+                file: responseAttachmentFiles[file.id], loading: loadingResponseAttachments.contains(file.id),
+                error: responseAttachmentErrors[file.id])
+        }
+    }
+}
+
+private struct PresentChatImagesKey: EnvironmentKey {
+    static let defaultValue: (([ChatAttachment], String) -> Void)? = nil
+}
+extension EnvironmentValues {
+    var presentChatImages: (([ChatAttachment], String) -> Void)? {
+        get { self[PresentChatImagesKey.self] }
+        set { self[PresentChatImagesKey.self] = newValue }
+    }
+}
+
+/// A bounded group of image previews, shared by desktop and mobile rows.
+/// Four cells are enough to recognize a set; the viewer retains every file.
+struct ChatImageGallery: View {
+    let resources: [ChatImageResource]
+    var compact = false
+    @Environment(\.presentChatImages) private var present
+
+    var body: some View {
+        Group {
+            if compact {
+                HStack(spacing: 6) {
+                    ForEach(Array(resources.prefix(4).enumerated()), id: \.element.attachment.id) { index, resource in
+                        tile(resource, index: index).frame(width: compactSize, height: compactSize)
+                    }
+                }
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: resources.count == 1 ? 1 : 2), spacing: 6) {
+                    ForEach(Array(resources.prefix(4).enumerated()), id: \.element.attachment.id) { index, resource in
+                        VStack(alignment: .leading, spacing: 4) {
+                            tile(resource, index: index).aspectRatio(resources.count == 1 ? 1.65 : 1.4, contentMode: .fit)
+                            Text(resource.attachment.name).font(Theme.caption).foregroundStyle(.secondary)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+                }
+                .frame(maxWidth: resources.count == 1 ? 300 : 420, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var compactSize: CGFloat {
+        #if os(macOS)
+        64
+        #else
+        52
+        #endif
+    }
+
+    private func tile(_ resource: ChatImageResource, index: Int) -> some View {
+        Button {
+            present?(resources.map(\.attachment), resource.attachment.id)
+        } label: {
+            ChatImageSurface(resource: resource, maxPixel: compact ? 192 : 720)
+                .overlay(alignment: .bottomTrailing) {
+                    if index == 3, resources.count > 4 {
+                        Text(L10n.text("common.chat.images.more", "\(resources.count - 4)"))
+                            .font(Theme.callout.weight(.semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 5)
+                            .background(.black.opacity(0.7), in: Capsule()).padding(6)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
+                .contentShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .help(L10n.text("common.chat.images.view", resource.attachment.name))
+        .accessibilityLabel(L10n.text("common.chat.images.view", resource.attachment.name))
+        .accessibilityValue(L10n.text("common.chat.images.position", "\(index + 1)", "\(resources.count)"))
+    }
+}
+
+/// Decode a bounded, alpha-preserving image away from the UI executor.
+/// The fixed preview box never changes when pixels arrive.
+private struct ChatImageSurface: View {
+    let resource: ChatImageResource
+    var maxPixel: CGFloat = 3072
+    var showsTransparencyGrid = true
+    @State private var decoded: Image?
+    @State private var decodedSource: Source?
+    private struct Source: Hashable { let data: Data?; let file: URL?; let maxPixel: CGFloat }
+    private var source: Source { Source(data: resource.data, file: resource.file, maxPixel: maxPixel) }
+    private static let checker: Image = {
+        guard let context = CGContext(data: nil, width: 32, height: 32, bitsPerComponent: 8, bytesPerRow: 128,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return Image(systemName: "square.fill")
+        }
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+        context.fill(CGRect(x: 16, y: 16, width: 16, height: 16))
+        guard let image = context.makeImage() else { return Image(systemName: "square.fill") }
+        return Image(decorative: image, scale: 1)
+    }()
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Theme.panel
+                if showsTransparencyGrid {
+                    Color.primary.opacity(0.035)
+                        .mask { Rectangle().fill(ImagePaint(image: Self.checker, scale: 1)) }
+                        .accessibilityHidden(true)
+                }
+                if decodedSource == source, let decoded {
+                    decoded.resizable().scaledToFit()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                } else if resource.loading || (resource.available && decodedSource != source) {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: resource.error == nil && !resource.available ? "photo" : "exclamationmark.triangle")
+                        .font(Theme.title3).foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
+        }
+        .task(id: source) {
+            let requested = source
+            let thumbnail = await Task.detached(priority: .userInitiated) {
+                if let data = requested.data { return ChatThumbnail.make(from: data, maxPixel: requested.maxPixel, preservingAlpha: true) }
+                if let file = requested.file { return ChatThumbnail.make(from: file, maxPixel: requested.maxPixel, preservingAlpha: true) }
+                return nil
+            }.value
+            guard !Task.isCancelled else { return }
+            decodedSource = requested
+            #if os(macOS)
+            decoded = thumbnail.flatMap(NSImage.init(data:)).map { Image(nsImage: $0) }
+            #else
+            decoded = thumbnail.flatMap(UIImage.init(data:)).map { Image(uiImage: $0) }
+            #endif
+        }
+    }
+}
+
+private struct ChatImagePresentation: Identifiable {
+    let id = UUID()
+    let reference: WorkReference?
+    let attachments: [ChatAttachment]
+    let selectedID: String
+}
+
+/// A chat owns the lightbox, so lazy row recycling cannot dismiss it.
+private struct ChatImageViewerHost: ViewModifier {
+    @Bindable var model: ChatModel
+    @State private var presentation: ChatImagePresentation?
+    func body(content: Content) -> some View {
+        content
+            .environment(\.presentChatImages, { files, selected in
+                guard !files.isEmpty else { return }
+                presentation = ChatImagePresentation(reference: model.currentReference, attachments: files, selectedID: selected)
+            })
+            .sheet(item: $presentation) { request in
+                ChatImageViewer(model: model, request: request)
+            }
+            .onChange(of: model.currentReference) { _, _ in presentation = nil }
+            .onChange(of: WorkSessionContext.shared.scope) { _, _ in presentation = nil }
+    }
+}
+extension View {
+    func chatImageViewer(model: ChatModel) -> some View { modifier(ChatImageViewerHost(model: model)) }
+}
+
+private struct ChatImageViewer: View {
+    @Bindable var model: ChatModel
+    let request: ChatImagePresentation
+    @State private var selection = 0
+    @State private var zoom: CGFloat = 1
+    @State private var gestureZoom: CGFloat = 1
+    @State private var error: String?
+    #if !os(macOS)
+    @State private var openingFile: ChatPreviewedFile?
+    @State private var savingFile: ChatPreviewedFile?
+    #endif
+    @Environment(\.dismiss) private var dismiss
+    init(model: ChatModel, request: ChatImagePresentation) {
+        self.model = model
+        self.request = request
+        _selection = State(initialValue: request.attachments.firstIndex(where: { $0.id == request.selectedID }) ?? 0)
+    }
+    private var attachment: ChatAttachment { request.attachments[min(selection, request.attachments.count - 1)] }
+    private var resource: ChatImageResource { model.imageResources(for: [attachment])[0] }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            ThemeRule()
+            viewport
+            downloadNotice
+            if let error { Text(error).font(Theme.caption).foregroundStyle(Theme.danger).padding(.horizontal, 16) }
+            ThemeRule()
+            navigationControls
+            fileActions
+        }
+        .background(Theme.background)
+        .modifier(ChatFileRelayConsent(model: model, presenter: request.id))
+        #if os(macOS)
+        .frame(minWidth: 480, idealWidth: 880, minHeight: 480, idealHeight: 680)
+        .onExitCommand { dismiss() }
+        #else
+        .presentationDetents([.large])
+        .fullScreenCover(item: $openingFile) { file in ClientFilePreview(file: file) { openingFile = nil } }
+        .sheet(item: $savingFile) { file in ChatImageExporter(file: file.url) { savingFile = nil } }
+        #endif
+        .onAppear { model.fileRelayPresenter = request.id }
+        .onDisappear {
+            if model.fileRelayPresenter == request.id {
+                model.fileRelayPresenter = nil
+                model.answerFileRelay(false)
+            }
+        }
+        .task(id: attachment.id) { await loadSelected() }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(attachment.name).font(Theme.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+                Text(L10n.text("common.chat.images.position", "\(selection + 1)", "\(request.attachments.count)"))
+                    .font(Theme.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
+            Spacer(minLength: 8)
+            iconButton(L10n.text("common.close"), symbol: "xmark") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+        }.padding(16)
+    }
+    private var viewport: some View {
+        GeometryReader { geometry in
+            ScrollView([.horizontal, .vertical]) {
+                ChatImageSurface(resource: resource, showsTransparencyGrid: false)
+                    .frame(width: max(1, geometry.size.width) * zoom, height: max(1, geometry.size.height) * zoom)
+                    .accessibilityLabel(attachment.name)
+            }
+            .scrollIndicators(.hidden)
+            .simultaneousGesture(MagnifyGesture().onChanged { value in
+                zoom = min(4, max(1, gestureZoom * value.magnification))
+            }.onEnded { _ in gestureZoom = zoom })
+        }
+    }
+    @ViewBuilder private var downloadNotice: some View {
+        if !resource.available, !resource.loading {
+            HStack {
+                Text(resource.error ?? L10n.text("common.chat.images.unavailable"))
+                    .font(Theme.caption).foregroundStyle(.secondary)
+                if model.savedCopy == nil {
+                    Button(L10n.text("common.retry"), .refresh) { Task { await loadSelected() } }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                }
+            }.padding(12)
+        }
+    }
+    private var navigationControls: some View {
+        HStack(spacing: 8) {
+            iconButton(L10n.text("common.chat.images.previous"), symbol: "chevron.left") { move(-1) }
+                .disabled(selection == 0).keyboardShortcut(.leftArrow, modifiers: [])
+            Spacer(minLength: 0)
+            iconButton(L10n.text("common.chat.images.zoom_out"), symbol: "minus.magnifyingglass") { setZoom(zoom - 0.5) }
+                .disabled(zoom <= 1)
+            iconButton(L10n.text("common.chat.images.reset_zoom"), symbol: "arrow.up.left.and.arrow.down.right") { setZoom(1) }
+            iconButton(L10n.text("common.chat.images.zoom_in"), symbol: "plus.magnifyingglass") { setZoom(zoom + 0.5) }
+                .disabled(zoom >= 4)
+            Spacer(minLength: 0)
+            iconButton(L10n.text("common.chat.images.next"), symbol: "chevron.right") { move(1) }
+                .disabled(selection + 1 >= request.attachments.count).keyboardShortcut(.rightArrow, modifiers: [])
+        }
+        .labelStyle(.iconOnly).buttonStyle(SecondaryButtonStyle(comfortable: true)).padding(.horizontal, 16).padding(.top, 10)
+    }
+    private func iconButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).frame(width: 20, height: 20) }
+            .buttonStyle(SecondaryButtonStyle(comfortable: true))
+            .help(title).accessibilityLabel(title)
+    }
+    private var fileActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { openSaveButtons }
+            VStack(spacing: 8) { openSaveButtons }
+        }
+        .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(!resource.available).padding(12)
+    }
+    private var openSaveButtons: some View {
+        Group {
+            Button(L10n.text("common.chat.images.open"), .preview) { openImage() }
+            Button(L10n.text("common.chat.images.save"), .download) { saveImage() }
+        }
+    }
+
+    private func setZoom(_ value: CGFloat) { zoom = min(4, max(1, value)); gestureZoom = zoom }
+    private func move(_ direction: Int) {
+        let next = selection + direction
+        guard request.attachments.indices.contains(next) else { return }
+        selection = next; setZoom(1); error = nil
+    }
+    private func loadSelected() async {
+        let selected = attachment
+        // A canceled predecessor or an automatic preview can still be
+        // settling. Wait for its transfer slot so Next opens the new image
+        // directly, including when the background read declined relay use.
+        while model.fileTransferInFlight || model.loadingResponseAttachments.contains(selected.id) {
+            guard !Task.isCancelled, model.currentReference == request.reference, attachment.id == selected.id else { return }
+            do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
+        }
+        guard !Task.isCancelled, model.currentReference == request.reference,
+              attachment.id == selected.id, !resource.available else { return }
+        await model.downloadResponseAttachment(selected)
+    }
+    private func sourceFile() throws -> URL {
+        guard let reference = request.reference, model.currentReference == reference,
+              WorkCacheAccess.canRead(reference) else { throw CancellationError() }
+        if let file = resource.file { return file }
+        guard let data = resource.data else { throw CocoaError(.fileNoSuchFile) }
+        return try ChatFileStaging.stage(data, id: attachment.id, name: attachment.name)
+    }
+    private func openImage() {
+        do {
+            let file = try sourceFile()
+            #if os(macOS)
+            NSWorkspace.shared.open(file)
+            #else
+            openingFile = ChatPreviewedFile(id: attachment.id, url: file, name: attachment.name)
+            #endif
+        } catch { self.error = L10n.text("common.chat.images.unavailable") }
+    }
+    private func saveImage() {
+        do {
+            guard let reference = request.reference else { throw CancellationError() }
+            let source = try sourceFile()
+            #if os(macOS)
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = attachment.name
+            panel.begin { result in
+                guard result == .OK, let destination = panel.url,
+                      source.standardizedFileURL != destination.standardizedFileURL,
+                      model.currentReference == reference, WorkCacheAccess.canRead(reference) else { return }
+                Task { await copyImage(source, to: destination, reference: reference) }
+            }
+            #else
+            savingFile = ChatPreviewedFile(id: attachment.id, url: source, name: attachment.name)
+            #endif
+        } catch { self.error = L10n.text("common.chat.images.save_failed") }
+    }
+
+    private func copyImage(_ source: URL, to destination: URL, reference: WorkReference) async {
+        guard !Task.isCancelled, model.currentReference == reference, WorkCacheAccess.canRead(reference) else { return }
+        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".tokenstat-image-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try FileManager.default.copyItem(at: source, to: temporary)
+            }.value
+            // The slow copy never publishes a destination. Only this actor
+            // may finish it, after checking the owner and access again.
+            guard !Task.isCancelled, model.currentReference == reference, WorkCacheAccess.canRead(reference) else { return }
+            if FileManager.default.fileExists(atPath: destination.path) {
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+            } else { try FileManager.default.moveItem(at: temporary, to: destination) }
+        } catch {
+            if model.currentReference == reference, WorkCacheAccess.canRead(reference) {
+                self.error = L10n.text("common.chat.images.save_failed")
+            }
+        }
+    }
+}
+
+#if !os(macOS)
+private struct ChatImageExporter: UIViewControllerRepresentable {
+    let file: URL
+    let onDone: () -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(onDone: onDone) }
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forExporting: [file], asCopy: true)
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onDone: () -> Void
+        init(onDone: @escaping () -> Void) { self.onDone = onDone }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { onDone() }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { onDone() }
+    }
+}
+#endif

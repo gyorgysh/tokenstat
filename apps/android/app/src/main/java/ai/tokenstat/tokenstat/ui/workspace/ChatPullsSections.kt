@@ -1624,11 +1624,13 @@ fun ChatSection(
             }
             // What the list draws. `transcript` stays every row, for the
             // seat line and anything else that must see a folded step.
-            val shownRows = remember(transcript, detail, groupsOpen, toggledGroups, openChat?.bol("running")) {
+            val foldedRows = remember(transcript, detail, groupsOpen, toggledGroups, openChat?.bol("running")) {
                 foldTranscript(transcript, detail, running = openChat?.bol("running") ?: true) { id ->
                     groupsOpen != (id in toggledGroups)
                 }
             }
+            val imageRows = remember(foldedRows, transcript) { chatImageRows(foldedRows, transcript) }
+            val shownRows = imageRows.rows
             // Fills, rather than wrapping: the composer below is docked to
             // the bottom edge the way every chat app docks it, instead of
             // floating at whatever height the transcript happened to end.
@@ -1718,6 +1720,7 @@ fun ChatSection(
                                 expandsOutput = detail == ChatDetail.Detailed,
                                 canAnswerQuestions = !offline && HostContracts.supportsChatQuestions(protocol),
                                 onReviewChanges = if (offline) null else ({ onOpenSection("Changes") }),
+                                toolImages = imageRows.toolImages[item.id].orEmpty(),
                                 onToggleGroup = { id ->
                                     toggledGroups = if (id in toggledGroups) toggledGroups - id else toggledGroups + id
                                 },

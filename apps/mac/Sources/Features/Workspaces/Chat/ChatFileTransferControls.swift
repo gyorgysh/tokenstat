@@ -32,8 +32,20 @@ extension ChatModel {
 struct ChatFileTransferControls: ViewModifier {
     @Bindable var model: ChatModel
     func body(content: Content) -> some View {
+        content.modifier(ChatFileRelayConsent(model: model))
+        .onChange(of: model.selectionGeneration) { _, _ in model.fileTransferCancelled = true; model.answerFileRelay(false) }
+        .onDisappear { model.fileTransferCancelled = true; model.answerFileRelay(false) }
+    }
+}
+
+/// Exactly one visible surface presents a transfer's consent request.
+struct ChatFileRelayConsent: ViewModifier {
+    @Bindable var model: ChatModel
+    var presenter: UUID? = nil
+    func body(content: Content) -> some View {
         content.alert(L10n.text("common.chat_files_relay_title"), isPresented: Binding(
-            get: { model.fileRelayName != nil }, set: { if !$0 { model.answerFileRelay(false) } }
+            get: { model.fileRelayPresenter == presenter && model.fileRelayName != nil },
+            set: { if !$0, model.fileRelayPresenter == presenter { model.answerFileRelay(false) } }
         )) {
             Button(L10n.text("common.cancel"), role: .cancel) { model.answerFileRelay(false) }
             Button(L10n.text("common.continue")) { model.answerFileRelay(true) }
@@ -42,8 +54,6 @@ struct ChatFileTransferControls: ViewModifier {
                 ByteCountFormatter.string(fromByteCount: Int64(clamping: model.fileRelaySize ?? 0), countStyle: .file)))
             if let remaining = model.fileRelayRemaining { Text(L10n.text("common.chat_files_remaining", ByteCountFormatter.string(fromByteCount: Int64(clamping: remaining), countStyle: .file))) }
         }
-        .onChange(of: model.selectionGeneration) { _, _ in model.fileTransferCancelled = true; model.answerFileRelay(false) }
-        .onDisappear { model.fileTransferCancelled = true; model.answerFileRelay(false) }
     }
 }
 

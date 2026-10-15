@@ -3033,6 +3033,8 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
     var name: String
     var mediaType: String?
     var size: UInt64?
+    /// Only present when the host explicitly attributes this file to a tool.
+    var toolCallId: String? = nil
 }
 
 struct ChatAttachmentData: Codable, Sendable {

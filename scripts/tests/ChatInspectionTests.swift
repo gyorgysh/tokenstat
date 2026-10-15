@@ -24,6 +24,16 @@ import Foundation
         bounded.contextWindow = 1
         bounded.contextUsed = .max
         precondition(bounded.fraction == 1, "Reported counts beyond the window cannot overflow the bar")
+        precondition(bounded.contextSegments == [1])
+        var split = value
+        split.contextUsed = 100
+        split.contextWindow = 200
+        split.contextBreakdown = .init(input: 20, cacheRead: 70, cacheWrite: 10)
+        precondition(split.contextSegments == [0.1, 0.35, 0.05], "Prompt categories occupy their share of capacity, not the entire bar")
+        split.contextBreakdown = .init(input: .max, cacheRead: .max, cacheWrite: 10)
+        precondition(split.contextSegments == [0.5], "Invalid breakdowns cannot overflow or invent categories")
+        split.contextWindow = nil
+        precondition(split.contextSegments.isEmpty, "Unknown capacity cannot display a percentage bar")
         print("Chat inspection: agent/configuration distinction, unknown telemetry, and bounded rendering passed")
     }
 }

@@ -188,7 +188,8 @@ enum ChatTranscriptFold {
     /// group's steps. Nil when the row is drawn as itself or is not here.
     static func owner(of id: String, in folded: [ChatDisplayItem]) -> String? {
         for item in folded {
-            if case let .group(group) = item.kind, !group.open, group.memberIDs.contains(id) {
+            if case let .group(group) = item.kind, !group.open,
+               group.memberIDs.contains(id) || item.imageRowIDs.contains(id) {
                 return item.id
             }
         }
@@ -365,7 +366,9 @@ enum ChatTranscriptFold {
         // rows, or its token counts would just vanish.
         if let lastHeader, cost > 0, case var .group(group) = out[lastHeader].kind {
             group.cost = cost
-            out[lastHeader] = ChatDisplayItem(id: out[lastHeader].id, kind: .group(group))
+            let previous = out[lastHeader]
+            out[lastHeader] = ChatDisplayItem(id: previous.id, kind: .group(group), lastSequence: previous.lastSequence,
+                imageAttachments: previous.imageAttachments, imageRowIDs: previous.imageRowIDs)
         } else {
             out.append(contentsOf: usage)
         }
@@ -382,7 +385,13 @@ enum ChatTranscriptFold {
         let id = groupID(firstMember: members[0].id)
         var group = group
         group.open = isOpen(id)
-        out.append(ChatDisplayItem(id: id, kind: .group(group), lastSequence: members.last?.lastSequence))
+        var header = ChatDisplayItem(id: id, kind: .group(group), lastSequence: members.last?.lastSequence)
+        if !group.open {
+            var seen = Set<String>()
+            header.imageAttachments = members.flatMap(\.imageAttachments).filter { seen.insert($0.id).inserted }
+            header.imageRowIDs = members.flatMap(\.imageRowIDs)
+        }
+        out.append(header)
         guard group.open else { return }
         for member in members {
             var row = member

@@ -9,12 +9,34 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class ChatFileTransfersTest {
     @get:Rule val temporary = TemporaryFolder()
+
+    @Test
+    fun automaticPreviewLimitIsCheckedAgainstTheHostDescriptorBeforeDownloading() = runBlocking {
+        val calls = mutableListOf<String>()
+        try {
+            downloadChatFile(temporary.newFolder(), "chat", "image", "owner",
+                call = { method, _ ->
+                    calls.add(method)
+                    when (method) {
+                        "protocol" -> buildJsonObject { put("protocolVersion", 34) }
+                        "chat.fileCapabilities" -> buildJsonObject { put("maxFileBytes", FILE_MAX); put("relay", false) }
+                        "chat.fileDownloadInfo" -> buildJsonObject { put("attachment", buildJsonObject { put("size", CHAT_IMAGE_PREVIEW_BYTES + 1) }) }
+                        else -> error("Preview must refuse before any chunk: $method")
+                    }
+                }, confirm = { error("Automatic previews cannot request relay allowance") }, progress = {}, byteLimit = CHAT_IMAGE_PREVIEW_BYTES)
+            error("The authoritative size must enforce the preview limit")
+        } catch (_: IllegalArgumentException) {
+            assertTrue("chat.fileDownloadInfo" in calls)
+            assertEquals(3, calls.size)
+        }
+    }
 
     @Test
     fun completedUploadSurvivesRetryWhenAnotherAttachmentRefusesTheMessage() = runBlocking {

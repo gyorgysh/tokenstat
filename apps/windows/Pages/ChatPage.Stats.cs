@@ -160,146 +160,139 @@ internal sealed partial class ChatPage
     private void AddStats(StackPanel target)
     {
         var data = _inspectionOwner == InspectionOwner() ? _inspection : null;
-        var body = new StackPanel { Spacing = Theme.SpaceS };
-        var details = new StackPanel { Spacing = Theme.SpaceS };
-        body.Children.Add(new TextBlock { Text = Format.Text(data, "model", Format.Text(_openChat, "backend")),
-            FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
-        if (data is null) body.Children.Add(Muted(L10n.Text("common.chat.stats.unavailable")));
-        else
+        var summary = new StackPanel { Spacing = 3 };
+        var details = new StackPanel { Spacing = 6 };
+        var model = Format.Text(data, "model", Format.Text(_openChat, "model", Format.Text(_openChat, "backend")));
+        summary.Children.Add(new TextBlock { Text = model, FontSize = 11, Opacity = .7, TextTrimming = TextTrimming.CharacterEllipsis,
+            IsTextSelectionEnabled = true });
+        if (data?["contextUsed"] is not null)
         {
-            var used = Format.Number(data, "contextUsed");
-            var window = Format.Number(data, "contextWindow");
-            if (data["contextUsed"] is not null)
+            var used = Math.Max(0, Format.Number(data, "contextUsed"));
+            var window = Math.Max(0, Format.Number(data, "contextWindow"));
+            var amount = new Grid { ColumnSpacing = 8 };
+            amount.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+            amount.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            amount.Children.Add(Fonts.Tabular(new TextBlock { Text = L10n.Text("common.chat.stats.in_context", used.ToString("N0")),
+                FontSize = 13, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap }));
+            if (window > 0)
             {
-                var amount = new Grid { ColumnSpacing = 8 };
-                amount.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                amount.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var tokens = Fonts.Tabular(new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap });
-                tokens.Inlines.Add(new Run { Text = used.ToString("N0"), FontSize = 22, FontWeight = FontWeights.SemiBold });
-                tokens.Inlines.Add(new Run { Text = $" / {(window > 0 ? window.ToString("N0") : "—")}" });
-                amount.Children.Add(tokens);
-                if (window > 0) {
-                    var percent = Fonts.Tabular(new TextBlock { Text = Math.Clamp(used / window, 0, 1).ToString("P0"),
-                        FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Theme.AccentBrush, VerticalAlignment = VerticalAlignment.Center });
-                    Grid.SetColumn(percent, 1); amount.Children.Add(percent);
-                }
-                body.Children.Add(amount);
-                if (window > 0) body.Children.Add(new ProgressBar { Minimum = 0, Maximum = 1, Value = Math.Clamp(used / window, 0, 1) });
+                var capacity = Fonts.Tabular(new TextBlock { Text = $"{used:N0} / {window:N0} · {used / window:P0}",
+                    FontSize = 11, Opacity = .7, VerticalAlignment = VerticalAlignment.Center });
+                Grid.SetColumn(capacity, 1); amount.Children.Add(capacity);
             }
-            else body.Children.Add(Muted(L10n.Text("common.chat.stats.no_data")));
-            if (data["contextBreakdown"] is JsonObject prompt) {
-                details.Children.Add(Muted(L10n.Text("common.chat.stats.last_prompt")));
-                details.Children.Add(Muted($"{L10n.Text("common.chat.stats.input")} · {Format.Number(prompt, "input"):N0}"));
-                details.Children.Add(Muted($"{L10n.Text("common.chat.stats.cache_read")} · {Format.Number(prompt, "cacheRead"):N0}"));
-                details.Children.Add(Muted($"{L10n.Text("common.chat.stats.cache_write")} · {Format.Number(prompt, "cacheWrite"):N0}"));
-                details.Children.Add(Muted(L10n.Text("common.chat.stats.prompt_note")));
+            summary.Children.Add(amount);
+            summary.Children.Add(ContextUsageBar(data!, used, window));
+        }
+        else summary.Children.Add(Muted(L10n.Text(data is null ? "common.chat.stats.unavailable" : "common.chat.stats.no_data")));
+        if (data is not null)
+        {
+            if (data["contextBreakdown"] is JsonObject prompt)
+            {
+                details.Children.Add(new TextBlock { Text = L10n.Text("common.chat.stats.last_prompt"), FontSize = 11, Opacity = .7 });
+                details.Children.Add(StatsMetric(L10n.Text("common.chat.stats.input"), Format.Number(prompt, "input").ToString("N0")));
+                details.Children.Add(StatsMetric(L10n.Text("common.chat.stats.cache_read"), Format.Number(prompt, "cacheRead").ToString("N0")));
+                details.Children.Add(StatsMetric(L10n.Text("common.chat.stats.cache_write"), Format.Number(prompt, "cacheWrite").ToString("N0")));
             }
             if (Format.Text(data, "windowSource") == "catalog") details.Children.Add(Muted(L10n.Text("common.chat.stats.catalog_window")));
-            var history = AsArray(data, "contextHistory").Select(p => Format.Number(p, "tokens")).ToArray();
-            if (history.Length > 1)
-            {
-                details.Children.Add(Muted(L10n.Text("common.chat.stats.history")));
-                var canvas = new Canvas { Height = 48, HorizontalAlignment = HorizontalAlignment.Stretch };
-                var line = new Polyline { Stroke = Theme.AccentBrush, StrokeThickness = 2 };
-                canvas.Children.Add(line);
-                canvas.SizeChanged += (_, _) => {
-                    var peak = Math.Max(1, history.Max());
-                    line.Points = new PointCollection();
-                    for (var i = 0; i < history.Length; i++) line.Points.Add(new Point(canvas.ActualWidth * i / (history.Length - 1), 48 * (1 - history[i] / peak)));
-                };
-                details.Children.Add(canvas);
-                details.Children.Add(Muted($"{history.First():N0} → {history.Last():N0}"));
-                details.Children.Add(Muted(L10n.Text("common.chat.stats.history_note")));
-            }
-            if (data["usage"] is JsonObject usage) AppendUsage(details, usage);
+            if (Format.Text(data, "windowSource") == "previousAgent") details.Children.Add(Muted(L10n.Text("common.chat.stats.last_window")));
             if (data["tools"] is JsonArray tools) details.Children.Add(ToolBrowser(tools, L10n.Text("common.chat.stats.available_tools", tools.Count.ToString("N0")), "available"));
             if (data["usedTools"] is JsonArray usedTools && usedTools.Count > 0) details.Children.Add(ToolBrowser(usedTools, L10n.Text("common.chat.stats.used_tools", usedTools.Count.ToString("N0")), "used"));
+            if (data["usage"] is JsonObject usage)
+            {
+                var metrics = new StackPanel { Spacing = 4 }; AppendUsage(metrics, usage);
+                details.Children.Add(StatsDisclosure(L10n.Text("common.chat.stats.conversation"), metrics, "conversation-usage"));
+            }
+            var history = AsArray(data, "contextHistory").Select(point => Format.Number(point, "tokens")).ToArray();
+            if (history.Length > 1)
+            {
+                var historyBody = new StackPanel { Spacing = 4 };
+                var canvas = new Canvas { Height = 40, HorizontalAlignment = HorizontalAlignment.Stretch };
+                var line = new Polyline { Stroke = Theme.AccentBrush, StrokeThickness = 1.5 }; canvas.Children.Add(line);
+                canvas.SizeChanged += (_, _) => {
+                    var peak = Math.Max(1, history.Max()); line.Points = new PointCollection();
+                    for (var i = 0; i < history.Length; i++) line.Points.Add(new Point(canvas.ActualWidth * i / (history.Length - 1), 40 * (1 - history[i] / peak)));
+                };
+                historyBody.Children.Add(canvas); historyBody.Children.Add(Muted($"{history.First():N0} → {history.Last():N0}"));
+                details.Children.Add(StatsDisclosure(L10n.Text("common.chat.stats.history"), historyBody, "context-history"));
+            }
             if (Format.Flag(data, "inventoryPartial")) details.Children.Add(Muted(L10n.Text("common.chat.stats.partial")));
         }
-        if (data is null && _aggregateUsage is JsonObject cached) AppendUsage(details, cached);
-        var status = new Border { Background = Theme.AccentSoftBrush, CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(8, 3, 8, 3), Child = Muted(Format.Flag(_openChat, "running") ? L10n.Text("common.running") : L10n.Text("common.idle")) };
-        target.Children.Add(CollapsibleStatsCard(L10n.Text("common.chat.stats"), "context", body, details, status));
+        else if (_aggregateUsage is JsonObject cached)
+        {
+            var metrics = new StackPanel { Spacing = 4 }; AppendUsage(metrics, cached);
+            details.Children.Add(StatsDisclosure(L10n.Text("common.chat.stats.conversation"), metrics, "conversation-usage"));
+        }
+        target.Children.Add(CollapsibleStatsCard(L10n.Text("common.chat.stats"), "context", summary, details));
         if (data is null) return;
         var servers = AsArray(data, "mcpServers").OfType<JsonObject>().ToArray();
-        var connected = servers.Where(s => Format.Text(s, "source") == "agent" && Format.Text(s, "status") == "connected").ToArray();
-        var mcp = new StackPanel { Spacing = Theme.SpaceS };
-        var mcpDetails = new StackPanel { Spacing = Theme.SpaceS };
-        if (connected.Length > 0) mcp.Children.Add(Muted(Format.Flag(data, "currentRun") && Format.Flag(_openChat, "running") ? L10n.Text("common.chat.stats.live_servers", connected.Length.ToString("N0")) : L10n.Text("common.chat.stats.connected_servers", connected.Length.ToString("N0"))));
-        if (servers.Length == 0) mcp.Children.Add(Muted(L10n.Text("common.chat.stats.no_servers")));
-        var connections = new StackPanel();
-        foreach (var server in connected) connections.Children.Add(ServerRow(server, Format.Flag(data, "currentRun") && Format.Flag(_openChat, "running")));
-        if (connections.Children.Count > 0) mcpDetails.Children.Add(connections);
-        var others = new StackPanel();
-        foreach (var server in servers.Except(connected)) others.Children.Add(ServerRow(server, false));
-        if (others.Children.Count > 0) mcp.Children.Add(Muted(L10n.Text("common.chat.stats.other_servers", others.Children.Count.ToString("N0"))));
-        if (others.Children.Count > 0) mcpDetails.Children.Add(StatsDisclosure(L10n.Text("common.chat.stats.other_servers", others.Children.Count.ToString("N0")), others, "other-servers"));
-        mcpDetails.Children.Add(Muted(L10n.Text("common.chat.stats.reported")));
-        target.Children.Add(CollapsibleStatsCard(L10n.Text("common.chat.stats.mcp_servers"), "servers", mcp, mcpDetails));
+        var connected = servers.Count(server => Format.Text(server, "source") == "agent" && Format.Text(server, "status") == "connected");
+        var serverSummary = new TextBlock { Text = L10n.Text("common.chat.stats.connection_summary", connected.ToString("N0"), (servers.Length - connected).ToString("N0")), FontSize = 12 };
+        var serverDetails = new StackPanel { Spacing = 2 };
+        var live = Format.Flag(data, "currentRun") && Format.Flag(_openChat, "running");
+        foreach (var server in servers) serverDetails.Children.Add(ServerRow(server, live));
+        if (servers.Length == 0) serverDetails.Children.Add(Muted(L10n.Text("common.chat.stats.no_servers")));
+        target.Children.Add(CollapsibleStatsCard(L10n.Text("common.chat.stats.mcp_servers"), "servers", serverSummary, serverDetails));
     }
-    private Border CollapsibleStatsCard(string title, string key, UIElement summary, FrameworkElement details, FrameworkElement? status = null)
+    private static Grid ContextUsageBar(JsonNode data, double used, double window)
+    {
+        var colors = new Brush[] { Theme.AccentBrush, Theme.Brush(static () => Theme.Secondary), Theme.Brush(static () => Theme.Warning) };
+        var values = data["contextBreakdown"] is JsonObject breakdown
+            ? new[] { Math.Max(0, Format.Number(breakdown, "input")), Math.Max(0, Format.Number(breakdown, "cacheRead")), Math.Max(0, Format.Number(breakdown, "cacheWrite")) }
+            : new[] { used };
+        if (Math.Abs(values.Sum() - used) > .5) values = [used];
+        var bar = new Grid { Height = 4, Background = Theme.AccentSoftBrush };
+        for (var index = 0; index < values.Length; index++)
+        {
+            bar.ColumnDefinitions.Add(new() { Width = new GridLength(values[index], GridUnitType.Star) });
+            var segment = new Border { Background = colors[index] }; Grid.SetColumn(segment, index); bar.Children.Add(segment);
+        }
+        if (window > used) bar.ColumnDefinitions.Add(new() { Width = new GridLength(window - used, GridUnitType.Star) });
+        return bar;
+    }
+    private static Grid StatsMetric(string title, string value)
+    {
+        var row = new Grid { ColumnSpacing = 8, MinHeight = 20 };
+        row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        row.Children.Add(new TextBlock { Text = title, FontSize = 12, Opacity = .75, VerticalAlignment = VerticalAlignment.Center });
+        var amount = Fonts.Tabular(new TextBlock { Text = value, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+        Grid.SetColumn(amount, 1); row.Children.Add(amount); return row;
+    }
+    private Border CollapsibleStatsCard(string title, string key, UIElement summary, FrameworkElement details)
     {
         var expanded = _statsExpanded.GetValueOrDefault(key);
         var header = new Grid { ColumnSpacing = 8 };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(new TextBlock { Text = title, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
-        if (status is not null) { Grid.SetColumn(status, 1); header.Children.Add(status); }
-        var chevron = new TextBlock { Text = expanded ? "⌃" : "⌄", VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(chevron, 2); header.Children.Add(chevron);
-        var toggle = new Button { Content = header, MinHeight = 44, Background = Theme.PanelBrush, BorderThickness = new Thickness(0),
+        header.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock { Text = title, FontSize = 12, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        var chevron = new TextBlock { Text = expanded ? "⌃" : "⌄", FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(chevron, 1); header.Children.Add(chevron);
+        var toggle = new Button { Content = header, MinHeight = 28, Background = Theme.PanelBrush, BorderThickness = new Thickness(0),
             Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         void State() {
-            details.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-            chevron.Text = expanded ? "⌃" : "⌄";
+            details.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed; chevron.Text = expanded ? "⌃" : "⌄";
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(toggle, L10n.Text(expanded ? "common.collapse" : "common.expand"));
         }
-        State();
-        toggle.Click += (_, _) => { expanded = !expanded; _statsExpanded[key] = expanded; State(); };
-        var stack = new StackPanel { Spacing = Theme.SpaceS };
-        stack.Children.Add(toggle); stack.Children.Add(summary); stack.Children.Add(details);
+        State(); toggle.Click += (_, _) => { expanded = !expanded; _statsExpanded[key] = expanded; State(); };
+        var stack = new StackPanel { Spacing = 5 }; stack.Children.Add(toggle); stack.Children.Add(summary); stack.Children.Add(details);
         return new Border { Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(Theme.CardPadding), Child = stack };
+            CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(12, 8, 12, 8), Child = stack };
     }
     private void AppendUsage(StackPanel body, JsonObject usage)
     {
-        body.Children.Add(new TextBlock { Text = L10n.Text("common.chat.stats.conversation"), FontWeight = FontWeights.SemiBold });
-        var values = new[] { "input", "output", "cacheRead", "cacheWrite" }.Select(key => Math.Max(0, Format.Number(usage, key))).ToArray();
-        var labels = new[] { L10n.Text("common.chat.stats.input"), L10n.Text("common.chat.stats.output"), L10n.Text("common.chat.stats.cache_read"), L10n.Text("common.chat.stats.cache_write") };
-        var colors = new Brush[] { Theme.AccentBrush, Theme.Brush(static () => Theme.Secondary), Theme.AccentSoftBrush, Theme.Brush(static () => Theme.Warning) };
-        var bar = new Grid { Height = 8 };
-        for (var i = 0; i < values.Length; i++)
-        {
-            bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(values[i], GridUnitType.Star) });
-            var segment = new Border { Background = colors[i] }; Grid.SetColumn(segment, i); bar.Children.Add(segment);
-        }
-        body.Children.Add(bar);
-        var metrics = new Grid { ColumnSpacing = 12, RowSpacing = 8 };
-        metrics.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        metrics.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        metrics.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        metrics.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        for (var i = 0; i < labels.Length; i++) {
-            var metric = new StackPanel { Spacing = 2 };
-            var label = new Grid { ColumnSpacing = 6 };
-            label.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            label.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            label.Children.Add(new Ellipse { Width = 6, Height = 6, Fill = colors[i], VerticalAlignment = VerticalAlignment.Center });
-            var title = Muted(labels[i]); Grid.SetColumn(title, 1); label.Children.Add(title);
-            metric.Children.Add(label);
-            metric.Children.Add(Fonts.Tabular(new TextBlock { Text = values[i].ToString("N0"), FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap }));
-            Grid.SetRow(metric, i / 2); Grid.SetColumn(metric, i % 2); metrics.Children.Add(metric);
-        }
-        body.Children.Add(metrics);
+        foreach (var (key, label) in new[] { ("input", "common.chat.stats.input"), ("output", "common.chat.stats.output"),
+            ("cacheRead", "common.chat.stats.cache_read"), ("cacheWrite", "common.chat.stats.cache_write") })
+            body.Children.Add(StatsMetric(L10n.Text(label), Math.Max(0, Format.Number(usage, key)).ToString("N0")));
         var cost = Format.Number(usage, "cost");
-        if (cost > 0) body.Children.Add(Muted(L10n.Text("common.chat.stats.cost") + " · " + cost.ToString("C2", CultureInfo.GetCultureInfo("en-US"))));
+        if (cost > 0) body.Children.Add(StatsMetric(L10n.Text("common.chat.stats.cost"), cost.ToString("C2", CultureInfo.GetCultureInfo("en-US"))));
     }
-    private Expander StatsDisclosure(string title, UIElement content, string? identity = null)
+    private Expander StatsDisclosure(object title, UIElement content, string? identity = null)
     {
-        var key = identity ?? title;
+        var key = identity ?? title.ToString() ?? "";
         var view = new Expander { Header = title, Content = content, HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch, IsExpanded = _statsExpanded.GetValueOrDefault(key) };
+            HorizontalContentAlignment = HorizontalAlignment.Stretch, IsExpanded = _statsExpanded.GetValueOrDefault(key),
+            MinHeight = 28, Padding = new Thickness(0) };
+        view.Resources["ExpanderHeaderMinHeight"] = 28d;
         view.Expanding += (_, _) => _statsExpanded[key] = true;
         view.Collapsed += (_, _) => _statsExpanded[key] = false;
         return view;
@@ -334,21 +327,20 @@ internal sealed partial class ChatPage
     private UIElement ServerRow(JsonNode server, bool live)
     {
         var connected = Format.Text(server, "source") == "agent" && Format.Text(server, "status") == "connected";
-        var body = new StackPanel { Spacing = 4 };
-        var row = new Grid { ColumnSpacing = 8, MinHeight = 32, Padding = new Thickness(0, 4, 0, 4) };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.Children.Add(new Ellipse { Width = 7, Height = 7, VerticalAlignment = VerticalAlignment.Center,
-            Fill = connected && live ? Theme.AccentBrush : connected ? Theme.AccentSoftBrush : Theme.Brush(static () => Theme.ControlGlyph) });
-        var label = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-        var name = new TextBlock { Text = Format.Text(server, "name").Replace("plugin:", "").Replace(":", " · "),
-            FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(name, ServerStatus(Format.Text(server, "status"), live));
-        label.Children.Add(name);
-        label.Children.Add(Muted(ServerStatus(Format.Text(server, "status"), connected && live)));
-        Grid.SetColumn(label, 1); row.Children.Add(label); body.Children.Add(row);
-        if (server["tools"] is JsonArray tools && tools.Count > 0) body.Children.Add(ToolBrowser(tools, L10n.Text("common.chat.stats.available_tools", tools.Count.ToString("N0")), "server-tools:" + Format.Text(server, "name")));
-        return body;
+        var row = new Grid { ColumnSpacing = 8, MinHeight = 26 };
+        row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        row.Children.Add(new TextBlock { Text = Format.Text(server, "name"), FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center, IsTextSelectionEnabled = true });
+        var status = new TextBlock { Text = ServerStatus(Format.Text(server, "status"), connected && live), FontSize = 11, Opacity = .75,
+            VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(status, 1); row.Children.Add(status);
+        if (server["tools"] is not JsonArray tools || tools.Count == 0) return row;
+        var names = new StackPanel { Spacing = 3 };
+        foreach (var tool in tools) names.Children.Add(new TextBlock { Text = tool?.GetValue<string>() ?? "", FontSize = 11,
+            TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+        ToolTipService.SetToolTip(row, L10n.Text("common.chat.stats.available_tools", tools.Count.ToString("N0")));
+        return StatsDisclosure(row, new ScrollViewer { Content = names, MaxHeight = 180 }, "server-tools:" + Format.Text(server, "name"));
     }
     private static string ServerStatus(string status, bool live) => status switch {
         "connected" => live ? L10n.Text("common.chat.stats.connected") : L10n.Text("common.chat.stats.reported_connected"),

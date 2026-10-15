@@ -120,6 +120,8 @@ final class ChatModel {
     var fileRelayName: String?
     var fileRelayRemaining: UInt64?
     var fileRelaySize: UInt64?
+    /// A presented image viewer owns relay consent while it covers the chat.
+    var fileRelayPresenter: UUID?
     @ObservationIgnored var fileRelayAnswer: CheckedContinuation<Bool, Never>?
     var fileTransferName: String?
     var fileTransferProgress: Double = 0
@@ -1036,13 +1038,13 @@ final class ChatModel {
         let toggled = toggledGroups
         if isShowingCachedTranscript {
             // A preview is one window of rows, briefly, while a chat opens.
-            return ChatTranscriptFold.fold(ChatAuthenticationFailure.presented(recentMessagePreview), detail: detail, running: false) { open != toggled.contains($0) }
+            return ChatTranscriptFold.fold(ChatImageGrouping.prepare(ChatAuthenticationFailure.presented(recentMessagePreview)), detail: detail, running: false) { open != toggled.contains($0) }
         }
         let pending = outgoing
         let rows = coalescedItems
         let key = FoldKey(display: displayKey, detail: detail, open: open, toggled: toggled)
         if key != foldKey {
-            foldCache = ChatTranscriptFold.fold(ChatAuthenticationFailure.presented(rows), detail: detail, running: selected?.running == true) {
+            foldCache = ChatTranscriptFold.fold(ChatImageGrouping.prepare(ChatAuthenticationFailure.presented(rows)), detail: detail, running: selected?.running == true) {
                 open != toggled.contains($0)
             }
             foldKey = key
@@ -1080,9 +1082,8 @@ final class ChatModel {
     /// the step itself rather than on a line that hides it.
     @discardableResult
     func revealRow(_ id: String) -> String {
-        guard let owner = ChatTranscriptFold.owner(of: id, in: transcriptItems) else { return id }
-        toggleGroup(owner)
-        return id
+        if let owner = ChatTranscriptFold.owner(of: id, in: transcriptItems) { toggleGroup(owner) }
+        return ChatImageGrouping.rowID(for: id, in: transcriptItems)
     }
 
     /// Where a kept reading place lands. A mark taken on a closed group's

@@ -63,7 +63,8 @@ pub enum Event {
         removed: u32,
         patch: String,
     },
-    /// A file the agent explicitly linked in its reply. Chat copies the file
+    /// A file explicitly shared in a reply or returned by an image tool.
+    /// Optional call_id identifies the tool that read/produced it. Chat copies the file
     /// into its own store before emitting this event, so the descriptor works
     /// for remote workspaces and remains valid if the original is moved.
     Attachment {
@@ -72,6 +73,9 @@ pub enum Event {
         #[serde(rename = "mediaType")]
         media_type: Option<String>,
         size: u64,
+        /// Explicit tool provenance. Omitted for ordinary shared/reply files.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
     },
     Usage {
         input: u64,
@@ -190,6 +194,7 @@ pub struct Parser {
     limit: Option<crate::provider_limit::Limit>,
     inspection: crate::chat_inspection::Snapshot,
     inspection_dirty: bool,
+    images: crate::chat_images::Collector,
 }
 
 impl Parser {
@@ -215,6 +220,7 @@ impl Parser {
             limit: None,
             inspection: Default::default(),
             inspection_dirty: false,
+            images: Default::default(),
         }
     }
 
@@ -223,6 +229,10 @@ impl Parser {
             return None;
         }
         Some(self.inspection.clone())
+    }
+
+    pub(crate) fn take_images(&mut self) -> Vec<crate::chat_images::Image> {
+        self.images.take()
     }
 
     pub(crate) fn take_limit(&mut self) -> Option<crate::provider_limit::Limit> {
@@ -508,6 +518,7 @@ impl Parser {
         } else {
             events_for_value(&self.backend, &value)
         };
+        self.images.observe(&self.backend, &value, &events);
         if self.backend == "claude" {
             match value.get("type").and_then(Value::as_str) {
                 Some("assistant") => {
@@ -1677,6 +1688,13 @@ fn events_codex(value: &Value) -> Vec<Event> {
             // the whole change list as card input while using its first path
             // for the collapsed-row target.
             Some("file_change") => vec![tool_start(item, "edit", codex_file_change_input(item))],
+            Some("image_view") => vec![tool_start(item, "Read", json!({"path":item["path"]}))],
+            Some("image_generation") => vec![tool_start(item, "Generate image", json!({}))],
+            Some("mcp_tool_call" | "dynamic_tool_call") => vec![tool_start(
+                item,
+                item["tool"].as_str().unwrap_or("tool"),
+                item["arguments"].clone(),
+            )],
             _ => Vec::new(),
         };
     }
@@ -1725,6 +1743,26 @@ fn events_codex(value: &Value) -> Vec<Event> {
                     .unwrap_or(true),
                 detail: codex_file_change_detail(item),
             }],
+            Some("image_view" | "image_generation" | "mcp_tool_call" | "dynamic_tool_call") => {
+                vec![Event::ToolEnd {
+                    call_id: item_id(item),
+                    ok: item["error"].is_null()
+                        && item["success"] != false
+                        && item["status"] != "failed"
+                        && item["status"] != "cancelled",
+                    detail: item
+                        .pointer("/result/content")
+                        .and_then(Value::as_array)
+                        .map(|parts| {
+                            parts
+                                .iter()
+                                .filter_map(|part| part["text"].as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                        .filter(|text| !text.is_empty()),
+                }]
+            }
             _ => Vec::new(),
         };
     }

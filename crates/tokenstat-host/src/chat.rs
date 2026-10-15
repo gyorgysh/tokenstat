@@ -2821,7 +2821,13 @@ impl Store {
             .map(|s| s.snapshot.clone())
             .unwrap_or_default();
         let model = snapshot.model.clone().or_else(|| chat.model.clone());
-        let mut window_source = snapshot.context_window.map(|_| "agent");
+        let mut window_source = snapshot.context_window.map(|_| {
+            if snapshot.context_window_inherited {
+                "previousAgent"
+            } else {
+                "agent"
+            }
+        });
         if snapshot.context_window.is_none() {
             let catalog = tokenstat_core::catalog::Catalog::load();
             snapshot.context_window = model
@@ -2911,7 +2917,43 @@ impl Store {
         {
             return;
         }
-        snapshot.context_history = crate::chat_inspection::load(&directory.join("inspection.json"))
+        let previous = crate::chat_inspection::load(&directory.join("inspection.json"))
+            .filter(|s| s.backend == backend && s.requested_model.as_deref() == requested_model);
+        let last_window = snapshot
+            .model
+            .as_ref()
+            .zip(snapshot.context_window)
+            .map(|(model, tokens)| crate::chat_inspection::ReportedWindow {
+                model: model.clone(),
+                tokens,
+            })
+            .or_else(|| {
+                previous.as_ref().and_then(|stored| {
+                    stored.last_window.clone().or_else(|| {
+                        stored
+                            .snapshot
+                            .model
+                            .as_ref()
+                            .zip(stored.snapshot.context_window)
+                            .map(|(model, tokens)| crate::chat_inspection::ReportedWindow {
+                                model: model.clone(),
+                                tokens,
+                            })
+                    })
+                })
+            });
+        // A new Claude run reports its prompt before it repeats modelUsage.
+        // Keep the capacity's explicit model identity across that gap; never
+        // apply another model's window, including an unresolved default.
+        if snapshot.context_window.is_none()
+            && let Some(window) = last_window
+                .as_ref()
+                .filter(|window| snapshot.model.as_ref() == Some(&window.model))
+        {
+            snapshot.context_window = Some(window.tokens);
+            snapshot.context_window_inherited = true;
+        }
+        snapshot.context_history = previous
             .filter(|s| {
                 s.backend == backend
                     && s.requested_model.as_deref() == requested_model
@@ -2943,6 +2985,7 @@ impl Store {
             run_revision: revision,
             observed_at_ms: now_ms(),
             snapshot,
+            last_window,
         };
         if let Ok(text) = serde_json::to_string(&record) {
             let _ = tokenstat_sync::snapshot::write_private_atomically(
@@ -4458,6 +4501,7 @@ impl Store {
                         && events.iter().any(crate::transcript::muse_sign_in_required);
                     questions.shift(collect_agent_text(&events, &mut assistant_text));
                     self.record_events(id, backend, events);
+                    self.record_tool_images(id, backend, activity_revision, parser.take_images());
                     if muse_sign_in_required {
                         // Muse exec waits for browser login instead of exiting.
                         // This is only its own normalized startup challenge;
@@ -4507,6 +4551,7 @@ impl Store {
                 backend == "muse" && events.iter().any(crate::transcript::muse_sign_in_required);
             questions.shift(collect_agent_text(&events, &mut assistant_text));
             self.record_events(id, backend, events);
+            self.record_tool_images(id, backend, activity_revision, parser.take_images());
         }
         let events = measured(parser.finish_events());
         if let Some(snapshot) = parser.take_inspection() {
@@ -4516,6 +4561,7 @@ impl Store {
             backend == "muse" && events.iter().any(crate::transcript::muse_sign_in_required);
         questions.shift(collect_agent_text(&events, &mut assistant_text));
         self.record_events(id, backend, events);
+        self.record_tool_images(id, backend, activity_revision, parser.take_images());
         self.record_questions(id, backend, questions.finish(&assistant_text));
         self.record_response_attachments(id, backend, &assistant_text, response_output_dir);
         let exit = manager.info(pty).ok().and_then(|info| info.exit_code);
@@ -4653,6 +4699,120 @@ impl Store {
         }
     }
 
+    /// Copy only explicit, correlated image evidence into the same private
+    /// attachment store used by shared files. The original may disappear
+    /// after a screenshot tool returns; remote clients need durable bytes.
+    fn record_tool_images(
+        &self,
+        id: &str,
+        backend: &str,
+        revision: u64,
+        images: Vec<crate::chat_images::Image>,
+    ) {
+        use crate::chat_images::Source;
+        use std::io::Read;
+        if images.is_empty() {
+            return;
+        }
+        let Ok(lifecycle) = crate::work_handoff_store::lifecycle_lock(&self.root) else {
+            return;
+        };
+        let Ok(chat) = self.get(id) else {
+            return;
+        };
+        if chat.backend != backend
+            || chat.run_revision != Some(revision)
+            || self.verified_append_directory(id).is_err()
+        {
+            return;
+        }
+        let workspace = crate::workspaces::folder(&chat.workspace_id).ok();
+        for image in images {
+            let (source, size, media_type, name) = match image.source {
+                Source::Bytes(bytes) => {
+                    let Some((mime, extension)) = crate::chat_images::media_type(&bytes) else {
+                        continue;
+                    };
+                    let size = bytes.len() as u64;
+                    (
+                        Source::Bytes(bytes),
+                        size,
+                        mime,
+                        format!("image.{extension}"),
+                    )
+                }
+                Source::File(path) => {
+                    let path = if path.is_absolute() {
+                        path
+                    } else if let Some(workspace) = &workspace {
+                        Path::new(&workspace.path).join(path)
+                    } else {
+                        continue;
+                    };
+                    let Ok(mut file) = files::open_regular(&path) else {
+                        continue;
+                    };
+                    let Ok(metadata) = file.metadata() else {
+                        continue;
+                    };
+                    if metadata.len() == 0 || metadata.len() > files::FILE_BYTES {
+                        continue;
+                    }
+                    let mut header = [0; 32];
+                    let Ok(read) = file.read(&mut header) else {
+                        continue;
+                    };
+                    let Some((mime, extension)) = crate::chat_images::media_type(&header[..read])
+                    else {
+                        continue;
+                    };
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(safe_file_name)
+                        .unwrap_or_else(|| format!("image.{extension}"));
+                    (Source::File(path), metadata.len(), mime, name)
+                }
+            };
+            if files::ensure_storage(&self.root.join(id), size).is_err() {
+                continue;
+            }
+            let attachment_id = mint_record_id("tool-image");
+            if files::create_attachment_directory(&self.root.join(id), &attachment_id).is_err() {
+                continue;
+            }
+            let destination = self.attachment_path(id, &attachment_id, &name);
+            let copied = match source {
+                Source::Bytes(bytes) => write_private_file(&destination, &bytes).map(|()| size),
+                Source::File(path) => files::copy_attachment(&path, &destination),
+            };
+            let recorded = copied.is_ok_and(|actual| actual == size)
+                && self
+                    .append_with_lifecycle(
+                        &lifecycle,
+                        id,
+                        &StoredEvent::Agent {
+                            event: Event::Attachment {
+                                id: attachment_id,
+                                name,
+                                media_type: Some(media_type.into()),
+                                size,
+                                call_id: Some(image.call_id),
+                            },
+                            at_ms: now_ms(),
+                            backend: backend.into(),
+                        },
+                    )
+                    .is_ok();
+            if !recorded {
+                let _ = fs::remove_file(&destination);
+                if let Some(parent) = destination.parent() {
+                    let _ = fs::remove_dir(parent);
+                }
+            }
+        }
+    }
+
     /// Turn explicit local-file links in the final reply into durable chat
     /// attachments. The link is the agent's declaration of intent; arbitrary
     /// paths mentioned in prose or printed by a tool are never copied.
@@ -4737,6 +4897,7 @@ impl Store {
                         name,
                         media_type: media_type_for_path(&source),
                         size: metadata.len(),
+                        call_id: None,
                     },
                     at_ms: now_ms(),
                     backend: backend.into(),
@@ -5488,6 +5649,7 @@ fn attachment_event(id: &str, path: &Path) -> Event {
         name,
         media_type: media_type_for_path(path),
         size,
+        call_id: None,
     }
 }
 
@@ -9077,6 +9239,126 @@ mod tests {
     }
 
     #[test]
+    fn capacity_reports_survive_new_runs_only_for_the_same_resolved_model() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "capacity");
+        store
+            .edit_conversation("capacity", |chat| {
+                chat.run_revision = Some(1);
+                Ok(())
+            })
+            .unwrap();
+        store.record_inspection(
+            "capacity",
+            "claude",
+            1,
+            None,
+            crate::chat_inspection::Snapshot {
+                model: Some("fixture-model".into()),
+                context_used: Some(100),
+                context_window: Some(1000),
+                ..Default::default()
+            },
+        );
+        store
+            .edit_conversation("capacity", |chat| {
+                chat.run_revision = Some(2);
+                Ok(())
+            })
+            .unwrap();
+        store.record_inspection("capacity", "claude", 2, None, Default::default());
+        assert!(
+            store.inspection("capacity").unwrap()["contextWindow"].is_null(),
+            "Unresolved default models cannot borrow another model's capacity"
+        );
+        store.record_inspection(
+            "capacity",
+            "claude",
+            2,
+            None,
+            crate::chat_inspection::Snapshot {
+                model: Some("fixture-model".into()),
+                context_used: Some(150),
+                ..Default::default()
+            },
+        );
+        let inspection = store.inspection("capacity").unwrap();
+        assert_eq!(inspection["contextWindow"], 1000);
+        assert_eq!(inspection["windowSource"], "previousAgent");
+        store.record_inspection(
+            "capacity",
+            "claude",
+            2,
+            None,
+            crate::chat_inspection::Snapshot {
+                model: Some("different-fixture-model".into()),
+                context_used: Some(75),
+                ..Default::default()
+            },
+        );
+        assert!(store.inspection("capacity").unwrap()["contextWindow"].is_null());
+    }
+
+    #[test]
+    fn tool_images_are_durable_correlated_and_run_scoped() {
+        use crate::chat_images::{Image, Source};
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "images");
+        store
+            .edit_conversation("images", |chat| {
+                chat.run_revision = Some(1);
+                Ok(())
+            })
+            .unwrap();
+        let png = b"\x89PNG\r\n\x1a\nfixture";
+        let path = root.path().join("screen.png");
+        fs::write(&path, png).unwrap();
+        store.record_tool_images(
+            "images",
+            "claude",
+            2,
+            vec![Image {
+                call_id: "stale".into(),
+                source: Source::Bytes(png.to_vec()),
+            }],
+        );
+        assert!(store.events("images", 0).unwrap().0.is_empty());
+        store.record_tool_images(
+            "images",
+            "claude",
+            1,
+            vec![
+                Image {
+                    call_id: "read".into(),
+                    source: Source::File(path.clone()),
+                },
+                Image {
+                    call_id: "capture".into(),
+                    source: Source::Bytes(png.to_vec()),
+                },
+                Image {
+                    call_id: "invalid".into(),
+                    source: Source::Bytes(b"private text".to_vec()),
+                },
+            ],
+        );
+        fs::remove_file(path).unwrap();
+        let events = store.events("images", 0).unwrap().0;
+        assert_eq!(events.len(), 2);
+        for (event, call) in events.iter().zip(["read", "capture"]) {
+            let event = &event["event"];
+            assert_eq!(event["callId"], call);
+            assert_eq!(event["mediaType"], "image/png");
+            let file = store
+                .attachment_data("images", event["id"].as_str().unwrap())
+                .unwrap();
+            assert_eq!(crate::base64::decode(&file.data).unwrap(), png);
+        }
+    }
+
+    #[test]
     fn context_history_is_bounded_survives_reopening_and_tracks_reductions() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -11783,11 +12065,13 @@ mod tests {
                 name,
                 media_type,
                 size,
+                call_id,
             } => {
                 assert_eq!(id, "att-1");
                 assert_eq!(name, "photo.png");
                 assert_eq!(media_type.as_deref(), Some("image/png"));
                 assert_eq!(size, 8);
+                assert_eq!(call_id, None);
             }
             other => panic!("expected an attachment row, got {other:?}"),
         }

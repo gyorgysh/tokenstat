@@ -943,6 +943,7 @@ struct ClientChatThread: View {
             ClientFilePreview(file: file) { previewFile = nil }
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
         }
+        .chatImageViewer(model: model)
         .onDisappear {
             model.saveDraftNow()
             traceViewport("disappear")
@@ -1172,6 +1173,7 @@ struct ClientChatThread: View {
                                         Task { await model.resolve(approval, choice: choice, owner: owner) }
                                     },
                                     attachmentFile: model.responseAttachmentFiles[attachmentID(for: item)],
+                                    imageResources: model.imageResources(for: item.imageAttachments),
                                     openAttachmentFile: { attachment, url in previewFile = ChatPreviewedFile(id: attachment.id, url: url, name: attachment.name) },
                                     attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
                                     attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],

@@ -1087,6 +1087,9 @@ fn codex_item(item: &Value) -> Option<Value> {
         "reasoning" => "reasoning",
         "mcpToolCall" => "mcp_tool_call",
         "webSearch" => "web_search",
+        "imageView" => "image_view",
+        "imageGeneration" => "image_generation",
+        "dynamicToolCall" => "dynamic_tool_call",
         _ => return None,
     };
     object.insert("type".into(), json!(kind));
@@ -1118,6 +1121,31 @@ fn codex_item(item: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_image_items_keep_tool_identity_and_structured_image_evidence() {
+        let data = crate::base64::encode(b"\x89PNG\r\n\x1a\nfixture");
+        for item in [
+            json!({"type":"imageView","id":"view","path":"screen.png"}),
+            json!({"type":"mcpToolCall","id":"mcp","tool":"capture","arguments":{},"status":"completed","result":{"content":[{"type":"image","data":data}]}}),
+            json!({"type":"imageGeneration","id":"generate","status":"completed","result":data}),
+            json!({"type":"dynamicToolCall","id":"dynamic","tool":"capture","arguments":{},"status":"completed","contentItems":[{"type":"inputImage","imageUrl":format!("data:image/png;base64,{data}")}]}),
+        ] {
+            let normalized = codex_item(&item).expect("native image items must reach the parser");
+            let mut parser = crate::transcript::Parser::new("codex");
+            let stream = format!(
+                "{}\n{}\n",
+                json!({"type":"item.started","item":normalized}),
+                json!({"type":"item.completed","item":normalized})
+            );
+            let events = parser.push_events(stream.as_bytes());
+            assert!(events.iter().any(|event| matches!(event, crate::transcript::Event::ToolStart { call_id, .. } if call_id == item["id"].as_str().unwrap())));
+            assert!(events.iter().any(|event| matches!(event, crate::transcript::Event::ToolEnd { call_id, ok:true, .. } if call_id == item["id"].as_str().unwrap())));
+            let images = parser.take_images();
+            assert_eq!(images.len(), 1, "{item}");
+            assert_eq!(images[0].call_id, item["id"].as_str().unwrap());
+        }
+    }
 
     #[test]
     fn resumed_usage_counts_new_work_once_and_handles_compaction_resets() {

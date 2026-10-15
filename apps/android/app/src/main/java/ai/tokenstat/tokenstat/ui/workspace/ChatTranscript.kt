@@ -35,7 +35,12 @@ sealed interface ChatDisplayItem {
         val name: String,
         val mediaType: String?,
         val size: Long?,
+        val callId: String? = null,
+        val backend: String? = null,
     ) : ChatDisplayItem
+
+    /** Consecutive ordinary images share one bounded transcript row. */
+    data class ImageGallery(override val id: String, val images: List<Attachment>) : ChatDisplayItem
 
     data class Approval(
         override val id: String,
@@ -95,6 +100,7 @@ data class ChatToolState(
     /// dozen times per draw and Codex shell outputs reach megabytes, so the
     /// full text stays in `detail` and the row only ever draws these.
     val snippet: List<String>,
+    val backend: String? = null,
 ) {
     val duration: String? get() = ChatClock.duration(startedAtMs, endedAtMs)
 
@@ -154,6 +160,8 @@ data class ChatEditState(
     val failed: Boolean,
     val startedAtMs: Long,
     val endedAtMs: Long?,
+    val callId: String? = null,
+    val backend: String? = null,
 ) {
     val duration: String? get() = ChatClock.duration(startedAtMs, endedAtMs)
 
@@ -244,7 +252,7 @@ fun coalesceTranscript(
     // Every row a call id has started, oldest first. A call id is not
     // unique on every backend, so an End closes the oldest row still
     // running under that name rather than the newest start.
-    val toolIndexes = mutableMapOf<String, MutableList<Int>>()
+    val toolIndexes = mutableMapOf<Pair<String?, String>, MutableList<Int>>()
     val toolStarts = mutableMapOf<String, Int>()
     val toolBackends = mutableMapOf<String, String>()
     val editStarts = mutableMapOf<String, Int>()
@@ -319,9 +327,9 @@ fun coalesceTranscript(
         return n
     }
 
-    fun noteToolIndex(index: Int, callId: String) {
+    fun noteToolIndex(index: Int, callId: String, backend: String?) {
         if (callId.isEmpty()) return
-        val indexes = toolIndexes.getOrPut(callId) { mutableListOf() }
+        val indexes = toolIndexes.getOrPut(backend to callId) { mutableListOf() }
         indexes.removeAll { it == index }
         indexes.add(index)
     }
@@ -329,9 +337,15 @@ fun coalesceTranscript(
     /// The row an End closes: the oldest one still running under this call
     /// id, or, for a repeat End with nothing left running, the newest row
     /// the id named.
-    fun toolEndIndex(callId: String): Int? {
+    fun toolIndexesFor(callId: String, backend: String?): List<Int>? =
+        toolIndexes[backend to callId]
+            // Older archives sometimes attributed an End to the chat's new
+            // backend. Only an unambiguous original namespace may recover it.
+            ?: toolIndexes.entries.filter { it.key.second == callId }.singleOrNull()?.value
+
+    fun toolEndIndex(callId: String, backend: String?): Int? {
         if (callId.isEmpty()) return null
-        val indexes = toolIndexes[callId] ?: return null
+        val indexes = toolIndexesFor(callId, backend) ?: return null
         val runningIdx = indexes.firstOrNull { index ->
             if (index !in items.indices) return@firstOrNull false
             when (val item = items[index]) {
@@ -343,9 +357,9 @@ fun coalesceTranscript(
         return runningIdx ?: indexes.lastOrNull { it in items.indices }
     }
 
-    fun matchingEditIndex(callId: String, path: String): Int? {
+    fun matchingEditIndex(callId: String, path: String, backend: String?): Int? {
         if (callId.isNotEmpty()) {
-            val indexes = toolIndexes[callId]
+            val indexes = toolIndexesFor(callId, backend)
             if (indexes != null) {
                 for (index in indexes.asReversed()) {
                     if (index !in items.indices) continue
@@ -364,9 +378,9 @@ fun coalesceTranscript(
         for (index in items.indices.reversed()) {
             when (val item = items[index]) {
                 is ChatDisplayItem.Edit ->
-                    if (item.state.running && (path.isEmpty() || item.state.path == path)) return index
+                    if (item.state.backend == backend && item.state.running && (path.isEmpty() || item.state.path == path)) return index
                 is ChatDisplayItem.Tool ->
-                    if (item.state.running && ChatToolState.isFileEditVerb(item.state.verb) &&
+                    if (item.state.backend == backend && item.state.running && ChatToolState.isFileEditVerb(item.state.verb) &&
                         (path.isEmpty() || item.state.target == path)
                     ) return index
                 else -> continue
@@ -512,7 +526,7 @@ fun coalesceTranscript(
                 val verb = inner.str("verb") ?: ""
                 val target = ChatToolState.clip(inner.str("target") ?: "")
                 if (eventBackend != null) toolBackends[rowID] = eventBackend
-                noteToolIndex(items.size, callId)
+                noteToolIndex(items.size, callId, eventBackend)
                 // A bare "tool" event without a start/end pair arrives
                 // already finished; only true starts run open.
                 val isStart = (inner.str("kind") ?: "").lowercase() != "tool"
@@ -531,6 +545,8 @@ fun coalesceTranscript(
                                 failed = inner.safeBool("failed") == true,
                                 startedAtMs = atMsOf(ev, inner) ?: 0,
                                 endedAtMs = null,
+                                callId = callId,
+                                backend = eventBackend,
                             ),
                         ),
                     )
@@ -551,6 +567,7 @@ fun coalesceTranscript(
                                     verb,
                                     inner.str("detail") ?: inner.str("snippet"),
                                 ),
+                                backend = eventBackend,
                             ),
                         ),
                     )
@@ -560,7 +577,7 @@ fun coalesceTranscript(
                 flushText()
                 flushThinking()
                 val callId = inner.str("callId") ?: inner.str("call_id") ?: ""
-                val index = toolEndIndex(callId)
+                val index = toolEndIndex(callId, eventBackend)
                 if (index != null && index in items.indices) {
                     when (val item = items[index]) {
                         is ChatDisplayItem.Tool -> {
@@ -607,6 +624,8 @@ fun coalesceTranscript(
                         failed = !(inner.safeBool("ok") ?: true),
                         startedAtMs = atMsOf(ev, inner) ?: 0,
                         endedAtMs = atMsOf(ev, inner),
+                        callId = callId.takeIf { it.isNotEmpty() },
+                        backend = eventBackend,
                     )
                     state = state.applyDetail(inner.str("detail"))
                     val rowID = if (ev.safeLong("seq") != null || callId.isEmpty()) {
@@ -614,7 +633,7 @@ fun coalesceTranscript(
                     } else {
                         "edit-$callId"
                     }
-                    noteToolIndex(items.size, callId)
+                    noteToolIndex(items.size, callId, eventBackend)
                     items.add(ChatDisplayItem.Edit(rowID, state))
                 } else {
                     val fallback = callId.ifEmpty { "end-${stamp(ev, items.size)}" }
@@ -629,7 +648,7 @@ fun coalesceTranscript(
                     } else {
                         if (occurrence == 1) "tool-$fallback" else "tool-$fallback#$occurrence"
                     }
-                    noteToolIndex(items.size, callId)
+                    noteToolIndex(items.size, callId, eventBackend)
                     items.add(
                         ChatDisplayItem.Tool(
                             rowID,
@@ -643,6 +662,7 @@ fun coalesceTranscript(
                                 startedAtMs = atMsOf(ev, inner) ?: 0,
                                 endedAtMs = atMsOf(ev, inner),
                                 snippet = ChatToolState.makeSnippet(presentation.verb, inner.str("detail")),
+                                backend = eventBackend,
                             ),
                         ),
                     )
@@ -656,7 +676,7 @@ fun coalesceTranscript(
                 val added = (inner.safeLong("added") ?: 0L).coerceIn(0L, 4_294_967_295L)
                 val removed = (inner.safeLong("removed") ?: 0L).coerceIn(0L, 4_294_967_295L)
                 val patch = inner.str("patch") ?: ""
-                val index = matchingEditIndex(callId, path)
+                val index = matchingEditIndex(callId, path, eventBackend)
                 if (index != null && index in items.indices) {
                     when (val item = items[index]) {
                         is ChatDisplayItem.Edit -> {
@@ -675,13 +695,15 @@ fun coalesceTranscript(
                                 failed = false,
                                 startedAtMs = item.state.startedAtMs,
                                 endedAtMs = if (item.state.running) null else (atMsOf(ev, inner) ?: item.state.endedAtMs),
+                                callId = item.state.callId,
+                                backend = item.state.backend,
                             )
                             state = state.recountIfNeeded()
                             items[index] = ChatDisplayItem.Edit(item.id, state)
                         }
                         else -> Unit
                     }
-                    if (callId.isNotEmpty()) noteToolIndex(index, callId)
+                    if (callId.isNotEmpty()) noteToolIndex(index, callId, eventBackend)
                 } else {
                     var state = ChatEditState(
                         path = path,
@@ -693,6 +715,8 @@ fun coalesceTranscript(
                         failed = false,
                         startedAtMs = atMsOf(ev, inner) ?: 0,
                         endedAtMs = null,
+                        callId = callId.takeIf { it.isNotEmpty() },
+                        backend = eventBackend,
                     )
                     state = state.recountIfNeeded()
                     val rowID = if (ev.safeLong("seq") != null || callId.isEmpty()) {
@@ -702,7 +726,7 @@ fun coalesceTranscript(
                         editStarts[callId] = occurrence
                         if (occurrence == 1) "edit-$callId" else "edit-$callId#$occurrence"
                     }
-                    if (callId.isNotEmpty()) noteToolIndex(items.size, callId)
+                    if (callId.isNotEmpty()) noteToolIndex(items.size, callId, eventBackend)
                     items.add(ChatDisplayItem.Edit(rowID, state))
                 }
             }
@@ -719,6 +743,8 @@ fun coalesceTranscript(
                             name = inner.str("name")?.ifEmpty { null } ?: L10n.text("android.chattranscript.attachment.040d2b36"),
                             mediaType = inner.str("mediaType") ?: inner.str("media_type"),
                             size = inner.safeLong("size"),
+                            callId = (inner.str("callId") ?: inner.str("call_id"))?.takeIf { it.isNotBlank() },
+                            backend = eventBackend,
                         ),
                     )
                 }
