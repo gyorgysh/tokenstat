@@ -469,13 +469,13 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "9.8.0"
+          gradle-version: "9.8.1"
 
       # JNI-only builds do not automatically install AGP's stripping toolchain.
       - name: Install the pinned Android NDK
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.16248370"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
 
       - name: Unit tests, instrumentation test APK, and release bundle
         run: gradle -p apps/android testDebugUnitTest lintDebug lintRelease assembleDebugAndroidTest bundleRelease

@@ -54,7 +54,7 @@ pub fn api_url(path: &str) -> anyhow::Result<String> {
 /// on disk. A stale sidecar would otherwise make the server answer 304 for a
 /// file we no longer have.
 pub fn fetch_conditional(url: &str, path: &Path, timeout_secs: u64) -> anyhow::Result<Fetched> {
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::http::client_builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
         // A conditional GET is a freshness check; it must not hang on a dead
         // network for the whole request timeout.

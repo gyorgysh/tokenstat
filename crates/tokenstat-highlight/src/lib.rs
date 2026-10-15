@@ -486,7 +486,7 @@ pub fn spans(language: Language, text: &str) -> Result<Vec<Span>, HighlightError
     let config = configuration(language)?;
     let mut highlighter = Highlighter::new();
     let events = highlighter
-        .highlight(config, text.as_bytes(), None, |_| None)
+        .highlight(config, text.as_bytes(), None, None, |_| None)
         .map_err(|e| HighlightError::Parse(e.to_string()))?;
 
     let mut spans: Vec<Span> = Vec::new();

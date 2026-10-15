@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Markdig" Version="1.3.2" />
+    <PackageReference Include="Markdig" Version="1.4.0" />
     <Compile Include="../../../apps/windows/Pages/NoteDraftStore.cs" Link="NoteDraftStore.cs" />
     <Compile Include="../../../apps/windows/Pages/NoteMarkdown.cs" Link="NoteMarkdown.cs" />
   <Compile Include="../../../apps/windows/Pages/NoteFormatting.cs" Link="NoteFormatting.cs" /></ItemGroup>

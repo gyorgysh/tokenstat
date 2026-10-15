@@ -68,7 +68,7 @@ fn import_digital_ocean(params: &str) -> Result<Value, String> {
     if p.token.trim().is_empty() {
         return Err("DigitalOcean token is required".into());
     }
-    let client = reqwest::blocking::Client::builder()
+    let client = tokenstat_sync::http::client_builder()
         .timeout(Duration::from_secs(20))
         .connect_timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())

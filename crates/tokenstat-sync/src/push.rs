@@ -604,7 +604,7 @@ fn post_with_status(
     path: &str,
     body: &serde_json::Value,
 ) -> Result<(reqwest::StatusCode, String), ProfileError> {
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::http::client_builder()
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(5))
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))

@@ -35,7 +35,7 @@ abstract class BaseTokenstatAppFunctionService : AppFunctionService() {
      * Only local project metadata is searched. No files or conversation content are returned.
      * @param query Project or computer name. An empty query returns recent projects.
      */
-    @AppFunction(isDescribedByKDoc = true)
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
     suspend fun searchProjects(query: String): List<ProjectFunctionResult> = withContext(Dispatchers.IO) {
         withTimeout(15_000) {
             val owner = verify()
@@ -50,7 +50,7 @@ abstract class BaseTokenstatAppFunctionService : AppFunctionService() {
      * This is an estimated value of usage, not a bill or subscription charge.
      * @param period Either today or week (the last seven calendar days).
      */
-    @AppFunction(isDescribedByKDoc = true)
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
     suspend fun getUsage(period: String): UsageFunctionResult = withContext(Dispatchers.IO) {
         withTimeout(15_000) {
             if (period !in setOf("today", "week")) throw AppFunctionInvalidArgumentException("period must be today or week")
@@ -72,7 +72,7 @@ abstract class BaseTokenstatAppFunctionService : AppFunctionService() {
      * @param body The note content to save.
      * @return The created note's id.
      */
-    @AppFunction(isDescribedByKDoc = true)
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
     suspend fun createNote(projectId: String, title: String, body: String): String = withContext(Dispatchers.IO) {
         withTimeout(15_000) {
             if (title.isBlank() || title.length > 200 || body.length > 100_000)

@@ -357,7 +357,11 @@ pub(crate) fn stop_terminal(id: &str, close: bool) -> Result<(), tokenstat_pty::
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let info = tokenstat_pty::manager().info(id).ok();
-    if let Some(info) = info.as_ref() {
+    // A reaped session has already recorded its result. Closing its old tab
+    // later must not start a second retention window after that result expires.
+    if terminals.contains_key(id)
+        && let Some(info) = info.as_ref()
+    {
         remember_completed_terminal(info);
     }
     if close {
@@ -417,13 +421,32 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         poll_terminals();
-        manager.close(&info.id).unwrap();
-        let completion = completed_terminals().lock().unwrap().remove(&info.id);
+        let completion = completed_terminals()
+            .lock()
+            .unwrap()
+            .get(&info.id)
+            .map(|work| work.phase);
         assert_eq!(
-            completion.map(|work| work.phase),
+            completion,
             Some(if code == 0 { "done" } else { "failed" }),
             "Local completion tracking must not depend on a legacy push binding."
         );
+        completed_terminals()
+            .lock()
+            .unwrap()
+            .get_mut(&info.id)
+            .unwrap()
+            .finished_at = Instant::now() - COMPLETION_LIFE;
+        stop_terminal(&info.id, true).unwrap();
+        assert!(
+            completed_terminals()
+                .lock()
+                .unwrap()
+                .get(&info.id)
+                .is_none_or(|work| work.finished_at.elapsed() >= COMPLETION_LIFE),
+            "Closing an old result must not restart its retention window."
+        );
+        completed_terminals().lock().unwrap().remove(&info.id);
     }
 
     #[cfg(unix)]

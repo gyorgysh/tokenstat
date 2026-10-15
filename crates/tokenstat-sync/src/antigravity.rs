@@ -284,7 +284,7 @@ fn resolve_token() -> anyhow::Result<Option<(String, TokenSource)>> {
 }
 
 fn download_quota_bundle(access_token: &str) -> anyhow::Result<String> {
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::http::client_builder()
         .timeout(std::time::Duration::from_secs(60))
         .connect_timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
@@ -383,7 +383,7 @@ fn try_refresh_from_oauth_file(rejected: &str) -> anyhow::Result<Option<String>>
     let Some(refresh) = creds.refresh_token.filter(|s| !s.is_empty()) else {
         return Ok(None);
     };
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::http::client_builder()
         .timeout(std::time::Duration::from_secs(30))
         .connect_timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())

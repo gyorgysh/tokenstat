@@ -238,7 +238,7 @@ pub struct VaultClient {
 impl VaultClient {
     pub fn capture() -> Result<Self, VaultError> {
         let authentication = Arc::new(auth()?);
-        let client = Client::builder()
+        let client = crate::http::client_builder()
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(5))
             .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))

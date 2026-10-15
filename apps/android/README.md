@@ -14,8 +14,8 @@ cargo install cargo-ndk --locked
 apps/android/gradlew -p apps/android testDebugUnitTest lintDebug lintRelease bundleRelease
 ```
 
-The launcher pins Gradle 9.8.0 and verifies downloaded distributions. The build
-uses Android Gradle Plugin 9.1.1 with built-in Kotlin; release builds enable
+The launcher pins Gradle 9.8.1 and verifies downloaded distributions. The build
+uses Android Gradle Plugin 9.4.1 with built-in Kotlin; release builds enable
 both R8 code optimization and optimized resource shrinking. Keep the release
 mapping files alongside native symbols for crash diagnosis (CI archives both).
 

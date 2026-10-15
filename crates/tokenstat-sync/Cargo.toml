@@ -20,6 +20,8 @@ thiserror.workspace = true
 jiff.workspace = true
 directories.workspace = true
 reqwest.workspace = true
+rustls.workspace = true
+webpki-root-certs.workspace = true
 rusqlite.workspace = true
 anyhow.workspace = true
 flate2 = { workspace = true }

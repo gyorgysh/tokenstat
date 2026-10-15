@@ -183,7 +183,7 @@ fn get_json(port: u16, path: &str) -> Result<Value, String> {
     // A real HTTP decoder handles chunked responses and Content-Length without
     // waiting for a server to close a reusable connection. The total deadline
     // also bounds a server that continually trickles a few bytes.
-    let response = reqwest::blocking::Client::builder()
+    let response = tokenstat_sync::http::client_builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(READ_TIMEOUT)
         .no_proxy()

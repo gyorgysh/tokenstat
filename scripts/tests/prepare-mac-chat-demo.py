@@ -126,7 +126,7 @@ sources = [
 project = {'name': 'DesktopDemo', 'options': {'deploymentTarget': {'macOS': '14.0'}},
            'packages': {'SwiftTerm': {'url': 'https://github.com/migueldeicaza/SwiftTerm.git', 'exactVersion': '1.11.2'}},
            'settings': {'base': {'SWIFT_VERSION': '5.0', 'SWIFT_ACTIVE_COMPILATION_CONDITIONS': 'DEBUG WORKBENCH_QA',
-                                 'CODE_SIGN_IDENTITY': '-', 'MARKETING_VERSION': '1.6.3', 'CURRENT_PROJECT_VERSION': '1'}},
+                                 'CODE_SIGN_IDENTITY': '-', 'MARKETING_VERSION': '1.6.4', 'CURRENT_PROJECT_VERSION': '1'}},
            'targets': {'DesktopDemo': {'type': 'application', 'platform': 'macOS', 'sources': sources,
                                       'dependencies': [{'framework': str(ROOT / 'apps/mac/Vendor/TokenstatFFI.xcframework'), 'embed': False}, {'package': 'SwiftTerm'}],
                                       'settings': {'base': {'PRODUCT_BUNDLE_IDENTIFIER': 'ai.tokenstat.desktopdemo',

@@ -1,8 +1,8 @@
 <Project>
   <PropertyGroup>
     <!-- Keep in lockstep with workspace Cargo.toml. CI may override. -->
-    <TokenstatVersion Condition="'$(TokenstatVersion)' == ''">1.6.3</TokenstatVersion>
-    <TokenstatBuildNumber Condition="'$(TokenstatBuildNumber)' == ''">155</TokenstatBuildNumber>
+    <TokenstatVersion Condition="'$(TokenstatVersion)' == ''">1.6.4</TokenstatVersion>
+    <TokenstatBuildNumber Condition="'$(TokenstatBuildNumber)' == ''">156</TokenstatBuildNumber>
     <Version>$(TokenstatVersion)</Version>
     <AssemblyVersion>$(TokenstatVersion).0</AssemblyVersion>
     <FileVersion>$(TokenstatVersion).$(TokenstatBuildNumber)</FileVersion>

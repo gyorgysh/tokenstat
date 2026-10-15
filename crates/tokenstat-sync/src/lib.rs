@@ -36,6 +36,7 @@ pub mod discover;
 pub mod forge;
 pub mod grok_limits;
 pub mod host;
+pub mod http;
 pub mod keychain;
 pub mod muse_limits;
 pub mod opencode_limits;

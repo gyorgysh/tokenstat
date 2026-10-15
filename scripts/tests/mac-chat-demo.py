@@ -127,10 +127,10 @@ def result(method, p):
                               len=len(match.group().encode('utf-16-le')) // 2,
                               kind='keyword' if match.group(1) else 'function'))
         return dict(language='TypeScript', spans=spans)
-    if method == 'protocol': return {'protocolVersion': '35', 'version': '1.6.3'}
-    if method == 'info': return dict(protocolVersion='35', coreVersion='1.6.3', hasArchive=True,
+    if method == 'protocol': return {'protocolVersion': '35', 'version': '1.6.4'}
+    if method == 'info': return dict(protocolVersion='35', coreVersion='1.6.4', hasArchive=True,
                                      timezone='UTC', priceBookEffectiveFrom='2026-10-13', hasPrices=True)
-    if method == 'app.updateCheck': return dict(current='1.6.3', latest='1.6.3', newer=False,
+    if method == 'app.updateCheck': return dict(current='1.6.4', latest='1.6.4', newer=False,
                                                 htmlUrl='https://tokenstat.ai/download')
     if method == 'ping': return {'pong': True}
     if method == 'machine.identity': return {'key': 'ab' * 32, 'label': 'Demo Mac', 'fingerprint': 'DEMO-MAC'}

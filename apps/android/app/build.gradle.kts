@@ -44,14 +44,14 @@ android {
     namespace = "ai.tokenstat.tokenstat"
     compileSdk = 37
     // Pin the stripping toolchain so AGP can package native debug symbols.
-    ndkVersion = "28.2.13676358"
+    ndkVersion = "30.0.16248370"
 
     defaultConfig {
         applicationId = "ai.tokenstat.tokenstat"
         minSdk = 28
         targetSdk = 36
-        versionCode = 155
-        versionName = "1.6.3"
+        versionCode = 156
+        versionName = "1.6.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
@@ -134,31 +134,31 @@ dependencies {
             }
         }
     }
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
+    val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
-    implementation("androidx.activity:activity-compose:1.12.0")
-    implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("androidx.appsearch:appsearch:1.1.0")
     implementation("androidx.appsearch:appsearch-platform-storage:1.1.0")
     implementation("androidx.appsearch:appsearch-local-storage:1.1.0")
-    implementation("androidx.appfunctions:appfunctions:1.0.0-alpha12")
-    ksp("androidx.appfunctions:appfunctions-compiler:1.0.0-alpha12")
-    implementation("androidx.fragment:fragment-ktx:1.8.9")
+    implementation("androidx.appfunctions:appfunctions:1.0.0-alpha13")
+    ksp("androidx.appfunctions:appfunctions-compiler:1.0.0-alpha13")
+    implementation("androidx.fragment:fragment-ktx:1.9.1")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
-    implementation("androidx.navigation:navigation-compose:2.9.5")
-    implementation("androidx.browser:browser:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.navigation:navigation-compose:2.10.2")
+    implementation("androidx.browser:browser:1.10.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.android.billingclient:billing-ktx:9.1.0")
-    implementation(platform("com.google.firebase:firebase-bom:34.3.0"))
+    implementation(platform("com.google.firebase:firebase-bom:35.0.1"))
     implementation("com.google.firebase:firebase-messaging")
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

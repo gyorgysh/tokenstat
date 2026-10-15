@@ -148,7 +148,7 @@ pub fn current_target() -> &'static str {
 }
 
 fn client() -> Result<reqwest::blocking::Client, UpdateError> {
-    Ok(reqwest::blocking::Client::builder()
+    Ok(crate::http::client_builder()
         .timeout(Duration::from_secs(120))
         .connect_timeout(Duration::from_secs(10))
         .user_agent(USER_AGENT)
@@ -160,7 +160,7 @@ fn client() -> Result<reqwest::blocking::Client, UpdateError> {
 /// Follows redirects. Asset bytes live on a storage host, and the
 /// browser download url is a 302. Never attach a token to this client.
 fn download_client() -> Result<reqwest::blocking::Client, UpdateError> {
-    Ok(reqwest::blocking::Client::builder()
+    Ok(crate::http::client_builder()
         .timeout(Duration::from_secs(120))
         .connect_timeout(Duration::from_secs(10))
         .user_agent(USER_AGENT)
@@ -461,7 +461,7 @@ struct ReleaseManifest {
 fn cached_site_release() -> Option<GhRelease> {
     // No redirects, cookies, credentials or identifying query parameters.
     // Keep fallback latency bounded when the website is unavailable.
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::http::client_builder()
         .timeout(Duration::from_secs(5))
         .connect_timeout(Duration::from_secs(3))
         .redirect(reqwest::redirect::Policy::none())

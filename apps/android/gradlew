@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 set -eu
 
-VERSION=9.8.0
-SHA256=bafd5ce9cfaea0fbccfdc8439a1ac42fbd4cd9c89dc9a988228d8a2639a58e6c
+VERSION=9.8.1
+SHA256=dce76f55f8e251a3a1f130eb120f30b3d271de2b76c9b0729d316b5a1b6dc01f
 DIST="${GRADLE_USER_HOME:-$HOME/.gradle}/tokenstat/gradle-$VERSION"
 if [ ! -x "$DIST/bin/gradle" ]; then
   ARCHIVE="$DIST-bin.zip"

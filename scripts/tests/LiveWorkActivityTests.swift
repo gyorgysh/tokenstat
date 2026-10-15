@@ -71,9 +71,11 @@ import Foundation
                "An older app must keep receiving updates after the overview completes.")
         finished.failed = 1; finished.total = 3
         assert(finished.displayPhase == .failed)
-        finished.working = 1; finished.total = 4
+        finished.idle = 1; finished.total = 4
+        assert(finished.displayPhase == .failed, "An idle shell must not hide a failed run.")
+        finished.working = 1; finished.total = 5
         assert(finished.displayPhase == .working)
-        finished.waiting = 1; finished.total = 5
+        finished.waiting = 1; finished.total = 6
         assert(finished.displayPhase == .waiting)
         let state = LiveWorkAttributes.ContentState(phase: .waiting, updatedAt: 1, overview: merged)
         let roundtrip = try JSONDecoder().decode(LiveWorkAttributes.ContentState.self, from: JSONEncoder().encode(state))

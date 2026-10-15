@@ -199,7 +199,7 @@ fn refusal_error(text: &str, status: u16) -> ProfileError {
 
 fn http_client() -> Result<reqwest::blocking::Client, ProfileError> {
     // No cookie jar: bearer routes must not attach a web session cookie.
-    Ok(reqwest::blocking::Client::builder()
+    Ok(crate::http::client_builder()
         .timeout(Duration::from_secs(60))
         // A dead network must fail fast, not eat the whole request timeout.
         // `timeout` covers connect, but the OS default connect phase can be
@@ -543,7 +543,7 @@ pub fn logout(host_flag: Option<&str>) -> Result<String, ProfileError> {
         // Dedicated client with a short budget. Reusing `http_client` meant a
         // dropped path could hold the whole logout for 60 seconds, and the
         // keychain only cleared after that.
-        if let Ok(client) = reqwest::blocking::Client::builder()
+        if let Ok(client) = crate::http::client_builder()
             .timeout(Duration::from_secs(4))
             .connect_timeout(Duration::from_secs(2))
             .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))

@@ -50,8 +50,8 @@ struct LiveWorkOverview: Codable, Hashable, Sendable {
     var displayPhase: LiveWorkPhase {
         if waiting > 0 { return .waiting }
         if working > 0 { return .working }
-        if idle > 0 { return .idle }
         if failed > 0 { return .failed }
+        if idle > 0 { return .idle }
         return done > 0 ? .done : .idle
     }
     var remaining: Int { max(0, total - items.count) }

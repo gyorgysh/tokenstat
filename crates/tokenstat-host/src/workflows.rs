@@ -2313,7 +2313,7 @@ fn run_http(
         workspace_path,
         outputs,
     );
-    let client = reqwest::blocking::Client::builder()
+    let client = tokenstat_sync::http::client_builder()
         .timeout(Duration::from_secs(60))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()

@@ -6,8 +6,8 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-$Version = "1.24.260710001"
-$PackageHash = "175640566a3b59c4b132070ee96c2c77e5ab7edd2e92732a5eb3610bbf63d90e"
+$Version = "1.25.260930003"
+$PackageHash = "02b07b349af66d801159bdf9e440d4a1ce78bb951f37fc8609731665afdae7ee"
 $Cache = Join-Path $Root "target/conpty/$Version"
 $Package = Join-Path $Cache "conpty.nupkg"
 New-Item -ItemType Directory -Force -Path $Cache | Out-Null
@@ -28,12 +28,12 @@ if ((Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLowerInvariant
 }
 $Hashes = @{
     x64 = @{
-        "conpty.dll" = "39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8"
-        "OpenConsole.exe" = "b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160"
+        "conpty.dll" = "feeef341d891643c62d30b6b07800bc70f0bc148f44cb8c3bee84aa557ae805a"
+        "OpenConsole.exe" = "3d66b23d0a71bb8eed2b77edc8b9df9bf54ce6c8fb74c863a30e760997f80586"
     }
     arm64 = @{
-        "conpty.dll" = "db3d173640b172bafd42d5b541b638a9aeec1c7d0e40dd636bf02822a32c912c"
-        "OpenConsole.exe" = "ed7622fd0d3bedc9ab9f122f5e58edf0def9e7999224f52dd395ba9f54edbe09"
+        "conpty.dll" = "151a02355227710c20c9f8f1eaf68ac4668aa09cdc921adc7ec661804d8eb1bf"
+        "OpenConsole.exe" = "4313825a3ba634d113cc6ed3bc8ce735e3c19d360cecd985794787479469f91f"
     }
 }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null

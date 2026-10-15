@@ -81,7 +81,7 @@ pub fn limits() -> ProviderLimits {
             );
         }
     };
-    let client = match reqwest::blocking::Client::builder()
+    let client = match crate::http::client_builder()
         .timeout(std::time::Duration::from_secs(15))
         .connect_timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
@@ -455,7 +455,7 @@ fn looks_like_jwt(token: &str) -> bool {
 }
 
 fn download_events_json(access_token: &str) -> anyhow::Result<String> {
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::http::client_builder()
         .timeout(std::time::Duration::from_secs(60))
         .connect_timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
@@ -642,7 +642,7 @@ fn billing_from_kind(kind: Option<&str>) -> BillingMode {
 }
 
 fn download_csv(session_token: &str) -> anyhow::Result<String> {
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::http::client_builder()
         .timeout(std::time::Duration::from_secs(60))
         .connect_timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())

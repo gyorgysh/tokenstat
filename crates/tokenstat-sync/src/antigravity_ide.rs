@@ -887,7 +887,7 @@ fn https_rpc_request(connection: &Connection, method: &str, body: &Value) -> any
     // cert, so verification is disabled here on purpose. CSRF + fixed host
     // 127.0.0.1 + body cap are the real guards. Prefer the plain HTTP path.
     let url = format!("https://127.0.0.1:{}/{SERVICE}/{method}", connection.port);
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::http::client_builder()
         .danger_accept_invalid_certs(true)
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()

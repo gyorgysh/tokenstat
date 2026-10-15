@@ -148,7 +148,7 @@ struct TokenResponse {
 }
 
 pub(super) fn http_client() -> Result<reqwest::blocking::Client, ForgeError> {
-    Ok(reqwest::blocking::Client::builder()
+    Ok(crate::http::client_builder()
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(10))
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
