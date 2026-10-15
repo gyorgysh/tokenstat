@@ -52,6 +52,7 @@ enum ChatUsageSummary: Equatable {
 /// not drawn as money charged.
 struct ChatCostMeter: View {
     let totals: ChatUsageSummary
+    @ScaledMetric(relativeTo: .caption) private var metricWidth = 104
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -60,7 +61,7 @@ struct ChatCostMeter: View {
                 .foregroundStyle(.tertiary)
             if case let .available(totals) = totals {
                 TokenSplitBar(input: totals.input, output: totals.output, cacheRead: totals.cacheRead, cacheWrite: totals.cacheWrite)
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: metricWidth), alignment: .leading)], alignment: .leading, spacing: Theme.Space.s) {
                     legend(color: Theme.accent, title: L10n.text("common.chat.stats.input"), value: totals.input)
                     legend(color: Theme.secondary, title: L10n.text("common.chat.stats.output"), value: totals.output)
                     legend(color: Theme.accent.opacity(0.55), title: L10n.text("common.chat.stats.cache_read"), value: totals.cacheRead)
@@ -88,15 +89,13 @@ struct ChatCostMeter: View {
     }
 
     private func legend(color: Color, title: String, value: UInt64) -> some View {
-        HStack(spacing: 6) {
-            Capsule()
-                .fill(color)
-                .frame(width: 8, height: 8)
-            Text(title)
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(title).font(Theme.caption).foregroundStyle(.secondary)
+            }
             Text(value.formatted())
-                .font(Theme.caption.weight(.medium).monospacedDigit())
+                .font(Theme.callout.weight(.semibold).monospacedDigit())
                 .foregroundStyle(.primary)
         }
     }

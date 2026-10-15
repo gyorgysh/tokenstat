@@ -56,25 +56,23 @@ struct ChatContextCard: View {
     }
 
     private var context: some View {
-        card(L10n.text("common.chat.stats"), symbol: "chart.pie") {
+        card(L10n.text("common.chat.stats"), symbol: "chart.pie", showsStatus: true) {
             if let inspection = currentInspection {
-                Text(model.selected?.running == true ? L10n.text("common.running") : L10n.text("common.idle"))
-                    .font(Theme.caption).foregroundStyle(.secondary)
                 if let resolved = inspection.model {
                     Text(resolved).font(Theme.callout.weight(.medium)).textSelection(.enabled)
                 }
                 if let used = inspection.contextUsed {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(used.formatted()).font(Theme.title3.weight(.semibold)).monospacedDigit()
-                        if let window = inspection.contextWindow {
-                            Text(L10n.text("apple.chatcontext.of_tokens", window.formatted()))
-                                .font(Theme.caption).foregroundStyle(.secondary)
+                        contextAmount(used, window: inspection.contextWindow)
+                        Spacer(minLength: 8)
+                        if let fraction = inspection.fraction {
+                            Text(fraction.formatted(.percent.precision(.fractionLength(0))))
+                                .font(Theme.caption.weight(.semibold)).monospacedDigit()
+                                .foregroundStyle(fraction > 0.9 ? Theme.warning : Theme.accent)
+                                .fixedSize()
                         }
                     }
                     if let fraction = inspection.fraction {
-                        Text(fraction.formatted(.percent.precision(.fractionLength(0))))
-                            .font(Theme.caption.weight(.medium)).monospacedDigit()
-                            .foregroundStyle(.secondary)
                         ProgressView(value: fraction).tint(fraction > 0.9 ? Theme.warning : Theme.accent)
                             .accessibilityLabel(L10n.text("apple.chatcontext.context"))
                             .accessibilityValue(fraction.formatted(.percent.precision(.fractionLength(0))))
@@ -129,11 +127,17 @@ struct ChatContextCard: View {
                     if !connected.isEmpty {
                         Text(L10n.text("common.chat.stats.connected_servers", connected.count.formatted()))
                             .font(Theme.caption).foregroundStyle(.secondary)
-                        ForEach(connected) { server in serverRow(server, inspection: inspection) }
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(connected) { server in serverRow(server) }
+                        }
                     }
                     if !others.isEmpty {
                         ChatDisclosureRow(title: L10n.text("common.chat.stats.other_servers", others.count.formatted()), expanded: $otherServersOpen)
-                        if otherServersOpen { ForEach(others) { server in serverRow(server, inspection: inspection) } }
+                        if otherServersOpen {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(others) { server in serverRow(server) }
+                            }
+                        }
                     }
                 }
                 if inspection.inventoryPartial == true { note(L10n.text("apple.chatcontext.inventory_partial")) }
@@ -177,24 +181,42 @@ struct ChatContextCard: View {
             .font(Theme.caption).foregroundStyle(.secondary)
     }
 
-    private func serverRow(_ server: ChatInspection.Server, inspection: ChatInspection) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            HStack(alignment: .top, spacing: Theme.Space.s) {
-                Circle().fill(inspection.hasLiveConnection(server, running: model.selected?.running == true) ? Theme.accent : Color.secondary)
-                    .frame(width: 7, height: 7).padding(.top, 6)
-                VStack(alignment: .leading, spacing: 4) {
+    private func contextAmount(_ used: UInt64, window: UInt64?) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(used.formatted()).font(Theme.title3.weight(.semibold)).monospacedDigit().fixedSize()
+                if let window {
+                    note(L10n.text("apple.chatcontext.of_tokens", window.formatted())).fixedSize()
+                }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(used.formatted()).font(Theme.title3.weight(.semibold)).monospacedDigit()
+                if let window { note(L10n.text("apple.chatcontext.of_tokens", window.formatted())) }
+            }
+        }
+    }
+
+    private func serverRow(_ server: ChatInspection.Server) -> some View {
+        let reportedConnected = server.source == "agent" && server.status == "connected"
+        return VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.s) {
+                Circle().fill(reportedConnected ? Theme.accent : Color.secondary)
+                    .frame(width: 7, height: 7).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(server.name.replacingOccurrences(of: "plugin:", with: "").replacingOccurrences(of: ":", with: " · "))
                         .font(Theme.callout.weight(.medium)).textSelection(.enabled)
-                    Text(status(server)).font(Theme.caption).foregroundStyle(.secondary)
+                        .accessibilityValue(status(server))
+                    if !reportedConnected {
+                        Text(status(server)).font(Theme.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer(minLength: 0)
-            }
+            }.frame(minHeight: 28)
             if let tools = server.tools, !tools.isEmpty {
                 toolList(tools, title: L10n.text("apple.chatcontext.server_tools", tools.count.formatted()))
             }
         }
-        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 2).frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func toolList(_ tools: [String], title: String) -> some View {
@@ -206,9 +228,19 @@ struct ChatContextCard: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func card<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
+    private func card<Content: View>(_ title: String, symbol: String, showsStatus: Bool = false, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Label(title, systemImage: symbol).font(Theme.callout.weight(.semibold))
+            HStack(alignment: .firstTextBaseline) {
+                Label(title, systemImage: symbol).font(Theme.callout.weight(.semibold))
+                if showsStatus {
+                    Spacer(minLength: 8)
+                    Text(model.selected?.running == true ? L10n.text("common.running") : L10n.text("common.idle"))
+                        .font(Theme.caption.weight(.medium)).fixedSize()
+                        .foregroundStyle(model.selected?.running == true ? Theme.accent : Color.secondary)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Theme.accentSoft, in: Capsule())
+                }
+            }
             content()
         }
         .padding(Theme.Space.m)

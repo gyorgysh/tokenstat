@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,7 +19,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -101,21 +108,29 @@ internal fun chatCommands() = listOf(
         }
     }
     val data = inspection
-    StatsCard(L10n.text("common.chat.stats")) {
+    StatsCard(L10n.text("common.chat.stats"), status = if (chat.bol("running")) L10n.text("common.running") else L10n.text("common.idle")) {
         if (data == null) {
             if (!loaded) CircularProgressIndicator(Modifier.size(20.dp))
             else Text(L10n.text("common.chat.stats.unavailable"))
         } else {
             Text(data.str("model") ?: backend.orEmpty(), fontWeight = FontWeight.SemiBold)
-            Text(if (chat.bol("running")) L10n.text("common.running") else L10n.text("common.idle"), style = MaterialTheme.typography.bodySmall)
             val used = data["contextUsed"]?.jsonPrimitive?.doubleOrNull
             val window = data["contextWindow"]?.jsonPrimitive?.doubleOrNull
             if (used != null) {
-                Text("${number(used)} / ${window?.let(::number) ?: "—"}", style = MaterialTheme.typography.titleLarge)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(buildAnnotatedString {
+                        withStyle(SpanStyle(fontSize = MaterialTheme.typography.titleLarge.fontSize, fontWeight = FontWeight.SemiBold, color = LocalTsColors.current.textPrimary)) {
+                            append(number(used))
+                        }
+                        append(" / ${window?.let(::number) ?: "—"}")
+                    }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary,
+                        lineHeight = MaterialTheme.typography.titleLarge.lineHeight)
+                    if (window != null && window > 0) Text(NumberFormat.getPercentInstance().format((used / window).coerceIn(0.0, 1.0)),
+                        fontWeight = FontWeight.SemiBold, color = LocalTsColors.current.accent)
+                }
                 if (window != null && window > 0) {
                     val fraction = (used / window).coerceIn(0.0, 1.0).toFloat()
                     LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth(), color = LocalTsColors.current.accent)
-                    Text(NumberFormat.getPercentInstance().format(fraction), style = MaterialTheme.typography.bodySmall)
                 }
                 Text(L10n.text("common.chat.stats.context"), style = MaterialTheme.typography.bodySmall)
             } else Text(L10n.text("common.chat.stats.no_data"), style = MaterialTheme.typography.bodySmall)
@@ -151,7 +166,7 @@ internal fun chatCommands() = listOf(
                     val total = values.sum().coerceAtLeast(1.0)
                     values.forEachIndexed { index, value -> if (value > 0) Box(Modifier.weight((value / total).toFloat().coerceAtLeast(.00001f)).fillMaxHeight().background(colors[index])) }
                 }
-                labels.forEachIndexed { index, label -> StatRow(label, number(values[index])) }
+                UsageMetrics(labels, values, colors)
                 val cost = usage["cost"]?.jsonPrimitive?.doubleOrNull ?: 0.0
                 if (cost > 0) StatRow(L10n.text("common.chat.stats.cost"), NumberFormat.getCurrencyInstance(java.util.Locale.US).format(cost))
             }
@@ -166,8 +181,12 @@ internal fun chatCommands() = listOf(
         val others = servers - connected.toSet()
         if (connected.isNotEmpty()) Text(L10n.text("common.chat.stats.connected_servers", "${connected.size}"), style = MaterialTheme.typography.bodySmall)
         if (servers.isEmpty()) Text(L10n.text("common.chat.stats.no_servers"), style = MaterialTheme.typography.bodySmall)
-        connected.forEach { server -> key(server.str("name")) { ServerRow(server, data.bol("currentRun") && chat.bol("running")) } }
-        if (others.isNotEmpty()) StatsDisclosure(L10n.text("common.chat.stats.other_servers", "${others.size}")) { others.forEach { server -> key(server.str("name")) { ServerRow(server, false) } } }
+        if (connected.isNotEmpty()) Column {
+            connected.forEach { server -> key(server.str("name")) { ServerRow(server, data.bol("currentRun") && chat.bol("running")) } }
+        }
+        if (others.isNotEmpty()) StatsDisclosure(L10n.text("common.chat.stats.other_servers", "${others.size}")) {
+            Column { others.forEach { server -> key(server.str("name")) { ServerRow(server, false) } } }
+        }
         Text(L10n.text("common.chat.stats.reported"), style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary)
     }
 }
@@ -191,13 +210,18 @@ private fun toolGroup(name: String): String = if (name.startsWith("mcp__")) name
     }
 }
 @Composable private fun ServerRow(server: JsonObject, live: Boolean) {
-    Surface(shape = RoundedCornerShape(8.dp), color = LocalTsColors.current.background) {
-        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(server.str("name").orEmpty().removePrefix("plugin:").replace(":", " · "), fontWeight = FontWeight.Medium)
-            Text(serverStatus(server.str("status"), live), style = MaterialTheme.typography.bodySmall,
-                color = if (live && server.str("status") == "connected") LocalTsColors.current.accent else LocalTsColors.current.textSecondary)
-            tools(server["tools"])?.takeIf { it.isNotEmpty() }?.let { ToolGroups(it, L10n.text("common.chat.stats.available_tools", "${it.size}")) }
+    val connected = server.str("source") == "agent" && server.str("status") == "connected"
+    val status = serverStatus(server.str("status"), live)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(7.dp).background(if (connected) LocalTsColors.current.accent else LocalTsColors.current.textSecondary, CircleShape))
+            Column(Modifier.weight(1f).semantics(mergeDescendants = true) { stateDescription = status }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(server.str("name").orEmpty().removePrefix("plugin:").replace(":", " · "), fontWeight = FontWeight.Medium)
+                if (!connected) Text(status, style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary)
+            }
         }
+        tools(server["tools"])?.takeIf { it.isNotEmpty() }?.let { ToolGroups(it, L10n.text("common.chat.stats.available_tools", "${it.size}")) }
     }
 }
 internal fun serverStatus(status: String?, live: Boolean) = when (status) {
@@ -214,10 +238,36 @@ internal fun serverStatus(status: String?, live: Boolean) = when (status) {
 @Composable private fun StatRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth()) { Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall); Text(value, style = MaterialTheme.typography.bodySmall) }
 }
-@Composable private fun StatsCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+@Composable private fun UsageMetrics(labels: List<String>, values: List<Double>, colors: List<Color>) {
+    val fontScale = LocalDensity.current.fontScale
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columns = if (maxWidth / fontScale >= 260.dp) 2 else 1
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            labels.indices.chunked(columns).forEach { indices ->
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    indices.forEach { index ->
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(Modifier.size(6.dp).background(colors[index], CircleShape))
+                                Text(labels[index], style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary)
+                            }
+                            Text(number(values[index]), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+@Composable private fun StatsCard(title: String, status: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Surface(shape = RoundedCornerShape(12.dp), color = LocalTsColors.current.panel) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold); content()
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                if (status != null) Text(status, style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary,
+                    modifier = Modifier.background(LocalTsColors.current.accent.copy(alpha = .12f), CircleShape).padding(horizontal = 8.dp, vertical = 3.dp))
+            }
+            content()
         }
     }
 }
