@@ -813,6 +813,12 @@ pub fn run(path: &Path) -> Result<(), String> {
                     )?;
                     initialized = true;
                 } else if message["type"] == "result" {
+                    // A resumed session can finish an old background task
+                    // before consuming the new prompt. Its result does not
+                    // complete or fail the person's active request.
+                    if message["origin"]["kind"] == "task-notification" {
+                        continue;
+                    }
                     emit(&message)?;
                     if message["is_error"] == true {
                         return Err("Claude reported a failed turn.".into());

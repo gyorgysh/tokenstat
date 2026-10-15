@@ -1567,7 +1567,6 @@ final class ChatModel {
         let openingStarted = ProcessInfo.processInfo.systemUptime
         #endif
         selected = chat
-        contextRevision = savedPage?.sendRevision
         // Group ids are archive positions, which repeat from one chat to the
         // next. A group opened here must not open its namesake elsewhere.
         groupsOpen = false
@@ -1738,7 +1737,9 @@ final class ChatModel {
     /// can be dropped: the newest page is exactly what is being asked for,
     /// and what is before it is a page away again.
     func reopenAtLatest() async {
-        guard let selected else { return }
+        // Send also jumps to the latest rows. Keep its captured selection
+        // alive through sign-in, attachment upload and acknowledgement.
+        guard !sending, !sendingNow, let selected else { return }
         advanceSelection("explicit-latest")
         discardSteerReservations()
         let generation = selectionGeneration
@@ -3768,6 +3769,9 @@ final class ChatModel {
 
     /// Everything a window of the timeline is, forgotten in one place.
     private func forgetWindow() {
+        // Folder loads can prime a cached selection without going through
+        // select(_:). Its revision belongs to the discarded transcript too.
+        contextRevision = nil
         liveWindowLoaded = false
         windowReplacementTicket = nil
         eventsEpoch &+= 1

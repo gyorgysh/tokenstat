@@ -22,6 +22,8 @@ def member(signature):
 
 methods = member('    private func openEvents(')
 methods += '\n' + member('    private func loadEvents(')
+methods += '\n' + member('    private func forgetWindow(')
+methods += '\n' + member('    func reopenAtLatest(')
 if '    private func readOpeningEvents(' in source:
     methods += '\n' + member('    private func readOpeningEvents(')
 
@@ -74,6 +76,11 @@ enum ChatPaging { static let openPageEvents = 1500 }
     var currentReference: Int?, readingRestorationPulse: UInt64 = 0
     var selectionGeneration: UInt64 { generation }
     var pagingUnavailable = false, hasEarlier = false, historyTrimmed = false, reachedStart = false, liveWindowLoaded = false
+    var loadingEarlier = false, earlierInFlight = false
+    var sending = false, sendingNow = false
+    var outgoing: [String] = [], outgoingWatermark: [String: Int] = [:]
+    func advanceSelection(_ reason: String) { openingRead.cancel(); generation &+= 1 }
+    func discardSteerReservations() {}
     func selectionMatches(id: String, generation: UInt64) -> Bool { self.generation == generation && selected?.id == id }
     func beginWindowReplacement() -> UUID {
         let ticket = UUID(); windowReplacementTicket = ticket; eventsEpoch &+= 1; return ticket
@@ -162,7 +169,41 @@ METHODS
         Bridge.finish(6, seq: 4)
         let retried = await retry.value
         precondition(retried && model.liveWindowLoaded && model.events.first?.seq == 4)
-        print("Mac chat opening: shared page survives cancellation, selection fence, bounded recovery, loaded window tails, reset fallback completes and retries")
+        // Send's follow pulse also returns long transcripts to the bottom.
+        // That presentation change must not retire the in-flight send owner.
+        model.sending = true
+        var sendJumpFinished = false
+        let sendJump = Task { await model.reopenAtLatest(); sendJumpFinished = true }
+        await until { sendJumpFinished || Bridge.replies.count > 7 }
+        precondition(sendJumpFinished && model.generation == 2 && Bridge.replies.count == 7
+                     && model.events.first?.seq == 4 && model.contextRevision == 1,
+                     "Jumping to the latest transcript invalidated an active send")
+        await sendJump.value
+        model.sending = false; model.sendingNow = true
+        await model.reopenAtLatest()
+        precondition(model.generation == 2 && Bridge.replies.count == 7,
+                     "A pending-message send lost its selection during preparation")
+        model.sendingNow = false
+        // A cached selection in another project bypasses select(_:). Its
+        // new window must discard the previous conversation's revision.
+        model.contextRevision = 11
+        model.forgetWindow()
+        precondition(model.contextRevision == nil, "A replaced window retained another chat's send revision")
+        model.selected = Conversation(id: "C", sendRevision: 0)
+        model.generation = 3
+        let switched = Task { await model.openEvents(id: "C", generation: 3) }
+        await until { Bridge.replies.count == 8 }
+        Bridge.finish(7, seq: 5)
+        let switchedAccepted = await switched.value
+        precondition(switchedAccepted && model.contextRevision == 0, "A new project must send with its own context")
+        let idleJump = Task { await model.reopenAtLatest() }
+        await until { Bridge.replies.count == 9 }
+        precondition(model.generation == 4 && model.events.isEmpty && model.contextRevision == nil,
+                     "An idle jump must still replace the old window")
+        Bridge.finish(8, seq: 6)
+        await idleJump.value
+        precondition(model.liveWindowLoaded && model.events.first?.seq == 6 && model.contextRevision == 0)
+        print("Chat opening: cancellation, selection fence, bounded recovery, tails, safe send jumps and project context passed")
     }
 }
 '''.replace('METHODS', methods)

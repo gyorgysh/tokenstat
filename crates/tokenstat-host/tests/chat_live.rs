@@ -208,6 +208,56 @@ for line in sys.stdin:
 }
 
 #[test]
+fn resumed_claude_background_results_do_not_complete_the_new_prompt() {
+    let root = tempfile::tempdir().unwrap();
+    let fake = root.path().join("fake-claude");
+    fs::write(
+        &fake,
+        r#"#!/usr/bin/env python3
+import sys,json,time
+def emit(v): print(json.dumps(v),flush=True)
+for line in sys.stdin:
+ m=json.loads(line)
+ if m.get('type')=='control_request':
+  emit({'type':'control_response','response':{'request_id':m['request_id'],'subtype':'success'}})
+  emit({'type':'system','subtype':'init','session_id':'session'})
+  # Resuming can report an old background task before reading the new input.
+  emit({'type':'result','subtype':'success','origin':{'kind':'task-notification'},'is_error':False,'num_turns':0})
+  time.sleep(.2)
+ elif m.get('type')=='user':
+  assert m['message']['content'][0]['text']=='literal prompt'
+  # A background task failure is also separate from the person's request.
+  emit({'type':'result','origin':{'kind':'task-notification'},'is_error':True})
+  emit({'type':'assistant','message':{'content':[{'type':'text','text':'New prompt completed.'}]}})
+  emit({'type':'result','subtype':'success','is_error':False,'num_turns':1})
+  break
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.path().join("config.json");
+    fs::write(
+        &config,
+        json!({"backend":"claude","argv":[fake,"-p","literal prompt","--resume","session","--output-format","stream-json","--verbose"]}).to_string(),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+        .args(["chat-live", config.to_str().unwrap()])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let rows: Vec<Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(rows.iter().any(|row| row["type"] == "assistant"));
+    assert_eq!(rows.iter().filter(|row| row["type"] == "result").count(), 1);
+    assert_eq!(rows.last().unwrap()["num_turns"], 1);
+}
+
+#[test]
 fn stopping_the_wrapper_retires_the_native_agent_and_its_tool_process() {
     let root = tempfile::tempdir().unwrap();
     let fake = root.path().join("fake-agent");
