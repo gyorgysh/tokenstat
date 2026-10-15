@@ -1629,9 +1629,12 @@ extension Bridge {
         }
     }
 
+    /// Context and tool metadata reported for this conversation's backend.
+    static func chatInspection(id: String, peer: String? = nil) async throws -> ChatInspection {
+        try await chatInvoke(peer: peer, "chat.inspection", ["id": id], as: ChatInspection.self)
+    }
+
     /// What this conversation tells its agent before it hears the person.
-    /// Read so the inspector can show it: nothing tokenstat adds to somebody's
-    /// chat should be invisible to them.
     static func chatInstructions(id: String, peer: String? = nil) async throws -> ChatInstructions {
         try await chatInvoke(peer: peer, "chat.instructions", ["id": id], as: ChatInstructions.self)
     }

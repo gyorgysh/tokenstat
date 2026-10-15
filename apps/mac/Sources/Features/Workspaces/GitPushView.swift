@@ -12,9 +12,17 @@ struct GitPushControl: View {
     var onPushed: () async -> Void
     @State private var session: GitPushSession?
     @State private var presenting = false
+    @Environment(\.presentGitSync) private var presentGitSync
 
     var body: some View {
-        Button { presenting = true } label: {
+        Button {
+            if let presentGitSync, let session {
+                presentGitSync(GitSyncPresentation(target: target, folderName: folderName,
+                    hostName: hostName, pushSession: session, onCompleted: onPushed))
+            } else {
+                presenting = true
+            }
+        } label: {
             HStack(spacing: Theme.Space.s) {
                 Label(session?.draft.submitted == nil ? L10n.text("apple.gitpushview.push.92363252") : L10n.text("apple.gitpushview.check_push.c821c305"), systemImage: ActionIcon.upload.symbol)
                 if outgoing > 0 && session?.draft.submitted == nil {

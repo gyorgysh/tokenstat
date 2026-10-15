@@ -802,7 +802,7 @@ fn toml_set(text: &str, section: Option<&str>, key: &str, encoded: &str) -> Resu
     Ok(document.to_string())
 }
 
-fn strip_trailing_commas(text: &str) -> String {
+pub(crate) fn strip_trailing_commas(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(chars.len());
     let mut in_string = false;
@@ -844,7 +844,7 @@ fn strip_trailing_commas(text: &str) -> String {
     out
 }
 
-fn strip_jsonc(text: &str) -> String {
+pub(crate) fn strip_jsonc(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     let mut in_string = false;

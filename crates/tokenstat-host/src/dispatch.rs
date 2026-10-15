@@ -2421,6 +2421,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 "usage": page.usage,
             }))
         }
+        "chat.inspection" => Ok(store.inspection(&p.id.ok_or("chat.inspection needs id")?)?),
         "chat.instructions" => Ok(store.instructions(&p.id.ok_or("chat.instructions needs id")?)?),
         "chat.backends" => Ok(Value::Array(crate::chat::backends(p.refresh == Some(true)))),
         "chat.personas" => {

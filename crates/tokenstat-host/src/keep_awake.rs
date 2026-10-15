@@ -98,6 +98,7 @@ pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
         | "chat.recent"
         | "chat.backends"
         | "chat.instructions"
+        | "chat.inspection"
         | "chat.personas"
         | "chat.personaDefault"
         | "chat.personaDraft"

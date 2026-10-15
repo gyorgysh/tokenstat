@@ -188,6 +188,8 @@ pub struct Parser {
     /// wait forever for terminal input. Keep its URL/code out of chat.
     muse_auth: MuseAuthState,
     limit: Option<crate::provider_limit::Limit>,
+    inspection: crate::chat_inspection::Snapshot,
+    inspection_dirty: bool,
 }
 
 impl Parser {
@@ -211,7 +213,16 @@ impl Parser {
             muse_calls: HashMap::new(),
             muse_auth: MuseAuthState::Startup,
             limit: None,
+            inspection: Default::default(),
+            inspection_dirty: false,
         }
+    }
+
+    pub(crate) fn take_inspection(&mut self) -> Option<crate::chat_inspection::Snapshot> {
+        if !std::mem::take(&mut self.inspection_dirty) {
+            return None;
+        }
+        Some(self.inspection.clone())
     }
 
     pub(crate) fn take_limit(&mut self) -> Option<crate::provider_limit::Limit> {
@@ -491,6 +502,7 @@ impl Parser {
         {
             self.limit = Some(limit);
         }
+        self.inspection_dirty |= self.inspection.observe(&self.backend, &value);
         let mut events = if self.backend == "muse" {
             self.events_muse(&value)
         } else {
@@ -731,7 +743,13 @@ impl Parser {
                     }
                     self.last_session = Some(id.clone());
                 }
-                Event::ToolStart { call_id, input, .. } => {
+                Event::ToolStart {
+                    call_id,
+                    verb,
+                    input,
+                    ..
+                } => {
+                    self.inspection_dirty |= self.inspection.used_tool(verb);
                     if !self.open_tools.iter().any(|id| id == call_id) {
                         self.open_tools.push(call_id.clone());
                     }

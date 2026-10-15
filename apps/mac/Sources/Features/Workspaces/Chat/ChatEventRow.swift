@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import SwiftUI
+import ImageIO
 #if os(macOS)
 import AppKit
-import ImageIO
+#else
+import UIKit
 #endif
 
 /// One coalesced transcript block: a user turn, assistant markdown, a tool,
@@ -315,7 +317,6 @@ func diffColoredText(_ patch: String, lineLimit: Int) -> (text: AttributedString
     return (out, total - shown)
 }
 
-#if os(macOS)
 /// Image dimensions from the file header, without decoding pixels. Used to
 /// reserve an attachment row's frame before its image arrives, so the decode
 /// landing shifts no layout mid-scroll.
@@ -341,8 +342,17 @@ private enum ChatImageDims {
         cache.setObject(NSNumber(value: aspect), forKey: key, cost: data.count)
         return aspect
     }
+
+    static func aspect(of file: URL) -> CGFloat? {
+        guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = props[kCGImagePropertyPixelWidth] as? Double,
+              let height = props[kCGImagePropertyPixelHeight] as? Double,
+              width > 0, height > 0 else { return nil }
+        let orientation = props[kCGImagePropertyOrientation] as? Int ?? 1
+        return (5...8).contains(orientation) ? height / width : width / height
+    }
 }
-#endif
 
 /// A response file is part of the conversation, not a path printed into it.
 /// Images get a useful inline preview; every other type gets the same compact
@@ -418,35 +428,42 @@ private struct ChatResponseAttachment: View {
         // after the last moved frame.
         .onHover { hovering = $0 }
         .help(data == nil && file == nil ? L10n.text("apple.chateventrow.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.chateventrow.open_0.e71b4013", "\(attachment.name)"))
-        .task(id: data) {
-            guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
-            // SwiftUI restarts a row's task when it re-enters the viewport.
-            // Keep its decoded image and geometry on those appearances.
-            guard decodedData != data else { return }
+        .task(id: imageSource) {
+            guard attachment.mediaType?.hasPrefix("image/") == true else { return }
+            let source = imageSource
+            guard decodedSource != source else { return }
+            let thumbnail = await Task.detached(priority: .userInitiated) {
+                if let data = source.data { return ChatThumbnail.make(from: data, maxPixel: 1440, preservingAlpha: true) }
+                if let file = source.file { return ChatThumbnail.make(from: file, maxPixel: 1440, preservingAlpha: true) }
+                return nil
+            }.value
+            guard !Task.isCancelled, let thumbnail else { return }
+            decodedSource = source
             #if os(macOS)
-            let result = await Task.detached(priority: .userInitiated) { NSImage(data: data) }.value
-            guard !Task.isCancelled else { return }
-            decodedData = data
-            decodedImage = result.map { Image(nsImage: $0) }
+            decodedImage = NSImage(data: thumbnail).map { Image(nsImage: $0) }
+            #else
+            decodedImage = UIImage(data: thumbnail).map { Image(uiImage: $0) }
             #endif
         }
     }
 
+    private struct ImageSource: Hashable {
+        let data: Data?
+        let file: URL?
+    }
+    private var imageSource: ImageSource { ImageSource(data: data, file: file) }
     @State private var decodedImage: Image?
-    @State private var decodedData: Data?
-    // Header metadata is available before the async task starts, so the first
-    // layout already has the final image box. Pixels only paint its overlay.
+    @State private var decodedSource: ImageSource?
+
     private var imageAspect: CGFloat? {
-        guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return nil }
-        #if os(macOS)
-        return ChatImageDims.aspect(of: data)
-        #else
+        guard attachment.mediaType?.hasPrefix("image/") == true else { return nil }
+        if let data { return ChatImageDims.aspect(of: data) }
+        if let file { return ChatImageDims.aspect(of: file) }
         return nil
-        #endif
     }
 
     private var image: Image? {
-        decodedData == data ? decodedImage : nil
+        decodedSource == imageSource ? decodedImage : nil
     }
 
     private var fileDetail: String {

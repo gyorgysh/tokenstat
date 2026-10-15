@@ -13,10 +13,16 @@ struct GitPullControl: View {
     let incoming: UInt32
     var onPulled: () async -> Void
     @State private var presenting = false
+    @Environment(\.presentGitSync) private var presentGitSync
 
     var body: some View {
         Button(incoming > 0 ? L10n.text("apple.gitpull.pull_count", "\(incoming)") : L10n.text("apple.gitpull.pull"), .download) {
-            presenting = true
+            if let presentGitSync {
+                presentGitSync(GitSyncPresentation(target: target, folderName: folderName,
+                    hostName: hostName, onCompleted: onPulled))
+            } else {
+                presenting = true
+            }
         }
         .buttonStyle(SecondaryButtonStyle(comfortable: true))
         .help(L10n.text("apple.gitpull.help"))

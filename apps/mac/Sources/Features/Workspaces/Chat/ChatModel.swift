@@ -4225,7 +4225,9 @@ final class ChatModel {
         guard !Task.isCancelled, savedCopy == nil,
               selectionMatches(id: id, generation: generation), currentReference == previewReference,
               memoryGeneration == attachmentCacheGeneration, WorkCacheAccess.canSave(previewReference),
-              userInitiated || ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: attachment.size)
+              userInitiated || ChatAttachmentDownloadPolicy.permitsAutomaticDownload(
+                size: attachment.size,
+                isLocalImage: targetPeer == nil && attachment.mediaType?.hasPrefix("image/") == true)
         else { return }
         do {
             let data: Data

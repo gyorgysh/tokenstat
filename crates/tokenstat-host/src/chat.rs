@@ -2794,6 +2794,123 @@ impl Store {
         }))
     }
 
+    /// Read-only metadata for the selected backend, shared by every client.
+    /// Configured servers are useful even before a turn, but never imply a
+    /// successful handshake in this chat.
+    pub fn inspection(&self, id: &str) -> Result<Value, String> {
+        let known = self.get(id)?;
+        let (directory, chat) = {
+            let chats = self
+                .conversations
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            self.verified_conversation(&known.workspace_id, id, &chats)?
+        };
+        let stored = crate::chat_inspection::load(&directory.join("inspection.json"))
+            .filter(|s| s.backend == chat.backend && s.requested_model == chat.model);
+        let mut snapshot = stored
+            .as_ref()
+            .map(|s| s.snapshot.clone())
+            .unwrap_or_default();
+        let model = snapshot.model.clone().or_else(|| chat.model.clone());
+        let mut window_source = snapshot.context_window.map(|_| "agent");
+        if snapshot.context_window.is_none() {
+            let catalog = tokenstat_core::catalog::Catalog::load();
+            snapshot.context_window = model
+                .as_deref()
+                .and_then(|model| catalog.get(model))
+                .and_then(|model| model.context_window());
+            if snapshot.context_window.is_some() {
+                window_source = Some("catalog");
+            }
+        }
+        // A launch agent's environment can differ from the login shell used
+        // to start agents. Reuse that cached environment without running a
+        // shell probe from an inspector read.
+        let login = tokenstat_pty::login_env();
+        let config_environment = |key: &str| match &login {
+            Some(environment) => environment.vars.get(key).map(PathBuf::from),
+            None => std::env::var_os(key).map(PathBuf::from),
+        };
+        let home = config_environment("HOME")
+            .filter(|p| p.is_absolute())
+            .or_else(tokenstat_paths::home_dir);
+        if let (Some(home), Ok(folder)) = (home, crate::workspaces::folder(&chat.workspace_id)) {
+            let (configured, partial) = crate::chat_inspection::configured(
+                &chat.backend,
+                &home,
+                &folder.path,
+                config_environment("CODEX_HOME"),
+                config_environment("XDG_CONFIG_HOME"),
+            );
+            snapshot.inventory_partial |= partial;
+            for server in configured {
+                if !snapshot.mcp_servers.iter().any(|s| s.name == server.name)
+                    && snapshot.mcp_servers.len() < 256
+                {
+                    snapshot.mcp_servers.push(server);
+                } else if !snapshot.mcp_servers.iter().any(|s| s.name == server.name) {
+                    snapshot.inventory_partial = true;
+                }
+            }
+        }
+        snapshot.mcp_servers.sort_by(|a, b| a.name.cmp(&b.name));
+        snapshot.mcp_servers.dedup_by(|a, b| a.name == b.name);
+        Ok(json!({"backend":chat.backend, "model":model,
+            "contextUsed":snapshot.context_used, "contextWindow":snapshot.context_window,
+            "contextSource":snapshot.context_source, "windowSource":window_source,
+            "tools":snapshot.tools, "usedTools":snapshot.used_tools,
+            "mcpServers":snapshot.mcp_servers, "mcpReported":snapshot.mcp_reported,
+            "inventoryPartial":snapshot.inventory_partial,
+            "observedAtMs":stored.as_ref().map(|s| s.observed_at_ms),
+            "currentRun":stored.as_ref().is_some_and(|s| Some(s.run_revision) == chat.run_revision),
+        }))
+    }
+
+    fn record_inspection(
+        &self,
+        id: &str,
+        backend: &str,
+        revision: u64,
+        requested_model: Option<&str>,
+        snapshot: crate::chat_inspection::Snapshot,
+    ) {
+        let Ok(_lifecycle) = crate::work_handoff_store::lifecycle_lock(&self.root) else {
+            return;
+        };
+        let Ok(known) = self.get(id) else {
+            return;
+        };
+        let Ok((directory, chat)) = ({
+            let chats = self
+                .conversations
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            self.verified_conversation(&known.workspace_id, id, &chats)
+        }) else {
+            return;
+        };
+        if chat.backend != backend
+            || chat.run_revision != Some(revision)
+            || chat.model.as_deref() != requested_model
+        {
+            return;
+        }
+        let record = crate::chat_inspection::Stored {
+            backend: backend.into(),
+            requested_model: chat.model,
+            run_revision: revision,
+            observed_at_ms: now_ms(),
+            snapshot,
+        };
+        if let Ok(text) = serde_json::to_string(&record) {
+            let _ = tokenstat_sync::snapshot::write_private_atomically(
+                &directory.join("inspection.json"),
+                &text,
+            );
+        }
+    }
+
     /// Everything written after `offset`, for live tailing.
     ///
     /// Only the region asked for is read. This runs on every poll of a
@@ -3934,7 +4051,11 @@ impl Store {
         })();
         let store = Arc::clone(self);
         let chat_id = id.to_string();
-        let backend = chat.backend;
+        let inspection_launch = crate::chat_inspection::Launch {
+            backend: chat.backend,
+            requested_model: chat.model,
+            revision: activity_revision,
+        };
         // Preserve the backend's original stream per turn. Structured events
         // are what the UI reads, but raw output lets a parser correction
         // rematerialize an older conversation without rerunning an agent.
@@ -3949,7 +4070,7 @@ impl Store {
         std::thread::spawn(move || {
             Arc::clone(&store).drain(
                 &chat_id,
-                &backend,
+                &inspection_launch,
                 &info.id,
                 &raw_path,
                 &response_output_dir,
@@ -4193,20 +4314,19 @@ impl Store {
     fn drain(
         self: Arc<Self>,
         id: &str,
-        backend: &str,
+        launch: &crate::chat_inspection::Launch,
         pty: &str,
         raw_path: &PathBuf,
         response_output_dir: &Path,
         mut measure: Option<crate::chat_edit_measure::EditMeasure>,
     ) {
         let manager = tokenstat_pty::manager();
+        let backend = launch.backend.as_str();
+        let launch_model = launch.requested_model.as_deref();
+        let activity_revision = launch.revision;
         let mut parser = Parser::new(backend);
         let reader = format!("chat:{id}");
         let mut offset = 0;
-        let activity_revision = self
-            .get(id)
-            .map(|chat| chat.run_revision.unwrap_or(chat.send_revision))
-            .unwrap_or(0);
         let mut activity_tick: Option<Instant> = None;
         let mut eof_at: Option<Instant> = None;
         let mut assistant_text = String::new();
@@ -4256,6 +4376,15 @@ impl Store {
                 if !chunk.bytes.is_empty() {
                     let _ = append_raw(raw_path, &chunk.bytes);
                     let events = measured(parser.push_events(&chunk.bytes));
+                    if let Some(snapshot) = parser.take_inspection() {
+                        self.record_inspection(
+                            id,
+                            backend,
+                            activity_revision,
+                            launch_model,
+                            snapshot,
+                        );
+                    }
                     muse_sign_in_required |= backend == "muse"
                         && events.iter().any(crate::transcript::muse_sign_in_required);
                     questions.shift(collect_agent_text(&events, &mut assistant_text));
@@ -4311,6 +4440,9 @@ impl Store {
             self.record_events(id, backend, events);
         }
         let events = measured(parser.finish_events());
+        if let Some(snapshot) = parser.take_inspection() {
+            self.record_inspection(id, backend, activity_revision, launch_model, snapshot);
+        }
         muse_sign_in_required |=
             backend == "muse" && events.iter().any(crate::transcript::muse_sign_in_required);
         questions.shift(collect_agent_text(&events, &mut assistant_text));
@@ -8620,6 +8752,152 @@ mod tests {
     }
 
     #[test]
+    fn inspection_is_scoped_to_backend_model_and_run_and_survives_reopening() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "inspection");
+        store
+            .edit_conversation("inspection", |chat| {
+                chat.run_revision = Some(3);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = crate::chat_inspection::Snapshot {
+            context_used: Some(321),
+            context_window: Some(1000),
+            ..Default::default()
+        };
+        store.record_inspection("inspection", "claude", 3, None, snapshot.clone());
+        let reopened = Store::load_at(root.path().join("chat"));
+        let value = reopened.inspection("inspection").unwrap();
+        assert_eq!(value["contextUsed"], 321);
+        assert_eq!(value["currentRun"], true);
+        reopened
+            .edit_conversation("inspection", |chat| {
+                chat.run_revision = Some(4);
+                Ok(())
+            })
+            .unwrap();
+        reopened.record_inspection(
+            "inspection",
+            "claude",
+            3,
+            None,
+            crate::chat_inspection::Snapshot::default(),
+        );
+        assert_eq!(
+            reopened.inspection("inspection").unwrap()["contextUsed"],
+            321,
+            "late old runner cannot overwrite metadata"
+        );
+        reopened
+            .edit_conversation("inspection", |chat| {
+                chat.backend = "codex".into();
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            reopened.inspection("inspection").unwrap()["contextUsed"].is_null(),
+            "backend switch cannot reuse another agent's count"
+        );
+        reopened
+            .edit_conversation("inspection", |chat| {
+                chat.backend = "claude".into();
+                chat.model = Some("new-model".into());
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            reopened.inspection("inspection").unwrap()["contextUsed"].is_null(),
+            "model switch cannot reuse a stale count"
+        );
+        reopened.record_inspection(
+            "inspection",
+            "claude",
+            4,
+            None,
+            crate::chat_inspection::Snapshot {
+                context_used: Some(999),
+                ..Default::default()
+            },
+        );
+        let retained =
+            crate::chat_inspection::load(&root.path().join("chat/inspection/inspection.json"))
+                .unwrap();
+        assert_eq!(
+            retained.requested_model, None,
+            "a late report cannot adopt a model selected after launch"
+        );
+        assert_eq!(retained.snapshot.context_used, Some(321));
+        reopened.remove("inspection").unwrap();
+        reopened.record_inspection("inspection", "claude", 4, None, snapshot);
+        assert!(
+            !root.path().join("chat/inspection").exists(),
+            "late metadata cannot recreate a deleted conversation"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspection_drainer_keeps_settings_captured_before_spawn() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        let id = "inspection-race";
+        conversation_for_receipts(&store, id);
+        store
+            .edit_conversation(id, |chat| {
+                chat.run_revision = Some(3);
+                Ok(())
+            })
+            .unwrap();
+        store.record_inspection(
+            id,
+            "claude",
+            3,
+            None,
+            crate::chat_inspection::Snapshot {
+                context_used: Some(321),
+                ..Default::default()
+            },
+        );
+        let launched = crate::chat_inspection::Launch {
+            backend: "claude".into(),
+            requested_model: None,
+            revision: 3,
+        };
+        // The selected model changes after spawn, before the reader runs.
+        store
+            .edit_conversation(id, |chat| {
+                chat.model = Some("next-model".into());
+                Ok(())
+            })
+            .unwrap();
+        let process = tokenstat_pty::manager().spawn(&tokenstat_pty::Spawn {
+            command: "/bin/sh".into(),
+            args: vec!["-c".into(), r#"printf '%s\n' '{"type":"assistant","message":{"usage":{"input_tokens":999}}}'"#.into()],
+            cwd: root.path().into(), workspace_id: None, hidden: true,
+            rows: 24, cols: 80, no_color: true, dark: None, environment: vec![],
+        }).unwrap();
+        Arc::clone(&store).drain(
+            id,
+            &launched,
+            &process.id,
+            &root.path().join("raw.ndjson"),
+            &root.path().join("output"),
+            None,
+        );
+        let retained =
+            crate::chat_inspection::load(&root.path().join("chat/inspection-race/inspection.json"))
+                .unwrap();
+        assert_eq!(retained.requested_model, None);
+        assert_eq!(
+            retained.snapshot.context_used,
+            Some(321),
+            "late launch output must not become next-model metadata"
+        );
+    }
+
+    #[test]
     fn recovery_repairs_idle_state_and_refuses_a_changed_revision() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -8704,7 +8982,18 @@ mod tests {
         let raw = root.path().join("raw.ndjson");
         let output = root.path().join("output");
         let thread = std::thread::spawn(move || {
-            Arc::clone(&drain_owner).drain("cooperative-stop", "codex", &pty, &raw, &output, None);
+            Arc::clone(&drain_owner).drain(
+                "cooperative-stop",
+                &crate::chat_inspection::Launch {
+                    backend: "codex".into(),
+                    requested_model: None,
+                    revision: 0,
+                },
+                &pty,
+                &raw,
+                &output,
+                None,
+            );
             let result =
                 drain_owner.finish_turn("cooperative-stop", &pty, Some(lease), || {}, || {});
             done.send(result).unwrap();
@@ -8897,7 +9186,11 @@ mod tests {
         let started = Instant::now();
         Arc::clone(&store).drain(
             id,
-            "muse",
+            &crate::chat_inspection::Launch {
+                backend: "muse".into(),
+                requested_model: None,
+                revision: 0,
+            },
             &process.id,
             &root.path().join("raw.ndjson"),
             &root.path().join("output"),

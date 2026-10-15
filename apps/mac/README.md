@@ -70,6 +70,25 @@ Regenerate provisioning profiles after changing assignments. The existing iOS ar
 
 For Developer ID Mac builds, set `TOKENSTAT_MAC_PROFILE` and `TOKENSTAT_MAC_WIDGET_PROFILE` to authorized app/extension profiles. Release CI uses `DEVELOPER_ID_PROFILE_BASE64` and `DEVELOPER_ID_WIDGET_PROFILE_BASE64`. `scripts/sign-mac-app.py` validates App Group authorization and signs the extension before the app. Properly signed installations are required for shared-container behavior.
 
+## Chat inspector
+
+Context and MCP details use the host's read-only `chat.inspection` response.
+The card shows the latest reported prompt footprint, including cached input,
+separately from whole-conversation usage. Window sizes from the model catalog
+are labeled; agents that do not report context remain unknown. Agent-reported
+MCP states and tool inventories are distinct from entries found in that
+backend's host/project configuration. Configuration alone does not establish
+availability in a chat. Idle/previous-turn connections are labeled as reports,
+and capped tool/server lists are marked partial. Snapshots are scoped to the selected backend, model and
+turn, and saved transcript copies do not query live connections. Older hosts
+keep chat working and show details as unavailable.
+
+Automatic attachment downloads allow 5 MiB. Local images bypass that transfer
+threshold and use downsampled previews that preserve transparency, including
+file-backed originals.
+Pull and Push dialogs are owned by the desktop window, so an inspector peek
+can auto-hide while a review remains open.
+
 ## Verification
 
 Run `scripts/run-swift-tests.sh` and `python3 scripts/tests/AppleWidgetSigningTests.py`. The ecosystem tests cover URL validation, midnight/timezone rollover, unavailable/locked data, snapshot persistence, source replacement and out-of-order Watch packets.

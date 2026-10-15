@@ -62,17 +62,20 @@ for line in sys.stdin:
    assert p['threadId']=='session' and p['config']['bypass_hook_trust']
    assert p['sandbox']=='read-only' and p['approvalPolicy']=='never'
    assert p['cwd']==os.getcwd() and p['excludeTurns']
-   emit({'id':m['id'],'result':{'thread':{'id':'session'}}})
+   emit({'id':m['id'],'result':{'thread':{'id':'session'},'model':'gpt-test'}})
   elif method=='turn/start':
    assert p['input'][0]['text']=='literal prompt'
    emit({'id':m['id'],'result':{'turn':{'id':'turn'}}})
+  elif method=='mcpServerStatus/list':
+   assert p['threadId']=='session'
+   emit({'id':m['id'],'result':{'data':[{'name':'godot-mcp','runtimeStatus':'connected','tools':{'scene':{'inputSchema':{'private':'secret'}}}}],'nextCursor':None}})
   elif method=='turn/settings/update':
    assert p['threadId']=='session' and p['turnId']=='turn'
    assert p['serviceTier']==('priority' if count==0 else 'default');count+=1
    emit({'id':m['id'],'result':{'status':'applied'}})
    if count==2:
     emit({'method':'item/completed','params':{'item':{'id':'answer','type':'agentMessage','text':'Completed once.'}}})
-    emit({'method':'thread/tokenUsage/updated','params':{'tokenUsage':{'total':{'inputTokens':100,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2}}}})
+    emit({'method':'thread/tokenUsage/updated','params':{'tokenUsage':{'last':{'inputTokens':60},'modelContextWindow':200000,'total':{'inputTokens':100,'cachedInputTokens':40,'outputTokens':5,'reasoningOutputTokens':2}}}})
     emit({'method':'turn/completed','params':{'turn':{'id':'turn','status':'completed'}}})
   elif method=='thread/unsubscribe':
    emit({'id':m['id'],'result':{}});break
@@ -164,6 +167,18 @@ for line in sys.stdin:
                 .map(|line| serde_json::from_str(line).unwrap())
                 .collect();
             assert_eq!(rows.last().unwrap()["usage"]["cached_input_tokens"], 40);
+            let context = rows
+                .iter()
+                .find(|row| row["type"] == "tokenstat.context" && row["contextUsed"] == 60)
+                .unwrap();
+            assert_eq!(context["contextWindow"], 200000);
+            let mcp = rows
+                .iter()
+                .find(|row| row["type"] == "tokenstat.mcp")
+                .unwrap();
+            assert_eq!(mcp["servers"][0]["name"], "godot-mcp");
+            assert_eq!(mcp["servers"][0]["tools"], json!(["scene"]));
+            assert!(!mcp.to_string().contains("secret"));
         }
     }
 }
@@ -233,6 +248,7 @@ for line in sys.stdin:
  if method=='initialize':emit({'id':m['id'],'result':{}})
  elif method=='initialized':pass
  elif method=='thread/resume':emit({'id':m['id'],'result':{'thread':{'id':'session'}}})
+ elif method=='mcpServerStatus/list':emit({'id':m['id'],'error':{'code':-32601,'message':'unsupported'}})
  elif method=='turn/start':
   with (root/'history').open('w') as f:f.write('custom_tool_call\n')
   emit({'id':m['id'],'result':{'turn':{'id':'turn'}}})
@@ -295,6 +311,7 @@ for line in sys.stdin:
  if method=='initialize':emit({'id':m['id'],'result':{}})
  elif method=='initialized':pass
  elif method=='thread/resume':emit({'id':m['id'],'result':{'thread':{'id':'session'}}})
+ elif method=='mcpServerStatus/list':emit({'id':m['id'],'error':{'code':-32601,'message':'unsupported'}})
  elif method=='turn/start':
   child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])
   (root/'tool.pid').write_text(str(child.pid))

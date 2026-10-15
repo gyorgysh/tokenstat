@@ -611,6 +611,7 @@ struct RootView: View {
         .sheet(item: $deviceRequests.asking) { request in
             DeviceAccessRequestSheet(request: request, model: deviceRequests)
         }
+        .gitSyncSheetHost()
         // A grant made here is what the phone is waiting on, so look again the
         // moment this window comes forward rather than on the next tick.
         .onReceive(

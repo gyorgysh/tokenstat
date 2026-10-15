@@ -398,8 +398,17 @@ enum ChatInbox {
 }
 
 enum ChatThumbnail {
-    static func make(from data: Data, maxPixel: CGFloat = 192) -> Data? {
+    static func make(from data: Data, maxPixel: CGFloat = 192, preservingAlpha: Bool = false) -> Data? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return make(from: source, maxPixel: maxPixel, preservingAlpha: preservingAlpha)
+    }
+
+    static func make(from file: URL, maxPixel: CGFloat = 192, preservingAlpha: Bool = false) -> Data? {
+        guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        return make(from: source, maxPixel: maxPixel, preservingAlpha: preservingAlpha)
+    }
+
+    private static func make(from source: CGImageSource, maxPixel: CGFloat, preservingAlpha: Bool) -> Data? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
@@ -411,7 +420,7 @@ enum ChatThumbnail {
         let out = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             out,
-            UTType.jpeg.identifier as CFString,
+            (preservingAlpha ? UTType.png : UTType.jpeg).identifier as CFString,
             1,
             nil
         ) else { return nil }
@@ -426,9 +435,12 @@ enum ChatThumbnail {
 }
 
 enum ChatAttachmentDownloadPolicy {
-    static let automaticLimit: UInt64 = 1024 * 1024
+    static let automaticLimit: UInt64 = 5 * 1024 * 1024
 
-    static func permitsAutomaticDownload(size: UInt64?) -> Bool {
+    static func permitsAutomaticDownload(size: UInt64?, isLocalImage: Bool = false) -> Bool {
+        // The local host already owns these bytes. The download threshold
+        // controls network transfers, not whether a local image is visible.
+        if isLocalImage { return size != 0 }
         guard let size else { return false }
         return size > 0 && size <= automaticLimit
     }

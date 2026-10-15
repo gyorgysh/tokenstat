@@ -353,6 +353,29 @@ fn read_control_file(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+fn codex_mcp_inventory(servers: &[Value]) -> Value {
+    let inventory_partial = servers.len() > 100
+        || servers.iter().take(100).any(|server| {
+            server["tools"]
+                .as_object()
+                .is_some_and(|tools| tools.len() > 256)
+        });
+    let servers: Vec<_> = servers
+        .iter()
+        .take(100)
+        .map(|server| {
+            let tools: Option<Vec<_>> = server["tools"]
+                .as_object()
+                .map(|tools| tools.keys().take(256).cloned().collect());
+            let status = server["runtimeStatus"].as_str().or_else(|| {
+                (server["authStatus"] == "notLoggedIn").then_some("authenticationRequired")
+            });
+            json!({"name":server["name"], "runtimeStatus":status, "tools":tools})
+        })
+        .collect();
+    json!({"type":"tokenstat.mcp", "servers":servers, "inventoryPartial":inventory_partial})
+}
+
 fn read_message(reader: &mut impl BufRead, cap: u64) -> Result<Option<Value>, String> {
     let mut line = String::new();
     let length = reader
@@ -568,6 +591,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         send(&mut input, &initialize)?;
         let startup_deadline = Instant::now() + Duration::from_secs(30);
         let mut initialized = false;
+        let mut mcp_pages = 0;
         let mut started = false;
         loop {
             let stop_requested = directory.join("stop").is_file();
@@ -644,12 +668,53 @@ pub fn run(path: &Path) -> Result<(), String> {
                     })?
                     .into();
                 emit(&json!({"type":"thread.started","thread_id":protocol.thread}))?;
+                emit(&json!({"type":"tokenstat.context","model":message["result"]["model"]}))?;
                 let mut params = initial.clone();
                 params["threadId"] = json!(protocol.thread);
                 send(
                     &mut input,
                     &json!({"id":"turn","method":"turn/start","params":params}),
                 )?;
+                // Reuse this thread's connections. Inventory must never
+                // delay turn/start or start an unrelated agent session.
+                let _ = send(
+                    &mut input,
+                    &json!({"id":"inspection-mcp","method":"mcpServerStatus/list",
+                    "params":{"threadId":protocol.thread,"limit":100}}),
+                );
+            } else if message["id"] == "inspection-mcp" {
+                if let Some(servers) = message["result"]["data"].as_array() {
+                    emit(&codex_mcp_inventory(servers))?;
+                    mcp_pages += 1;
+                    if mcp_pages >= 3 && message["result"]["nextCursor"].is_string() {
+                        emit(
+                            &json!({"type":"tokenstat.mcp", "servers":[], "inventoryPartial":true}),
+                        )?;
+                    }
+                    if mcp_pages < 3 && message["result"]["nextCursor"].is_string() {
+                        let _ = send(
+                            &mut input,
+                            &json!({"id":"inspection-mcp","method":"mcpServerStatus/list",
+                            "params":{"threadId":protocol.thread,"limit":100,"cursor":message["result"]["nextCursor"]}}),
+                        );
+                    }
+                }
+            } else if message["method"] == "mcpServer/startupStatus/updated" {
+                let params = &message["params"];
+                if params["threadId"].is_null() || params["threadId"] == protocol.thread {
+                    let status = match params["status"].as_str() {
+                        Some("ready") => "connected",
+                        Some("failed") if params["failureReason"] == "reauthenticationRequired" => {
+                            "authenticationRequired"
+                        }
+                        Some("failed") => "failed",
+                        Some("cancelled") => "cancelled",
+                        _ => "starting",
+                    };
+                    emit(
+                        &json!({"type":"tokenstat.mcp", "servers":[{"name":params["name"], "runtimeStatus":status}]}),
+                    )?;
+                }
             } else if message["id"] == "turn" || message["method"] == "turn/started" {
                 let turn = if message["id"] == "turn" {
                     &message["result"]["turn"]
@@ -698,7 +763,12 @@ pub fn run(path: &Path) -> Result<(), String> {
                 }
                 return Ok(());
             } else if message["method"] == "thread/tokenUsage/updated" {
-                let total = &message["params"]["tokenUsage"]["total"];
+                let usage = &message["params"]["tokenUsage"];
+                emit(
+                    &json!({"type":"tokenstat.context", "contextUsed":usage["last"]["inputTokens"],
+                    "contextWindow":usage["modelContextWindow"]}),
+                )?;
+                let total = &usage["total"];
                 protocol.usage = json!({"input_tokens":total["inputTokens"],"cached_input_tokens":total["cachedInputTokens"],"cache_write_input_tokens":total["cacheWriteInputTokens"],"output_tokens":total["outputTokens"],"reasoning_output_tokens":total["reasoningOutputTokens"]});
             } else if matches!(
                 message["method"].as_str(),
@@ -792,6 +862,20 @@ fn codex_item(item: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_inventory_reports_truncated_tool_lists() {
+        let tools: serde_json::Map<_, _> = (0..257)
+            .map(|i| (format!("tool-{i}"), json!({"description":"private"})))
+            .collect();
+        let inventory = codex_mcp_inventory(&[json!({"name":"many-tools", "tools":tools})]);
+        assert_eq!(inventory["inventoryPartial"], true);
+        assert_eq!(
+            inventory["servers"][0]["tools"].as_array().unwrap().len(),
+            256
+        );
+        assert!(!inventory.to_string().contains("private"));
+    }
 
     #[test]
     fn malformed_launch_and_oversized_protocol_messages_are_refused() {

@@ -13,7 +13,7 @@ struct ChatReadKey: Hashable, Sendable {
 /// mutations invalidate both predecessor results and their sharing slots.
 actor ChatReadFlights {
     static let reads: Set<String> = ["chat.list", "chat.recent", "chat.events", "chat.eventPage",
-                                     "chat.approvals", "chat.instructions", "chat.personas"]
+                                     "chat.approvals", "chat.instructions", "chat.inspection", "chat.personas"]
     static let mutations: Set<String> = ["chat.create", "chat.fork", "chat.update", "chat.remove", "chat.removeAll",
         "chat.send", "chat.stop", "chat.recover", "chat.routing", "chat.routeAction", "chat.answerQuestion", "chat.steer", "chat.steerClear", "chat.steerDeliver",
         "chat.resolveApproval", "chat.personaSave", "chat.personaDefault", "chat.personaRemove"]

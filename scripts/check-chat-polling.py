@@ -93,7 +93,7 @@ enum RemoteHostFeature { case steer, chatRecovery; var minimumProtocol: Int { 1 
     @MainActor func isSupported(peer: String?) async -> Bool { Self.modernFiles }
 }
 enum ChatInbox { static let maxBytes = 100 }
-enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: UInt64?) -> Bool { true } }
+enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: UInt64?, isLocalImage: Bool = false) -> Bool { true } }
 @MainActor enum ClientChatReadState { static let shared = SelfHolder(); final class SelfHolder { func markRead(peer: String?, chat: ChatConversation) {} } }
 @MainActor final class Model {
     struct PollOwner: Hashable, Sendable { let reference: Reference; let generation: UInt64 }

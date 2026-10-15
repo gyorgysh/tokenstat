@@ -1543,6 +1543,7 @@ struct ClientChatThread: View {
                             showsIntro: false
                         )
                         ChatInstructionsCard(model: model, chat: chat)
+                        ChatContextCard(model: model)
                         ChatCostMeter(totals: model.turnUsage)
                         Button(L10n.text("apple.clientchatview.personas.fa2ea3fb"), .persona) { showingPersonas = true }
                             .buttonStyle(SecondaryButtonStyle())

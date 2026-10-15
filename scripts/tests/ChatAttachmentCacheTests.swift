@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 // Run with ChatInbox.swift WorkReference.swift using swiftc -parse-as-library, then run the binary.
 import Foundation
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 
 @main
 struct ChatAttachmentCacheTests {
@@ -62,8 +65,31 @@ struct ChatAttachmentCacheTests {
             .map { try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0 }
         require(sizes.reduce(0, +) <= 8, "Disk budget")
 
-        require(ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 1_048_576), "1 MiB automatic")
-        require(!ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 1_048_577), "Above 1 MiB manual")
+        // File-backed originals use the same bounded inline preview as small
+        // images. The decoder must not allocate the original pixel dimensions.
+        let imageFile = root.appendingPathComponent("original.png")
+        let context = CGContext(data: nil, width: 4096, height: 2048, bitsPerComponent: 8,
+                                bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let destination = CGImageDestinationCreateWithURL(imageFile as CFURL, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        require(CGImageDestinationFinalize(destination), "Image fixture written")
+        let thumb = ChatThumbnail.make(from: imageFile, maxPixel: 1440, preservingAlpha: true)!
+        let source = CGImageSourceCreateWithData(thumb as CFData, nil)!
+        let pixels = CGImageSourceCreateImageAtIndex(source, 0, nil)!
+        require(pixels.width == 1440 && pixels.height == 720, "Large file preview is downsampled and keeps its aspect")
+        require([CGImageAlphaInfo.first, .last, .premultipliedFirst, .premultipliedLast].contains(pixels.alphaInfo), "File preview preserves transparency")
+        let inline = ChatThumbnail.make(from: try Data(contentsOf: imageFile), maxPixel: 1440, preservingAlpha: true)!
+        let inlineSource = CGImageSourceCreateWithData(inline as CFData, nil)!
+        let inlinePixels = CGImageSourceCreateImageAtIndex(inlineSource, 0, nil)!
+        require([CGImageAlphaInfo.first, .last, .premultipliedFirst, .premultipliedLast].contains(inlinePixels.alphaInfo), "Inline preview preserves transparency")
+        require(ChatThumbnail.make(from: root.appendingPathComponent("missing.png")) == nil, "Missing image fails gracefully")
+
+        require(ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 5_242_880), "5 MiB automatic")
+        require(!ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 5_242_881), "Above 5 MiB manual")
+        require(ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 200_000_000, isLocalImage: true), "Local images bypass network threshold")
+        require(ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: nil, isLocalImage: true), "Local images with unknown size can load")
+        require(!ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 0, isLocalImage: true), "Empty local image is not fetched")
         require(!ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: nil), "Unknown size manual")
         require(!ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 0), "Empty size manual")
         let purgeRoot = root.appendingPathComponent("purge")
