@@ -21,6 +21,7 @@ struct ChatQueueStrip: View {
     var owner: WorkReference?
     var paused = false
     var offline = false
+    var canSteer = false
     var onChange: (ChatQueuedMessage, String) -> Void
     var onRemove: (ChatQueuedMessage) -> Void
     var onSendNow: (ChatQueuedMessage) -> Void
@@ -47,6 +48,7 @@ struct ChatQueueStrip: View {
                     item: next,
                     compact: true,
                     offline: offline,
+                    canSteer: canSteer,
                     onChange: { onChange(next, $0) },
                     onRemove: { onRemove(next) },
                     onSendNow: { onSendNow(next) }
@@ -67,6 +69,7 @@ struct ChatQueueStrip: View {
             ChatPendingMessagesSheet(
                 items: items,
                 offline: offline,
+                canSteer: canSteer,
                 onChange: onChange,
                 onRemove: onRemove,
                 onSendNow: onSendNow,
@@ -137,6 +140,7 @@ struct ChatSteerNoteBanner: View {
 private struct ChatPendingMessagesSheet: View {
     let items: [ChatQueuedMessage]
     var offline = false
+    var canSteer = false
     var onChange: (ChatQueuedMessage, String) -> Void
     var onRemove: (ChatQueuedMessage) -> Void
     var onSendNow: (ChatQueuedMessage) -> Void
@@ -193,6 +197,7 @@ private struct ChatPendingMessagesSheet: View {
                     ChatQueueRow(
                         item: item,
                         offline: offline,
+                        canSteer: canSteer,
                         onChange: { onChange(item, $0) },
                         onRemove: { onRemove(item) },
                         onSendNow: { onSendNow(item) }
@@ -203,7 +208,7 @@ private struct ChatPendingMessagesSheet: View {
             } header: {
                 Text(L10n.text("apple.chatqueuestrip.drag_to_reorder_messages_marked_send_when.07ceb60d"))
             } footer: {
-                Text(L10n.text("apple.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"))
+                Text(canSteer ? L10n.text("common.chat.steer_help") : L10n.text("apple.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"))
             }
         }
         .listStyle(.plain)
@@ -225,7 +230,7 @@ private struct ChatPendingMessagesSheet: View {
                 ForEach(items) { item in
                     macQueueRow(item)
                 }
-                Text(L10n.text("apple.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"))
+                Text(canSteer ? L10n.text("common.chat.steer_help") : L10n.text("apple.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -274,6 +279,7 @@ private struct ChatPendingMessagesSheet: View {
             ChatQueueRow(
                 item: item,
                 offline: offline,
+                canSteer: canSteer,
                 onChange: { onChange(item, $0) },
                 onRemove: { onRemove(item) },
                 onSendNow: { onSendNow(item) }
@@ -336,6 +342,7 @@ private struct ChatQueueRow: View {
     let item: ChatQueuedMessage
     var compact = false
     var offline = false
+    var canSteer = false
     var onChange: (String) -> Void
     var onRemove: () -> Void
     var onSendNow: () -> Void
@@ -380,12 +387,12 @@ private struct ChatQueueRow: View {
                     if item.delivery == .needsReview {
                         Button(L10n.text("common.chat_send_latest"), .refresh, action: onSendNow)
                     } else {
-                        Button(item.needsReceipt ? L10n.text("apple.chatqueuestrip.check_delivery.b8e3662d") : L10n.text("apple.chatqueuestrip.send_now.58803287"), .send, action: onSendNow)
+                        Button(item.needsReceipt ? L10n.text("apple.chatqueuestrip.check_delivery.b8e3662d") : (canSteer && item.attachments.isEmpty && !item.text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/") ? L10n.text("common.chat.steer") : L10n.text("apple.chatqueuestrip.send_now.58803287")), .send, action: onSendNow)
                     }
                 }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .disabled(offline)
-                    .help(item.needsReceipt ? L10n.text("apple.chatqueuestrip.ask_the_host_whether_it_accepted_this_mess.9803fa8c") : item.delivery == .needsReview ? L10n.text("apple.chatqueuestrip.prepare_this_message_using_the_conversatio.cf0e4a1d") : L10n.text("apple.chatqueuestrip.stop_this_turn_so_this_message_goes_out_ne.d09eed4c"))
+                    .help(item.needsReceipt ? L10n.text("apple.chatqueuestrip.ask_the_host_whether_it_accepted_this_mess.9803fa8c") : item.delivery == .needsReview ? L10n.text("apple.chatqueuestrip.prepare_this_message_using_the_conversatio.cf0e4a1d") : canSteer && item.attachments.isEmpty ? L10n.text("common.chat.steer_help") : L10n.text("apple.chatqueuestrip.stop_this_turn_so_this_message_goes_out_ne.d09eed4c"))
                 Button(item.needsReceipt ? L10n.text("apple.chatqueuestrip.remove_copy.63d1aef0") : L10n.text("common.remove"), .delete, action: onRemove)
                     .buttonStyle(DestructiveButtonStyle(small: true))
                     .environment(\.compactActions, compact)

@@ -67,6 +67,7 @@ fun ChatQueueStrip(
     items: List<QueuedMessage>,
     paused: Boolean,
     offline: Boolean,
+    canSteer: Boolean = false,
     onChange: (QueuedMessage, String) -> Unit,
     onRemove: (QueuedMessage) -> Unit,
     onSendNow: (QueuedMessage) -> Unit,
@@ -109,6 +110,7 @@ fun ChatQueueStrip(
                 item = next,
                 compact = true,
                 offline = offline,
+                canSteer = canSteer,
                 onChange = { onChange(next, it) },
                 onRemove = { onRemove(next) },
                 onSendNow = { onSendNow(next) },
@@ -119,6 +121,7 @@ fun ChatQueueStrip(
         ChatPendingSheet(
             items = items,
             offline = offline,
+                canSteer = canSteer,
             onChange = onChange,
             onRemove = onRemove,
             onSendNow = onSendNow,
@@ -136,6 +139,7 @@ fun ChatQueueStrip(
 private fun ChatPendingSheet(
     items: List<QueuedMessage>,
     offline: Boolean,
+    canSteer: Boolean = false,
     onChange: (QueuedMessage, String) -> Unit,
     onRemove: (QueuedMessage) -> Unit,
     onSendNow: (QueuedMessage) -> Unit,
@@ -208,6 +212,7 @@ private fun ChatPendingSheet(
                             item = item,
                             compact = false,
                             offline = offline,
+                canSteer = canSteer,
                             onChange = { onChange(item, it) },
                             onRemove = { onRemove(item) },
                             onSendNow = { onSendNow(item) },
@@ -217,7 +222,7 @@ private fun ChatPendingSheet(
                 }
             }
             Text(
-                L10n.text("android.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"),
+                if (canSteer) L10n.text("common.chat.steer_help") else L10n.text("android.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
@@ -232,6 +237,7 @@ private fun ChatQueueRow(
     item: QueuedMessage,
     compact: Boolean,
     offline: Boolean,
+    canSteer: Boolean = false,
     onChange: (String) -> Unit,
     onRemove: () -> Unit,
     onSendNow: () -> Unit,
@@ -297,6 +303,7 @@ private fun ChatQueueRow(
                 label = when {
                     item.needsReceipt -> L10n.text("android.chatqueuestrip.check_delivery.b8e3662d")
                     item.delivery == ChatDelivery.NeedsReview -> L10n.text("common.chat_send_latest")
+                    canSteer && item.attachments.isEmpty() && !item.text.trimStart().startsWith("/") -> L10n.text("common.chat.steer")
                     else -> L10n.text("android.chatqueuestrip.send_now.58803287")
                 },
                 icon = if (item.delivery == ChatDelivery.NeedsReview) {

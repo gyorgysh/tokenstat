@@ -1841,6 +1841,7 @@ mod retirement_tests {
             .append(
                 "original",
                 &StoredEvent::User {
+                    steer: false,
                     text: "Earlier task".into(),
                     at_ms: 1,
                 },
@@ -1860,6 +1861,7 @@ mod retirement_tests {
             .append(
                 "original",
                 &StoredEvent::User {
+                    steer: false,
                     text: "Current task".into(),
                     at_ms: 2,
                 },

@@ -215,7 +215,7 @@ private final class ProtocolServer: @unchecked Sendable {
         }
         for pooled in [false, true] {
             for remote in [false, true] {
-              for operation in ["chat.send", "chat.compact"] {
+              for operation in ["chat.send", "chat.compact", "chat.steerSend"] {
                 let server = try ClosingServer()
                 let transport = pooled ? SocketTransport.connecting(to: server.path)! : SocketTransport(path: server.path)
                 let method = remote ? "remote.call" : operation

@@ -148,7 +148,7 @@ fun withTurnChanges(
     }
     for (item in raw) {
         when {
-            item is ChatDisplayItem.User -> {
+            item is ChatDisplayItem.User && !item.isSteer -> {
                 close()
                 turn++
             }
@@ -169,7 +169,7 @@ fun withTurnChanges(
     val out = ArrayList<ChatDisplayItem>(folded.size + changes.size)
     turn = 0
     for (item in folded) {
-        if (item is ChatDisplayItem.User) {
+        if (item is ChatDisplayItem.User && !item.isSteer) {
             changes[turn]?.let { out.add(it) }
             turn++
         }
@@ -286,7 +286,7 @@ private fun foldMinimal(
     val out = ArrayList<ChatDisplayItem>()
     // A turn runs from one question to the next. Rows before the first
     // question (a window that opens mid-turn) are a turn of their own.
-    val starts = items.indices.filter { items[it] is ChatDisplayItem.User }.toMutableList()
+    val starts = items.indices.filter { (items[it] as? ChatDisplayItem.User)?.isSteer == false }.toMutableList()
     if (starts.firstOrNull() != 0) starts.add(0, 0)
     starts.forEachIndexed { n, start ->
         if (start >= items.size) return@forEachIndexed

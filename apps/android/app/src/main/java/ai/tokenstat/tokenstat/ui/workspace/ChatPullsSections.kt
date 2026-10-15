@@ -767,7 +767,7 @@ fun ChatSection(
     /// Nothing leaves the queue before the host acknowledges it, and every
     /// outcome that is not a plain acceptance leaves the copy behind in a
     /// state that says what to do next. Port of `ChatModel.deliverQueued`.
-    suspend fun deliver(item: QueuedMessage, stopCurrent: Boolean): Boolean {
+    suspend fun deliver(item: QueuedMessage, stopCurrent: Boolean, steerCurrent: Boolean = false): Boolean {
         if (!ownsProject()) return false
         val id = openId ?: return false
         if (!HostContracts.supportsConfirmedSend(protocol)) {
@@ -827,7 +827,7 @@ fun ChatSection(
             val sent = runCatching {
                 model.workspaceSection(
                     peer,
-                    ChatCommandRules.sendMethod(live.text),
+                    if (steerCurrent) "chat.steerSend" else ChatCommandRules.sendMethod(live.text),
                     chatSendParams(
                         id, live.text, deliveryId, firstAttempt, live.expectedRevision,
                         live.attachments.map { it.id },
@@ -989,7 +989,8 @@ fun ChatSection(
         val noteOwner = projectOwner?.conversation(id) ?: return true
         val noteDraft = model.chatComposers.capture(noteOwner)
         val chat = chats.firstOrNull { it.str("id") == id }
-        if (!ChatSteer.canAttempt(
+        val native = chat?.bol("running") == true && chat.bol("nativeSteer") && staged.isEmpty() && !text.startsWith("/")
+        if (!native && !ChatSteer.canAttempt(
                 chat?.bol("running") == true,
                 text,
                 staged.isEmpty(),
@@ -1005,6 +1006,13 @@ fun ChatSection(
         try {
             if (openId != id) return true
             val trimmed = text.trim()
+            if (native) {
+                val item = enqueue(id, trimmed, emptyList(), whenConnected = false) ?: return true
+                model.chatComposers.clearIfUnchanged(noteOwner, noteDraft)
+                if (openId != id || !ownsProject()) return true
+                deliver(item, stopCurrent = false, steerCurrent = true)
+                return true
+            }
             val payload = try {
                 model.workspaceSection(peer, "chat.steer", buildJsonObject {
                     put("id", id)
@@ -1097,7 +1105,8 @@ fun ChatSection(
         // Only the CLI's own answer stops a send. A stored token past its
         // expiry is routine (the CLI renews it), and an agent signed in with
         // an environment key has no login file at all.
-        if (selectedBackend?.bol("signInVerified") == true && selectedBackend.str("readiness") in listOf("needsSignIn", "expired")) {
+        val liveInput = chat?.bol("running") == true && chat.bol("nativeSteer") && staged.isEmpty()
+        if (!liveInput && selectedBackend?.bol("signInVerified") == true && selectedBackend.str("readiness") in listOf("needsSignIn", "expired")) {
             error = L10n.text("android.agentsetup.draft_kept", selectedBackend?.str("label") ?: "")
             return
         }
@@ -1168,7 +1177,7 @@ fun ChatSection(
 
     /// Stop the open turn so this message goes next, or check a delivery
     /// nobody could confirm, or re-aim one at the conversation as it is now.
-    suspend fun sendNow(item: QueuedMessage) {
+    suspend fun sendNow(item: QueuedMessage, steerOnly: Boolean = false) {
         val id = openId ?: return
         if (item.needsReceipt) {
             checkReceipt(id, item)
@@ -1188,7 +1197,9 @@ fun ChatSection(
             }) return
         }
         authorized = authorized + item.id
-        deliver(candidate, stopCurrent = true)
+        val chat = chats.firstOrNull { it.str("id") == id }
+        val steer = steerOnly || (chat?.bol("running") == true && chat.bol("nativeSteer") && candidate.attachments.isEmpty() && !candidate.text.trimStart().startsWith("/"))
+        deliver(candidate, stopCurrent = !steer, steerCurrent = steer)
     }
     LaunchedEffect(projectOwner) { loadChats() }
     // A navigation that named a conversation: open exactly it, even when
@@ -1781,7 +1792,7 @@ fun ChatSection(
                 TextButton(onClick = { setupError = null }) { Text(L10n.text("android.chatpullssections.dismiss.48845bff")) }
             }
             val runningTurn = openChat?.bol("running") == true
-            val noteForStep = ChatSteer.promisesNote(
+            val noteForStep = (runningTurn && openChat?.bol("nativeSteer") == true && staged.isEmpty()) || ChatSteer.promisesNote(
                 runningTurn,
                 staged.isEmpty(),
                 openChat?.str("backend"),
@@ -1802,6 +1813,7 @@ fun ChatSection(
             }
             ChatQueueStrip(
                 items = pendingQueue,
+                canSteer = runningTurn && openChat?.bol("nativeSteer") == true,
                 // Paused when the next message is not one this session was
                 // asked to send: a reopened queue waits to be told. Read
                 // from what the strip shows, so the in-flight send hiding
@@ -1824,7 +1836,10 @@ fun ChatSection(
                         writeQueue(id) { list -> list.removeAll { it.id == item.id } }
                     }
                 },
-                onSendNow = { item -> scope.launch { sendNow(item) } },
+                onSendNow = { item ->
+                    val steerOnly = runningTurn && openChat?.bol("nativeSteer") == true && item.attachments.isEmpty() && !item.text.trimStart().startsWith("/")
+                    scope.launch { sendNow(item, steerOnly = steerOnly) }
+                },
                 onMove = { from, to ->
                     val id = openId ?: return@ChatQueueStrip
                     scope.launch {
@@ -1858,7 +1873,7 @@ fun ChatSection(
                 hint = ChatHint.hint(folderName, sending || runningTurn, note = noteForStep),
                 sending = sending,
                 parking = parkingSteer,
-                sendLabel = if (noteForStep) L10n.text("android.chatpullssections.add_a_note_for_the_next_step.4778177a") else L10n.text("android.chatpullssections.send.f6f4688f"),
+                sendLabel = if (noteForStep && openChat?.bol("nativeSteer") == true) L10n.text("common.chat.steer") else if (noteForStep) L10n.text("android.chatpullssections.add_a_note_for_the_next_step.4778177a") else L10n.text("android.chatpullssections.send.f6f4688f"),
                 staged = staged,
                 onPick = { attachError = null; picker.launch(arrayOf("*/*")) },
                 onRemove = { staged = staged - it },

@@ -218,6 +218,7 @@ enum ChatClock {
 /// redraws whenever anything about it changes, and without this every visible
 /// row rebuilds itself because one of them grew by a word.
 struct ChatDisplayItem: Identifiable, Equatable, Sendable {
+    var isSteer: Bool = false
     let id: String
     let kind: Kind
     /// Inclusive end of a coalesced text/thinking block in the loaded archive.

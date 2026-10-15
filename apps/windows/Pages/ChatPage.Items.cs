@@ -31,6 +31,7 @@ internal sealed partial class ChatPage
         public string Verb;
         public string Target;
         public bool Running;
+        public bool IsSteer;
         public bool Failed;
         public string Detail;
         public string Duration;

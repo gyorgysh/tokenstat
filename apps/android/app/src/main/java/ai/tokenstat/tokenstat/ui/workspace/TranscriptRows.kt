@@ -160,15 +160,14 @@ internal fun TranscriptItemRow(
         is ChatDisplayItem.User -> {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Spacer(Modifier.width(36.dp))
-                Text(
-                    item.text,
-                    style = TsType.chatBody,
-                    color = LocalTsColors.current.textPrimary,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(LocalTsColors.current.accentSoft)
-                        .padding(Space.m),
-                )
+                Column(Modifier.clip(RoundedCornerShape(16.dp)).background(LocalTsColors.current.accentSoft).padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    if (item.isSteer) Text(L10n.text("common.chat.steer"), style = TsType.caption, color = LocalTsColors.current.accent)
+                    Text(
+                        item.text,
+                        style = TsType.chatBody,
+                        color = LocalTsColors.current.textPrimary,
+                    )
+                }
             }
         }
         is ChatDisplayItem.Assistant -> AssistantPanel(

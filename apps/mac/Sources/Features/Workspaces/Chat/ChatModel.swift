@@ -2325,7 +2325,7 @@ final class ChatModel {
         else { await drainQueue() }
     }
 
-    func sendNow(_ item: ChatQueuedMessage, owner: WorkReference?) async {
+    func sendNow(_ item: ChatQueuedMessage, owner: WorkReference?, forceStop: Bool = false, steerOnly: Bool = false) async {
         guard let owner, owner == queuedReference, ownsQueue else { return }
         if let backend = item.signInBackend {
             error = L10n.text("apple.agentsetup.pending_other_agent", self.backend(for: backend)?.label ?? backend.capitalized)
@@ -2355,7 +2355,8 @@ final class ChatModel {
                 queued = try ChatOutboxStore.shared.items(for: owner)
             } catch { self.error = L10n.text("apple.chatmodel.the_pending_message_changed_reopen_it_befo.3d158d7b"); return }
         }
-        _ = await deliverQueued(candidate, stopCurrent: true)
+        let steer = steerOnly || (!forceStop && busy && selected?.nativeSteer == true && candidate.attachments.isEmpty && !candidate.text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/"))
+        _ = await deliverQueued(candidate, stopCurrent: !steer, steerCurrent: steer)
     }
 
     func drainQueue() async {
@@ -2379,7 +2380,7 @@ final class ChatModel {
 
     /// Acceptance updates the captured owner's disk record even if navigation
     /// changes. Nothing leaves the outbox before the host's acknowledgement.
-    private func deliverQueued(_ candidate: ChatQueuedMessage, stopCurrent: Bool, reserved: Bool = false) async -> Bool {
+    private func deliverQueued(_ candidate: ChatQueuedMessage, stopCurrent: Bool, reserved: Bool = false, steerCurrent: Bool = false) async -> Bool {
         guard candidate.signInBackend == nil, savedCopy == nil, ownsQueue, (!sending || reserved), let reference = queuedReference,
               WorkCacheAccess.canSave(reference), let conversationID = reference.itemID,
               ChatOutboxStore.shared.beginDelivery(reference) else { return false }
@@ -2454,7 +2455,7 @@ final class ChatModel {
                     try? await Task.sleep(for: .milliseconds(200))
                 }
             }
-            guard current(), !busy else {
+            guard current(), !busy || steerCurrent else {
                 if current() { busyTurnError() }
                 return false
             }
@@ -2462,7 +2463,7 @@ final class ChatModel {
             // opened chat, and a catalog refresh replaces its local evidence.
             // Check before sending, so a CLI that signs in automatically in
             // exec mode cannot park a browser challenge inside the chat.
-            if let backend = backend(for: selected?.backend ?? ""),
+            if !steerCurrent, let backend = backend(for: selected?.backend ?? ""),
                backend.canCheckSignIn, backend.signInFlow?.supported == true {
                 let status = await checkSignIn(backend)
                 guard current(), selected?.backend == backend.id, !busy else { return false }
@@ -2479,7 +2480,7 @@ final class ChatModel {
                 }
             }
             let resolved = try await resolveDraftAttachments(item.attachments, reference: reference, peer: targetPeer)
-            guard current(), !busy else {
+            guard current(), !busy || steerCurrent else {
                 if current() { busyTurnError() }
                 return false
             }
@@ -2504,12 +2505,12 @@ final class ChatModel {
                 items[index].firstAttemptAt = firstAttemptAt
                 items[index].attemptedAt = Date()
             })
-            let staged = stageOutgoing(item.text)
+            let staged = stageOutgoing(item.text, steer: steerCurrent)
             var accepted = false
             do {
                 let updated = try await Bridge.sendChat(id: conversationID, text: item.text,
                     attachmentIDs: resolved.map(\.id), clientMessageID: deliveryItem.id,
-                    clientMessageCreatedAt: firstAttemptAt, expectedRevision: item.expectedRevision, peer: targetPeer)
+                    clientMessageCreatedAt: firstAttemptAt, expectedRevision: item.expectedRevision, steer: steerCurrent, peer: targetPeer)
                 accepted = true
                 let remaining = try ChatOutboxStore.shared.accept(deliveryItem, revision: updated.sendRevision, for: reference)
                 publish(remaining)
@@ -3023,6 +3024,7 @@ final class ChatModel {
     var sendsAsNote: Bool {
         guard busy, attachments.isEmpty, stagingAttachments == 0, savedCopy == nil else { return false }
         guard steerAutonomy, steerBackend else { return false }
+        if selected?.nativeSteer == true { return true }
         if let peer, !peer.isEmpty { return remoteSteer == true }
         return true
     }
@@ -3034,6 +3036,7 @@ final class ChatModel {
 
     /// Muse can take a note on any autonomy. The others only while they ask first.
     private var steerAutonomy: Bool {
+        if selected?.nativeSteer == true { return true }
         if selected?.backend == "muse" { return true }
         return selected?.autonomy == "standard"
     }
@@ -3048,7 +3051,7 @@ final class ChatModel {
         if trimmed.isEmpty || !attachments.isEmpty || savedCopy != nil
             || stagingAttachments > 0 || sending
             || !steerAutonomy || !steerBackend
-            || remoteSteer == false {
+            || (remoteSteer == false && selected?.nativeSteer != true) {
             return .queue
         }
         guard let selected, let reference = currentReference,
@@ -3087,6 +3090,10 @@ final class ChatModel {
         let id = submission.conversationID
         let asked = submission.peer
         do {
+            if selected?.nativeSteer == true {
+                queueBusyNote(submission, deliverAsSteer: true)
+                return
+            }
             if let asked, !asked.isEmpty, remoteSteer != true {
                 let version = try await Bridge.peerProtocolVersion(asked)
                 guard current() else { return }
@@ -3122,7 +3129,7 @@ final class ChatModel {
 
     /// Queue the reserved payload. Words edited during the request become a
     /// separate draft, with their own delivery identity.
-    private func queueBusyNote(_ submission: ChatDraftSubmission) {
+    private func queueBusyNote(_ submission: ChatDraftSubmission, deliverAsSteer: Bool = false) {
         guard let reference = submission.reference, let messageID = submission.messageID,
               submission.owns(reference: currentReference, conversationID: selected?.id,
                               peer: peer, scope: WorkSessionContext.shared.scope),
@@ -3151,7 +3158,11 @@ final class ChatModel {
             } else {
                 ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference, newMessage: true)
             }
-            Task { await drainQueue() }
+            Task {
+                guard currentReference == reference, selectionGeneration == submission.generation else { return }
+                if deliverAsSteer { _ = await deliverQueued(stored, stopCurrent: false, steerCurrent: true) }
+                else { await drainQueue() }
+            }
         } catch {
             self.error = L10n.text("apple.chatmodel.this_message_could_not_be_saved_to_the_que.342364f9")
         }
@@ -3677,11 +3688,11 @@ final class ChatModel {
 
     /// Show the prompt in the transcript the moment Send is pressed.
     @discardableResult
-    private func stageOutgoing(_ text: String) -> String? {
+    private func stageOutgoing(_ text: String, steer: Bool = false) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let id = "outgoing-\(UUID().uuidString)"
-        outgoing.append(ChatDisplayItem(id: id, kind: .user(trimmed)))
+        outgoing.append(ChatDisplayItem(isSteer: steer, id: id, kind: .user(trimmed)))
         outgoingWatermark[id] = events.compactMap(\.seq).max()
         return id
     }

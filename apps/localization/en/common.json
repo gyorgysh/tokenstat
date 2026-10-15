@@ -209,5 +209,7 @@
   "common.chat.stats.no_servers": "No MCP servers reported or configured.",
   "common.chat.stats.catalog_window": "Context limit from the model catalog.",
   "common.chat.stats.cost": "Reported cost",
-  "common.chat.stats.overview": "Chat overview"
+  "common.chat.stats.overview": "Chat overview",
+  "common.chat.steer": "Steer",
+  "common.chat.steer_help": "Adds context to the current turn without stopping it."
 }

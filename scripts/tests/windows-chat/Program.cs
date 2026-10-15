@@ -358,6 +358,10 @@ var firstTurn = liveChanges.First(row => row.Id == "changes:e1").Changes!;
 Check(string.Join(",", firstTurn.Select(file => file.Path)) == "/w/a.cs,/w/b.cs" && firstTurn[0].Added == 5 && firstTurn[0].Removed == 1,
     "one row per file, summed, failures left out");
 Check(FoldRows(changed, ChatDetail.Minimal).Last().Changes is { Count: 1 }, "a finished turn gets its card");
+var steerNote = Ask("steered"); steerNote.IsSteer = true;
+var steeredChanges = FoldRows([Ask("turn"), EditRow("before", "/w/a.cs", 2), steerNote, EditRow("after", "/w/a.cs", 3), Say("answer")], ChatDetail.Minimal);
+Check(steeredChanges.Count(row => row.Kind == ChatPage.ItemKind.Changes) == 1
+    && steeredChanges.Last().Changes![0].Added == 5, "steering preserves the current turn and its aggregate changes");
 Console.WriteLine("Windows chat detail: minimal, compact, standard and detailed folding, turn changes, pinned rows, open groups and counts pass.");
 
 var loadedWork = new List<ChatPage.DisplayItem> { Ask("long-turn") };

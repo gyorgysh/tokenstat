@@ -3,7 +3,7 @@ import Foundation
 
 struct ChatTimelineEvent: Codable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
-        case kind, text, seq, atMs, backend, event, approval, to, brief
+        case kind, text, seq, atMs, backend, event, approval, to, brief, steer
         case recordID = "id"
         case question, options, multiple, blocking, delivery
         case defaultAnswer = "default"
@@ -15,6 +15,8 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
 
     var kind: String
     var text: String?
+    /// Additional context acknowledged during the same turn. Older archives omit it.
+    var steer: Bool? = nil
     /// Where this record starts in the conversation's archive.
     ///
     /// A name for the row that does not change when an older page is loaded
@@ -50,6 +52,7 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kind = try c.decode(String.self, forKey: .kind)
         text = try c.decodeIfPresent(String.self, forKey: .text)
+        steer = try c.decodeIfPresent(Bool.self, forKey: .steer)
         seq = try c.decodeIfPresent(UInt64.self, forKey: .seq)
         atMs = try c.decodeIfPresent(Int64.self, forKey: .atMs)
             ?? c.decodeIfPresent(Int64.self, forKey: .atMsLegacy)
@@ -72,6 +75,7 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(kind, forKey: .kind)
         try c.encodeIfPresent(text, forKey: .text)
+        try c.encodeIfPresent(steer, forKey: .steer)
         try c.encodeIfPresent(seq, forKey: .seq)
         try c.encodeIfPresent(atMs, forKey: .atMs)
         try c.encodeIfPresent(backend, forKey: .backend)

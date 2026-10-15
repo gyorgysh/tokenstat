@@ -80,7 +80,7 @@ struct ChatEventRow: View {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 Spacer(minLength: 48)
                 RowCopyButton(text: text, help: L10n.text("apple.chateventrow.copy_prompt.ffc64b8b"), visible: hovering)
-                userBubble(text, selectable: allowsSelection)
+                userBubble(text, selectable: allowsSelection, steer: item.isSteer)
                     .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -89,7 +89,7 @@ struct ChatEventRow: View {
             #else
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 Spacer(minLength: 48)
-                userBubble(text, selectable: allowsSelection)
+                userBubble(text, selectable: allowsSelection, steer: item.isSteer)
                     .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -265,12 +265,19 @@ struct ChatEventRow: View {
 /// `Text` in a `LazyVStack` can measure as empty on the first pass, which
 /// is a sent prompt that is missing until the next layout (a click off
 /// the row and back). Markdown already asks for this; the bubble did not.
-private func userBubble(_ text: String, selectable: Bool) -> some View {
-    Text(text)
-        .font(Theme.chatBody)
-        .multilineTextAlignment(.leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .modifier(SelectableWhen(selectable))
+private func userBubble(_ text: String, selectable: Bool, steer: Bool = false) -> some View {
+    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+        if steer {
+            Label(L10n.text("common.chat.steer"), systemImage: "arrow.triangle.branch")
+                .font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent)
+                .help(L10n.text("common.chat.steer_help"))
+        }
+        Text(text)
+            .font(Theme.chatBody)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .modifier(SelectableWhen(selectable))
+    }
         .padding(Theme.Space.m)
         .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contextMenu {

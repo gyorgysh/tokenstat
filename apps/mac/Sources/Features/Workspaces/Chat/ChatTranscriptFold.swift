@@ -149,7 +149,7 @@ enum ChatTranscriptFold {
         }
         for item in raw {
             switch item.kind {
-            case .user:
+            case .user where !item.isSteer:
                 close()
                 turn += 1
             case let .edit(state) where !state.failed && !state.running:
@@ -171,7 +171,7 @@ enum ChatTranscriptFold {
         out.reserveCapacity(folded.count + changes.count)
         turn = 0
         for item in folded {
-            if case .user = item.kind {
+            if case .user = item.kind, !item.isSteer {
                 if let finished = changes[turn] { out.append(ChatDisplayItem(id: finished.id, kind: .changes(finished))) }
                 turn += 1
             }
@@ -310,7 +310,7 @@ enum ChatTranscriptFold {
         var out: [ChatDisplayItem] = []
         // A turn runs from one question to the next. Rows before the first
         // question (a window that opens mid-turn) are a turn of their own.
-        var starts = items.indices.filter { if case .user = items[$0].kind { return true } else { return false } }
+        var starts = items.indices.filter { if case .user = items[$0].kind, !items[$0].isSteer { return true } else { return false } }
         if starts.first != 0 { starts.insert(0, at: 0) }
         for (n, start) in starts.enumerated() where start < items.count {
             let end = n + 1 < starts.count ? starts[n + 1] : items.count

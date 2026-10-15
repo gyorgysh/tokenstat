@@ -76,7 +76,7 @@ private func key(_ owner: String = "account-a", _ peer: String? = "computer-a", 
         precondition(wire.reads == 13, "A caller canceled before entry dispatched a read")
         let typed: Int = try await flights.run(request) { 42 }; precondition(typed == 42)
         precondition(!ChatReadFlights.reads.contains("chat.send") && !ChatReadFlights.reads.contains("chat.receipt"))
-        precondition(ChatReadFlights.mutations.contains("chat.compact"))
+        precondition(ChatReadFlights.mutations.contains("chat.compact") && ChatReadFlights.mutations.contains("chat.steerSend"))
         precondition(ChatReadFlights.mutations.contains("chat.send") && ChatReadFlights.mutations.contains("chat.remove"))
         print("Chat reads: 30 shared waiters, cancellation, mutation invalidation, exact account/peer/cursor isolation, failure retry and no completed cache passed")
     }

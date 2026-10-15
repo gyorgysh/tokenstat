@@ -1342,6 +1342,7 @@ extension Bridge {
         clientMessageID: String? = nil,
         clientMessageCreatedAt: Date? = nil,
         expectedRevision: UInt64? = nil,
+        steer: Bool = false,
         peer: String? = nil
     ) async throws -> ChatConversation {
         var params: [String: Any] = ["id": id, "text": text, "attachmentIds": attachmentIDs]
@@ -1355,7 +1356,7 @@ extension Bridge {
         }
         return try await chatInvoke(
             peer: peer,
-            ChatCommandRules.sendMethod(text),
+            steer ? "chat.steerSend" : ChatCommandRules.sendMethod(text),
             params,
             as: ChatConversation.self
         )

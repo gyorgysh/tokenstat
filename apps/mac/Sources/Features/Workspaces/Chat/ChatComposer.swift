@@ -400,6 +400,7 @@ struct ChatComposer: View {
     }
 
     private var sendTitle: String {
+        if sendsAsNote && model.selected?.nativeSteer == true { return L10n.text("common.chat.steer") }
         if sendsAsNote { return L10n.text("apple.chatcomposer.next_step.298a9207") }
         return running ? L10n.text("apple.chatcomposer.send_after_this_turn.012fc8c3") : L10n.text("apple.chatcomposer.send.f6f4688f")
     }

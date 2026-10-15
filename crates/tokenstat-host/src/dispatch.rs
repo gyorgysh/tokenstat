@@ -2376,6 +2376,25 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             )?,
         )
         .envelope(),
+        "chat.steerSend" => {
+            if p.attachment_ids.as_ref().is_some_and(|ids| !ids.is_empty()) {
+                return Err("Steer does not accept attachments.".into());
+            }
+            let id = p.id.ok_or("chat.steerSend needs id")?;
+            let chat = store.steer_send(
+                &id,
+                &p.text.ok_or("chat.steerSend needs text")?,
+                &p.client_message_id
+                    .ok_or("chat.steerSend needs clientMessageId")?,
+                p.client_message_created_at_ms
+                    .ok_or("chat.steerSend needs clientMessageCreatedAtMs")?,
+                p.expected_revision
+                    .ok_or("chat.steerSend needs expectedRevision")?,
+            )?;
+            let mut value = serde_json::to_value(chat).map_err(|error| error.to_string())?;
+            value["nativeSteer"] = json!(store.native_steer(&id).is_some());
+            Ok(value)
+        }
         "chat.steer" => {
             store.steer(
                 &p.id.ok_or("chat.steer needs id")?,

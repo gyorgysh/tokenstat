@@ -140,7 +140,7 @@ internal static class ChatDetailFold
         }
         foreach (var item in raw)
         {
-            if (item.Kind == ChatPage.ItemKind.User)
+            if (item.Kind == ChatPage.ItemKind.User && !item.IsSteer)
             {
                 Close();
                 turn++;
@@ -166,7 +166,7 @@ internal static class ChatDetailFold
         turn = 0;
         foreach (var item in folded)
         {
-            if (item.Kind == ChatPage.ItemKind.User)
+            if (item.Kind == ChatPage.ItemKind.User && !item.IsSteer)
             {
                 if (changes.TryGetValue(turn, out var finished)) output.Add(finished);
                 turn++;
@@ -325,7 +325,7 @@ internal static class ChatDetailFold
         var starts = new List<int>();
         for (var i = 0; i < items.Count; i++)
         {
-            if (items[i].Kind == ChatPage.ItemKind.User) starts.Add(i);
+            if (items[i].Kind == ChatPage.ItemKind.User && !items[i].IsSteer) starts.Add(i);
         }
         if (starts.Count == 0 || starts[0] != 0) starts.Insert(0, 0);
         for (var n = 0; n < starts.Count; n++)

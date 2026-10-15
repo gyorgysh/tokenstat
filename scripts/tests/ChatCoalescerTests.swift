@@ -5,6 +5,14 @@ struct ChatAttachment: Hashable, Sendable { var id: String; var name: String; va
 struct ChatApproval: Codable, Hashable, Sendable { var id: String; var decision: String? }
 @main struct ChatCoalescerTests {
     @MainActor static func main() async throws {
+        let steerWire: [[String: Any]] = [
+            ["kind":"agent", "atMs":1, "event":["kind":"toolStart", "callId":"running", "verb":"Bash", "target":"sleep 5"]],
+            ["kind":"user", "atMs":2, "text":"Also check the tests", "steer":true],
+        ]
+        let steerEvents = try JSONDecoder().decode([ChatTimelineEvent].self, from: JSONSerialization.data(withJSONObject: steerWire))
+        let steerRows = ChatDisplayItem.coalesce(steerEvents, running: true)
+        precondition(steerRows.last?.isSteer == true)
+        precondition(steerRows.contains { if case let .tool(tool) = $0.kind { return tool.running }; return false }, "Steering must not close an active tool")
         let projector = ChatTranscriptProjector()
         var cases = 0
         for seed in 1...250 {

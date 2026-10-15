@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-//! One-turn CLI protocol runner. Speed controls use a private, turn-owned
-//! mailbox, never agent prompt text or the provider's persistent preferences.
+//! One-turn CLI protocol runner. Live input and speed settings use a private,
+//! turn-owned mailbox. Speed settings never become agent prompt text.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -33,7 +33,13 @@ struct Config {
 
 pub(crate) struct Launch {
     directory: tempfile::TempDir,
+    accepts_steer: bool,
     pub(crate) argv: Vec<String>,
+}
+
+pub(crate) enum SteerError {
+    Refused(String),
+    Unknown(String),
 }
 
 fn now_ms() -> u64 {
@@ -112,10 +118,72 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
 }
 
 impl Launch {
+    pub(crate) fn ready(&self) -> bool {
+        self.directory.path().join("ready.json").is_file()
+    }
+
+    pub(crate) fn ready_for_steer(&self) -> bool {
+        self.accepts_steer && self.ready()
+    }
+
+    /// Additional input goes to the existing CLI, never through interrupt or
+    /// turn/start. A missing acknowledgement must never trigger a resend.
+    pub(crate) fn steer(&self, pty: &str, text: &str) -> Result<(), SteerError> {
+        if !self.ready_for_steer() {
+            return Err(SteerError::Refused(
+                "This agent is still starting. Try steering after its first step.".into(),
+            ));
+        }
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).map_err(|error| SteerError::Refused(error.to_string()))?;
+        random[6] = (random[6] & 0x0f) | 0x40;
+        random[8] = (random[8] & 0x3f) | 0x80;
+        let id = random
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let request = self.directory.path().join(format!("request-{id}.json"));
+        let response = self.directory.path().join(format!("response-{id}.json"));
+        write_json(
+            &request,
+            &json!({"id":id,"steer":text,"expires":now_ms()+10_000}),
+        )
+        .map_err(SteerError::Unknown)?;
+        let until = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Ok(bytes) = read_control_file(&response) {
+                let _ = fs::remove_file(&response);
+                let result: Value = serde_json::from_slice(&bytes)
+                    .map_err(|error| SteerError::Unknown(error.to_string()))?;
+                return if result["ok"] == true {
+                    Ok(())
+                } else if result["unknown"] == true {
+                    Err(SteerError::Unknown("Steering delivery could not be confirmed. Check the conversation before sending these words again.".into()))
+                } else {
+                    Err(SteerError::Refused(
+                        result["error"]
+                            .as_str()
+                            .unwrap_or("The agent refused this steering message.")
+                            .into(),
+                    ))
+                };
+            }
+            if Instant::now() >= until
+                || !tokenstat_pty::manager()
+                    .info(pty)
+                    .is_ok_and(|info| info.alive)
+            {
+                return Err(SteerError::Unknown("Steering delivery could not be confirmed. Check the conversation before sending these words again.".into()));
+            }
+            std::thread::sleep(Duration::from_millis(40));
+        }
+    }
+
     #[cfg(all(test, unix))]
     pub(crate) fn test_mailbox(directory: tempfile::TempDir) -> Self {
         Self {
             directory,
+            accepts_steer: true,
             argv: Vec::new(),
         }
     }
@@ -148,6 +216,7 @@ impl Launch {
         let helper = std::env::current_exe().map_err(|error| error.to_string())?;
         Ok(Some(Self {
             directory,
+            accepts_steer: argv.last().is_none_or(|prompt| prompt.trim() != "/compact"),
             argv: vec![
                 helper.to_string_lossy().into_owned(),
                 "chat-live".into(),
@@ -228,7 +297,7 @@ struct Protocol {
     backend: String,
     thread: String,
     turn: String,
-    pending: HashMap<String, PathBuf>,
+    pending: HashMap<String, (PathBuf, bool)>,
     usage: Value,
 }
 
@@ -369,7 +438,11 @@ fn claude_launch(argv: &[String]) -> Result<(Vec<String>, String), String> {
         .ok_or("missing Claude print flag")?;
     let prompt = args.get(at + 1).ok_or("missing Claude prompt")?.clone();
     args.remove(at + 1);
-    args.extend(["--input-format".into(), "stream-json".into()]);
+    args.extend([
+        "--input-format".into(),
+        "stream-json".into(),
+        "--replay-user-messages".into(),
+    ]);
     Ok((args, prompt))
 }
 
@@ -528,17 +601,52 @@ impl Protocol {
             {
                 write_json(
                     &response,
-                    &json!({"ok":false,"error":"The speed request expired. Try again."}),
+                    &json!({"ok":false,"error":"The agent input request expired. Try again."}),
                 )?;
             } else {
-                let fast = request["fast"].as_bool().ok_or("invalid speed request")?;
-                let message = if self.backend == "claude" {
-                    json!({"type":"control_request","request_id":id,"request":{"subtype":"apply_flag_settings","settings":{"fastMode":fast}}})
+                let steer = request["steer"].as_str();
+                let message = if let Some(text) = steer {
+                    let uuid = format!(
+                        "{}-{}-{}-{}-{}",
+                        &id[..8],
+                        &id[8..12],
+                        &id[12..16],
+                        &id[16..20],
+                        &id[20..]
+                    );
+                    if self.backend == "claude" {
+                        json!({"type":"user","uuid":uuid,"session_id":"","message":{"role":"user","content":[{"type":"text","text":text}]},"parent_tool_use_id":null})
+                    } else {
+                        json!({"id":id,"method":"turn/steer","params":{"threadId":self.thread,"expectedTurnId":self.turn,"clientUserMessageId":uuid,"input":[{"type":"text","text":text}]}})
+                    }
                 } else {
-                    json!({"id":id,"method":"turn/settings/update","params":{"threadId":self.thread,"turnId":self.turn,"serviceTier":if fast {"priority"} else {"default"}}})
+                    let fast = request["fast"].as_bool().ok_or("invalid speed request")?;
+                    if self.backend == "claude" {
+                        json!({"type":"control_request","request_id":id,"request":{"subtype":"apply_flag_settings","settings":{"fastMode":fast}}})
+                    } else {
+                        json!({"id":id,"method":"turn/settings/update","params":{"threadId":self.thread,"turnId":self.turn,"serviceTier":if fast {"priority"} else {"default"}}})
+                    }
                 };
-                send(input, &message)?;
-                self.pending.insert(id.into(), response);
+                if let Err(error) = send(input, &message) {
+                    if steer.is_some() {
+                        let _ = write_json(
+                            &response,
+                            &json!({"ok":false,"unknown":true,"error":error}),
+                        );
+                        let _ = fs::remove_file(entry.path());
+                        continue;
+                    }
+                    return Err(error);
+                }
+                if steer.is_some() && self.backend == "claude" {
+                    // Claude echoes input only at its next safe boundary,
+                    // which may follow a long tool call. Acceptance means
+                    // the input queue took it, just like Codex's steer RPC.
+                    // Keep tracking the echo so a preceding result cannot
+                    // close the CLI before this input is consumed.
+                    let _ = write_json(&response, &json!({"ok":true}));
+                }
+                self.pending.insert(id.into(), (response, steer.is_some()));
             }
             fs::remove_file(entry.path()).map_err(|error| error.to_string())?;
         }
@@ -546,29 +654,53 @@ impl Protocol {
     }
 
     fn acknowledge(&mut self, value: &Value) -> Result<bool, String> {
-        let response = if self.backend == "claude" {
+        let replay = self.backend == "claude" && value["type"] == "user";
+        let response = if self.backend == "claude" && !replay {
             &value["response"]
         } else {
             value
         };
-        let id = if self.backend == "claude" {
+        let id = if replay {
+            value["uuid"].as_str()
+        } else if self.backend == "claude" {
             response["request_id"].as_str()
         } else {
             response["id"].as_str()
         };
-        let Some(path) = id.and_then(|id| self.pending.remove(id)) else {
+        let Some((path, steer)) = id.and_then(|id| {
+            self.pending.remove(&if replay {
+                id.replace('-', "")
+            } else {
+                id.to_string()
+            })
+        }) else {
             return Ok(false);
         };
-        let ok = if self.backend == "claude" {
+        let ok = if replay {
+            steer
+        } else if self.backend == "claude" {
             response["subtype"] == "success"
+        } else if steer {
+            response["result"]["turnId"] == self.turn && response["error"].is_null()
         } else {
             response["result"]["status"] == "applied"
         };
         let error = response["error"]
             .as_str()
             .or_else(|| response["error"]["message"].as_str())
-            .unwrap_or("The active turn could not apply this speed setting.");
-        write_json(&path, &json!({"ok":ok,"error":error}))?;
+            .unwrap_or(if steer {
+                "The active turn refused this steering message."
+            } else {
+                "The active turn could not apply this speed setting."
+            });
+        if self.backend == "claude" && steer {
+            return Ok(true);
+        }
+        if steer {
+            let _ = write_json(&path, &json!({"ok":ok,"error":error}));
+        } else {
+            write_json(&path, &json!({"ok":ok,"error":error}))?;
+        }
         Ok(true)
     }
 }
@@ -684,6 +816,9 @@ pub fn run(path: &Path) -> Result<(), String> {
                     emit(&message)?;
                     if message["is_error"] == true {
                         return Err("Claude reported a failed turn.".into());
+                    }
+                    if protocol.pending.values().any(|(_, steer)| *steer) {
+                        continue;
                     }
                     if initial == "/compact" {
                         emit(
@@ -1066,7 +1201,8 @@ mod tests {
                 "--resume",
                 "session",
                 "--input-format",
-                "stream-json"
+                "stream-json",
+                "--replay-user-messages"
             ]
         );
     }
@@ -1080,7 +1216,7 @@ mod tests {
                 backend: backend.into(),
                 thread: "thread".into(),
                 turn: "turn".into(),
-                pending: HashMap::from([("request".into(), path.clone())]),
+                pending: HashMap::from([("request".into(), (path.clone(), false))]),
                 usage: Value::Null,
             };
             assert!(

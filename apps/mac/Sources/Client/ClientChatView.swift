@@ -1043,19 +1043,21 @@ struct ClientChatThread: View {
                         .padding(.horizontal, Theme.Space.s)
                 }
                 if !model.pendingQueue.isEmpty {
-                        let queueOwner = model.currentReference
+                    let queueOwner = model.currentReference
+                    let queueCanSteer = model.busy && model.selected?.nativeSteer == true
                     ChatQueueStrip(
                         items: model.pendingQueue,
                         owner: queueOwner,
-                            paused: model.queuePaused,
-                            offline: model.savedCopy != nil,
+                        paused: model.queuePaused,
+                        offline: model.savedCopy != nil,
+                        canSteer: queueCanSteer,
                         onChange: { item, text in model.updateQueued(item, text: text, owner: queueOwner) },
                         onRemove: { model.removeQueued($0, owner: queueOwner) },
                         onSendNow: { item in
                             showNewest()
                             resumeLatest()
                             followPulse += 1
-                            Task { await model.sendNow(item, owner: queueOwner) }
+                            Task { await model.sendNow(item, owner: queueOwner, steerOnly: queueCanSteer && item.attachments.isEmpty && !item.text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")) }
                         },
                         onMove: { model.moveQueued(from: $0, to: $1, owner: queueOwner) }
                     )
@@ -2045,7 +2047,7 @@ struct ClientChatThread: View {
             resumeLatest()
             followPulse += 1
             let queueOwner = model.currentReference
-            Task { await model.sendNow(item, owner: queueOwner) }
+            Task { await model.sendNow(item, owner: queueOwner, forceStop: true) }
             return
         }
         if model.busy {

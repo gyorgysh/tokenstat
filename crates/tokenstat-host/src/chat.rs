@@ -26,6 +26,8 @@ use crate::transcript::{Event, Parser};
 pub mod files;
 #[path = "chat_router.rs"]
 pub mod router;
+#[path = "chat_steer.rs"]
+mod steering;
 
 const EVENTS_CAP: u64 = 1024 * 1024;
 /// How many events one page carries when the client does not say.
@@ -390,6 +392,8 @@ enum StoredEvent {
     User {
         text: String,
         at_ms: i64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        steer: bool,
     },
     Agent {
         event: Event,
@@ -399,10 +403,7 @@ enum StoredEvent {
     /// An approval belongs in the transcript, not in a disconnected modal.
     /// The queue remains the source of truth for its live decision; this
     /// record preserves the place where the agent paused after it is settled.
-    Approval {
-        approval: Approval,
-        at_ms: i64,
-    },
+    Approval { approval: Approval, at_ms: i64 },
     /// One agent handing the conversation to another.
     ///
     /// Recorded in full, brief included, for the same reason the instructions
@@ -1306,6 +1307,7 @@ impl Store {
         self.append(
             &id,
             &StoredEvent::User {
+                steer: true,
                 text: note.clone(),
                 at_ms,
             },
@@ -1595,13 +1597,15 @@ impl Store {
             let Some(id) = row.get("id").and_then(Value::as_str) else {
                 continue;
             };
-            let Some(note) = steers.get(id) else {
-                continue;
-            };
+            let native_steer = self.native_steer(id).is_some();
+            let note = steers.get(id).cloned();
             let Some(object) = row.as_object_mut() else {
                 continue;
             };
-            object.insert("pendingSteer".into(), Value::String(note.clone()));
+            object.insert("nativeSteer".into(), Value::Bool(native_steer));
+            if let Some(note) = note {
+                object.insert("pendingSteer".into(), Value::String(note));
+            }
         }
     }
 
@@ -4049,6 +4053,7 @@ impl Store {
             self.append(
                 id,
                 &StoredEvent::User {
+                    steer: false,
                     text: prompt.into(),
                     at_ms: user_at,
                 },
@@ -6933,6 +6938,7 @@ mod tests {
                 .append(
                     "opening-window",
                     &StoredEvent::User {
+                        steer: false,
                         text: format!("hello {n}"),
                         at_ms: n as i64,
                     },
@@ -6960,6 +6966,7 @@ mod tests {
                 .append(
                     "heavy-window",
                     &StoredEvent::User {
+                        steer: false,
                         text: format!("{:04}:{}\n", n, "x".repeat(12 * 1024)),
                         at_ms: n as i64,
                     },
@@ -7155,6 +7162,165 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg(unix)]
+    #[test]
+    fn native_steering_is_receipted_once_without_stopping_the_turn() {
+        for outcome in [Some(true), Some(false), None] {
+            let root = tempfile::tempdir().unwrap();
+            let store = Store::at(root.path().join("chat"));
+            conversation_for_receipts(&store, "steering");
+            store
+                .edit_conversation("steering", |chat| {
+                    chat.autonomy = "bypass".into();
+                    Ok(())
+                })
+                .unwrap();
+            store.set_running("steering", true).unwrap();
+            let mailbox = tempfile::tempdir().unwrap();
+            let directory = mailbox.path().to_path_buf();
+            fs::write(directory.join("ready.json"), "true").unwrap();
+            let manager = tokenstat_pty::manager();
+            let process = manager
+                .spawn(&tokenstat_pty::Spawn {
+                    command: "/bin/sleep".into(),
+                    args: vec!["30".into()],
+                    cwd: root.path().into(),
+                    workspace_id: None,
+                    hidden: true,
+                    rows: 24,
+                    cols: 80,
+                    no_color: true,
+                    dark: None,
+                    environment: Vec::new(),
+                })
+                .unwrap();
+            store
+                .active
+                .lock()
+                .unwrap()
+                .insert("steering".into(), process.id.clone());
+            store.live_speed.lock().unwrap().insert(
+                "steering".into(),
+                (
+                    process.id.clone(),
+                    Arc::new(crate::chat_live::Launch::test_mailbox(mailbox)),
+                ),
+            );
+            let response_dir = directory.clone();
+            let process_id = process.id.clone();
+            let responder = std::thread::spawn(move || {
+                let until = Instant::now() + Duration::from_secs(5);
+                loop {
+                    for entry in fs::read_dir(&response_dir).unwrap().flatten() {
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        if let Some(id) = name
+                            .strip_prefix("request-")
+                            .and_then(|name| name.strip_suffix(".json"))
+                        {
+                            let request: Value =
+                                serde_json::from_slice(&fs::read(entry.path()).unwrap()).unwrap();
+                            assert_eq!(request["steer"], "Keep working and include tests.");
+                            assert_eq!(&id[12..13], "4");
+                            assert!(matches!(&id[16..17], "8" | "9" | "a" | "b"));
+                            if let Some(accepted) = outcome {
+                                fs::write(
+                                    response_dir.join(format!("response-{id}.json")),
+                                    json!({"ok":accepted,"error":"refused"}).to_string(),
+                                )
+                                .unwrap();
+                            } else {
+                                tokenstat_pty::manager().kill(&process_id).unwrap();
+                            }
+                            return;
+                        }
+                    }
+                    assert!(Instant::now() < until);
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            });
+            let result = store.steer_send(
+                "steering",
+                "Keep working and include tests.",
+                "steer-message",
+                now_ms(),
+                0,
+            );
+            responder.join().unwrap();
+            assert_eq!(manager.info(&process.id).unwrap().alive, outcome.is_some());
+            assert!(!directory.join("stop").exists());
+            assert!(!store.killed.lock().unwrap().contains("steering"));
+            if outcome == Some(true) {
+                assert!(result.as_ref().unwrap().running);
+                store
+                    .steer_send(
+                        "steering",
+                        "Keep working and include tests.",
+                        "steer-message",
+                        now_ms(),
+                        0,
+                    )
+                    .unwrap();
+                assert!(
+                    store
+                        .steer_send("steering", "Different text", "steer-message", now_ms(), 0)
+                        .is_err()
+                );
+                let events = store.events("steering", 0).unwrap();
+                let users: Vec<_> = events
+                    .0
+                    .iter()
+                    .filter(|event| event["kind"] == "user")
+                    .collect();
+                assert_eq!(users.len(), 1);
+                assert_eq!(users[0]["steer"], true);
+                assert_eq!(
+                    store
+                        .receipt("steering", "steer-message")
+                        .unwrap()
+                        .unwrap()
+                        .state,
+                    crate::chat_receipts::ReceiptState::Accepted
+                );
+            } else if outcome == Some(false) {
+                assert_eq!(result.as_ref().unwrap_err().code, "steer_refused");
+                assert!(
+                    store
+                        .receipt("steering", "steer-message")
+                        .unwrap()
+                        .is_none()
+                );
+            }
+            if outcome.is_none() {
+                assert_eq!(
+                    result.as_ref().unwrap_err().code,
+                    crate::error::DELIVERY_UNKNOWN
+                );
+                let again = store
+                    .steer_send(
+                        "steering",
+                        "Keep working and include tests.",
+                        "steer-message",
+                        now_ms(),
+                        0,
+                    )
+                    .unwrap_err();
+                assert_eq!(again.code, crate::error::DELIVERY_UNKNOWN);
+                assert_eq!(
+                    fs::read_dir(&directory)
+                        .unwrap()
+                        .flatten()
+                        .filter(|entry| entry.file_name().to_string_lossy().starts_with("request-"))
+                        .count(),
+                    1
+                );
+            }
+            if outcome.is_some() {
+                manager.kill(&process.id).unwrap();
+            }
+            manager.close(&process.id).unwrap();
+        }
+    }
+
     #[test]
     fn stopping_a_live_turn_requests_its_mailbox_before_killing_the_pty() {
         let root = tempfile::tempdir().unwrap();
@@ -7713,6 +7879,7 @@ mod tests {
             .append(
                 "chat-test",
                 &StoredEvent::User {
+                    steer: false,
                     text: note.clone(),
                     at_ms: user_at,
                 },
@@ -8030,6 +8197,7 @@ mod tests {
             .append(
                 "chat-test",
                 &StoredEvent::User {
+                    steer: false,
                     text: "Previous question".into(),
                     at_ms: now_ms(),
                 },
@@ -8563,6 +8731,7 @@ mod tests {
         store.observe_question_attention(
             "chat-b1",
             &StoredEvent::User {
+                steer: false,
                 text: "Continue".into(),
                 at_ms: now_ms(),
             },
@@ -8635,6 +8804,7 @@ mod tests {
             .append(
                 "chat-test",
                 &StoredEvent::User {
+                    steer: false,
                     text: "Hello".into(),
                     at_ms: 2,
                 },
@@ -9250,6 +9420,7 @@ mod tests {
             .append(
                 &fork.id,
                 &StoredEvent::User {
+                    steer: false,
                     text: "Independent follow-up".into(),
                     at_ms: 300,
                 },
@@ -9283,6 +9454,7 @@ mod tests {
             .append(
                 id,
                 &StoredEvent::User {
+                    steer: false,
                     text: "Original request".into(),
                     at_ms: 2,
                 },
@@ -10039,6 +10211,7 @@ mod tests {
             .append(
                 "original",
                 &StoredEvent::User {
+                    steer: false,
                     text: "Original prompt".into(),
                     at_ms: 1,
                 },
@@ -10170,6 +10343,7 @@ mod tests {
             .append(
                 &copied.id,
                 &StoredEvent::User {
+                    steer: false,
                     text: "Fork prompt".into(),
                     at_ms: 6,
                 },
@@ -10278,6 +10452,7 @@ mod tests {
             serde_json::to_writer(
                 &mut legacy,
                 &StoredEvent::User {
+                    steer: false,
                     text: format!("Legacy {at_ms} {}", "x".repeat(32_000)),
                     at_ms,
                 },
@@ -10300,6 +10475,7 @@ mod tests {
                 .append(
                     "retention",
                     &StoredEvent::User {
+                        steer: false,
                         text: format!("New {at_ms} {}", "y".repeat(32_000)),
                         at_ms,
                     },
@@ -10740,6 +10916,7 @@ mod tests {
         store.save().unwrap();
         let stale = Store::load_at(store.root.clone());
         let event = StoredEvent::User {
+            steer: false,
             text: "A late event".into(),
             at_ms: 1,
         };
@@ -10755,6 +10932,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         let event = StoredEvent::User {
+            steer: false,
             text: "Late event".into(),
             at_ms: 1,
         };
@@ -10878,6 +11056,7 @@ mod tests {
                 .append(
                     "usage-retention",
                     &StoredEvent::User {
+                        steer: false,
                         text: "x".repeat(32_000),
                         at_ms,
                     },
@@ -10931,6 +11110,7 @@ mod tests {
         let bytes = fs::read(store.events_path("maximum")).unwrap();
         let seq = crate::work_transcript_identity::next_sequence(&bytes, 0).unwrap();
         let empty = serde_json::to_value(StoredEvent::User {
+            steer: false,
             text: String::new(),
             at_ms: 2,
         })
@@ -10945,6 +11125,7 @@ mod tests {
             .append(
                 "maximum",
                 &StoredEvent::User {
+                    steer: false,
                     text: "x".repeat(PAGE_RECORD_BYTES as usize - overhead),
                     at_ms: 2,
                 },
@@ -10957,6 +11138,7 @@ mod tests {
             .append(
                 "maximum",
                 &StoredEvent::User {
+                    steer: false,
                     text: "After the large record".into(),
                     at_ms: 3,
                 },
@@ -10981,6 +11163,7 @@ mod tests {
         let incomplete = b"{\"kind\":\"user\",\"text\":\"unfinished";
         fs::write(&path, incomplete).unwrap();
         let event = StoredEvent::User {
+            steer: false,
             text: "next".into(),
             at_ms: 2,
         };
@@ -10988,6 +11171,7 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), incomplete);
         fs::write(&path, b"").unwrap();
         let large = StoredEvent::User {
+            steer: false,
             text: "x".repeat(EVENTS_CAP as usize + 100),
             at_ms: 3,
         };
@@ -10995,6 +11179,7 @@ mod tests {
         let before = fs::read(&path).unwrap();
         assert_eq!(records(&before, 0).len(), 1);
         let oversized = StoredEvent::User {
+            steer: false,
             text: "x".repeat(PAGE_RECORD_BYTES as usize),
             at_ms: 4,
         };
@@ -11064,6 +11249,7 @@ mod tests {
                 .append(
                     "shared",
                     &StoredEvent::User {
+                        steer: false,
                         text: format!("{writer}-{at_ms}"),
                         at_ms,
                     },
@@ -11343,6 +11529,7 @@ mod tests {
                     .append(
                         "chat-pending",
                         &StoredEvent::User {
+                            steer: false,
                             text: "hello again".into(),
                             at_ms,
                         },
@@ -11783,6 +11970,7 @@ mod tests {
             .append(
                 "chat-handoff",
                 &StoredEvent::User {
+                    steer: false,
                     text: "Add a retry to the uploader".into(),
                     at_ms: 1,
                 },
@@ -11897,6 +12085,7 @@ mod tests {
             .append(
                 "chat-rebrief",
                 &StoredEvent::User {
+                    steer: false,
                     text: "Add a retry to the uploader".into(),
                     at_ms: 1,
                 },

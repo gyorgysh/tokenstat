@@ -22,7 +22,7 @@ import kotlinx.serialization.json.longOrNull
 sealed interface ChatDisplayItem {
     val id: String
 
-    data class User(override val id: String, val text: String) : ChatDisplayItem
+    data class User(override val id: String, val text: String, val isSteer: Boolean = false) : ChatDisplayItem
     data class Assistant(override val id: String, val text: String, val backend: String?) : ChatDisplayItem
     data class TurnSeparator(override val id: String, val backend: String) : ChatDisplayItem
     data class Handoff(override val id: String, val to: String, val brief: String) : ChatDisplayItem
@@ -383,12 +383,15 @@ fun coalesceTranscript(
             flushThinking()
             // A new user turn bounds any tools left open by an interrupted
             // older turn, including histories recorded by older hosts.
-            closeRunningTools(failed = false, at = atMsOf(ev, inner), detail = L10n.text("android.chattranscript.interrupted.132d124d"))
-            editRevisions.clear()
+            if (!ev.bol("steer")) {
+                closeRunningTools(failed = false, at = atMsOf(ev, inner), detail = L10n.text("android.chattranscript.interrupted.132d124d"))
+                editRevisions.clear()
+            }
             items.add(
                 ChatDisplayItem.User(
                     "user-${stamp(ev, items.size)}",
                     ev.str("text") ?: ev.str("body") ?: "",
+                    isSteer = ev.bol("steer"),
                 ),
             )
             continue

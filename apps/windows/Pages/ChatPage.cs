@@ -1045,7 +1045,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         ItemKind.Group => $"{item.Id}|{StepGroupKey(item.Group)}",
         ItemKind.Question => $"{item.Id}|{item.Question?.Answer}|{item.Question?.Delivery}|{_answering.Contains(item.Question?.Id ?? "")}",
-        ItemKind.User => $"{item.Id}|{item.Text}",
+        ItemKind.User => $"{item.Id}|{item.IsSteer}|{item.Text}",
         ItemKind.Assistant => $"{item.Id}|{item.Text}",
         ItemKind.Thinking => $"{item.Id}|{item.Text}",
         ItemKind.Tool => $"{item.Id}|{item.Verb}|{item.Target}|{item.Running}|{item.Failed}|{item.Duration}|{item.Detail}|{CardExpanded(item)}",
@@ -1168,7 +1168,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
         ItemKind.Tool or ItemKind.Edit when item.Plain == PlainStep.Detail => PlainStepDetail(item),
         ItemKind.Tool or ItemKind.Edit when item.Plain == PlainStep.Line => PlainStepRow(item),
-        ItemKind.User => UserBubble(item.Text),
+        ItemKind.User => UserBubble(item.Text, item.IsSteer),
         ItemKind.Assistant => AssistantBubble(item.Text),
         ItemKind.Thinking => ThinkingRow(item.Text),
         ItemKind.Tool => ToolRow(item),
@@ -1325,22 +1325,22 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return PersonaSeed.For("chat");
     }
 
-    private static UIElement UserBubble(string text)
+    private static UIElement UserBubble(string text, bool steer = false)
     {
-        return new Border
+        var body = new StackPanel { Spacing = 4 };
+        if (steer) body.Children.Add(new TextBlock { Text = L10n.Text("common.chat.steer"), FontSize = 12, Foreground = Theme.AccentBrush });
+        body.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+        var bubble = new Border
         {
             HorizontalAlignment = HorizontalAlignment.Right,
             MaxWidth = 560,
             Background = Theme.AccentSoftBrush,
             CornerRadius = new CornerRadius(16),
             Padding = new Thickness(Theme.SpaceM),
-            Child = new TextBlock
-            {
-                Text = text,
-                TextWrapping = TextWrapping.Wrap,
-                IsTextSelectionEnabled = true,
-            },
+            Child = body,
         };
+        if (steer) ToolTipService.SetToolTip(bubble, L10n.Text("common.chat.steer_help"));
+        return bubble;
     }
 
     /// <summary>
@@ -1934,7 +1934,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (Busy())
         {
             var steering = SteerKnownAvailable();
-            var queue = ActionIconGlyph.PrimaryButton(steering ? L10n.Text("windows.chatpage.next_step.298a9207") : L10n.Text("windows.chatpage.queue.3b2fe03e"), ActionIcon.Send, async (_, _) => await SendAsync());
+            var queue = ActionIconGlyph.PrimaryButton(steering && Format.Flag(_openChat, "nativeSteer") ? L10n.Text("common.chat.steer") : steering ? L10n.Text("windows.chatpage.next_step.298a9207") : L10n.Text("windows.chatpage.queue.3b2fe03e"), ActionIcon.Send, async (_, _) => await SendAsync());
             var tip = steering
                 ? L10n.Text("windows.chatpage.the_agent_reads_this_on_its_next_step.aab7b1c7")
                 : L10n.Text("windows.chatpage.waits_until_this_turn_finishes_stop_and_se.2df81427");
@@ -2018,12 +2018,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (_opening) return;
         if (_openId is not string chat || _sending || _queueing || _fileTransfer is not null) return;
         if (await ConsumeCommandAsync()) return;
-        if (OpenBackendMissing()) return;
+        var liveInput = !sendNext && Busy() && Format.Flag(_openChat, "nativeSteer") && _attachments.Count == 0;
+        if (!liveInput && OpenBackendMissing()) return;
         var backend = Backend(Format.Text(_openChat, "backend"));
         // Only the CLI's own answer stops a send. A stored token past its
         // expiry is routine (the CLI renews it), and an agent signed in with an
         // environment key has no login file at all.
-        if (Format.Flag(backend, "signInVerified") && Format.Text(backend, "readiness") is "needsSignIn" or "expired")
+        if (!liveInput && Format.Flag(backend, "signInVerified") && Format.Text(backend, "readiness") is "needsSignIn" or "expired")
         {
             Banner(L10n.Text("windows.agentsetup.draft_kept", Format.Text(backend, "label")));
             return;
@@ -2058,7 +2059,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _outboxKey = key; _authorizedQueue.Add(item.Id);
             if (_draft.Text.Trim() == text) _draft.Text = "";
             _attachments.RemoveAll(file => attachmentIds.Contains(file.Id));
-            await DrainQueueAsync(messageId: item.Id);
+            await DrainQueueAsync(messageId: item.Id, steerCurrent: !sendNext && Busy() && Format.Flag(_openChat, "nativeSteer") && attachmentIds.Length == 0 && !text.StartsWith("/", StringComparison.Ordinal));
             if (Current()) { PaintConversation(); StartPoll(); }
         }
         catch (Exception ex) { if (Current()) Banner(ex.Message); }
@@ -2497,6 +2498,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 {
                     Id = "user-" + Format.Long(row, "atMs") + "-" + items.Count,
                     Kind = ItemKind.User,
+                    IsSteer = Format.Flag(row, "steer"),
                     Text = Format.Text(row, "text"),
                 });
                 continue;

@@ -62,12 +62,13 @@ internal sealed partial class ChatPage
                 }
                 else
                 {
-                    actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chat_send_latest"), ActionIcon.Run, async (_, _) =>
+                    var steerForItem = Busy() && Format.Flag(_openChat, "nativeSteer") && item.Attachments.Length == 0 && !item.Text.TrimStart().StartsWith("/", StringComparison.Ordinal);
+                    actions.Children.Add(ActionIconGlyph.Button(steerForItem ? L10n.Text("common.chat.steer") : L10n.Text("common.chat_send_latest"), ActionIcon.Run, async (_, _) =>
                     {
                         try
                         {
                             if (!Current()) return;
-                            await RefreshCatalogAsync();
+                            if (!steerForItem) await RefreshCatalogAsync();
                             if (!Current()) return;
                             _openChat = FindChat(chat);
                             if (_openChat?["sendRevision"] is null) throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.this_conversation_is_no_longer_available.07f8c47b"));
@@ -80,7 +81,7 @@ internal sealed partial class ChatPage
                                 rows[index] = rows[index] with { Revision = revision, State = "waiting" };
                             });
                             _authorizedQueue.Add(item.Id);
-                            await DrainQueueAsync(messageId: item.Id);
+                            await DrainQueueAsync(messageId: item.Id, steerCurrent: steerForItem);
                             if (Current()) { PaintConversation(); StartPoll(); }
                         }
                         catch (Exception ex) { if (Current()) Banner(ex.Message); }
@@ -150,7 +151,7 @@ internal sealed partial class ChatPage
         return true;
     }
 
-    private async Task DrainQueueAsync(bool deliverNote = true, string? messageId = null)
+    private async Task DrainQueueAsync(bool deliverNote = true, string? messageId = null, bool steerCurrent = false)
     {
         // A parked note does not need the outbox key, and it goes out before
         // any queued message. The flag is set by the delivery itself so a
@@ -162,7 +163,7 @@ internal sealed partial class ChatPage
             await DeliverParkedSteerAsync(chat);
             return;
         }
-        if (Busy() || _outboxKey is not string key) return;
+        if ((Busy() && !steerCurrent) || _outboxKey is not string key) return;
         var generation = _openGeneration;
         var accountGeneration = AppServices.AccountGeneration;
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && _outboxKey == key
@@ -176,11 +177,11 @@ internal sealed partial class ChatPage
             var currentKey = await OutboxKeyAsync(chat);
             if (!Current()) return;
             if (currentKey != key) throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.the_signed_in_account_changed_pending_mess.54c18f45"));
-            await RefreshCatalogAsync();
+            if (!steerCurrent) await RefreshCatalogAsync();
             if (!Current()) return;
             var live = _chats.FirstOrDefault(row => Format.Text(row, "id") == chat)
                 ?? throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.this_conversation_is_no_longer_available.07f8c47b"));
-            if (Format.Flag(live, "running")) return;
+            if (Format.Flag(live, "running") && !steerCurrent) return;
             if (live["sendRevision"] is null || Format.Long(live, "sendRevision") != candidate.Revision)
             {
                 _authorizedQueue.Remove(candidate.Id);
@@ -188,7 +189,7 @@ internal sealed partial class ChatPage
                 return;
             }
             var attempted = ChatOutbox.Shared.Stage(key, candidate, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            var updated = await CallChatAsync(ChatCommandRules.SendMethod(attempted.Text), new JsonObject
+            var updated = await CallChatAsync(steerCurrent ? "chat.steerSend" : ChatCommandRules.SendMethod(attempted.Text), new JsonObject
             {
                 ["id"] = chat, ["text"] = attempted.Text,
                 ["attachmentIds"] = new JsonArray(attempted.Attachments.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()),

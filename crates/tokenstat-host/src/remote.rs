@@ -2607,7 +2607,7 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
             }
             // The request may have reached the host. Its receipt, not a
             // transport redial, decides what a send may do next.
-            Err(error) if matches!(method, "chat.send" | "chat.compact") => {
+            Err(error) if matches!(method, "chat.send" | "chat.compact" | "chat.steerSend") => {
                 return Err(error.to_string());
             }
             Err(_) => {}
@@ -2620,7 +2620,7 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     // means the far daemon was just replacing its listener, the same reconnect
     // window `tunnel_dial` retries through. One redial rides over it; anything
     // more is a real failure and should be reported as one.
-    if !matches!(method, "chat.send" | "chat.compact")
+    if !matches!(method, "chat.send" | "chat.compact" | "chat.steerSend")
         && answer
             .as_ref()
             .is_err_and(|e| matches!(e, tokenstat_remote::RemoteError::Closed))
@@ -3553,7 +3553,7 @@ fn forwarded_result(
 ) -> Result<Value, crate::error::DispatchError> {
     use crate::error::DispatchError;
     let unreadable = |message: String| {
-        if matches!(method, "chat.send" | "chat.compact") {
+        if matches!(method, "chat.send" | "chat.compact" | "chat.steerSend") {
             DispatchError::delivery_unknown(message)
         } else {
             DispatchError::from(message)
@@ -4053,7 +4053,7 @@ mod tests {
 
     #[test]
     fn forwarding_preserves_send_uncertainty_and_explicit_refusals() {
-        for method in ["chat.send", "chat.compact"] {
+        for method in ["chat.send", "chat.compact", "chat.steerSend"] {
             for code in ["delivery_unknown", "not_approved", "send_upgrade_required"] {
                 let reply = json!({"ok":false,"error":{"code":code,"message":"Keep these words"}})
                     .to_string();

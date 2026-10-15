@@ -123,6 +123,16 @@ class ChatTranscriptTest {
     }
 
     @Test
+    fun steeringAddsContextWithoutClosingAnOpenTool() {
+        val items = coalesceTranscript(listOf(
+            toolStart("live", "Bash", "sleep 5"),
+            buildJsonObject { put("kind", "user"); put("text", "Include tests"); put("steer", true) },
+        ))
+        assertTrue((items.first() as ChatDisplayItem.Tool).state.running)
+        assertTrue((items.last() as ChatDisplayItem.User).isSteer)
+    }
+
+    @Test
     fun userTurnBoundsOpenTools() {
         val items = coalesceTranscript(
             listOf(

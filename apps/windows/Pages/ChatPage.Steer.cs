@@ -77,6 +77,7 @@ internal sealed partial class ChatPage
         if (!_steerProtocol.TryGetValue(SteerPeerKey(), out var protocol)) return false;
         if (protocol < RemoteFeatureGate.SteerMinProtocol) return false;
         if (_attachments.Count > 0) return false;
+        if (Format.Flag(_openChat, "nativeSteer")) return true;
         var backend = Format.Text(_openChat, "backend");
         if (backend is not ("claude" or "codex" or "cursor" or "muse")) return false;
         if (backend == "cursor" && Format.Text(_openChat, "mode") == "plan") return false;
@@ -150,7 +151,7 @@ internal sealed partial class ChatPage
         var accountGeneration = AppServices.AccountGeneration;
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
         if (sendNext || attachmentIds.Length > 0 || text.Length == 0 || !Busy()) return false;
-        if (SteerUnsupported()) return false;
+        if (SteerUnsupported() || Format.Flag(_openChat, "nativeSteer")) return false;
         var backend = Format.Text(_openChat, "backend");
         if (backend is not ("claude" or "codex" or "cursor" or "muse")) return false;
         if (backend == "cursor" && Format.Text(_openChat, "mode") == "plan") return false;

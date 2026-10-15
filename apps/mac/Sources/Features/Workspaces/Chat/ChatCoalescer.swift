@@ -169,10 +169,13 @@ extension ChatDisplayItem {
                 flushThinking()
                 // A new user turn bounds any tools left open by an interrupted
                 // older turn, including histories recorded by older hosts.
-                closeRunningTools(failed: false, at: event.atMs, detail: L10n.text("apple.chatmodel.interrupted.132d124d"))
-                editRevisions = [:]
+                if event.steer != true {
+                    closeRunningTools(failed: false, at: event.atMs, detail: L10n.text("apple.chatmodel.interrupted.132d124d"))
+                    editRevisions = [:]
+                }
                 items.append(
                     ChatDisplayItem(
+                        isSteer: event.steer == true,
                         id: "user-\(stamp(event, items.count))",
                         kind: .user(event.text ?? "")
                     )

@@ -35,10 +35,11 @@ fn live_controls_apply_without_restarting_or_resending_a_turn() {
         let root = tempfile::tempdir().unwrap();
         let fake = root.path().join("fake-agent");
         fs::write(&fake, r##"#!/usr/bin/env python3
-import sys,json,os
+import sys,json,os,uuid
 backend=sys.argv[1]
 def emit(v): print(json.dumps(v),flush=True)
 count=0
+pending=None
 for line in sys.stdin:
  m=json.loads(line)
  if backend=='claude':
@@ -46,12 +47,18 @@ for line in sys.stdin:
    r=m['request'];emit({'type':'control_response','response':{'request_id':m['request_id'],'subtype':'success'}})
    if r['subtype']=='apply_flag_settings':
     assert r['settings']['fastMode']==(count==0);count+=1
+    if pending is not None: emit(pending);pending=None
     if count==2:
      emit({'type':'assistant','message':{'content':[{'type':'text','text':'Completed once.'}]}})
      emit({'type':'result','subtype':'success','is_error':False});break
   elif m.get('type')=='user':
-   assert m['message']['content'][0]['text']=='literal prompt'
-   emit({'type':'system','subtype':'init','session_id':'session'})
+   if m['message']['content'][0]['text']=='literal prompt':
+    emit({'type':'system','subtype':'init','session_id':'session'})
+   else:
+    assert m['message']['content'][0]['text']=='Additional context.'
+    assert uuid.UUID(m['uuid']).version==4
+    pending=m
+    emit({'type':'result','subtype':'success','is_error':False})
  else:
   method=m.get('method');p=m.get('params',{})
   if method=='initialize':
@@ -69,6 +76,11 @@ for line in sys.stdin:
   elif method=='mcpServerStatus/list':
    assert p['threadId']=='session'
    emit({'id':m['id'],'result':{'data':[{'name':'godot-mcp','runtimeStatus':'connected','tools':{'scene':{'inputSchema':{'private':'secret'}}}}],'nextCursor':None}})
+  elif method=='turn/steer':
+   assert p['threadId']=='session' and p['expectedTurnId']=='turn'
+   assert p['input']==[{'type':'text','text':'Additional context.'}]
+   assert uuid.UUID(p['clientUserMessageId']).version==4
+   emit({'id':m['id'],'result':{'turnId':'turn'}})
   elif method=='turn/settings/update':
    assert p['threadId']=='session' and p['turnId']=='turn'
    assert p['serviceTier']==('priority' if count==0 else 'default');count+=1
@@ -137,6 +149,18 @@ for line in sys.stdin:
             );
             root.path().join("ready.json").is_file()
         });
+        let steer_id = "00000000000040008000000000000001";
+        let request = root.path().join(format!("request-{steer_id}.json"));
+        fs::write(
+            request.with_extension("tmp"),
+            json!({"id":steer_id,"steer":"Additional context.","expires":u64::MAX}).to_string(),
+        )
+        .unwrap();
+        fs::rename(request.with_extension("tmp"), request).unwrap();
+        let response = root.path().join(format!("response-{steer_id}.json"));
+        wait_for(|| response.exists());
+        let accepted: Value = serde_json::from_slice(&fs::read(response).unwrap()).unwrap();
+        assert_eq!(accepted["ok"], true, "{backend}: {accepted}");
         for (id, fast) in [("a".repeat(32), true), ("b".repeat(32), false)] {
             let request = root.path().join(format!("request-{id}.json"));
             fs::write(
