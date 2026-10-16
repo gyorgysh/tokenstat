@@ -15,10 +15,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -197,6 +199,17 @@ fun NewChatScreen(
     var hostMenu by remember { mutableStateOf(false) }
     var repositoryMenu by remember { mutableStateOf(false) }
     val selected = folders.firstOrNull { it.newChatText("id") == selectedRepository }
+    // Why Send cannot fire, in the same words and the same order as the Apple
+    // page's `blockReason`. Without it the arrow is simply grey, and a written
+    // message with a repository still unchosen looks like it was swallowed.
+    val blockReason = when {
+        connecting || reading -> null
+        connectedPeer == null -> newChatCopy("choose_host")
+        selected == null -> newChatCopy("needs_repository")
+        !catalogReady -> newChatCopy("finding_agents")
+        setup?.isAvailable(backends) != true -> newChatCopy("needs_agent")
+        else -> null
+    }
     val reduced = rememberReduceMotion()
     val wave = remember(accountOwner) { Animatable(1f) }
     var waveCenter by remember(accountOwner) { mutableStateOf(Offset.Zero) }
@@ -282,11 +295,20 @@ fun NewChatScreen(
                         }
                     }
                     if (hosts.isEmpty()) TextButton(onClick = onManageDevices) { Text(L10n.text("common.devices")) }
+                    // Lit until the choice is made, the way the Apple page lights
+                    // it: it is the one control on this page a send cannot
+                    // happen without.
+                    val litRepository = connectedPeer != null && !connecting && selected == null
                     Box(Modifier.fillMaxWidth()) {
                         OutlinedButton(onClick = { repositoryMenu = true }, enabled = connectedPeer != null && !connecting,
                             modifier = Modifier.fillMaxWidth().testTag("newChat.repository")) {
                             Text(selected?.newChatText("name") ?: newChatCopy("choose_repository"))
                         }
+                        // Over the button, not under it: the button draws its
+                        // own quiet outline on top of anything behind it. The
+                        // ring carries no input, so the button still takes the
+                        // tap through it.
+                        if (litRepository) Box(Modifier.matchParentSize().border(1.dp, colors.accent, CircleShape))
                         DropdownMenu(expanded = repositoryMenu, onDismissRequest = { repositoryMenu = false }) {
                             folders.forEach { folder -> DropdownMenuItem(text = { Column { Text(folder.newChatText("name")); Text(folder.newChatText("path"), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary) } },
                                 onClick = { repositoryMenu = false; onRepository(folder.newChatText("id")) }) }
@@ -305,6 +327,12 @@ fun NewChatScreen(
                         attachmentEnabled = selected != null && !connecting && !reading, fieldModifier = Modifier.testTag("newChat.composer"), sendModifier = Modifier.testTag("newChat.send"))
                     if (reading || connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     (attachError ?: error)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.danger) }
+                    if (attachError == null && error == null && setupError == null) {
+                        blockReason?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary,
+                                textAlign = TextAlign.Center, modifier = Modifier.testTag("newChat.blocked"))
+                        }
+                    }
                     setupError?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = colors.danger)
                         TextButton(onClick = { catalogAttempt++ }) { Text(L10n.text("common.retry")) }
