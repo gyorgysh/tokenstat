@@ -22,6 +22,12 @@ import SwiftUI
 import AppKit
 
 struct RootView: View {
+    private struct SidebarChatReadIdentity: Hashable {
+        let folderID: String
+        let model: ObjectIdentifier
+        let session: UInt64
+    }
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var route: Route = .global(.home)
@@ -2599,7 +2605,8 @@ struct RootView: View {
         // A folder that has not been opened this session has no chat list
         // in the model yet. Opening it in the sidebar is the moment to read
         // one, the same read opening its sessions already does.
-        .task(id: folder.id) {
+        .task(id: SidebarChatReadIdentity(folderID: folder.id, model: ObjectIdentifier(chat),
+                                         session: WorkSessionContext.shared.generation)) {
             guard chat.sidebarChats(in: folder.id).isEmpty, chat.folderID != folder.id else { return }
             await BridgeLaunch.wait()
             await chat.warmWorkspacePreviews(folder.id, includeMessages: false)

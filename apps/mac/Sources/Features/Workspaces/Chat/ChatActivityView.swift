@@ -6,6 +6,18 @@ enum ChatActivitySection: String {
     init?(command: String) { self.init(rawValue: String(command.dropFirst())) }
 }
 
+struct ChatActivityDisclosureState {
+    private var choices: [ChatActivitySection: Bool] = [:]
+
+    func isExpanded(_ section: ChatActivitySection, requested: ChatActivitySection?, hasContent: Bool) -> Bool {
+        choices[section] ?? (requested.map { $0 == section } ?? hasContent)
+    }
+
+    mutating func setExpanded(_ expanded: Bool, for section: ChatActivitySection) {
+        choices[section] = expanded
+    }
+}
+
 struct ChatActivityOwner: Hashable {
     var reference: WorkReference?
     var backend: String?
@@ -205,7 +217,9 @@ private struct ChatActivitySummary: View {
             Text(L10n.text("common.chat.activity.steps", activity.completedSteps.formatted(), activity.plan.count.formatted())).monospacedDigit()
         }
         if activity.agentsReported, !activity.agents.isEmpty {
-            Text(L10n.text("common.chat.activity.agents", activity.agents.count.formatted())).monospacedDigit()
+            Text(activity.agents.count == 1
+                 ? L10n.text("common.chat.activity.one_subagent", activity.agents.count.formatted())
+                 : L10n.text("common.chat.activity.agents", activity.agents.count.formatted())).monospacedDigit()
             if live, let count = activity.runningAgents, count > 0 {
                 Text(L10n.text("common.chat.activity.running_agents", count.formatted())).foregroundStyle(Theme.accent)
             }
@@ -215,25 +229,77 @@ private struct ChatActivitySummary: View {
     }
 }
 
+struct ChatActivityPlanChecklist: View {
+    @Bindable var model: ChatModel
+
+    var body: some View {
+        if let activity = model.currentActivityRead?.inspection?.activity,
+           activity.planReported, !activity.plan.isEmpty {
+            ChatPlanChecklist(activity: activity, live: model.activityIsLive)
+        }
+    }
+}
+
+struct ChatPlanChecklist: View {
+    let activity: ChatInspection.Activity
+    let live: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack {
+                Text(L10n.text("common.chat.activity.plan")).font(Theme.callout.weight(.medium))
+                Spacer(minLength: 8)
+                Text(L10n.text("common.chat.activity.steps", activity.completedSteps.formatted(), activity.plan.count.formatted()))
+                    .font(Theme.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
+            ChatPlanSteps(steps: activity.plan, live: live)
+            if !live {
+                Text(L10n.text("common.chat.activity.report_only")).font(Theme.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+    }
+}
+
+private struct ChatPlanSteps: View {
+    let steps: [ChatInspection.Activity.Step]
+    let live: Bool
+
+    var body: some View {
+        ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                Image(systemName: step.status == "completed" ? "checkmark.circle.fill" : step.status == "inProgress" ? "circle.inset.filled" : "circle.dashed")
+                    .foregroundStyle(live && step.status == "inProgress" ? Theme.accent : Color.secondary)
+                    .frame(width: 16)
+                Text(step.text).textSelection(.enabled)
+                    .foregroundStyle(step.status == "completed" ? Color.secondary : Color.primary)
+                Spacer(minLength: 0)
+            }
+            .font(Theme.callout).padding(.vertical, 3)
+            .accessibilityElement(children: .combine).accessibilityValue(activityStatus(step.status))
+        }
+    }
+}
+
 private struct ChatActivityDetails: View {
     var inspection: ChatInspection?
     var live: Bool
-    @State private var goalOpen: Bool
-    @State private var planOpen: Bool
-    @State private var agentsOpen: Bool
+    private let requestedSection: ChatActivitySection?
+    @State private var disclosures = ChatActivityDisclosureState()
 
     init(inspection: ChatInspection?, live: Bool, section: ChatActivitySection? = nil) {
         self.inspection = inspection
         self.live = live
-        _goalOpen = State(initialValue: section == nil || section == .goal)
-        _planOpen = State(initialValue: section == .plan)
-        _agentsOpen = State(initialValue: section == .subagents)
+        requestedSection = section
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if let activity = inspection?.activity {
-                section(L10n.text("common.chat.activity.goal"), expanded: $goalOpen) {
+                section(L10n.text("common.chat.activity.goal"), expanded: expansion(.goal, hasContent: activity.goal != nil)) {
                     if let goal = activity.goal {
                         Text(goal.objective).font(Theme.callout).textSelection(.enabled)
                         Text(activityStatus(goal.status)).font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent)
@@ -247,27 +313,19 @@ private struct ChatActivityDetails: View {
                     } else { note(activity.goalReported ? L10n.text("common.chat.activity.none") : L10n.text("common.chat.activity.not_reported")) }
                 }
                 ThemeRule()
-                section(L10n.text("common.chat.activity.plan"), expanded: $planOpen) {
+                section(L10n.text("common.chat.activity.plan"), expanded: expansion(.plan, hasContent: !activity.plan.isEmpty)) {
                     if activity.plan.isEmpty {
                         note(activity.planReported ? L10n.text("common.chat.activity.none") : L10n.text("common.chat.activity.not_reported"))
                     } else {
                         Text(L10n.text("common.chat.activity.steps", activity.completedSteps.formatted(), activity.plan.count.formatted()))
                             .font(Theme.caption).foregroundStyle(.secondary)
                         ChatActivityProgress(fraction: Double(activity.completedSteps) / Double(activity.plan.count))
-                        ForEach(Array(activity.plan.enumerated()), id: \.offset) { _, step in
-                            HStack(alignment: .top, spacing: Theme.Space.s) {
-                                Image(systemName: step.status == "completed" ? "checkmark.circle.fill" : step.status == "inProgress" ? "circle.inset.filled" : "circle")
-                                    .foregroundStyle(step.status == "pending" ? Color.secondary : Theme.accent)
-                                Text(step.text).textSelection(.enabled)
-                                Spacer(minLength: 0)
-                            }.font(Theme.caption).padding(.vertical, 3)
-                                .accessibilityElement(children: .combine).accessibilityValue(activityStatus(step.status))
-                        }
+                        ChatPlanSteps(steps: activity.plan, live: live)
                         if let value = activity.planSource { source(value) }
                     }
                 }
                 ThemeRule()
-                section(L10n.text("common.chat.activity.subagents"), expanded: $agentsOpen) {
+                section(L10n.text("common.chat.activity.subagents"), expanded: expansion(.subagents, hasContent: !activity.agents.isEmpty)) {
                     if activity.agents.isEmpty {
                         note(activity.agentsReported ? L10n.text("common.chat.activity.none") : L10n.text("common.chat.activity.not_reported"))
                     } else {
@@ -293,6 +351,11 @@ private struct ChatActivityDetails: View {
             } else { note(L10n.text("common.chat.activity.unavailable")) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func expansion(_ section: ChatActivitySection, hasContent: Bool) -> Binding<Bool> {
+        Binding(get: { disclosures.isExpanded(section, requested: requestedSection, hasContent: hasContent) },
+                set: { disclosures.setExpanded($0, for: section) })
     }
 
     private func section<Content: View>(_ title: String, expanded: Binding<Bool>, @ViewBuilder content: () -> Content) -> some View {

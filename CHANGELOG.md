@@ -16,7 +16,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Start a chat from a dedicated composer on Mac, iPhone, iPad, Android and Windows. Choose an existing repository or add a folder, attach files and images, and set the agent, model, effort, working style, permissions and supported fast mode before sending. Drafts stay with their repository.
 - The new-chat screen on Apple devices has layered violet glass that responds gently to movement and clicks, with support for reduced motion and transparency.
 - Use slash commands to inspect context, usage, tools and MCP servers, view goals and subagents, stop work, or compact supported Claude and Codex conversations.
-- See reported goals, plan progress and subagent tasks in the chat activity summary and inspector. Available information follows each agent's capabilities.
+- See reported goals, plan progress and subagent tasks in the chat activity summary and inspector. Reported plans appear as live checklists in the conversation, with completed, current and upcoming steps. Activity details open sections with reported content automatically and remember manual collapses. Available information follows each agent's capabilities.
 - Copy chat, terminal and native agent session IDs from session details. Handoffs retain earlier session references and saved transcript locations so agents can follow the conversation across sessions.
 - Browse chat images in compact galleries and open a viewer to navigate, zoom, save or open an image. Images read or captured by tools appear beside the relevant step.
 - Pull and Push detect repositories that use Git LFS and transfer large-file objects with the reviewed commits. The Apple setup panels can enable LFS on the host or install it on a Mac with Homebrew, while preserving existing Git hooks.
@@ -45,6 +45,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Pull and Push dialogs closing when the Mac inspector hides in a narrow window, and resize cursors lingering over hidden pane dividers.
 - Mac titlebar dragging on the new-chat screen, and image-viewer dismissal by clicking its dimmed backdrop.
 - Mac terminal details opening while hovering through the sidebar; use the info button, just as with chats.
+- Mac repository chat lists staying on loading placeholders after starting a new chat or verifying the account, until the repository was opened manually.
 - Session history staying stale after a transcript is replaced on Windows, and chat setup failing after the inspector refreshes.
 
 ### Security

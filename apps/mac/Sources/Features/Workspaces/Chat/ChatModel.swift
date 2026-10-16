@@ -1037,15 +1037,17 @@ final class ChatModel {
         let listRead = beginChatListRead(workspaceID: route.workspaceID, peer: route.peer, scope: scope)
         do {
             let answer = try await Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
-            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
-                  previewCacheEpoch == epoch else { return }
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
             if continuityScope == nil { continuityScope = scope }
             guard continuityScope == scope else { return }
             let list = applyChatList(answer, read: listRead, current: sidebarChats(in: folder))
             storeChatListCache(Self.uniqued(list), folderID: folder)
+            // Directory reads belong to the account and repository, not the
+            // transcript-preview epoch. First opening a chat or deleting an
+            // unrelated chat must not discard these titles without a retry.
             // Expanded sidebar projects need titles, not every transcript.
             // Leave message warming to hover or explicitly opening a project.
-            guard includeMessages else { return }
+            guard includeMessages, previewCacheEpoch == epoch else { return }
             let prefix = WorkReferenceKey.folder(scope: scope, hostIdentity: host, workspaceID: route.workspaceID)
             let worth = Self.uniqued(list).filter { !isUnused($0, in: folder) }
             let candidates = ChatHistoryWindow.previews(in: worth,
@@ -1089,7 +1091,7 @@ final class ChatModel {
             }
         } catch {
             guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
-                  previewCacheEpoch == epoch, chatListCache[folder] == nil else { return }
+                  chatListCache[folder] == nil else { return }
             sidebarListErrors[folder] = (scope, error.localizedDescription)
             if sidebarListErrors.count > Self.chatListCacheCap,
                let drop = sidebarListErrors.keys.first(where: { $0 != folder }) {

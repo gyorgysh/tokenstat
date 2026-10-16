@@ -1618,6 +1618,7 @@ fun ChatSection(
                 )
             }
             val openChat = chats.firstOrNull { it.str("id") == openId }
+            val chatActivity = chatActivityData(chatInspection.data, openChat)
             // Status polls also update names, usage and timestamps. Only the
             // row inputs should rebuild an image-rich transcript.
             val transcript = remember(events, openChat?.str("backend"), openChat?.bol("running")) {
@@ -1693,7 +1694,7 @@ fun ChatSection(
                 // thinking indicator is its own row below the last turn, and
                 // without this the list never scrolls it into view when a
                 // turn starts with no new events yet.
-                LaunchedEffect(transcript, openChat?.bol("running"), openChat?.get("routing")) {
+                LaunchedEffect(transcript, openChat?.bol("running"), openChat?.get("routing"), chatActivity?.plan) {
                     if (transcript.isNotEmpty() && follow.pinned &&
                         !(listState.isScrollInProgress && !autoScrolling)
                     ) {
@@ -1730,6 +1731,9 @@ fun ChatSection(
                                     toggledGroups = if (id in toggledGroups) toggledGroups - id else toggledGroups + id
                                 },
                             )
+                        }
+                        if (chatActivity?.planReported == true && chatActivity.plan.isNotEmpty()) {
+                            item(key = "activity-plan") { ChatPlanChecklist(chatActivity) }
                         }
                         if (openChat != null && (openChat["routing"] as? JsonObject)?.get("limit") is JsonObject) {
                             item(key = "routing-limit") {

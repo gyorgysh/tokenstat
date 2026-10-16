@@ -45,7 +45,7 @@ builders = '\n'.join(methods(stats, signature) for signature in [
 builders += '\n' + stats[stats.index('    private static string ServerStatus('):stats.rindex('\n}')]
 builders += '\n' + '\n'.join(methods(activity, signature) for signature in [
     '    private static string ActivityText(', '    private static string ActivityStatus(',
-    '    private static string ActivitySummary(', '    private UIElement ActivityCard(',
+    '    private static string ActivitySummary(', '    private static FrameworkElement ActivityPlanChecklist(', '    private UIElement ActivityCard(',
     '    private UIElement ActivityDisclosure(', '    private static void AddActivitySource(',
     '    private static void AddActivityMetric(', '    private static ProgressBar ActivityProgress(',
 ])
@@ -100,6 +100,7 @@ class TextBlock : FrameworkElement {
     public string Text { get; set; } = "";
     public double FontSize { get; set; }
     public double Opacity { get; set; }
+    public Brush? Foreground { get; set; }
     public object? FontWeight { get; set; }
     public TextTrimming TextTrimming { get; set; }
     public TextWrapping TextWrapping { get; set; }
@@ -145,11 +146,13 @@ static class Fonts { public static TextBlock Tabular(TextBlock text) => text; }
 static class L10n { public static string Text(string key, params string[] args) => args.Length == 0 ? key : key + ":" + string.Join(",", args); }
 static class Theme {
     public static Brush AccentBrush = new(), AccentSoftBrush = new(), PanelBrush = new(), BorderBrush = new();
-    public static object Secondary = new(), Warning = new();
+    public static object Secondary = new(), Warning = new(), DefaultText = new();
     public const int SpaceS = 4, SpaceM = 8, CardRadius = 12;
     public static Brush Brush(Func<object> color) => new();
 }
-namespace Microsoft.UI.Xaml.Automation { static class AutomationProperties { public static void SetHelpText(UIElement item, string text) {} } }
+enum ActionIcon { Done, Run, Scheduled }
+static class ActionIconGlyph { public static TextBlock Icon(this ActionIcon icon) => new() { Text = icon.ToString() }; }
+namespace Microsoft.UI.Xaml.Automation { static class AutomationProperties { public static void SetHelpText(UIElement item, string text) {} public static void SetName(UIElement item, string text) {} } }
 namespace Tokenstat.Pages {
 internal sealed partial class ChatPage {
     private readonly Dictionary<string, bool> _statsExpanded = new();
@@ -179,14 +182,17 @@ internal sealed partial class ChatPage {
         var data = Fixture(); var page = new ChatPage(data); var root = page.Build();
         Check(!HasText(root, "goal-objective") && !HasText(root, "1. plan-step") && !HasText(root, "agent-task"), "Collapsed activity built its goal/plan/agent details");
         Toggle(root, "common.chat.activity.title").Invoke();
-        Check(!HasText(root, "goal-objective") && !HasText(root, "1. plan-step"), "Collapsed activity sections built their details");
-        Toggle(root, "common.chat.activity.plan").Invoke(); Check(HasText(root, "1. plan-step"), "Opening the plan lost its steps");
-        Toggle(root, "common.chat.activity.subagents").Invoke();
+        Check(HasText(root, "goal-objective") && HasText(root, "1. plan-step"), "Reported goal and plan did not open automatically");
         Check(!HasText(root, "agent-task"), "Collapsed agent card built its task");
         Toggle(root, "agent-name").Invoke(); Check(HasText(root, "agent-task"), "Opening an agent lost its task");
         var activityCount = UIElement.Constructed;
         Toggle(root, "common.chat.activity.title").Invoke(); Toggle(root, "common.chat.activity.title").Invoke();
         Check(activityCount == UIElement.Constructed, "Reopening activity rebuilt its details");
+        Toggle(root, "common.chat.activity.plan").Invoke();
+        var refreshed = page.Build();
+        Check(!HasText(refreshed, "1. plan-step"), "Automatic expansion overrode a manual collapse on refresh");
+        var checklist = ActivityPlanChecklist(ChatActivityData.Read(data, page._openChat)!);
+        Check(HasText(checklist, "plan-step") && HasText(checklist, "Scheduled"), "Transcript checklist lost its reported step or status");
         var planDialog = new ChatPage(data).ActivityCard(data, expanded: true, section: "plan");
         Check(HasText(planDialog, "1. plan-step") && !HasText(planDialog, "goal-objective") && !HasText(planDialog, "agent-task"), "The plan command expanded unrelated sections or hid the requested plan");
         var goalDialog = new ChatPage(data).ActivityCard(data, expanded: true, section: "goal");

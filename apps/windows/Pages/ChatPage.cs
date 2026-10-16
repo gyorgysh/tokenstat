@@ -1188,7 +1188,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var end = SliceEnd(items.Count, _sliceOlder);
         var prefix = start > 0 || _hasEarlier ? 1 : 0;
         var visible = end - start;
-        var desiredCount = prefix + visible + (busy ? 1 : 0);
+        var activity = _sliceOlder == 0 ? ChatActivityData.Read(CurrentInspection, _openChat) : null;
+        var planCount = activity?.PlanReported == true && activity.Plan.Length > 0 ? 1 : 0;
+        var desiredCount = prefix + visible + planCount + (busy ? 1 : 0);
 
         if (prefix == 1)
         {
@@ -1238,9 +1240,22 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
         }
 
+        if (planCount > 0 && activity is not null)
+        {
+            var index = prefix + visible;
+            var key = "__activity_plan__:" + System.Text.Json.JsonSerializer.Serialize(new { activity.Plan, activity.Live });
+            var current = index < _transcript.Children.Count ? _transcript.Children[index] as FrameworkElement : null;
+            if (current?.Tag as string != key)
+            {
+                var checklist = ActivityPlanChecklist(activity); checklist.Tag = key;
+                if (index < _transcript.Children.Count) _transcript.Children.RemoveAt(index);
+                _transcript.Children.Insert(index, checklist);
+            }
+        }
+
         if (busy)
         {
-            var workingIdx = prefix + visible;
+            var workingIdx = prefix + visible + planCount;
             var mood = LiveMood(raw);
             var words = mood == PersonaMood.Working ? WorkingWords(raw) : mood.Label();
             // The words are part of the key, so thinking turning into reading

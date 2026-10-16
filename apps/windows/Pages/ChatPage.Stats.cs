@@ -161,6 +161,7 @@ internal sealed partial class ChatPage
         _inspectionHost.Children.Clear(); AddStats(_inspectionHost);
         RenderSessionIdentities();
         RenderActivitySummary();
+        if (IsLoaded && _openId is not null) RebuildTranscript();
         if (_commandDialogBody is not null && _commandDialogOwner == InspectionOwner()) RenderCommandStats();
         else _commandDialog?.Hide();
         if (filter is not null && _statsFilters.LastOrDefault(field => Equals(field.Tag, filter)) is TextBox replacement)

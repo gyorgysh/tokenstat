@@ -37,7 +37,8 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
         goal.tokenBudget?.let { budget -> add(activityText("tokens") + " " + activityText("progress", goal.tokensUsed?.let(::activityNumber) ?: "—", activityNumber(budget))) }
     }
     if (data.planReported && data.plan.isNotEmpty()) add(activityText("steps", "${data.completedSteps}", "${data.plan.size}"))
-    if (data.agentsReported && data.agents.isNotEmpty()) add(data.runningAgents?.let { activityText("running_agents", "$it") } ?: activityText("agents", "${data.agents.size}"))
+    if (data.agentsReported && data.agents.isNotEmpty()) add(data.runningAgents?.let { activityText("running_agents", "$it") }
+        ?: activityText(if (data.agents.size == 1) "one_subagent" else "agents", "${data.agents.size}"))
     data.headline?.takeIf { it.isNotBlank() }?.let(::add)
 }.joinToString(" · ").ifBlank { activityText("no_activity") }
 
@@ -55,8 +56,34 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
     }
 }
 
+@Composable internal fun ChatPlanChecklist(data: ChatActivityData) {
+    Surface(shape = RoundedCornerShape(10.dp), color = LocalTsColors.current.panel) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(activityText("plan"), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                ActivityNote(activityText("steps", "${data.completedSteps}", "${data.plan.size}"))
+            }
+            ActivityPlanSteps(data)
+            if (!data.live) ActivityNote(activityText("report_only"))
+        }
+    }
+}
+
+@Composable private fun ActivityPlanSteps(data: ChatActivityData) {
+    data.plan.forEach { step ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Icon(if (step.status == "completed") ActionIcon.Done.vector else if (step.status == "inProgress") ActionIcon.Run.vector else ActionIcon.Scheduled.vector,
+                activityStatus(step.status, data.live), Modifier.size(16.dp),
+                tint = if (data.live && step.status == "inProgress") LocalTsColors.current.accent else LocalTsColors.current.textSecondary)
+            Text(step.text, style = MaterialTheme.typography.bodySmall,
+                color = if (step.status == "completed") LocalTsColors.current.textSecondary else LocalTsColors.current.textPrimary)
+        }
+    }
+}
+
 @Composable internal fun ChatActivityPanel(inspection: JsonObject?, chat: JsonObject, initialSection: String? = null, initiallyExpanded: Boolean = false, loaded: Boolean = true) {
     val data = chatActivityData(inspection, chat)
+    val owner = listOf(chat.str("id"), chat.str("backend"), chat.str("model"), chat["runRevision"])
     var expanded by remember(chat.str("id"), chat.str("backend"), chat.str("model"), initialSection) { mutableStateOf(initiallyExpanded || initialSection != null) }
     Surface(shape = RoundedCornerShape(10.dp), color = LocalTsColors.current.panel) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -76,7 +103,7 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
                 }
                 else {
                     ActivityNote(activityText(if (data.live) "live" else "report_only"))
-                    ActivitySection(activityText("goal"), initialSection in listOf("goal", "all")) {
+                    ActivitySection(activityText("goal"), initialSection == "goal" || initialSection in listOf(null, "all") && data.goal != null, owner = owner) {
                         val goal = data.goal
                         if (!data.goalReported) ActivityNote(activityText("not_reported"))
                         else if (goal == null) ActivityNote(activityText("none"))
@@ -88,30 +115,22 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
                             goal.source?.let { ActivityNote(activityText("source", activitySource(it))) }
                         }
                     }
-                    ActivitySection(activityText("plan"), initialSection in listOf("plan", "all")) {
+                    ActivitySection(activityText("plan"), initialSection == "plan" || initialSection in listOf(null, "all") && data.plan.isNotEmpty(), owner = owner) {
                         if (!data.planReported) ActivityNote(activityText("not_reported"))
                         else if (data.plan.isEmpty()) ActivityNote(activityText("none"))
                         else {
                             ActivityNote(activityText("steps", "${data.completedSteps}", "${data.plan.size}"))
                             ActivityProgress(data.completedSteps.toFloat() / data.plan.size)
-                            data.plan.forEachIndexed { index, step ->
-                                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Icon(if (step.status == "completed") ActionIcon.Done.vector else if (step.status == "inProgress") ActionIcon.Run.vector else ActionIcon.Scheduled.vector,
-                                        null, Modifier.size(14.dp), tint = LocalTsColors.current.textSecondary)
-                                    Column(Modifier.weight(1f)) {
-                                        Text("${index + 1}. ${step.text}", style = MaterialTheme.typography.bodySmall)
-                                        ActivityNote(activityStatus(step.status, data.live))
-                                    }
-                                }
-                            }
+                            ActivityPlanSteps(data)
                             data.planSource?.let { ActivityNote(activityText("source", activitySource(it))) }
                         }
                     }
-                    ActivitySection(activityText("subagents"), initialSection in listOf("subagents", "all")) {
+                    ActivitySection(activityText("subagents"), initialSection == "subagents" || initialSection in listOf(null, "all") && data.agents.isNotEmpty(), owner = owner) {
                         if (!data.agentsReported) ActivityNote(activityText("not_reported"))
                         else if (data.agents.isEmpty()) ActivityNote(activityText("none"))
                         else data.agents.forEach { agent ->
-                            ActivitySection(agent.name ?: agent.id, false, activityStatus(agent.displayStatus(data.live), data.live)) {
+                            ActivitySection(agent.name ?: agent.id, data.live && agent.status in listOf("running", "waiting"),
+                                activityStatus(agent.displayStatus(data.live), data.live), owner = owner) {
                                 if (agent.name != null) ActivityNote(agent.id)
                                 agent.task?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                                 agent.model?.let { ActivityNote(it) }
@@ -140,10 +159,11 @@ private fun activitySummary(data: ChatActivityData): String = buildList {
 @Composable private fun ActivityProgress(fraction: Float) {
     LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth().height(4.dp))
 }
-@Composable private fun ActivitySection(title: String, initiallyExpanded: Boolean, status: String? = null, content: @Composable ColumnScope.() -> Unit) {
-    var expanded by remember(title, initiallyExpanded) { mutableStateOf(initiallyExpanded) }
+@Composable private fun ActivitySection(title: String, initiallyExpanded: Boolean, status: String? = null, owner: Any? = null, content: @Composable ColumnScope.() -> Unit) {
+    var choice by remember(title, owner) { mutableStateOf<Boolean?>(null) }
+    val expanded = choice ?: initiallyExpanded
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 34.dp).clickable { expanded = !expanded }
+        Row(Modifier.fillMaxWidth().heightIn(min = 34.dp).clickable { choice = !expanded }
             .semantics { stateDescription = L10n.text(if (expanded) "common.collapse" else "common.expand") },
             horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -84,7 +84,8 @@ internal sealed partial class ChatPage
         }
         if (data.PlanReported && data.Plan.Length > 0) values.Add(ActivityText("steps", data.CompletedSteps.ToString("N0"), data.Plan.Length.ToString("N0")));
         if (data.AgentsReported && data.Agents.Length > 0) values.Add(data.RunningAgents is int running
-            ? ActivityText("running_agents", running.ToString("N0")) : ActivityText("agents", data.Agents.Length.ToString("N0")));
+            ? ActivityText("running_agents", running.ToString("N0"))
+            : ActivityText(data.Agents.Length == 1 ? "one_subagent" : "agents", data.Agents.Length.ToString("N0")));
         if (!string.IsNullOrWhiteSpace(data.Headline)) values.Add(data.Headline);
         return values.Count == 0 ? ActivityText("no_activity") : string.Join(" · ", values);
     }
@@ -139,6 +140,31 @@ internal sealed partial class ChatPage
         }
         finally { _commandDialogOpening = false; }
     }
+    private static FrameworkElement ActivityPlanChecklist(ChatActivityData data)
+    {
+        var body = new StackPanel { Spacing = 7 };
+        body.Children.Add(new TextBlock { Text = ActivityText("plan"), FontSize = 12, FontWeight = FontWeights.SemiBold });
+        body.Children.Add(Muted(ActivityText("steps", data.CompletedSteps.ToString("N0"), data.Plan.Length.ToString("N0"))));
+        foreach (var step in data.Plan)
+        {
+            var row = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 3, 0, 3) };
+            row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+            var icon = (step.Status == "completed" ? ActionIcon.Done : step.Status == "inProgress" ? ActionIcon.Run : ActionIcon.Scheduled).Icon();
+            icon.Width = 16; icon.Height = 16;
+            icon.Foreground = data.Live && step.Status == "inProgress" ? Theme.AccentBrush : Theme.Brush(static () => Theme.DefaultText);
+            icon.Opacity = step.Status == "inProgress" ? 1 : .65;
+            AutomationProperties.SetName(icon, ActivityStatus(step.Status, data.Live));
+            row.Children.Add(icon);
+            var text = new TextBlock { Text = step.Text, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true,
+                Opacity = step.Status == "completed" ? .65 : 1 };
+            Grid.SetColumn(text, 1); row.Children.Add(text); body.Children.Add(row);
+        }
+        if (!data.Live) body.Children.Add(Muted(ActivityText("report_only")));
+        return new Border { Child = body, Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(12) };
+    }
+
     private UIElement ActivityCard(JsonNode? inspection, bool expanded = false, string? section = null)
     {
         var data = ChatActivityData.Read(inspection, _openChat);
@@ -165,7 +191,8 @@ internal sealed partial class ChatPage
                     }
                     return goalBody;
                 }
-                body.Children.Add(ActivityDisclosure(ActivityText("goal"), scope + "goal", GoalDetails, section is "goal" or "all"));
+                body.Children.Add(ActivityDisclosure(ActivityText("goal"), scope + "goal", GoalDetails,
+                    section == "goal" || (section is null or "all") && data.Goal is not null));
                 FrameworkElement PlanDetails()
                 {
                     var planBody = new StackPanel { Spacing = 4 };
@@ -186,7 +213,8 @@ internal sealed partial class ChatPage
                     }
                     return planBody;
                 }
-                body.Children.Add(ActivityDisclosure(ActivityText("plan"), scope + "plan", PlanDetails, section is "plan" or "all"));
+                body.Children.Add(ActivityDisclosure(ActivityText("plan"), scope + "plan", PlanDetails,
+                    section == "plan" || (section is null or "all") && data.Plan.Length > 0));
                 FrameworkElement AgentDetails()
                 {
                     var agentBody = new StackPanel { Spacing = 2 };
@@ -203,11 +231,13 @@ internal sealed partial class ChatPage
                             AddActivitySource(details, agent.Source);
                             return details;
                         }
-                        agentBody.Children.Add(ActivityDisclosure(agent.Name ?? agent.Id, scope + "agent/" + agent.Id, AgentDetail, status: ActivityStatus(agent.DisplayStatus(data.Live), data.Live)));
+                        agentBody.Children.Add(ActivityDisclosure(agent.Name ?? agent.Id, scope + "agent/" + agent.Id, AgentDetail,
+                            initiallyExpanded: data.Live && (agent.Status is "running" or "waiting"), status: ActivityStatus(agent.DisplayStatus(data.Live), data.Live)));
                     }
                     return agentBody;
                 }
-                body.Children.Add(ActivityDisclosure(ActivityText("subagents"), scope + "subagents", AgentDetails, section is "subagents" or "all"));
+                body.Children.Add(ActivityDisclosure(ActivityText("subagents"), scope + "subagents", AgentDetails,
+                    section == "subagents" || (section is null or "all") && data.Agents.Length > 0));
                 if (data.Partial) body.Children.Add(Muted(ActivityText("partial")));
                 if (data.ObservedAtMs is long stamp) body.Children.Add(Muted(ActivityText("last_reported", DateTimeOffset.FromUnixTimeMilliseconds(stamp).ToLocalTime().ToString("g"))));
             }

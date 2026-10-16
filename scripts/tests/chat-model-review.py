@@ -177,3 +177,113 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-chat-create-') as directory:
     subprocess.run(['swiftc', '-parse-as-library', str(path / 'Fixture.swift'),
                     '-o', str(path / 'test')], check=True)
     subprocess.run([str(path / 'test')], check=True)
+
+start = source.index('    func warmWorkspacePreviews(')
+end = source.index('\n    private func', start)
+# The next production member may have documentation; retain only the function.
+brace = source.index('{', start)
+depth, end = 1, brace + 1
+while depth:
+    depth += (source[end] == '{') - (source[end] == '}')
+    end += 1
+warm = source[start:end]
+root_source = (root / 'apps/mac/Sources/App/RootView.swift').read_text()
+start = root_source.index('    private struct SidebarChatReadIdentity:')
+end = root_source.index('\n    }', start) + len('\n    }')
+identity = root_source[start:end].replace('private struct', 'struct')
+sidebar_fixture = r'''
+import Foundation
+struct ChatConversation: Equatable { let id: String; var backend = "codex"; var running = false }
+typealias ChatDisplayItem = String
+@MainActor final class WorkSessionContext {
+    static let shared = WorkSessionContext()
+    var scope: String? = "account", localHostIdentity: String? = "host"
+    func resolveLocalHostIdentity() async {}
+}
+@MainActor enum Bridge {
+    struct Route { let workspaceID: String; let peer: String? }
+    struct Page { var events: [String] = [] }
+    static var replies: [CheckedContinuation<[ChatConversation], Error>?] = []
+    static func chatRoute(workspaceID: String, peer: String?) -> Route { Route(workspaceID: workspaceID, peer: peer) }
+    static func chats(workspaceID: String, peer: String?) async throws -> [ChatConversation] {
+        try await withCheckedThrowingContinuation { replies.append($0) }
+    }
+    static func chatEventPage(id: String, cursor: String?, limit: Int, peer: String?, includeUsage: Bool) async throws -> Page { Page() }
+}
+enum ChatPaging { static let previewPageEvents = 10 }
+enum WorkReferenceKey {
+    static func folder(scope: String, hostIdentity: String, workspaceID: String) -> String { workspaceID }
+    static func encode(_ id: String) -> String { id }
+}
+enum DiagnosticsLog { static func note(_ text: String) {} }
+enum ChatHistoryWindow {
+    static func previews(in list: [ChatConversation], limit: Int, excluding: (ChatConversation) -> Bool) -> [ChatConversation] { [] }
+}
+struct ChatRecentMessages<T> { static var perFolderLimit: Int { 10 } }
+struct Cache {
+    func contains(_ key: String) -> Bool { false }
+    func store(_ rows: [String], for key: String, speculative: Bool, cost: (String) -> Int) {}
+    func peek(_ key: String) -> [String] { [] }
+}
+struct Projector { func project(_ rows: [String], backend: String, running: Bool) async throws -> [String] { [] } }
+@MainActor final class Model {
+    var continuityScope: String?
+    var previewCacheEpoch: UInt64 = 0
+    var folderID: String?, selected: ChatConversation?
+    var chatListCache: [String: [ChatConversation]] = [:]
+    var sidebarListErrors: [String: (String, String)] = [:]
+    var previewReads: Set<String> = []
+    var recentMessages = Cache(), previewProjector = Projector()
+    static let chatListCacheCap = 30
+    func beginChatListRead(workspaceID: String, peer: String?, scope: String?) -> Int? { 1 }
+    func applyChatList(_ rows: [ChatConversation], read: Int?, current: [ChatConversation]) -> [ChatConversation] { rows }
+    func sidebarChats(in folder: String) -> [ChatConversation] { chatListCache[folder] ?? [] }
+    func storeChatListCache(_ list: [ChatConversation], folderID: String) { chatListCache[folderID] = list; sidebarListErrors[folderID] = nil }
+    static func uniqued(_ list: [ChatConversation]) -> [ChatConversation] { list }
+    func isUnused(_ row: ChatConversation, in folder: String) -> Bool { false }
+    static func warmMarkdown(_ rows: [String]) {}
+WARM
+}
+IDENTITY
+@MainActor func until(_ count: Int) async {
+    for _ in 0..<10000 { if Bridge.replies.count == count { return }; await Task.yield() }
+    preconditionFailure("Sidebar directory read did not start")
+}
+@main struct SidebarTests {
+    @MainActor static func main() async {
+        let model = Model()
+        let read = Task { await model.warmWorkspacePreviews("other-repo", includeMessages: false) }
+        await until(1)
+        // Opening the first conversation adopts the scope and retires only
+        // transcript previews while other sidebar folders are still loading.
+        model.continuityScope = "account"; model.previewCacheEpoch += 1
+        Bridge.replies[0]?.resume(returning: [ChatConversation(id: "existing")]); Bridge.replies[0] = nil
+        await read.value
+        assert(model.chatListCache["other-repo"]?.first?.id == "existing",
+               "preview invalidation must not leave another repository loading")
+        let failed = Task { await model.warmWorkspacePreviews("failed-repo", includeMessages: false) }
+        await until(2); model.previewCacheEpoch += 1
+        Bridge.replies[1]?.resume(throwing: CocoaError(.fileReadUnknown)); Bridge.replies[1] = nil
+        await failed.value
+        assert(model.sidebarListErrors["failed-repo"] != nil, "failed directory reads settle to Retry")
+        let oldAccount = Task { await model.warmWorkspacePreviews("private-repo", includeMessages: false) }
+        await until(3); WorkSessionContext.shared.scope = "other-account"
+        Bridge.replies[2]?.resume(returning: [ChatConversation(id: "private")]); Bridge.replies[2] = nil
+        await oldAccount.value
+        assert(model.chatListCache["private-repo"] == nil, "retired account replies cannot populate the sidebar")
+        let original = SidebarChatReadIdentity(folderID: "repo", model: ObjectIdentifier(model), session: 1)
+        let replacement = Model()
+        assert(original != SidebarChatReadIdentity(folderID: "repo", model: ObjectIdentifier(replacement), session: 1),
+               "starting a chat with a new model restarts expanded repository reads")
+        assert(original != SidebarChatReadIdentity(folderID: "repo", model: ObjectIdentifier(model), session: 2),
+               "account verification and session changes restart directory reads")
+        print("Sidebar chats: preview invalidation, failed reads, account fences and new-chat model replacement passed")
+    }
+}
+'''.replace('WARM', warm).replace('IDENTITY', identity)
+with tempfile.TemporaryDirectory(prefix='tokenstat-sidebar-chats-') as directory:
+    path = Path(directory)
+    (path / 'Fixture.swift').write_text(sidebar_fixture)
+    subprocess.run(['swiftc', '-parse-as-library', str(path / 'Fixture.swift'),
+                    '-o', str(path / 'test')], check=True)
+    subprocess.run([str(path / 'test')], check=True)

@@ -46,6 +46,7 @@ enum BridgeError: Error { case core(String, String) }
 }
 ''']
 pieces += [declaration(signature) for signature in [
+    'enum ChatActivitySection:', 'struct ChatActivityDisclosureState {',
     'struct ChatActivityOwner:', 'struct ChatActivityRead {', 'extension ChatModel {']]
 pieces += [r'''
 @main enum Tests {
@@ -57,6 +58,19 @@ pieces += [r'''
         return next
     }
     @MainActor static func main() async throws {
+        var disclosure = ChatActivityDisclosureState()
+        precondition(!disclosure.isExpanded(.plan, requested: nil, hasContent: false))
+        precondition(disclosure.isExpanded(.plan, requested: nil, hasContent: true),
+                     "A newly reported plan opens automatically")
+        disclosure.setExpanded(false, for: .plan)
+        precondition(!disclosure.isExpanded(.plan, requested: nil, hasContent: true),
+                     "Refresh cannot override a manual collapse")
+        disclosure.setExpanded(true, for: .plan)
+        precondition(disclosure.isExpanded(.plan, requested: nil, hasContent: false))
+        let focused = ChatActivityDisclosureState()
+        precondition(focused.isExpanded(.goal, requested: .goal, hasContent: false))
+        precondition(!focused.isExpanded(.plan, requested: .goal, hasContent: true),
+                     "Explicit commands focus only their requested section")
         let wire = Data(#"{"backend":"codex","model":"model","tools":null,"usedTools":[],"mcpServers":[],"mcpReported":false,"currentRun":true,"activity":{"goal":null,"plan":[],"agents":[{"id":"worker","status":"running","source":"agent"}],"goalReported":false,"planReported":false,"agentsReported":true,"partial":false,"live":true}}"#.utf8)
         let report = try JSONDecoder().decode(ChatInspection.self, from: wire)
         for change in ["chat", "account", "backend", "model", "run", "selection", "running", "saved", "access"] {

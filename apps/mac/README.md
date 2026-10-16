@@ -111,7 +111,11 @@ Activity panel in the inspector/setup view on Mac, iPhone/iPad, Android and
 Windows. It shows a reported goal, token/time budgets when supplied, plan
 steps, and subagent tasks and status. `/goal`, `/plan` and `/subagents` open
 those details locally; they do not create a goal, change its lifecycle, or
-send a prompt. Only current, successfully refreshed run reports show live
+send a prompt. Reported plans also appear as checklists in the conversation,
+showing completed, current and upcoming steps. The activity dialog opens
+sections with content automatically; manually opening or closing a section
+is preserved as reports refresh. Specific slash commands focus their requested
+section. Only current, successfully refreshed run reports show live
 subagent counts. Previous reports remain labeled, and an unreported section
 is distinct from a reported empty list. Saved transcript copies do not fetch
 live activity.
