@@ -431,6 +431,20 @@ internal sealed partial class ChatPage
     /// The detail level, and Expand or Collapse all, in one menu beside the
     /// conversation's other actions.
     /// </summary>
+    private UIElement DetailChoices()
+    {
+        var choices = new FlowPanel { Spacing = Theme.SpaceS };
+        foreach (var level in Enum.GetValues<ChatDetail>()) {
+            var resource = "windows.chatdetail." + level.ToString().ToLowerInvariant();
+            var button = new Button { Content = L10n.Text(resource), Padding = new Thickness(8, 5, 8, 5),
+                Background = ChatDetailPreference.Level == level ? Theme.AccentSoftBrush : Theme.PanelBrush };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(button, "chat.detail." + level.ToString().ToLowerInvariant());
+            button.Click += (_, _) => { ChatDetailPreference.Level = level; RebuildTranscript(full: true); RenderInspector(); };
+            choices.Children.Add(button);
+        }
+        return choices;
+    }
+
     private Button DetailButton()
     {
         var button = ActionIconGlyph.Button(L10n.Text("windows.chatdetail.title"), ActionIcon.Visibility, (_, _) => { });

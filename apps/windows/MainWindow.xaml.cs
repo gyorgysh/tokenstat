@@ -1361,14 +1361,14 @@ public sealed partial class MainWindow : Window
                     var added = await WorkspaceAddDialog.ShowAsync(_newChatPage!);
                     if (generation != AppServices.AccountGeneration) return null;
                     _foldersLoaded = false; await TryLoadFoldersAsync(); return added;
-                }, repository => RemoteWorkspaces.CallWorkspaceAsync(repository.Id, "chat.backends", new JsonObject()), async (repository, text, setup, owns, accepted) => {
+                }, repository => RemoteWorkspaces.CallWorkspaceAsync(repository.Id, "chat.backends", new JsonObject()), async (repository, text, setup, files, owns, accepted) => {
                     if (!owns() || !ReferenceEquals(_frame.Content, _newChatPage)) return;
                     NavigateTo("ws:" + repository.Id + ":Chat");
                     var workbench = WorkspaceTabs(repository.Id);
                     await workbench.WhenLoadedAsync(async () => {
                         if (workbench.ActivePage is not ChatPage chat) return;
                         bool Current() => owns() && ReferenceEquals(_frame.Content, workbench) && ReferenceEquals(workbench.ActivePage, chat);
-                        if (Current()) await chat.StartNewChatWithDraftAsync(text, setup, Current, accepted);
+                        if (Current()) await chat.StartNewChatWithDraftAsync(text, setup, files, Current, accepted);
                     });
                 });
             }

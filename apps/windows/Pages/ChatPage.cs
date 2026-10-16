@@ -50,6 +50,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private string _folderName = "";
+    private string _folderPath = "";
     private readonly StackPanel _transcript = new() { Spacing = Theme.SpaceM };
     private ScrollViewer? _scroll;
     private bool _followEnd = true;
@@ -103,6 +104,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private JsonArray _approvals = new();
     private readonly List<StagedFile> _attachments = [];
     private readonly Dictionary<string, (string Text, StagedFile[] Attachments)> _drafts = new();
+    private readonly Dictionary<string, string> _instructionDrafts = new();
+    private bool _savingInstructions, _updatingAllowed;
 
     private void RememberDraft()
     {
@@ -124,6 +127,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     public ChatPage(string workspaceId, string? chatId = null)
     {
         _workspaceId = workspaceId;
+        // The command menu has one retained logical owner. Rebuilding a
+        // composer moves this viewer, never the Content between viewers.
+        _commandScroll.Content = _commandMenu;
         if (!string.IsNullOrEmpty(chatId))
         {
             _pendingReveal = chatId;
@@ -292,13 +298,22 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _inspector.Children.Add(CollapsibleStatsCard(L10n.Text("windows.chatpage.conversation.8b34dbc2"), "conversation",
             new TextBlock { Text = Format.Text(chat, "title") + " · " + L10n.Text(Format.Flag(chat, "running") ? "common.running" : "common.idle"),
                 FontSize = 11, Opacity = .7, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }, conversation));
-        var detailControls = new StackPanel { Spacing = Theme.SpaceS }; detailControls.Children.Add(DetailButton());
-        var detailKey = "windows.chatdetail." + ChatDetailPreference.Level.ToString().ToLowerInvariant();
-        _inspector.Children.Add(CollapsibleStatsCard(L10n.Text("windows.chatdetail.title"), "chat-detail", Muted(L10n.Text(detailKey)), detailControls));
         Detach(_inspectionHost);
         _inspector.Children.Add(_inspectionHost);
         _ = RefreshInspectionAsync();
+        var detailControls = new StackPanel { Spacing = Theme.SpaceS };
+        detailControls.Children.Add(Muted(ChatDetailPreference.Level switch {
+            ChatDetail.Minimal => L10n.Text("common.chat.detail.minimal_help"),
+            ChatDetail.Compact => L10n.Text("common.chat.detail.compact_help"),
+            ChatDetail.Detailed => L10n.Text("common.chat.detail.detailed_help"),
+            _ => L10n.Text("common.chat.detail.standard_help"),
+        }));
+        var stepsOpen = AnyGroupOpen();
+        detailControls.Children.Add(ActionIconGlyph.Button(L10n.Text(stepsOpen ? "windows.chatdetail.collapse_steps" : "windows.chatdetail.expand_steps"), ActionIcon.Visibility, (_, _) => SetAllGroups(!stepsOpen)));
+        _inspector.Children.Add(CollapsibleStatsCard(L10n.Text("windows.chatdetail.title"), "chat-detail", DetailChoices(), detailControls));
         _inspector.Children.Add(RoutingControls());
+        _inspector.Children.Add(SetupCard(inspector: true));
+        AddWorkingAccessCards(_inspector, chat);
     }
 
     /// <summary>
@@ -325,8 +340,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task<string> FolderNameAsync()
     {
+        var generation = _openGeneration; var account = AppServices.AccountGeneration;
         if (RemoteWorkspaces.CachedFolder(_workspaceId) is RemoteFolder cached)
         {
+            _folderPath = cached.Path;
             return cached.DisplayName;
         }
         try
@@ -339,6 +356,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 {
                     if (Format.Text(folder, "id") == _workspaceId)
                     {
+                        if (generation == _openGeneration && account == AppServices.AccountGeneration) _folderPath = Format.Text(folder, "path");
                         return Format.Text(folder, "name", Format.Text(folder, "path", _workspaceId));
                     }
                 }
@@ -554,20 +572,21 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return Task.CompletedTask;
     }
 
-    internal async Task StartNewChatWithDraftAsync(string text, NewChatSetup setup, Func<bool> ownsRequest, Action accepted)
+    internal async Task StartNewChatWithDraftAsync(string text, NewChatSetup setup, IReadOnlyList<NewChatFile> files, Func<bool> ownsRequest, Action accepted)
     {
         if (!IsLoaded || !ownsRequest()) return;
-        var created = await CreateAsync(setup);
+        var created = await CreateAsync(setup, ownsRequest);
         if (!IsLoaded || !ownsRequest() || created is null || _openId != created || _opening || _draft.Text.Length > 0 || _attachments.Count > 0) return;
         _draft.Text = text;
-        RememberDraft();
+        _attachments.AddRange(files.Select(file => new StagedFile("local-" + Guid.NewGuid().ToString("N"), file.Name, file)));
+        RememberDraft(); RebuildAttachStrip();
         accepted(); // The writing now belongs to the new conversation, including refused sends.
-        if (NewChatSetup.ShouldSend(text)) await SendAsync();
+        if (NewChatSetup.ShouldSend(text, files.Count)) await SendAsync();
     }
 
-    private async Task<string?> CreateAsync(NewChatSetup? setup = null)
+    private async Task<string?> CreateAsync(NewChatSetup? setup = null, Func<bool>? ownsRequest = null)
     {
-        if (_creatingChat) return null;
+        if (_creatingChat || ownsRequest?.Invoke() == false) return null;
         _creatingChat = true;
         try
         {
@@ -577,11 +596,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var backends = CallChatAsync("chat.backends");
             var personas = CallChatAsync("chat.personas", new JsonObject { ["workspaceId"] = _workspaceId });
             await Task.WhenAll(backends, personas);
-            if (generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded) return null;
+            if (generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded || ownsRequest?.Invoke() == false) return null;
             _backends = AsArray(backends.Result);
             _personas = AsArray(personas.Result, "personas");
             await RefreshCatalogAsync(refreshMenus: false);
-            if (generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded) return null;
+            if (generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded || ownsRequest?.Invoke() == false) return null;
             var saved = ChatLaunchChoice.Load();
             var chosen = setup is null ? DefaultBackend(saved?.Backend) : _backends.FirstOrDefault(backend => Format.Text(backend, "id") == setup.Backend && Installed(backend));
             if (setup is not null && !setup.IsAvailable(chosen)) throw new InvalidOperationException(L10n.Text("common.new_chat.setup_changed"));
@@ -593,12 +612,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 // Always Execute, like the Mac. Plan is a choice for one piece
                 // of work, and carried over it left every later chat planning
                 // at somebody who had asked for something to be done.
-                ["mode"] = "execute",
+                ["mode"] = setup?.Mode ?? "execute",
                 // Don't ask unless the last chat was set to ask first. The
                 // remembered choice still wins once somebody has made one.
                 ["autonomy"] = Format.Text(chosen, "gateTier") == "bypassOnly"
                     ? "bypass"
-                    : saved?.Autonomy ?? "bypass",
+                    : setup?.Autonomy ?? saved?.Autonomy ?? "bypass",
             };
             // The rest of the last setup travels when this agent still
             // offers it. A model or effort it no longer lists is dropped.
@@ -606,6 +625,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             {
                 if (setup.Model is not null) request["model"] = setup.Model;
                 if (setup.Effort is not null) request["effort"] = setup.Effort;
+                if (setup.FastMode) request["fastMode"] = true;
             }
             else if (saved is not null && Format.Text(chosen, "id") == saved.Backend)
             {
@@ -614,6 +634,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
             if (RememberedPersona(saved) is string personaId) request["personaId"] = personaId;
             var created = await CallChatAsync("chat.create", request);
+            if (generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded || ownsRequest?.Invoke() == false) return null;
             ChatLaunchChoice.Save(created);
             AppServices.NotifyConversationsChanged();
             if (generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded) return null;
@@ -768,7 +789,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _composerDock.Child = Composer();
     }
 
-    private UIElement SetupCard()
+    private UIElement SetupCard(bool inspector = false)
     {
         var chat = _openChat ?? new JsonObject();
         var backendId = Format.Text(chat, "backend");
@@ -777,13 +798,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var bypassOnly = gate == "bypassOnly";
         var running = Format.Flag(chat, "running");
         var body = new StackPanel { Spacing = Theme.SpaceM };
-        body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.done"), ActionIcon.Done, (_, _) =>
+        if (!inspector) body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.done"), ActionIcon.Done, (_, _) =>
         {
             _setupExpanded = false;
             PaintConversation();
         }));
-        body.Children.Add(Chrome.SectionLabel(L10n.Text("windows.chatpage.how_this_chat_should_work.b5eec3c8")));
-        body.Children.Add(Muted(L10n.Text("windows.chatpage.agent_model_and_mode_also_live_on_the_comp.23ec79e1")));
+        var help = new StackPanel { Spacing = Theme.SpaceS };
+        help.Children.Add(Chrome.SectionLabel(L10n.Text("windows.chatpage.how_this_chat_should_work.b5eec3c8")));
+        help.Children.Add(Muted(L10n.Text("windows.chatpage.agent_model_and_mode_also_live_on_the_comp.23ec79e1")));
 
         body.Children.Add(Labeled(L10n.Text("windows.chatpage.agent.11b39c93"), AgentPicker(backendId, running)));
         if (_personas.Count > 0)
@@ -842,15 +864,16 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             await UpdateAsync(new JsonObject { ["autonomy"] = "standard" });
         };
         body.Children.Add(bypass);
-        body.Children.Add(Muted(GateCopy(gate, Format.Text(chat, "autonomy") == "bypass")));
-        if (bypassOnly && Format.Text(chat, "autonomy") != "bypass" && !running)
+        help.Children.Add(Muted(GateCopy(gate, Format.Text(chat, "autonomy") == "bypass")));
+        if (!inspector && bypassOnly && Format.Text(chat, "autonomy") != "bypass" && !running)
         {
             _ = UpdateAsync(new JsonObject { ["autonomy"] = "bypass" });
         }
         var setup = new StackPanel { Spacing = Theme.SpaceM };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(setup, L10n.Text("windows.chatpage.setup.7013af4c"));
+        body.Children.Add(help);
         setup.Children.Add(SetupSection(L10n.Text("common.chat_agent_behavior"), body, ActionIcon.Run,
-            string.Join(" · ", new[] { Format.Text(backend, "label", backendId), Format.Text(chat, "model"), Format.Text(chat, "mode") == "plan" ? L10n.Text("windows.chatpage.plan.fa8ed0bd") : L10n.Text("windows.chatpage.execute.e3a67d95") }.Where(value => value.Length > 0))));
+            primary: CompactAgentMenu(running)));
         setup.Children.Add(InstructionsCard(
             Format.Text(chat, "systemPrompt"),
             Format.Text(backend, "label", L10n.Text("windows.chatpage.this_agent.15af7e1b")),
@@ -866,18 +889,24 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private UIElement InstructionsCard(string systemPrompt, string agent, bool running)
     {
         var chatId = _openId;
+        var generation = _openGeneration; var account = AppServices.AccountGeneration;
+        var owner = $"{account}/{_workspaceId}/{chatId}";
+        bool Current() => chatId is not null && OpenChatIs(chatId) && generation == _openGeneration && account == AppServices.AccountGeneration;
         var stack = new StackPanel { Spacing = Theme.SpaceS };
 
         var brief = new TextBox
         {
             PlaceholderText = L10n.Text("windows.chatpage.how_should_this_agent_behave.6cee0aaf"),
-            Text = systemPrompt,
+            Text = _instructionDrafts.GetValueOrDefault(owner, systemPrompt),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 76,
             IsEnabled = !running,
         };
         stack.Children.Add(brief);
+        var primary = new FlowPanel { Spacing = Theme.SpaceS };
+        var edit = ActionIconGlyph.Button(L10n.Text("common.edit"), ActionIcon.Edit, (_, _) => { });
+        edit.IsEnabled = !running; primary.Children.Add(edit);
         var note = Muted(L10n.Text("windows.chatpage.sent_as_an_instruction_never_as_part_of_yo.48abdbf3"));
         stack.Children.Add(note);
         // The handler is attached after creation so it can name the button
@@ -886,15 +915,31 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var save = ActionIconGlyph.PrimaryButton(L10n.Text("common.save"), ActionIcon.Save, (_, _) => { });
         save.Click += async (_, _) =>
         {
-            await UpdateAsync(new JsonObject { ["systemPrompt"] = brief.Text ?? "" });
-            save.Visibility = Visibility.Collapsed;
+            if (!Current() || Busy() || _savingInstructions) return;
+            var text = brief.Text;
+            _savingInstructions = true; save.IsEnabled = false;
+            try {
+                await UpdateAsync(new JsonObject { ["systemPrompt"] = text });
+                if (Current() && _instructionDrafts.TryGetValue(owner, out var latestDraft) && Format.Text(_openChat, "systemPrompt") == latestDraft)
+                {
+                    _instructionDrafts.Remove(owner);
+                    save.Visibility = Visibility.Collapsed;
+                }
+            } finally {
+                _savingInstructions = false;
+                if (IsLoaded) RenderInspector();
+            }
         };
-        save.Visibility = Visibility.Collapsed;
+        save.IsEnabled = !running && !_savingInstructions;
+        save.Visibility = brief.Text != systemPrompt ? Visibility.Visible : Visibility.Collapsed;
         brief.TextChanged += (_, _) =>
         {
+            if (!Current()) return;
+            if (brief.Text == systemPrompt && !_savingInstructions) _instructionDrafts.Remove(owner);
+            else _instructionDrafts[owner] = brief.Text;
             save.Visibility = brief.Text != systemPrompt ? Visibility.Visible : Visibility.Collapsed;
         };
-        stack.Children.Add(save);
+        primary.Children.Add(save);
         var added = new TextBlock
         {
             FontFamily = Fonts.Mono,
@@ -913,11 +958,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             });
         stack.Children.Add(toggle);
         stack.Children.Add(added);
-        if (chatId is not null)
-        {
-            _ = LoadInstructionsAsync(chatId, agent, note, added);
-        }
-        return SetupSection(L10n.Text("windows.chatpage.instructions.934652dc"), stack, ActionIcon.Docs, systemPrompt.Split('\n').FirstOrDefault());
+        var requested = false;
+        void ReadInstructions() { if (!requested && chatId is not null && Current()) { requested = true; _ = LoadInstructionsAsync(chatId, agent, note, added); } }
+        var section = SetupSection(L10n.Text("windows.chatpage.instructions.934652dc"), stack, ActionIcon.Docs,
+            string.IsNullOrEmpty(brief.Text) ? L10n.Text("windows.chatpage.how_should_this_agent_behave.6cee0aaf") : brief.Text.Split('\n').FirstOrDefault(), primary, edit, ReadInstructions);
+        edit.Click += (_, _) => brief.Focus(FocusState.Programmatic);
+        return section;
     }
 
     private async Task LoadInstructionsAsync(string chatId, string agent, TextBlock note, TextBlock added)
@@ -1657,8 +1703,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         well.Children.Add(_draft);
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
-        Detach(_commandMenu);
-        context.Children.Add(new ScrollViewer { Content = _commandMenu, MaxHeight = 220 });
+        context.Children.Add(_commandScroll);
         RenderCommandMenu();
         var row = _composerRow = new Grid { ColumnSpacing = Theme.SpaceS };
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -1940,7 +1985,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var remove = file;
             var button = new Button
             {
-                Content = chip,
+                Content = chip, IsEnabled = !_queueing && !_sending && _fileTransfer is null,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Background = new SolidColorBrush(Colors.Transparent),
                 BorderThickness = new Thickness(0),
@@ -1951,7 +1996,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             button.Click += (_, _) =>
             {
                 _attachments.Remove(remove);
-                RebuildAttachStrip();
+                RememberDraft(); RebuildAttachStrip();
+                remove.LocalFile?.Discard();
                 if (Busy()) RebuildComposerActions();
             };
             _attachStrip.Children.Add(button);
@@ -2015,7 +2061,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task AttachAsync()
     {
-        if (_openId is not string chat) return;
+        if (_openId is not string chat || _queueing || _sending || _fileTransfer is not null) return;
         var generation = _openGeneration;
         var accountGeneration = AppServices.AccountGeneration;
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
@@ -2026,28 +2072,18 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
         }
         var file = await picker.PickSingleFileAsync();
-        if (file is null || !Current()) return;
+        if (file is null || !Current() || _queueing || _sending || _fileTransfer is not null) return;
         try
         {
+            if (_attachments.Count >= NewChatFile.MaximumCount) throw new IOException(L10n.Text("common.chat_files_busy"));
             var attached = await UploadFileAsync(chat, file, Current);
             if (!Current()) return;
-            // An id-less reply stages nothing: without it the send-guard
-            // below would count an empty chip as content and fire a turn
-            // with no content at all.
             var id = Format.Text(attached, "id");
-            if (string.IsNullOrEmpty(id))
-            {
-                Banner(L10n.Text("windows.chatpage.attachment_was_rejected.c3b4db65"));
-                return;
-            }
+            if (id.Length == 0) throw new IOException(L10n.Text("windows.chatpage.attachment_was_rejected.c3b4db65"));
             _attachments.Add(new StagedFile(id, file.Name));
-            RebuildAttachStrip();
-            if (Busy()) RebuildComposerActions();
+            RememberDraft(); RebuildAttachStrip(); RebuildComposerActions();
         }
-        catch (Exception ex)
-        {
-            Banner(ex.Message);
-        }
+        catch (Exception ex) { if (Current()) Banner(ex.Message); }
     }
 
     /// A send is in flight. Set synchronously before the first await so a
@@ -2078,14 +2114,16 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
         var text = _draft.Text.Trim();
         if (text.Length == 0 && _attachments.Count == 0) return;
-        var attachmentIds = _attachments.Select(file => file.Id).ToArray();
-        _queueing = true;
+        _queueing = true; RebuildAttachStrip();
         try
         {
             var key = await OutboxKeyAsync(chat);
             if (!Current()) return;
             if (_outboxKey != key)
                 throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.reopen_this_conversation_with_its_original.bb0e73dd"));
+            await UploadPendingAttachmentsAsync(chat, Current);
+            if (!Current()) return;
+            var attachmentIds = _attachments.Select(file => file.Id).ToArray();
             if (text != "/compact" && await TryParkSteerAsync(chat, text, sendNext, attachmentIds)) return;
             if (!Current()) return;
             if (_openChat?["sendRevision"] is null) throw new InvalidOperationException(L10n.Text("windows.chatpage.update_the_host_to_use_reliable_message_de.fcb58190"));
@@ -2107,7 +2145,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (Current()) { PaintConversation(); StartPoll(); }
         }
         catch (Exception ex) { if (Current()) Banner(ex.Message); }
-        finally { _queueing = false; }
+        finally { _queueing = false; if (Current()) { RememberDraft(); RebuildAttachStrip(); RebuildComposerActions(); } }
     }
 
     private async Task StopAsync()
@@ -2834,10 +2872,53 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     };
 
     /// Compact summary and a full-width disclosure, shared with context cards.
-    private Border SetupSection(string title, UIElement body, ActionIcon icon, string? subtitle = null)
+    private Border SetupSection(string title, UIElement body, ActionIcon icon, string? subtitle = null, UIElement? primary = null, Button? reveal = null, Action? opened = null)
     {
-        return CollapsibleStatsCard(title, "setup/" + title, new TextBlock { Text = subtitle ?? "", FontSize = 11, Opacity = .7,
-            TextTrimming = TextTrimming.CharacterEllipsis }, (FrameworkElement)body);
+        var summary = new StackPanel { Spacing = Theme.SpaceS };
+        if (!string.IsNullOrEmpty(subtitle)) summary.Children.Add(new TextBlock { Text = subtitle, FontSize = 11, Opacity = .7, TextTrimming = TextTrimming.CharacterEllipsis });
+        if (primary is not null) summary.Children.Add(primary);
+        return CollapsibleStatsCard(title, "setup/" + title, summary, (FrameworkElement)body, reveal, opened);
+    }
+
+    private void AddWorkingAccessCards(StackPanel target, JsonNode chat)
+    {
+        var chatId = _openId; var generation = _openGeneration; var account = AppServices.AccountGeneration;
+        bool Current() => chatId is not null && OpenChatIs(chatId) && generation == _openGeneration && account == AppServices.AccountGeneration;
+        var folder = new StackPanel { Spacing = Theme.SpaceS }; folder.Children.Add(Muted(_folderName));
+        var folderActions = new FlowPanel { Spacing = Theme.SpaceS };
+        folderActions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.files"), ActionIcon.Reveal, (_, _) => AppServices.OpenWorkspace?.Invoke(_workspaceId, WorkspaceSection.Files)));
+        var path = RemoteWorkspaces.CachedFolder(_workspaceId)?.Path ?? _folderPath;
+        var copyPath = ActionIconGlyph.Button(L10n.Text("common.chat.inspector.copy_path"), ActionIcon.Copy, (_, _) => {
+            try { var data = new Windows.ApplicationModel.DataTransfer.DataPackage(); data.SetText(path); Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data); }
+            catch (Exception error) { Banner(error.Message); }
+        });
+        copyPath.IsEnabled = path.Length > 0; folderActions.Children.Add(copyPath);
+        folder.Children.Add(folderActions);
+        target.Children.Add(CollapsibleStatsCard(L10n.Text("common.chat.inspector.folder"), "folder", folder, Muted(path)));
+        var tools = AsArray(chat, "allowedTools"); var commands = AsArray(chat, "allowedShellPrefixes");
+        var allowlist = new StackPanel { Spacing = Theme.SpaceS };
+        allowlist.Children.Add(Muted(tools.Count + commands.Count == 0 ? L10n.Text("common.chat.inspector.allowed_empty")
+            : L10n.Text("common.chat.inspector.allowed_summary", tools.Count.ToString(), commands.Count.ToString())));
+        var chips = new FlowPanel { Spacing = Theme.SpaceS };
+        foreach (var (field, values) in new[] { ("allowedTools", tools), ("allowedShellPrefixes", commands) })
+            foreach (var entry in values) {
+                var value = entry?.ToString() ?? "";
+                var remove = ActionIconGlyph.Button(value, ActionIcon.Dismiss, async (_, _) => {
+                    if (!Current() || Busy() || _updatingAllowed) return;
+                    _updatingAllowed = true;
+                    foreach (var control in chips.Children.OfType<Button>()) control.IsEnabled = false;
+                    try {
+                        var latest = AsArray(_openChat, field);
+                        await UpdateAsync(new JsonObject { [field] = new JsonArray(latest.Where(item => item?.ToString() != value).Select(item => item?.DeepClone()).ToArray()) });
+                    } finally {
+                        _updatingAllowed = false;
+                        if (IsLoaded) RenderInspector();
+                    }
+                });
+                remove.IsEnabled = !Busy() && !_updatingAllowed; chips.Children.Add(remove);
+            }
+        var allowedDetails = new StackPanel { Spacing = Theme.SpaceS }; allowedDetails.Children.Add(chips); allowedDetails.Children.Add(Muted(L10n.Text("common.chat.inspector.allowed_help")));
+        target.Children.Add(CollapsibleStatsCard(L10n.Text("common.chat.inspector.always_allowed"), "allowed", allowlist, allowedDetails));
     }
 
     private static Border Card(string title, UIElement body) => Chrome.Card(title, body);
@@ -2870,5 +2951,5 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Insert(1, Chrome.Banner(text, Theme.Danger, Symbol.Important));
     }
 
-    private readonly record struct StagedFile(string Id, string Name);
+    private readonly record struct StagedFile(string Id, string Name, NewChatFile? LocalFile = null);
 }

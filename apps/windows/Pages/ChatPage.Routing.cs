@@ -73,8 +73,9 @@ internal sealed partial class ChatPage
         routing.Children.Add(Muted(mode));
         if (routePolicy?["routes"] is JsonArray destinations && destinations.Count > 0) routing.Children.Add(Muted(string.Join(" → ", destinations.Select(d => Format.Text(d, "backend")))));
         if (Format.Flag(routePolicy, "returnPreferred")) routing.Children.Add(Muted(L10n.Text("common.chat_route_preferred", Format.Text(routePolicy?["preferred"] ?? snapshot?["routing"]?["preferred"], "backend", Format.Text(snapshot, "backend")))));
-        routing.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("common.chat_route_setup"), ActionIcon.Settings, async (_, _) => await ShowRoutingAsync()));
-        body.Children.Add(SetupSection(L10n.Text("common.chat_routing"), routing, ActionIcon.Settings, mode));
+        var configure = ActionIconGlyph.PrimaryButton(L10n.Text("common.chat_route_setup"), ActionIcon.Settings, async (_, _) => await ShowRoutingAsync());
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(configure, "chat.routing.setup");
+        body.Children.Add(SetupSection(L10n.Text("common.chat_routing"), routing, ActionIcon.Settings, mode, configure));
         return body;
     }
 

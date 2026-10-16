@@ -67,8 +67,8 @@ struct ChatSetupHeader: View {
 
     private var agentForm: some View {
         ChatSetupSection(title: L10n.text("common.chat_agent_behavior"), icon: .run,
-                         summary: [backend?.label ?? chat.backend, chat.model, chat.effort].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
-                         initiallyExpanded: showsIntro) {
+                         initiallyExpanded: showsIntro,
+                         primary: agentRow.disabled(model.savedCopy != nil)) {
             Group {
                 if showsIntro {
                     Text(L10n.text("apple.chatsetupheader.how_this_chat_should_work.b5eec3c8"))
@@ -78,7 +78,6 @@ struct ChatSetupHeader: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                agentRow
                 if !model.personas.isEmpty {
                     personaRow
                 }
@@ -350,7 +349,7 @@ struct ChatComposerControls<Chrome: View>: View {
          @ViewBuilder chrome: () -> Chrome) {
         self.model = model
         self.chat = chat
-        self.locked = locked
+        self.locked = locked || (model.landingDraft != nil && !model.landingCanSubmit)
         self.compact = compact
         self.chrome = chrome()
     }
@@ -435,7 +434,9 @@ struct ChatComposerControls<Chrome: View>: View {
     private var agentField: some View {
         HStack(spacing: Theme.Space.s) {
             ChatAgentField(model: model, chat: chat, locked: locked) { pickingAgent = true }
-            ChatRoutingControls(model: model, chat: chat, compact: true)
+            if model.landingDraft == nil {
+                ChatRoutingControls(model: model, chat: chat, compact: true)
+            }
         }
     }
 
@@ -989,27 +990,35 @@ struct ChatAgentAvailabilityNotice: View {
 }
 
 /// Settings share the compact disclosure anatomy used by context and activity.
-struct ChatSetupSection<Content: View>: View {
+struct ChatSetupSection<Content: View, Primary: View>: View {
     let title: String
     let icon: ActionIcon
     var subtitle: String? = nil
     var summary: String? = nil
+    let primary: Primary
     let content: Content
-    @State private var expanded: Bool
+    private let externalExpansion: Binding<Bool>?
+    @State private var localExpansion: Bool
 
     init(title: String, icon: ActionIcon, subtitle: String? = nil, summary: String? = nil,
-         initiallyExpanded: Bool = false, @ViewBuilder content: () -> Content) {
+         initiallyExpanded: Bool = false, expanded: Binding<Bool>? = nil,
+         primary: Primary, @ViewBuilder content: () -> Content) {
         self.title = title
         self.icon = icon
         self.subtitle = subtitle
         self.summary = summary
+        self.primary = primary
         self.content = content()
-        _expanded = State(initialValue: initiallyExpanded)
+        externalExpansion = expanded
+        _localExpansion = State(initialValue: initiallyExpanded)
     }
+
+    private var expansion: Binding<Bool> { externalExpansion ?? $localExpansion }
+    private var expanded: Bool { expansion.wrappedValue }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Button { expanded.toggle() } label: {
+            Button { expansion.wrappedValue.toggle() } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: Theme.Space.s) {
                         Image(systemName: icon.symbol).accessibilityHidden(true)
@@ -1028,6 +1037,7 @@ struct ChatSetupSection<Content: View>: View {
             }
             .buttonStyle(.plain)
             .accessibilityValue(expanded ? L10n.text("common.collapse") : L10n.text("common.expand"))
+            primary
             if expanded {
                 if let subtitle {
                     Text(subtitle).font(Theme.caption).foregroundStyle(.secondary)
@@ -1048,5 +1058,14 @@ struct ChatSetupSection<Content: View>: View {
         #else
         44
         #endif
+    }
+}
+
+extension ChatSetupSection where Primary == EmptyView {
+    init(title: String, icon: ActionIcon, subtitle: String? = nil, summary: String? = nil,
+         initiallyExpanded: Bool = false, expanded: Binding<Bool>? = nil,
+         @ViewBuilder content: () -> Content) {
+        self.init(title: title, icon: icon, subtitle: subtitle, summary: summary,
+                  initiallyExpanded: initiallyExpanded, expanded: expanded, primary: EmptyView(), content: content)
     }
 }

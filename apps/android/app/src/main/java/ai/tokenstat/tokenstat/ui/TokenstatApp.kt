@@ -2987,10 +2987,9 @@ private fun WorkspacesScreen(
     tabBarScroll: NestedScrollConnection? = null,
 ) {
     val navigationOwner = HomeStores.pinIdentity(state.account)
-    val newChatOwner = ProjectOwner.from(state.account, "unselected", "new-chat")?.accountScope?.plus("|new-chat")
+    val newChatAccount = ProjectOwner.from(state.account, "unselected", "new-chat")?.accountScope
     val newChatDraftRevision by model.chatComposers.revision.collectAsStateWithLifecycle()
     val newChatFailure by model.chatComposers.failure.collectAsStateWithLifecycle()
-    val newChatDraft = remember(newChatOwner, newChatDraftRevision) { model.chatComposers.snapshot(newChatOwner).text }
     var newChatOpen by rememberSaveable(navigationOwner) { mutableStateOf(false) }
     var newChatRequest by remember(navigationOwner) { mutableStateOf<ai.tokenstat.tokenstat.ui.workspace.NewChatRequest?>(null) }
     // The host list the iOS model keeps: hosts only, without this phone
@@ -3022,7 +3021,20 @@ private fun WorkspacesScreen(
     val storedHost by session.host.collectAsStateWithLifecycle()
     val connectedPeer by session.connectedPeer.collectAsStateWithLifecycle()
     var newChatRepository by rememberSaveable(navigationOwner, connectedPeer) { mutableStateOf<String?>(null) }
-    var newChatSetup by remember(navigationOwner, connectedPeer) { mutableStateOf<ai.tokenstat.tokenstat.ui.workspace.NewChatSetup?>(null) }
+    val newChatOwner = ai.tokenstat.tokenstat.ui.workspace.newChatDraftOwner(newChatAccount, connectedPeer, newChatRepository)
+    val newChatDraft = remember(newChatOwner, newChatDraftRevision) { model.chatComposers.snapshot(newChatOwner) }
+    val newChatSetups by model.newChatSetups.collectAsStateWithLifecycle()
+    val newChatSetup = newChatSetups[newChatOwner]
+    fun selectNewChatRepository(id: String?) {
+        val currentAccount = ProjectOwner.from(model.state.value.account, "unselected", "new-chat")?.accountScope
+        if (currentAccount != newChatAccount) return
+        if (newChatRepository == null && id != null) {
+            ai.tokenstat.tokenstat.ui.workspace.adoptUnboundNewChatDraft(model.chatComposers, newChatAccount, connectedPeer, id)
+            val target = ai.tokenstat.tokenstat.ui.workspace.newChatDraftOwner(newChatAccount, connectedPeer, id)
+            if (target != null && target !in newChatSetups) model.rememberNewChatSetup(target, newChatSetups[newChatOwner])
+        }
+        newChatRepository = id
+    }
     val allowed by session.allowed.collectAsStateWithLifecycle()
     val folders by session.folders.collectAsStateWithLifecycle()
     val sessions by session.sessions.collectAsStateWithLifecycle()
@@ -3041,6 +3053,7 @@ private fun WorkspacesScreen(
     var search by remember { mutableStateOf("") }
     var customizing by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf(false) }
+    var newChatAddScope by remember(navigationOwner) { mutableStateOf<Pair<String?, String?>?>(null) }
     var choosingFor by remember { mutableStateOf<String?>(null) }
     var initialSection by remember { mutableStateOf<String?>(null) }
     // A navigation that names a conversation opens exactly it, and arriving
@@ -3435,7 +3448,7 @@ private fun WorkspacesScreen(
             onClose = { cloning = false },
             onCloned = { id ->
                 cloning = false
-                if (newChatOpen) newChatRepository = id else pendingSelectFolderId = id
+                if (newChatOpen) selectNewChatRepository(id) else pendingSelectFolderId = id
                 folderRefresh += 1
             },
         )
@@ -3444,29 +3457,41 @@ private fun WorkspacesScreen(
             model = model,
             peer = boundHost.string("publicIdentity") ?: "",
             hostName = boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"),
-            onClose = { picking = false },
+            onClose = { picking = false; newChatAddScope = null },
             onAdded = { folder ->
                 picking = false
-                if (newChatOpen) newChatRepository = folder.string("id") else pendingSelectFolderId = folder.string("id")
+                if (newChatOpen) {
+                    val currentAccount = ProjectOwner.from(model.state.value.account, "unselected", "new-chat")?.accountScope
+                    if (newChatAddScope == (currentAccount to connectedPeer)) selectNewChatRepository(folder.string("id"))
+                } else pendingSelectFolderId = folder.string("id")
+                newChatAddScope = null
                 folderRefresh += 1
             },
         )
     } else if (newChatOpen) {
         ai.tokenstat.tokenstat.ui.workspace.NewChatScreen(
-            model = model, accountOwner = newChatOwner, initialSetup = newChatSetup, onSetup = { newChatSetup = it },
-            draft = newChatDraft,
-            onDraft = { model.chatComposers.update(newChatOwner, model.chatComposers.snapshot(newChatOwner).copy(text = it)) },
+            model = model, accountOwner = newChatOwner, accountScope = newChatAccount, initialSetup = newChatSetup,
+            onSetup = { setup ->
+                if (ProjectOwner.from(model.state.value.account, "unselected", "new-chat")?.accountScope == newChatAccount)
+                    model.rememberNewChatSetup(newChatOwner, setup)
+            },
+            draft = newChatDraft.text, staged = newChatDraft.attachments,
+            onDraft = {
+                if (ProjectOwner.from(model.state.value.account, "unselected", "new-chat")?.accountScope == newChatAccount)
+                    model.chatComposers.update(newChatOwner, model.chatComposers.snapshot(newChatOwner).copy(text = it))
+            },
             hosts = hosts, connectedPeer = connectedPeer, connecting = connectingPeer != null,
             folders = folders.filterIsInstance<JsonObject>(), selectedRepository = newChatRepository,
-            onRepository = { newChatRepository = it }, onHost = { machine -> newChatRepository = null; scope.launch { connect(machine) } },
+            onRepository = { selectNewChatRepository(it) }, onHost = { machine -> newChatRepository = null; scope.launch { connect(machine) } },
             onManageDevices = onManageDevices,
-            onAdd = { picking = true }, onClose = { newChatOpen = false }, error = newChatFailure?.takeIf { it.owner == newChatOwner }?.message ?: error,
+            onAdd = { newChatAddScope = newChatAccount to connectedPeer; picking = true }, onClose = { newChatOpen = false }, error = newChatFailure?.takeIf { it.owner == newChatOwner }?.message ?: error,
             onSend = {
                 val peer = connectedPeer
                 val repository = folders.filterIsInstance<JsonObject>().firstOrNull { it.string("id") == newChatRepository }
                 val owner = if (peer != null && repository != null) ProjectOwner.from(model.state.value.account, peer, repository.string("id").orEmpty()) else null
                 val source = model.chatComposers.capture(newChatOwner)
-                if (owner != null && peer != null && repository != null && newChatSetup != null && newChatOwner == owner.accountScope + "|new-chat" && source.owner == newChatOwner) {
+                if (owner != null && peer != null && repository != null && newChatSetup != null &&
+                    newChatOwner == ai.tokenstat.tokenstat.ui.workspace.newChatDraftOwner(owner.accountScope, peer, repository.string("id")) && source.owner == newChatOwner) {
                     newChatRequest = ai.tokenstat.tokenstat.ui.workspace.NewChatRequest(peer, repository.string("id").orEmpty(), owner.accountScope, source, setup = newChatSetup)
                     selectedFolderId = repository.string("id"); initialSection = "Chat"; pendingChatId = null; pendingOpenConversation = false; newChatOpen = false
                 }
@@ -3505,7 +3530,7 @@ private fun WorkspacesScreen(
                     openConversationOnAppear = pendingOpenConversation,
                     newChatRequest = newChatRequest,
                     onNewChatHandled = { token -> if (newChatRequest?.id == token) newChatRequest = null },
-                    onNewChat = { newChatRepository = boundFolder.string("id"); newChatOpen = true },
+                    onNewChat = { selectNewChatRepository(boundFolder.string("id")); newChatOpen = true },
                 )
             }
         }

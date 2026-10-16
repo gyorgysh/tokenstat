@@ -22,6 +22,90 @@ final class ChatModel {
     private static let launchChoiceKey = "chat.lastLaunchChoice.v1"
     /// Set only on an isolated landing-page reader, before its first create.
     var newChatChoice: ChatStartDraft.AgentChoice?
+    weak var landingDraft: ChatStartDraft?
+    var landingCanSubmit = false
+
+    /// An in-memory adapter lets the real composer edit local landing state.
+    /// Its synthetic ID is never dispatched to a host or a conversation store.
+    func configureLanding(_ state: ChatStartDraft, backends: [ChatBackend], peer: String?) {
+        landingDraft = state
+        self.backends = backends
+        self.peer = peer
+        folderID = state.repositoryID
+        workspaceID = state.repositoryID
+        continuityScope = state.owner?.scope
+        let reference = state.attachmentReference ?? WorkReference(scope: state.owner?.scope ?? .local(installationID: "unbound"),
+            hostIdentity: "new-chat-local", workspaceID: "unbound", kind: .conversation, itemID: "unbound")
+        var chat = ChatConversation(saved: reference, title: "", backend: state.agent?.backend)
+        chat.model = state.agent?.model; chat.effort = state.agent?.effort
+        chat.mode = state.agent?.mode ?? "execute"; chat.autonomy = state.agent?.autonomy ?? "standard"
+        chat.fastMode = state.agent?.fastMode ?? false
+        // A new import generation must close an old picker before it can edit.
+        chat.id += reference.anchor ?? ""
+        if selected?.id != chat.id { loadGeneration &+= 1 }
+        selected = chat
+        draft = state.text
+        attachments = state.attachments; attachmentPreviews = state.previews
+        stagingAttachments = state.stagingAttachments
+    }
+
+    private func updateLanding(backend: String?, model: String?, effort: String?, fastMode: Bool?, mode: String?, autonomy: String?) {
+        guard let state = landingDraft, !state.isSubmitting, let owner = state.owner,
+              owner.scope == WorkSessionContext.shared.scope, owner.session == WorkSessionContext.shared.generation else { return }
+        var choice = state.agent ?? .init(backend: backend ?? "", model: nil, effort: nil)
+        if let backend, backend != choice.backend { choice.backend = backend; choice.model = nil; choice.effort = nil; choice.fastMode = false }
+        if let model { choice.model = model.isEmpty ? nil : model }
+        if let effort { choice.effort = effort.isEmpty ? nil : effort }
+        if let fastMode { choice.fastMode = fastMode }
+        if let mode { choice.mode = mode }
+        if let autonomy { choice.autonomy = autonomy }
+        if let descriptor = self.backend(for: choice.backend) {
+            if descriptor.gateTier == "bypassOnly" { choice.autonomy = "bypass" }
+            if !ChatFastMode.available(model: choice.model, models: descriptor.fastModeModels, backend: choice.backend) { choice.fastMode = false }
+        }
+        state.agent = choice
+        configureLanding(state, backends: backends, peer: peer)
+    }
+
+    private func stageLandingAttachment(_ item: ChatInboxItem, reference: WorkReference, state: ChatStartDraft) async {
+        defer { if let file = item.file { try? FileManager.default.removeItem(at: file) } }
+        guard let owner = state.owner, owner.scope == WorkSessionContext.shared.scope,
+              owner.session == WorkSessionContext.shared.generation, state.beginImport(reference) else { return }
+        stagingAttachments = state.stagingAttachments
+        var staged: ChatAttachment?
+        defer {
+            state.finishImport(reference, attachment: staged, preview: ChatThumbnail.make(from: item.data))
+            if landingDraft === state, currentReference == reference {
+                attachments = state.attachments; attachmentPreviews = state.previews
+                stagingAttachments = state.stagingAttachments
+            }
+        }
+        if let failure = item.importFailure { state.error = failure; return }
+        do {
+            if let file = item.file { staged = try await ChatLocalAttachmentStore.shared.stage(file: file, name: item.name, mediaType: item.mediaType, reference: reference) }
+            else { staged = try await ChatLocalAttachmentStore.shared.stage(data: item.data, name: item.name, mediaType: item.mediaType, reference: reference) }
+        } catch { if state.attachmentReference == reference { state.error = error.localizedDescription } }
+    }
+
+    /// Copy originals into the real conversation's normal owned draft. Source
+    /// files remain available if navigation, staging or delivery fails.
+    func installLandingDraft(_ submission: ChatStartDraft.Submission, permits: () -> Bool) async -> Bool {
+        guard permits(), let reference = currentReference, reference.scope == submission.owner.scope else { return false }
+        draft = submission.text
+        saveDraftNow()
+        for file in submission.attachments {
+            guard permits(), currentReference == reference else { return false }
+            do {
+                let original = try await ChatLocalAttachmentStore.shared.exportURL(file, reference: submission.attachmentReference)
+                defer { try? FileManager.default.removeItem(at: original.deletingLastPathComponent()) }
+                guard permits(), currentReference == reference else { return false }
+                let before = attachments.count
+                await attach(ChatInboxItem(data: Data(), name: file.name, mediaType: file.mediaType, file: original), to: reference)
+                guard attachments.count == before + 1 else { return false }
+            } catch { self.error = error.localizedDescription; return false }
+        }
+        return permits() && currentReference == reference
+    }
 
     static func newChatDefaults(backends: [ChatBackend]) -> ChatStartDraft.AgentChoice? {
         let saved = UserDefaults.standard.data(forKey: launchChoiceKey)
@@ -31,7 +115,8 @@ final class ChatModel {
             ?? available.first(where: { $0.id == "codex" }) ?? available.first else { return nil }
         return .init(backend: chosen.id,
                      model: chosen.models.contains(saved?.model ?? "") ? saved?.model : nil,
-                     effort: chosen.efforts.contains(saved?.effort ?? "") ? saved?.effort : nil)
+                     effort: chosen.efforts.contains(saved?.effort ?? "") ? saved?.effort : nil,
+                     autonomy: chosen.gateTier == "bypassOnly" ? "bypass" : (saved?.autonomy ?? "standard"))
     }
     var chats: [ChatConversation] = [] {
         didSet { noteRunningChats() }
@@ -351,6 +436,7 @@ final class ChatModel {
     var draft = "" {
         didSet {
             guard !restoringDraft, draft != oldValue else { return }
+            if let landingDraft { landingDraft.text = draft; return }
             scheduleDraftSave()
         }
     }
@@ -389,6 +475,7 @@ final class ChatModel {
     /// The same reference the draft is filed under, so the words somebody
     /// left and the place they were reading are kept together.
     var currentReference: WorkReference? {
+        if let landingDraft { return landingDraft.attachmentReference }
         guard let selected, let folderID else { return nil }
         return draftReference(for: selected.id, in: folderID)
     }
@@ -461,6 +548,7 @@ final class ChatModel {
     /// Write the composer out now: leaving the screen, going to the
     /// background, or handing the words to a send.
     func saveDraftNow() {
+        if landingDraft != nil { return }
         draftSaveTask?.cancel()
         draftSaveTask = nil
         guard let reference = draftReference else { return }
@@ -708,7 +796,7 @@ final class ChatModel {
     /// same command, sign-in and durable-send reservation as its composer.
     func sendInitialDraft() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let selected, !busy, !sending else { return }
+        guard !text.isEmpty || !attachments.isEmpty, let selected, !busy, !sending else { return }
         if consumeChatCommand() { return }
         switch holdForSignIn(text, backend: selected.backend) {
         case .notNeeded: break
@@ -1846,7 +1934,8 @@ final class ChatModel {
             if let requested = newChatChoice {
                 guard let explicit = available.first(where: { $0.id == requested.backend }),
                       requested.model == nil || explicit.models.contains(requested.model!),
-                      requested.effort == nil || explicit.efforts.contains(requested.effort!) else {
+                      requested.effort == nil || explicit.efforts.contains(requested.effort!),
+                      !requested.fastMode || ChatFastMode.available(model: requested.model, models: explicit.fastModeModels, backend: explicit.id) else {
                     error = L10n.text("apple.chatmodel.can_t_check_agents_on_this_computer_reconn.49c16d28")
                     return nil
                 }
@@ -1864,16 +1953,13 @@ final class ChatModel {
             let chat = try await Bridge.createChat(
                 workspaceID: workspaceID,
                 backend: chosen?.id ?? "claude",
-                // Always execute. Plan is a choice for one piece of work,
-                // and carried over it left every later chat planning at
-                // somebody who had asked for something to be done. The rest
-                // of the setup is remembered. Autonomy stays standard unless
-                // chosen: the agent acts, and a tool that needs permission
-                // still stops and asks.
-                mode: "execute",
+                // Execute unless this landing page explicitly chose Plan.
+                // A remembered prior conversation's mode is not an instruction
+                // for a new piece of work.
+                mode: newChatChoice?.mode ?? "execute",
                 autonomy: chosen?.gateTier == "bypassOnly"
                     ? "bypass"
-                    : (saved?.autonomy ?? "standard"),
+                    : (newChatChoice?.autonomy ?? saved?.autonomy ?? "standard"),
                 model: model,
                 effort: effort,
                 personaID: rememberedPersonaID(saved),
@@ -1987,6 +2073,10 @@ final class ChatModel {
         allowedTools: [String]? = nil,
         allowedShellPrefixes: [String]? = nil
     ) async {
+        if landingDraft != nil {
+            updateLanding(backend: backend, model: model, effort: effort, fastMode: fastMode, mode: mode, autonomy: autonomy)
+            return
+        }
         guard savedCopy == nil, let selected else { return }
         let generation = selectionGeneration
         do {
@@ -2681,6 +2771,7 @@ final class ChatModel {
     /// Imports retain the conversation chosen before file preparation begins.
     /// Later files in a batch must not follow navigation to another draft.
     func attach(_ item: ChatInboxItem, to reference: WorkReference) async {
+        if let landingDraft { await stageLandingAttachment(item, reference: reference, state: landingDraft); return }
         defer { if let file = item.file { try? FileManager.default.removeItem(at: file) } }
         guard WorkReferenceKey.conversation(reference) != nil,
               WorkCacheAccess.canRead(reference) else { return }
@@ -2737,6 +2828,11 @@ final class ChatModel {
     }
 
     func removeAttachment(_ attachment: ChatAttachment) {
+        if let landingDraft {
+            landingDraft.removeAttachment(attachment)
+            attachments = landingDraft.attachments; attachmentPreviews = landingDraft.previews
+            return
+        }
         attachments.removeAll { $0.id == attachment.id }
         attachmentPreviews.removeValue(forKey: attachment.id)
         missingDraftAttachments.remove(attachment.id)

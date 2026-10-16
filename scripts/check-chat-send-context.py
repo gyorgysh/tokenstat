@@ -19,15 +19,19 @@ struct Conversation { let id: String; let sendRevision: UInt64? }
 @MainActor enum Bridge {
     static var reply = Conversation(id: "chat", sendRevision: 8)
     static var beforeReply: (() -> Void)?
+    static var updates = 0
     static func updateChat(id: String, title: String?, backend: String?, model: String?,
         effort: String?, fastMode: Bool?, expectedRevision: UInt64?, mode: String?,
         autonomy: String?, personaID: String?, systemPrompt: String?, allowedTools: [String]?,
         allowedShellPrefixes: [String]?, peer: String?) async throws -> Conversation {
+        updates += 1
         beforeReply?()
         return reply
     }
 }
 @MainActor final class Model {
+    var landingDraft: Bool? = nil
+    var landingModel: String?
     var savedCopy: Bool? = nil
     var selected: Conversation? = Conversation(id: "chat", sendRevision: 7)
     var selectionGeneration: UInt64 = 0
@@ -39,6 +43,9 @@ struct Conversation { let id: String; let sendRevision: UInt64? }
     }
     func replace(_ chat: Conversation) { selected = chat }
     func loadInstructions(id: String, generation: UInt64) async {}
+    func updateLanding(backend: String?, model: String?, effort: String?, fastMode: Bool?, mode: String?, autonomy: String?) {
+        landingModel = model
+    }
 '''
 tests = '''
 }
@@ -60,7 +67,12 @@ tests = '''
         Bridge.beforeReply = { model.selected = Conversation(id: "other-chat", sendRevision: 20) }
         await model.update(model: "fourth-model")
         assert(model.contextRevision == 9 && model.selected?.id == "other-chat", "Late setup response cannot change another chat")
-        print("ChatModel send context: own model/speed edits, concurrent work and changed selection passed")
+        let updates = Bridge.updates
+        model.landingDraft = true
+        await model.update(model: "local-model")
+        assert(model.landingModel == "local-model" && Bridge.updates == updates,
+               "Landing setup must edit its local adapter without updating a host conversation")
+        print("ChatModel send context: own model/speed edits, concurrent work, changed selection and local landing dispatch passed")
     }
 }
 '''

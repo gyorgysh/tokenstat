@@ -26,6 +26,7 @@ internal sealed partial class ChatPage
     private readonly Dictionary<string, string> _statsQueries = new();
     private readonly List<TextBox> _statsFilters = new();
     private readonly StackPanel _commandMenu = new() { Spacing = 2 };
+    private readonly ScrollViewer _commandScroll = new() { MaxHeight = 220 };
     private int _commandIndex;
     private bool _commandsDismissed;
     private bool _commandInFlight;
@@ -274,7 +275,7 @@ internal sealed partial class ChatPage
         var amount = Fonts.Tabular(new TextBlock { Text = value, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
         Grid.SetColumn(amount, 1); row.Children.Add(amount); return row;
     }
-    private Border CollapsibleStatsCard(string title, string key, UIElement summary, FrameworkElement details)
+    private Border CollapsibleStatsCard(string title, string key, UIElement summary, FrameworkElement details, Button? reveal = null, Action? opened = null)
     {
         var expanded = _statsExpanded.GetValueOrDefault(key);
         var header = new Grid { ColumnSpacing = 8 };
@@ -288,8 +289,10 @@ internal sealed partial class ChatPage
         void State() {
             details.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed; chevron.Text = expanded ? "⌃" : "⌄";
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(toggle, L10n.Text(expanded ? "common.collapse" : "common.expand"));
+            if (expanded) opened?.Invoke();
         }
         State(); toggle.Click += (_, _) => { expanded = !expanded; _statsExpanded[key] = expanded; State(); };
+        if (reveal is not null) reveal.Click += (_, _) => { expanded = true; _statsExpanded[key] = true; State(); };
         var stack = new StackPanel { Spacing = 5 }; stack.Children.Add(toggle); stack.Children.Add(summary); stack.Children.Add(details);
         return new Border { Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(12, 8, 12, 8), Child = stack };

@@ -2283,8 +2283,18 @@ struct RootView: View {
         }
         // Persist to this new conversation before exposing it to navigation.
         // Existing conversation drafts are owned by the previous model.
-        reader.draft = submission.text
-        reader.saveDraftNow()
+        guard current(), reader.selected?.id == created.id,
+              await reader.installLandingDraft(submission, permits: current) else {
+            chatStart.failed(submission, message: reader.error)
+            return
+        }
+        if submission.agent.fastMode {
+            await reader.update(fastMode: true)
+            guard current(), reader.selected?.id == created.id, reader.selected?.fastMode == true, reader.error == nil else {
+                chatStart.failed(submission, message: reader.error ?? L10n.text("common.new_chat.setup_changed"))
+                return
+            }
+        }
         guard current(), reader.selected?.id == created.id else { return }
         chat.saveDraftNow()
         chat = reader

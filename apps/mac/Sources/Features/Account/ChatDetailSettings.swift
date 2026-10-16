@@ -76,7 +76,7 @@ struct ChatDetailSettings: View {
         if model != nil {
             ChatSetupSection(title: L10n.text("apple.chatdetail.title"), icon: .comment,
                              subtitle: L10n.text("apple.chatdetail.subtitle"),
-                             summary: ChatDetailPreference.label(preference.level)) { rows }
+                             primary: levelPicker) { details }
         } else {
         #if os(macOS)
         Card(
@@ -103,7 +103,13 @@ struct ChatDetailSettings: View {
 
     private var rows: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Group {
+            levelPicker
+            details
+        }
+    }
+
+    private var levelPicker: some View {
+        Group {
                 #if os(macOS)
                 SegmentedCapsulePicker(
                     options: ChatDetail.allCases.map {
@@ -119,9 +125,13 @@ struct ChatDetailSettings: View {
                     comfortable: true
                 )
                 #endif
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(L10n.text("apple.chatdetail.title"))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(L10n.text("apple.chatdetail.title"))
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(ChatDetailPreference.explanation(preference.level))
                 #if os(macOS)
                 .font(Theme.caption)

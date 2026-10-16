@@ -174,6 +174,11 @@ tests = '''
         await initial.sendInitialDraft()
         assert(initial.initialSends == 1 && initial.reservedInitialText == "Start from the landing page",
                "Landing Send must use the existing composer reservation exactly once")
+        let imageInitial = Model()
+        imageInitial.busy = false; imageInitial.needsAuthentication = false; imageInitial.draft = ""
+        await imageInitial.sendInitialDraft()
+        assert(imageInitial.initialSends == 1 && imageInitial.reservedInitialText == "",
+               "An attachment-only landing message must use the ordinary send reservation")
         let initialSignIn = Model()
         initialSignIn.busy = false; initialSignIn.attachments = []
         await initialSignIn.sendInitialDraft()

@@ -2,18 +2,18 @@
 import Foundation
 import Observation
 
-/// The landing page owns writing, never a server-side conversation. A Send
-/// ticket captures account/session, repository and words before any await.
+/// Local writing belongs to an account and repository. No host conversation
+/// exists until an explicit Send/Open chat captures one immutable ticket.
 @MainActor @Observable
 final class ChatStartDraft {
-    struct Owner: Equatable {
-        var scope: WorkReference.Scope
-        var session: UInt64
-    }
+    struct Owner: Equatable { var scope: WorkReference.Scope; var session: UInt64 }
     struct AgentChoice: Equatable {
         var backend: String
         var model: String?
         var effort: String?
+        var mode = "execute"
+        var autonomy = "standard"
+        var fastMode = false
     }
     struct Submission {
         let id: UUID
@@ -21,55 +21,153 @@ final class ChatStartDraft {
         let repositoryID: String
         let text: String
         let agent: AgentChoice
+        let attachments: [ChatAttachment]
+        let attachmentReference: WorkReference
     }
+    private struct Key: Hashable { var scope: WorkReference.Scope; var repository: String? }
+    private struct Writing {
+        var text = ""
+        var agent: AgentChoice?
+        var attachments: [ChatAttachment] = []
+        var previews: [String: Data] = [:]
+        var localID = UUID().uuidString
+    }
+    private var writings: [Key: Writing] = [:]
+    private var lastRepository: [WorkReference.Scope: String] = [:]
+    private var claimedUnbound: Set<WorkReference.Scope> = []
+    private var changingOwner = false
+    private var localID = UUID().uuidString
+    private var importGeneration = UUID()
+    private var imports: [String: Int] = [:]
+    private var importOwners: [WorkReference: Owner] = [:]
     private(set) var owner: Owner?
     var text = ""
-    var repositoryID: String?
     var agent: AgentChoice?
+    var attachments: [ChatAttachment] = []
+    var previews: [String: Data] = [:]
+    var repositoryID: String? {
+        didSet {
+            guard !changingOwner, oldValue != repositoryID, let owner else { return }
+            save(scope: owner.scope, repository: oldValue)
+            let unbound = Key(scope: owner.scope, repository: nil)
+            let firstSelection = oldValue == nil && repositoryID != nil && !claimedUnbound.contains(owner.scope)
+            if firstSelection, let repositoryID {
+                let destination = Key(scope: owner.scope, repository: repositoryID)
+                // Claim the initial unbound writing once. Returning through a
+                // host picker must never copy it into a second repository.
+                if writings[destination] == nil { writings[destination] = writings[unbound] }
+                writings[unbound] = nil
+                claimedUnbound.insert(owner.scope)
+            }
+            restore(scope: owner.scope, repository: repositoryID)
+            if let repositoryID { lastRepository[owner.scope] = repositoryID }
+            retire()
+        }
+    }
     private(set) var pending: UUID?
     var error: String?
     var isSubmitting: Bool { pending != nil }
+    var attachmentReference: WorkReference? {
+        guard let owner else { return nil }
+        // The namespace stays stable when initial unbound writing is claimed
+        // by its first repository. Neither this ID nor this workspace is sent
+        // to Bridge. Individual repository drafts have distinct local IDs.
+        return WorkReference(scope: owner.scope, hostIdentity: "new-chat-local", workspaceID: "new-chat-local",
+                             kind: .conversation, itemID: localID, anchor: importGeneration.uuidString)
+    }
+    var stagingAttachments: Int { attachmentReference.flatMap(WorkReferenceKey.conversation).map { imports[$0] ?? 0 } ?? 0 }
 
-    func activate(scope: WorkReference.Scope?, session: UInt64, repositoryID: String? = nil) {
+    func activate(scope: WorkReference.Scope?, session: UInt64, repositoryID requested: String? = nil) {
         let next = scope.map { Owner(scope: $0, session: session) }
-        if owner != next {
-            // Re-authentication retires in-flight work, while unsent words
-            // still belong to the same account. Another account starts empty.
-            if owner?.scope != next?.scope {
-                text = ""
-                self.repositoryID = nil
-                agent = nil
-            }
+        if owner?.scope != next?.scope {
+            if let previous = owner { save(scope: previous.scope, repository: repositoryID) }
+            changingOwner = true
             owner = next
+            repositoryID = requested ?? scope.flatMap { lastRepository[$0] }
+            if let scope { restore(scope: scope, repository: repositoryID) }
+            else { apply(Writing()) }
+            changingOwner = false
             retire()
-        }
-        if let repositoryID {
-            if self.repositoryID != repositoryID { retire() }
-            self.repositoryID = repositoryID
+        } else if owner != next { owner = next; retire() }
+        if let requested { repositoryID = requested }
+        if let owner, let parked = writings[Key(scope: owner.scope, repository: repositoryID)], parked.localID == localID {
+            for file in parked.attachments where !attachments.contains(where: { $0.id == file.id }) { attachments.append(file) }
+            previews = parked.previews.merging(previews) { _, current in current }
         }
     }
-    func retire() { pending = nil; error = nil }
+    func retire() {
+        if let owner { save(scope: owner.scope, repository: repositoryID) }
+        pending = nil; error = nil; importGeneration = UUID()
+    }
     func begin(available: Set<String>) -> Submission? {
-        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard pending == nil, let owner, let repositoryID, let agent, available.contains(repositoryID) else { return nil }
-        let id = UUID()
-        pending = id
-        error = nil
-        return Submission(id: id, owner: owner, repositoryID: repositoryID, text: words, agent: agent)
+        guard pending == nil, stagingAttachments == 0, let owner, let repositoryID, let agent,
+              let reference = attachmentReference, available.contains(repositoryID) else { return nil }
+        let id = UUID(); pending = id; error = nil
+        return Submission(id: id, owner: owner, repositoryID: repositoryID,
+                          text: text.trimmingCharacters(in: .whitespacesAndNewlines), agent: agent,
+                          attachments: attachments, attachmentReference: reference)
     }
     func accepts(_ submission: Submission, scope: WorkReference.Scope?, session: UInt64) -> Bool {
-        pending == submission.id && owner == submission.owner
-            && repositoryID == submission.repositoryID && text.trimmingCharacters(in: .whitespacesAndNewlines) == submission.text
-            && agent == submission.agent && scope == submission.owner.scope && session == submission.owner.session
+        pending == submission.id && owner == submission.owner && repositoryID == submission.repositoryID
+            && text.trimmingCharacters(in: .whitespacesAndNewlines) == submission.text && agent == submission.agent
+            && attachments == submission.attachments && scope == submission.owner.scope && session == submission.owner.session
     }
     func transferred(_ submission: Submission) {
         guard accepts(submission, scope: owner?.scope, session: owner?.session ?? 0) else { return }
-        text = ""
+        if let owner { writings[Key(scope: owner.scope, repository: repositoryID)] = Writing(agent: agent, localID: localID) }
+        text = ""; attachments = []; previews = [:]
         retire()
     }
     func failed(_ submission: Submission, message: String?) {
         guard pending == submission.id, owner == submission.owner else { return }
-        pending = nil
-        error = message
+        pending = nil; error = message
+    }
+    func beginImport(_ reference: WorkReference) -> Bool {
+        guard reference == attachmentReference, !isSubmitting, let owner,
+              let key = WorkReferenceKey.conversation(reference) else { return false }
+        guard attachments.count + (imports[key] ?? 0) < 20 else {
+            error = L10n.text("apple.chatmodel.a_draft_can_include_up_to_20_files_remove.14221a45")
+            return false
+        }
+        imports[key, default: 0] += 1
+        importOwners[reference] = owner
+        return true
+    }
+    func finishImport(_ reference: WorkReference, attachment: ChatAttachment?, preview: Data? = nil) {
+        guard let importedBy = importOwners[reference], let key = WorkReferenceKey.conversation(reference),
+              (imports[key] ?? 0) > 0 else { return }
+        imports[key] = max(0, (imports[key] ?? 0) - 1)
+        guard let attachment else { return }
+        if importedBy == owner, reference.itemID == localID {
+            attachments.append(attachment); previews[attachment.id] = preview
+        } else {
+            // An import already being copied stays with its original draft.
+            // Never publish it into a newer repository/presentation.
+            guard let key = writings.first(where: { $0.key.scope == reference.scope && $0.value.localID == reference.itemID })?.key,
+                  var writing = writings[key] else { return }
+            writing.attachments.append(attachment); writing.previews[attachment.id] = preview
+            writings[key] = writing
+        }
+    }
+    func removeAttachment(_ attachment: ChatAttachment) {
+        attachments.removeAll { $0.id == attachment.id }; previews[attachment.id] = nil
+        if let owner {
+            let key = Key(scope: owner.scope, repository: repositoryID)
+            writings[key]?.attachments.removeAll { $0.id == attachment.id }
+            writings[key]?.previews[attachment.id] = nil
+        }
+    }
+    private func save(scope: WorkReference.Scope, repository: String?) {
+        let key = Key(scope: scope, repository: repository)
+        // Preserve imports that finished while this presentation was retired.
+        let extra = writings[key].flatMap { $0.localID == localID ? $0 : nil }
+        var files = attachments
+        for file in extra?.attachments ?? [] where !files.contains(where: { $0.id == file.id }) { files.append(file) }
+        writings[key] = Writing(text: text, agent: agent, attachments: files,
+                                previews: (extra?.previews ?? [:]).merging(previews) { _, current in current }, localID: localID)
+    }
+    private func restore(scope: WorkReference.Scope, repository: String?) { apply(writings[Key(scope: scope, repository: repository)] ?? Writing()) }
+    private func apply(_ writing: Writing) {
+        text = writing.text; agent = writing.agent; attachments = writing.attachments; previews = writing.previews; localID = writing.localID
     }
 }

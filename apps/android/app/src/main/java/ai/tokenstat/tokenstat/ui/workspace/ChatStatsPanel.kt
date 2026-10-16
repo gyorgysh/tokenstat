@@ -93,10 +93,14 @@ internal fun chatCommands() = listOf(
 
 internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Boolean)
 
-@Composable internal fun ChatSetupDisclosure(title: String, summary: String?, owner: String?, content: @Composable ColumnScope.() -> Unit) {
-    var expanded by remember(owner, title) { mutableStateOf(false) }
-    StatsCard(title, expanded, { expanded = !expanded }, subtitle = summary) {
-        if (expanded) Column(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+@Composable internal fun ChatSetupDisclosure(title: String, summary: String?, owner: String?,
+    expanded: Boolean? = null, onExpandedChanged: ((Boolean) -> Unit)? = null,
+    primary: @Composable ColumnScope.() -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
+    var localExpanded by remember(owner, title) { mutableStateOf(false) }
+    val isExpanded = expanded ?: localExpanded
+    StatsCard(title, isExpanded, { if (onExpandedChanged != null) onExpandedChanged(!isExpanded) else localExpanded = !isExpanded }, subtitle = summary) {
+        primary()
+        if (isExpanded) Column(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
     }
 }
 

@@ -43,6 +43,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -629,7 +630,7 @@ fun ChatSection(
             val backendId = setup?.backend ?: LaunchDefaults.backend(saved, backends)
             val backend = backends.firstOrNull { it.str("id") == backendId }
             check(setup == null || setup.isAvailable(backends)) { L10n.text("common.new_chat.setup_changed") }
-            model.workspaceSection(peer, "chat.create", buildJsonObject {
+            model.workspaceSection(peer, "chat.create", setup?.createParameters(workspace) ?: buildJsonObject {
                 put("workspaceId", workspace)
                 put("backend", backendId)
                 // What was last used, not what the host falls back to. The
@@ -1237,8 +1238,7 @@ fun ChatSection(
             val id = createAndOpen(request.setup) ?: return@LaunchedEffect
             if (!ownsProject() || openId != id) return@LaunchedEffect
             val target = projectOwner?.conversation(id) ?: return@LaunchedEffect
-            if (model.chatComposers.hasWriting(target) || !model.chatComposers.update(target, request.source.snapshot)) return@LaunchedEffect
-            model.chatComposers.clearIfUnchanged(request.source.owner, request.source)
+            if (!request.installInto(model.chatComposers, target)) return@LaunchedEffect
             if (request.shouldSend) pendingNewChatSend = Triple(request.id, id, request.source.snapshot.text)
         } finally { onNewChatHandled(request.id) }
     }
@@ -2135,6 +2135,7 @@ fun ChatSection(
                 model = model,
                 peer = peer,
                 workspace = workspace,
+                folderName = folderName,
                 chatId = id,
                 inspection = chatInspection,
                 hostLabel = hostLabel,
@@ -2145,6 +2146,8 @@ fun ChatSection(
                 onChanged = { scope.launch { loadChats() } },
                 detail = detail,
                 onDetail = { detail = it; detailStore.setLevel(it) },
+                stepsExpanded = groupsOpen || toggledGroups.isNotEmpty(),
+                onToggleSteps = { groupsOpen = !(groupsOpen || toggledGroups.isNotEmpty()); toggledGroups = emptySet() },
             )
         }
     }
@@ -2343,6 +2346,7 @@ private fun ChatSetupDialog(
     model: AppViewModel,
     peer: String,
     workspace: String,
+    folderName: String,
     chatId: String,
     hostLabel: String,
     chat: JsonObject?,
@@ -2353,6 +2357,8 @@ private fun ChatSetupDialog(
     inspection: ChatInspectionSnapshot? = null,
     detail: ChatDetail = ChatDetail.Standard,
     onDetail: (ChatDetail) -> Unit = {},
+    stepsExpanded: Boolean = false,
+    onToggleSteps: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var brief by remember { mutableStateOf<String?>(null) }
@@ -2365,6 +2371,21 @@ private fun ChatSetupDialog(
     var showingPersonas by remember { mutableStateOf(false) }
     var pickingPersona by remember { mutableStateOf(false) }
     var pickingDefault by remember { mutableStateOf(false) }
+    var editingTitle by remember(chatId) { mutableStateOf(false) }
+    var editingBrief by remember(chatId) { mutableStateOf(false) }
+    var briefDraft by remember(chatId) { mutableStateOf("") }
+    var savingBrief by remember(chatId) { mutableStateOf(false) }
+    var showingAllowed by remember(chatId) { mutableStateOf(false) }
+    var removingAllowed by remember(chatId) { mutableStateOf(false) }
+    val clientState by model.state.collectAsStateWithLifecycle()
+    val setupOwner = remember(peer, workspace, chatId) { ProjectOwner.from(clientState.account, peer, workspace) }
+    fun ownsSetup() = setupOwner != null && ProjectOwner.from(model.state.value.account, peer, workspace) == setupOwner
+    val folders by model.workspacesConnection.folders.collectAsStateWithLifecycle()
+    val connectedPeer by model.workspacesConnection.connectedPeer.collectAsStateWithLifecycle()
+    val folder = if (connectedPeer == peer) folders.filterIsInstance<JsonObject>().firstOrNull { it.str("id") == workspace } else null
+    fun remembered(field: String) = (chat?.get(field) as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+    var allowedTools by remember(chatId, chat?.get("allowedTools")) { mutableStateOf(remembered("allowedTools")) }
+    var allowedCommands by remember(chatId, chat?.get("allowedShellPrefixes")) { mutableStateOf(remembered("allowedShellPrefixes")) }
 
     suspend fun load() {
         loading = true
@@ -2376,6 +2397,7 @@ private fun ChatSetupDialog(
             // `toString`, which put the raw JSON on screen, escapes and all.
             val obj = element as? JsonObject
             brief = obj?.str("brief")
+            if (!editingBrief) briefDraft = brief.orEmpty()
             added = obj?.str("added")
             channel = obj?.str("channel")
         }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel) }
@@ -2388,7 +2410,7 @@ private fun ChatSetupDialog(
         }
         loading = false
     }
-    LaunchedEffect(chatId) { load() }
+    LaunchedEffect(chatId, chat?.str("systemPrompt")) { load() }
 
     /// This conversation's own persona, which is the id and the brief written
     /// together: the host keeps the text on the chat, so a persona edited
@@ -2396,6 +2418,7 @@ private fun ChatSetupDialog(
     fun applyPersona(persona: ChatPersona?) {
         scope.launch {
             runCatching {
+                if (!ownsSetup()) return@launch
                 model.workspaceSection(peer, "chat.update", buildJsonObject {
                     put("id", chatId)
                     put("personaId", persona?.id ?: "")
@@ -2406,20 +2429,42 @@ private fun ChatSetupDialog(
         }
     }
 
-    fun updateChat(field: String, value: String) {
+    fun updateChat(field: String, value: String, onSaved: () -> Unit = {}, onFinished: () -> Unit = {}) {
         scope.launch {
-            runCatching {
+            try { runCatching {
+                if (!ownsSetup()) return@launch
                 model.workspaceSection(peer, "chat.update", buildJsonObject {
                     put("id", chatId); put(field, value)
                 })
-            }.onSuccess { onChanged() }
+            }.onSuccess { if (ownsSetup()) { onSaved(); onChanged() } }
                 .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel) }
+            } finally { onFinished() }
+        }
+    }
+
+    fun removeAllowed(field: String, value: String) {
+        if (removingAllowed || !ownsSetup()) return
+        val values = (if (field == "allowedTools") allowedTools else allowedCommands).filter { it != value }
+        removingAllowed = true
+        scope.launch {
+            try { runCatching {
+                if (!ownsSetup()) return@launch
+                model.workspaceSection(peer, "chat.update", buildJsonObject {
+                    put("id", chatId); put(field, JsonArray(values.map(::JsonPrimitive)))
+                })
+            }.onSuccess { if (ownsSetup()) {
+                if (field == "allowedTools") allowedTools = values else allowedCommands = values
+                onChanged()
+            } }
+                .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel) }
+            } finally { removingAllowed = false }
         }
     }
 
     fun setDefault(persona: ChatPersona?) {
         scope.launch {
             runCatching {
+                if (!ownsSetup()) return@launch
                 model.workspaceSection(peer, "chat.personaDefault", personaDefaultParams(workspace, persona?.id ?: ""))
             }.onSuccess { defaultId = persona?.id }
                 .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel) }
@@ -2459,12 +2504,32 @@ private fun ChatSetupDialog(
                 TsSecondaryButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, small = true, onClick = onDismiss)
             }
             if (error != null) Banner(error!!, BannerSeverity.DANGER)
-            ChatSetupDisclosure(L10n.text("android.chatpullssections.conversation.ccca1817"), chat?.str("title"), chatId) {
+            ChatSetupDisclosure(L10n.text("android.chatpullssections.conversation.ccca1817"), chat?.str("title"), chatId, primary = {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    TsSecondaryButton(label = L10n.text("android.chatpullssections.rename_chat.26076241"), icon = ActionIcon.Edit.vector,
+                        small = true, onClick = { editingTitle = true })
+                    TsSecondaryButton(label = L10n.text("android.chatpullssections.edit_personas.a41f17a3"), icon = ActionIcon.Persona.vector,
+                        small = true, onClick = { showingPersonas = true })
+                }
+            }) {
                 Text(L10n.text(if (chat?.bol("running") == true) "common.running" else "common.idle"), style = MaterialTheme.typography.bodySmall)
                 Text(chatAgentSummary(backends, chat), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
             }
-            ChatSetupDisclosure(L10n.text("android.chatdetail.title"), chatDetailLabel(detail), chatId) {
-                ChatDetail.entries.forEach { level -> TextButton(onClick = { onDetail(level) }, modifier = Modifier.fillMaxWidth()) { Text(chatDetailLabel(level)) } }
+            ChatSetupDisclosure(L10n.text("android.chatdetail.title"), null, chatId, primary = {
+                ChatSegmented(ChatDetail.entries.map { it.name to chatDetailLabel(it) }, detail.name, enabled = true,
+                    onSelect = { name -> onDetail(ChatDetail.valueOf(name)) }, modifier = Modifier.fillMaxWidth())
+            }) {
+                val explanation = when (detail) {
+                    ChatDetail.Minimal -> L10n.text("common.chat.detail.minimal_help")
+                    ChatDetail.Compact -> L10n.text("common.chat.detail.compact_help")
+                    ChatDetail.Standard -> L10n.text("common.chat.detail.standard_help")
+                    ChatDetail.Detailed -> L10n.text("common.chat.detail.detailed_help")
+                }
+                Text(explanation, style = TsType.caption, color = colors.textSecondary)
+                if (detail != ChatDetail.Detailed) TsSecondaryButton(
+                    label = L10n.text(if (stepsExpanded) "android.chatdetail.collapse_steps" else "android.chatdetail.expand_steps"),
+                    icon = if (stepsExpanded) ActionIcon.Collapse.vector else ActionIcon.Preview.vector,
+                    small = true, onClick = onToggleSteps)
             }
             if (chat != null) ChatStatsPanel(model, peer, chat, inspection)
             if (chat != null) {
@@ -2475,18 +2540,12 @@ private fun ChatSetupDialog(
             if (loading) {
                 Text(L10n.text("android.chatpullssections.loading.ba3bbbe1"), color = colors.textSecondary)
             } else {
-                ChatSetupDisclosure(L10n.text("common.chat_agent_behavior"), chatAgentSummary(backends, chat), chatId) {
+                ChatSetupDisclosure(L10n.text("common.chat_agent_behavior"), null, chatId, primary = {
+                    TsPickerField(summary = chatAgentSummary(backends, chat), onOpen = onPickAgent, modifier = Modifier.fillMaxWidth())
+                }) {
                 // Who answers, in one field. The three settings behind it are
                 // one list with one filter, rather than three dropdowns that
                 // each hold a scroll of their own.
-                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    SectionLabel(L10n.text("android.chatpullssections.agent.11b39c93"))
-                    TsPickerField(
-                        summary = chatAgentSummary(backends, chat),
-                        onOpen = onPickAgent,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
                 // The persona picker, with the chosen one's face beside it.
                 // The face is the point of the row: a name in a list is a
                 // setting, and a character sitting next to it is the thing
@@ -2554,12 +2613,21 @@ private fun ChatSetupDialog(
                 // What the person wrote, and what tokenstat adds, kept apart:
                 // only one of the two is theirs to change.
                 }
-                ChatSetupDisclosure(L10n.text("android.chatpullssections.brief.ac40ae1e"), brief?.lineSequence()?.firstOrNull(), chatId) {
-                    Text(
-                        brief?.ifBlank { null } ?: L10n.text("android.chatpullssections.no_brief_the_agent_gets_the_folder_and_you.5d32d831"),
-                        style = TextStyle(fontSize = 14.sp),
-                        color = colors.textSecondary,
-                    )
+                ChatSetupDisclosure(L10n.text("android.chatpullssections.brief.ac40ae1e"), brief?.lineSequence()?.firstOrNull(), chatId,
+                    expanded = editingBrief, onExpandedChanged = { editingBrief = it }, primary = {
+                        TsSecondaryButton(label = L10n.text(if (briefDraft != brief.orEmpty()) "common.save" else "common.edit"),
+                            icon = if (briefDraft != brief.orEmpty()) ActionIcon.Save.vector else ActionIcon.Edit.vector,
+                            small = true, enabled = !savingBrief, onClick = {
+                                if (briefDraft != brief.orEmpty() && !savingBrief) {
+                                    val submitted = briefDraft
+                                    savingBrief = true
+                                    updateChat("systemPrompt", submitted, onSaved = { brief = submitted }, onFinished = { savingBrief = false })
+                                }
+                                else editingBrief = true
+                            })
+                    }) {
+                    OutlinedTextField(briefDraft, { briefDraft = it }, modifier = Modifier.fillMaxWidth(), minLines = 3, maxLines = 8,
+                        placeholder = { Text(L10n.text("android.chatpullssections.no_brief_the_agent_gets_the_folder_and_you.5d32d831")) })
                 }
                 added?.ifBlank { null }?.let {
                     ChatSetupDisclosure(L10n.text("android.chatpullssections.what_tokenstat_adds.358d9a68"), it.lineSequence().firstOrNull(), chatId) {
@@ -2575,11 +2643,47 @@ private fun ChatSetupDialog(
                         )
                     }
                 }
+                ChatSetupDisclosure(L10n.text("common.chat.inspector.folder"), folderName, chatId, primary = {
+                    folder?.str("path")?.takeIf { it.isNotBlank() }?.let { path ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                            Text(path, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = TsType.caption, color = colors.textSecondary)
+                            val clipboard = androidx.compose.ui.platform.LocalClipboard.current
+                            TsSecondaryButton(label = L10n.text("common.chat.inspector.copy_path"), icon = ActionIcon.Copy.vector, small = true,
+                                onClick = { scope.launch { clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText(folderName, path))) } })
+                        }
+                    }
+                }) {
+                    Text(folder?.str("path") ?: folderName, style = TsType.caption, color = colors.textSecondary)
+                    Text(hostLabel, style = TsType.caption, color = colors.textSecondary)
+                }
+                ChatSetupDisclosure(L10n.text("common.chat.inspector.always_allowed"),
+                    if (allowedTools.isEmpty() && allowedCommands.isEmpty()) L10n.text("common.chat.inspector.allowed_empty")
+                    else L10n.text("common.chat.inspector.allowed_summary", allowedTools.size, allowedCommands.size), chatId,
+                    expanded = showingAllowed, onExpandedChanged = { showingAllowed = it }, primary = {
+                        if (allowedTools.isNotEmpty() || allowedCommands.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text((allowedTools + allowedCommands).take(3).joinToString(" · "), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                style = TsType.caption, color = colors.textSecondary)
+                            if (!showingAllowed) TsSecondaryButton(label = L10n.text("common.edit"), icon = ActionIcon.Edit.vector, small = true, onClick = { showingAllowed = true })
+                        }
+                    }) {
+                    Text(L10n.text("common.chat.inspector.allowed_help"), style = TsType.caption, color = colors.textSecondary)
+                    listOf("allowedTools" to allowedTools, "allowedShellPrefixes" to allowedCommands).forEach { (field, values) ->
+                        values.forEach { value ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(value, Modifier.weight(1f), style = TsType.caption)
+                                TsSecondaryButton(label = L10n.text("common.remove"), icon = ActionIcon.Delete.vector, small = true, enabled = !removingAllowed, onClick = { removeAllowed(field, value) })
+                            }
+                        }
+                    }
+                }
                 HorizontalDivider(color = colors.border)
                 // Which persona new chats in this folder inherit, including
                 // none. A row rather than a mark on whichever persona is open,
                 // so there is a way to say "none of them".
-                ChatSetupDisclosure(L10n.text("android.chatpullssections.new_chats_here.cc6a9bf2"), personas.firstOrNull { it.id == defaultId }?.name ?: L10n.text("android.chatpullssections.no_persona.cce53fca"), chatId) {
+                ChatSetupDisclosure(L10n.text("android.chatpullssections.new_chats_here.cc6a9bf2"), null, chatId, primary = {
+                    TsPickerField(summary = personas.firstOrNull { it.id == defaultId }?.name ?: L10n.text("android.chatpullssections.no_persona.cce53fca"),
+                        onOpen = { pickingDefault = true }, modifier = Modifier.fillMaxWidth())
+                }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -2593,15 +2697,14 @@ private fun ChatSetupDialog(
                             color = colors.textSecondary,
                         )
                     }
-                    TsPickerField(
-                        summary = personas.firstOrNull { it.id == defaultId }?.name ?: L10n.text("android.chatpullssections.no_persona.cce53fca"),
-                        onOpen = { pickingDefault = true },
-                    )
                 }
                 }
             }
         }
         }
+    }
+    if (editingTitle) NameEditorDialog(L10n.text("android.chatpullssections.rename_chat.26076241"), chat?.str("title").orEmpty(), onDismiss = { editingTitle = false }) { title ->
+        editingTitle = false; updateChat("title", title)
     }
     if (pickingPersona) {
         TsSimplePickerSheet(
@@ -3037,6 +3140,12 @@ internal fun ChatComposer(
     fastModeSaving: Boolean = false,
     /// Keep the draft and send it once there is a connection again.
     onQueueWhenConnected: () -> Unit = {},
+    /// The unsent landing composer can explicitly open an empty conversation.
+    allowEmpty: Boolean = false,
+    submitEnabled: Boolean = true,
+    attachmentEnabled: Boolean = true,
+    fieldModifier: Modifier = Modifier,
+    sendModifier: Modifier = Modifier,
 ) {
     val colors = LocalTsColors.current
     // A conversation says what mode it is in. With none open yet, this reads
@@ -3053,7 +3162,7 @@ internal fun ChatComposer(
     // say so rather than accepting a press it will reject. `sending` alone
     // was this screen's own flag and went false long before the turn did.
     val locked = sending || chat?.bol("running") == true
-    val canSend = !parking && (draft.isNotBlank() || staged.isNotEmpty())
+    val canSend = submitEnabled && !parking && (allowEmpty || draft.isNotBlank() || staged.isNotEmpty())
     // An agent that can only run on Bypass is put on it, the way the Apple
     // header enforces it on appear and on every change of agent.
     LaunchedEffect(bypassOnly, autonomy, locked) {
@@ -3170,7 +3279,7 @@ internal fun ChatComposer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.xs),
             ) {
-                IconButton(onClick = onPick, enabled = !sending) {
+                IconButton(onClick = onPick, enabled = !sending && attachmentEnabled) {
                     Icon(
                         ActionIcon.Attach.vector,
                         L10n.text("android.chatpullssections.attach_a_file.21298c62"),
@@ -3204,7 +3313,7 @@ internal fun ChatComposer(
                 OutlinedTextField(
                     draft,
                     onDraft,
-                    Modifier.weight(1f),
+                    Modifier.weight(1f).then(fieldModifier),
                     placeholder = { Text(hint) },
                     maxLines = if (expanded) 18 else 5,
                 )
@@ -3225,6 +3334,7 @@ internal fun ChatComposer(
                             onSend()
                         },
                         enabled = canSend,
+                        modifier = sendModifier,
                     ) {
                         Icon(
                             ActionIcon.Send.vector,

@@ -144,6 +144,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val chatComposers = ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions<ai.tokenstat.tokenstat.ui.workspace.StagedAttachment>(
         attachmentCost = { it.data.length.toLong() * 2 + it.name.length.toLong() * 2 },
     )
+    private val mutableNewChatSetups = MutableStateFlow<Map<String, ai.tokenstat.tokenstat.ui.workspace.NewChatSetup>>(emptyMap())
+    val newChatSetups = mutableNewChatSetups.asStateFlow()
+    fun rememberNewChatSetup(owner: String?, setup: ai.tokenstat.tokenstat.ui.workspace.NewChatSetup?) {
+        if (owner != null && setup != null) mutableNewChatSetups.value = mutableNewChatSetups.value + (owner to setup)
+    }
 
     /// The live SSH shells, in one place. Held here so navigating between
     /// tabs cannot orphan a shell: a refresh reconciles against what the host

@@ -20,12 +20,14 @@ struct ChatInstructionsCard: View {
 
     @State private var draft = ""
     @State private var showingAdded = false
+    @State private var showingDetails = false
+    @State private var saving = false
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ChatSetupSection(title: L10n.text("apple.chatinstructionscard.instructions.934652dc"), icon: .docs,
-                         summary: chat.systemPrompt.isEmpty ? L10n.text("apple.chatinstructionscard.how_should_this_agent_behave.6cee0aaf") : chat.systemPrompt) {
+                         expanded: $showingDetails, primary: primaryControls) {
 
             ThemedEditor(text: $draft, font: Theme.callout, minHeight: 76, maxHeight: 220)
                 .disabled(model.savedCopy != nil)
@@ -41,18 +43,10 @@ struct ChatInstructionsCard: View {
                     }
                 }
 
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                Text(channelNote)
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-                if changed {
-                    Button(L10n.text("common.save"), .save) { commit() }
-                        .disabled(model.savedCopy != nil)
-                        .buttonStyle(AccentButtonStyle(small: true))
-                }
-            }
+            Text(channelNote)
+                .font(Theme.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Button {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { showingAdded.toggle() }
@@ -95,10 +89,28 @@ struct ChatInstructionsCard: View {
         }
         .onAppear { draft = chat.systemPrompt }
         .onChange(of: chat.id) { _, _ in draft = chat.systemPrompt }
-        .onChange(of: chat.systemPrompt) { _, next in
-            // Do not yank the field out from under somebody mid-sentence. A
-            // persona applied from another screen lands as soon as they leave.
-            if !focused, draft != next { draft = next }
+        .onChange(of: chat.systemPrompt) { previous, next in
+            // Acknowledgements and persona changes must preserve unsaved edits,
+            // including edits made while an earlier Save was in flight.
+            if !focused, !saving, draft == previous { draft = next }
+        }
+    }
+
+    private var primaryControls: some View {
+        HStack(spacing: Theme.Space.s) {
+            Text(draft.isEmpty ? L10n.text("apple.chatinstructionscard.how_should_this_agent_behave.6cee0aaf") : draft)
+                .font(Theme.caption).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if changed {
+                Button(L10n.text("common.save"), .save) { commit() }
+                    .disabled(model.savedCopy != nil || saving)
+                    .buttonStyle(AccentButtonStyle(small: true))
+            } else if !showingDetails {
+                Button(L10n.text("common.edit"), .edit) { showingDetails = true; focused = true }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .disabled(model.savedCopy != nil)
+            }
         }
     }
 
@@ -129,10 +141,13 @@ struct ChatInstructionsCard: View {
     }
 
     private func commit() {
+        guard !saving, let owner = model.currentReference,
+              model.selected?.id == chat.id, model.savedCopy == nil else { return }
         let brief = draft
-        let owner = model.currentReference
+        saving = true
         Task {
-            guard let owner, model.currentReference == owner,
+            defer { saving = false }
+            guard model.currentReference == owner,
                   model.selected?.id == chat.id, model.savedCopy == nil else { return }
             await model.update(systemPrompt: brief)
         }

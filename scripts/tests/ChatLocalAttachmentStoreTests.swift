@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with WorkReference.swift ChatLocalAttachmentStore.swift ChatFileIO.swift ChatFileStaging.swift ChatDraftStore.swift. OriginalFileCoordination.swift.
+// Compile with WorkReference.swift ChatLocalAttachmentStore.swift ChatFileIO.swift ChatFileStaging.swift ChatDraftStore.swift. OriginalFileCoordination.swift ChatStartDraft.swift.
 import Foundation
 struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
     var id: String; var name: String; var mediaType: String?; var size: UInt64?
@@ -31,6 +31,33 @@ private final class CopyResults: @unchecked Sendable {
         let reopened = ChatLocalAttachmentStore(directory: root)
         let restored = try await reopened.read(attachment, reference: ref())
         assert(restored == bytes)
+        // Landing originals use their own local-only namespace. Binding the
+        // first repository and copying into a real conversation cannot consume
+        // them, even if upload subsequently fails.
+        let landingStore = ChatLocalAttachmentStore(directory: root.appendingPathComponent("landing-fixture"))
+        let landing = ChatStartDraft()
+        landing.activate(scope: ref().scope, session: 1)
+        let unbound = landing.attachmentReference!
+        let landingFile = try await landingStore.stage(data: bytes, name: "landing.txt", mediaType: "text/plain", reference: unbound)
+        precondition(landing.beginImport(unbound))
+        landing.finishImport(unbound, attachment: landingFile)
+        landing.repositoryID = "remote:mac:repository"
+        landing.agent = .init(backend: "codex", model: nil, effort: nil)
+        let ticket = landing.begin(available: ["remote:mac:repository"])!
+        let landingExport = try await landingStore.exportURL(landingFile, reference: ticket.attachmentReference)
+        let conversationFile = try await landingStore.stage(file: landingExport, name: landingFile.name,
+            mediaType: landingFile.mediaType, reference: ref())
+        try? FileManager.default.removeItem(at: landingExport.deletingLastPathComponent())
+        enum RefusedUpload: Error { case refused }
+        do {
+            _ = try await landingStore.resolveStream(conversationFile, reference: ref()) { _ in throw RefusedUpload.refused }
+            assertionFailure("Expected the upload refusal")
+        } catch {}
+        landing.failed(ticket, message: "Upload refused")
+        let retainedLandingBytes = try await landingStore.read(landingFile, reference: ticket.attachmentReference)
+        let retainedConversationFile = await landingStore.contains(conversationFile, reference: ref())
+        assert(retainedLandingBytes == bytes && retainedConversationFile && landing.attachments == [landingFile],
+               "Both original landing files and the real conversation draft survive failed delivery")
         for other in [ref("two"), ref(host: "other"), ref(folder: "other")] {
             do { _ = try await reopened.read(attachment, reference: other); assertionFailure("Wrong owner read original") } catch {}
         }

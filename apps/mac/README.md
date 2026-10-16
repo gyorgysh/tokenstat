@@ -75,9 +75,12 @@ For Developer ID Mac builds, set `TOKENSTAT_MAC_PROFILE` and `TOKENSTAT_MAC_WIDG
 Repositories groups the folders registered on this computer and connected
 hosts, including Git checkouts and ordinary folders. New chat opens a dedicated
 composer with a repository picker. Add repository uses the existing folder
-selection and registration flow. Opening this screen, choosing a repository,
-or canceling folder selection does not create a conversation; Send hands the
-prompt to the normal chat creation and delivery path. With an empty prompt,
+selection and registration flow. The normal composer provides attachments,
+agent/model/effort, working style, permissions and supported fast mode. Draft
+text, files and setup stay with their account and repository when switching.
+Opening this screen, selecting files, choosing a repository, or canceling
+folder selection does not create a conversation; Send hands the prompt and
+files to the normal chat creation and delivery path. With an empty prompt,
 Open chat creates the normal composer for image/file-first messages without
 starting a model turn. Repository identifiers,
 host requests and saved sidebar preferences retain their existing formats.

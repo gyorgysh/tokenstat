@@ -20,7 +20,9 @@ struct ChatInspector: View {
         let owner: WorkReference
     }
     @State private var writingAllowlist = false
+    @State private var allowlistExpanded = false
     @State private var titleDraft = ""
+    @State private var titleOwner: WorkReference?
     @FocusState private var titleFocused: Bool
 
     var body: some View {
@@ -55,10 +57,9 @@ struct ChatInspector: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .id(model.currentReference)
                     }
-                    .onAppear { titleDraft = chat.title }
-                    .onChange(of: chat.id) { _, _ in titleDraft = chat.title }
+                    .onAppear { resetTitle() }
                     .onChange(of: chat.title) { _, next in
-                        if !titleFocused, titleDraft != next { titleDraft = next }
+                        if titleOwner == model.currentReference, !titleFocused, titleDraft != next { titleDraft = next }
                     }
                     .onChange(of: titleFocused) { _, focused in
                         if !focused { commitTitle(chat) }
@@ -97,6 +98,8 @@ struct ChatInspector: View {
         .onChange(of: model.currentReference) { _, _ in
             pendingDelete = false
             deletionTarget = nil
+            allowlistExpanded = false
+            resetTitle()
         }
         .onChange(of: model.savedCopy != nil) { _, saved in
             if saved {
@@ -107,30 +110,40 @@ struct ChatInspector: View {
     }
 
     private func identity(_ chat: ChatConversation) -> some View {
-        group(L10n.text("apple.chatinspector.conversation.ccca1817"), summary: chat.title, icon: .comment) {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                TextField(L10n.text("apple.chatinspector.title.7e8cd205"), text: $titleDraft)
-                    .themedFieldBox()
-                    .disabled(model.savedCopy != nil)
-                    .focused($titleFocused)
-                    .onSubmit { commitTitle(chat) }
-                HStack(spacing: Theme.Space.s) {
-                    Button(L10n.text("apple.chatinspector.personas.fa2ea3fb"), .persona) { showingPersonas = true }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
-                    if chat.running {
-                        Text(L10n.text("common.working"))
-                            .font(Theme.caption.weight(.medium))
-                            .foregroundStyle(Theme.accent)
-                    }
-                    Spacer(minLength: 0)
-                }
+        ChatSetupSection(title: L10n.text("apple.chatinspector.conversation.ccca1817"), icon: .comment,
+                         primary: titleField(chat)) {
+            Text(chat.title).font(Theme.caption).foregroundStyle(.secondary)
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            if chat.running {
+                Text(L10n.text("common.working"))
+                    .font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent)
             }
+        }
+    }
+
+    private func titleField(_ chat: ChatConversation) -> some View {
+        let owner = model.currentReference
+        let text = Binding(get: { titleDraft }, set: { next in
+            guard let owner, titleOwner == owner, model.currentReference == owner else { return }
+            titleDraft = next
+        })
+        return HStack(spacing: Theme.Space.s) {
+            TextField(L10n.text("apple.chatinspector.title.7e8cd205"), text: text)
+                .themedFieldBox()
+                .disabled(model.savedCopy != nil)
+                .focused($titleFocused)
+                .onSubmit { commitTitle(chat) }
+            Button(L10n.text("apple.chatinspector.personas.fa2ea3fb"), .persona) { showingPersonas = true }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .environment(\.compactActions, true)
+                .help(L10n.text("apple.chatinspector.personas.fa2ea3fb"))
         }
     }
 
     @ViewBuilder
     private var folderCard: some View {
-        group(L10n.text("apple.chatinspector.folder.74ccd433"), summary: folder?.name, icon: .reveal) {
+        ChatSetupSection(title: L10n.text("apple.chatinspector.folder.74ccd433"), icon: .reveal,
+                         summary: folder?.name, primary: folderActions) {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text(folder?.name ?? L10n.text("apple.chatinspector.this_project.d0f62545"))
                     .font(Theme.callout.weight(.medium))
@@ -139,17 +152,36 @@ struct ChatInspector: View {
                         .font(Theme.mono(11))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+                }
+                if let machine = folder?.machineLabel, !machine.isEmpty {
+                    Label(machine, systemImage: "desktopcomputer").font(Theme.caption).foregroundStyle(.secondary)
+                }
+                if let branch = folder?.git?.branch, !branch.isEmpty {
+                    Label(branch, systemImage: "arrow.triangle.branch").font(Theme.caption).foregroundStyle(.secondary)
                 }
             }
         }
     }
 
+    @ViewBuilder
+    private var folderActions: some View {
+        if let path = folder?.path, !path.isEmpty {
+            HStack(spacing: Theme.Space.s) {
+                Text(path).font(Theme.mono(11)).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button(L10n.text("common.chat.inspector.copy_path"), .copy) { ChatClipboard.copy(path) }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+            }
+        }
+    }
+
     private func allowlist(_ chat: ChatConversation) -> some View {
-        group(L10n.text("apple.chatinspector.always_allowed.94387772"), summary: chat.allowedTools.isEmpty && chat.allowedShellPrefixes.isEmpty
+        ChatSetupSection(title: L10n.text("apple.chatinspector.always_allowed.94387772"), icon: .settings,
+              summary: chat.allowedTools.isEmpty && chat.allowedShellPrefixes.isEmpty
               ? L10n.text("apple.chatinspector.nothing_is_remembered_yet.d523b614")
-              : L10n.text("common.chat.inspector.allowed_summary", chat.allowedTools.count.formatted(), chat.allowedShellPrefixes.count.formatted())) {
+              : L10n.text("common.chat.inspector.allowed_summary", chat.allowedTools.count.formatted(), chat.allowedShellPrefixes.count.formatted()),
+              expanded: $allowlistExpanded, primary: allowlistActions(chat)) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Text(L10n.text("apple.chatinspector.always_allow_on_a_permission_card_writes_h.b50406cc"))
                     .font(Theme.caption)
@@ -172,6 +204,23 @@ struct ChatInspector: View {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func allowlistActions(_ chat: ChatConversation) -> some View {
+        let remembered = chat.allowedTools + chat.allowedShellPrefixes
+        if !remembered.isEmpty {
+            HStack(spacing: Theme.Space.s) {
+                Text(remembered.prefix(3).joined(separator: " · "))
+                    .font(Theme.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !allowlistExpanded {
+                    Button(L10n.text("common.edit"), .edit) { allowlistExpanded = true }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .disabled(model.savedCopy != nil || writingAllowlist)
                 }
             }
         }
@@ -209,10 +258,6 @@ struct ChatInspector: View {
         }
     }
 
-    private func group<Content: View>(_ title: String, summary: String? = nil, icon: ActionIcon = .settings, @ViewBuilder content: () -> Content) -> some View {
-        ChatSetupSection(title: title, icon: icon, summary: summary) { content() }
-    }
-
     private func change(_ chat: ChatConversation, operation: @escaping @MainActor () async -> Void) {
         let owner = model.currentReference
         Task { @MainActor in
@@ -223,11 +268,19 @@ struct ChatInspector: View {
     }
 
     private func commitTitle(_ chat: ChatConversation) {
+        guard let titleOwner, titleOwner == model.currentReference,
+              model.selected?.id == chat.id else { return }
         let title = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, title != chat.title else {
             if title.isEmpty { titleDraft = chat.title }
             return
         }
         change(chat) { await model.update(title: title) }
+    }
+
+    private func resetTitle() {
+        titleFocused = false
+        titleOwner = model.currentReference
+        titleDraft = model.selected?.title ?? ""
     }
 }

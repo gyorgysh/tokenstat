@@ -148,6 +148,26 @@ internal sealed partial class ChatPage
         }
         finally { ClearFileProgress(); if (claim is not null) FileClaims.TryRemove(claim, out _); _fileTransfer = null; if (current()) RebuildComposerActions(); }
     }
+    private async Task UploadPendingAttachmentsAsync(string chat, Func<bool> current)
+    {
+        foreach (var pending in _attachments.Where(file => file.LocalFile is not null).ToArray())
+        {
+            if (!current()) throw new OperationCanceledException();
+            if (!pending.LocalFile!.IsCurrent()) throw new IOException(L10n.Text("windows.chatpage.attachment_was_rejected.c3b4db65"));
+            var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(pending.LocalFile.Path);
+            if (!current()) throw new OperationCanceledException();
+            var attached = await UploadFileAsync(chat, file, current);
+            if (!current()) throw new OperationCanceledException();
+            var id = Format.Text(attached, "id");
+            if (id.Length == 0) throw new IOException(L10n.Text("windows.chatpage.attachment_was_rejected.c3b4db65"));
+            var index = _attachments.IndexOf(pending);
+            if (index < 0) throw new OperationCanceledException();
+            _attachments[index] = new StagedFile(id, pending.Name);
+            RememberDraft(); RebuildAttachStrip();
+            pending.LocalFile.Discard();
+        }
+    }
+
     private async Task DownloadFileAsync(DisplayItem item)
     {
         if (_openId is not string chat || _fileTransfer is not null) return;

@@ -74,7 +74,7 @@ struct ClientChatComposer: View {
             ChatComposerControls(
                 model: model,
                 chat: chat,
-                locked: running,
+                locked: setupLocked,
                 compact: true
             ) {
                 HStack(spacing: Theme.Space.s) {
@@ -98,7 +98,7 @@ struct ClientChatComposer: View {
             }
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 attachControl
-                ChatFastModeButton(model: model, chat: chat, locked: running)
+                ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
                 field
                 // The send button earns its 44 points only when there is
                 // something to send. A permanently greyed one is a control
@@ -115,10 +115,8 @@ struct ClientChatComposer: View {
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: running)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: expanded)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: focused)
-        .padding(12)
-        .clientFloatingBar()
-        .padding(.horizontal, Theme.Space.s)
-        .padding(.bottom, Theme.Space.s)
+        .padding(model.landingDraft == nil ? 12 : 0)
+        .modifier(ClientComposerSurface(landing: model.landingDraft != nil))
         .dropDestination(for: String.self) { items, _ in
             onDropText(items)
             return !items.isEmpty
@@ -139,6 +137,9 @@ struct ClientChatComposer: View {
         } isTargeted: { targeted in
             urlDropTargeted = targeted
             reportDropTarget()
+        }
+        .onChange(of: model.currentReference) { _, _ in
+            importing = false; importOwner = nil; pickingPhotos = false; photoOwner = nil; photos = []
         }
         .fileImporter(
             isPresented: $importing,
@@ -200,6 +201,7 @@ struct ClientChatComposer: View {
                 .frame(width: 44, height: 44)
                 .contentShape(.rect)
         }
+        .disabled(model.landingDraft != nil && model.currentReference == nil)
         .accessibilityLabel(L10n.text("apple.clientchatcomposer.attach.d406ade2"))
     }
 
@@ -234,6 +236,7 @@ struct ClientChatComposer: View {
             .lineLimit(expanded ? 8...18 : 1...6)
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: expanded ? 180 : 0, alignment: .topLeading)
             .focused($focused)
+            .disabled(model.landingDraft?.isSubmitting == true)
             .padding(.vertical, 8)
             .submitLabel(.send)
             .onSubmit { if canSend { sendTapped() } }
@@ -279,6 +282,11 @@ struct ClientChatComposer: View {
     }
 
     private var sendTitle: String {
+        if let landing = model.landingDraft {
+            return landing.isSubmitting ? L10n.text("common.new_chat.preparing")
+                : (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty
+                   ? L10n.text("common.new_chat.open_chat") : L10n.text("common.new_chat.send"))
+        }
         if sendsAsNote && model.selected?.nativeSteer == true { return L10n.text("common.chat.steer") }
         if sendsAsNote { return L10n.text("apple.clientchatcomposer.next_step.298a9207") }
         return running ? L10n.text("apple.clientchatcomposer.send_after_this_turn.012fc8c3") : L10n.text("apple.clientchatcomposer.send.f6f4688f")
@@ -291,7 +299,10 @@ struct ClientChatComposer: View {
         .scale(scale: 0.6).combined(with: .opacity)
     }
 
+    private var setupLocked: Bool { running || (model.landingDraft != nil && !model.landingCanSubmit) }
+
     private var cannotSend: Bool {
+        if let landing = model.landingDraft { return !model.landingCanSubmit || landing.isSubmitting || landing.stagingAttachments > 0 }
         // A saved copy is read and drafted in, never sent from: the banner
         // above says why, and the field stays editable for those drafts.
         if model.canHandleChatCommandLocally && !model.sending && model.stagingAttachments == 0 && model.unconfirmedSend == nil { return false }
@@ -340,6 +351,20 @@ struct ClientChatComposer: View {
             for item in items {
                 await onAttach(item, owner)
             }
+        }
+    }
+}
+
+/// The landing page already owns the surrounding card. Conversation bars
+/// keep their ordinary floating surface and safe-area spacing.
+private struct ClientComposerSurface: ViewModifier {
+    let landing: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if landing { content }
+        else {
+            content.clientFloatingBar()
+                .padding(.horizontal, Theme.Space.s)
+                .padding(.bottom, Theme.Space.s)
         }
     }
 }

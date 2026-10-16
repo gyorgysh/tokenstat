@@ -11,6 +11,63 @@ Check(selectedNewChatSetup.IsAvailable(Json("""{"id":"codex","models":["model"],
 foreach (var descriptor in new[] { """{"id":"claude","models":["model"],"efforts":["high"]}""", """{"id":"codex","installed":false,"models":["model"],"efforts":["high"]}""", """{"id":"codex","models":["other-model"],"efforts":["high"]}""", """{"id":"codex","models":["model"],"efforts":["low"]}""" })
     Check(!selectedNewChatSetup.IsAvailable(Json(descriptor)), "a changed agent, model, effort or installation cannot silently replace the captured landing setup");
 Check(!selectedNewChatSetup.IsAvailable(null) && new NewChatSetup("codex", null, null).IsAvailable(Json("""{"id":"codex"}""")), "absent agents fail while explicitly chosen default settings require no invented model");
+Check(!new NewChatSetup("", null, null).IsAvailable(Json("""{"id":""}""")), "an empty agent descriptor cannot become a launch choice");
+Check(NewChatSetup.ShouldSend("", 1), "file-only landing prompts use explicit Send");
+Check(!new NewChatSetup("codex", null, null, "invented").IsAvailable(Json("""{"id":"codex"}"""))
+    && !new NewChatSetup("codex", null, null, "execute", "invented").IsAvailable(Json("""{"id":"codex"}""")), "captured mode and autonomy are validated");
+Check(!new NewChatSetup("agy", null, null).IsAvailable(Json("""{"id":"agy","gateTier":"bypassOnly"}"""))
+    && new NewChatSetup("agy", null, null, "plan", "bypass").IsAvailable(Json("""{"id":"agy","gateTier":"bypassOnly"}""")), "a bypass-only agent retains its applicable autonomy choice");
+Check(new NewChatSetup("codex", "model", "high", FastMode: true).IsAvailable(Json("""{"id":"codex","models":["model"],"efforts":["high"],"fastModeModels":[]}"""))
+    && !new NewChatSetup("codex", "model", "high", FastMode: true).IsAvailable(Json("""{"id":"codex","models":["model"],"efforts":["high"]}""")), "fast mode must be explicitly offered by the current agent catalog");
+var stagedPath = Path.GetTempFileName();
+try {
+    File.WriteAllBytes(stagedPath, [1, 2, 3]);
+    var selected = await NewChatFile.CaptureAsync(stagedPath);
+    Check(selected.IsCurrent() && selected.Size == 3 && selected.Path != Path.GetFullPath(stagedPath)
+        && selected.Name == Path.GetFileName(stagedPath) && File.ReadAllBytes(selected.Path).SequenceEqual(new byte[] { 1, 2, 3 }),
+        "landing attachment selection makes an owned private copy before any conversation exists");
+    var landingDrafts = new NewChatDraftStore();
+    var firstDraft = new NewChatDraft("unbound prompt", [selected], new NewChatSetup("codex", "model", "high", "plan", "bypass", true));
+    Check(new NewChatDraftStore().Select("first-repo", new NewChatDraft("", [], firstDraft.Setup)).Setup == firstDraft.Setup,
+        "initial setup-only choices also follow the first repository selection");
+    var firstBound = landingDrafts.Select("host-one/repo", firstDraft);
+    Check(landingDrafts.AcceptsFiles(null, 0), "an import started before choosing a repository follows that first selection");
+    Check(firstBound.Text == firstDraft.Text && firstBound.Files.SequenceEqual(firstDraft.Files) && firstBound.Setup == firstDraft.Setup,
+        "the initial repository choice carries unbound words, files, mode, autonomy and fast mode together");
+    var firstRevision = landingDrafts.Revision;
+    var secondBound = landingDrafts.Select("host-two/repo", firstBound);
+    Check(!landingDrafts.AcceptsFiles(null, 0) && !landingDrafts.AcceptsFiles("host-one/repo", firstRevision),
+        "later repository changes reject stale picker and in-progress copy owners");
+    Check(secondBound.Text.Length == 0 && secondBound.Files.Length == 0 && secondBound.Setup is null && landingDrafts.Revision > firstRevision,
+        "the same repository name on another host has a separate landing draft and retires picker ownership");
+    var secondDraft = new NewChatDraft("other computer", [], new NewChatSetup("claude", null, "low"));
+    var restoredFirst = landingDrafts.Select("host-one/repo", secondDraft);
+    Check(restoredFirst.Text == firstDraft.Text && restoredFirst.Files.SequenceEqual(firstDraft.Files) && restoredFirst.Setup == firstDraft.Setup,
+        "switching repositories restores the complete earlier draft instead of carrying controls or files across owners");
+    var unselected = landingDrafts.Select(null, restoredFirst);
+    Check(unselected.Text.Length == 0 && unselected.Files.Length == 0, "removing a selected repository does not move its draft to the unbound page");
+    var third = landingDrafts.Select("host-three/repo", new NewChatDraft("unselected text", [], null));
+    Check(third.Text.Length == 0, "unbound transfer happens only for the first repository selection");
+    Check(landingDrafts.Select("host-two/repo", third).Text == secondDraft.Text, "unselecting or adding another repository retains all earlier owner drafts");
+    File.WriteAllBytes(stagedPath, [1, 2, 3, 4]);
+    Check(selected.IsCurrent() && File.ReadAllBytes(selected.Path).SequenceEqual(new byte[] { 1, 2, 3 }), "editing the original cannot replace the selected attachment bytes");
+    var movedSource = stagedPath + ".moved";
+    File.Move(stagedPath, movedSource);
+    File.Delete(movedSource);
+    Check(selected.IsCurrent() && File.ReadAllBytes(selected.Path).SequenceEqual(new byte[] { 1, 2, 3 }), "moving or deleting the original screenshot leaves the staged attachment usable");
+    File.WriteAllBytes(stagedPath, [8, 9]);
+    var staleSelection = await NewChatFile.CaptureAsync(stagedPath);
+    Check(staleSelection.RetainIfOwned(false) is null && !File.Exists(staleSelection.Path) && File.Exists(stagedPath),
+        "a picker or copy result from a retired owner deletes its private snapshot and preserves the source");
+    new NewChatFile(stagedPath, "source", 2, File.GetLastWriteTimeUtc(stagedPath)).Discard();
+    Check(File.Exists(stagedPath), "cleanup refuses to delete a path outside the owned staging directory");
+    landingDrafts.DiscardFiles();
+    Check(!File.Exists(selected.Path) && File.Exists(stagedPath), "retiring an account cleans all repository draft copies without deleting source files");
+    using var cancelledSelection = new CancellationTokenSource(); cancelledSelection.Cancel();
+    try { await NewChatFile.CaptureAsync(stagedPath, cancelledSelection.Token); throw new Exception("cancelled selection copied bytes"); }
+    catch (OperationCanceledException) { }
+    File.Delete(stagedPath);
+} finally { File.Delete(stagedPath); }
 const long imageFileMaximum = 256L * 1024 * 1024;
 Check(ChatImagePolicy.DownloadLimit(false, true, imageFileMaximum) == 5L * 1024 * 1024,
     "automatic remote image previews use the separate 5 MiB policy");

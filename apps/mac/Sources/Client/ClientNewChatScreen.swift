@@ -127,8 +127,18 @@ struct ClientNewChatScreen: View {
             draft.failed(submission, message: reader.error ?? L10n.text("apple.chatview.chat_unavailable.a45aae80"))
             return
         }
-        reader.draft = submission.text
-        reader.saveDraftNow()
+        guard current(), reader.selected?.id == created.id,
+              await reader.installLandingDraft(submission, permits: current) else {
+            draft.failed(submission, message: reader.error)
+            return
+        }
+        if submission.agent.fastMode {
+            await reader.update(fastMode: true)
+            guard current(), reader.selected?.id == created.id, reader.selected?.fastMode == true, reader.error == nil else {
+                draft.failed(submission, message: reader.error ?? L10n.text("common.new_chat.setup_changed"))
+                return
+            }
+        }
         guard current(), reader.selected?.id == created.id else { return }
         draft.transferred(submission)
         navigation.showingNewChat = false

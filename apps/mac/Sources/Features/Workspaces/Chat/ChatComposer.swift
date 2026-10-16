@@ -125,17 +125,21 @@ struct ChatComposer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        well
-            .frame(maxWidth: ReadingRoom.laneWidth)
-            .padding(.horizontal, Theme.Space.l)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Space.m)
-            .background(Theme.background)
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Theme.border)
-                    .frame(height: 1)
+        Group {
+            if model.landingDraft != nil { well }
+            else {
+                well
+                    .frame(maxWidth: ReadingRoom.laneWidth)
+                    .padding(.horizontal, Theme.Space.l)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Space.m)
+                    .background(Theme.background)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Theme.border).frame(height: 1)
+                    }
             }
+        }
+        .onChange(of: model.currentReference) { _, _ in importing = false; importOwner = nil }
         .fileImporter(
             isPresented: $importing,
             allowedContentTypes: [.item],
@@ -173,9 +177,9 @@ struct ChatComposer: View {
             ComposerUtilityLayout(spacing: Theme.Space.s, controlsGap: Theme.Space.m) {
                 HStack(spacing: Theme.Space.s) {
                     attachControl
-                    ChatFastModeButton(model: model, chat: chat, locked: running)
+                    ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
                 }
-                ChatComposerControls(model: model, chat: chat, locked: running)
+                ChatComposerControls(model: model, chat: chat, locked: setupLocked)
                 HStack(spacing: Theme.Space.s) {
                     turnStatus
                     ComposerLimitsBadge(backend: chat.backend)
@@ -188,11 +192,11 @@ struct ChatComposer: View {
             if running { onStop() }
         }
         #endif
-        .padding(12)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(model.landingDraft == nil ? 12 : 0)
+        .background(model.landingDraft == nil ? Theme.panel : Color.clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
+                .strokeBorder(model.landingDraft == nil ? Theme.border : Color.clear, lineWidth: 1)
         }
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: onDropProviders)
         #if os(macOS)
@@ -248,6 +252,7 @@ struct ChatComposer: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         #endif
+        .disabled(model.landingDraft != nil && model.currentReference == nil)
         .help(L10n.text("apple.chatcomposer.attach_files_or_images.b548dd44"))
         .accessibilityLabel(L10n.text("apple.chatcomposer.attach.d406ade2"))
     }
@@ -342,7 +347,7 @@ struct ChatComposer: View {
             selection: $selection,
             owner: model.currentReference,
             placeholder: placeholder,
-            enabled: !model.sending,
+            enabled: !model.sending && model.landingDraft?.isSubmitting != true,
             acceptsAttachmentDrops: acceptsDrops,
             onSend: {
                 if model.selected?.id == chat.id, !cannotSend { onSend() }
@@ -372,12 +377,20 @@ struct ChatComposer: View {
     }
 
     private var sendTitle: String {
+        if let landing = model.landingDraft {
+            return landing.isSubmitting ? L10n.text("common.new_chat.preparing")
+                : (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty
+                   ? L10n.text("common.new_chat.open_chat") : L10n.text("common.new_chat.send"))
+        }
         if sendsAsNote && model.selected?.nativeSteer == true { return L10n.text("common.chat.steer") }
         if sendsAsNote { return L10n.text("apple.chatcomposer.next_step.298a9207") }
         return running ? L10n.text("apple.chatcomposer.send_after_this_turn.012fc8c3") : L10n.text("apple.chatcomposer.send.f6f4688f")
     }
 
+    private var setupLocked: Bool { running || (model.landingDraft != nil && !model.landingCanSubmit) }
+
     private var cannotSend: Bool {
+        if let landing = model.landingDraft { return !model.landingCanSubmit || landing.isSubmitting || landing.stagingAttachments > 0 }
         // A saved copy is read and drafted in, never sent from: the banner
         // above says why, and the field stays editable for those drafts.
         if model.canHandleChatCommandLocally && !model.sending && model.stagingAttachments == 0 && model.unconfirmedSend == nil { return false }

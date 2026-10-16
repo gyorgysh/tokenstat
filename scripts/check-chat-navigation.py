@@ -15,6 +15,7 @@ nav_class = nav[nav.index('@MainActor\n@Observable\nfinal class ClientNavigation
 presented = nav[nav.index('struct PresentedTaskBoard:'):nav.rindex('#endif')]
 model_stub = (root / 'scripts/tests/ClientChatSessionTests.swift').read_text().split('@main\n')[0]
 stubs = '''
+struct ChatAttachment: Codable, Sendable, Identifiable, Hashable { var id: String; var name: String; var mediaType: String?; var size: UInt64? }
 enum ClientTab: String { case home, workspaces, insights, machines, ssh }
 enum WorkspaceSection: String { case sessions, chat, changes }
 struct ClientAppDestination {}

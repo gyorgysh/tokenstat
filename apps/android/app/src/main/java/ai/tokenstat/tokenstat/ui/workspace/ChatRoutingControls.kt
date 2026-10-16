@@ -218,6 +218,10 @@ internal fun ChatRoutingControls(
                 if (policy.bol("waitForReset")) "common.chat_route_combined_mode" else "common.chat_route_fallback_mode"
             } else if (policy?.bol("waitForReset") == true) "common.chat_route_wait_mode" else "common.chat_route_manual"),
             owner = chat.routeText("id"),
+            primary = {
+                TsAccentButton(label = L10n.text("common.chat_route_setup"), icon = ActionIcon.Settings.vector,
+                    small = true, onClick = { showing = true })
+            },
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text(
@@ -248,11 +252,6 @@ internal fun ChatRoutingControls(
                         ),
                         style = TsType.footnote,
                     )
-                TsAccentButton(
-                    label = L10n.text("common.chat_route_setup"),
-                    icon = ActionIcon.Settings.vector,
-                    onClick = { showing = true },
-                )
             }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

@@ -59,7 +59,8 @@ struct ChatRoutingSection: View {
     }
     var body: some View {
         ChatSetupSection(title: L10n.text("common.chat_routing"), icon: .settings,
-                         subtitle: L10n.text("common.chat_routing_intro"), summary: summary) {
+                         subtitle: L10n.text("common.chat_routing_intro"), summary: summary,
+                         primary: ChatRoutingControls(model: model, chat: chat, title: L10n.text("common.chat_route_setup"))) {
             if !policy.routes.isEmpty {
                 Text(policy.routes.map { model.backend(for: $0.backend)?.label ?? $0.backend }.joined(separator: " → "))
                     .font(Theme.caption).fixedSize(horizontal: false, vertical: true)
@@ -68,7 +69,6 @@ struct ChatRoutingSection: View {
                 Text(L10n.text("common.chat_route_preferred", model.backend(for: policy.preferred?.backend ?? chat.routing?.preferred?.backend ?? chat.backend)?.label ?? chat.backend))
                     .font(Theme.caption).foregroundStyle(.secondary)
             }
-            ChatRoutingControls(model: model, chat: chat, title: L10n.text("common.chat_route_setup"), prominent: true)
         }
 
     }

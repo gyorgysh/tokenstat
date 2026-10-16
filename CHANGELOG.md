@@ -13,7 +13,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Added
 
-- New chat opens a dedicated composer with a repository picker and the existing Add repository flow on Mac, iPhone/iPad, Android and Windows. The Repositories section groups Git checkouts and ordinary folders. Opening the landing page or choosing a repository does not create an empty conversation. Open chat supports image/file-first messages without starting a model turn.
+- New chat opens a dedicated composer with a repository picker and the existing Add repository flow on Mac, iPhone/iPad, Android and Windows. It includes file/image attachments, agent/model/effort, working style, permissions and supported fast mode. Local drafts stay with their repository. Opening the landing page, selecting files or choosing a repository does not create an empty conversation. Open chat supports image/file-first messages without starting a model turn. Empty background taps produce a subtle ripple when motion is enabled.
 - Chat composers on Mac, iPhone, iPad, Android and Windows offer slash commands for context, usage, tools, MCP servers, stopping work and native Claude/Codex compaction.
 - Chat inspectors combine context and conversation usage, recent context history, tool groups and reported MCP connections in compact, expandable panels.
 - Chats show reported goals, plan steps and subagent tasks in a compact activity summary and expandable inspector on Mac, iPhone/iPad, Android and Windows. `/goal`, `/plan` and `/subagents` open the details without starting a model turn. Live counts and historical reports stay distinct, and backend sections that are not reported remain unknown.
@@ -35,7 +35,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Changed
 
-- Conversation settings, chat detail, routing, agent behavior and instructions use compact summary cards with full-row disclosures across clients.
+- Conversation settings, chat detail, routing, agent behavior and instructions use compact cards across clients. Primary controls stay visible; full-row disclosures reveal explanations and secondary settings.
 - Updated Rust, Android and Windows dependencies, terminal renderers and build tools. HTTP requests retain the existing certificate trust policy across the library upgrade.
 - Automatic chat attachment previews allow files up to 5 MiB; local images bypass that threshold and preserve transparency in bounded previews.
 
