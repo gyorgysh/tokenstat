@@ -168,6 +168,14 @@ Screenshot thumbnails fall back to their image data if a temporary file URL
 is unavailable.
 Pull and Push dialogs are owned by the desktop window, so an inspector peek
 can auto-hide while a review remains open.
+On Mac, clicking the dimmed chat outside the image viewer closes it and consumes
+the click. Viewer controls, other windows and nested dialogs keep it open.
+Pull and Push detect Git LFS in the checkout and reviewed commits. Their setup
+card asks before installing through an existing Homebrew installation or enabling
+repository-local LFS; other hosts get the installation guide and a recheck action.
+Git filters and hooks can find Homebrew tools even when the app starts from Finder.
+Reviewed pushes upload their LFS objects before sending the Git ref, so custom
+hooks can remain intact. Setup changes repository filters and leaves hooks alone.
 
 ## Verification
 

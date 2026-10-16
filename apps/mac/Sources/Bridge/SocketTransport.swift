@@ -263,6 +263,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
         "pulls.review",
         "launcher.signIn",
         "launcher.install",
+        "workspace.lfsSetup",
         "chat.personaDraft",
         "screen.viewer.input",
         "ssh.vault.password.set",

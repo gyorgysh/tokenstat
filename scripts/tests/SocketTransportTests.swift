@@ -179,7 +179,7 @@ private final class ProtocolServer: @unchecked Sendable {
         for method in ["workflow.run", "pty.spawn", "ssh.session.open", "chat.create", "chat.fork", "automation.create",
                        "workflow.create", "workflow.continue", "workflow.design", "todo.create",
                        "pulls.create", "pulls.comment", "pulls.review", "launcher.signIn", "launcher.install",
-                       "chat.personaDraft", "screen.viewer.input", "ssh.vault.password.set", "ssh.vault.recovery.rotate"] {
+                       "chat.personaDraft", "screen.viewer.input", "ssh.vault.password.set", "ssh.vault.recovery.rotate", "workspace.lfsSetup"] {
             for remote in [false, true] {
                 let server = try ClosingServer()
                 let transport = SocketTransport.connecting(to: server.path)!

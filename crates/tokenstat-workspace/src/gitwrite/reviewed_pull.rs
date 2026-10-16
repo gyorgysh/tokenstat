@@ -39,6 +39,8 @@ pub struct Review {
     /// Commits this branch has that the upstream does not.
     pub outgoing: u64,
     pub state: State,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lfs: Option<super::lfs::Status>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -145,6 +147,7 @@ pub fn review(dir: &Path) -> Result<Review, String> {
     .output()
     .map_err(|e| e.to_string())?;
     if listed.status.code() == Some(2) {
+        let lfs = super::lfs::status(dir, Some(&head));
         return Ok(Review {
             branch,
             head,
@@ -154,6 +157,7 @@ pub fn review(dir: &Path) -> Result<Review, String> {
             incoming: 0,
             outgoing: 0,
             state: State::Missing,
+            lfs,
         });
     }
     if !listed.status.success() {
@@ -195,6 +199,7 @@ pub fn review(dir: &Path) -> Result<Review, String> {
         (_, 0) => State::FastForward,
         _ => State::Diverged,
     };
+    let lfs = super::lfs::status(dir, Some(&upstream));
     Ok(Review {
         branch,
         head,
@@ -204,6 +209,7 @@ pub fn review(dir: &Path) -> Result<Review, String> {
         incoming,
         outgoing,
         state,
+        lfs,
     })
 }
 
@@ -272,6 +278,7 @@ pub fn pull(dir: &Path, reviewed: &Review) -> Result<Outcome, String> {
             _ => "There is nothing to pull.".into(),
         });
     }
+    super::lfs::ensure_ready(dir, target)?;
     let out = command(
         dir,
         &[
@@ -484,5 +491,37 @@ mod tests {
         let reviewed = review(dir).unwrap();
         assert_eq!(reviewed.state, State::Missing);
         assert!(pull(dir, &reviewed).is_err());
+    }
+
+    #[test]
+    fn incoming_lfs_is_detected_before_checkout_and_downloaded_after_setup() {
+        let f = fixture();
+        let dir = f.local.path();
+        if text(dir, &["lfs", "version"]).is_err() {
+            return;
+        }
+        super::super::lfs::setup(f.other.path(), false).unwrap();
+        commit(
+            f.other.path(),
+            ".gitattributes",
+            "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+        );
+        let body = "Large file from upstream\n".repeat(1000);
+        commit(f.other.path(), "asset.bin", &body);
+        text(f.other.path(), &["push", "-q"]).unwrap();
+        // Override any global installation to model an unconfigured clone.
+        text(dir, &["config", "filter.lfs.process", ""]).unwrap();
+        let reviewed = review(dir).unwrap();
+        assert!(!reviewed.lfs.as_ref().unwrap().ready());
+        assert!(pull(dir, &reviewed).unwrap_err().contains("Git LFS"));
+        assert_eq!(text(dir, &["rev-parse", "HEAD"]).unwrap(), reviewed.head);
+        assert!(!dir.join("asset.bin").exists());
+        // The explicit enable action repairs the empty repository filter.
+        assert!(super::super::lfs::setup(dir, false).unwrap().ready());
+        // Pull needs the filters, not an unrelated pre-push hook.
+        let _ = fs::remove_file(dir.join(".git/hooks/pre-push"));
+        let reviewed = review(dir).unwrap();
+        assert!(pull(dir, &reviewed).unwrap().ok);
+        assert_eq!(fs::read_to_string(dir.join("asset.bin")).unwrap(), body);
     }
 }

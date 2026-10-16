@@ -230,6 +230,7 @@ private struct ChatImageViewer: View {
         .modifier(ChatFileRelayConsent(model: model, presenter: request.id))
         #if os(macOS)
         .frame(minWidth: 480, idealWidth: 880, minHeight: 480, idealHeight: 680)
+        .background(ChatImageOutsideDismiss { dismiss() })
         .onExitCommand { dismiss() }
         #else
         .presentationDetents([.large])
@@ -394,6 +395,49 @@ private struct ChatImageViewer: View {
         }
     }
 }
+
+#if os(macOS)
+/// Keep native sheet focus and keyboard behavior while making its dimmed
+/// parent a dismissal target. Consume the click so it cannot activate chat.
+private struct ChatImageOutsideDismiss: NSViewRepresentable {
+    let dismiss: () -> Void
+    func makeNSView(context: Context) -> OutsideDismissView { OutsideDismissView() }
+    func updateNSView(_ view: OutsideDismissView, context: Context) { view.dismiss = dismiss }
+    static func dismantleNSView(_ view: OutsideDismissView, coordinator: ()) { view.stopMonitoring() }
+
+    final class OutsideDismissView: NSView {
+        var dismiss: (() -> Void)?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stopMonitoring()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+                guard let self, let sheet = self.window, let parent = sheet.sheetParent,
+                      event.window === parent, parent.attachedSheet === sheet,
+                      sheet.attachedSheet == nil,
+                      NSApp.modalWindow == nil || NSApp.modalWindow === sheet else { return event }
+                // Wait until AppKit finishes dispatching this event before
+                // ending the sheet whose modal loop is handling it.
+                DispatchQueue.main.async { [weak self, weak sheet, weak parent] in
+                    guard let self, let sheet, let parent, self.window === sheet,
+                          sheet.sheetParent === parent, parent.attachedSheet === sheet,
+                          sheet.attachedSheet == nil,
+                          NSApp.modalWindow == nil || NSApp.modalWindow === sheet else { return }
+                    self.dismiss?()
+                }
+                return nil
+            }
+        }
+
+        func stopMonitoring() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+    }
+}
+#endif
 
 #if !os(macOS)
 private struct ChatImageExporter: UIViewControllerRepresentable {

@@ -99,14 +99,14 @@ struct GitCommitTarget: Hashable, Sendable, GitCommitService {
                        ["operationId": operationID], as: GitCommitReceipt?.self)
     }
 
-    func call<T: Decodable & Sendable>(_ method: String, _ values: [String: Any], as type: T.Type) async throws -> T {
+    func call<T: Decodable & Sendable>(_ method: String, _ values: [String: Any], patience: TimeInterval = Bridge.Patience.standard, as type: T.Type) async throws -> T {
         var params = values
         params["id"] = workspaceID
         if let peer {
-            return try await Bridge.onPeer(peer, method, params, as: type)
+            return try await Bridge.onPeer(peer, method, params, patience: patience, as: type)
         }
         #if os(macOS)
-        return try await Bridge.localReviewedGit(method, params, as: type)
+        return try await Bridge.localReviewedGit(method, params, patience: patience, as: type)
         #else
         throw CocoaError(.fileReadNoSuchFile)
         #endif

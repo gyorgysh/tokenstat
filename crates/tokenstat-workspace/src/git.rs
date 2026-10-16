@@ -1249,6 +1249,10 @@ fn git_command(dir: &Path, args: &[&str]) -> Command {
         // arrive C-quoted, which is what that function is for.
         .args(["-c", "core.quotePath=false"])
         .args(args);
+    if let Some(path) = crate::git_environment::executable_path(std::env::var_os("PATH").as_deref())
+    {
+        command.env("PATH", path);
+    }
     command
 }
 

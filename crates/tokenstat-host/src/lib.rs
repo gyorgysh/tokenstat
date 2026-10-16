@@ -254,4 +254,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// history list draws for everyone who has one.
 /// Version 34 adds revision-checked chat recovery and cooperative runner stop.
 /// Version 35 adds the opt-in work overview across chats and terminals.
-pub const PROTOCOL_VERSION: &str = "35";
+/// Version 36 adds Git LFS preflight and explicitly consented repository setup.
+pub const PROTOCOL_VERSION: &str = "36";

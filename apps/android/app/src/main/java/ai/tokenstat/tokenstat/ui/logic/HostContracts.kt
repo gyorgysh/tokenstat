@@ -13,7 +13,7 @@ import kotlinx.serialization.json.longOrNull
 object HostContracts {
     const val CHAT_RECOVERY_MIN_PROTOCOL = 34
     fun supportsChatRecovery(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_RECOVERY_MIN_PROTOCOL
-    const val PROTOCOL_VERSION = "34"
+    const val PROTOCOL_VERSION = "36"
     const val WORKTREES_MIN_PROTOCOL = 24
     const val CHAT_MIN_PROTOCOL = 4
     const val CHAT_FORK_MIN_PROTOCOL = 26

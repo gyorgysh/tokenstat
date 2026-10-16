@@ -12,6 +12,7 @@ struct GitPullReview: Codable, Sendable, Equatable {
     let incoming: UInt64
     let outgoing: UInt64
     let state: State
+    var lfs: GitLFSStatus? = nil
 
     enum State: String, Codable, Sendable {
         case upToDate, ahead, fastForward, diverged, missing
@@ -27,7 +28,7 @@ struct GitPullOutcome: Codable, Sendable, Equatable {
     let head: String?
 }
 
-protocol GitPullService: Sendable {
+protocol GitPullService: GitLFSService {
     func supportsReviewedPull() async -> Bool
     func pullReview() async throws -> GitPullReview
     func pull(_ review: GitPullReview) async throws -> GitPullOutcome
@@ -42,7 +43,7 @@ extension GitCommitTarget: GitPullService {
     }
     func pull(_ review: GitPullReview) async throws -> GitPullOutcome {
         let reviewed = try JSONSerialization.jsonObject(with: JSONEncoder().encode(review))
-        return try await call("workspace.pullReviewed", ["review": reviewed], as: GitPullOutcome.self)
+        return try await call("workspace.pullReviewed", ["review": reviewed], patience: Bridge.Patience.long, as: GitPullOutcome.self)
     }
 }
 

@@ -7,8 +7,9 @@ struct FileDiff: Codable, Sendable {}
 struct WorkspaceFolder: Codable, Sendable {}
 enum FixtureError: Error { case disconnected, unexpectedTransport }
 enum Bridge {
-    static func onPeer<T: Decodable & Sendable>(_ peer: String, _ method: String, _ params: [String: Any], as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
-    static func localReviewedGit<T: Decodable & Sendable>(_ method: String, _ params: [String: Any], as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
+    enum Patience { static let standard: TimeInterval = 60; static let long: TimeInterval = 600 }
+    static func onPeer<T: Decodable & Sendable>(_ peer: String, _ method: String, _ params: [String: Any], patience: TimeInterval = 60, as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
+    static func localReviewedGit<T: Decodable & Sendable>(_ method: String, _ params: [String: Any], patience: TimeInterval = 60, as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
 }
 enum RemoteHostFeature {
     case selectedCommit

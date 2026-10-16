@@ -2496,9 +2496,9 @@ extension Bridge {
     }
 
     static func localReviewedGit<T: Decodable & Sendable>(
-        _ method: String, _ params: [String: Any], as type: T.Type
+        _ method: String, _ params: [String: Any], patience: TimeInterval = Patience.standard, as type: T.Type
     ) async throws -> T {
-        try await background(method, params, as: type)
+        try await background(method, params, patience: patience, as: type)
     }
 
     static func reviewedGitTarget(id: String) -> GitCommitTarget {

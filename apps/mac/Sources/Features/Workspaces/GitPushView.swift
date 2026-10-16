@@ -87,6 +87,10 @@ struct GitPushView: View {
                         if review.setUpstream {
                             Text(L10n.text("apple.gitpushview.this_will_also_set_the_branch_s_tracking_d.95dfeac0")).font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                         }
+                        if let lfs = review.lfs {
+                            GitLFSSetupView(status: lfs, working: session.working,
+                                            setup: { await session.setupLFS() }, check: { await session.prepare() })
+                        }
                     }
                     if let outcome = session.outcome {
                         Text(outcome.message).font(Theme.callout)
@@ -97,7 +101,9 @@ struct GitPushView: View {
                         Text(error).font(Theme.callout).foregroundStyle(Theme.danger).textSelection(.enabled)
                     }
                     if session.working {
-                        ProgressView(session.draft.submitted == nil ? L10n.text("apple.gitpushview.checking_the_branch.3733503a") : L10n.text("apple.gitpushview.checking_push.00fa6ce0"))
+                        ProgressView(session.settingUpLFS ? L10n.text("apple.gitlfs.setting_up")
+                                     : session.draft.submitted == nil ? L10n.text("apple.gitpushview.checking_the_branch.3733503a")
+                                     : L10n.text("apple.gitpushview.checking_push.00fa6ce0"))
                             .font(Theme.callout)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -114,7 +120,7 @@ struct GitPushView: View {
                 Button(L10n.text("common.done"), .done) { dismiss() }.buttonStyle(AccentButtonStyle(comfortable: true))
             } else if session.review != nil {
                 Button(session.review?.remoteHead == nil ? L10n.text("apple.gitpushview.publish_branch.e1f5968c") : L10n.text("apple.gitpushview.push_branch.97deb7c0"), .upload) { Task { await session.submit(); await refreshIfPushed() } }
-                    .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
+                    .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working || session.review?.lfs?.ready == false)
             } else {
                 Button(L10n.text("apple.gitpushview.check_branch.8128e71f"), .refresh) { Task { await session.prepare() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)

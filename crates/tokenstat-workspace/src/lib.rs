@@ -22,6 +22,7 @@
 //! pressed a button. Keep new code on the correct side of that line.
 
 pub mod git;
+mod git_environment;
 pub mod gitwrite;
 pub mod registry;
 pub mod tree;

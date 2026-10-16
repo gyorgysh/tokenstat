@@ -15,6 +15,7 @@ use std::process::Command;
 use serde::Serialize;
 
 mod lease;
+pub mod lfs;
 pub mod reviewed_pull;
 pub mod reviewed_push;
 pub mod selected;
@@ -79,6 +80,10 @@ fn git_command(dir: &Path) -> Command {
         .env_remove("GIT_PREFIX")
         .env_remove("GIT_COMMON_DIR")
         .args(["-c", "core.quotePath=false"]);
+    if let Some(path) = crate::git_environment::executable_path(std::env::var_os("PATH").as_deref())
+    {
+        command.env("PATH", path);
+    }
     command
 }
 

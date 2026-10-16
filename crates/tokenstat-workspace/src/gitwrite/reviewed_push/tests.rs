@@ -27,6 +27,82 @@ fn repositories() -> (tempfile::TempDir, tempfile::TempDir) {
 }
 
 #[test]
+fn reviewed_push_transfers_lfs_objects_with_the_commit() {
+    let (local, remote) = repositories();
+    let dir = local.path();
+    if text(dir, &["lfs", "version"]).is_err() {
+        return;
+    }
+    assert!(super::super::lfs::setup(dir, false).unwrap().ready());
+    fs::write(
+        dir.join(".gitattributes"),
+        "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+    )
+    .unwrap();
+    let body = "Reviewed large file\n".repeat(1000);
+    fs::write(dir.join("asset.bin"), &body).unwrap();
+    text(dir, &["add", ".gitattributes", "asset.bin"]).unwrap();
+    text(dir, &["commit", "-qm", "LFS asset"]).unwrap();
+    // An executable hook that does not run LFS must still upload the asset,
+    // and the original hook must still run during the Git push.
+    let hook = dir.join(".git/hooks/pre-push");
+    let hook_body = "#!/bin/sh\nprintf ran > custom-hook-ran\n";
+    fs::write(&hook, hook_body).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let reviewed = review(dir).unwrap();
+    assert!(reviewed.lfs.as_ref().unwrap().ready());
+    let receipt = push(dir, "fixture-lfs-push", &reviewed, false).unwrap();
+    assert_eq!(receipt.state, "succeeded", "{}", receipt.message);
+    let pointer = text(remote.path(), &["show", "refs/heads/main:asset.bin"]).unwrap();
+    let oid = pointer
+        .lines()
+        .find_map(|line| line.strip_prefix("oid sha256:"))
+        .unwrap();
+    let object = remote
+        .path()
+        .join("lfs/objects")
+        .join(&oid[..2])
+        .join(&oid[2..4])
+        .join(oid);
+    assert_eq!(fs::read_to_string(object).unwrap(), body);
+    assert_eq!(fs::read_to_string(&hook).unwrap(), hook_body);
+    assert_eq!(
+        fs::read_to_string(dir.join("custom-hook-ran")).unwrap(),
+        "ran"
+    );
+    // A missing LFS payload fails before any Git ref or user hook is sent.
+    fs::write(dir.join("missing.bin"), "A different missing large file").unwrap();
+    text(dir, &["add", "missing.bin"]).unwrap();
+    text(dir, &["commit", "-qm", "Missing LFS payload"]).unwrap();
+    let pointer = text(dir, &["show", "HEAD:missing.bin"]).unwrap();
+    let oid = pointer
+        .lines()
+        .find_map(|line| line.strip_prefix("oid sha256:"))
+        .unwrap();
+    fs::remove_file(
+        dir.join(".git/lfs/objects")
+            .join(&oid[..2])
+            .join(&oid[2..4])
+            .join(oid),
+    )
+    .unwrap();
+    fs::remove_file(dir.join("custom-hook-ran")).unwrap();
+    let missing = review(dir).unwrap();
+    let failure = push(dir, "fixture-lfs-missing-payload", &missing, false).unwrap();
+    assert_eq!(failure.state, "failed", "{}", failure.message);
+    assert!(failure.message.contains("Git LFS"));
+    assert_eq!(
+        text(remote.path(), &["rev-parse", "refs/heads/main"]).unwrap(),
+        reviewed.head
+    );
+    assert!(!dir.join("custom-hook-ran").exists());
+}
+
+#[test]
 fn publishes_only_reviewed_branch_and_restores_tracking() {
     let (local, remote) = repositories();
     let dir = local.path();

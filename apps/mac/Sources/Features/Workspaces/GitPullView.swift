@@ -46,6 +46,7 @@ struct GitPullSheet: View {
     @State private var error: String?
     @State private var working = false
     @State private var pulling = false
+    @State private var settingUpLFS = false
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -71,6 +72,9 @@ struct GitPullSheet: View {
                                 .foregroundStyle(review.state == .diverged || review.state == .missing ? Theme.warning : .primary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        if let lfs = review.lfs {
+                            GitLFSSetupView(status: lfs, working: working, setup: setupLFS, check: check)
+                        }
                     }
                     if let error {
                         Text(error)
@@ -80,7 +84,8 @@ struct GitPullSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if working {
-                        ProgressView(pulling ? L10n.text("apple.gitpull.pulling") : L10n.text("apple.gitpull.checking"))
+                        ProgressView(settingUpLFS ? L10n.text("apple.gitlfs.setting_up")
+                                     : pulling ? L10n.text("apple.gitpull.pulling") : L10n.text("apple.gitpull.checking"))
                             .font(Theme.callout)
                     }
                     Text(L10n.text("apple.gitpull.help"))
@@ -100,7 +105,7 @@ struct GitPullSheet: View {
                     Task { await pull(review) }
                 }
                 .buttonStyle(AccentButtonStyle(comfortable: true))
-                .disabled(working)
+                .disabled(working || review.lfs?.ready == false)
             } else {
                 Button(L10n.text("apple.gitpull.check_again"), .refresh) { Task { await check() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true))
@@ -159,6 +164,21 @@ struct GitPullSheet: View {
             // again with the same review. Drop it so the sheet offers Check
             // again instead of the same Pull.
             review = nil
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func setupLFS() async {
+        guard !working, let lfs = review?.lfs, !lfs.ready else { return }
+        working = true
+        settingUpLFS = true
+        defer { working = false; settingUpLFS = false }
+        error = nil
+        do {
+            _ = try await service.setupLFS(allowInstall: !lfs.installed && lfs.canInstall)
+            // Setup can take time; get a fresh review before offering Pull.
+            await check()
+        } catch {
             self.error = error.localizedDescription
         }
     }

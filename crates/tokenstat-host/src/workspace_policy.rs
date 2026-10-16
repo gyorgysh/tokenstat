@@ -1236,6 +1236,7 @@ mod tests {
             "workspace.pushRecover",
             "workspace.pullReview",
             "workspace.pullReviewed",
+            "workspace.lfsSetup",
             "pulls.branch",
             "pty.spawn",
             "pty.write",

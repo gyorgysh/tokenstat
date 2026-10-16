@@ -15,6 +15,7 @@ final class GitPushSession {
     private(set) var outcome: GitPushReceipt?
     private(set) var draft = GitPushDraft()
     private(set) var working = false
+    private(set) var settingUpLFS = false
     private(set) var loaded = false
     private(set) var canRetry = false
     private(set) var errorMessage: String?
@@ -65,7 +66,8 @@ final class GitPushSession {
     }
 
     func submit() async {
-        guard loaded, !working, draft.submitted == nil, let review, !review.upToDate, review.outgoing != 0 else { return }
+        guard loaded, !working, draft.submitted == nil, let review, !review.upToDate,
+              review.outgoing != 0, review.lfs?.ready != false else { return }
         working = true
         defer { working = false }
         draft.submitted = GitPushSubmission(operationID: UUID().uuidString, review: review)
@@ -78,6 +80,21 @@ final class GitPushSession {
             return
         }
         await send(retry: false)
+    }
+
+    func setupLFS() async {
+        guard loaded, !working, draft.submitted == nil, let lfs = review?.lfs, !lfs.ready else { return }
+        working = true
+        settingUpLFS = true
+        defer { working = false; settingUpLFS = false }
+        errorMessage = nil
+        review = nil
+        outcome = nil
+        do {
+            _ = try await service.setupLFS(allowInstall: !lfs.installed && lfs.canInstall)
+            review = try await service.pushReview()
+            outcome = nil
+        } catch { errorMessage = error.localizedDescription }
     }
 
     func checkOutcome() async {

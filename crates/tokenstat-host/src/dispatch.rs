@@ -309,6 +309,15 @@ struct ReviewedPushParams {
 }
 
 #[cfg(feature = "local-host")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LfsSetupParams {
+    id: String,
+    #[serde(default)]
+    allow_install: bool,
+}
+
+#[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PtySpawnParams {
@@ -3011,6 +3020,7 @@ fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
         | "workspace.pushRecover"
         | "workspace.pullReview"
         | "workspace.pullReviewed"
+        | "workspace.lfsSetup"
         | "workspace.write"
         | "workspace.push"
         | "pty.spawn" => {}
@@ -3521,6 +3531,15 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             // Review fetched, so ahead and behind moved even when nothing else did.
             invalidate_workspace_status(Some(&p.id));
             result.map_err(|e| e.to_string())
+        }
+
+        "workspace.lfsSetup" => {
+            let p: LfsSetupParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let outcome = tokenstat_workspace::gitwrite::lfs::setup(&ws.path, p.allow_install)?;
+            invalidate_workspace_status(Some(&p.id));
+            serde_json::to_value(outcome).map_err(|e| e.to_string())
         }
 
         "workspace.push" => {
@@ -5843,6 +5862,22 @@ mod tests {
                 .success()
         );
         run(&["remote", "add", "origin", remote.path().to_str().unwrap()]);
+        if std::process::Command::new("git")
+            .args(["lfs", "version"])
+            .output()
+            .is_ok_and(|out| out.status.success())
+        {
+            run(&["config", "core.hooksPath", ".git/hooks"]);
+            let setup: Value = serde_json::from_str(&call(
+                &mut s,
+                "workspace.lfsSetup",
+                &json!({"id": id}).to_string(),
+            ))
+            .unwrap();
+            assert_eq!(setup["ok"], true, "{setup}");
+            assert_eq!(setup["result"]["installed"], true, "{setup}");
+            assert_eq!(setup["result"]["configured"], true, "{setup}");
+        }
         let push_review: Value = serde_json::from_str(&call(
             &mut s,
             "workspace.pushReview",

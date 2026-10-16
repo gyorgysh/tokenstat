@@ -11,6 +11,7 @@ struct GitPushReview: Codable, Sendable, Equatable {
     let remoteHead: String?
     let outgoing: UInt64?
     let setUpstream: Bool
+    var lfs: GitLFSStatus? = nil
 
     var branchName: String { String(branch.dropFirst("refs/heads/".count)) }
     var destination: String { remote + "/" + remoteRef.replacingOccurrences(of: "refs/heads/", with: "") }
@@ -40,7 +41,7 @@ struct GitPushReceipt: Codable, Sendable, Equatable {
     var finished: Bool { succeeded || state == "failed" }
 }
 
-protocol GitPushService: Sendable {
+protocol GitPushService: GitLFSService {
     func supportsReviewedPush() async -> Bool
     func pushReview() async throws -> GitPushReview
     func push(_ submission: GitPushSubmission, retry: Bool) async throws -> GitPushReceipt
@@ -56,7 +57,7 @@ extension GitCommitTarget: GitPushService {
     }
     func push(_ submission: GitPushSubmission, retry: Bool) async throws -> GitPushReceipt {
         let review = try JSONSerialization.jsonObject(with: JSONEncoder().encode(submission.review))
-        return try await call("workspace.pushReviewed", ["operationId": submission.operationID, "review": review, "retry": retry], as: GitPushReceipt.self)
+        return try await call("workspace.pushReviewed", ["operationId": submission.operationID, "review": review, "retry": retry], patience: Bridge.Patience.long, as: GitPushReceipt.self)
     }
     func pushReceipt(operationID: String, recover: Bool) async throws -> GitPushReceipt? {
         try await call(recover ? "workspace.pushRecover" : "workspace.pushReceipt", ["operationId": operationID], as: GitPushReceipt?.self)

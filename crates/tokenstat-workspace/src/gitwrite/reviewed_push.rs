@@ -25,6 +25,8 @@ pub struct Review {
     pub remote_head: Option<String>,
     pub outgoing: Option<u64>,
     pub set_upstream: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lfs: Option<super::lfs::Status>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -130,6 +132,7 @@ pub fn review(dir: &Path) -> Result<Review, String> {
     let outgoing = text(dir, &["rev-list", "--count", &range])
         .ok()
         .and_then(|s| s.parse().ok());
+    let lfs = super::lfs::status(dir, Some(&head));
     Ok(Review {
         branch,
         head,
@@ -139,6 +142,7 @@ pub fn review(dir: &Path) -> Result<Review, String> {
         remote_head,
         outgoing,
         set_upstream: upstream_remote.is_none() && merge.is_none(),
+        lfs,
     })
 }
 
@@ -188,17 +192,22 @@ pub fn push(dir: &Path, id: &str, reviewed: &Review, retry: bool) -> Result<Rece
         .and_then(|stored| stored.endpoint.as_deref());
     save_receipt(&path, &result, previous_endpoint)?;
     let prepared = (|| {
-        let fresh = review(dir)?;
+        let mut fresh = review(dir)?;
+        // LFS readiness is advisory review metadata, not part of the bound
+        // branch/destination identity. Older clients do not round-trip it.
+        fresh.lfs = reviewed.lfs.clone();
         if fresh != *reviewed {
             return Err(
                 "The branch or push destination changed. Review the current branch before pushing."
                     .into(),
             );
         }
+        super::lfs::ensure_ready(dir, &fresh.head)?;
         let url = endpoint(dir, &reviewed.remote)?;
         if digest(url.as_bytes()) != reviewed.endpoint_digest {
             return Err("The push destination changed. Review it again.".into());
         }
+        super::lfs::pre_push(dir, &fresh, &url)?;
         Ok(url)
     })();
     let url = match prepared {

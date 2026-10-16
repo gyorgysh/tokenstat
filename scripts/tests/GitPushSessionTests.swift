@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with GitPushModels.swift GitCommitModels.swift GitPushSession.swift SessionIdentities.swift.
+// Compile with GitPushModels.swift GitLFSModels.swift GitCommitModels.swift GitPushSession.swift SessionIdentities.swift.
 // WorkbenchDraftFile.swift OriginalFileCoordination.swift WorkReference.swift.
 import Foundation
 
@@ -7,8 +7,9 @@ struct FileDiff: Codable, Sendable {}
 struct WorkspaceFolder: Codable, Sendable {}
 enum FixtureError: Error { case disconnected, unexpectedTransport }
 enum Bridge {
-    static func onPeer<T: Decodable & Sendable>(_ peer: String, _ method: String, _ params: [String: Any], as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
-    static func localReviewedGit<T: Decodable & Sendable>(_ method: String, _ params: [String: Any], as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
+    enum Patience { static let standard: TimeInterval = 60; static let long: TimeInterval = 600 }
+    static func onPeer<T: Decodable & Sendable>(_ peer: String, _ method: String, _ params: [String: Any], patience: TimeInterval = 60, as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
+    static func localReviewedGit<T: Decodable & Sendable>(_ method: String, _ params: [String: Any], patience: TimeInterval = 60, as type: T.Type) async throws -> T { throw FixtureError.unexpectedTransport }
 }
 enum RemoteHostFeature {
     case selectedCommit, reviewedPush
@@ -23,10 +24,24 @@ enum RemoteHostFeature {
 actor FixturePush: GitPushService {
     var submissions: [GitPushSubmission] = []
     var receipt: GitPushReceipt?
+    var lfs: GitLFSStatus?
+    var setups: [Bool] = []
+    var setupFails = false
+    func requireLFS(installed: Bool = true, fails: Bool = false) {
+        lfs = GitLFSStatus(installed: installed, configured: false, canInstall: !installed)
+        setupFails = fails
+    }
+    func setupLFS(allowInstall: Bool) async throws -> GitLFSStatus {
+        setups.append(allowInstall)
+        if setupFails { throw FixtureError.disconnected }
+        let ready = GitLFSStatus(installed: true, configured: true, canInstall: false)
+        lfs = ready
+        return ready
+    }
     func supportsReviewedPush() async -> Bool { true }
     func pushReview() async throws -> GitPushReview {
         GitPushReview(branch: "refs/heads/main", head: "reviewed-head", remote: "origin", remoteRef: "refs/heads/main",
-                      endpointDigest: "endpoint", remoteHead: nil, outgoing: 2, setUpstream: true)
+                      endpointDigest: "endpoint", remoteHead: nil, outgoing: 2, setUpstream: true, lfs: lfs)
     }
     func push(_ submission: GitPushSubmission, retry: Bool) async throws -> GitPushReceipt {
         submissions.append(submission)
@@ -73,6 +88,32 @@ actor FixturePush: GitPushService {
         let other = session(host: "another-computer")
         await other.load()
         assert(other.draft.submitted == nil)
-        print("Push sessions: durable identity, duplicate prevention, stale-window protection and read-only recovery passed")
+        await service.requireLFS()
+        await other.prepare()
+        await other.submit()
+        assert(other.draft.submitted == nil, "A missing LFS setup cannot submit a push")
+        await other.setupLFS()
+        assert(other.review?.lfs?.ready == true, "Setup refreshes the branch review")
+        let afterSetup = await service.submissions.count
+        let setups = await service.setups
+        assert(afterSetup == 1 && setups == [false], "Enable only authorizes setup and never pushes implicitly")
+        await other.submit()
+        let afterSubmit = await service.submissions.count
+        assert(afterSubmit == 2, "A configured LFS repository can push")
+        let installer = session(host: "install-computer")
+        await service.requireLFS(installed: false)
+        await installer.prepare()
+        await installer.setupLFS()
+        let installPermissions = await service.setups
+        assert(installPermissions == [false, true], "Only the install action authorizes package installation")
+        await service.requireLFS(fails: true)
+        await installer.prepare()
+        await installer.setupLFS()
+        assert(installer.review == nil && installer.errorMessage != nil,
+               "A failed setup drops its stale review and offers a fresh branch check")
+        let legacy = Data(#"{"branch":"refs/heads/main","head":"abc","remote":"origin","remoteRef":"refs/heads/main","endpointDigest":"endpoint","outgoing":1,"setUpstream":true}"#.utf8)
+        let legacyReview = try JSONDecoder().decode(GitPushReview.self, from: legacy)
+        assert(legacyReview.lfs == nil)
+        print("Push sessions: durable identity, duplicate prevention, read-only recovery and explicit LFS setup passed")
     }
 }

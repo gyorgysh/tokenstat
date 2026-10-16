@@ -5678,5 +5678,15 @@
   "apple.chatcontext.connection_note": "Connection status from the agent’s last report.",
   "apple.chatcontext.reported_connected": "Reported connected",
   "apple.chatcontext.inventory_partial": "The tool and server lists are partial.",
-  "apple.chatcontext.no_listed_servers": "No MCP servers are listed in this report."
+  "apple.chatcontext.no_listed_servers": "No MCP servers are listed in this report.",
+  "apple.gitlfs.title": "Git LFS",
+  "apple.gitlfs.ready": "Large files will transfer with this repository.",
+  "apple.gitlfs.enable_help": "This repository uses large files. Allow tokenstat to enable Git LFS for this repository on the computer shown above. Existing hooks are preserved.",
+  "apple.gitlfs.install_help": "This repository needs Git LFS. Allow tokenstat to install it with Homebrew on the computer shown above and enable it for this repository.",
+  "apple.gitlfs.manual_help": "Install Git LFS on the computer shown above, then check the branch again to continue.",
+  "apple.gitlfs.enable": "Enable Git LFS",
+  "apple.gitlfs.install": "Install and enable Git LFS",
+  "apple.gitlfs.guide": "Git LFS installation guide",
+  "apple.gitlfs.check": "Check again",
+  "apple.gitlfs.setting_up": "Setting up Git LFS…"
 }
