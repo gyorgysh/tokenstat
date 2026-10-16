@@ -459,7 +459,9 @@ private struct ChatStartEmptySpace: View {
 
 /// One light behind the composer, and the surface in front of it.
 ///
-/// Three layers. Native glass stays a complete, unmasked surface underneath.
+/// Three layers. Underneath is the floor: the Mac's own window glass, which
+/// has a desktop behind it, or on a phone and an iPad an opaque colour, since
+/// a full-screen page has nothing behind it for a material to pull through.
 /// The light is an elliptical gradient the compositor owns, so its twenty
 /// second breath and its lean after the pointer never cost a frame. The
 /// surface on top is `ChatStartField.metal`, evaluated per pixel on the GPU,
@@ -504,12 +506,12 @@ private struct ChatStartLiquidSurface: View {
                         // leaves the layer as it was drawn, and the page is
                         // the one place that would be a solid slab.
                         Rectangle()
-                            .fill(Theme.background)
+                            .fill(ChatStartGlassField.ground)
                             .colorEffect(ChatStartGlassField.shader(
                                 size: pane.size, time: time, now: now, motion: motion,
                                 lift: lift ? 1 : 0,
                                 palette: .init(accent: Theme.accent, secondary: Theme.secondary,
-                                               background: Theme.background, dark: colorScheme == .dark)))
+                                               background: ChatStartGlassField.ground, dark: colorScheme == .dark)))
                     }
                     // No parallax here, deliberately. The light is the deep
                     // layer and leans; the surface is at the glass and holds
@@ -538,8 +540,8 @@ private struct ChatStartLiquidSurface: View {
         if !reduceTransparency {
             EllipticalGradient(
                 stops: [
-                    .init(color: Theme.accent.opacity(colorScheme == .dark ? 0.20 : 0.10), location: 0),
-                    .init(color: Theme.accent.opacity(colorScheme == .dark ? 0.065 : 0.035), location: 0.48),
+                    .init(color: Theme.accent.opacity((colorScheme == .dark ? 0.20 : 0.10) * ChatStartGlassField.lightGain), location: 0),
+                    .init(color: Theme.accent.opacity((colorScheme == .dark ? 0.065 : 0.035) * ChatStartGlassField.lightGain), location: 0.48),
                     .init(color: .clear, location: 1),
                 ],
                 center: UnitPoint(x: 0.5, y: 0.46),
@@ -563,7 +565,7 @@ private struct ChatStartLiquidSurface: View {
     }
 
     @ViewBuilder private var glass: some View {
-        if reduceTransparency { Theme.background }
+        if reduceTransparency { ChatStartGlassField.ground }
         else {
             #if os(macOS)
             if #available(macOS 26, *) {
@@ -572,7 +574,11 @@ private struct ChatStartLiquidSurface: View {
                 Rectangle().fill(.ultraThinMaterial)
             }
             #else
-            Rectangle().fill(.ultraThinMaterial)
+            // Nothing behind this page on a phone or an iPad, so there is
+            // nothing for a material to pull through: it frosted a blank and
+            // read pale against the app. An opaque floor instead, with the
+            // light, the folds and the rings all drawn on top of it.
+            ChatStartGlassField.ground
             #endif
         }
     }

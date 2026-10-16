@@ -41,6 +41,15 @@ enum Theme {
     /// and the content below and made the strip look like a band stuck across
     /// the window. Dark mode can take the contrast, light mode cannot.
     static let tabStrip = Color.adaptive(light: hex(0xF3F2F8), dark: hex(0x08070D))
+    /// The floor under the new chat page on iPhone and iPad.
+    ///
+    /// That page is presented full screen over nothing, so a material there
+    /// frosts a blank rather than anything worth seeing, and it came out pale
+    /// beside the rest of the app. A step under `background` instead: the
+    /// light, the folds and the prism are drawn on an opaque floor, the lit
+    /// card floats off it, and the page reads as this app's. The Mac keeps
+    /// its window glass, which has a desktop behind it.
+    static let chatStartGround = Color.adaptive(light: hex(0xF2F1F7), dark: hex(0x050409))
     /// Hairlines. These carry the structure that shadows used to.
     static let border = Color.adaptive(light: hex(0xE7E7EE), dark: hex(0x211D33))
     /// A row the pointer is over.

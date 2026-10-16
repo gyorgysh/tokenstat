@@ -79,6 +79,28 @@ enum ChatStartGlassField {
         var dark: Bool
     }
 
+    /// The floor the page is drawn on, which the surface also tints towards.
+    ///
+    /// The Mac sits on the window's own glass and has a desktop behind it.
+    /// The phone and the iPad have nothing behind them, so they get an opaque
+    /// floor instead of a material frosting a blank. See `Theme.chatStartGround`.
+    static var ground: Color {
+        #if os(macOS)
+        Theme.background
+        #else
+        Theme.chatStartGround
+        #endif
+    }
+
+    /// How hard the key light is driven. Window glass carries some of the
+    /// light itself; an opaque floor carries none, so the phone and the iPad
+    /// drive it a little harder for the same depth.
+    #if os(macOS)
+    static let lightGain = 1.0
+    #else
+    static let lightGain = 1.3
+    #endif
+
     /// Read from inside a view body, which is where the motion it packs
     /// lives too.
     @MainActor

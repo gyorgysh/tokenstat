@@ -256,7 +256,10 @@ settings:
     # 157 is the 1.7.0 chat, repository and session experience preview.
     # 158 was uploaded for 1.7.0 device testing.
     # 159 retries unaccepted steering messages after checking the current turn.
-    CURRENT_PROJECT_VERSION: "159"
+    # 160 is 1.7.0 with the mobile new chat page: a floor instead of frosted
+    # glass, a keyboard the page gives way to, and an answer when the account
+    # has no computer on it.
+    CURRENT_PROJECT_VERSION: "160"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

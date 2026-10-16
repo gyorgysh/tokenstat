@@ -389,7 +389,8 @@ struct ClientRootView: View {
 
     private var rootPresentations: some View {
         rootLifecycle
-        .fullScreenCover(isPresented: Binding(get: { navigation.showingNewChat }, set: { navigation.showingNewChat = $0 })) {
+        .fullScreenCover(isPresented: Binding(get: { navigation.showingNewChat }, set: { navigation.showingNewChat = $0 }),
+                         onDismiss: openPendingNewChatRequest) {
             ClientNewChatScreen()
         }
         .fullScreenCover(item: Binding(
@@ -522,6 +523,16 @@ struct ClientRootView: View {
             kind: target.chatID != nil ? .conversation : target.terminalID != nil ? .terminal : .workspace,
             itemID: target.chatID ?? target.terminalID)
         navigation.restoredRoute = WorkMobileRoute(scope: scope, tab: "workspaces", reference: reference, section: target.section?.rawValue ?? "sessions")
+    }
+
+    /// New chat had nothing to run on and said so on its way out.
+    private func openPendingNewChatRequest() {
+        guard let request = navigation.pendingNewChatRequest else { return }
+        navigation.pendingNewChatRequest = nil
+        switch request {
+        case .machineSetup: sessionModels.models(for: WorkSessionContext.shared.scope).setup.open()
+        case .plans: store.showPaywall = true
+        }
     }
 
     /// Go where search was asked to go, now that search has closed.

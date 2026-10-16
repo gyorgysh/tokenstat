@@ -9,15 +9,16 @@ struct ClientNewChatScreen: View {
     @Environment(AccountModel.self) private var account
     @State private var addingRepository = false
     @State private var choosingHost = false
+    /// This presentation has had a computer to offer. A refresh that comes
+    /// back with an empty account snapshot must not pull the composer out
+    /// from under somebody who is writing in it.
+    @State private var sawMachine = false
     private var draft: ChatStartDraft { navigation.newChatDraft }
     private var host: ClientHost? { workspaces.hosts.first { $0.peerKey == workspaces.connectedKey } }
 
     var body: some View {
         NavigationStack {
-            ChatStartPage(draft: draft, repositories: workspaces.folders,
-                          hostPicker: AnyView(hostPicker), allowsSend: workspaces.isConnecting == nil && host != nil,
-                          onAdd: addRepository,
-                          onSend: { Task { await send() } })
+            page
                 .navigationTitle(L10n.text("apple.clientchatview.new_chat.db18382a"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -72,7 +73,68 @@ struct ClientNewChatScreen: View {
         .onChange(of: WorkSessionContext.shared.generation) { _, generation in
             draft.activate(scope: WorkSessionContext.shared.scope, session: generation)
         }
+        .onChange(of: workspaces.hosts.isEmpty, initial: true) { _, empty in
+            if !empty { sawMachine = true }
+        }
         .onDisappear { draft.retire() }
+    }
+
+    /// New chat is a first-class action on both layouts: the iPad keeps it at
+    /// the top of the sidebar and the phone in the Projects bar, whatever the
+    /// account has on it. So it is pressed by people with no computer paired
+    /// and by people whose plan has no remote, and what it used to open for
+    /// both was the whole composer with a Send that could never fire. A
+    /// disabled control is not an answer to "why can I not start a chat".
+    /// Projects already answers both questions, in these words.
+    @ViewBuilder private var page: some View {
+        if !remoteAllowed, account.signedIn {
+            reason(kind: .needsAccount, art: .remoteGate,
+                   title: L10n.text("apple.clientnewchatscreen.remote_is_on_patron.d25dea13"),
+                   message: L10n.text("apple.clientnewchatscreen.running_a_conversation_on_your_computer_is.ba662608"),
+                   actionTitle: L10n.text("apple.clientnewchatscreen.see_plans.d9898933"),
+                   icon: .plans, request: .plans)
+        } else if workspaces.hosts.isEmpty, !sawMachine {
+            reason(kind: .nothingYet, art: .connect,
+                   title: L10n.text("apple.clientnewchatscreen.no_machine_yet.3ea83dc9"),
+                   message: L10n.text("apple.clientnewchatscreen.a_conversation_runs_an_agent_on_a_computer.3bed8f6c"),
+                   actionTitle: L10n.text("apple.clientnewchatscreen.set_up_a_machine.43e10e13"),
+                   icon: .connect, request: .machineSetup)
+        } else {
+            ChatStartPage(draft: draft, repositories: workspaces.folders,
+                          hostPicker: AnyView(hostPicker), allowsSend: workspaces.isConnecting == nil && host != nil,
+                          onAdd: addRepository,
+                          onSend: { Task { await send() } })
+        }
+    }
+
+    /// Why there is no composer here, on the same floor the page would have
+    /// been drawn on.
+    private func reason(kind: ClientEmptyKind, art: EmptyArtKind, title: String, message: String,
+                        actionTitle: String, icon: ActionIcon, request: ClientNewChatRequest) -> some View {
+        ZStack {
+            ChatStartGlassField.ground.ignoresSafeArea()
+            ClientEmptyState(kind: kind, title: title, message: message, actionTitle: actionTitle,
+                             actionIcon: icon, action: { leave(for: request) }, art: art)
+                .padding(.horizontal, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Setup and the paywall are both sheets the root owns, and this page is
+    /// covering that root, so asking for one here would queue a presentation
+    /// behind one that is going away. The root starts it once this screen
+    /// has gone.
+    private func leave(for request: ClientNewChatRequest) {
+        navigation.pendingNewChatRequest = request
+        navigation.showingNewChat = false
+    }
+
+    /// The plan's own answer, with the account's flag ahead of the tier it was
+    /// derived from. Twin of the test `ClientWorkspacesView` makes.
+    private var remoteAllowed: Bool {
+        if let remote = account.account?.canRemote { return remote }
+        let tier = account.account?.tier?.lowercased()
+        return ["patron", "legend"].contains(tier)
     }
 
     private var hostPicker: some View {

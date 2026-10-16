@@ -9,6 +9,17 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.7.1]
+
+### Improved
+
+- The new chat screen on iPhone and iPad sits on a deeper, opaque background. The light, the ripples and the prism read as part of the app rather than as frosted glass over nothing. The Mac keeps its window glass.
+- The Android new chat screen gives way to the keyboard. The heading steps aside, the repository and agent choices stay reachable, the composer sits against the keyboard, and a button puts the keyboard away.
+
+### Fixed
+
+- Starting a chat on iPhone or iPad with no computer on the account. New chat now says what is missing and offers machine setup, or the plans screen when the account has no remote, instead of a composer that cannot send.
+
 ## [1.7.0] - 2026-10-16
 
 ### Added
