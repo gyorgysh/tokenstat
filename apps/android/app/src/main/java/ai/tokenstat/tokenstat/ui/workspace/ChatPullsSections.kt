@@ -747,7 +747,7 @@ fun ChatSection(
     /// Nothing leaves the queue before the host acknowledges it, and every
     /// outcome that is not a plain acceptance leaves the copy behind in a
     /// state that says what to do next. Port of `ChatModel.deliverQueued`.
-    suspend fun deliver(item: QueuedMessage, stopCurrent: Boolean, steerCurrent: Boolean = false): Boolean {
+    suspend fun deliver(item: QueuedMessage, stopCurrent: Boolean, steerCurrent: Boolean = false, retryUnavailableSteer: Boolean = true): Boolean {
         if (!ownsProject()) return false
         val id = openId ?: return false
         if (!HostContracts.supportsConfirmedSend(protocol)) {
@@ -756,8 +756,10 @@ fun ChatSection(
             return false
         }
         val key = outboxKey(id)
+        val deliveryOwner = projectOwner
         if (!outbox.beginDelivery(key)) return false
         sendingIds = sendingIds + id
+        var deferredSteer: QueuedMessage? = null
         try {
             if (item.needsReceipt) return checkReceipt(id, item)
             // The host refuses a send with no revision, and a message written
@@ -833,6 +835,24 @@ fun ChatSection(
             // must leave the message where it was, not mark it failed.
             if (failure is CancellationException) throw failure
             val code = (failure as? ai.tokenstat.tokenstat.core.CoreFailure)?.code.orEmpty()
+            // This refusal precedes input acceptance and receipt creation.
+            // Preserve authorization until a fresh idle report lets the
+            // ordinary outbox send it, without stopping or repeating a turn.
+            if (steerCurrent && code == "steer_unavailable") {
+                var deferred = false
+                if (!writeQueue(id) { list ->
+                    deferred = deferUnavailableSteer(list, live, code, steerCurrent)
+                }) return false
+                if (openId == id && ownsProject()) {
+                    authorized = authorized - item.id - deliveryId
+                    if (deferred) {
+                        authorized = authorized + deliveryId
+                        sendError = null
+                        if (retryUnavailableSteer) deferredSteer = live
+                    }
+                }
+                return false
+            }
             writeQueue(id) { list ->
                 val at = list.indexOfFirst { it.id == deliveryId }
                 if (at >= 0) {
@@ -855,6 +875,22 @@ fun ChatSection(
         } finally {
             outbox.endDelivery(key)
             sendingIds = sendingIds - id
+            deferredSteer?.let { attempt ->
+                scope.launch {
+                    if (openId != id || projectOwner != deliveryOwner || !ownsProject() || attempt.id !in authorized) return@launch
+                    if (!refreshChats()) return@launch
+                    if (openId != id || projectOwner != deliveryOwner || !ownsProject() || attempt.id !in authorized) return@launch
+                    val fresh = chats.firstOrNull { it.str("id") == id } ?: return@launch
+                    val waiting = queued.firstOrNull { it.id == attempt.id && it.delivery == ChatDelivery.Waiting }
+                        ?: return@launch
+                    if (fresh.long("sendRevision") != waiting.expectedRevision) return@launch
+                    val steering = fresh.bol("running") && fresh.bol("nativeSteer") &&
+                        ChatCommandRules.canSteer(waiting.text, waiting.attachments.isNotEmpty(), fresh.bol("nativeSteerAttachments"))
+                    if (steering) {
+                        deliver(waiting, stopCurrent = false, steerCurrent = steering, retryUnavailableSteer = false)
+                    }
+                }
+            }
         }
     }
 
@@ -1146,8 +1182,8 @@ fun ChatSection(
         try {
             // This explicit new intent can proceed while an older, uncertain
             // delivery remains available for review in Pending.
-            // Keep the action chosen before upload: an ended turn must not
-            // turn a Steer tap into a new prompt or an interruption.
+            // Try the chosen live action first. Only a definite refusal may
+            // return it to the queue for a fresh idle report.
             if (liveInput) deliver(item, stopCurrent = false, steerCurrent = true)
             else if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) deliver(item, stopCurrent = false)
         } finally {
@@ -3399,4 +3435,15 @@ internal fun prepareQueuedDelivery(
         firstAttemptAtMs = if (rotates) now else current.firstAttemptAtMs ?: current.attemptedAtMs ?: now,
         attemptedAtMs = now,
     ).also { items[index] = it }
+}
+
+/** A host-confirmed unaccepted steer may wait for the turn without a receipt hold. */
+internal fun deferUnavailableSteer(
+    items: MutableList<QueuedMessage>, attempt: QueuedMessage, code: String, steering: Boolean,
+): Boolean {
+    if (!steering || code != "steer_unavailable" || attempt.delivery != ChatDelivery.Sending) return false
+    val index = items.indexOfFirst { it.id == attempt.id }
+    if (index < 0 || items[index] != attempt) return false
+    items[index] = attempt.copy(delivery = ChatDelivery.Waiting, attemptedAtMs = null)
+    return true
 }

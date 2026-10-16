@@ -34,6 +34,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Fixed
 
 - Sending and resuming long conversations, previewing local images and screenshots, and keeping attachments when steering capabilities change.
+- Steering messages getting stuck as failed when live input becomes unavailable during delivery on Apple devices and Android. The app rechecks the turn, retries eligible live input once, and keeps unsent messages queued.
 - Jump to latest on Mac keeps the conversation ready to send while its newest messages load. A new-chat agent choice applies only to that creation, and failed or abandoned setup cleans up the new conversation.
 - Final messages, tool results and screenshots getting lost when an agent exits quickly or leaves a large amount of queued output.
 - Native compaction in plan mode, after instruction changes and when Codex resumes another task first. A late Claude result no longer ends a turn before queued steering input is consumed.

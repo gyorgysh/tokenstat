@@ -2582,7 +2582,7 @@ final class ChatModel {
 
     /// Acceptance updates the captured owner's disk record even if navigation
     /// changes. Nothing leaves the outbox before the host's acknowledgement.
-    private func deliverQueued(_ candidate: ChatQueuedMessage, stopCurrent: Bool, reserved: Bool = false, steerCurrent: Bool = false) async -> Bool {
+    private func deliverQueued(_ candidate: ChatQueuedMessage, stopCurrent: Bool, reserved: Bool = false, steerCurrent: Bool = false, retryUnavailableSteer: Bool = true) async -> Bool {
         guard candidate.signInBackend == nil, savedCopy == nil, ownsQueue, (!sending || reserved), let reference = queuedReference,
               WorkCacheAccess.canSave(reference), let conversationID = reference.itemID,
               ChatOutboxStore.shared.beginDelivery(reference) else { return false }
@@ -2726,6 +2726,48 @@ final class ChatModel {
                 return true
             } catch {
                 if current() { dropOutgoing(staged) }
+                // The host returns this before accepting any input or
+                // writing a receipt. Keep the person's send authorized when
+                // the CLI ends before the phone learns the turn is over.
+                if !accepted, steerCurrent,
+                   case BridgeError.core(code: "steer_unavailable", message: _) = error {
+                    publish(try ChatOutboxStore.shared.update(reference) { items in
+                        guard let index = items.firstIndex(where: { $0.id == deliveryItem.id }),
+                              items[index].hasSameWriting(as: deliveryItem),
+                              items[index].expectedRevision == item.expectedRevision,
+                              items[index].delivery == .sending else {
+                            throw ChatOutboxStore.Failure.conflict
+                        }
+                        items[index].delivery = .waiting
+                        items[index].attemptedAt = nil
+                    })
+                    if current() {
+                        authorizedQueueItems.remove(item.id)
+                        authorizedQueueItems.insert(deliveryItem.id)
+                        self.error = nil
+                        Task {
+                            guard current() else { return }
+                            let read = beginChatListRead(workspaceID: reference.workspaceID, peer: targetPeer)
+                            guard let answer = try? await Bridge.chats(workspaceID: reference.workspaceID, peer: targetPeer),
+                                  current() else { return }
+                            let latest = applyChatList(answer, read: read, current: chats)
+                            guard let fresh = latest.first(where: { $0.id == conversationID }) else { return }
+                            replace(fresh)
+                            if retryUnavailableSteer, busy, selected?.nativeSteer == true,
+                               selected?.sendRevision == item.expectedRevision,
+                               let waiting = queued.first(where: { $0.id == deliveryItem.id }),
+                               authorizedQueueItems.contains(waiting.id),
+                               ChatCommandRules.canSteer(waiting.text, attachments: !waiting.attachments.isEmpty,
+                                                         acceptsAttachments: nativeSteerAcceptsAttachments) {
+                                _ = await deliverQueued(waiting, stopCurrent: false, steerCurrent: true,
+                                                        retryUnavailableSteer: false)
+                            } else {
+                                await drainQueue()
+                            }
+                        }
+                    }
+                    return false
+                }
                 authorizedQueueItems.remove(deliveryItem.id)
                 publish(try ChatOutboxStore.shared.update(reference) { items in
                     if let index = items.firstIndex(where: { $0.id == deliveryItem.id }) {

@@ -6,7 +6,9 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.longOrNull
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatPullsSectionsTest {
@@ -69,6 +71,52 @@ class ChatPullsSectionsTest {
         assertEquals(10L, attempt.firstAttemptAtMs)
         items[0] = attempt.copy(delivery = ai.tokenstat.tokenstat.ui.logic.ChatDelivery.NeedsReview)
         assertNull(prepareQueuedDelivery(items, "new", 11, "other"))
+    }
+
+    @Test
+    fun `a refused steer waits with the same writing files context and receipt identity`() {
+        val original = ai.tokenstat.tokenstat.ui.logic.QueuedMessage(
+            "message", "Keep going", expectedRevision = 3,
+            attachments = listOf(ai.tokenstat.tokenstat.ui.logic.QueuedAttachment("image", "image.png")))
+        val items = mutableListOf(original)
+        val attempt = prepareQueuedDelivery(items, original.id, 10, "unused")!!
+        assertTrue(deferUnavailableSteer(items, attempt, "steer_unavailable", steering = true))
+        assertEquals(original.copy(firstAttemptAtMs = 10), items.single())
+        val resumed = prepareQueuedDelivery(items, original.id, 20, "must-not-rotate")!!
+        assertEquals(original.id, resumed.id)
+        assertEquals(10L, resumed.firstAttemptAtMs)
+        assertEquals(original.text, resumed.text)
+        assertEquals(original.attachments, resumed.attachments)
+        assertEquals(original.expectedRevision, resumed.expectedRevision)
+    }
+
+    @Test
+    fun `uncertain delivery content refusals and ordinary sends cannot autoqueue`() {
+        val sending = ai.tokenstat.tokenstat.ui.logic.QueuedMessage(
+            "message", "Keep going", expectedRevision = 3,
+            delivery = ai.tokenstat.tokenstat.ui.logic.ChatDelivery.Sending, attemptedAtMs = 10)
+        for (code in listOf("delivery_unknown", "steer_refused", "conversation_changed", "")) {
+            val items = mutableListOf(sending)
+            assertFalse(deferUnavailableSteer(items, sending, code, steering = true))
+            assertEquals(sending, items.single())
+        }
+        val items = mutableListOf(sending)
+        assertFalse(deferUnavailableSteer(items, sending, "steer_unavailable", steering = false))
+        assertEquals(sending, items.single())
+    }
+
+    @Test
+    fun `late steer refusal cannot overwrite another delivery state or recreate removed writing`() {
+        val sending = ai.tokenstat.tokenstat.ui.logic.QueuedMessage(
+            "message", "Keep going", expectedRevision = 3,
+            delivery = ai.tokenstat.tokenstat.ui.logic.ChatDelivery.Sending, attemptedAtMs = 10)
+        val changed = sending.copy(delivery = ai.tokenstat.tokenstat.ui.logic.ChatDelivery.DeliveryUnknown)
+        val items = mutableListOf(changed)
+        assertFalse(deferUnavailableSteer(items, sending, "steer_unavailable", steering = true))
+        assertEquals(changed, items.single())
+        items.clear()
+        assertFalse(deferUnavailableSteer(items, sending, "steer_unavailable", steering = true))
+        assertTrue(items.isEmpty())
     }
 
     @Test

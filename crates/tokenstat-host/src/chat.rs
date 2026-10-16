@@ -7908,6 +7908,32 @@ mod tests {
                 }
                 if outcome.is_some() {
                     manager.kill(&process.id).unwrap();
+                    // A phone can still display a running, steer-capable
+                    // snapshot after the CLI has exited. This refusal must
+                    // prove that no input or receipt was accepted, so the
+                    // client can leave the same message waiting safely.
+                    assert!(store.get("steering").unwrap().running);
+                    let requests = fs::read_dir(&directory)
+                        .unwrap()
+                        .flatten()
+                        .filter(|entry| entry.file_name().to_string_lossy().starts_with("request-"))
+                        .count();
+                    let unavailable = store
+                        .steer_send("steering", "Keep this pending", "late-steer", now_ms(), 0)
+                        .unwrap_err();
+                    assert_eq!(unavailable.code, "steer_unavailable");
+                    assert!(store.receipt("steering", "late-steer").unwrap().is_none());
+                    assert_eq!(
+                        fs::read_dir(&directory)
+                            .unwrap()
+                            .flatten()
+                            .filter(|entry| entry
+                                .file_name()
+                                .to_string_lossy()
+                                .starts_with("request-"))
+                            .count(),
+                        requests
+                    );
                 }
                 manager.close(&process.id).unwrap();
             }
