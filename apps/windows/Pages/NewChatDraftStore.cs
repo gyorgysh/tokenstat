@@ -27,10 +27,13 @@ internal sealed class NewChatDraftStore
         _drafts.Clear();
     }
 
-    internal NewChatDraft Select(string? repository, NewChatDraft current)
+    internal NewChatDraft Select(string? repository, NewChatDraft current, bool adoptUnbound = true)
     {
         Remember(current);
         if (Repository == repository) return current;
+        // A folder shown before anyone chooses one is not a selection. The
+        // unbound draft stays unbound, and the first explicit choice adopts it.
+        if (!adoptUnbound) return current;
         if (repository is not null && !_hasSelectedRepository && Repository is null && !_drafts.ContainsKey(repository))
         {
             _drafts[repository] = current;

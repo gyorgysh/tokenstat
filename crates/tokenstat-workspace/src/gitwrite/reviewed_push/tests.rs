@@ -27,6 +27,68 @@ fn repositories() -> (tempfile::TempDir, tempfile::TempDir) {
 }
 
 #[test]
+fn false_skip_push_values_still_upload_lfs_objects() {
+    for value in ["0", "false"] {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!(
+                    "{}::reviewed_push_transfers_lfs_objects_with_the_commit",
+                    module_path!()
+                ),
+                "--nocapture",
+            ])
+            .env("GIT_LFS_SKIP_PUSH", value)
+            .status()
+            .unwrap();
+        assert!(status.success(), "GIT_LFS_SKIP_PUSH={value}");
+    }
+}
+
+#[test]
+fn skip_push_refuses_before_publishing_the_ref() {
+    if std::env::var("GIT_LFS_SKIP_PUSH").as_deref() != Ok("1") {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!(
+                    "{}::skip_push_refuses_before_publishing_the_ref",
+                    module_path!()
+                ),
+                "--nocapture",
+            ])
+            .env("GIT_LFS_SKIP_PUSH", "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+    let (local, remote) = repositories();
+    let dir = local.path();
+    if text(dir, &["lfs", "version"]).is_err() {
+        return;
+    }
+    super::super::lfs::setup(dir, false).unwrap();
+    fs::write(
+        dir.join(".gitattributes"),
+        "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+    )
+    .unwrap();
+    fs::write(dir.join("asset.bin"), "unpublished LFS payload").unwrap();
+    text(dir, &["add", ".gitattributes", "asset.bin"]).unwrap();
+    text(dir, &["commit", "-qm", "LFS asset"]).unwrap();
+    let reviewed = review(dir).unwrap();
+    let receipt = push(dir, "fixture-lfs-skip-push", &reviewed, false).unwrap();
+    assert_eq!(receipt.state, "failed");
+    assert!(
+        receipt.message.contains("GIT_LFS_SKIP_PUSH"),
+        "{}",
+        receipt.message
+    );
+    assert!(text(remote.path(), &["rev-parse", "--verify", "refs/heads/main"]).is_err());
+}
+
+#[test]
 fn reviewed_push_transfers_lfs_objects_with_the_commit() {
     let (local, remote) = repositories();
     let dir = local.path();

@@ -125,7 +125,11 @@ internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Bo
     var liveLease by remember(owner, peer, id, backend, requestedModel, revision) { mutableStateOf(false) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(owner, peer, id, backend, requestedModel, revision, lifecycle, enabled) {
-        if (!enabled || id == null) return@LaunchedEffect
+        if (!enabled || id == null) {
+            loaded = true
+            liveLease = false
+            return@LaunchedEffect
+        }
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             try {
                 while (true) {
@@ -133,9 +137,15 @@ internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Bo
                         val next = model.workspaceSection(peer, "chat.inspection", buildJsonObject { put("id", id) }) as? JsonObject
                         currentCoroutineContext().ensureActive()
                         if (next?.str("backend") == backend) { inspection = next; liveLease = true }
+                        else { liveLease = false }
                         loaded = true
                     } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { inspection = null; loaded = true; liveLease = false }
+                    catch (_: Exception) {
+                        // Keep the last matching snapshot. A failed poll is not
+                        // an empty conversation, and offline status must settle.
+                        liveLease = false
+                        loaded = true
+                    }
                     delay(5000)
                 }
             } finally { liveLease = false }

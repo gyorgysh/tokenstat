@@ -2276,21 +2276,33 @@ struct RootView: View {
             chatStart.failed(submission, message: reader.error ?? L10n.text("apple.chatview.chat_unavailable.a45aae80"))
             return
         }
+        // The host conversation exists now. Leave, a failed draft, or a failed
+        // fast-mode change has to delete it or the sidebar keeps an empty chat.
+        func abandon(_ message: String?) async {
+            let preserved = message ?? reader.error
+            if submission.owner.scope == WorkSessionContext.shared.scope {
+                await reader.remove(created)
+            }
+            chatStart.failed(submission, message: preserved)
+        }
         // Persist to this new conversation before exposing it to navigation.
         // Existing conversation drafts are owned by the previous model.
         guard current(), reader.selected?.id == created.id,
               await reader.installLandingDraft(submission, permits: current) else {
-            chatStart.failed(submission, message: reader.error)
+            await abandon(reader.error)
             return
         }
         if submission.agent.fastMode {
             await reader.update(fastMode: true)
             guard current(), reader.selected?.id == created.id, reader.selected?.fastMode == true, reader.error == nil else {
-                chatStart.failed(submission, message: reader.error ?? L10n.text("common.new_chat.setup_changed"))
+                await abandon(reader.error ?? L10n.text("common.new_chat.setup_changed"))
                 return
             }
         }
-        guard current(), reader.selected?.id == created.id else { return }
+        guard current(), reader.selected?.id == created.id else {
+            await abandon(nil)
+            return
+        }
         chat.saveDraftNow()
         chat = reader
         chatStart.transferred(submission)

@@ -9,10 +9,10 @@
 //! merge commit, no rebase, no stash and no flag that asks for one: a branch
 //! that has diverged is reported in words and left exactly as it was.
 //!
-//! No receipt is kept. After the fetch everything here is local, and whether
-//! it happened is answered by reading HEAD, so repeating an apply whose
-//! answer went missing is safe and says so.
+//! No receipt is kept. Reading HEAD identifies a completed ref update, and
+//! any LFS pointers still need their payloads before a retry reports success.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -261,7 +261,9 @@ pub fn pull(dir: &Path, reviewed: &Review) -> Result<Outcome, String> {
         return Err("The current branch changed. Review it again before pulling.".into());
     }
     // A repeat of an apply whose answer went missing finds the work done.
+    // Pointers left by a skipped smudge are not that finished state.
     if head == target {
+        super::lfs::materialize(dir, &reviewed.remote, target)?;
         return Ok(Outcome {
             ok: true,
             message: "The branch is already at the reviewed commit.".into(),
@@ -279,6 +281,8 @@ pub fn pull(dir: &Path, reviewed: &Review) -> Result<Outcome, String> {
         });
     }
     super::lfs::ensure_ready(dir, target)?;
+    super::lfs::fetch(dir, &reviewed.remote, target)?;
+    let before = untracked(dir)?;
     let out = command(
         dir,
         &[
@@ -291,10 +295,18 @@ pub fn pull(dir: &Path, reviewed: &Review) -> Result<Outcome, String> {
             target,
         ],
     )
+    .env_remove("GIT_LFS_SKIP_SMUDGE")
     .output()
     .map_err(|e| e.to_string())?;
     let after = text(dir, &["rev-parse", "--verify", "HEAD^{commit}"]).ok();
     if out.status.success() && after.as_deref() == Some(target) {
+        if let Err(error) = super::lfs::materialize(dir, &reviewed.remote, target) {
+            return Ok(Outcome {
+                ok: false,
+                message: error,
+                head: after,
+            });
+        }
         let count = reviewed.incoming;
         return Ok(Outcome {
             ok: true,
@@ -306,11 +318,68 @@ pub fn pull(dir: &Path, reviewed: &Review) -> Result<Outcome, String> {
             head: after,
         });
     }
+    // A failed smudge can leave the commit's files untracked. The next
+    // fast-forward then refuses to overwrite them. Remove only paths this
+    // checkout added.
+    if after.as_deref() == Some(reviewed.head.as_str()) {
+        restore_partial_checkout(dir, &before, target);
+    }
     Ok(Outcome {
         ok: false,
         message: failure(out, "Git did not move the branch."),
         head: after,
     })
+}
+
+fn untracked(dir: &Path) -> Result<HashSet<String>, String> {
+    // Include ignored files too: an incoming .gitignore can expose a file
+    // that already existed before checkout.
+    nul_paths(dir, &["ls-files", "--others", "-z"])
+}
+
+fn restore_partial_checkout(dir: &Path, before: &HashSet<String>, target: &str) {
+    let Ok(after) = untracked(dir) else {
+        return;
+    };
+    let Ok(tree) = nul_paths(dir, &["ls-tree", "-r", "--name-only", "-z", target]) else {
+        return;
+    };
+    for path in after.difference(before) {
+        if !tree.contains(path) || path.split('/').any(|part| part.is_empty() || part == "..") {
+            continue;
+        }
+        let full = dir.join(path);
+        if !full.symlink_metadata().is_ok_and(|info| info.is_file()) {
+            continue;
+        }
+        // Never delete writing changed by another process during checkout.
+        // hash-object applies this path's clean filter, so downloaded LFS
+        // payloads compare against the reviewed pointer as well.
+        let expected = text(dir, &["rev-parse", &format!("{target}:{path}")]);
+        let actual = text(dir, &["hash-object", &format!("--path={path}"), "--", path]);
+        if let (Ok(expected), Ok(actual)) = (expected, actual)
+            && expected == actual
+        {
+            let _ = std::fs::remove_file(full);
+        }
+    }
+}
+
+fn nul_paths(dir: &Path, args: &[&str]) -> Result<HashSet<String>, String> {
+    let out = command(dir, args)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !out.status.success() {
+        return Err(super::GitOutcome::from(out).message);
+    }
+    Ok(out
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        // Do not turn a non-UTF-8 path into a different file's name during
+        // cleanup. Such paths are left alone when they cannot be represented.
+        .filter_map(|path| String::from_utf8(path.to_vec()).ok())
+        .collect())
 }
 
 #[cfg(test)]
@@ -523,5 +592,129 @@ mod tests {
         let reviewed = review(dir).unwrap();
         assert!(pull(dir, &reviewed).unwrap().ok);
         assert_eq!(fs::read_to_string(dir.join("asset.bin")).unwrap(), body);
+    }
+
+    #[test]
+    fn skip_smudge_environment_does_not_leave_pointers() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!(
+                    "{}::incoming_lfs_is_detected_before_checkout_and_downloaded_after_setup",
+                    module_path!()
+                ),
+                "--nocapture",
+            ])
+            .env("GIT_LFS_SKIP_SMUDGE", "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn a_retry_at_the_target_fetches_missing_lfs_objects() {
+        let f = fixture();
+        let dir = f.local.path();
+        if text(dir, &["lfs", "version"]).is_err() {
+            return;
+        }
+        super::super::lfs::setup(f.other.path(), false).unwrap();
+        commit(
+            f.other.path(),
+            ".gitattributes",
+            "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+        );
+        let body = "Retry this large file\n".repeat(1000);
+        commit(f.other.path(), "asset.bin", &body);
+        text(f.other.path(), &["push", "-q"]).unwrap();
+        super::super::lfs::setup(dir, false).unwrap();
+        let reviewed = review(dir).unwrap();
+        // Model an older host's successful ref update with a skipped smudge.
+        let out = command(
+            dir,
+            &[
+                "merge",
+                "--ff-only",
+                "--",
+                reviewed.upstream_head.as_deref().unwrap(),
+            ],
+        )
+        .env("GIT_LFS_SKIP_SMUDGE", "1")
+        .output()
+        .unwrap();
+        assert!(out.status.success());
+        assert!(
+            fs::read_to_string(dir.join("asset.bin"))
+                .unwrap()
+                .starts_with("version https://git-lfs")
+        );
+        let objects = dir.join(".git/lfs/objects");
+        if objects.exists() {
+            fs::remove_dir_all(objects).unwrap();
+        }
+        assert!(pull(dir, &reviewed).unwrap().ok);
+        assert_eq!(fs::read_to_string(dir.join("asset.bin")).unwrap(), body);
+    }
+
+    #[test]
+    fn failed_smudge_cleanup_preserves_preexisting_and_changed_files() {
+        let f = fixture();
+        let dir = f.local.path();
+        fs::write(dir.join("kept"), "local writing").unwrap();
+        fs::write(dir.join("unrelated"), "unrelated writing").unwrap();
+        commit(f.other.path(), "kept", "upstream");
+        commit(f.other.path(), "added", "upstream");
+        commit(f.other.path(), "changed", "upstream");
+        text(f.other.path(), &["push", "-q"]).unwrap();
+        let reviewed = review(dir).unwrap();
+        let before = untracked(dir).unwrap();
+        fs::write(dir.join("added"), "upstream").unwrap();
+        fs::write(dir.join("changed"), "new local writing").unwrap();
+        restore_partial_checkout(dir, &before, reviewed.upstream_head.as_deref().unwrap());
+        assert!(!dir.join("added").exists());
+        assert_eq!(
+            fs::read_to_string(dir.join("kept")).unwrap(),
+            "local writing"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("changed")).unwrap(),
+            "new local writing"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("unrelated")).unwrap(),
+            "unrelated writing"
+        );
+    }
+
+    #[test]
+    fn a_failed_checkout_can_be_retried_without_untracked_blockers() {
+        let f = fixture();
+        let dir = f.local.path();
+        commit(f.other.path(), ".gitattributes", "*.bin filter=broken\n");
+        commit(f.other.path(), "aaa", "ordinary new file");
+        commit(f.other.path(), "zzz.bin", "filtered new file");
+        text(f.other.path(), &["push", "-q"]).unwrap();
+        text(
+            dir,
+            &[
+                "config",
+                "filter.broken.smudge",
+                "git tokenstat-test-missing-filter",
+            ],
+        )
+        .unwrap();
+        text(dir, &["config", "filter.broken.required", "true"]).unwrap();
+        let reviewed = review(dir).unwrap();
+        assert!(!pull(dir, &reviewed).unwrap().ok);
+        assert_eq!(text(dir, &["rev-parse", "HEAD"]).unwrap(), reviewed.head);
+        assert!(!dir.join(".gitattributes").exists());
+        assert!(!dir.join("aaa").exists());
+        text(dir, &["config", "filter.broken.required", "false"]).unwrap();
+        text(dir, &["config", "--unset", "filter.broken.smudge"]).unwrap();
+        assert!(pull(dir, &reviewed).unwrap().ok);
+        assert_eq!(
+            fs::read_to_string(dir.join("aaa")).unwrap(),
+            "ordinary new file"
+        );
     }
 }

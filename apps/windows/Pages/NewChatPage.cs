@@ -193,9 +193,14 @@ internal sealed class NewChatPage : Page
         var repositories = _repositories(); _refreshingRepositories = true; _repository.ItemsSource = repositories;
         _repository.SelectedItem = repositories.FirstOrDefault(repository => repository.Id == _requestedRepository)
             ?? repositories.FirstOrDefault(repository => repository.Id == prior);
-        if ((_repository.SelectedItem as NewChatRepository)?.Id == _requestedRepository) _requestedRepository = null;
+        var chosen = (_repository.SelectedItem as NewChatRepository)?.Id;
+        var requestedThisPass = _requestedRepository is not null && chosen == _requestedRepository;
+        if (requestedThisPass) _requestedRepository = null;
         _refreshingRepositories = false;
-        BindRepository((_repository.SelectedItem as NewChatRepository)?.Id);
+        // Filling the combo is not a choice. An explicit open, or a folder the
+        // person already selected, may adopt. An automatic first folder must
+        // leave the unbound draft on screen.
+        BindRepository(chosen, adoptUnbound: requestedThisPass || _drafts.Repository is not null);
         _notice.Text = repositories.Count == 0 ? Copy("empty") : "";
         RefreshActions();
         _ = LoadAgentsAsync();
@@ -279,8 +284,9 @@ internal sealed class NewChatPage : Page
         _preferredSetup = CurrentSetup();
         _drafts.Remember(new NewChatDraft(_draft.Text, _files.ToArray(), _preferredSetup));
     }
-    private void BindRepository(string? repository)
+    private void BindRepository(string? repository, bool adoptUnbound = true)
     {
+        if (!adoptUnbound) return;
         if (_draftRepository == repository) return;
         if (!(_draftRepository is null && _draftGeneration == 0 && repository is not null)) _stagingCancellation?.Cancel();
         RememberDraft();
@@ -388,10 +394,12 @@ internal sealed class NewChatPage : Page
         var setup = CurrentSetup()!; var files = _files.ToArray(); RememberDraft();
         var revision = _draftGeneration;
         bool Owns() => _account == AppServices.AccountGeneration && _request == ticket && _draftGeneration == revision
-            && _draftRepository == repository.Id && _draft.Text == text && _files.SequenceEqual(files) && CurrentSetup() == setup;
+            && (_draftRepository == repository.Id || _draftRepository is null)
+            && (_repository.SelectedItem as NewChatRepository)?.Id == repository.Id
+            && _draft.Text == text && _files.SequenceEqual(files) && CurrentSetup() == setup;
         _handoff = true;
         try { await _send(repository, text, setup, files, Owns, () => {
-            if (Owns() && _draftRepository == repository.Id && _draft.Text == text && _files.SequenceEqual(files)) {
+            if (Owns() && _draft.Text == text && _files.SequenceEqual(files)) {
                 _draft.Text = ""; _files.Clear(); RenderFiles(); RememberDraft();
             }
         }); }

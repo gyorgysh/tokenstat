@@ -2564,7 +2564,7 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
         {
             return Ok(relay_file_refusal());
         }
-        match round_trip(&mut connection, request.as_bytes()) {
+        match round_trip(&mut connection, request.as_bytes(), ANSWER_IDLE) {
             Ok(answer) => {
                 let answer = file_capability_answer(method, &connection, answer);
                 checkin(peer_hex, ChannelPurpose::Files, connection);
@@ -2584,7 +2584,7 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
                 {
                     return Ok(relay_file_refusal());
                 }
-                let answer = round_trip(&mut redialled, request.as_bytes())
+                let answer = round_trip(&mut redialled, request.as_bytes(), ANSWER_IDLE)
                     .map_err(|error| error.to_string())?;
                 let answer = file_capability_answer(method, &redialled, answer);
                 checkin(peer_hex, ChannelPurpose::Files, redialled);
@@ -2600,14 +2600,14 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     // bills its bytes to the wrong label on the relay.
     let purpose = purpose_for_method(method);
     if let Some(mut pooled) = checkout(peer_hex, purpose) {
-        match round_trip(&mut pooled, request.as_bytes()) {
+        match round_trip(&mut pooled, request.as_bytes(), answer_idle(method)) {
             Ok(answer) => {
                 checkin(peer_hex, purpose, pooled);
                 return Ok(answer);
             }
             // The request may have reached the host. Its receipt, not a
             // transport redial, decides what a send may do next.
-            Err(error) if matches!(method, "chat.send" | "chat.compact" | "chat.steerSend") => {
+            Err(error) if refuses_redial(method) => {
                 return Err(error.to_string());
             }
             Err(_) => {}
@@ -2615,17 +2615,19 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     }
 
     let mut fresh = dial_peer_as(peer_hex, purpose)?;
-    let answer = round_trip(&mut fresh, request.as_bytes());
+    let idle = answer_idle(method);
+    let answer = round_trip(&mut fresh, request.as_bytes(), idle);
     // A freshly dialled connection that closes before the first answer usually
     // means the far daemon was just replacing its listener, the same reconnect
     // window `tunnel_dial` retries through. One redial rides over it; anything
-    // more is a real failure and should be reported as one.
-    if !matches!(method, "chat.send" | "chat.compact" | "chat.steerSend")
+    // more is a real failure and should be reported as one. A send, or a Git
+    // call that already started work on the desktop, is not started again.
+    if !refuses_redial(method)
         && answer
             .as_ref()
             .is_err_and(|e| matches!(e, tokenstat_remote::RemoteError::Closed))
         && let Ok(mut connection) = dial_peer_as(peer_hex, purpose)
-        && let Ok(second) = round_trip(&mut connection, request.as_bytes())
+        && let Ok(second) = round_trip(&mut connection, request.as_bytes(), idle)
     {
         checkin(peer_hex, purpose, connection);
         return Ok(second);
@@ -3079,14 +3081,43 @@ fn tunnel_dial(
 
 /// How long a peer may say nothing before a forwarded call gives up.
 ///
-/// Not a deadline on the answer: the budget resets as the frame arrives, so a
+/// Not a deadline on the answer: the budget resets as each frame arrives, so a
 /// peer that is slow but talking is never cut off. It is there for the peer
 /// that has stopped talking altogether, which on a Mac means the lid closed.
 /// The relay only notices that when its keepalive fails, and until then this
 /// end would hold a thread, a connection and one of the app's pool slots on a
-/// machine that is asleep. Shorter than the app's own patience, so the person
-/// gets "could not reach that machine" rather than a socket that went quiet.
+/// machine that is asleep.
 const ANSWER_IDLE: Duration = Duration::from_secs(45);
+
+/// Git LFS setup, a reviewed pull, and a reviewed push answer once, after
+/// minutes of silence. The phone's own patience for those calls is ten
+/// minutes. Cutting the forwarder at 45 seconds leaves the desktop command
+/// running and lets a retry start a second install or upload.
+const QUIET_WORK_IDLE: Duration = Duration::from_secs(600);
+
+fn answer_idle(method: &str) -> Duration {
+    if matches!(
+        method,
+        "workspace.lfsSetup" | "workspace.pullReviewed" | "workspace.pushReviewed"
+    ) {
+        QUIET_WORK_IDLE
+    } else {
+        ANSWER_IDLE
+    }
+}
+
+/// A closed connection may already have started work that must not run twice.
+fn refuses_redial(method: &str) -> bool {
+    matches!(
+        method,
+        "chat.send"
+            | "chat.compact"
+            | "chat.steerSend"
+            | "workspace.lfsSetup"
+            | "workspace.pullReviewed"
+            | "workspace.pushReviewed"
+    )
+}
 
 /// How long the retry ladder in `tunnel_dial` keeps trying. See there.
 const DIAL_BUDGET: Duration = Duration::from_secs(12);
@@ -3119,6 +3150,7 @@ fn dial_retry_pause(last: &str, attempt: u32) -> Option<Duration> {
 fn round_trip(
     connection: &mut tokenstat_remote::Connection,
     request: &[u8],
+    idle: Duration,
 ) -> Result<String, tokenstat_remote::RemoteError> {
     let check = || {
         crate::account_session::check_current().map_err(|error| {
@@ -3130,7 +3162,7 @@ fn round_trip(
     };
     check()?;
     connection.send(request)?;
-    let result = connection.receive_within(MAX_MESSAGE, ANSWER_IDLE);
+    let result = connection.receive_within(MAX_MESSAGE, idle);
     check()?;
     Ok(String::from_utf8_lossy_owned(result?))
 }
@@ -4049,6 +4081,23 @@ mod tests {
         let params = json!({"peer": "ab".repeat(32), "method": "remote.call", "params": {}});
         let refused = forward(&params.to_string()).expect_err("must refuse");
         assert!(refused.message.contains("another remote call"), "{refused}");
+    }
+
+    #[test]
+    fn quiet_git_work_waits_without_replaying_mutations() {
+        for method in [
+            "workspace.lfsSetup",
+            "workspace.pullReviewed",
+            "workspace.pushReviewed",
+        ] {
+            assert_eq!(answer_idle(method), Duration::from_secs(600));
+            assert!(refuses_redial(method));
+        }
+        assert_eq!(answer_idle("workspace.status"), ANSWER_IDLE);
+        assert!(!refuses_redial("workspace.status"));
+        for method in ["chat.send", "chat.compact", "chat.steerSend"] {
+            assert!(refuses_redial(method));
+        }
     }
 
     #[test]

@@ -98,20 +98,36 @@ pub fn status(dir: &Path, revision: Option<&str>) -> Option<Status> {
     Some(inspect(dir))
 }
 
+/// `git lfs install --skip-smudge` leaves the filter names set and points
+/// smudge and process at `--skip`, which checks out pointer files.
+fn skips_payload(value: &str) -> bool {
+    value.split_whitespace().any(|part| part == "--skip")
+}
+
+fn skip_push(value: &str) -> bool {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "1" | "true" | "t" | "yes" | "on"
+    )
+}
+
 fn inspect(dir: &Path) -> Status {
     let installed = installed(dir);
-    let filters = [
+    let values: Vec<String> = [
         "filter.lfs.clean",
         "filter.lfs.smudge",
         "filter.lfs.process",
     ]
     .iter()
-    .all(|key| text(dir, &["config", "--get", key]).is_ok_and(|value| !value.is_empty()));
+    .map(|key| text(dir, &["config", "--get", key]).unwrap_or_default())
+    .collect();
+    let filters = values.iter().all(|value| !value.is_empty());
+    let downloads = values.iter().skip(1).all(|value| !skips_payload(value));
     let required = text(dir, &["config", "--bool", "--get", "filter.lfs.required"])
         .is_ok_and(|value| value == "true");
     Status {
         installed,
-        configured: filters && required,
+        configured: filters && required && downloads,
         can_install: !installed && installer(dir).is_some(),
     }
 }
@@ -143,6 +159,9 @@ pub(super) fn pre_push(
     if status(dir, Some(&reviewed.head)).is_none() {
         return Ok(());
     }
+    if std::env::var("GIT_LFS_SKIP_PUSH").is_ok_and(|value| skip_push(&value)) {
+        return Err("Git LFS upload is disabled by GIT_LFS_SKIP_PUSH. Unset it, then review the branch again before pushing.".into());
+    }
     let zeros = "0".repeat(reviewed.head.len());
     let remote_head = reviewed.remote_head.as_deref().unwrap_or(&zeros);
     let input = format!(
@@ -152,6 +171,7 @@ pub(super) fn pre_push(
     // The URL is the same pinned endpoint Git push will use. LFS maps that
     // address to its configured remote, just as in Git's native pre-push hook.
     let mut child = command(dir, &["lfs", "pre-push", "--", url, url])
+        .env_remove("GIT_LFS_SKIP_PUSH")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -206,6 +226,76 @@ fn installer(dir: &Path) -> Option<Command> {
     None
 }
 
+/// Download the reviewed commit's objects before checkout. A missing object
+/// during `merge` writes the new files and then aborts, which the next
+/// fast-forward cannot overwrite.
+pub(super) fn fetch(dir: &Path, remote: &str, commit: &str) -> Result<(), String> {
+    if status(dir, Some(commit)).is_none() {
+        return Ok(());
+    }
+    let out = command(dir, &["lfs", "fetch", "--", remote, commit])
+        .env_remove("GIT_LFS_SKIP_SMUDGE")
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !out.status.success() {
+        return Err(format!(
+            "Git LFS could not download the reviewed files. {}",
+            super::GitOutcome::from(out).message
+        ));
+    }
+    Ok(())
+}
+
+/// Turn pointer files into the objects just fetched. `GIT_LFS_SKIP_SMUDGE`
+/// would otherwise leave the worktree on pointers after a clean fast-forward.
+pub(super) fn materialize(dir: &Path, remote: &str, commit: &str) -> Result<(), String> {
+    if status(dir, None).is_none() {
+        return Ok(());
+    }
+    // HEAD may already have moved on an earlier attempt, with only pointer
+    // files left behind. Retrying must also recover a missing local object.
+    if pointers_remain(dir)? {
+        ensure_ready(dir, commit)?;
+        fetch(dir, remote, commit)?;
+    }
+    let out = command(dir, &["lfs", "checkout"])
+        // LFS builds its own pathspecs; forcing them literal silently makes
+        // its internal checkout match no files.
+        .env_remove("GIT_LITERAL_PATHSPECS")
+        .env_remove("GIT_LFS_SKIP_SMUDGE")
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !out.status.success() {
+        return Err(format!(
+            "Git LFS could not check out the reviewed files. {}",
+            super::GitOutcome::from(out).message
+        ));
+    }
+    if pointers_remain(dir)? {
+        return Err(
+            "Git LFS left pointer files in the working tree. The large files were not downloaded."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn pointers_remain(dir: &Path) -> Result<bool, String> {
+    let out = command(dir, &["lfs", "ls-files"])
+        .env_remove("GIT_LFS_SKIP_SMUDGE")
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !out.status.success() {
+        return Err(super::GitOutcome::from(out).message);
+    }
+    let listed = String::from_utf8_lossy(&out.stdout);
+    Ok(listed.lines().any(|line| {
+        let mut fields = line.split_whitespace();
+        fields.next();
+        fields.next() == Some("-")
+    }))
+}
+
 /// The explicit enable action replaces only repository-local LFS filters.
 /// Never force installation over an existing hook or change global filters.
 pub fn setup(dir: &Path, allow_install: bool) -> Result<Status, String> {
@@ -253,6 +343,52 @@ mod tests {
         text(dir.path(), &["init", "-q"]).unwrap();
         text(dir.path(), &["config", "core.hooksPath", ".git/hooks"]).unwrap();
         dir
+    }
+
+    #[test]
+    fn skip_push_uses_lfs_boolean_values() {
+        for value in ["1", "true", "TRUE", "t", "yes", "on"] {
+            assert!(skip_push(value), "{value}");
+        }
+        for value in ["", "0", "false", "FALSE", "no", "off", "invalid"] {
+            assert!(!skip_push(value), "{value}");
+        }
+    }
+
+    #[test]
+    fn skip_smudge_filters_are_not_ready() {
+        let dir = repo();
+        let hooks = dir.path().join(".git/hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        fs::write(
+            hooks.join("pre-push"),
+            "#!/bin/sh\ngit lfs pre-push \"$@\"\n",
+        )
+        .unwrap();
+        for (key, value) in [
+            ("filter.lfs.clean", "git-lfs clean -- %f"),
+            ("filter.lfs.smudge", "git-lfs smudge --skip -- %f"),
+            ("filter.lfs.process", "git-lfs filter-process --skip"),
+            ("filter.lfs.required", "true"),
+        ] {
+            text(dir.path(), &["config", key, value]).unwrap();
+        }
+        let found = status(dir.path(), None).expect("pre-push hook");
+        assert!(
+            !found.configured,
+            "smudge --skip still checks out pointer files"
+        );
+        text(
+            dir.path(),
+            &["config", "filter.lfs.smudge", "git-lfs smudge -- %f"],
+        )
+        .unwrap();
+        text(
+            dir.path(),
+            &["config", "filter.lfs.process", "git-lfs filter-process"],
+        )
+        .unwrap();
+        assert!(status(dir.path(), None).expect("pre-push hook").configured);
     }
 
     #[test]

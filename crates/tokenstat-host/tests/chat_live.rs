@@ -62,6 +62,7 @@ for line in sys.stdin:
     assert uuid.UUID(m['uuid']).version==4
     pending=m
     emit({'type':'result','subtype':'success','is_error':False})
+    emit({'type':'result','subtype':'error_during_execution','is_error':True})
  else:
   method=m.get('method');p=m.get('params',{})
   if method=='initialize':
@@ -256,6 +257,16 @@ for line in sys.stdin:
                 assert!(
                     rows.iter()
                         .any(|row| row["item"]["type"] == "collab_agent_tool_call")
+                );
+            } else {
+                let rows: Vec<Value> = output
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+                assert_eq!(
+                    rows.iter().filter(|row| row["type"] == "result").count(),
+                    1,
+                    "results before the steer echo must not close the turn: {output}"
                 );
             }
         }
@@ -522,7 +533,10 @@ for line in sys.stdin:
    if refuse:
     emit({{'id':m['id'],'error':{{'code':-32601,'message':'Native compaction unavailable'}}}});break
    emit({{'id':m['id'],'result':{{}}}})
+   emit({{'method':'turn/started','params':{{'threadId':'session','turn':{{'id':'goal','status':'inProgress'}}}}}})
+   emit({{'method':'turn/completed','params':{{'threadId':'session','turn':{{'id':'goal','status':'interrupted','error':{{'message':'goal interrupted'}}}}}}}})
    emit({{'method':'turn/started','params':{{'threadId':'session','turn':{{'id':'compact'}}}}}})
+   emit({{'method':'item/started','params':{{'threadId':'session','turnId':'compact','item':{{'id':'compact-item','type':'contextCompaction'}}}}}})
    emit({{'method':'turn/completed','params':{{'threadId':'session','turn':{{'id':'compact','status':'completed'}}}}}})
   elif method in ('mcpServerStatus/list','thread/goal/get'): emit({{'id':m['id'],'error':{{'code':-32601,'message':'unsupported'}}}})
   elif method=='thread/unsubscribe': emit({{'id':m['id'],'result':{{}}}});break
@@ -572,6 +586,12 @@ for line in sys.stdin:
         assert_eq!(runner.0.wait().unwrap().success(), !refuse);
         let output = fs::read_to_string(root.path().join("output")).unwrap();
         assert_eq!(output.contains("Context compaction completed."), !refuse);
+        if !refuse && backend == "codex" {
+            assert!(
+                !output.contains("goal interrupted"),
+                "a resumed goal turn must not finish compaction: {output}"
+            );
+        }
         if refuse {
             assert!(
                 fs::read_to_string(root.path().join("stderr"))

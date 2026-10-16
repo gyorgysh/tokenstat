@@ -880,16 +880,18 @@ pub fn run(path: &Path) -> Result<(), String> {
                 } else if message["type"] == "result" {
                     // A resumed session can finish an old background task
                     // before consuming the new prompt. Its result does not
-                    // complete or fail the person's active request.
-                    if message["origin"]["kind"] == "task-notification" {
+                    // complete or fail the person's active request. A steer
+                    // that is still waiting for its echo is the same case:
+                    // emitting this result closes the turn, and an error
+                    // result exits before the CLI has taken the new words.
+                    if message["origin"]["kind"] == "task-notification"
+                        || protocol.pending.values().any(|(_, steer)| *steer)
+                    {
                         continue;
                     }
                     emit(&message)?;
                     if message["is_error"] == true {
                         return Err("Claude reported a failed turn.".into());
-                    }
-                    if protocol.pending.values().any(|(_, steer)| *steer) {
-                        continue;
                     }
                     if initial == "/compact" {
                         emit(
@@ -1002,6 +1004,21 @@ pub fn run(path: &Path) -> Result<(), String> {
                         &json!({"type":"tokenstat.mcp", "servers":[{"name":params["name"], "runtimeStatus":status}]}),
                     )?;
                 }
+            } else if initial["tokenstatCompact"] == true
+                && message["method"] == "item/started"
+                && message["params"]["threadId"].as_str() == Some(protocol.thread.as_str())
+                && message["params"]["item"]["type"] == "contextCompaction"
+            {
+                // thread/compact/start returns before any turn exists. The
+                // compaction run is the turn that owns this item, not the
+                // first turn/started on a resumed thread (often a goal).
+                if let Some(id) = message["params"]["turnId"].as_str() {
+                    protocol.turn = id.to_string();
+                }
+                if !started {
+                    write_json(&directory.join("ready.json"), &json!(true))?;
+                    started = true;
+                }
             } else if message["id"] == "turn" || message["method"] == "turn/started" {
                 if message["method"] == "turn/started"
                     && (message["params"]["threadId"].as_str() != Some(protocol.thread.as_str())
@@ -1009,6 +1026,16 @@ pub fn run(path: &Path) -> Result<(), String> {
                             && message["params"]["turn"]["id"].as_str()
                                 != Some(protocol.turn.as_str())))
                 {
+                    continue;
+                }
+                if message["method"] == "turn/started"
+                    && initial["tokenstatCompact"] == true
+                    && protocol.turn.is_empty()
+                {
+                    if !started {
+                        write_json(&directory.join("ready.json"), &json!(true))?;
+                        started = true;
+                    }
                     continue;
                 }
                 let turn = if message["id"] == "turn" {

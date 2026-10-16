@@ -196,13 +196,15 @@ METHODS
         Bridge.finish(7, seq: 5)
         let switchedAccepted = await switched.value
         precondition(switchedAccepted && model.contextRevision == 0, "A new project must send with its own context")
+        model.selected?.sendRevision = 7
+        model.contextRevision = 7
         let idleJump = Task { await model.reopenAtLatest() }
         await until { Bridge.replies.count == 9 }
-        precondition(model.generation == 4 && model.events.isEmpty && model.contextRevision == nil,
-                     "An idle jump must still replace the old window")
+        precondition(model.generation == 4 && model.events.isEmpty && model.contextRevision == 7,
+                     "An idle jump replaces the window while keeping the same chat sendable")
         Bridge.finish(8, seq: 6)
         await idleJump.value
-        precondition(model.liveWindowLoaded && model.events.first?.seq == 6 && model.contextRevision == 0)
+        precondition(model.liveWindowLoaded && model.events.first?.seq == 6 && model.contextRevision == 7)
         print("Chat opening: cancellation, selection fence, bounded recovery, tails, safe send jumps and project context passed")
     }
 }

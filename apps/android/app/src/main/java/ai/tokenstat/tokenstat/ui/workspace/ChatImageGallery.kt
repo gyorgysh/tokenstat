@@ -49,6 +49,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -124,9 +125,23 @@ internal fun ChatImageGallery(
             return null
         } finally { loading.remove(image.attachmentId) }
     }
-    LaunchedEffect(owner, images.take(4).map { it.attachmentId }, lifecycle) {
+    LaunchedEffect(owner, images.take(4).map { it.attachmentId to it.size }, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            images.take(4).forEach { load(it, automatic = true) }
+            // The route is read inside load, so a relay that later becomes
+            // direct has to be asked again. Too-large files stay out.
+            var waitMs = 1_000L
+            while (true) {
+                val pending = images.take(4).filter { image ->
+                    val size = image.size
+                    size != null && size in 1..CHAT_IMAGE_PREVIEW_BYTES && files[image.attachmentId]?.isFile != true
+                }
+                if (pending.isEmpty()) break
+                for (image in pending) load(image, automatic = true)
+                val stillWaiting = pending.any { files[it.attachmentId]?.isFile != true }
+                if (!stillWaiting) break
+                delay(waitMs)
+                waitMs = (waitMs * 2).coerceAtMost(8_000L)
+            }
         }
     }
     val index = viewer

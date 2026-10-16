@@ -13,12 +13,13 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Added
 
-- Start a chat from a dedicated composer on Mac, iPhone, iPad, Android and Windows. Choose an existing repository or add a folder, attach files and images, and set the agent, model, effort, working style and permissions before sending. Drafts stay with their repository.
+- Start a chat from a dedicated composer on Mac, iPhone, iPad, Android and Windows. Choose an existing repository or add a folder, attach files and images, and set the agent, model, effort, working style, permissions and supported fast mode before sending. Drafts stay with their repository.
 - The new-chat screen on Apple devices has layered violet glass that responds gently to movement and clicks, with support for reduced motion and transparency.
 - Use slash commands to inspect context, usage, tools and MCP servers, view goals and subagents, stop work, or compact supported Claude and Codex conversations.
 - See reported goals, plan progress and subagent tasks in the chat activity summary and inspector. Available information follows each agent's capabilities.
 - Copy chat, terminal and native agent session IDs from session details. Handoffs retain earlier session references and saved transcript locations so agents can follow the conversation across sessions.
 - Browse chat images in compact galleries and open a viewer to navigate, zoom, save or open an image. Images read or captured by tools appear beside the relevant step.
+- Pull and Push detect repositories that use Git LFS and transfer large-file objects with the reviewed commits. The Apple setup panels can enable LFS on the host or install it on a Mac with Homebrew, while preserving existing Git hooks.
 
 ### Improved
 
@@ -33,9 +34,16 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Fixed
 
 - Sending and resuming long conversations, previewing local images and screenshots, and keeping attachments when steering capabilities change.
+- Jump to latest on Mac keeps the conversation ready to send while its newest messages load. A new-chat agent choice applies only to that creation, and failed or abandoned setup cleans up the new conversation.
 - Final messages, tool results and screenshots getting lost when an agent exits quickly or leaves a large amount of queued output.
-- Native compaction in plan mode and after instruction changes, and stopping work after switching chats.
+- Native compaction in plan mode, after instruction changes and when Codex resumes another task first. A late Claude result no longer ends a turn before queued steering input is consumed.
+- Stopping work after switching chats, and Windows steering messages being left paused when a turn finishes during attachment upload. These messages send normally once the chat is idle.
+- Windows new-chat drafts being claimed by an automatically displayed repository before a folder is chosen.
+- Android chat status spinning while offline and losing its last report after a failed refresh. Image previews retry after connection recovery while the chat stays open.
+- Git LFS pulls reporting success with pointer files, and failed checkouts leaving new files that block a retry. Missing payloads can be recovered by retrying the pull, and pushes refuse disabled LFS uploads before publishing the branch.
+- Remote LFS setup, pulls and pushes timing out during quiet work or being started twice by an automatic reconnect.
 - Pull and Push dialogs closing when the Mac inspector hides in a narrow window, and resize cursors lingering over hidden pane dividers.
+- Mac titlebar dragging on the new-chat screen, and image-viewer dismissal by clicking its dimmed backdrop.
 - Mac terminal details opening while hovering through the sidebar; use the info button, just as with chats.
 - Session history staying stale after a transcript is replaced on Windows, and chat setup failing after the inspector refreshes.
 

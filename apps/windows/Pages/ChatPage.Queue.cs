@@ -169,6 +169,7 @@ internal sealed partial class ChatPage
         var accountGeneration = AppServices.AccountGeneration;
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && _outboxKey == key
             && accountGeneration == AppServices.AccountGeneration;
+        var retryAsSend = false;
         var candidates = ChatOutbox.Shared.Read(key);
         var candidate = messageId is null ? candidates.FirstOrDefault() : candidates.FirstOrDefault(row => row.Id == messageId);
         if (candidate is null || candidate.AttemptedAt.HasValue || !_authorizedQueue.Contains(candidate.Id)) return;
@@ -178,11 +179,12 @@ internal sealed partial class ChatPage
             var currentKey = await OutboxKeyAsync(chat);
             if (!Current()) return;
             if (currentKey != key) throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.the_signed_in_account_changed_pending_mess.54c18f45"));
-            if (!steerCurrent) await RefreshCatalogAsync();
+            await RefreshCatalogAsync();
             if (!Current()) return;
             var live = _chats.FirstOrDefault(row => Format.Text(row, "id") == chat)
                 ?? throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.this_conversation_is_no_longer_available.07f8c47b"));
-            if (Format.Flag(live, "running") && !steerCurrent) return;
+            var steering = steerCurrent && Format.Flag(live, "running");
+            if (Format.Flag(live, "running") && !steering) return;
             if (live["sendRevision"] is null || Format.Long(live, "sendRevision") != candidate.Revision)
             {
                 _authorizedQueue.Remove(candidate.Id);
@@ -190,7 +192,7 @@ internal sealed partial class ChatPage
                 return;
             }
             var attempted = ChatOutbox.Shared.Stage(key, candidate, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            var updated = await CallChatAsync(steerCurrent ? "chat.steerSend" : ChatCommandRules.SendMethod(attempted.Text), new JsonObject
+            var updated = await CallChatAsync(steering ? "chat.steerSend" : ChatCommandRules.SendMethod(attempted.Text), new JsonObject
             {
                 ["id"] = chat, ["text"] = attempted.Text,
                 ["attachmentIds"] = new JsonArray(attempted.Attachments.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()),
@@ -205,10 +207,34 @@ internal sealed partial class ChatPage
         }
         catch (Exception ex)
         {
-            if (ex is HostException hostError) ChatOutbox.Shared.Refuse(key, candidate.Id, hostError.Code);
-            _authorizedQueue.Remove(candidate.Id);
-            if (Current()) Banner(L10n.Text("windows.chatpage_queue.the_pending_copy_is_saved_0.215c8440", $"{ex.Message}"));
+            // The composer is already clear. A steer that missed the turn is
+            // still the person's message, so put it back and send it once.
+            if (ex is HostException { Code: "steer_unavailable" } && steerCurrent)
+            {
+                try
+                {
+                    ChatOutbox.Shared.Update(key, items =>
+                    {
+                        var index = items.FindIndex(item => item.Id == candidate.Id);
+                        if (index >= 0 && items[index].State == "sending")
+                            items[index] = items[index] with { AttemptedAt = null, State = "waiting" };
+                    });
+                    retryAsSend = true;
+                }
+                catch (Exception reset)
+                {
+                    _authorizedQueue.Remove(candidate.Id);
+                    if (Current()) Banner(L10n.Text("windows.chatpage_queue.the_pending_copy_is_saved_0.215c8440", $"{reset.Message}"));
+                }
+            }
+            else
+            {
+                if (ex is HostException hostError) ChatOutbox.Shared.Refuse(key, candidate.Id, hostError.Code);
+                _authorizedQueue.Remove(candidate.Id);
+                if (Current()) Banner(L10n.Text("windows.chatpage_queue.the_pending_copy_is_saved_0.215c8440", $"{ex.Message}"));
+            }
         }
         finally { _sending = false; }
+        if (retryAsSend) await DrainQueueAsync(messageId: candidate.Id, steerCurrent: false);
     }
 }

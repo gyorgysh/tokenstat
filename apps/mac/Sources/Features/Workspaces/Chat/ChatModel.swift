@@ -1910,10 +1910,14 @@ final class ChatModel {
         advanceSelection("explicit-latest")
         discardSteerReservations()
         let generation = selectionGeneration
+        let revision = selected.sendRevision
         events = []
         outgoing = []
         outgoingWatermark = [:]
         forgetWindow()
+        // forgetWindow drops the revision with the page. Sends during the
+        // reload still belong to this conversation, so keep the one just read.
+        contextRevision = revision
         openingConversation = true
         defer {
             if selectionGeneration == generation { openingConversation = false }
@@ -1952,6 +1956,10 @@ final class ChatModel {
     private(set) var isCreating = false
 
     private func performCreate(expectedGeneration: UInt64) async -> ChatConversation? {
+        // The landing page sets this for one attempt. A later New chat on the
+        // same reader must use the saved launch choice, not this request.
+        let requestedChoice = newChatChoice
+        newChatChoice = nil
         guard !Task.isCancelled, expectedGeneration == loadGeneration, let workspaceID, let scope = continuityScope,
               scope == WorkSessionContext.shared.scope else { return nil }
         let context = loadGeneration
@@ -1966,12 +1974,12 @@ final class ChatModel {
             let saved = lastLaunchChoice
             let available = backends.filter { $0.installed != false && $0.id != "sh" }
             let chosen: ChatBackend?
-            if let requested = newChatChoice {
+            if let requested = requestedChoice {
                 guard let explicit = available.first(where: { $0.id == requested.backend }),
                       requested.model == nil || explicit.models.contains(requested.model!),
                       requested.effort == nil || explicit.efforts.contains(requested.effort!),
                       !requested.fastMode || ChatFastMode.available(model: requested.model, models: explicit.fastModeModels, backend: explicit.id) else {
-                    error = L10n.text("apple.chatmodel.can_t_check_agents_on_this_computer_reconn.49c16d28")
+                    error = L10n.text("apple.chatmodel.that_agent_setup_is_not_available_on_this.b1407fd7")
                     return nil
                 }
                 chosen = explicit
@@ -1981,9 +1989,9 @@ final class ChatModel {
                     ?? available.first
                     ?? backends.first { $0.id != "sh" }
             }
-            let model = newChatChoice != nil ? newChatChoice?.model
+            let model = requestedChoice != nil ? requestedChoice?.model
                 : (chosen?.models.contains(saved?.model ?? "") == true ? saved?.model : nil)
-            let effort = newChatChoice != nil ? newChatChoice?.effort
+            let effort = requestedChoice != nil ? requestedChoice?.effort
                 : (chosen?.efforts.contains(saved?.effort ?? "") == true ? saved?.effort : nil)
             let chat = try await Bridge.createChat(
                 workspaceID: workspaceID,
@@ -1991,16 +1999,23 @@ final class ChatModel {
                 // Execute unless this landing page explicitly chose Plan.
                 // A remembered prior conversation's mode is not an instruction
                 // for a new piece of work.
-                mode: newChatChoice?.mode ?? "execute",
+                mode: requestedChoice?.mode ?? "execute",
                 autonomy: chosen?.gateTier == "bypassOnly"
                     ? "bypass"
-                    : (newChatChoice?.autonomy ?? saved?.autonomy ?? "standard"),
+                    : (requestedChoice?.autonomy ?? saved?.autonomy ?? "standard"),
                 model: model,
                 effort: effort,
                 personaID: rememberedPersonaID(saved),
                 peer: targetPeer
             )
-            guard context == loadGeneration, scope == WorkSessionContext.shared.scope else { return nil }
+            guard !Task.isCancelled, context == loadGeneration, scope == WorkSessionContext.shared.scope else {
+                // This result belongs to the route captured before create.
+                // The model may already point at another folder or computer.
+                if scope == WorkSessionContext.shared.scope {
+                    try await Bridge.removeChat(id: chat.id, peer: targetPeer)
+                }
+                return nil
+            }
             chats.insert(chat, at: 0)
             if let folderID { storeChatListCache(chats, folderID: folderID) }
             if !Task.isCancelled, selection == selectionGeneration {

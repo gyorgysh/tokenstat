@@ -63,6 +63,13 @@ try {
     var firstDraft = new NewChatDraft("unbound prompt", [selected], new NewChatSetup("codex", "model", "high", "plan", "bypass", true));
     Check(new NewChatDraftStore().Select("first-repo", new NewChatDraft("", [], firstDraft.Setup)).Setup == firstDraft.Setup,
         "initial setup-only choices also follow the first repository selection");
+    var automatic = new NewChatDraftStore();
+    var shown = automatic.Select("auto-repo", firstDraft, adoptUnbound: false);
+    Check(shown.Text == firstDraft.Text && shown.Files.SequenceEqual(firstDraft.Files) && automatic.Repository is null && automatic.Revision == 0,
+        "an automatic folder preview leaves the unbound draft on screen and unclaimed");
+    var adopted = automatic.Select("chosen-repo", shown);
+    Check(adopted.Text == firstDraft.Text && adopted.Files.SequenceEqual(firstDraft.Files) && automatic.Repository == "chosen-repo",
+        "the first explicit repository choice still adopts the unbound draft after an automatic preview");
     var firstBound = landingDrafts.Select("host-one/repo", firstDraft);
     Check(landingDrafts.AcceptsFiles(null, 0), "an import started before choosing a repository follows that first selection");
     Check(firstBound.Text == firstDraft.Text && firstBound.Files.SequenceEqual(firstDraft.Files) && firstBound.Setup == firstDraft.Setup,

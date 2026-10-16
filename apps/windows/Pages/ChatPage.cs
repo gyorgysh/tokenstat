@@ -2166,6 +2166,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             await UploadPendingAttachmentsAsync(chat, Current);
             if (!Current()) return;
             var attachmentIds = _attachments.Select(file => file.Id).ToArray();
+            // The turn can finish while the files upload. Steer only if it is
+            // still running. Drain sends an ordinary message when it is not.
+            liveInput = !sendNext && Busy() && Format.Flag(_openChat, "nativeSteer")
+                && ChatCommandRules.CanSteer(text, attachmentIds.Length > 0, Format.Flag(_openChat, "nativeSteerAttachments"));
             if (text != "/compact" && await TryParkSteerAsync(chat, text, sendNext, attachmentIds)) return;
             if (!Current()) return;
             if (_openChat?["sendRevision"] is null) throw new InvalidOperationException(L10n.Text("windows.chatpage.update_the_host_to_use_reliable_message_de.fcb58190"));

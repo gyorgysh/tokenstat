@@ -80,3 +80,100 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-chat-review-') as directory:
                     str(root / 'apps/mac/Sources/Features/Workspaces/Chat/Singleflight.swift'),
                     '-o', str(path / 'test')], check=True)
     subprocess.run([str(path / 'test')], check=True)
+
+# Also exercise performCreate itself: singleflight stubs cannot catch a late
+# create deleting from the model's newer host, or reusing a landing setup.
+start = source.index('    private func performCreate(')
+end = source.index('\n    /// Take the backend list again', start)
+perform = source[start:end].replace('private func performCreate', 'func performCreate')
+create_fixture = r'''
+import Foundation
+struct ChatConversation { var id = "created" }
+struct Choice {
+    var backend: String
+    var model: String? = nil, effort: String? = nil
+    var fastMode = false
+    var mode = "execute", autonomy = "standard"
+}
+struct ChatBackend {
+    var id: String
+    var installed: Bool? = true
+    var models = ["model"], efforts = ["high"], fastModeModels = ["model"]
+    var gateTier: String? = nil
+}
+enum L10n { static func text(_ key: String) -> String { key } }
+enum ChatFastMode {
+    static func available(model: String?, models: [String], backend: String) -> Bool { true }
+}
+@MainActor final class WorkSessionContext {
+    static let shared = WorkSessionContext()
+    var scope: String? = "account"
+}
+@MainActor enum Bridge {
+    static var beforeReply: (() -> Void)?
+    static var removed: [String?] = []
+    static var choices: [String] = []
+    static func chatBackends(peer: String?) async throws -> [ChatBackend] { [] }
+    static func createChat(workspaceID: String, backend: String, mode: String, autonomy: String,
+        model: String?, effort: String?, personaID: String?, peer: String?) async throws -> ChatConversation {
+        choices.append(backend)
+        beforeReply?()
+        return ChatConversation()
+    }
+    static func removeChat(id: String, peer: String?) async throws { removed.append(peer) }
+}
+@MainActor final class Model {
+    var newChatChoice: Choice? = Choice(backend: "claude")
+    var lastLaunchChoice: Choice? = Choice(backend: "codex")
+    var loadGeneration: UInt64 = 0, selectionGeneration: UInt64 = 0
+    var workspaceID: String? = "workspace", folderID: String? = "remote:original:workspace"
+    var continuityScope: String? = "account", peer: String? = "original"
+    var backends = [ChatBackend(id: "claude"), ChatBackend(id: "codex")]
+    var chats: [ChatConversation] = []
+    var error: String?
+    func rememberedPersonaID(_ choice: Choice?) -> String? { nil }
+    func storeChatListCache(_ chats: [ChatConversation], folderID: String) {}
+    func select(_ chat: ChatConversation, savedPage: Bool?, fresh: Bool) async {}
+PERFORM
+}
+@main struct CreateTests {
+    @MainActor static func main() async {
+        let model = Model()
+        let first = await model.performCreate(expectedGeneration: 0)
+        assert(first != nil && model.newChatChoice == nil)
+        _ = await model.performCreate(expectedGeneration: 0)
+        assert(Bridge.choices == ["claude", "codex"], "landing setup is used once")
+
+        let stale = Model()
+        Bridge.beforeReply = {
+            stale.loadGeneration += 1
+            stale.peer = "different"
+            stale.folderID = "remote:different:other-workspace"
+        }
+        let result = await stale.performCreate(expectedGeneration: 0)
+        assert(result == nil && stale.chats.isEmpty)
+        assert(Bridge.removed.count == 1 && Bridge.removed[0] == "original",
+               "late create cleanup uses its captured computer")
+
+        let switched = Model()
+        Bridge.beforeReply = { WorkSessionContext.shared.scope = "another-account" }
+        let switchedResult = await switched.performCreate(expectedGeneration: 0)
+        assert(switchedResult == nil && Bridge.removed.count == 1,
+               "cleanup never borrows another account's authority")
+        WorkSessionContext.shared.scope = "account"
+
+        let cancelled = Model()
+        Bridge.beforeReply = { withUnsafeCurrentTask { $0?.cancel() } }
+        let cancelledResult = await Task { await cancelled.performCreate(expectedGeneration: 0) }.value
+        assert(cancelledResult == nil && Bridge.removed.count == 2 && cancelled.chats.isEmpty,
+               "cancellation after create cleans up before publishing")
+        print("Chat creation: one-use choices, original-host cleanup, cancellation and account changes passed")
+    }
+}
+'''.replace('PERFORM', perform)
+with tempfile.TemporaryDirectory(prefix='tokenstat-chat-create-') as directory:
+    path = Path(directory)
+    (path / 'Fixture.swift').write_text(create_fixture)
+    subprocess.run(['swiftc', '-parse-as-library', str(path / 'Fixture.swift'),
+                    '-o', str(path / 'test')], check=True)
+    subprocess.run([str(path / 'test')], check=True)

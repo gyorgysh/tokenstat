@@ -127,19 +127,31 @@ struct ClientNewChatScreen: View {
             draft.failed(submission, message: reader.error ?? L10n.text("apple.chatview.chat_unavailable.a45aae80"))
             return
         }
+        // The host conversation exists now. Leave, a failed draft, or a failed
+        // fast-mode change has to delete it or the sidebar keeps an empty chat.
+        func abandon(_ message: String?) async {
+            let preserved = message ?? reader.error
+            if submission.owner.scope == WorkSessionContext.shared.scope {
+                await reader.remove(created)
+            }
+            draft.failed(submission, message: preserved)
+        }
         guard current(), reader.selected?.id == created.id,
               await reader.installLandingDraft(submission, permits: current) else {
-            draft.failed(submission, message: reader.error)
+            await abandon(reader.error)
             return
         }
         if submission.agent.fastMode {
             await reader.update(fastMode: true)
             guard current(), reader.selected?.id == created.id, reader.selected?.fastMode == true, reader.error == nil else {
-                draft.failed(submission, message: reader.error ?? L10n.text("common.new_chat.setup_changed"))
+                await abandon(reader.error ?? L10n.text("common.new_chat.setup_changed"))
                 return
             }
         }
-        guard current(), reader.selected?.id == created.id else { return }
+        guard current(), reader.selected?.id == created.id else {
+            await abandon(nil)
+            return
+        }
         draft.transferred(submission)
         navigation.showingNewChat = false
         navigation.destination = .workspaces
