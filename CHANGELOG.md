@@ -14,7 +14,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Improved
 
 - The new chat screen on iPhone and iPad sits on a deeper, opaque background. The light, the ripples and the prism read as part of the app rather than as frosted glass over nothing. The Mac keeps its window glass.
-- The Android new chat screen gives way to the keyboard. The heading steps aside, the repository and agent choices stay reachable, the composer sits against the keyboard, and a button puts the keyboard away.
+- The Android new chat screen keeps as much of itself as the keyboard leaves. The heading steps aside only when the room is genuinely too small, and the repository, the agent choices and the composer stay together in the middle of what is left rather than being pushed around.
 
 ### Fixed
 

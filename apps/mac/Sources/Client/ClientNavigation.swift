@@ -79,13 +79,25 @@ final class ClientNavigationModel {
         showingNewChat = true
     }
 
+    /// What the new chat page could not do itself, and asked the root for.
+    ///
+    /// Nested here, with the property that carries it, because this is the
+    /// type the navigation model speaks and the chat navigation guard
+    /// compiles this class against a trimmed source set.
+    enum NewChatRequest: Hashable {
+        /// The account has no computer on it yet.
+        case machineSetup
+        /// The account has no remote on it.
+        case plans
+    }
+
     /// What New chat asked for on its way out.
     ///
     /// Two presentations from one view queue rather than stack, so a page
     /// covering the root cannot open the root's own setup sheet or paywall:
     /// it has to go first. `ClientRootView` delivers this once it has, the
     /// way `pendingPlace` is delivered after search closes.
-    var pendingNewChatRequest: ClientNewChatRequest?
+    var pendingNewChatRequest: NewChatRequest?
 
     var showWorkSearch = false
     var ecosystemSearchTerm = ""

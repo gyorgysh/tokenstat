@@ -37,7 +37,6 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -205,9 +204,6 @@ fun NewChatScreen(
     var rootCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var contentBounds by remember { mutableStateOf<Rect?>(null) }
     val pageScroll = rememberScrollState()
-    // The page is laid out twice: once with the room it has, and once with
-    // what a keyboard leaves of it. See the arrangement below.
-    val keyboardUp = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val phase = if (reduced) 0f else {
         val animation = rememberInfiniteTransition(label = "new-chat-ambient")
         animation.animateFloat(0f, 1f, infiniteRepeatable(tween(12000, easing = LinearEasing), RepeatMode.Reverse), label = "ambient-phase").value
@@ -236,31 +232,44 @@ fun NewChatScreen(
                 radius = 12.dp.toPx() + wave.value * size.maxDimension * .8f, center = waveCenter, style = Stroke(1.5.dp.toPx()))
         }
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-            // The way out, and the way to put the keyboard away, hold their
-            // place at the top while the page under them reflows.
+            // The way out holds its place at the top while the page under it
+            // reflows. No keyboard button here: the app's own bar above this
+            // page already grows one whenever the keyboard is up.
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                KeyboardDismissButton()
                 IconButton(onClick = onClose) { Icon(ActionIcon.Dismiss.vector, L10n.text("common.close")) }
             }
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(pageScroll).padding(horizontal = 20.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                // Centred in an empty page, and held against the keyboard
-                // once the keyboard owns most of it, so the field and Send
-                // end up the last things above it rather than the first
-                // things pushed off the top of what is left.
-                verticalArrangement = if (keyboardUp) Arrangement.Bottom else Arrangement.Center) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                // What is left after the keyboard has taken its share, and
+                // how much of the page's own name fits in it. Measured on a
+                // phone: the mark, the question and the line under it come to
+                // 136dp, and the two pickers and the composer under them to
+                // 418dp. So the whole heading needs 560dp of room, and the
+                // question on its own needs 480dp.
+                val roomForHeading = maxHeight >= 560.dp
+                val roomForTitle = maxHeight >= 480.dp
+                Column(Modifier.fillMaxSize().verticalScroll(pageScroll).padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    // Centred in whatever room there is. Held against the
+                    // keyboard instead, the short page left a third of the
+                    // screen empty above it.
+                    verticalArrangement = Arrangement.Center) {
                 Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().onGloballyPositioned { contentBounds = it.boundsInRoot() }, horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    // The mark and the two lines name the page. With a keyboard up
-                    // there is no page left to name, and keeping their place is
-                    // what pushed the pickers and the composer off the top of the
-                    // few hundred points the keyboard left behind.
-                    if (!keyboardUp) {
+                    // The page names itself with as much as the room allows,
+                    // in steps rather than all or nothing: a keyboard that
+                    // leaves most of the page still leaves room for the
+                    // heading, and dropping it there was what left a third of
+                    // the screen empty above the composer.
+                    if (roomForHeading) {
                         Row(Modifier.height(44.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                             listOf(22, 36, 28).forEach { height -> Box(Modifier.width(7.dp).height(height.dp).background(colors.accent, RoundedCornerShape(3.dp))) }
                         }
+                    }
+                    if (roomForTitle) {
                         Text(newChatCopy("title"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                    }
+                    if (roomForHeading) {
                         Text(newChatCopy("subtitle"), style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, textAlign = TextAlign.Center)
                     }
                     Box(Modifier.fillMaxWidth()) {
@@ -300,6 +309,7 @@ fun NewChatScreen(
                         Text(it, style = MaterialTheme.typography.bodySmall, color = colors.danger)
                         TextButton(onClick = { catalogAttempt++ }) { Text(L10n.text("common.retry")) }
                     }
+                }
                 }
             }
         }

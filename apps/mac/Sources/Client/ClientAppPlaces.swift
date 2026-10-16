@@ -29,16 +29,6 @@ enum ClientAppDestination: Hashable {
     case device(String)
 }
 
-/// What the new chat page could not do itself, and asked the root for.
-///
-/// It is presented over the root, so both of these have to wait for it to go.
-enum ClientNewChatRequest: Hashable {
-    /// The account has no computer on it yet.
-    case machineSetup
-    /// The account has no remote on it.
-    case plans
-}
-
 /// A screen inside the account sheet, rather than one of its panes.
 enum ClientAccountDetail: String, Hashable {
     case tabs

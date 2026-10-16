@@ -110,7 +110,7 @@ struct ClientNewChatScreen: View {
     /// Why there is no composer here, on the same floor the page would have
     /// been drawn on.
     private func reason(kind: ClientEmptyKind, art: EmptyArtKind, title: String, message: String,
-                        actionTitle: String, icon: ActionIcon, request: ClientNewChatRequest) -> some View {
+                        actionTitle: String, icon: ActionIcon, request: ClientNavigationModel.NewChatRequest) -> some View {
         ZStack {
             ChatStartGlassField.ground.ignoresSafeArea()
             ClientEmptyState(kind: kind, title: title, message: message, actionTitle: actionTitle,
@@ -124,7 +124,7 @@ struct ClientNewChatScreen: View {
     /// covering that root, so asking for one here would queue a presentation
     /// behind one that is going away. The root starts it once this screen
     /// has gone.
-    private func leave(for request: ClientNewChatRequest) {
+    private func leave(for request: ClientNavigationModel.NewChatRequest) {
         navigation.pendingNewChatRequest = request
         navigation.showingNewChat = false
     }
