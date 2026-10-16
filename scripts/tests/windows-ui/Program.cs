@@ -61,6 +61,30 @@ public sealed partial class SmokeApp : Application
         throw new Exception(diagnostics());
     }
 
+    private sealed class PlaybackProbe
+    {
+        private readonly Windows.Media.Playback.MediaPlayer _player;
+        private int _requested;
+        private int _starting;
+        private int _closed;
+
+        public PlaybackProbe(H264Streamer streamer, Windows.Media.Playback.MediaPlayer player)
+        {
+            _player = player;
+            streamer.Source.SampleRequested += (_, _) => Interlocked.Increment(ref _requested);
+            streamer.Source.Starting += (_, _) => Interlocked.Increment(ref _starting);
+            streamer.Source.Closed += (_, _) => Interlocked.Increment(ref _closed);
+        }
+
+        public async Task WaitForOpenAsync(Task opened, string stage)
+        {
+            string State() => $"starting={Volatile.Read(ref _starting)}, sampleRequests={Volatile.Read(ref _requested)}, closed={Volatile.Read(ref _closed)}, state={_player.PlaybackSession.PlaybackState}, video={_player.PlaybackSession.NaturalVideoWidth}x{_player.PlaybackSession.NaturalVideoHeight}";
+            try { await opened.WaitAsync(TimeSpan.FromSeconds(15)); }
+            catch (TimeoutException error) { throw new TimeoutException($"H.264 {stage} did not open: {State()}", error); }
+            Program.Log($"H.264 {stage} opened: {State()}");
+        }
+    }
+
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         Program.Log("Creating editor and player controls");
@@ -336,11 +360,21 @@ public sealed partial class SmokeApp : Application
                 var fixture = Environment.GetEnvironmentVariable("TOKENSTAT_SCREEN_FIXTURE") ?? throw new Exception("Screen fixture path missing");
                 var frames = Directory.GetFiles(fixture, "frame-*.bin").Order().Select(path => ScreenFrame.Parse(File.ReadAllBytes(path))!).ToArray();
                 if (frames.Length < 3 || frames.Any(frame => frame is null)) throw new Exception("Native encoder fixture missing");
+                if (!frames[0].Keyframe) throw new Exception("The native encoder fixture must begin with an independent frame");
+                for (var index = 0; index < frames.Length; index++)
+                {
+                    if (frames[index].Sequence != (ulong)index + 1)
+                        throw new Exception($"Native encoder fixture has a transport gap at sample {index}: sequence {frames[index].Sequence}, expected {index + 1}");
+                    if (index > 0 && frames[index].TimestampMicroseconds <= frames[index - 1].TimestampMicroseconds)
+                        throw new Exception($"Native encoder fixture has a non-increasing timestamp at sample {index}");
+                }
+                Program.Log($"H.264 fixture: {frames.Length} samples, {frames[0].TimestampMicroseconds}..{frames[^1].TimestampMicroseconds} us; " + string.Join(", ", frames.Select(frame => $"{frame.Sequence}{(frame.Keyframe ? "K" : "D")}")));
                 streamer = new H264Streamer((uint)frames[0].Width, (uint)frames[0].Height);
                 var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 string? playbackFailure = null;
                 using (var player = new Windows.Media.Playback.MediaPlayer())
                 {
+                    var probe = new PlaybackProbe(streamer, player);
                     video.SetMediaPlayer(player);
                     player.MediaOpened += (_, _) => opened.TrySetResult();
                     player.MediaFailed += (_, error) =>
@@ -351,7 +385,7 @@ public sealed partial class SmokeApp : Application
                     player.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
                     foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10), frame.Sequence);
                     player.Play();
-                    await opened.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                    await probe.WaitForOpenAsync(opened.Task, "initial stream");
                     await Task.Delay(500);
                     if (playbackFailure is not null) throw new Exception(playbackFailure);
                     if (player.PlaybackSession.NaturalVideoWidth != 320 || player.PlaybackSession.NaturalVideoHeight != 180)
@@ -374,6 +408,7 @@ public sealed partial class SmokeApp : Application
                 {
                     streamer = new H264Streamer((uint)frames[0].Width, (uint)frames[0].Height);
                     using var next = new Windows.Media.Playback.MediaPlayer();
+                    var probe = new PlaybackProbe(streamer, next);
                     var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     next.MediaOpened += (_, _) => ready.TrySetResult();
                     next.MediaFailed += (_, error) => ready.TrySetException(new Exception($"Reopen {iteration + 1}: {error.Error} (0x{error.ExtendedErrorCode?.HResult ?? 0:X8}): {error.ErrorMessage}"));
@@ -381,7 +416,7 @@ public sealed partial class SmokeApp : Application
                     next.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
                     foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10), frame.Sequence);
                     next.Play();
-                    await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                    await probe.WaitForOpenAsync(ready.Task, $"reopen {iteration + 1}");
                     await Task.Delay(100);
                     // Reconfigure/navigate while the live stream is waiting for more data.
                     video.SetMediaPlayer(null);

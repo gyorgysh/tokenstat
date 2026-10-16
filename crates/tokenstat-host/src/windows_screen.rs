@@ -557,8 +557,12 @@ mod tests {
             std::fs::create_dir_all(path).unwrap();
         }
         let mut produced = 0;
-        for sequence in 1..=30 {
-            if let Some(frame) = encoder.next(sequence == 1, sequence).unwrap() {
+        for _ in 0..30 {
+            // Media Foundation can buffer an input without producing output.
+            // Match run(): only emitted frames advance the transport sequence,
+            // otherwise the viewer correctly treats the fixture as packet loss
+            // and discards its keyframe before the decoder can open.
+            if let Some(frame) = encoder.next(produced == 0, produced as u64 + 1).unwrap() {
                 if produced == 0 {
                     assert!(frame.independent);
                     for nal in [5, 7, 8] {
