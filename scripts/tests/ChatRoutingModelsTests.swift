@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ChatRoutingModels.swift.
+// Compile with ChatRoutingModels.swift. SessionIdentities.swift.
 import Foundation
 
 @main

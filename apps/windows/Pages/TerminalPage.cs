@@ -37,6 +37,11 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     private readonly TerminalSession _session;
     private string _folderName = "";
     private string? _reportedSessionId;
+    private readonly Expander _sessionIdentityDetails = new() { HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch };
+    private bool _sessionHistoryExpanded;
+    private string? _identityDetailsSession;
+    private SessionIdentities? _identityDetailsProjection;
     private readonly StackPanel _status = new() { Spacing = Theme.SpaceS };
     private readonly TextBlock _title = new()
     {
@@ -230,13 +235,15 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
-        _inspector.Children.Add(new TextBlock
+        _sessionIdentityDetails.Header = L10n.Text("common.session_identity.title");
+        if (_identityDetailsSession != _session.Id || !_session.NativeSessionIdentities.SameProjection(_identityDetailsProjection))
         {
-            Text = ShortId(_session.Id),
-            FontFamily = Fonts.Mono,
-            FontSize = 12,
-            Opacity = 0.7,
-        });
+            _identityDetailsSession = _session.Id;
+            _identityDetailsProjection = _session.NativeSessionIdentities;
+            _sessionIdentityDetails.Content = SessionIdentityRows.Build(_session.Id, "common.session_identity.terminal", _session.NativeSessionIdentities,
+                showTitle: false, historyExpanded: _sessionHistoryExpanded, historyChanged: expanded => _sessionHistoryExpanded = expanded);
+        }
+        _inspector.Children.Add(_sessionIdentityDetails);
         var state = _session.Closed ? L10n.Text("windows.terminalpage.closed.c21ead06")
             : !_session.Alive ? L10n.Text("windows.terminalpage.exited.85fc46c1")
             : L10n.Text("common.running");

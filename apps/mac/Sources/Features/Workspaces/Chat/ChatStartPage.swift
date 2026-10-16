@@ -7,12 +7,14 @@ import SwiftUI
 struct ChatStartPage: View {
     @Bindable var draft: ChatStartDraft
     let repositories: [WorkspaceFolder]
+    var isFullScreen = false
     var hostPicker: AnyView? = nil
     var allowsSend = true
     let onAdd: () -> Void
     let onSend: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityDimFlashingLights) private var dimFlashingLights
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.scenePhase) private var scenePhase
     @State private var model = ChatModel()
     @State private var selection = NSRange(location: 0, length: 0)
@@ -23,9 +25,10 @@ struct ChatStartPage: View {
     @State private var catalogLease = UUID()
     @State private var dropTargeted = false
     @State private var composerDropTargeted = false
-    @State private var contentBounds = CGRect.zero
-    @State private var ripple: ChatStartRipple?
-    @State private var rippleExpanded = false
+    @State private var touches: [ChatStartLiquidTouch] = []
+    @State private var pointer: CGPoint?
+    @State private var lastPointerUpdate = 0.0
+    @State private var agentPickerFocused = false
     private struct CatalogOwner: Equatable {
         var owner: ChatStartDraft.Owner?
         var repository: String?
@@ -47,7 +50,8 @@ struct ChatStartPage: View {
 
     var body: some View {
         ZStack {
-            background
+            ChatStartLiquidSurface(touches: touches, pointer: pointer, isFullScreen: isFullScreen,
+                                   active: active && !agentPickerFocused && scenePhase == .active)
             ScrollView {
                 VStack(spacing: 26) {
                     introduction
@@ -61,28 +65,37 @@ struct ChatStartPage: View {
                     }
                 }
                 .frame(maxWidth: 700)
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(key: ChatStartBounds.self, value: geometry.frame(in: .named("chat-start")))
-                    }
-                }
+                .anchorPreference(key: ChatStartContentAnchor.self, value: .bounds) { $0 }
                 .padding(.horizontal, 24).padding(.vertical, 70)
                 .frame(maxWidth: .infinity)
             }
             .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: receive)
+            .blur(radius: agentPickerFocused && !reduceTransparency ? 7 : 0)
+            .overlay {
+                if agentPickerFocused {
+                    Theme.background.opacity(reduceTransparency ? 0.70 : 0.30).allowsHitTesting(false)
+                }
+            }
             if acceptsDrops && (dropTargeted || composerDropTargeted) { ChatDropExperience() }
         }
-        .coordinateSpace(name: "chat-start")
-        .onPreferenceChange(ChatStartBounds.self) { contentBounds = $0 }
-        .simultaneousGesture(SpatialTapGesture(coordinateSpace: .named("chat-start")).onEnded { event in
-            guard !contentBounds.contains(event.location) else { return }
-            showRipple(at: event.location)
+        .overlayPreferenceValue(ChatStartContentAnchor.self) { anchor in
+            GeometryReader { geometry in
+                if let anchor {
+                    let excluded = geometry[anchor].insetBy(dx: -12, dy: -12)
+                    ChatStartEmptySpace(excluded: excluded, tap: displaceLiquid, hover: moveLiquid)
+                        .allowsHitTesting(active && !agentPickerFocused)
+                }
+            }
+        }
+        .environment(\.chatAgentPickerFocus, { focused in
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { agentPickerFocused = focused }
+            pointer = nil
         })
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: receive)
         .onAppear { active = true; synchronizeComposer() }
-        .onDisappear { active = false; catalogLease = UUID(); ripple = nil }
+        .onDisappear { active = false; catalogLease = UUID(); touches = []; pointer = nil; agentPickerFocused = false }
         .onChange(of: adapterIdentity) { _, _ in synchronizeComposer() }
         .onChange(of: draft.text) { _, text in if model.draft != text { model.draft = text } }
         .onChange(of: draft.attachments) { _, _ in synchronizeComposer() }
@@ -100,25 +113,6 @@ struct ChatStartPage: View {
             Text(L10n.text("common.new_chat.subtitle"))
                 .font(Theme.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
-    }
-
-    private var background: some View {
-        ZStack {
-            Theme.background
-            TimelineView(.animation(minimumInterval: 1 / 20, paused: reduceMotion || dimFlashingLights || scenePhase != .active)) { context in
-                let phase = reduceMotion || dimFlashingLights ? 0 : sin(context.date.timeIntervalSinceReferenceDate / 12)
-                Ellipse().fill(Theme.accent.opacity(0.09))
-                    .frame(width: 620, height: 330).blur(radius: 85)
-                    .offset(x: phase * 36, y: -90)
-            }
-            if let ripple {
-                Circle().stroke(Theme.accent.opacity(rippleExpanded ? 0 : 0.17), lineWidth: rippleExpanded ? 1 : 3)
-                    .frame(width: rippleExpanded ? 760 : 24, height: rippleExpanded ? 760 : 24)
-                    .position(ripple.point)
-                    .id(ripple.id)
-            }
-        }
-        .allowsHitTesting(false).accessibilityHidden(true)
     }
 
     private var composer: some View {
@@ -238,17 +232,27 @@ struct ChatStartPage: View {
         for case .attachment(let item) in drops { if let file = item.file { try? FileManager.default.removeItem(at: file) } }
     }
 
-    private func showRipple(at point: CGPoint) {
-        guard !reduceMotion, !dimFlashingLights, scenePhase == .active else { return }
-        let wave = ChatStartRipple(point: point)
-        rippleExpanded = false; ripple = wave
+    private func displaceLiquid(at point: CGPoint) {
+        guard active, !agentPickerFocused, !reduceMotion, !dimFlashingLights, scenePhase == .active else { return }
+        let touch = ChatStartLiquidTouch(point: point)
+        touches = Array(touches.suffix(2)) + [touch]
         Task { @MainActor in
-            await Task.yield()
-            guard ripple?.id == wave.id, active else { return }
-            withAnimation(.easeOut(duration: 1.1)) { rippleExpanded = true }
-            try? await Task.sleep(for: .seconds(1.15))
-            if ripple?.id == wave.id { ripple = nil }
+            try? await Task.sleep(for: .seconds(3.2))
+            touches.removeAll { $0.id == touch.id }
         }
+    }
+
+    private func moveLiquid(to point: CGPoint?) {
+        guard active, !agentPickerFocused, !reduceMotion, !dimFlashingLights, scenePhase == .active else {
+            if pointer != nil { pointer = nil }
+            return
+        }
+        guard let point else { pointer = nil; return }
+        let now = Date.timeIntervalSinceReferenceDate
+        guard now - lastPointerUpdate >= 1 / 30,
+              pointer.map({ hypot($0.x - point.x, $0.y - point.y) >= 3 }) ?? true else { return }
+        lastPointerUpdate = now
+        pointer = point
     }
 
     private var repositoryPicker: some View {
@@ -277,8 +281,208 @@ struct ChatStartPage: View {
     }
 }
 
-private struct ChatStartRipple { let id = UUID(); let point: CGPoint }
-private struct ChatStartBounds: PreferenceKey {
-    static var defaultValue: CGRect { .zero }
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+/// Resolving the content anchor in this overlay avoids mixed window/local
+/// coordinates. The even-odd hit shape contains only empty background: native
+/// text fields, menus, popovers and the whole composer never receive this gesture.
+private struct ChatStartContentAnchor: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = nextValue() ?? value }
+}
+
+private struct ChatStartEmptyShape: Shape {
+    let excluded: CGRect
+    func path(in rect: CGRect) -> Path {
+        var path = Path(rect)
+        let hole = excluded.intersection(rect)
+        if !hole.isNull { path.addRect(hole) }
+        return path
+    }
+}
+
+private struct ChatStartEmptySpace: View {
+    let excluded: CGRect
+    let tap: (CGPoint) -> Void
+    let hover: (CGPoint?) -> Void
+    var body: some View {
+        Color.clear
+            .contentShape(ChatStartEmptyShape(excluded: excluded), eoFill: true)
+            .onTapGesture(coordinateSpace: .local) { point in
+                guard !excluded.contains(point) else { return }
+                tap(point)
+            }
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point): hover(excluded.contains(point) ? nil : point)
+                case .ended: hover(nil)
+                }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+private struct ChatStartLiquidTouch: Identifiable {
+    let id = UUID()
+    let point: CGPoint
+    let began = Date.timeIntervalSinceReferenceDate
+}
+
+/// The native sidebar backdrop sits beneath an ink-like wash. Interaction
+/// pushes that wash aside, exposing actual frosted glass rather than drawing
+/// a ring over a solid plate. All decoration lives behind the writing surface.
+private struct ChatStartLiquidSurface: View {
+    let touches: [ChatStartLiquidTouch]
+    let pointer: CGPoint?
+    let isFullScreen: Bool
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityDimFlashingLights) private var dimFlashingLights
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var animates: Bool { active && !reduceMotion && !dimFlashingLights }
+
+    var body: some View {
+        ZStack {
+            glass
+            TimelineView(.animation(minimumInterval: touches.isEmpty && pointer == nil ? 1 / 12 : 1 / 45, paused: !animates)) { context in
+                let now = context.date.timeIntervalSinceReferenceDate
+                let phase = animates ? now / 15 : 0
+                ZStack {
+                    ZStack {
+                        Theme.background.opacity(colorScheme == .dark ? 0.91 : 0.86)
+                        ambient(phase: phase)
+                    }
+                    .mask { displacementMask(now: now) }
+                    caustics(now: now)
+                }
+            }
+        }
+        .allowsHitTesting(false).accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var glass: some View {
+        if reduceTransparency { Theme.background }
+        else {
+            #if os(macOS)
+            if #available(macOS 26, *) {
+                SidebarGlassSurface(isFullScreen: isFullScreen, cornerRadius: 0)
+            } else {
+                Rectangle().fill(.ultraThinMaterial)
+            }
+            #else
+            Rectangle().fill(.ultraThinMaterial)
+            #endif
+        }
+    }
+
+    private func ambient(phase: Double) -> some View {
+        GeometryReader { geometry in
+            let size = geometry.size
+            Canvas { context, _ in
+                let a = CGPoint(x: size.width * (0.28 + sin(phase) * 0.08), y: size.height * 0.48)
+                let b = CGPoint(x: size.width * (0.72 + cos(phase * 0.8) * 0.07), y: size.height * 0.64)
+                glow(context: &context, at: a, radius: min(640, size.width * 0.65), color: Theme.accent, opacity: 0.22)
+                glow(context: &context, at: b, radius: min(470, size.width * 0.5), color: Theme.secondary, opacity: 0.12)
+                glow(context: &context, at: CGPoint(x: size.width * 0.53, y: size.height * 0.27), radius: min(420, size.width * 0.42), color: Theme.accent, opacity: 0.08)
+            }
+        }
+    }
+
+    private func displacementMask(now: Double) -> some View {
+        Canvas { context, size in
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+            guard !reduceMotion, !dimFlashingLights else { return }
+            context.blendMode = .destinationOut
+            if let pointer, active {
+                glow(context: &context, at: pointer, radius: 170, color: .white, opacity: 0.74)
+            }
+            for touch in touches {
+                let age = max(0, now - touch.began)
+                guard age < 3.1 else { continue }
+                let growth = 1 - pow(1 - min(1, age / 1.5), 3)
+                let fade = min(1, max(0, (3.1 - age) / 1.3))
+                let radius = 52 + 330 * growth
+                // Overlapping soft lenses form an asymmetric liquid opening;
+                // their centers separate and settle as the wash flows back.
+                clearPool(context: &context, at: touch.point, radius: radius, opacity: 0.98 * fade)
+                let shifted = CGPoint(x: touch.point.x + radius * 0.24, y: touch.point.y - radius * 0.16)
+                glow(context: &context, at: shifted, radius: radius * 0.71, color: .white, opacity: 0.54 * fade)
+            }
+        }
+    }
+
+    private func caustics(now: Double) -> some View {
+        Canvas { context, _ in
+            guard !reduceMotion, !dimFlashingLights else { return }
+            if let pointer, active {
+                glow(context: &context, at: CGPoint(x: pointer.x - 78, y: pointer.y + 48), radius: 115, color: Theme.accent, opacity: 0.14)
+                glow(context: &context, at: CGPoint(x: pointer.x + 92, y: pointer.y - 40), radius: 100, color: Theme.secondary, opacity: 0.10)
+            }
+            for touch in touches {
+                let age = max(0, now - touch.began)
+                guard age < 3.1 else { continue }
+                let growth = 1 - pow(1 - min(1, age / 1.5), 3)
+                let fade = min(1, max(0, (3.1 - age) / 1.3))
+                let radius = 52 + 330 * growth
+                // Offset light catches the displaced mist in broad folds.
+                // There is no stroked circle or repeated pulse.
+                let a = CGPoint(x: touch.point.x - radius * 0.72, y: touch.point.y + radius * 0.28)
+                let b = CGPoint(x: touch.point.x + radius * 0.63, y: touch.point.y - radius * 0.46)
+                glow(context: &context, at: a, radius: radius * 0.74, color: Theme.accent, opacity: 0.34 * fade)
+                glow(context: &context, at: b, radius: radius * 0.59, color: Theme.secondary, opacity: 0.21 * fade)
+                glow(context: &context, at: CGPoint(x: b.x - 20, y: b.y + 12), radius: radius * 0.19, color: .white, opacity: 0.08 * fade)
+                foldedLight(context: &context, at: touch.point, radius: radius * 0.79, phase: growth, opacity: fade)
+            }
+        }
+    }
+
+    /// A broad clear center and a soft, irregular edge read as a displaced
+    /// film. A simple Gaussian hole would only look like another blurry glow.
+    private func clearPool(context: inout GraphicsContext, at center: CGPoint, radius: CGFloat, opacity: Double) {
+        context.drawLayer { lens in
+            lens.translateBy(x: center.x, y: center.y)
+            lens.scaleBy(x: 1, y: 0.84)
+            let rect = CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2)
+            lens.fill(Path(ellipseIn: rect), with: .radialGradient(
+                Gradient(stops: [.init(color: .white.opacity(opacity), location: 0),
+                                 .init(color: .white.opacity(opacity * 0.95), location: 0.52),
+                                 .init(color: .white.opacity(opacity * 0.26), location: 0.83),
+                                 .init(color: .white.opacity(0), location: 1)]),
+                center: .zero, startRadius: 0, endRadius: radius))
+        }
+    }
+
+    /// Soft folds catch light at the edge of the moving mist. Filled,
+    /// tapered ribbons avoid the outlined-ring appearance of a ripple.
+    private func foldedLight(context: inout GraphicsContext, at center: CGPoint, radius: CGFloat, phase: Double, opacity: Double) {
+        for side in [0.0, Double.pi] {
+            var outside: [CGPoint] = [], inside: [CGPoint] = []
+            for index in 0...42 {
+                let t = Double(index) / 42
+                let angle = -1.1 + t * 1.65 + side
+                let r = radius * (1 + 0.12 * sin(angle * 3 + phase * 2) + 0.06 * cos(angle * 5 - phase))
+                let width = radius * 0.045 * sin(t * .pi)
+                outside.append(CGPoint(x: center.x + cos(angle) * (r + width), y: center.y + sin(angle) * (r + width) * 0.77))
+                inside.append(CGPoint(x: center.x + cos(angle) * (r - width), y: center.y + sin(angle) * (r - width) * 0.77))
+            }
+            var fold = Path()
+            fold.addLines(outside + inside.reversed()); fold.closeSubpath()
+            context.drawLayer { light in
+                light.addFilter(.blur(radius: 13))
+                light.fill(fold, with: .linearGradient(
+                    Gradient(colors: [Theme.accent.opacity(0), Theme.accent.opacity(0.24 * opacity),
+                                      Theme.secondary.opacity(0.15 * opacity), Theme.secondary.opacity(0)]),
+                    startPoint: outside.first ?? center, endPoint: outside.last ?? center))
+            }
+        }
+    }
+
+    private func glow(context: inout GraphicsContext, at center: CGPoint, radius: CGFloat, color: Color, opacity: Double) {
+        let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+        context.fill(Path(ellipseIn: rect), with: .radialGradient(
+            Gradient(stops: [.init(color: color.opacity(opacity), location: 0),
+                             .init(color: color.opacity(opacity * 0.70), location: 0.42),
+                             .init(color: color.opacity(0), location: 1)]),
+            center: center, startRadius: 0, endRadius: radius))
+    }
 }

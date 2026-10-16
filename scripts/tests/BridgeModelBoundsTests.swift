@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with Models.swift JSONValue.swift FileDiff.swift WorkflowLayering.swift.
+// Compile with Models.swift JSONValue.swift FileDiff.swift WorkflowLayering.swift. SessionIdentities.swift.
 import Foundation
 import SwiftUI
 
@@ -18,6 +18,14 @@ struct ChatUsageTotals: Codable, Sendable, Equatable {}
 
 @main struct BridgeModelBoundsTests {
     static func main() throws {
+        let oldPTY = try JSONDecoder().decode(PtySessionInfo.self,
+            from: Data(#"{"id":"pty-real","command":"claude","cwd":"/repo","rows":24,"cols":80,"alive":true,"totalBytes":0}"#.utf8))
+        precondition(oldPTY.sessionIdentities == nil, "An older host does not invent a backend session ID")
+        let newPTY = try JSONDecoder().decode(PtySessionInfo.self,
+            from: Data(#"{"id":"pty-real","command":"claude","cwd":"/repo","rows":24,"cols":80,"alive":true,"totalBytes":0,"sessionIdentities":{"entries":[{"backend":"claude","id":"verified-native","status":"current"}],"total":1,"truncated":false}}"#.utf8))
+        precondition(newPTY.sessionIdentities?.entries.first?.id == "verified-native")
+        let ptyRoundtrip = try JSONDecoder().decode(PtySessionInfo.self, from: JSONEncoder().encode(newPTY))
+        precondition(ptyRoundtrip.sessionIdentities == newPTY.sessionIdentities)
         let counters = Counters(inputFresh: .max, output: 1, total: .max,
                                 inputTotal: .max, hasUnknown: false)
         assert(counters.workTokens == .max)

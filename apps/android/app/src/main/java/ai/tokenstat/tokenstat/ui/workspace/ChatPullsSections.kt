@@ -520,7 +520,7 @@ fun ChatSection(
             model = chat.str("model")?.ifBlank { null },
             effort = chat.str("effort")?.ifBlank { null },
             mode = chat.str("mode")?.ifBlank { null } ?: LaunchDefaults.MODE,
-            autonomy = chat.str("autonomy")?.ifBlank { null } ?: LaunchDefaults.AUTONOMY,
+            autonomy = chatComposerAutonomy(chat),
             // Empty, not null: no persona is a choice worth carrying.
             personaId = chat.str("personaId").orEmpty(),
         )
@@ -1965,6 +1965,7 @@ fun ChatSection(
                     }
                 },
                 launchMode = LaunchDefaults.mode(launchChoice.read()),
+                launchAutonomy = LaunchDefaults.autonomy(launchChoice.read(), bypassOnly = false),
                 offline = offline,
                 fastModeSaving = fastModeSaveId != null,
                 onQueueWhenConnected = {
@@ -2380,6 +2381,7 @@ private fun ChatSetupDialog(
     val clientState by model.state.collectAsStateWithLifecycle()
     val setupOwner = remember(peer, workspace, chatId) { ProjectOwner.from(clientState.account, peer, workspace) }
     fun ownsSetup() = setupOwner != null && ProjectOwner.from(model.state.value.account, peer, workspace) == setupOwner
+    val setupInspection = inspection ?: rememberChatInspection(model, peer, chat, setupOwner)
     val folders by model.workspacesConnection.folders.collectAsStateWithLifecycle()
     val connectedPeer by model.workspacesConnection.connectedPeer.collectAsStateWithLifecycle()
     val folder = if (connectedPeer == peer) folders.filterIsInstance<JsonObject>().firstOrNull { it.str("id") == workspace } else null
@@ -2514,6 +2516,7 @@ private fun ChatSetupDialog(
             }) {
                 Text(L10n.text(if (chat?.bol("running") == true) "common.running" else "common.idle"), style = MaterialTheme.typography.bodySmall)
                 Text(chatAgentSummary(backends, chat), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                ChatSessionIdentifiers(chatId, setupInspection.data, chat?.str("backend"))
             }
             ChatSetupDisclosure(L10n.text("android.chatdetail.title"), null, chatId, primary = {
                 ChatSegmented(ChatDetail.entries.map { it.name to chatDetailLabel(it) }, detail.name, enabled = true,
@@ -2531,7 +2534,7 @@ private fun ChatSetupDialog(
                     icon = if (stepsExpanded) ActionIcon.Collapse.vector else ActionIcon.Preview.vector,
                     small = true, onClick = onToggleSteps)
             }
-            if (chat != null) ChatStatsPanel(model, peer, chat, inspection)
+            if (chat != null) ChatStatsPanel(model, peer, chat, setupInspection)
             if (chat != null) {
                 ChatRoutingControls(chat, backends,
                     { method, params -> model.workspaceSection(peer, method, params) },
@@ -3103,6 +3106,11 @@ private fun ChatWorkingIndicator(
     }
 }
 
+/** Only a fresh composer inherits launch defaults. Older conversations with
+ * no autonomy field retain the host's approval-based interpretation. */
+internal fun chatComposerAutonomy(chat: JsonObject?, launchAutonomy: String = LaunchDefaults.AUTONOMY): String =
+    if (chat == null) launchAutonomy else if (chat.str("autonomy") == "bypass") "bypass" else "standard"
+
 /// The docked composer, built like the one on iPhone: what the message will
 /// be answered by on top, then how much rope the agent has, then the field
 /// itself with the paperclip beside it.
@@ -3135,6 +3143,7 @@ internal fun ChatComposer(
     /// What a new conversation would open in, for the moment before one is
     /// selected. See `LaunchDefaults`.
     launchMode: String,
+    launchAutonomy: String = LaunchDefaults.AUTONOMY,
     /// Whether this device can reach the host at all.
     offline: Boolean = false,
     fastModeSaving: Boolean = false,
@@ -3154,7 +3163,7 @@ internal fun ChatComposer(
     // The value is "standard", not "ask": the host only treats "standard"
     // as ask-with-approvals, and anything else that is not "bypass" runs
     // without the approval plumbing. The label stays Ask.
-    val autonomy = if (chat?.str("autonomy") == "bypass") "bypass" else "standard"
+    val autonomy = chatComposerAutonomy(chat, launchAutonomy)
     // An agent with no approval protocol of its own runs on Bypass or not at
     // all. Twin of `isBypassOnly` in `ChatSetupHeader.swift`.
     val bypassOnly = chatAgentForcesBypass(backends, chat?.str("backend").orEmpty())

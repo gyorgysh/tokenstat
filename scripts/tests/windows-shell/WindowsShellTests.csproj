@@ -8,6 +8,7 @@
     <Compile Include="../../../apps/windows/Pages/WorkspaceSshTabs.cs" Link="WorkspaceSshTabs.cs" />
     <Compile Include="../../../apps/windows/Pages/SshDisplayName.cs" Link="SshDisplayName.cs" />
     <Compile Include="../../../apps/windows/Pages/TerminalSession.cs" Link="TerminalSession.cs" />
+    <Compile Include="../../../apps/windows/Pages/SessionIdentities.cs" Link="SessionIdentities.cs" />
     <Compile Include="../../../apps/windows/Pages/TerminalViewer.cs" Link="TerminalViewer.cs" />
     <Compile Include="../../../apps/windows/Pages/Format.cs" Link="Format.cs" />
   </ItemGroup>

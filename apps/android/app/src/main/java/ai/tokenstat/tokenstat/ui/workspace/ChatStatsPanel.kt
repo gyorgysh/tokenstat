@@ -5,6 +5,9 @@ import ai.tokenstat.tokenstat.ui.logic.ChatCommandRules
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
+import ai.tokenstat.tokenstat.ui.components.SessionIdentifierRow
+import ai.tokenstat.tokenstat.ui.components.AgentSessionIdentifiers
+import ai.tokenstat.tokenstat.ui.logic.parseChatSessionIdentities
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -71,6 +74,7 @@ internal fun chatCommands() = listOf(
 
 @Composable internal fun ChatStatsDialog(model: AppViewModel, peer: String, chat: JsonObject, inspection: ChatInspectionSnapshot? = null, activitySection: String? = null, onDismiss: () -> Unit) {
     val account by model.state.collectAsStateWithLifecycle()
+    val snapshot = inspection ?: rememberChatInspection(model, peer, chat, account.account)
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(shape = RoundedCornerShape(20.dp), color = LocalTsColors.current.background,
             modifier = Modifier.fillMaxWidth(.94f).fillMaxHeight(.86f)) {
@@ -80,9 +84,11 @@ internal fun chatCommands() = listOf(
                     TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
                 }
                 if (activitySection != null) {
-                    val snapshot = inspection ?: rememberChatInspection(model, peer, chat, account.account)
                     ChatActivityPanel(snapshot.data, chat, activitySection, initiallyExpanded = true, loaded = snapshot.loaded)
-                } else ChatStatsPanel(model, peer, chat, inspection)
+                } else ChatStatsPanel(model, peer, chat, snapshot)
+                StatsDisclosure(L10n.text("common.session_identity.title")) {
+                    ChatSessionIdentifiers(chat.str("id").orEmpty(), snapshot.data, chat.str("backend"))
+                }
                 StatsDisclosure(L10n.text("common.chat.commands")) {
                     chatCommands().forEach { (command, detail) -> Text("$command · $detail", style = MaterialTheme.typography.bodySmall) }
                 }
@@ -92,6 +98,11 @@ internal fun chatCommands() = listOf(
 }
 
 internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Boolean)
+
+@Composable internal fun ChatSessionIdentifiers(chatId: String, inspection: JsonObject?, backend: String?) {
+    SessionIdentifierRow(L10n.text("common.session_identity.conversation"), chatId)
+    AgentSessionIdentifiers(parseChatSessionIdentities(inspection?.takeIf { it.str("backend") == backend }), chatId)
+}
 
 @Composable internal fun ChatSetupDisclosure(title: String, summary: String?, owner: String?,
     expanded: Boolean? = null, onExpandedChanged: ((Boolean) -> Unit)? = null,

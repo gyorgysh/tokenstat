@@ -1153,13 +1153,22 @@ fn events_grok(value: &Value) -> Vec<Event> {
         Some("tool_call_update") => events_grok_tool_update(value),
         Some("error") => event_failed(value.get("message").and_then(Value::as_str)),
         Some("usage") => event_usage(value),
-        Some("end") => vec![done(
-            value
-                .get("stopReason")
+        Some("end") => {
+            let mut events = value
+                .get("sessionId")
                 .and_then(Value::as_str)
-                .unwrap_or("done"),
-            None,
-        )],
+                .filter(|id| !id.is_empty())
+                .map(|id| vec![Event::Session { id: id.into() }])
+                .unwrap_or_default();
+            events.push(done(
+                value
+                    .get("stopReason")
+                    .and_then(Value::as_str)
+                    .unwrap_or("done"),
+                None,
+            ));
+            events
+        }
         _ => Vec::new(),
     }
 }
@@ -4112,6 +4121,28 @@ mod tests {
         let mut agy = Parser::new("agy");
         let edits = agy.push_events(include_str!("../../../fixtures/chat/agy.ndjson").as_bytes());
         assert!(edits.iter().any(|event| matches!(event, Event::Edit { path, added: 1, removed: 1, .. } if path == "a.rs")));
+    }
+
+    #[test]
+    fn grok_end_reports_native_session_without_using_tool_payload_ids() {
+        let raw = concat!(
+            "{\"type\":\"tool_call\",\"toolCallId\":\"one\",\"toolName\":\"read\",\"rawInput\":{\"sessionId\":\"credential\"}}\n",
+            "{\"type\":\"end\",\"stopReason\":\"done\",\"sessionId\":\"11111111-1111-4111-8111-111111111111\"}\n"
+        );
+        let events = Parser::new("grok").push_events(raw.as_bytes());
+        let ids = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Session { id } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["11111111-1111-4111-8111-111111111111"]);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::Done { .. }))
+        );
     }
 
     #[test]

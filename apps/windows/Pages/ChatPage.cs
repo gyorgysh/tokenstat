@@ -295,6 +295,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 L10n.Text("windows.chatpage.approvals.2bfc3471"), L10n.Text("windows.chatpage.0_waiting.15f51b52", $"{_approvals.Count}"),
                 L10n.Text("windows.chatpage.answer_them_in_the_transcript.fd152eae")));
         }
+        Detach(_sessionIdentityHost);
+        conversation.Children.Add(_sessionIdentityHost);
+        RenderSessionIdentities();
         _inspector.Children.Add(CollapsibleStatsCard(L10n.Text("windows.chatpage.conversation.8b34dbc2"), "conversation",
             new TextBlock { Text = Format.Text(chat, "title") + " · " + L10n.Text(Format.Flag(chat, "running") ? "common.running" : "common.idle"),
                 FontSize = 11, Opacity = .7, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }, conversation));

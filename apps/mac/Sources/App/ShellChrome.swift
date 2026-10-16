@@ -362,8 +362,6 @@ struct ColumnResizeHandle: View {
     var help: String = L10n.text("apple.shellchrome.drag_to_resize.31b2f1cd")
 
     @State private var start: Double?
-    @State private var cursorPushed = false
-    @State private var isHovering = false
 
     var body: some View {
         ZStack {
@@ -374,16 +372,7 @@ struct ColumnResizeHandle: View {
         .frame(width: 7)
         .frame(maxHeight: .infinity)
         .contentShape(.rect)
-        .onHover { hovering in
-            isHovering = hovering
-            if hovering, !cursorPushed {
-                NSCursor.resizeLeftRight.push()
-                cursorPushed = true
-            } else if !hovering, cursorPushed, start == nil {
-                NSCursor.pop()
-                cursorPushed = false
-            }
-        }
+        .background { ColumnResizeCursorArea() }
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
@@ -396,10 +385,6 @@ struct ColumnResizeHandle: View {
                     if let liveWidth { width = liveWidth }
                     liveWidth = nil
                     start = nil
-                    if !isHovering, cursorPushed {
-                        NSCursor.pop()
-                        cursorPushed = false
-                    }
                 }
         )
         // Double-click puts the column back where it started.
@@ -407,7 +392,6 @@ struct ColumnResizeHandle: View {
             width = side == .leading ? ShellMetrics.sidebarDefault : ShellMetrics.inspectorDefault
         }
         .onDisappear {
-            if cursorPushed { NSCursor.pop(); cursorPushed = false }
             liveWidth = nil
             start = nil
         }
@@ -418,6 +402,27 @@ struct ColumnResizeHandle: View {
             let step: Double = direction == .increment ? 20 : -20
             width = min(range.upperBound, max(range.lowerBound, width + step))
         }
+    }
+}
+
+/// AppKit owns the cursor only inside the visible divider. A global cursor
+/// stack can outlive SwiftUI hover exits when columns move or disappear.
+struct ColumnResizeCursorArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> ColumnResizeCursorView { ColumnResizeCursorView() }
+    func updateNSView(_ view: ColumnResizeCursorView, context: Context) {
+        view.window?.invalidateCursorRects(for: view)
+    }
+    static func dismantleNSView(_ view: ColumnResizeCursorView, coordinator: ()) {
+        view.discardCursorRects()
+    }
+}
+
+final class ColumnResizeCursorView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        guard window != nil, !isHiddenOrHasHiddenAncestor, !visibleRect.isEmpty else { return }
+        addCursorRect(visibleRect, cursor: .resizeLeftRight)
     }
 }
 #endif

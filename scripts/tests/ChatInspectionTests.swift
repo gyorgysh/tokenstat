@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ChatInspection.swift.
+// Compile with ChatInspection.swift. SessionIdentities.swift.
 import Foundation
 
 @main struct ChatInspectionTests {
@@ -7,6 +7,15 @@ import Foundation
         let wire = Data(#"{"backend":"claude","model":"model","contextUsed":1234,"contextWindow":200000,"contextSource":"lastInput","windowSource":"agent","tools":["Read"],"usedTools":["Read"],"mcpServers":[{"name":"godot-mcp","status":"connected","source":"agent","tools":["scene"]},{"name":"tokenstat-mcp","status":"configured","source":"configuration","tools":null}],"mcpReported":true,"observedAtMs":1,"currentRun":true}"#.utf8)
         let value = try JSONDecoder().decode(ChatInspection.self, from: wire)
         precondition(value.contextUsed == 1234 && value.contextWindow == 200000)
+        precondition(value.sessions == nil, "Inspection remains compatible with hosts predating session identity telemetry")
+        var sessionWire = try JSONSerialization.jsonObject(with: wire) as! [String: Any]
+        sessionWire["sessions"] = ["entries": [["backend": "claude", "id": "reported-native", "status": "current"]], "total": 1, "truncated": false]
+        let withSessions = try JSONDecoder().decode(ChatInspection.self, from: JSONSerialization.data(withJSONObject: sessionWire))
+        precondition(withSessions.sessions?.entries.first?.id == "reported-native" && withSessions.contextUsed == 1234)
+        sessionWire["sessions"] = false
+        let malformedSessions = try JSONDecoder().decode(ChatInspection.self, from: JSONSerialization.data(withJSONObject: sessionWire))
+        precondition(malformedSessions.contextUsed == 1234 && malformedSessions.sessions?.entries.isEmpty == true,
+                     "Malformed optional identity metadata must not cost a chat its context inspection")
         precondition(value.mcpServers[0].status == "connected" && value.mcpServers[1].status == "configured")
         precondition(value.mcpServers[1].tools == nil, "Unknown inventory must remain unknown")
         precondition(value.hasLiveConnection(value.mcpServers[0], running: true))

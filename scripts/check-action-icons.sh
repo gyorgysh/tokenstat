@@ -46,6 +46,9 @@ ALLOWED = [
     ("Features/Work/WorkSearchSheet.swift", "openPlace(place)"),
     ("Client/ClientWorkSearch.swift", "openPlace(place)"),
     ("App/RootView.swift", "Button(action: action) {"),
+    # Terminal rows already lead with the harness/terminal mark. Their action
+    # also dismisses the explicit info popover before opening the session.
+    ("App/RootView.swift", "leadingMark"),
     # Conversation rows lead with the selected backend's HarnessMark.
     ("App/RootView.swift", "Button(action: select) {"),
     ("App/TokenstatApp.swift", 'Button("About tokenstat")'),

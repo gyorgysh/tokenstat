@@ -2355,6 +2355,7 @@ impl Store {
         }
         let source_usage = self.conversation_usage(&fork, &source.join("events.ndjson"))?;
         let stored_usage = usage_totals(&source.join("events.ndjson"))?;
+        crate::chat_sessions::remember(&source, &fork)?;
         fork.id = mint_record_id("chat");
         fork.title = format!("{} (fork)", fork.title);
         fork.created_at_ms = now_ms();
@@ -2410,6 +2411,7 @@ impl Store {
                 copied.extend(crate::work_transcript_identity::encoded(record, seq)?);
             }
             replace_chat_file(&destination.join("events.ndjson"), &copied)?;
+            crate::chat_sessions::inherit(&source, &destination)?;
             copy_fork_files(&source.join("files"), &destination.join("files"))?;
             self.edit_index_locked(&lifecycle, false, |_, current| {
                 current.push(fork.clone());
@@ -2478,6 +2480,8 @@ impl Store {
             if let Some(backend) = changes.backend
                 && backend != chat.backend
             {
+                crate::chat_sessions::remember(&safe_join(&self.root, id)?, chat)?;
+                preserve_legacy_resume(chat);
                 chat.backend = backend;
                 // A model/effort value and a backend session are backend-
                 // specific. Do not send stale setup or a legacy token to the
@@ -2889,12 +2893,27 @@ impl Store {
             let _guard = self.transcript_guard()?;
             self.conversation_usage(&chat, &self.events_path(id)).ok()
         };
+        let sessions = {
+            let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+            let mut sessions = crate::chat_sessions::inventory(&directory, &chat);
+            if self.codex_session_missing(&chat) {
+                for entry in &mut sessions.entries {
+                    if entry.backend == "codex"
+                        && entry.source_conversation_id.as_deref() == Some(id)
+                    {
+                        entry.status = "historical".into();
+                    }
+                }
+            }
+            sessions
+        };
         Ok(json!({"backend":chat.backend, "model":model,
             "contextUsed":snapshot.context_used, "contextWindow":snapshot.context_window,
             "contextSource":snapshot.context_source, "windowSource":window_source,
             "contextHistory":snapshot.context_history,
             "contextBreakdown":snapshot.context_breakdown,
             "usage":usage,
+            "sessions":sessions,
             "tools":snapshot.tools, "usedTools":snapshot.used_tools,
             "mcpServers":snapshot.mcp_servers, "mcpReported":snapshot.mcp_reported,
             "inventoryPartial":snapshot.inventory_partial,
@@ -3364,15 +3383,36 @@ impl Store {
         if brief.is_empty() {
             return Ok(None);
         }
-        // The inline brief is bounded; a long conversation drops early turns.
-        // Point the new agent at the full export exactly then, so depth is
-        // one file read away and the handover still works when it never reads.
+        let history = crate::chat_brain::export_markdown(&events, &folder);
+        let path = self.write_history(&chat.id, &history)?;
+        brief.push_str(&format!(
+            "\nFull history: {path}. Read it if the summary above is missing what you need.\n"
+        ));
         if crate::chat_brain::dropped_turns(&events, &folder, crate::chat_brain::BUDGET) > 0 {
-            let history = crate::chat_brain::export_markdown(&events, &folder);
-            let path = self.write_history(&chat.id, &history)?;
-            brief.push_str(&format!(
-                "\nFull history: {path}. Read it if the summary above is missing what you need.\n"
-            ));
+            brief.push_str("Earlier turns were omitted from this inline summary; the full history retains them.\n");
+        }
+        let sessions = {
+            let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+            let directory = safe_join(&self.root, &chat.id)?;
+            crate::chat_sessions::remember(&directory, chat)?;
+            crate::chat_sessions::inventory(&directory, chat)
+        };
+        if !sessions.entries.is_empty() {
+            brief.push_str("\nNative session references (transcript lookup only; these do not grant resume authority):\n");
+            for entry in sessions.entries {
+                brief.push_str(&format!(
+                    "- {}: {} ({}, Tokenstat chat {})\n",
+                    entry.backend,
+                    entry.id,
+                    entry.status,
+                    entry.source_conversation_id.as_deref().unwrap_or(&chat.id)
+                ));
+            }
+            if let Some(archive) = sessions.archive_path {
+                brief.push_str(&format!(
+                    "Complete native session reference history: {archive}\n"
+                ));
+            }
         }
         Ok(Some(Handover {
             announce: previous.is_some_and(|name| name != chat.backend),
@@ -5149,6 +5189,10 @@ impl Store {
     }
     fn set_resume(&self, id: &str, backend: &str, token: &str) -> Result<(), String> {
         self.edit_conversation(id, |chat| {
+            let directory = safe_join(&self.root, id)?;
+            crate::chat_sessions::remember(&directory, chat)?;
+            preserve_legacy_resume(chat);
+            crate::chat_sessions::observed(&directory, chat, backend, token, now_ms())?;
             chat.resume_tokens.insert(backend.into(), token.into());
             chat.resume_token = Some(token.into());
             chat.updated_at_ms = now_ms();
@@ -5195,11 +5239,27 @@ impl Store {
     /// Older turns deleted this home during cleanup. Give a fresh Codex
     /// session the stored conversation instead of resuming a missing rollout.
     /// Keep this decision local until the new session reports its own token.
-    fn recover_codex_session(&self, chat: &mut Conversation) {
-        if chat.backend == "codex"
+    fn codex_session_missing(&self, chat: &Conversation) -> bool {
+        chat.backend == "codex"
             && private_codex_home(chat.autonomy == "standard")
             && !self.codex_home(&chat.id).join("sessions").is_dir()
-        {
+    }
+
+    fn recover_codex_session(&self, chat: &mut Conversation) {
+        if self.codex_session_missing(chat) {
+            if let Ok(_lifecycle) = crate::work_handoff_store::lifecycle_lock(&self.root)
+                && let Ok(directory) = safe_join(&self.root, &chat.id)
+            {
+                let _ = crate::chat_sessions::remember(&directory, chat);
+                if let Some(id) = chat
+                    .resume_tokens
+                    .get("codex")
+                    .or(chat.resume_token.as_ref())
+                {
+                    let _ =
+                        crate::chat_sessions::invalidated(&directory, chat, "codex", id, now_ms());
+                }
+            }
             chat.resume_tokens.remove("codex");
             chat.resume_token = None;
             chat.standing_sent.remove("codex");
@@ -6876,6 +6936,15 @@ fn validate_update_setup(chat: &Conversation, changes: &Update) -> Result<(), St
     Ok(())
 }
 
+fn preserve_legacy_resume(chat: &mut Conversation) {
+    if chat.resume_tokens.is_empty()
+        && let Some(token) = &chat.resume_token
+    {
+        chat.resume_tokens
+            .insert(chat.backend.clone(), token.clone());
+    }
+}
+
 fn next_send_revision(revision: u64) -> Result<u64, String> {
     revision
         .checked_add(1)
@@ -8464,6 +8533,120 @@ mod tests {
             assert_eq!(history[0]["event"]["delta"], rich);
             assert_eq!(history[1], live[0]);
         }
+    }
+
+    #[test]
+    fn native_session_refs_survive_replacement_handoff_and_fork_without_recent_leaks() {
+        const OLD: &str = "11111111-1111-4111-8111-111111111111";
+        const NEW: &str = "22222222-2222-4222-8222-222222222222";
+        const CODEX: &str = "33333333-3333-4333-8333-333333333333";
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        store
+            .edit_conversation("chat-test", |chat| {
+                chat.resume_token = Some(OLD.into());
+                Ok(())
+            })
+            .unwrap();
+        store.set_resume("chat-test", "claude", NEW).unwrap();
+        store.set_resume("chat-test", "codex", CODEX).unwrap();
+        store
+            .append(
+                "chat-test",
+                &StoredEvent::User {
+                    steer: false,
+                    text: "Keep the established plan".into(),
+                    at_ms: 1,
+                },
+            )
+            .unwrap();
+        store.record_events(
+            "chat-test",
+            "codex",
+            vec![Event::Text {
+                delta: "Completed the first step".into(),
+            }],
+        );
+        let inspected = store.inspection("chat-test").unwrap();
+        let refs = inspected["sessions"]["entries"].as_array().unwrap();
+        assert_eq!(refs.len(), 3);
+        assert!(
+            refs.iter()
+                .any(|entry| entry["id"] == NEW && entry["status"] == "current")
+        );
+        assert!(
+            refs.iter()
+                .any(|entry| entry["id"] == OLD && entry["status"] == "historical")
+        );
+        assert!(
+            refs.iter()
+                .any(|entry| entry["id"] == CODEX && entry["status"] == "saved")
+        );
+        let handover = store
+            .handover(&store.get("chat-test").unwrap())
+            .unwrap()
+            .unwrap();
+        for id in [OLD, NEW, CODEX] {
+            assert!(handover.brief.contains(id));
+        }
+        assert!(
+            handover.brief.contains("Full history:")
+                && handover.brief.contains("transcript lookup only")
+        );
+        assert!(root.path().join("chat/chat-test/history.md").is_file());
+        let recent = serde_json::to_string(&store.recent(10)).unwrap();
+        for id in [OLD, NEW, CODEX] {
+            assert!(!recent.contains(id));
+        }
+        let fork = store.fork("chat-test").unwrap();
+        assert!(fork.resume_tokens.is_empty() && fork.resume_token.is_none());
+        let refs = store.inspection(&fork.id).unwrap()["sessions"].clone();
+        assert_eq!(refs["total"], 3);
+        assert!(
+            refs["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|entry| entry["status"] == "historical"
+                    && entry["sourceConversationId"] == "chat-test")
+        );
+    }
+
+    #[test]
+    fn invalidated_codex_id_stays_historical_until_replacement_even_after_reopen() {
+        const OLD: &str = "11111111-1111-4111-8111-111111111111";
+        const NEW: &str = "22222222-2222-4222-8222-222222222222";
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        retune_chat(&store, "chat-test", "codex", "standard");
+        store.set_resume("chat-test", "codex", OLD).unwrap();
+        let mut launch = store.get("chat-test").unwrap();
+        store.recover_codex_session(&mut launch);
+        assert!(launch.resume_tokens.is_empty());
+        assert_eq!(
+            store.get("chat-test").unwrap().resume_token.as_deref(),
+            Some(OLD)
+        );
+        // A failed fresh launch reports no replacement, even after its home is recreated.
+        fs::create_dir_all(store.codex_home("chat-test").join("sessions")).unwrap();
+        let reopened = Store::load_at(store.root.clone());
+        assert_eq!(
+            reopened.inspection("chat-test").unwrap()["sessions"]["entries"][0]["status"],
+            "historical"
+        );
+        reopened.set_resume("chat-test", "codex", NEW).unwrap();
+        let refs = reopened.inspection("chat-test").unwrap()["sessions"].clone();
+        assert_eq!(refs["entries"][0]["id"], NEW);
+        assert_eq!(refs["entries"][0]["status"], "current");
+        assert!(
+            refs["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["id"] == OLD && entry["status"] == "historical")
+        );
     }
 
     #[test]

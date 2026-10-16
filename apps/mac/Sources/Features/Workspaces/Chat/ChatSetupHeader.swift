@@ -344,6 +344,7 @@ struct ChatComposerControls<Chrome: View>: View {
     let chrome: Chrome
 
     @State private var pickingAgent = false
+    @Environment(\.chatAgentPickerFocus) private var agentPickerFocus
 
     init(model: ChatModel, chat: ChatConversation, locked: Bool, compact: Bool = false,
          @ViewBuilder chrome: () -> Chrome) {
@@ -366,6 +367,8 @@ struct ChatComposerControls<Chrome: View>: View {
                 }
             }
             .onAppear { enforceBypassOnly() }
+            .onChange(of: pickingAgent) { _, presented in agentPickerFocus(presented) }
+            .onDisappear { if pickingAgent { agentPickerFocus(false) } }
             .onChange(of: chat.backend) { _, _ in enforceBypassOnly() }
             .onChange(of: model.currentReference) { _, _ in pickingAgent = false }
             .onChange(of: model.savedCopy != nil) { _, saved in
@@ -1067,5 +1070,16 @@ extension ChatSetupSection where Primary == EmptyView {
          @ViewBuilder content: () -> Content) {
         self.init(title: title, icon: icon, subtitle: subtitle, summary: summary,
                   initiallyExpanded: initiallyExpanded, expanded: expanded, primary: EmptyView(), content: content)
+    }
+}
+
+private struct ChatAgentPickerFocusKey: EnvironmentKey {
+    static let defaultValue: (Bool) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    var chatAgentPickerFocus: (Bool) -> Void {
+        get { self[ChatAgentPickerFocusKey.self] }
+        set { self[ChatAgentPickerFocusKey.self] = newValue }
     }
 }

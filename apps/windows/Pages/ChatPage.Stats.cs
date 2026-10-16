@@ -17,6 +17,7 @@ namespace Tokenstat.Pages;
 internal sealed partial class ChatPage
 {
     private readonly StackPanel _inspectionHost = new() { Spacing = Theme.SpaceM };
+    private readonly StackPanel _sessionIdentityHost = new();
     private JsonNode? _inspection;
     private bool _inspectionRunning;
     private string? _inspectionOwner;
@@ -153,6 +154,7 @@ internal sealed partial class ChatPage
         var owner = InspectionOwner();
         _statsFilters.Clear();
         _inspectionHost.Children.Clear(); AddStats(_inspectionHost);
+        RenderSessionIdentities();
         RenderActivitySummary();
         if (_commandDialogBody is not null && _commandDialogOwner == InspectionOwner()) RenderCommandStats();
         else _commandDialog?.Hide();
@@ -162,6 +164,14 @@ internal sealed partial class ChatPage
                 replacement.Focus(FocusState.Programmatic);
                 replacement.Select(Math.Min(caret, replacement.Text.Length), Math.Min(length, Math.Max(0, replacement.Text.Length - caret)));
             });
+    }
+    private void RenderSessionIdentities()
+    {
+        _sessionIdentityHost.Children.Clear();
+        if (_openChat is not null && _openId is not null)
+            _sessionIdentityHost.Children.Add(SessionIdentityRows.Build(_openId, "common.session_identity.conversation",
+                SessionIdentities.Read(CurrentInspection?["sessions"]), historyExpanded: _statsExpanded.GetValueOrDefault("session-history"),
+                historyChanged: expanded => _statsExpanded["session-history"] = expanded));
     }
     private void RenderCommandStats()
     {

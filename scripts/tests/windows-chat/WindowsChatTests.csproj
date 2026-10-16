@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="../../../apps/windows/Pages/ChatCommandRules.cs" Link="ChatCommandRules.cs" />
     <Compile Include="../../../apps/windows/Pages/NewChatSetup.cs" Link="NewChatSetup.cs" />
+    <Compile Include="../../../apps/windows/Pages/SessionIdentities.cs" Link="SessionIdentities.cs" />
     <Compile Include="../../../apps/windows/Pages/NewChatFile.cs" Link="NewChatFile.cs" />
     <Compile Include="../../../apps/windows/Pages/NewChatDraftStore.cs" Link="NewChatDraftStore.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatActivityData.cs" Link="ChatActivityData.cs" />

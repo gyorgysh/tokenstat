@@ -15,6 +15,7 @@ struct ClientTerminalActions: ViewModifier {
     @State private var rename = false
     @State private var error: String?
     @State private var duplicating = false
+    @State private var showingIdentities = false
 
     private var reference: WorkReference? {
         guard !workspaceID.isEmpty else { return nil }
@@ -24,6 +25,10 @@ struct ClientTerminalActions: ViewModifier {
 
     func body(content: Content) -> some View {
         content.contextMenu {
+            Button(L10n.text("common.session_identity.title"), .copy) {
+                guard owner != nil, owner == WorkSessionContext.shared.scope else { return }
+                showingIdentities = true
+            }
             Button(L10n.text("apple.clientterminalactions.rename_terminal.68e0c2a6"), .edit) { rename = true }.disabled(reference == nil)
             Button(L10n.text("apple.clientterminalactions.duplicate_terminal.4d6bc239"), .copy) {
                 guard !duplicating, owner != nil, owner == WorkSessionContext.shared.scope else { return }
@@ -59,6 +64,24 @@ struct ClientTerminalActions: ViewModifier {
                 Button(L10n.text("common.close"), role: .destructive, action: onClose)
             }
         }
+        .sheet(isPresented: $showingIdentities) {
+            NavigationStack {
+                ScrollView {
+                    SessionIdentityRows(entries: SessionIdentityPresentation.entries(localID: info.id, kind: .terminal, sessions: info.sessionIdentities),
+                                        truncated: info.sessionIdentities?.truncated ?? false, reportedTotal: info.sessionIdentities?.total)
+                        .padding(Theme.Space.m)
+                }
+                .background(Theme.background)
+                .navigationTitle(L10n.text("common.session_identity.title"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.text("common.done"), .done) { showingIdentities = false }
+                } }
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .onChange(of: reference) { _, _ in showingIdentities = false }
+        .onChange(of: WorkSessionContext.shared.generation) { _, _ in showingIdentities = false }
         .sheet(isPresented: $rename) {
             ClientNameEditor(title: L10n.text("apple.clientterminalactions.rename_terminal.68e0c2a6"), initial: title) { name in
                 guard owner != nil, owner == WorkSessionContext.shared.scope else { throw ClientActionOwnership.changed }

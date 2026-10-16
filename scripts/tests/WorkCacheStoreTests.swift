@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with WorkReference.swift WorkCache.swift WorkCacheStore.swift WorkCacheModels.swift.
+// Compile with WorkReference.swift WorkCache.swift WorkCacheStore.swift WorkCacheModels.swift. SessionIdentities.swift.
 import Foundation
 
 // Local transport/keychain doubles. No production credentials or files are used.

@@ -14,6 +14,7 @@ pub struct Destination {
 }
 impl Destination {
     fn apply(&self, chat: &mut Conversation) {
+        preserve_legacy_resume(chat);
         chat.backend = self.backend.clone();
         chat.model = self.model.clone();
         chat.effort = self.effort.clone();
@@ -807,6 +808,7 @@ impl Store {
         // The next reservation advances the revision. Do not add a second
         // revision here after validating the client's accepted context.
         let result = self.edit_conversation(id, |current| {
+            crate::chat_sessions::remember(&safe_join(&self.root, id)?, current)?;
             preferred.apply(current);
             Ok(current.clone())
         })?;
@@ -1050,6 +1052,7 @@ impl Store {
             || destination.effort != selected.effort
         {
             selected = self.edit_conversation(id, |c| {
+                crate::chat_sessions::remember(&safe_join(&self.root, id)?, c)?;
                 destination.apply(c);
                 c.send_revision = next_send_revision(c.send_revision)?;
                 Ok(c.clone())

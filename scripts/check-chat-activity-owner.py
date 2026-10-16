@@ -133,5 +133,5 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-activity-owner-') as director
     fixture = directory / 'Check.swift'
     fixture.write_text('\n'.join(pieces))
     subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', str(directory / 'cache'),
-                    str(fixture), str(root / 'apps/mac/Sources/Bridge/ChatInspection.swift'), '-o', str(directory / 'check')], check=True)
+                    str(fixture), str(root / 'apps/mac/Sources/Bridge/ChatInspection.swift'), str(root / 'apps/mac/Sources/Bridge/SessionIdentities.swift'), '-o', str(directory / 'check')], check=True)
     subprocess.run([str(directory / 'check')], check=True)

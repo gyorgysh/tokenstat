@@ -2,7 +2,7 @@
 namespace Tokenstat.Pages;
 
 internal sealed record NewChatSetup(string Backend, string? Model, string? Effort,
-    string Mode = "execute", string Autonomy = "standard", bool FastMode = false)
+    string Mode = "execute", string Autonomy = "bypass", bool FastMode = false)
 {
     internal static bool ShouldSend(string text, int files = 0) => !string.IsNullOrWhiteSpace(text) || files > 0;
     internal bool IsAvailable(System.Text.Json.Nodes.JsonNode? descriptor)

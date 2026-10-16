@@ -11,6 +11,9 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         let alice = WorkReference.Scope.local(installationID: "alice")
         let bob = WorkReference.Scope.local(installationID: "bob")
         let draft = ChatStartDraft()
+        let fresh = ChatStartDraft.AgentChoice(backend: "codex", model: nil, effort: nil)
+        precondition(fresh.mode == "execute" && fresh.autonomy == "bypass",
+                     "An untouched landing composer starts in Execute/Don't ask before any catalog is loaded")
         let picture = ChatAttachment(id: "local-draft:picture", name: "image.png", mediaType: "image/png", size: 3)
         let second = ChatAttachment(id: "local-draft:second", name: "notes.txt", mediaType: "text/plain", size: 4)
         let codex = ChatStartDraft.AgentChoice(backend: "codex", model: "model", effort: "high", mode: "plan", autonomy: "bypass", fastMode: true)
@@ -37,7 +40,7 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         draft.repositoryID = "remote:other-host:repo"
         precondition(draft.text.isEmpty && draft.attachments.isEmpty && draft.agent == nil,
                      "Different hosts/repositories have independent unsent writing and setup")
-        draft.text = "Other repository"; draft.agent = .init(backend: "claude", model: nil, effort: nil)
+        draft.text = "Other repository"; draft.agent = .init(backend: "claude", model: nil, effort: nil, mode: "plan", autonomy: "standard")
         draft.repositoryID = "repo"
         precondition(draft.text == first.text && draft.attachments == [picture] && draft.agent == codex,
                      "Returning to a repository restores text, files and setup")
@@ -46,7 +49,7 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         precondition(draft.begin(available: ["repo"]) == nil, "A half-copied file cannot be omitted by Send")
         draft.repositoryID = "remote:other-host:repo"
         draft.finishImport(importOwner, attachment: second)
-        precondition(draft.attachments.isEmpty && draft.text == "Other repository", "An in-flight copy cannot move into the newly selected repository")
+        precondition(draft.attachments.isEmpty && draft.text == "Other repository" && draft.agent?.mode == "plan" && draft.agent?.autonomy == "standard", "An in-flight copy cannot move into the newly selected repository")
         draft.repositoryID = "repo"
         precondition(draft.attachments == [picture, second] && draft.stagingAttachments == 0,
                      "An already-started import stays with its original draft")

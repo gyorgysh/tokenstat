@@ -13,7 +13,9 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Added
 
-- New chat opens a dedicated composer with a repository picker and the existing Add repository flow on Mac, iPhone/iPad, Android and Windows. It includes file/image attachments, agent/model/effort, working style, permissions and supported fast mode. Local drafts stay with their repository. Opening the landing page, selecting files or choosing a repository does not create an empty conversation. Open chat supports image/file-first messages without starting a model turn. Empty background taps produce a subtle ripple when motion is enabled.
+- New chat opens a dedicated composer with a repository picker and the existing Add repository flow on Mac, iPhone/iPad, Android and Windows. It includes file/image attachments, agent/model/effort, working style, permissions and supported fast mode. Local drafts stay with their repository. Opening the landing page, selecting files or choosing a repository does not create an empty conversation. Open chat supports image/file-first messages without starting a model turn. Empty background interactions produce motion-aware effects.
+- The Apple new-chat canvas reveals frosted glass beneath a liquid glow as the pointer moves or the empty background is clicked. Mac glass follows sidebar appearance settings; reduced motion and transparency are respected. The agent selector softens the canvas behind it to keep attention on the choices.
+- Chat and terminal details offer click-to-copy Tokenstat and verified agent session IDs. Chat handoffs preserve earlier session references and point incoming agents to saved transcripts, including after a native session has been replaced.
 - Chat composers on Mac, iPhone, iPad, Android and Windows offer slash commands for context, usage, tools, MCP servers, stopping work and native Claude/Codex compaction.
 - Chat inspectors combine context and conversation usage, recent context history, tool groups and reported MCP connections in compact, expandable panels.
 - Chats show reported goals, plan steps and subagent tasks in a compact activity summary and expandable inspector on Mac, iPhone/iPad, Android and Windows. `/goal`, `/plan` and `/subagents` open the details without starting a model turn. Live counts and historical reports stay distinct, and backend sections that are not reported remain unknown.
@@ -32,6 +34,9 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Mac chats accept image and file drops throughout the transcript, including message text, images and empty space. One highlight covers the full chat area and composer on Mac and iPad. Screenshot drops can use their image pixels when a temporary file URL is unavailable.
 - Context and MCP reports share one scoped reader and retire live status when a view becomes inactive. Image thumbnails stay attached to the preceding tool in their own turn and backend, interrupted tools stop holding chats busy, and session goals survive model changes without carrying over old context or subagents.
 - Native screenshots retain returned image bytes when temporary output paths disappear, and verified extensionless image files can appear in galleries.
+- Fresh composers show Execute and Don't ask before agent discovery finishes, while remembered choices and older conversation settings stay intact.
+- Mac pane dividers limit resize cursors to their visible bounds when columns move, hide or close.
+- Mac terminal session details open from an info button, matching chats, and no longer open while hovering through the sidebar.
 
 ### Changed
 

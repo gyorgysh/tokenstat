@@ -65,6 +65,21 @@ internal static class TerminalSessionTests
         await old.CloseAsync();
         await restored.CloseAsync();
         Console.WriteLine("Terminal session: respawn retires both old cache keys and preserves its new owner");
+
+        var identities = TerminalSession.For("native-identities-" + Guid.NewGuid(), null);
+        await identities.AttachAsync(30, 100);
+        Check(identities.NativeSessionIdentities.Entries.Count == 0, "An older host must not invent native terminal IDs");
+        AppServices.Host.SessionInventory = JsonNode.Parse("""{"entries":[{"backend":"codex","id":"11111111-1111-4111-8111-111111111111","status":"current"}]}""");
+        await identities.AttachAsync(30, 100);
+        Check(identities.NativeSessionIdentities.Entries.Single().Id == "11111111-1111-4111-8111-111111111111",
+            "pty.info must expose native IDs from its top-level optional inventory");
+        await identities.RespawnAsync(30, 100);
+        Check(identities.NativeSessionIdentities.Entries.Single().Backend == "codex", "pty.spawn must accept the same optional identity projection");
+        AppServices.Host.SessionInventory = null;
+        await identities.AttachAsync(30, 100);
+        Check(identities.NativeSessionIdentities.Entries.Count == 0, "Missing newer metadata must clear a previous terminal identity projection");
+        await identities.CloseAsync();
+        Console.WriteLine("Terminal session: optional native IDs survive spawn/info and tolerate older hosts");
     }
 }
 
@@ -79,6 +94,7 @@ namespace Tokenstat
     internal sealed class TerminalProtocolFixture
     {
         internal Func<string, Task>? BeforeCall { get; set; }
+        internal JsonNode? SessionInventory { get; set; }
         internal async Task<JsonNode> CallAsync(string method, JsonNode? parameters = null)
         {
             if (BeforeCall is { } before) await before(method);
@@ -92,6 +108,8 @@ namespace Tokenstat
                 "pty.detach" or "pty.close" or "pty.write" or "pty.kill" => new JsonObject(),
                 _ => throw new Exception("Unexpected terminal fixture method: " + method),
             };
+            if (method is "pty.spawn" or "pty.info" && SessionInventory is not null)
+                result["sessionIdentities"] = SessionInventory.DeepClone();
             return result;
         }
     }

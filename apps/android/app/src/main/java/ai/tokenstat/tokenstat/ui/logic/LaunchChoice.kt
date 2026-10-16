@@ -39,7 +39,7 @@ data class LaunchChoice(
 /// `ChatModel.startChat`.
 object LaunchDefaults {
     const val MODE = "execute"
-    const val AUTONOMY = "standard"
+    const val AUTONOMY = "bypass"
 
     /// Always execute, whatever the last chat used. Plan is a choice for one
     /// piece of work, and carried over it left every later chat planning at
@@ -48,8 +48,8 @@ object LaunchDefaults {
     @Suppress("UNUSED_PARAMETER")
     fun mode(saved: LaunchChoice?): String = MODE
 
-    /// An agent with no approval protocol of its own runs on Bypass or not at
-    /// all, so it is put there whatever was last used.
+    /// Fresh chats start on Bypass. A saved Ask first choice still wins for
+    /// agents with approvals; bypass-only agents cannot use that preference.
     fun autonomy(saved: LaunchChoice?, bypassOnly: Boolean): String =
         if (bypassOnly) "bypass" else saved?.autonomy?.ifBlank { null } ?: AUTONOMY
 

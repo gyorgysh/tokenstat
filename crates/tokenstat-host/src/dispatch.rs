@@ -494,6 +494,9 @@ fn add_meter(item: &mut Value, siblings: &[(String, u64)]) {
     let Some(map) = item.as_object_mut() else {
         return;
     };
+    if let Some(sessions) = meter.session_identities {
+        map.insert("sessionIdentities".into(), json!(sessions));
+    }
     map.insert("tokens".into(), json!(meter.tokens));
     map.insert("billing".into(), json!(meter.billing.as_str()));
     if let Some(micros) = meter.cost_micros {

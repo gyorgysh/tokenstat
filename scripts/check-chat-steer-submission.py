@@ -21,14 +21,28 @@ members = '\n'.join(member(signature) for signature in [
     '    var nativeSteerAcceptsAttachments:', '    var sendsAsNote:',
     '    private var steerBackend:', '    private var steerAutonomy:',
     '    enum BusyNoteStart', '    func beginBusyNote(',
+    '    static func newChatDefaults(', '    static var newChatInitialAutonomy:', '    private struct LaunchChoice:',
     '    enum SignInHold', '    func holdForSignIn(',
     '    func finishBusyNote(', '    func consumeChatCommand(', '    func sendInitialDraft(',
 ])
+members = members.replace('UserDefaults.standard', 'FixtureDefaults.standard')
 activity = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatActivityView.swift').read_text()
 activity_section = member('enum ChatActivitySection:', activity)
 stub = '''import Foundation
 enum L10n { static func text(_ key: String) -> String { key } }
 struct ChatAttachment: Equatable { let id: String }
+struct ChatBackend {
+    var id: String
+    var installed: Bool? = true
+    var models: [String] = ["model"]
+    var efforts: [String] = ["high"]
+    var gateTier: String? = nil
+}
+@MainActor final class FixtureDefaults {
+    static let standard = FixtureDefaults()
+    var saved: Data?
+    func data(forKey: String) -> Data? { saved }
+}
 struct Conversation {
     var id = "chat"
     var nativeSteer: Bool? = true
@@ -48,6 +62,7 @@ enum RemoteHostFeature { case steer; var minimumProtocol: Int { 1 } }
     var scope: WorkReference.Scope? = .local(installationID: "test")
 }
 @MainActor final class Model {
+    private static let launchChoiceKey = "fixture"
     var selected: Conversation? = Conversation()
     var busy = true
     var attachments = [ChatAttachment(id: "image")]
@@ -163,6 +178,17 @@ tests = '''
             }
         }
         assert(Bridge.steerCalls == 0)
+        FixtureDefaults.standard.saved = nil
+        assert(Model.newChatInitialAutonomy == "bypass")
+        let freshSetup = Model.newChatDefaults(backends: [ChatBackend(id: "codex")])!
+        assert(freshSetup.mode == "execute" && freshSetup.autonomy == "bypass",
+               "Fresh local setup must show Execute/Don't ask before and after a catalog answers")
+        FixtureDefaults.standard.saved = Data(#"{"backend":"codex","model":"model","effort":"high","mode":"plan","autonomy":"standard"}"#.utf8)
+        assert(Model.newChatInitialAutonomy == "standard")
+        let remembered = Model.newChatDefaults(backends: [ChatBackend(id: "codex")])!
+        assert(remembered.mode == "execute" && remembered.autonomy == "standard" && remembered.model == "model",
+               "An explicit remembered Ask first is preserved while Plan never becomes a fresh default")
+        FixtureDefaults.standard.saved = nil
         let initial = Model()
         initial.busy = false; initial.attachments = []; initial.needsAuthentication = false
         initial.draft = "  Start from the landing page  "
@@ -221,6 +247,7 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-steer-submission-') as work:
     subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5',
         '-module-cache-path', str(work / 'cache'), '-o', str(work / 'test'), str(swift),
         str(root / 'apps/mac/Sources/Features/Work/WorkReference.swift'),
+        str(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatStartDraft.swift'),
         str(root / 'apps/mac/Sources/Features/Work/ChatDraftSubmission.swift'),
         str(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatSteerContext.swift'),
         str(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatCommandRules.swift')], check=True)

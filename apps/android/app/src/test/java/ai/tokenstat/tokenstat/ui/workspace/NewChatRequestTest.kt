@@ -2,6 +2,8 @@
 package ai.tokenstat.tokenstat.ui.workspace
 
 import ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions
+import ai.tokenstat.tokenstat.ui.logic.LaunchChoice
+import ai.tokenstat.tokenstat.ui.logic.LaunchDefaults
 import org.junit.Assert.*
 import org.junit.Test
 import kotlinx.serialization.json.Json
@@ -34,7 +36,27 @@ class NewChatRequestTest {
         assertFalse(setup.isAvailable(emptyList()))
         assertTrue(NewChatSetup("codex", null, null).isAvailable(descriptor("""{"id":"codex"}""")))
         assertFalse(NewChatSetup("codex", null, null, fastMode = true).isAvailable(descriptor("""{"id":"codex"}""")))
-        assertFalse(NewChatSetup("muse", null, null).isAvailable(descriptor("""{"id":"muse","gateTier":"bypassOnly"}""")))
+        assertFalse(NewChatSetup("muse", null, null, autonomy = "standard").isAvailable(descriptor("""{"id":"muse","gateTier":"bypassOnly"}""")))
+    }
+
+    @Test fun freshComposerShowsTheSameExecuteBypassDefaultsThatCreationUses() {
+        val setup = NewChatSetup("codex", null, null)
+        val params = setup.createParameters("repository")
+        assertEquals("execute", setup.mode)
+        assertEquals("execute", params["mode"]?.jsonPrimitive?.content)
+        assertEquals("bypass", chatComposerAutonomy(null))
+        assertEquals(chatComposerAutonomy(null), params["autonomy"]?.jsonPrimitive?.content)
+    }
+
+    @Test fun explicitAskAndExistingConversationDefaultsRemainApprovalBased() {
+        val saved = LaunchChoice("codex", null, null, "execute", "standard", null)
+        val launchAutonomy = LaunchDefaults.autonomy(saved, bypassOnly = false)
+        assertEquals("standard", chatComposerAutonomy(null, launchAutonomy))
+        val existing = Json.parseToJsonElement("""{"backend":"codex"}""").jsonObject
+        assertEquals("standard", chatComposerAutonomy(existing))
+        val explicit = NewChatSetup("codex", null, null, mode = "plan", autonomy = "standard")
+        assertEquals("standard", chatComposerAutonomy(explicit.chat()))
+        assertEquals("plan", explicit.createParameters("repository")["mode"]?.jsonPrimitive?.content)
     }
 
     @Test fun localComposerChoicesAreCapturedInCreationAndAgentChangesRetireAgentSpecificChoices() {

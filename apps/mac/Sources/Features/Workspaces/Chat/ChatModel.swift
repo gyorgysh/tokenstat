@@ -38,7 +38,7 @@ final class ChatModel {
             hostIdentity: "new-chat-local", workspaceID: "unbound", kind: .conversation, itemID: "unbound")
         var chat = ChatConversation(saved: reference, title: "", backend: state.agent?.backend)
         chat.model = state.agent?.model; chat.effort = state.agent?.effort
-        chat.mode = state.agent?.mode ?? "execute"; chat.autonomy = state.agent?.autonomy ?? "standard"
+        chat.mode = state.agent?.mode ?? "execute"; chat.autonomy = state.agent?.autonomy ?? Self.newChatInitialAutonomy
         chat.fastMode = state.agent?.fastMode ?? false
         // A new import generation must close an old picker before it can edit.
         chat.id += reference.anchor ?? ""
@@ -116,7 +116,15 @@ final class ChatModel {
         return .init(backend: chosen.id,
                      model: chosen.models.contains(saved?.model ?? "") ? saved?.model : nil,
                      effort: chosen.efforts.contains(saved?.effort ?? "") ? saved?.effort : nil,
-                     autonomy: chosen.gateTier == "bypassOnly" ? "bypass" : (saved?.autonomy ?? "standard"))
+                     autonomy: chosen.gateTier == "bypassOnly" ? "bypass" : (saved?.autonomy ?? "bypass"))
+    }
+
+    /// The disabled composer is visible before a host catalog answers. Use
+    /// the same local permission preference as the eventual fresh choice, so
+    /// loading does not flash Ask first before switching to Don't ask.
+    static var newChatInitialAutonomy: String {
+        UserDefaults.standard.data(forKey: launchChoiceKey)
+            .flatMap { try? JSONDecoder().decode(LaunchChoice.self, from: $0) }?.autonomy ?? "bypass"
     }
     var chats: [ChatConversation] = [] {
         didSet { noteRunningChats() }

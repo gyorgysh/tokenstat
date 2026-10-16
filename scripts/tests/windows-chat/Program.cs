@@ -4,9 +4,42 @@ using Tokenstat.Pages;
 
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
+Check(SessionIdentities.Read(null).Entries.Count == 0 && SessionIdentities.Read(Json("{}" )).Entries.Count == 0,
+    "older hosts omit native IDs without falling back to opaque resume credentials");
+const string nativeSessionId = "11111111-1111-4111-8111-111111111111";
+foreach (var backend in new[] { "claude", "codex", "cursor", "muse", "grok", "agy" }) {
+    Check(SessionIdentities.ValidNativeId(backend, nativeSessionId), "known native UUID session IDs are copyable");
+    foreach (var secret in new[] { "eyJhbGciOiJIUzI1NiJ9.credential", "/private/resume.json", "session-name", "00000000-0000-0000-0000-000000000000" })
+        Check(!SessionIdentities.ValidNativeId(backend, secret), "credentials, resume titles and paths are not copyable session IDs");
+}
+Check(SessionIdentities.ValidNativeId("opencode2", "ses_012345abcdef0123456789abcd")
+    && !SessionIdentities.ValidNativeId("sh", nativeSessionId), "OpenCode IDs use their native shape and unknown backends do not invent IDs");
+var identityRows = SessionIdentities.Read(Json("""{"total":4,"entries":[{"backend":"claude","id":"11111111-1111-4111-8111-111111111111","status":"current"},{"backend":"claude","id":"11111111-1111-4111-8111-111111111111","status":"saved"},{"backend":"codex","id":"22222222-2222-4222-8222-222222222222","status":"newer-status","sourceConversationId":"old-chat"},{"backend":"muse","id":"private-blob"}]}"""));
+Check(identityRows.Entries.Count == 2 && identityRows.Entries[0].Status == "current" && identityRows.Entries[1].Status == "historical"
+    && identityRows.Entries[1].SourceConversationId == "old-chat" && identityRows.Truncated && identityRows.Total == 4,
+    "inspection and PTY inventories deduplicate valid IDs, keep source ownership, treat new statuses as references and disclose omitted history");
+Check(SessionIdentities.Read(Json("""{"total":"bad","truncated":{},"entries":[null,{},17,{"backend":19,"id":true}]}""")).Entries.Count == 0,
+    "malformed optional inventory metadata cannot break older-host chat or terminal details");
+var inheritedIds = SessionIdentities.Read(Json("""{"entries":[{"backend":"claude","id":"11111111-1111-4111-8111-111111111111","status":"historical","sourceConversationId":"chat-origin"},{"backend":"claude","id":"11111111-1111-4111-8111-111111111111","status":"saved","sourceConversationId":"chat-intermediate"},{"backend":"claude","id":"11111111-1111-4111-8111-111111111111","status":"current","sourceConversationId":"chat-intermediate"},{"backend":"codex","id":"22222222-2222-4222-8222-222222222222","status":"saved","sourceConversationId":"/private/transcript"}]}"""));
+Check(inheritedIds.Entries.Count == 2 && inheritedIds.Entries[0].Status == "current"
+    && inheritedIds.SourceConversationIds.SequenceEqual(new[] { "chat-origin", "chat-intermediate" }),
+    "current IDs win independent of report order, while inherited source chat IDs stay deduplicated and copyable");
+var boundedRows = new JsonArray();
+for (var index = 0; index < 70; index++) boundedRows.Add(new JsonObject {
+    ["backend"] = "codex", ["id"] = $"{index + 1:x8}-1111-4111-8111-111111111111", ["status"] = index == 69 ? "current" : "historical",
+    ["sourceConversationId"] = $"chat-{index}",
+});
+var boundedIds = SessionIdentities.Read(new JsonObject { ["entries"] = boundedRows });
+Check(boundedIds.Entries.Count == 64 && boundedIds.SourceConversationIds.Count == 64 && boundedIds.Entries[0].Status == "current"
+    && boundedIds.Total == 70 && boundedIds.Truncated,
+    "large inventories remain bounded without hiding the current session behind historical rows");
+Check(SessionIdentities.Read(Json("""{"resumeToken":"11111111-1111-4111-8111-111111111111","meter":{"sessionIdentities":{"entries":[{"backend":"codex","id":"11111111-1111-4111-8111-111111111111","status":"current"}]}}}""")).Entries.Count == 0,
+    "session projections never search credentials or nested terminal meters for native IDs");
 Check(!NewChatSetup.ShouldSend("") && !NewChatSetup.ShouldSend(" \n ") && NewChatSetup.ShouldSend("Review this"),
     "explicit empty Open chat creates the normal composer without dispatching a model prompt; nonempty drafts retain Send");
 var selectedNewChatSetup = new NewChatSetup("codex", "model", "high");
+Check(selectedNewChatSetup.Mode == "execute" && selectedNewChatSetup.Autonomy == "bypass",
+    "an untouched landing composer uses Execute and Don't ask from its initial setup");
 Check(selectedNewChatSetup.IsAvailable(Json("""{"id":"codex","models":["model"],"efforts":["high"]}""")), "older descriptors without installed flag still validate explicit new-chat selections");
 foreach (var descriptor in new[] { """{"id":"claude","models":["model"],"efforts":["high"]}""", """{"id":"codex","installed":false,"models":["model"],"efforts":["high"]}""", """{"id":"codex","models":["other-model"],"efforts":["high"]}""", """{"id":"codex","models":["model"],"efforts":["low"]}""" })
     Check(!selectedNewChatSetup.IsAvailable(Json(descriptor)), "a changed agent, model, effort or installation cannot silently replace the captured landing setup");
@@ -15,7 +48,7 @@ Check(!new NewChatSetup("", null, null).IsAvailable(Json("""{"id":""}""")), "an 
 Check(NewChatSetup.ShouldSend("", 1), "file-only landing prompts use explicit Send");
 Check(!new NewChatSetup("codex", null, null, "invented").IsAvailable(Json("""{"id":"codex"}"""))
     && !new NewChatSetup("codex", null, null, "execute", "invented").IsAvailable(Json("""{"id":"codex"}""")), "captured mode and autonomy are validated");
-Check(!new NewChatSetup("agy", null, null).IsAvailable(Json("""{"id":"agy","gateTier":"bypassOnly"}"""))
+Check(!new NewChatSetup("agy", null, null, Autonomy: "standard").IsAvailable(Json("""{"id":"agy","gateTier":"bypassOnly"}"""))
     && new NewChatSetup("agy", null, null, "plan", "bypass").IsAvailable(Json("""{"id":"agy","gateTier":"bypassOnly"}""")), "a bypass-only agent retains its applicable autonomy choice");
 Check(new NewChatSetup("codex", "model", "high", FastMode: true).IsAvailable(Json("""{"id":"codex","models":["model"],"efforts":["high"],"fastModeModels":[]}"""))
     && !new NewChatSetup("codex", "model", "high", FastMode: true).IsAvailable(Json("""{"id":"codex","models":["model"],"efforts":["high"]}""")), "fast mode must be explicitly offered by the current agent catalog");

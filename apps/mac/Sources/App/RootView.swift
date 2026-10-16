@@ -81,7 +81,6 @@ struct RootView: View {
     @AppStorage("chat.browserPaneWidth") private var browserPaneWidth = 520.0
     @State private var browserResizeStart: Double?
     @State private var browserLiveWidth: Double?
-    @State private var browserCursorPushed = false
     @State private var browserWorkspaceID: String?
     @State private var terminalWorkspaceID: String?
     @State private var workspaceBrowserURLs: [String: String] = [:]
@@ -1677,7 +1676,7 @@ struct RootView: View {
     private var detailColumn: some View {
         HStack(spacing: 0) {
             detail
-                .background(Theme.background)
+                .background(route.isGlobal(.newChat) ? Color.clear : Theme.background)
                 .frame(minWidth: Self.detailMinimumWidth, maxWidth: .infinity, maxHeight: .infinity)
             if showsWorkspaceCompanion && browserFitsBesideWorkspace {
                 browserResizeHandle
@@ -1814,15 +1813,7 @@ struct RootView: View {
                     .ignoresSafeArea(.container, edges: .top)
             }
             .contentShape(.rect)
-            .onHover { hovering in
-                if hovering && !browserCursorPushed {
-                    NSCursor.resizeLeftRight.push()
-                    browserCursorPushed = true
-                } else if !hovering && browserCursorPushed {
-                    NSCursor.pop()
-                    browserCursorPushed = false
-                }
-            }
+            .background { ColumnResizeCursorArea() }
             .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { value in
                 if browserResizeStart == nil { browserResizeStart = fittedBrowserWidth }
                 let available = windowContentWidth - leftChromeWidth
@@ -1839,7 +1830,6 @@ struct RootView: View {
                 browserResizeStart = nil
             })
             .onDisappear {
-                if browserCursorPushed { NSCursor.pop(); browserCursorPushed = false }
                 browserLiveWidth = nil
                 browserResizeStart = nil
             }
@@ -2241,6 +2231,7 @@ struct RootView: View {
 
     private var newChatPage: some View {
         ChatStartPage(draft: chatStart, repositories: workspaces.folders,
+                      isFullScreen: isFullScreen,
                       onAdd: {
                           if let owner = chatStart.owner {
                               chatStartAdd = (owner, Set(workspaces.folders.map(\.id)))
@@ -5206,7 +5197,7 @@ private struct ActiveSessionRow: View {
     let action: () -> Void
 
     @State private var isHovering = false
-    @State private var controlsHovered = false
+    @State private var showingDetails = false
     @State private var renaming = false
 
 
@@ -5326,7 +5317,10 @@ private struct ActiveSessionRow: View {
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            Button(action: action) {
+            Button {
+                showingDetails = false
+                action()
+            } label: {
                 HStack(spacing: Theme.Space.s) {
                     leadingMark
                     Text(dynamicTitle.map { "\(title) · \($0)" } ?? title)
@@ -5339,25 +5333,38 @@ private struct ActiveSessionRow: View {
                         .frame(minWidth: 26, alignment: .trailing)
                 }
                 .padding(.leading, ChatSidebarConversationRow.markInset)
-                .padding(.trailing, Theme.Space.s + 2)
+                .padding(.trailing, Theme.Space.s + 2 + 28)
                 .frame(maxWidth: .infinity)
                 .frame(height: DisplayFit.dp(30))
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            SidebarRowActions(name: title, visible: isHovering,
-                              deleteTitle: session.alive ? L10n.text("apple.rootview.stop_and_close.52b40c33") : L10n.text("apple.rootview.close_terminal.7d02fb04"),
-                              delete: close, hover: { controlsHovered = $0 }, actions: { menu })
-                .padding(.trailing, Theme.Space.s + 2)
+            HStack(spacing: 4) {
+                SidebarRowActions(name: title, visible: isHovering,
+                                  deleteTitle: session.alive ? L10n.text("apple.rootview.stop_and_close.52b40c33") : L10n.text("apple.rootview.close_terminal.7d02fb04"),
+                                  delete: close, hover: { _ in }, actions: { menu })
+                SidebarDetailButton(title: title, isPresented: $showingDetails) {
+                    SidebarDetailCard(title: title, subtitle: dynamicTitle.map { L10n.text("apple.rootview.terminal_0.f851d42b", "\($0)") } ?? L10n.text("apple.rootview.terminal.e0926fda"),
+                                      symbol: "terminal", path: session.reportedCwd ?? session.cwd,
+                                      fields: detailFields, git: folder.git) {
+                        Text(L10n.text("common.session_identity.title")).font(Theme.callout.weight(.semibold))
+                        SessionIdentityRows(entries: session.identityEntries,
+                                            truncated: session.sessionIdentities?.truncated ?? false,
+                                            reportedTotal: session.sessionIdentities?.total)
+                    }
+                }
+                .disabled(renaming)
+            }
+            .padding(.trailing, Theme.Space.s + 2)
         }
         .background(background)
         .contentShape(.rect)
         .onHover { isHovering = $0 }
         .sidebarContextMenu(items: { menu })
-        .sidebarHoverCard(hovering: isHovering, enabled: !renaming, suppressOpening: controlsHovered) {
-            SidebarDetailCard(title: title, subtitle: dynamicTitle.map { L10n.text("apple.rootview.terminal_0.f851d42b", "\($0)") } ?? L10n.text("apple.rootview.terminal.e0926fda"),
-                              symbol: "terminal", path: session.reportedCwd ?? session.cwd,
-                              fields: detailFields, git: folder.git) { EmptyView() }
+        .onChange(of: isSelected) { _, _ in showingDetails = false }
+        .onChange(of: session.workReference) { _, _ in showingDetails = false }
+        .onChange(of: SidebarMenuTracking.shared.active) { _, active in
+            if active { showingDetails = false }
         }
         .sheet(isPresented: $renaming) {
             SidebarRenameSheet(title: L10n.text("apple.rootview.rename_terminal.68e0c2a6"), currentName: title) { name in

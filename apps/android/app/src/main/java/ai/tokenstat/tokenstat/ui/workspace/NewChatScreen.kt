@@ -128,6 +128,7 @@ fun NewChatScreen(
     val colors = LocalTsColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val savedChoice = remember(context, accountOwner) { SharedPrefsLaunchChoice(context).read() }
     val currentOwner by rememberUpdatedState(accountOwner)
     var backends by remember(accountOwner, connectedPeer) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var setup by remember(accountOwner, connectedPeer) { mutableStateOf(initialSetup) }
@@ -210,7 +211,7 @@ fun NewChatScreen(
             val previous = setup
             backends = (model.workspaceSection(peer, "chat.backends", buildJsonObject {}) as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
             currentCoroutineContext().ensureActive()
-            val saved = SharedPrefsLaunchChoice(context).read()
+            val saved = savedChoice
             val backendId = previous?.backend?.takeIf { id -> chatBackendOptions(backends).any { it.first == id && id != "sh" } } ?: LaunchDefaults.backend(saved, backends)
             val backend = backends.firstOrNull { it.newChatText("id") == backendId }
             if (backend != null && chatBackendOptions(backends).any { it.first == backendId && it.first != "sh" }) {
@@ -300,6 +301,7 @@ fun NewChatScreen(
                     onRemove = { attachment -> if (owns(accountOwner)) { val snapshot = model.chatComposers.snapshot(accountOwner); model.chatComposers.update(accountOwner, snapshot.copy(attachments = snapshot.attachments - attachment)) } },
                     onSend = onSend, onStop = {}, onChange = { field, value -> setup = setup?.changed(field, value, backends); onSetup(setup) },
                     backends = backends, onAgent = { agentMenu = true }, launchMode = setup?.mode ?: LaunchDefaults.MODE,
+                    launchAutonomy = setup?.autonomy ?: LaunchDefaults.autonomy(savedChoice, bypassOnly = false),
                     allowEmpty = true, submitEnabled = connectedPeer != null && !connecting && selected != null && catalogReady && setup?.isAvailable(backends) == true && !reading,
                     attachmentEnabled = selected != null && !connecting && !reading, fieldModifier = Modifier.testTag("newChat.composer"), sendModifier = Modifier.testTag("newChat.send"))
                 if (reading || connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)

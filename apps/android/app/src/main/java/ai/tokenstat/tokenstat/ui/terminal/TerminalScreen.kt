@@ -59,6 +59,7 @@ import androidx.compose.runtime.Composable
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -79,6 +80,10 @@ import androidx.lifecycle.viewModelScope
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
 import ai.tokenstat.tokenstat.ui.logic.TerminalNames
+import ai.tokenstat.tokenstat.ui.components.ActionIcon
+import ai.tokenstat.tokenstat.ui.components.SessionIdentifierDialog
+import ai.tokenstat.tokenstat.ui.logic.SessionIdentities
+import ai.tokenstat.tokenstat.ui.logic.parseTerminalSessionIdentities
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -125,6 +130,26 @@ fun TerminalScreen(
     }
     bridge.lifecycle = LocalLifecycleOwner.current.lifecycle
     var sessionId by remember { mutableStateOf(existingSessionId) }
+    var showingSessionDetails by remember(sessionId, nameOwner) { mutableStateOf(false) }
+    var sessionIdentities by remember(sessionId, nameOwner) { mutableStateOf(SessionIdentities()) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(showingSessionDetails, sessionId, nameOwner, lifecycle) {
+        val id = sessionId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        val owner = nameOwner ?: return@LaunchedEffect
+        if (!showingSessionDetails) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (ProjectOwner.from(model.state.value.account, peer, workspaceId) == owner) {
+                try {
+                    val info = model.workspaceSection(peer, "pty.info", ptyViewerParams(id)) as? JsonObject
+                    currentCoroutineContext().ensureActive()
+                    if (ProjectOwner.from(model.state.value.account, peer, workspaceId) != owner) break
+                    sessionIdentities = parseTerminalSessionIdentities(info)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { /* Preserve the last attested IDs during a transient outage. */ }
+                delay(5000)
+            }
+        }
+    }
     val displayName = sessionId?.let { names.name(nameOwner, it) }
     var confirmClose by remember { mutableStateOf(false) }
     // The bar's Ctrl key reads the bridge, which is what spends the flag.
@@ -212,6 +237,9 @@ fun TerminalScreen(
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back")) }
             },
             actions = {
+                IconButton(onClick = { showingSessionDetails = true }, enabled = nameOwner != null && !sessionId.isNullOrBlank()) {
+                    Icon(ActionIcon.Docs.vector, L10n.text("common.session_identity.title"))
+                }
                 TextButton(onClick = { confirmClose = true }) { Text(L10n.text("common.close")) }
                 TextButton(onClick = onClose) { Text(L10n.text("common.done")) }
             },
@@ -393,6 +421,9 @@ fun TerminalScreen(
             keyboardUp = keyboardUp,
         )
     }
+    if (showingSessionDetails && nameOwner != null) sessionId?.takeIf { it.isNotBlank() }?.let { id ->
+        SessionIdentifierDialog(id, sessionIdentities) { showingSessionDetails = false }
+    }
     if (confirmClose) {
         AlertDialog(
             onDismissRequest = { confirmClose = false },
@@ -492,6 +523,7 @@ fun SshTerminalScreen(
     ReconcileKeyboard(keyboardUp) { keyboardUp = false; bridge.noteKeyboardHidden() }
     LaunchedEffect(dark) { bridge.pushTheme(dark) }
     var confirmEnd by remember { mutableStateOf(false) }
+    var showingSessionDetails by remember(sessionId) { mutableStateOf(false) }
     var filling by remember { mutableStateOf<JsonObject?>(null) }
     // On-connect commands, once the shell is there to hear them. The channel
     // is buffered, so this survives the page still loading.
@@ -538,6 +570,9 @@ fun SshTerminalScreen(
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back")) }
             },
             actions = {
+                IconButton(onClick = { showingSessionDetails = true }, enabled = sessionId.isNotBlank()) {
+                    Icon(ActionIcon.Docs.vector, L10n.text("common.session_identity.title"))
+                }
                 TextButton(onClick = { confirmEnd = true }) { Text(L10n.text("android.terminalscreen.end_session.f00b921f")) }
                 // Done leaves it running, which is why it is not Close.
                 TextButton(onClick = onClose) { Text(L10n.text("common.done")) }
@@ -656,6 +691,7 @@ fun SshTerminalScreen(
             },
         )
     }
+    if (showingSessionDetails) SessionIdentifierDialog(sessionId) { showingSessionDetails = false }
     if (confirmEnd) {
         AlertDialog(
             onDismissRequest = { confirmEnd = false },

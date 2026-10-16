@@ -295,5 +295,16 @@
   "common.chat.inspector.copy_path": "Copy path",
   "common.chat.inspector.allowed_summary": "{0} tools · {1} commands",
   "common.new_chat.setup_changed": "This agent or model is no longer available. Choose again.",
-  "common.new_chat.open_chat": "Open chat"
+  "common.new_chat.open_chat": "Open chat",
+  "common.session_identity.title": "Session IDs",
+  "common.session_identity.conversation": "Tokenstat chat ID",
+  "common.session_identity.terminal": "Tokenstat terminal ID",
+  "common.session_identity.current": "Current · {0}",
+  "common.session_identity.saved": "Saved · {0}",
+  "common.session_identity.previous": "Previous · {0}",
+  "common.session_identity.copy": "Copy {0}",
+  "common.session_identity.copied": "ID copied",
+  "common.session_identity.not_reported": "No agent session ID reported yet.",
+  "common.session_identity.history_help": "Previous IDs can help locate transcripts. They may no longer resume.",
+  "common.session_identity.truncated": "Showing {0} of {1} reported IDs."
 }

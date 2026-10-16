@@ -32,6 +32,10 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     let command: String
     let cwd: String
     private(set) var workspaceID: String?
+    private(set) var sessionIdentities: SessionIdentities?
+    var identityEntries: [SessionIdentityEntry] {
+        SessionIdentityPresentation.entries(localID: hostID.hasPrefix("pending-") ? nil : hostID, kind: .terminal, sessions: sessionIdentities)
+    }
     var workReference: WorkReference? {
         guard let ownerScope, ownerScope == WorkSessionContext.shared.scope,
               let workspaceID, !workspaceID.isEmpty, !hostID.hasPrefix("pending-") else { return nil }
@@ -90,6 +94,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         id = UUID().uuidString
         self.peer = peer
         liveInfo = info
+        sessionIdentities = info.sessionIdentities
         hostID = info.id
         workspaceID = info.workspaceID
         command = info.command
@@ -120,6 +125,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         if removed && !closeWhenAttached { return }
         hostID = info.id
         liveInfo = info
+        if sessionIdentities != info.sessionIdentities { sessionIdentities = info.sessionIdentities }
         workspaceID = info.workspaceID
         alive = info.alive
         exitCode = info.exitCode
@@ -332,6 +338,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         }
         guard mayOperate else { return false }
         liveInfo = info
+        if sessionIdentities != info.sessionIdentities { sessionIdentities = info.sessionIdentities }
         if rows != info.rows { rows = info.rows }
         if cols != info.cols { cols = info.cols }
         if alive != info.alive { alive = info.alive }
@@ -402,6 +409,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         }
         guard mayOperate else { return false }
         liveInfo = info
+        if sessionIdentities != info.sessionIdentities { sessionIdentities = info.sessionIdentities }
         if rows != info.rows { rows = info.rows }
         if cols != info.cols { cols = info.cols }
         if alive != info.alive { alive = info.alive }
@@ -642,8 +650,15 @@ struct ClientTerminalScreen: View {
                     }
                     .buttonStyle(.plain)
                     .popover(isPresented: $showingTransportDetails) {
-                        Text(statusText).font(Theme.body).padding(Theme.Space.m)
-                            .presentationCompactAdaptation(.popover)
+                        VStack(alignment: .leading, spacing: Theme.Space.m) {
+                            Text(statusText).font(Theme.body)
+                            ThemeRule()
+                            Text(L10n.text("common.session_identity.title")).font(Theme.callout.weight(.semibold))
+                            SessionIdentityRows(entries: session.identityEntries,
+                                truncated: session.sessionIdentities?.truncated ?? false, reportedTotal: session.sessionIdentities?.total)
+                        }
+                        .padding(Theme.Space.m).frame(idealWidth: 320, maxWidth: 420)
+                        .presentationCompactAdaptation(.popover)
                     }
                 }
                 Spacer()
@@ -708,6 +723,7 @@ struct ClientTerminalScreen: View {
             rememberTerminal()
         }
         .onChange(of: session.hostID) { _, _ in rememberTerminal() }
+        .onChange(of: session.workReference) { _, _ in showingTransportDetails = false }
         .task(id: "live-\(session.hostID)-\(scenePhase == .active)") {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {

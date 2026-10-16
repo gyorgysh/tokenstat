@@ -1544,6 +1544,9 @@ struct ClientChatThread: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let chat {
+                        ChatSetupSection(title: L10n.text("common.session_identity.title"), icon: .copy, summary: chat.id) {
+                            ChatSessionIdentityDetails(model: model, conversation: chat)
+                        }
                         ChatContextCard(model: model)
                         ChatActivityCard(model: model)
                         ChatDetailSettings(model: model)

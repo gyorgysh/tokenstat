@@ -4289,6 +4289,8 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     /// `metered`, `plan`, or `unknown`. A plan session's money is an
     /// equivalent, never a charge.
     var billing: String?
+    /// Backend-native identifiers verified from this PTY's attributed logs.
+    var sessionIdentities: SessionIdentities? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -4319,6 +4321,7 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
         case contextWindow
         case contextEstimated
         case billing
+        case sessionIdentities
     }
 }
 

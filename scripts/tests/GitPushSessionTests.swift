@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with GitPushModels.swift GitCommitModels.swift GitPushSession.swift
+// Compile with GitPushModels.swift GitCommitModels.swift GitPushSession.swift SessionIdentities.swift.
 // WorkbenchDraftFile.swift OriginalFileCoordination.swift WorkReference.swift.
 import Foundation
 

@@ -14,7 +14,8 @@
 //! the archive uses, without writing anything to the store.
 //!
 //! Conversation text is dropped at the parser boundary. The reading carries
-//! counters, a model id, and a context fraction. Nothing else.
+//! counters, a model id, a context fraction and verified native session IDs.
+//! Session IDs stay on the terminal route; aggregate account snapshots omit them.
 //!
 //! **The reading starts when the process did.** A folder's transcript is the
 //! folder's whole history, so folding all of it in reported the last session's
@@ -64,6 +65,9 @@ pub(crate) struct MeterReading {
     pub context_window: Option<u64>,
     /// The window came from sibling models, not from a published figure.
     pub context_estimated: bool,
+    /// Verified vendor IDs from this PTY's attributed transcript. These stay
+    /// on the full terminal route and never enter account usage snapshots.
+    pub session_identities: Option<crate::chat_sessions::SessionInventory>,
 }
 
 /// Fold a live session's usage into a sidebar reading, when we can find it.
@@ -110,6 +114,7 @@ pub(crate) fn reading(
         return None;
     }
     let mut reading = fold(&mine, &current_prices())?;
+    reading.session_identities = terminal_session_identities(harness, &mine);
     // Grok's own log says nothing about how the session is paid for, but the
     // login it runs under does: an OIDC login is a SuperGrok subscription, an
     // API key is metered. Read, never written, and no token leaves this call.
@@ -117,6 +122,71 @@ pub(crate) fn reading(
         reading.billing = grok_billing();
     }
     Some(reading)
+}
+
+fn terminal_session_identities(
+    harness: &str,
+    events: &[&UsageEvent],
+) -> Option<crate::chat_sessions::SessionInventory> {
+    use crate::chat_sessions::{SessionInventory, SessionReference, valid_native_id};
+    let backend = if harness == "antigravity" {
+        "agy"
+    } else {
+        harness
+    };
+    let latest = events
+        .iter()
+        .max_by_key(|event| event.ts.utc_ms)?
+        .session
+        .as_str();
+    let mut identities: HashMap<&str, (i64, i64)> = HashMap::new();
+    for event in events {
+        if !valid_native_id(backend, &event.session) {
+            continue;
+        }
+        identities
+            .entry(&event.session)
+            .and_modify(|(first, last)| {
+                *first = (*first).min(event.ts.utc_ms);
+                *last = (*last).max(event.ts.utc_ms);
+            })
+            .or_insert((event.ts.utc_ms, event.ts.utc_ms));
+    }
+    if identities.is_empty() {
+        return None;
+    }
+    let total = identities.len() as u64;
+    let mut entries: Vec<_> = identities
+        .into_iter()
+        .map(|(id, (first, last))| SessionReference {
+            backend: backend.to_string(),
+            id: id.to_string(),
+            status: if id == latest {
+                "current"
+            } else {
+                "historical"
+            }
+            .into(),
+            first_seen_at_ms: Some(first),
+            last_seen_at_ms: Some(last),
+            ..Default::default()
+        })
+        .collect();
+    entries.sort_by(|left, right| {
+        right
+            .status
+            .eq("current")
+            .cmp(&left.status.eq("current"))
+            .then(right.last_seen_at_ms.cmp(&left.last_seen_at_ms))
+            .then(left.id.cmp(&right.id))
+    });
+    entries.truncate(64);
+    Some(SessionInventory {
+        truncated: total > entries.len() as u64,
+        total,
+        entries,
+        ..Default::default()
+    })
 }
 
 /// Whether the Grok CLI on this machine is signed in to a subscription.
@@ -546,6 +616,7 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
         context_used,
         context_window,
         context_estimated,
+        session_identities: None,
     })
 }
 
@@ -1378,6 +1449,87 @@ mod tests {
         let mut e = event("claude-opus-4-1", 100, 0, 10);
         e.ts = Timestamp::from_ms(ms);
         e
+    }
+
+    #[test]
+    fn terminal_native_ids_are_validated_deduplicated_and_ordered_by_observation() {
+        let a = "550e8400-e29b-41d4-a716-446655440000";
+        let b = "550e8400-e29b-41d4-a716-446655440001";
+        let mut first = stamped(100);
+        first.session = a.into();
+        let mut other = stamped(200);
+        other.session = b.into();
+        let mut repeated = stamped(300);
+        repeated.session = a.into();
+        let entries = terminal_session_identities("claude", &[&repeated, &first, &other]).unwrap();
+        assert_eq!(entries.total, 2);
+        assert!(!entries.truncated);
+        assert_eq!(entries.entries[0].id, a);
+        assert_eq!(entries.entries[0].status, "current");
+        assert_eq!(entries.entries[0].first_seen_at_ms, Some(100));
+        assert_eq!(entries.entries[0].last_seen_at_ms, Some(300));
+        assert_eq!(entries.entries[1].status, "historical");
+        assert!(
+            entries
+                .entries
+                .iter()
+                .all(|entry| entry.source_conversation_id.is_none())
+        );
+        let mut unknown = stamped(400);
+        unknown.session = "unknown".into();
+        let historic = terminal_session_identities("claude", &[&first, &unknown]).unwrap();
+        assert_eq!(historic.entries[0].status, "historical");
+        assert!(terminal_session_identities("claude", &[&unknown]).is_none());
+        assert!(terminal_session_identities("sh", &[&first]).is_none());
+    }
+
+    #[test]
+    fn terminal_native_ids_exclude_older_work_and_bound_the_report() {
+        let mut old = stamped(0);
+        old.session = "550e8400-e29b-41d4-a716-446655440000".into();
+        let mut current = stamped(4_000);
+        current.session = "550e8400-e29b-41d4-a716-446655440001".into();
+        let events = vec![old, current];
+        let mine = since(&events, 4_000);
+        let identities = terminal_session_identities("claude", &mine).unwrap();
+        assert_eq!(identities.total, 1);
+        assert_eq!(identities.entries[0].id, events[1].session);
+
+        let events: Vec<_> = (0..70)
+            .map(|index| {
+                let mut event = stamped(index);
+                event.session = format!("550e8400-e29b-41d4-a716-{index:012x}");
+                event
+            })
+            .collect();
+        let refs: Vec<_> = events.iter().collect();
+        let identities = terminal_session_identities("claude", &refs).unwrap();
+        assert_eq!(identities.total, 70);
+        assert_eq!(identities.entries.len(), 64);
+        assert!(identities.truncated);
+        assert_eq!(identities.entries[0].id, events[69].session);
+        assert_eq!(identities.entries[0].status, "current");
+        let wire = serde_json::to_value(identities).unwrap();
+        assert_eq!(wire["entries"][0]["backend"], "claude");
+        assert!(wire["entries"][0].get("sourceConversationId").is_none());
+        assert!(wire.get("archivePath").is_none());
+    }
+
+    #[test]
+    fn terminal_native_id_limit_keeps_current_when_latest_timestamps_tie() {
+        let events: Vec<_> = (0..70)
+            .map(|index| {
+                let mut event = stamped(1_000);
+                event.session = format!("550e8400-e29b-41d4-a716-{index:012x}");
+                event
+            })
+            .collect();
+        let refs: Vec<_> = events.iter().collect();
+        let identities = terminal_session_identities("claude", &refs).unwrap();
+        assert!(identities.truncated);
+        assert_eq!(identities.entries.len(), 64);
+        assert_eq!(identities.entries[0].id, events[69].session);
+        assert_eq!(identities.entries[0].status, "current");
     }
 
     /// The trap the archive avoids in SQL and the meter used to walk into: a

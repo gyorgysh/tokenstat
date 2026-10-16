@@ -46,7 +46,8 @@ class LaunchChoiceTest {
 
     @Test
     fun `the last autonomy is what the next chat opens in`() {
-        assertEquals("standard", LaunchDefaults.autonomy(null, bypassOnly = false))
+        assertEquals("bypass", LaunchDefaults.autonomy(null, bypassOnly = false))
+        assertEquals("bypass", LaunchDefaults.AUTONOMY)
         assertEquals("bypass", LaunchDefaults.autonomy(choice(autonomy = "bypass"), false))
         assertEquals("standard", LaunchDefaults.autonomy(choice(autonomy = "standard"), false))
     }

@@ -86,6 +86,7 @@ enum Bridge {
 activity_path = 'apps/mac/Sources/Features/Workspaces/Chat/ChatActivityView.swift'
 pieces += [declaration(activity_path, marker) for marker in [
     'struct ChatActivityOwner:', 'struct ChatActivityRead {', 'extension ChatModel {']]
+pieces += [(root / 'apps/mac/Sources/Bridge/SessionIdentities.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Bridge/ChatInspection.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatCostMeter.swift').read_text()]
 context = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatContextCard.swift').read_text()

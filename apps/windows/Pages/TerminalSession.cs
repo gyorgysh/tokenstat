@@ -63,6 +63,8 @@ internal sealed class TerminalSession
 
     public string Command { get; private set; } = "";
 
+    public SessionIdentities NativeSessionIdentities { get; private set; } = SessionIdentities.Read(null);
+
     public int? ExitCode { get; private set; }
 
     public string LastError { get; private set; } = "";
@@ -270,6 +272,7 @@ internal sealed class TerminalSession
         Dropped = 0;
         Paused = false;
         Command = "";
+        NativeSessionIdentities = SessionIdentities.Read(null);
         ExitCode = null;
         LastError = "";
         _failures = 0;
@@ -372,6 +375,7 @@ internal sealed class TerminalSession
                     ["dark"] = Theme.IsDark,
                 });
             Id = Format.Text(spawned, "id");
+            NativeSessionIdentities = SessionIdentities.Read(spawned["sessionIdentities"]);
             Command = Format.Text(spawned, "command", command);
             var rowsNow = Format.Long(spawned, "rows");
             var colsNow = Format.Long(spawned, "cols");
@@ -431,6 +435,7 @@ internal sealed class TerminalSession
 
     private void ApplyInfo(JsonNode info)
     {
+        NativeSessionIdentities = SessionIdentities.Read(info["sessionIdentities"]);
         var rows = Format.Long(info, "rows");
         var cols = Format.Long(info, "cols");
         if (rows > 0)

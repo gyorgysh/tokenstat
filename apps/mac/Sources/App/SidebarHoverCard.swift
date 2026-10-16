@@ -124,17 +124,15 @@ private struct SidebarGitDetail: View {
     }
 }
 
-/// Chat details are deliberate: opening a conversation or moving through the
+/// Session details are deliberate: opening a session or moving through the
 /// list never presents a card. The native popover stays open for reading.
-struct SidebarChatDetailButton: View {
-    let conversation: ChatConversation
-    let folder: WorkspaceFolder
+struct SidebarDetailButton<Card: View>: View {
+    let title: String
     @Binding var isPresented: Bool
+    @ViewBuilder var card: Card
     @State private var hovering = false
 
     private var label: String {
-        let title = conversation.title.isEmpty
-            ? L10n.text("apple.sidebarhovercard.untitled_conversation.31d248c4") : conversation.title
         return L10n.text("apple.clientstates.details.45989de4") + ": " + title
     }
 
@@ -153,6 +151,20 @@ struct SidebarChatDetailButton: View {
         .accessibilityLabel(label)
         .onHover { hovering = $0 }
         .popover(isPresented: $isPresented, arrowEdge: .leading) {
+            card
+        }
+    }
+}
+
+struct SidebarChatDetailButton: View {
+    let conversation: ChatConversation
+    let folder: WorkspaceFolder
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        SidebarDetailButton(title: conversation.title.isEmpty
+            ? L10n.text("apple.sidebarhovercard.untitled_conversation.31d248c4") : conversation.title,
+                            isPresented: $isPresented) {
             SidebarChatDetailCard(conversation: conversation, folder: folder)
         }
     }
@@ -162,6 +174,24 @@ struct SidebarChatDetailCard: View {
     let conversation: ChatConversation
     let folder: WorkspaceFolder
     @State private var usage: ChatUsageTotals?
+    @State private var sessionIdentities: SessionIdentities?
+    private struct ReadOwner: Hashable {
+        var reference: WorkReference?
+        var generation: UInt64
+        var backend: String
+        var updatedAtMs: Int64
+    }
+    private var readOwner: ReadOwner {
+        let destination = WorkDestinationResolver.route(folderID: folder.id)
+        let reference = WorkSessionContext.shared.scope.flatMap { scope in
+            (destination.peer ?? WorkSessionContext.shared.localHostIdentity).map {
+                WorkReference(scope: scope, hostIdentity: $0, workspaceID: destination.workspaceID,
+                              kind: .conversation, itemID: conversation.id)
+            }
+        }
+        return ReadOwner(reference: reference, generation: WorkSessionContext.shared.generation,
+                         backend: conversation.backend, updatedAtMs: conversation.updatedAtMs)
+    }
     @State private var finishedLoading = false
     @State private var loadFailed = false
 
@@ -173,13 +203,25 @@ struct SidebarChatDetailCard: View {
             path: folder.path,
             fields: fields,
             git: folder.git
-        ) { EmptyView() }
-        .task(id: "\(conversation.id)-\(conversation.updatedAtMs)") {
-            finishedLoading = false
+        ) {
+            ThemeRule()
+            Text(L10n.text("common.session_identity.title")).font(Theme.callout.weight(.semibold))
+            SessionIdentityRows(entries: SessionIdentityPresentation.entries(localID: conversation.id, kind: .conversation, sessions: sessionIdentities),
+                                truncated: sessionIdentities?.truncated ?? false, reportedTotal: sessionIdentities?.total)
+        }
+        .task(id: readOwner) {
+            let requested = readOwner
+            usage = nil; sessionIdentities = nil; finishedLoading = false
+            guard let reference = requested.reference, WorkCacheAccess.canRead(reference) else {
+                loadFailed = true; finishedLoading = true; return
+            }
             let route = Bridge.chatRoute(workspaceID: folder.id)
-            let page = try? await Bridge.chatEventPage(id: conversation.id, cursor: nil, limit: 1, peer: route.peer)
-            guard !Task.isCancelled else { return }
+            async let pageRead = try? Bridge.chatEventPage(id: conversation.id, cursor: nil, limit: 1, peer: route.peer)
+            async let inspectionRead = try? Bridge.chatInspection(id: conversation.id, peer: route.peer)
+            let (page, inspection) = await (pageRead, inspectionRead)
+            guard !Task.isCancelled, readOwner == requested, WorkCacheAccess.canRead(reference) else { return }
             usage = page?.usage.flatMap { $0.isValid ? $0 : nil }
+            sessionIdentities = inspection?.backend == conversation.backend ? inspection?.sessions : nil
             loadFailed = page == nil
             finishedLoading = true
         }

@@ -70,6 +70,7 @@ struct ChatInspection: Decodable, Sendable {
     var currentRun: Bool
     var inventoryPartial: Bool?
     var activity: Activity?
+    var sessions: SessionIdentities?
 
     func hasLiveConnection(_ server: Server, running: Bool) -> Bool {
         running && currentRun && server.source == "agent" && server.status == "connected"

@@ -114,6 +114,7 @@ struct ChatInspector: View {
                          primary: titleField(chat)) {
             Text(chat.title).font(Theme.caption).foregroundStyle(.secondary)
                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            ChatSessionIdentityDetails(model: model, conversation: chat)
             if chat.running {
                 Text(L10n.text("common.working"))
                     .font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent)

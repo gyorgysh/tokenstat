@@ -142,6 +142,11 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// Folder the session runs in, as the host reported it.
     nonisolated let cwd: String
 
+    private(set) var sessionIdentities: SessionIdentities?
+    var identityEntries: [SessionIdentityEntry] {
+        SessionIdentityPresentation.entries(localID: isPending ? nil : hostID, kind: .terminal, sessions: sessionIdentities)
+    }
+
     var workReference: WorkReference? {
         guard !isPending, let scope = WorkSessionContext.shared.scope else { return nil }
         let route = WorkDestinationResolver.route(folderID: workspaceID)
@@ -1395,6 +1400,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// grow a `$0.00` or a 0% bar. Written only when the numbers change,
     /// because `pty.info` arrives several times a second.
     private func applyMeter(from info: PtySessionInfo) {
+        if sessionIdentities != info.sessionIdentities { sessionIdentities = info.sessionIdentities }
         let tokens = info.tokens ?? 0
         // Zero is a reading now. The host sends `0` for a harness it can
         // meter that has not logged a turn yet, so the row starts at $0.00

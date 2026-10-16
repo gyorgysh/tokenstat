@@ -12,7 +12,7 @@ final class ChatStartDraft {
         var model: String?
         var effort: String?
         var mode = "execute"
-        var autonomy = "standard"
+        var autonomy = "bypass"
         var fastMode = false
     }
     struct Submission {
