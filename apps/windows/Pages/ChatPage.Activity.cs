@@ -143,60 +143,80 @@ internal sealed partial class ChatPage
     {
         var data = ChatActivityData.Read(inspection, _openChat);
         var scope = section is null ? "inspector/" : "dialog/";
-        var body = new StackPanel { Spacing = 4 };
-        if (data is null) body.Children.Add(Muted(ActivityText("unavailable")));
-        else
+        FrameworkElement Details()
         {
-            body.Children.Add(Muted(ActivityText(data.Live ? "live" : "report_only")));
-            var goalBody = new StackPanel { Spacing = 4 };
-            if (!data.GoalReported) goalBody.Children.Add(Muted(ActivityText("not_reported")));
-            else if (data.Goal is not { } goal) goalBody.Children.Add(Muted(ActivityText("none")));
+            var body = new StackPanel { Spacing = 4 };
+            if (data is null) body.Children.Add(Muted(ActivityText("unavailable")));
             else
             {
-                goalBody.Children.Add(new TextBlock { Text = goal.Objective, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
-                goalBody.Children.Add(Muted(ActivityStatus(goal.Status, data.Live)));
-                AddActivityMetric(goalBody, "tokens", goal.TokensUsed, goal.TokenBudget);
-                AddActivityMetric(goalBody, "time", goal.TimeUsedSeconds, goal.TimeBudgetSeconds, seconds: true);
-                AddActivitySource(goalBody, goal.Source);
-            }
-            body.Children.Add(ActivityDisclosure(ActivityText("goal"), scope + "goal", goalBody, section is "goal" or "all"));
-            var planBody = new StackPanel { Spacing = 4 };
-            if (!data.PlanReported) planBody.Children.Add(Muted(ActivityText("not_reported")));
-            else if (data.Plan.Length == 0) planBody.Children.Add(Muted(ActivityText("none")));
-            else
-            {
-                planBody.Children.Add(Muted(ActivityText("steps", data.CompletedSteps.ToString("N0"), data.Plan.Length.ToString("N0"))));
-                planBody.Children.Add(ActivityProgress((double)data.CompletedSteps / data.Plan.Length));
-                for (var i = 0; i < data.Plan.Length; i++)
+                body.Children.Add(Muted(ActivityText(data.Live ? "live" : "report_only")));
+                FrameworkElement GoalDetails()
                 {
-                    var step = data.Plan[i];
-                    var row = new StackPanel { Spacing = 2, Margin = new Thickness(0, 2, 0, 2) };
-                    row.Children.Add(new TextBlock { Text = $"{i + 1}. {step.Text}", FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
-                    row.Children.Add(Muted(ActivityStatus(step.Status, data.Live))); planBody.Children.Add(row);
+                    var goalBody = new StackPanel { Spacing = 4 };
+                    if (!data.GoalReported) goalBody.Children.Add(Muted(ActivityText("not_reported")));
+                    else if (data.Goal is not { } goal) goalBody.Children.Add(Muted(ActivityText("none")));
+                    else
+                    {
+                        goalBody.Children.Add(new TextBlock { Text = goal.Objective, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+                        goalBody.Children.Add(Muted(ActivityStatus(goal.Status, data.Live)));
+                        AddActivityMetric(goalBody, "tokens", goal.TokensUsed, goal.TokenBudget);
+                        AddActivityMetric(goalBody, "time", goal.TimeUsedSeconds, goal.TimeBudgetSeconds, seconds: true);
+                        AddActivitySource(goalBody, goal.Source);
+                    }
+                    return goalBody;
                 }
-                AddActivitySource(planBody, data.PlanSource);
+                body.Children.Add(ActivityDisclosure(ActivityText("goal"), scope + "goal", GoalDetails, section is "goal" or "all"));
+                FrameworkElement PlanDetails()
+                {
+                    var planBody = new StackPanel { Spacing = 4 };
+                    if (!data.PlanReported) planBody.Children.Add(Muted(ActivityText("not_reported")));
+                    else if (data.Plan.Length == 0) planBody.Children.Add(Muted(ActivityText("none")));
+                    else
+                    {
+                        planBody.Children.Add(Muted(ActivityText("steps", data.CompletedSteps.ToString("N0"), data.Plan.Length.ToString("N0"))));
+                        planBody.Children.Add(ActivityProgress((double)data.CompletedSteps / data.Plan.Length));
+                        for (var i = 0; i < data.Plan.Length; i++)
+                        {
+                            var step = data.Plan[i];
+                            var row = new StackPanel { Spacing = 2, Margin = new Thickness(0, 2, 0, 2) };
+                            row.Children.Add(new TextBlock { Text = $"{i + 1}. {step.Text}", FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+                            row.Children.Add(Muted(ActivityStatus(step.Status, data.Live))); planBody.Children.Add(row);
+                        }
+                        AddActivitySource(planBody, data.PlanSource);
+                    }
+                    return planBody;
+                }
+                body.Children.Add(ActivityDisclosure(ActivityText("plan"), scope + "plan", PlanDetails, section is "plan" or "all"));
+                FrameworkElement AgentDetails()
+                {
+                    var agentBody = new StackPanel { Spacing = 2 };
+                    if (!data.AgentsReported) agentBody.Children.Add(Muted(ActivityText("not_reported")));
+                    else if (data.Agents.Length == 0) agentBody.Children.Add(Muted(ActivityText("none")));
+                    else foreach (var agent in data.Agents)
+                    {
+                        FrameworkElement AgentDetail()
+                        {
+                            var details = new StackPanel { Spacing = 4 };
+                            details.Children.Add(Muted(agent.Id));
+                            if (agent.Task is not null) details.Children.Add(new TextBlock { Text = agent.Task, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+                            if (agent.Model is not null) details.Children.Add(Muted(agent.Model));
+                            AddActivitySource(details, agent.Source);
+                            return details;
+                        }
+                        agentBody.Children.Add(ActivityDisclosure(agent.Name ?? agent.Id, scope + "agent/" + agent.Id, AgentDetail, status: ActivityStatus(agent.DisplayStatus(data.Live), data.Live)));
+                    }
+                    return agentBody;
+                }
+                body.Children.Add(ActivityDisclosure(ActivityText("subagents"), scope + "subagents", AgentDetails, section is "subagents" or "all"));
+                if (data.Partial) body.Children.Add(Muted(ActivityText("partial")));
+                if (data.ObservedAtMs is long stamp) body.Children.Add(Muted(ActivityText("last_reported", DateTimeOffset.FromUnixTimeMilliseconds(stamp).ToLocalTime().ToString("g"))));
             }
-            body.Children.Add(ActivityDisclosure(ActivityText("plan"), scope + "plan", planBody, section is "plan" or "all"));
-            var agentBody = new StackPanel { Spacing = 2 };
-            if (!data.AgentsReported) agentBody.Children.Add(Muted(ActivityText("not_reported")));
-            else if (data.Agents.Length == 0) agentBody.Children.Add(Muted(ActivityText("none")));
-            else foreach (var agent in data.Agents)
-            {
-                var details = new StackPanel { Spacing = 4 };
-                details.Children.Add(Muted(agent.Id));
-                if (agent.Task is not null) details.Children.Add(new TextBlock { Text = agent.Task, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
-                if (agent.Model is not null) details.Children.Add(Muted(agent.Model));
-                AddActivitySource(details, agent.Source);
-                agentBody.Children.Add(ActivityDisclosure(agent.Name ?? agent.Id, scope + "agent/" + agent.Id, details, status: ActivityStatus(agent.DisplayStatus(data.Live), data.Live)));
-            }
-            body.Children.Add(ActivityDisclosure(ActivityText("subagents"), scope + "subagents", agentBody, section is "subagents" or "all"));
-            if (data.Partial) body.Children.Add(Muted(ActivityText("partial")));
-            if (data.ObservedAtMs is long stamp) body.Children.Add(Muted(ActivityText("last_reported", DateTimeOffset.FromUnixTimeMilliseconds(stamp).ToLocalTime().ToString("g"))));
+            return body;
         }
         var summary = data is null ? ActivityText("unavailable") : ActivitySummary(data);
-        return ActivityDisclosure(ActivityText("title"), scope + "activity", body, expanded, summary, card: true);
+        return ActivityDisclosure(ActivityText("title"), scope + "activity", Details, expanded, summary, card: true);
     }
-    private UIElement ActivityDisclosure(string title, string key, FrameworkElement body, bool initiallyExpanded = false, string? status = null, bool card = false)
+    private UIElement ActivityDisclosure(string title, string key, Func<FrameworkElement> makeBody, bool initiallyExpanded = false, string? status = null, bool card = false)
     {
         var identity = "activity/" + key;
         var expanded = _statsExpanded.TryGetValue(identity, out var saved) ? saved : initiallyExpanded;
@@ -210,7 +230,12 @@ internal sealed partial class ChatPage
         if (!string.IsNullOrEmpty(status)) header.Children.Add(new TextBlock { Text = status, FontSize = 11, Opacity = .7, TextTrimming = TextTrimming.CharacterEllipsis });
         var button = new Button { Content = header, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = Theme.PanelBrush, BorderThickness = new Thickness(0), Padding = new Thickness(0, 5, 0, 5), MinHeight = 30 };
-        void State() { body.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed; chevron.Text = expanded ? "⌃" : "⌄"; AutomationProperties.SetHelpText(button, L10n.Text(expanded ? "common.collapse" : "common.expand")); }
+        var body = new StackPanel();
+        void State() {
+            if (expanded && body.Children.Count == 0) body.Children.Add(makeBody());
+            body.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed; chevron.Text = expanded ? "⌃" : "⌄";
+            AutomationProperties.SetHelpText(button, L10n.Text(expanded ? "common.collapse" : "common.expand"));
+        }
         button.Click += (_, _) => { expanded = !expanded; _statsExpanded[identity] = expanded; State(); }; State();
         var stack = new StackPanel { Spacing = 3 }; stack.Children.Add(button); stack.Children.Add(body);
         return card ? new Border { Child = stack, Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(12, 7, 12, 7) } : stack;

@@ -10,12 +10,72 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::{Mutex, OnceLock, PoisonError, mpsc};
+use std::sync::{Arc, Mutex, Once, OnceLock, PoisonError, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const INTERRUPT_TIMEOUT: Duration = Duration::from_secs(3);
 const EXIT_TIMEOUT: Duration = Duration::from_secs(3);
 const STOP_TIMEOUT: Duration = Duration::from_secs(8);
+const CAPABILITY_TTL: Duration = Duration::from_secs(60);
+
+type CliVersion = Option<[u64; 3]>;
+type VersionEntry = Arc<Mutex<Option<(Instant, CliVersion)>>>;
+
+#[derive(Default)]
+struct VersionCache {
+    entries: Mutex<HashMap<String, VersionEntry>>,
+}
+
+impl VersionCache {
+    fn version(&self, command: &str, probe: impl FnOnce() -> CliVersion) -> CliVersion {
+        let entry = Arc::clone(
+            self.entries
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .entry(command.to_owned())
+                .or_default(),
+        );
+        // One probe per command, including overlapping startup/on-demand
+        // reads. Other commands and unrelated RPCs do not share this lock.
+        let mut cached = entry.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((at, value)) = *cached
+            && at.elapsed() < CAPABILITY_TTL
+        {
+            return value;
+        }
+        let value = probe();
+        *cached = Some((Instant::now(), value));
+        value
+    }
+}
+
+fn cli_version(text: &str) -> CliVersion {
+    let version = text
+        .split_whitespace()
+        .find(|part| part.as_bytes().first().is_some_and(u8::is_ascii_digit))?;
+    let parts = version
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    (parts.len() == 3).then(|| [parts[0], parts[1], parts[2]])
+}
+
+/// Prepare the existing, conservative capability checks while the client is
+/// starting. A single background worker performs the same bounded probes as
+/// on-demand reads; callers still validate through supported() and its TTL.
+pub fn warm_capabilities() {
+    static STARTED: Once = Once::new();
+    STARTED.call_once(|| {
+        let _ = std::thread::Builder::new()
+            .name("tokenstat-chat-capabilities".into())
+            .spawn(|| {
+                for backend in ["claude", "codex"] {
+                    let _ = supported(backend);
+                }
+            });
+    });
+}
 
 #[cfg(unix)]
 static STOPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -68,38 +128,18 @@ pub(crate) fn supported(backend: &str) -> bool {
         _ => return false,
     };
     let command = crate::launcher::spawn_command(backend);
-    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, bool)>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(Mutex::default);
-    if let Some((at, value)) = cache
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(&command)
-        && at.elapsed() < Duration::from_secs(60)
-    {
-        return *value;
-    }
-    let value = (|| {
-        let text = crate::agent_models::run_list_with_timeout(
-            &command,
-            &["--version"],
-            Duration::from_secs(2),
-        )?;
-        let version = text
-            .split_whitespace()
-            .find(|part| part.as_bytes().first().is_some_and(u8::is_ascii_digit))?;
-        let parts = version
-            .split('.')
-            .map(str::parse::<u64>)
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?;
-        (parts.len() == 3).then(|| [parts[0], parts[1], parts[2]] >= floor)
-    })()
-    .unwrap_or(false);
-    cache
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .insert(command, (Instant::now(), value));
-    value
+    static CACHE: OnceLock<VersionCache> = OnceLock::new();
+    let version = CACHE
+        .get_or_init(VersionCache::default)
+        .version(&command, || {
+            let text = crate::agent_models::run_list_with_timeout(
+                &command,
+                &["--version"],
+                Duration::from_secs(2),
+            )?;
+            cli_version(&text)
+        });
+    version.is_some_and(|version| version >= floor)
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
@@ -1195,6 +1235,80 @@ fn codex_item(item: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capability_prewarming_and_first_use_share_one_probe() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let cache = Arc::new(VersionCache::default());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (entered, was_entered) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let background = {
+            let cache = Arc::clone(&cache);
+            let calls = Arc::clone(&calls);
+            std::thread::spawn(move || {
+                cache.version("fixture", || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    entered.send(()).unwrap();
+                    released.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Some([2, 1, 289])
+                })
+            })
+        };
+        was_entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (starting, started) = mpsc::channel();
+        let foreground = {
+            let cache = Arc::clone(&cache);
+            let calls = Arc::clone(&calls);
+            std::thread::spawn(move || {
+                starting.send(()).unwrap();
+                cache.version("fixture", || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    None
+                })
+            })
+        };
+        started.recv_timeout(Duration::from_secs(5)).unwrap();
+        // A different command remains usable while this probe is in flight.
+        assert_eq!(
+            cache.version("another", || Some([0, 160, 0])),
+            Some([0, 160, 0])
+        );
+        release.send(()).unwrap();
+        assert_eq!(background.join().unwrap(), Some([2, 1, 289]));
+        assert_eq!(foreground.join().unwrap(), Some([2, 1, 289]));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn capability_cache_preserves_negative_expiry_and_version_changes() {
+        let cache = VersionCache::default();
+        assert_eq!(cache.version("fixture", || None), None);
+        assert_eq!(
+            cache.version("fixture", || panic!("negative results stay cached")),
+            None
+        );
+        let entry = Arc::clone(cache.entries.lock().unwrap().get("fixture").unwrap());
+        *entry.lock().unwrap() = Some((Instant::now() - CAPABILITY_TTL, None));
+        assert_eq!(
+            cache.version("fixture", || Some([0, 160, 0])),
+            Some([0, 160, 0])
+        );
+        assert_eq!(
+            cache.version("fixture", || panic!("fresh version stays cached")),
+            Some([0, 160, 0])
+        );
+        *entry.lock().unwrap() = Some((Instant::now() - CAPABILITY_TTL, Some([0, 160, 0])));
+        assert_eq!(
+            cache.version("fixture", || Some([0, 159, 0])),
+            Some([0, 159, 0])
+        );
+        assert_eq!(cli_version("codex-cli 0.160.0"), Some([0, 160, 0]));
+        assert_eq!(cli_version("Claude 2.1.289"), Some([2, 1, 289]));
+        for invalid in ["", "version unknown", "2.1", "2.1.289-extra", "2.1.289.1"] {
+            assert_eq!(cli_version(invalid), None);
+        }
+    }
 
     #[test]
     fn native_image_items_keep_tool_identity_and_structured_image_evidence() {

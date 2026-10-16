@@ -211,11 +211,13 @@ struct ChatCacheSettings: View {
         message = nil
         do {
             try await ChatAttachmentCache.shared.purge()
+            await ChatImageDecodeCache.shared.removeAll()
             NotificationCenter.default.post(name: .chatAttachmentCachePurged, object: nil)
             bytes = await ChatAttachmentCache.shared.usedBytes()
             if !reduceMotion { try? await Task.sleep(for: .milliseconds(300)) }
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { cleared = true }
         } catch {
+            await ChatImageDecodeCache.shared.removeAll()
             NotificationCenter.default.post(name: .chatAttachmentCachePurged, object: nil)
             bytes = await ChatAttachmentCache.shared.usedBytes()
             message = L10n.text("apple.chatcachesettings.some_cached_files_could_not_be_removed_try.9111b244")

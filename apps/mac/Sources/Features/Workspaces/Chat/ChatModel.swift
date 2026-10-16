@@ -164,7 +164,9 @@ final class ChatModel {
     /// The composer clears on Send. Without this the bubble is missing
     /// until the host answers, and a lazy stack can also skip that first
     /// landing until the next layout.
-    private(set) var outgoing: [ChatDisplayItem] = []
+    private(set) var outgoing: [ChatDisplayItem] = [] {
+        didSet { outgoingRevision &+= 1 }
+    }
     var approvals: [ChatApproval] = []
     /// Whether the live approval list has answered for the current selection.
     /// Until it has, the transcript's own records are the only evidence of a
@@ -240,11 +242,33 @@ final class ChatModel {
     /// earlier failures in an otherwise working conversation are history.
     private var signInRecovery: ChatAuthenticationFailure.Recovery? {
         guard let selected else { return nil }
-        return ChatAuthenticationFailure.latestRecovery(in: displayItems, backend: selected.backend)
+        // Every visible row asks whether it is the recovery row. A scroll
+        // must not repeat a full transcript projection for each of them.
+        _ = displayRevision
+        _ = displayCache
+        _ = outgoing
+        let key = SignInRecoveryKey(display: displayKey, outgoing: outgoingRevision,
+                                    conversation: selected.id, backend: selected.backend)
+        if let cached = signInRecoveryCache, cached.key == key { return cached.value }
+        let value = ChatAuthenticationFailure.latestRecovery(in: displayItems, backend: selected.backend)
+        signInRecoveryCache = (key, value)
+        return value
     }
+    private struct SignInRecoveryKey: Equatable {
+        var display: DisplayKey?
+        var outgoing: UInt64
+        var conversation: String
+        var backend: String
+    }
+    @ObservationIgnored private var outgoingRevision: UInt64 = 0
+    @ObservationIgnored private var signInRecoveryCache: (key: SignInRecoveryKey, value: ChatAuthenticationFailure.Recovery?)?
     var signInQueuedMessage: ChatQueuedMessage? {
-        guard savedCopy == nil, ownsQueue, let selected else { return nil }
-        return queued.first { $0.signInBackend == selected.backend && $0.delivery == .waiting }
+        // Rows need no account/cache ownership lookup when no sign-in send
+        // exists. A matching item still passes the same gate before exposure.
+        guard savedCopy == nil, let selected,
+              let item = queued.first(where: { $0.signInBackend == selected.backend && $0.delivery == .waiting }),
+              ownsQueue else { return nil }
+        return item
     }
     var signInGateRowID: String? {
         if let item = signInQueuedMessage { return "signin-gate-\(item.id)" }

@@ -258,6 +258,7 @@ jobs:
           python3 scripts/check-vault-scope.py
           python3 scripts/check-ssh-workbench.py
           python3 scripts/tests/chat-model-review.py
+          python3 scripts/tests/chat-recovery-cache.py
           python3 scripts/tests/screen-viewer-lifecycle.py
           python3 scripts/tests/terminal-final-output.py
           python3 scripts/tests/terminal-program-status.py
@@ -290,6 +291,10 @@ jobs:
         run: bash scripts/run-windows-state-tests.sh
       - name: Check independent Windows chat loading
         run: python3 scripts/check-windows-chat-loading.py
+      - name: Check lazy Windows chat inspector and projection
+        run: |
+          python3 scripts/check-windows-chat-inspector.py
+          python3 scripts/check-windows-chat-projection.py
 
   test:
     name: test ${{ matrix.os }}
@@ -453,6 +458,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+
+      - name: Check native benchmark result handling
+        run: python3 scripts/tests/benchmark-android-chat-images.py
 
       - uses: actions/setup-java@v6
         with:

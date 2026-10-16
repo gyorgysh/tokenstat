@@ -1181,13 +1181,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         // `raw` is every row, for the seat line, which must see a running
         // step whether or not it is folded away. `items` is what is drawn.
         var raw = Coalesce(_events);
+        var busy = Busy(raw);
         var items = ChatImageGallery.Compose(ChatDetailFold.Fold(raw, ChatDetailPreference.Level, _running, IsGroupOpen));
         _sliceOlder = SliceClamp(_sliceOlder, items.Count);
         var start = SliceStart(items.Count, _sliceOlder);
         var end = SliceEnd(items.Count, _sliceOlder);
         var prefix = start > 0 || _hasEarlier ? 1 : 0;
         var visible = end - start;
-        var desiredCount = prefix + visible + (Busy() ? 1 : 0);
+        var desiredCount = prefix + visible + (busy ? 1 : 0);
 
         if (prefix == 1)
         {
@@ -1237,7 +1238,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
         }
 
-        if (Busy())
+        if (busy)
         {
             var workingIdx = prefix + visible;
             var mood = LiveMood(raw);
@@ -2844,14 +2845,24 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return items;
     }
 
-    private bool Busy()
+    // History rows are append-only until the page array is replaced. Busy
+    // checks happen on every composer/key/follow update, so retain this small
+    // result rather than projecting the entire transcript for each control.
+    private JsonArray? _busyEvents;
+    private int _busyEventCount;
+    private string? _busyBackend;
+    private bool _busyValue;
+    private bool Busy(List<DisplayItem>? rows = null)
     {
         if (_running) return true;
-        foreach (var item in Coalesce(_events))
-        {
-            if (item.Kind is (ItemKind.Tool or ItemKind.Edit) && item.Running) return true;
-        }
-        return false;
+        var backend = Format.Text(_openChat, "backend");
+        if (rows is null && ReferenceEquals(_busyEvents, _events) && _busyEventCount == _events.Count && _busyBackend == backend)
+            return _busyValue;
+        _busyValue = (rows ?? Coalesce(_events)).Any(item => item.Kind is (ItemKind.Tool or ItemKind.Edit) && item.Running);
+        _busyEvents = _events;
+        _busyEventCount = _events.Count;
+        _busyBackend = backend;
+        return _busyValue;
     }
 
     private static string Duration(long start, long end)

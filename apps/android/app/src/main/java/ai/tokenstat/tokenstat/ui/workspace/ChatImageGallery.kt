@@ -51,6 +51,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -63,9 +65,10 @@ internal fun ChatImageGallery(
     if (images.isEmpty()) return
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val account by model.state.collectAsStateWithLifecycle()
+    val accountFlow = remember(model) { model.state.map { it.account }.distinctUntilChanged() }
+    val account by accountFlow.collectAsStateWithLifecycle(initialValue = null)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val owner = ProjectOwner.from(account.account, peer, chatId)
+    val owner = remember(account, peer, chatId) { ProjectOwner.from(account, peer, chatId) }
     val files = remember(owner, chatId) { mutableStateMapOf<String, File>() }
     val loading = remember(owner, chatId) { mutableStateMapOf<String, Boolean>() }
     val errors = remember(owner, chatId) { mutableStateMapOf<String, String>() }
@@ -206,11 +209,10 @@ internal fun ChatImageGallery(
 }
 
 @Composable private fun imageBitmap(file: File?, maxEdge: Int): ImageBitmap? {
+    val cache = ChatImageCache.shared(LocalContext.current)
     return key(file, maxEdge) {
         val bitmap by produceState<ImageBitmap?>(null) {
-            value = if (file == null) null else withContext(Dispatchers.IO) {
-                runCatching { decodeChatImage(file, maxEdge).asImageBitmap() }.getOrNull()
-            }
+            value = if (file == null) null else cache.image(file, maxEdge)?.asImageBitmap()
         }
         bitmap
     }

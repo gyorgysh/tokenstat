@@ -27,6 +27,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Supported Claude and Codex chats accept steering messages and attachments during an active turn, with steering marked in the transcript.
 - Drop files and images throughout an open chat on Mac, Windows, iPad and Android. A single highlight covers the chat and composer. On Mac, screenshot drops also work when their temporary file is unavailable.
 - Automatic attachment previews support files up to 5 MiB. Images available locally can preview above that limit, and large images use bounded previews.
+- Image-heavy chats reuse decoded previews on Apple devices and Android. Windows avoids rebuilding hidden inspector details, and opening long conversations does less repeated transcript work.
 - iPhone and iPad work overviews retain completed and failed work for an hour. Terminal results survive sign-in, and the Dynamic Island makes reconnecting and failed work clearer.
 
 ### Fixed

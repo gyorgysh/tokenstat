@@ -1618,7 +1618,9 @@ fun ChatSection(
                 )
             }
             val openChat = chats.firstOrNull { it.str("id") == openId }
-            val transcript = remember(events, openChat) {
+            // Status polls also update names, usage and timestamps. Only the
+            // row inputs should rebuild an image-rich transcript.
+            val transcript = remember(events, openChat?.str("backend"), openChat?.bol("running")) {
                 coalesceTranscript(
                     events,
                     defaultBackend = openChat?.str("backend"),

@@ -10,16 +10,19 @@ enum ChatAuthenticationFailure {
     }
 
     static func latestRecovery(in items: [ChatDisplayItem], backend: String) -> Recovery? {
-        let items = presented(items)
-        guard let start = items.lastIndex(where: { if case .user = $0.kind { return true }; return false }),
-              case let .user(text) = items[start].kind,
-              let failure = items[(start + 1)...].last(where: {
+        // Presentation changes only agent prose and counters inside a turn.
+        // Earlier turns cannot contribute to this retry, so avoid projecting
+        // their tool output and attachments again when a new page arrives.
+        guard let start = items.lastIndex(where: { if case .user = $0.kind { return true }; return false }) else { return nil }
+        let turn = presented(Array(items[start...]))
+        guard case let .user(text) = turn[0].kind,
+              let failure = turn.dropFirst().last(where: {
                   if case let .failed(text) = $0.kind { return needsSignIn(text, backend: backend) }; return false
               }) else { return nil }
         // User attachments immediately follow the prompt. Agent-returned files
         // later in the turn must never become input to a retry.
         var attachments: [ChatAttachment] = []
-        for item in items[(start + 1)...] {
+        for item in turn.dropFirst() {
             guard case let .attachment(file) = item.kind else { break }
             attachments.append(file)
         }

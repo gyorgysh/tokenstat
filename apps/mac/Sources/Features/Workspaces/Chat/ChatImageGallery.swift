@@ -42,9 +42,9 @@ struct ChatImageGallery: View {
     var compact = false
     @Environment(\.presentChatImages) private var present
     @State private var dimensions: [String: ChatImageDimensions] = [:]
-    private struct MetadataRequest: Hashable { let id: String; let file: URL?; let bytes: Int? }
+    private struct MetadataRequest: Equatable { let id: String; let file: URL?; let data: Data? }
     private var metadataRequests: [MetadataRequest] {
-        resources.prefix(4).map { MetadataRequest(id: $0.attachment.id, file: $0.file, bytes: $0.data?.count) }
+        resources.prefix(4).map { MetadataRequest(id: $0.attachment.id, file: $0.file, data: $0.data) }
     }
 
     var body: some View {
@@ -131,9 +131,9 @@ private struct ChatImageRowsLayout: Layout {
 private struct ChatImageSurface: View {
     let resource: ChatImageResource
     var maxPixel: CGFloat = 3072
-    @State private var decoded: Image?
+    @State private var decoded: CGImage?
     @State private var decodedSource: Source?
-    private struct Source: Hashable { let data: Data?; let file: URL?; let maxPixel: CGFloat }
+    private struct Source: Equatable { let data: Data?; let file: URL?; let maxPixel: CGFloat }
     private var source: Source { Source(data: resource.data, file: resource.file, maxPixel: maxPixel) }
 
     var body: some View {
@@ -141,7 +141,8 @@ private struct ChatImageSurface: View {
             ZStack {
                 Theme.panel
                 if decodedSource == source, let decoded {
-                    decoded.resizable().scaledToFit()
+                    Image(decoded, scale: 1, label: Text(verbatim: resource.attachment.name))
+                        .resizable().scaledToFit()
                         .frame(width: geometry.size.width, height: geometry.size.height)
                 } else if resource.loading || (resource.available && decodedSource != source) {
                     ProgressView().controlSize(.small)
@@ -154,19 +155,14 @@ private struct ChatImageSurface: View {
             .clipped()
         }
         .task(id: source) {
+            // Published attachment bytes/cache files stay immutable until the
+            // model resets their resource. Lazy reappearance still requests
+            // the cache again, which revalidates file identity before reuse.
             let requested = source
-            let thumbnail = await Task.detached(priority: .userInitiated) {
-                if let data = requested.data { return ChatThumbnail.make(from: data, maxPixel: requested.maxPixel, preservingAlpha: true) }
-                if let file = requested.file { return ChatThumbnail.make(from: file, maxPixel: requested.maxPixel, preservingAlpha: true) }
-                return nil
-            }.value
+            let image = await ChatImageDecodeCache.shared.image(data: requested.data, file: requested.file, maxPixel: requested.maxPixel)
             guard !Task.isCancelled else { return }
             decodedSource = requested
-            #if os(macOS)
-            decoded = thumbnail.flatMap(NSImage.init(data:)).map { Image(nsImage: $0) }
-            #else
-            decoded = thumbnail.flatMap(UIImage.init(data:)).map { Image(uiImage: $0) }
-            #endif
+            decoded = image
         }
     }
 }

@@ -94,8 +94,15 @@ for name in ['contextOpen', 'serversOpen', 'otherServersOpen', 'promptOpen', 'hi
     context = context.replace(name + ' = false', name + ' = GalleryQAState.expanded')
 pieces += [context]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageLayout.swift').read_text()]
+pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageDecode.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageGallery.swift').read_text()]
+pieces += [declaration('scripts/tests/ChatImageDecodeTests.swift', '    static func tiff(').replace('static func', 'func', 1)]
 pieces += [r'''
+@MainActor private struct GalleryMutationQA: View {
+    @Bindable var model: ChatModel
+    let file: ChatAttachment
+    var body: some View { ChatImageGallery(resources: model.imageResources(for: [file])).frame(width: 320) }
+}
 @MainActor final class GalleryQARunner: NSObject, NSApplicationDelegate {
     let output: URL
     init(output: URL) { self.output = output }
@@ -152,6 +159,26 @@ pieces += [r'''
         }
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 480, height: 440), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        // Exercise the actual SwiftUI task identity, not only the metadata
+        // actor: equal-byte-count EXIF changes must update a mounted gallery.
+        let mutationFile = ChatAttachment(id: "mutation-qa", name: "orientation.tiff", mediaType: "image/tiff")
+        let before = tiff(width: 370, height: 830, orientation: 1)
+        let after = tiff(width: 370, height: 830, orientation: 6)
+        precondition(before.count == after.count)
+        model.responseAttachmentData[mutationFile.id] = before
+        let mutationHost = NSHostingView(rootView: GalleryMutationQA(model: model, file: mutationFile))
+        mutationHost.frame = NSRect(x: 0, y: 0, width: 320, height: 400)
+        window.contentView = mutationHost; window.setContentSize(mutationHost.frame.size); window.orderFront(nil)
+        try await Task.sleep(for: .milliseconds(500))
+        mutationHost.layoutSubtreeIfNeeded()
+        let portraitHeight = mutationHost.fittingSize.height
+        model.responseAttachmentData[mutationFile.id] = after
+        try await Task.sleep(for: .milliseconds(500))
+        mutationHost.layoutSubtreeIfNeeded()
+        let landscapeHeight = mutationHost.fittingSize.height
+        precondition(portraitHeight > landscapeHeight + 40,
+                     "A mounted gallery must refresh same-length EXIF geometry: \(portraitHeight) -> \(landscapeHeight)")
+        print("Native gallery same-length metadata change: \(portraitHeight) -> \(landscapeHeight)")
         for dark in [false, true] {
             window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             for width: CGFloat in [320, 480, 760] {

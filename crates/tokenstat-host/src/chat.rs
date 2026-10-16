@@ -67,6 +67,8 @@ const RAW_RETAIN: u64 = 4 * 1024 * 1024;
 /// Allow on it would report success while the tool had already been refused.
 const APPROVAL_TTL_MS: i64 = crate::chat_gate::GATE_DEADLINE_SECONDS as i64 * 1000;
 const POLL: Duration = Duration::from_millis(400);
+const DRAIN_BACKLOG_BYTES: u64 = 256 * 1024;
+const DRAIN_BURST_BYTES: usize = 4 * 1024 * 1024;
 const EXIT_STATUS_GRACE: Duration = Duration::from_secs(3);
 /// A persona draft is one short text transform. Anything past this is a run
 /// that has gone wrong, and the wizard says so rather than waiting on it.
@@ -3201,16 +3203,22 @@ impl Store {
         path: &Path,
         muse_root: Option<&Path>,
     ) -> Result<Value, String> {
+        let muse = chat
+            .resume_tokens
+            .get("muse")
+            .map(String::as_str)
+            .or_else(|| {
+                (chat.backend == "muse")
+                    .then_some(chat.resume_token.as_deref())
+                    .flatten()
+            });
         let baseline = usage_totals(path)?;
         let bytes = read_fork_file(
             path,
             PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64,
             true,
         )?;
-        let records: Vec<Value> = bytes
-            .split(|byte| *byte == b'\n')
-            .filter_map(|line| serde_json::from_slice(line).ok())
-            .collect();
+        let records = usage_repair_records(&bytes, muse.is_some() || chat.backend == "codex");
         let mut totals = baseline.clone();
         // Only Codex raw output carries `turn.completed`. Without this gate
         // every first-page read of any other chat scanned its raw folder.
@@ -3237,15 +3245,6 @@ impl Store {
                 let _ = add_usage_value(&mut totals, &recovered);
             }
         }
-        let muse = chat
-            .resume_tokens
-            .get("muse")
-            .map(String::as_str)
-            .or_else(|| {
-                (chat.backend == "muse")
-                    .then_some(chat.resume_token.as_deref())
-                    .flatten()
-            });
         if let Some(token) = muse.filter(|token| validate_record_id(token).is_ok()) {
             let directory = if let Some(root) = muse_root {
                 muse_session_directory(root, token).ok().flatten()
@@ -4542,8 +4541,9 @@ impl Store {
             Some(measure) => measure.observe(events),
             None => events,
         };
+        let mut burst_bytes = 0usize;
         loop {
-            let mut received_output = false;
+            let mut received_bytes = 0;
             let stop_path = self.root.join(safe_file_name(id)).join("stop-request.json");
             if let Ok(meta) = fs::symlink_metadata(&stop_path)
                 && meta.file_type().is_file()
@@ -4575,7 +4575,8 @@ impl Store {
             if let Ok(chunk) = manager.read_for_stream(pty, &reader, offset) {
                 offset = chunk.next_offset;
                 if !chunk.bytes.is_empty() {
-                    received_output = true;
+                    received_bytes = chunk.bytes.len();
+                    burst_bytes = burst_bytes.saturating_add(received_bytes);
                     let _ = append_raw(raw_path, &chunk.bytes);
                     let events = measured(parser.push_events(&chunk.bytes));
                     if let Some(snapshot) = parser.take_inspection() {
@@ -4603,7 +4604,15 @@ impl Store {
                     self.record_questions(id, backend, questions.scan(&assistant_text));
                 }
             }
-            match manager.info(pty) {
+            // Check budgets on every bounded chunk, including a fast backlog
+            // read. A large producer must never bypass Stop or its deadline.
+            let status = manager.info(pty);
+            if status.as_ref().is_ok_and(|info| info.alive)
+                && deadline.is_some_and(|when| Instant::now() >= when)
+            {
+                let _ = self.stop_pty(id, pty);
+            }
+            match status {
                 Err(_) => break,
                 Ok(info) if !info.alive => {
                     // EOF and child exit can arrive in either order. Drain
@@ -4626,17 +4635,24 @@ impl Store {
                     ) {
                         break;
                     }
-                    if received_output {
+                    if received_bytes > 0 {
                         // A finished producer can leave many bounded chunks.
                         // Consume that backlog without one polling delay each.
                         continue;
                     }
                 }
+                Ok(info)
+                    if drain_buffered_output(
+                        received_bytes,
+                        info.total_bytes.saturating_sub(offset),
+                        burst_bytes,
+                    ) =>
+                {
+                    continue;
+                }
                 Ok(_) => {}
             }
-            if deadline.is_some_and(|when| Instant::now() >= when) {
-                let _ = self.stop_pty(id, pty);
-            }
+            burst_bytes = 0;
             std::thread::sleep(POLL);
         }
         // One final read catches output written immediately before exit.
@@ -5559,6 +5575,13 @@ impl Store {
             );
         }
     }
+}
+
+/// Consume large already-buffered tool/image output without one polling
+/// delay per 256 KiB. Small token streams keep their existing batching. A
+/// finite burst yields normally even if a producer keeps the queue full.
+fn drain_buffered_output(received: usize, pending: u64, burst: usize) -> bool {
+    received > 0 && pending >= DRAIN_BACKLOG_BYTES && burst < DRAIN_BURST_BYTES
 }
 
 /// A closed output stream has a finite tail: finish consuming it even when
@@ -6591,6 +6614,40 @@ fn muse_log_usage(directory: &Path, since_ms: i64) -> Result<Value, String> {
     Ok(totals.value())
 }
 
+/// Legacy repairs only need Codex records and retained summaries. Reading a
+/// Claude tool's large argument/result into a JSON tree on every inspector
+/// refresh needlessly copies the entire retained transcript. Inspect its two
+/// top-level selectors while serde skips the other values without allocating.
+/// Muse reconciliation still needs the full sequence, including user/session
+/// boundaries. A current Codex session is also likely to need most records,
+/// so both keep the existing single full projection without a selector pass.
+fn usage_repair_records(bytes: &[u8], full_history: bool) -> Vec<Value> {
+    #[derive(Deserialize)]
+    struct Header {
+        #[serde(default)]
+        kind: Value,
+        #[serde(default)]
+        backend: Value,
+    }
+    bytes
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| {
+            if !full_history {
+                let header: Header = match serde_json::from_slice(line) {
+                    Ok(header) => header,
+                    // Preserve the legacy Value parser's permissive handling
+                    // of unusual envelopes such as duplicate selector keys.
+                    Err(_) => return serde_json::from_slice(line).ok(),
+                };
+                if header.backend != "codex" && header.kind != "retainedUsage" {
+                    return None;
+                }
+            }
+            serde_json::from_slice(line).ok()
+        })
+        .collect()
+}
+
 fn usage_totals(path: &Path) -> Result<Value, String> {
     use std::io::Read;
     let file = match fs::File::open(path) {
@@ -7045,6 +7102,38 @@ mod tests {
         let not_directory = root.path().join("file");
         fs::write(&not_directory, b"file").unwrap();
         assert!(usage_totals(&not_directory.join("events.ndjson")).is_err());
+    }
+
+    #[test]
+    fn legacy_usage_repairs_select_metadata_without_interpreting_tool_or_user_content() {
+        let records = [
+            json!({"kind":"user","text":"{\"backend\":\"codex\",\"kind\":\"retainedUsage\"}"}),
+            json!({"kind":"agent","backend":"claude","event":{"kind":"toolStart","input":{"backend":"codex","kind":"retainedUsage","content":"large tool body".repeat(1000)}}}),
+            json!({"kind":"agent","backend":"codex","event":{"kind":"usage","input":4}}),
+            json!({"kind":"retainedUsage","usage":{"turns":1}}),
+            json!({"kind":null,"backend":7,"event":{"kind":"usage","input":2}}),
+        ];
+        let mut bytes = records
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes();
+        bytes.extend_from_slice(b"\n{\"kind\":\"agent\",\"backend\":\"c\\u006fdex\",\"event\":{\"kind\":\"usage\",\"input\":3}}\n");
+        let selected = usage_repair_records(&bytes, false);
+        assert_eq!(selected.len(), 3);
+        assert_eq!(selected[0], records[2]);
+        assert_eq!(selected[1], records[3]);
+        assert_eq!(selected[2]["backend"], "codex");
+        assert_eq!(selected[2]["event"]["input"], 3);
+        let complete = usage_repair_records(&bytes, true);
+        assert_eq!(complete.len(), 6);
+        assert_eq!(&complete[..5], records.as_slice());
+        let duplicate = br#"{"kind":"agent","backend":"claude","backend":"codex","event":{"kind":"usage","input":8}}"#;
+        assert_eq!(
+            usage_repair_records(duplicate, false),
+            vec![serde_json::from_slice::<Value>(duplicate).unwrap()]
+        );
     }
 
     /// A throwaway archive of `count` records, each a little different in
@@ -7879,6 +7968,22 @@ mod tests {
     fn prepare_live_chat(store: &Store, id: &str) {
         conversation_for_receipts(store, id);
         store.set_running(id, true).unwrap();
+    }
+
+    #[test]
+    fn live_output_backlogs_make_progress_in_bounded_bursts() {
+        assert!(drain_buffered_output(256 * 1024, 1024 * 1024, 256 * 1024));
+        // Ordinary incremental token output keeps its normal batching.
+        assert!(!drain_buffered_output(1024, DRAIN_BACKLOG_BYTES - 1, 1024));
+        // An empty or failed read must never spin against a stale snapshot.
+        assert!(!drain_buffered_output(0, u64::MAX, 0));
+        // Even a continuously growing producer gets only one bounded burst.
+        assert!(!drain_buffered_output(
+            256 * 1024,
+            u64::MAX,
+            DRAIN_BURST_BYTES
+        ));
+        assert!(!drain_buffered_output(256 * 1024, u64::MAX, usize::MAX));
     }
 
     #[test]

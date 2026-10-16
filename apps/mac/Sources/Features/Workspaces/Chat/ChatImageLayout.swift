@@ -67,7 +67,7 @@ struct ChatImageGalleryGeometry {
 /// The actor keeps at most 256 small entries and never retains image bytes.
 actor ChatImageMetadata {
     static let shared = ChatImageMetadata()
-    private enum Key: Hashable { case data(Data), file(URL, UInt64?, UInt64?, Date?) }
+    private enum Key: Hashable { case data(Data), file(ChatImageFileIdentity) }
     private struct Entry { let dimensions: ChatImageDimensions? }
     private var entries: [Key: Entry] = [:]
     private var recency: [Key] = []
@@ -81,11 +81,7 @@ actor ChatImageMetadata {
             // Retain only the fixed-size digest, never the original pixels.
             key = .data(Data(SHA256.hash(data: data)))
         }
-        else if let file {
-            let attributes = try? FileManager.default.attributesOfItem(atPath: file.path)
-            key = .file(file, (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value,
-                (attributes?[.size] as? NSNumber)?.uint64Value, attributes?[.modificationDate] as? Date)
-        }
+        else if let file, let identity = ChatImageFileIdentity(file) { key = .file(identity) }
         else { return nil }
         recency.removeAll { $0 == key }
         recency.append(key)

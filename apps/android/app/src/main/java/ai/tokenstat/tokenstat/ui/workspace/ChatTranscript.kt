@@ -113,17 +113,27 @@ data class ChatToolState(
         /// shell trace like "+ set -x" never poses as a diff.
         fun makeSnippet(verb: String, detail: String?): List<String> {
             if (detail.isNullOrEmpty()) return emptyList()
-            val lines = detail.split("\n")
             val isDiff = verb == "Edit" || verb == "NotebookEdit" || verb == "Diff"
-            val out = lines.take(SnippetLineCap).map { line ->
-                val shown = clip(line)
-                if (isDiff && isDiffLine(shown)) shown else "| $shown"
+            val out = ArrayList<String>(SnippetLineCap + 1)
+            var start = 0
+            var count = 0
+            while (true) {
+                val end = detail.indexOf('\n', start).let { if (it < 0) detail.length else it }
+                if (count < SnippetLineCap) {
+                    // Keep the complete detail for expansion, but do not
+                    // allocate thousands of hidden lines just to draw sixty.
+                    val shown = detail.substring(start, minOf(end, start + SnippetColumnCap)) +
+                        if (end - start > SnippetColumnCap) "…" else ""
+                    out.add(if (isDiff && isDiffLine(shown)) shown else "| $shown")
+                }
+                count++
+                if (end == detail.length) break
+                start = end + 1
             }
-            return if (lines.size > SnippetLineCap) {
-                out + L10n.text("android.chattranscript.0_more.8bfcca49", "${lines.size - SnippetLineCap}")
-            } else {
-                out
+            if (count > SnippetLineCap) {
+                out.add(L10n.text("android.chattranscript.0_more.8bfcca49", "${count - SnippetLineCap}"))
             }
+            return out
         }
 
         /// A unified or old/new diff body line. File headers stay grey.

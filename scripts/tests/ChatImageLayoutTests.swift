@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ChatImageLayout.swift.
+// Compile with ChatImageLayout.swift and ChatImageDecode.swift.
 import Foundation
 import ImageIO
 
@@ -74,6 +74,14 @@ import ImageIO
         let after = await metadata.dimensions(data: nil, file: file)
         precondition(before == .init(width: 37, height: 83) && after == .init(width: 83, height: 37),
             "Replacing an image at the same path must invalidate cached dimensions")
+        let preservedDate = try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as! Date
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.write(contentsOf: png)
+        try handle.close()
+        try FileManager.default.setAttributes([.modificationDate: preservedDate], ofItemAtPath: file.path)
+        let edited = await metadata.dimensions(data: nil, file: file)
+        precondition(edited == .init(width: 37, height: 83),
+                     "An in-place equal-length edit restoring mtime must invalidate metadata using ctime")
         let invalid = await metadata.dimensions(data: Data([1, 2, 3]), file: nil)
         precondition(invalid == nil)
         print("Image layout: justified rows, width/height bounds, touch targets, native singles and metadata orientation/replacement passed")

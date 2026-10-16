@@ -249,6 +249,22 @@ class ChatTranscriptTest {
     }
 
     @Test
+    fun snippetRetainsBlankAndCarriageReturnRowsAtTheBoundary() {
+        assertEquals(emptyList<String>(), ChatToolState.makeSnippet("Shell", ""))
+        assertEquals(listOf("| ", "| "), ChatToolState.makeSnippet("Shell", "\n"))
+        assertEquals(listOf("| one\r", "| \r", "| "), ChatToolState.makeSnippet("Shell", "one\r\n\r\n"))
+        val sixty = (1..60).joinToString("\n") { "row $it" }
+        assertEquals(60, ChatToolState.makeSnippet("Shell", sixty).size)
+        val trailing = ChatToolState.makeSnippet("Shell", "$sixty\n")
+        assertEquals(61, trailing.size)
+        assertTrue(trailing.last().startsWith("| … (1 more)"))
+        val detail = "x".repeat(2 * 1024 * 1024)
+        val tool = (coalesceTranscript(listOf(toolEnd("big", "Shell", detail)), running = false).single() as ChatDisplayItem.Tool).state
+        assertEquals(detail, tool.detail)
+        assertEquals(listOf("| ${"x".repeat(600)}…"), tool.snippet)
+    }
+
+    @Test
     fun diffLinesStayUnprefixedInSnippet() {
         val snippet = ChatToolState.makeSnippet("Diff", "+new\n context\n-old")
         assertEquals(listOf("+new", "|  context", "-old"), snippet)

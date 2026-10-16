@@ -117,6 +117,9 @@ internal static class Format
             return fallback;
         }
         var value = node?[name];
+        // JsonValue<string> can serialize just to discover GetValueKind().
+        // Read text directly for both UI-created and parsed values.
+        if (value is JsonValue text && text.TryGetValue<string>(out var content)) return content ?? fallback;
         if (value is null || value.GetValueKind() is JsonValueKind.Null or JsonValueKind.Undefined)
         {
             return fallback;

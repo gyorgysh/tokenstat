@@ -176,6 +176,11 @@ fn run() -> Result<(), String> {
     let listener = server::bind(&path)?;
     eprintln!("tokenstat-hostd listening on {}", path.display());
 
+    // No version subprocess runs on the socket-readiness path. Warm the
+    // existing capability cache on one worker while the app paints instead
+    // of making its first model/composer request pay for both CLI probes.
+    tokenstat_host::chat_live::warm_capabilities();
+
     server::serve(listener, session)
 }
 
