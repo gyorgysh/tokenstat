@@ -9,45 +9,37 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.6.4]
+## [1.7.0] - Unreleased
 
 ### Added
 
-- New chat opens a dedicated composer with a repository picker and the existing Add repository flow on Mac, iPhone/iPad, Android and Windows. It includes file/image attachments, agent/model/effort, working style, permissions and supported fast mode. Local drafts stay with their repository. Opening the landing page, selecting files or choosing a repository does not create an empty conversation. Open chat supports image/file-first messages without starting a model turn. Empty background interactions produce motion-aware effects.
-- The Apple new-chat canvas layers flowing violet folds over frosted glass. Hover bends the layers with momentum; clicks spread gradually and settle. Mac glass follows sidebar appearance settings and fills the titlebar. Reduced motion and transparency are respected, and the agent selector softens the canvas behind it to keep attention on the choices.
-- Chat and terminal details offer click-to-copy Tokenstat and verified agent session IDs. Chat handoffs preserve earlier session references and point incoming agents to saved transcripts, including after a native session has been replaced.
-- Chat composers on Mac, iPhone, iPad, Android and Windows offer slash commands for context, usage, tools, MCP servers, stopping work and native Claude/Codex compaction.
-- Chat inspectors combine context and conversation usage, recent context history, tool groups and reported MCP connections in compact, expandable panels.
-- Chats show reported goals, plan steps and subagent tasks in a compact activity summary and expandable inspector on Mac, iPhone/iPad, Android and Windows. `/goal`, `/plan` and `/subagents` open the details without starting a model turn. Live counts and historical reports stay distinct, and backend sections that are not reported remain unknown.
-- Supported Claude and Codex chats accept steering messages, including attachments, during the current turn and mark them on the transcript.
-- Chat images use compact galleries with proportional thumbnails, a quiet background and a viewer with image navigation, zoom, Open and Save. Sets of up to three share a row; larger sets use paired rows and an overflow count. Explicit image reads and structured tool-image results appear as thumbnails beside their tool step.
+- Start a chat from a dedicated composer on Mac, iPhone, iPad, Android and Windows. Choose an existing repository or add a folder, attach files and images, and set the agent, model, effort, working style and permissions before sending. Drafts stay with their repository.
+- The new-chat screen on Apple devices has layered violet glass that responds gently to movement and clicks, with support for reduced motion and transparency.
+- Use slash commands to inspect context, usage, tools and MCP servers, view goals and subagents, stop work, or compact supported Claude and Codex conversations.
+- See reported goals, plan progress and subagent tasks in the chat activity summary and inspector. Available information follows each agent's capabilities.
+- Copy chat, terminal and native agent session IDs from session details. Handoffs retain earlier session references and saved transcript locations so agents can follow the conversation across sessions.
+- Browse chat images in compact galleries and open a viewer to navigate, zoom, save or open an image. Images read or captured by tools appear beside the relevant step.
+
+### Improved
+
+- Projects are now called Repositories, bringing Git repositories and ordinary working folders together in one place.
+- Chat inspectors use compact, expandable cards with primary controls always available. Context usage, conversation totals, recent history, tools and MCP connections are easier to inspect together.
+- Supported Claude and Codex chats accept steering messages and attachments during an active turn, with steering marked in the transcript.
+- Drop files and images throughout an open chat on Mac, Windows, iPad and Android. A single highlight covers the chat and composer. On Mac, screenshot drops also work when their temporary file is unavailable.
+- Automatic attachment previews support files up to 5 MiB. Images available locally can preview above that limit, and large images use bounded previews.
+- iPhone and iPad work overviews retain completed and failed work for an hour. Terminal results survive sign-in, and the Dynamic Island makes reconnecting and failed work clearer.
 
 ### Fixed
 
-- iPhone and iPad work overviews keep recently completed and failed chats and terminals visible for one hour, instead of dropping to zero when the last session finishes. Completed work has its own count and status, while new turns replace the previous result and resolved attention stays cleared.
-- Terminal results remain available in the work overview after signing in, including sessions started while signed out. A stale overview shows reconnecting in the Dynamic Island even when the last work completed.
-- Closing an old terminal result keeps its original expiry time, and idle terminals no longer hide failed work in the Dynamic Island.
-- Pull and Push dialogs stay open when the Mac inspector automatically hides in a narrow window.
-- Chat sends recover in long and resumed conversations. Automatic image previews no longer share an upload's cancellation or progress state, and large images use file-backed previews on Mac, iPhone and iPad.
-- Native compaction remains a maintenance operation in plan mode and after instruction changes. Steering preserves pending questions, retains attachments when capabilities change, and queues messages that exceed the agent's steering limits. A deferred Stop command stays tied to its original chat.
-- Context inspectors label token usage and capacity, preserve the last reported capacity for the same model during active turns, and keep history and conversation totals behind compact disclosures.
-- Mac chats accept image and file drops throughout the transcript, including message text, images and empty space. One highlight covers the full chat area and composer on Mac and iPad. Screenshot drops can use their image pixels when a temporary file URL is unavailable.
-- Context and MCP reports share one scoped reader and retire live status when a view becomes inactive. Image thumbnails stay attached to the preceding tool in their own turn and backend, interrupted tools stop holding chats busy, and session goals survive model changes without carrying over old context or subagents.
-- Native screenshots retain returned image bytes when temporary output paths disappear, and verified extensionless image files can appear in galleries.
-- Fresh composers show Execute and Don't ask before agent discovery finishes, while remembered choices and older conversation settings stay intact.
-- Mac pane dividers limit resize cursors to their visible bounds when columns move, hide or close.
-- Mac terminal session details open from an info button, matching chats, and no longer open while hovering through the sidebar.
-- Session ID history refreshes after transcript replacement on Windows, including when file size and timestamps match.
-
-### Changed
-
-- Conversation settings, chat detail, routing, agent behavior and instructions use compact cards across clients. Primary controls stay visible; full-row disclosures reveal explanations and secondary settings.
-- Updated Rust, Android and Windows dependencies, terminal renderers and build tools. HTTP requests retain the existing certificate trust policy across the library upgrade.
-- Automatic chat attachment previews allow files up to 5 MiB; local images bypass that threshold and preserve transparency in bounded previews.
+- Sending and resuming long conversations, previewing local images and screenshots, and keeping attachments when steering capabilities change.
+- Native compaction in plan mode and after instruction changes, and stopping work after switching chats.
+- Pull and Push dialogs closing when the Mac inspector hides in a narrow window, and resize cursors lingering over hidden pane dividers.
+- Mac terminal details opening while hovering through the sidebar; use the info button, just as with chats.
+- Session history staying stale after a transcript is replaced on Windows, and chat setup failing after the inspector refreshes.
 
 ### Security
 
-- Updated vulnerable transitive Android build-tool libraries, including cryptography, XML and token parsing dependencies.
+- Updated dependencies and build tools, including fixes for vulnerable Android build-tool libraries.
 
 ## [1.6.3] - 2026-10-14
 

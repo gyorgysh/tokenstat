@@ -104,6 +104,21 @@ extension View {
     }
 }
 
+/// A transparent titlebar region that delegates the original mouse-down to
+/// AppKit. Window Server then owns the drag, including Space switching; the
+/// decorative SwiftUI background never interprets it as a liquid interaction.
+struct TitlebarDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> TitlebarDragView { TitlebarDragView() }
+    func updateNSView(_ view: TitlebarDragView, context: Context) {}
+}
+
+final class TitlebarDragView: NSView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+}
+
 @available(macOS 26, *)
 struct SidebarGlassSurface: View {
     let isFullScreen: Bool

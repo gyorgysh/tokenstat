@@ -2232,6 +2232,7 @@ struct RootView: View {
     private var newChatPage: some View {
         ChatStartPage(draft: chatStart, repositories: workspaces.folders,
                       isFullScreen: isFullScreen,
+                      titlebarDragHeight: isFullScreen ? 0 : max(titlebarInset, ShellMetrics.titleBand),
                       onAdd: {
                           if let owner = chatStart.owner {
                               chatStartAdd = (owner, Set(workspaces.folders.map(\.id)))

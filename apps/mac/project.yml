@@ -38,7 +38,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.6.4"
+    MARKETING_VERSION: "1.7.0"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -248,8 +248,9 @@ settings:
     # 152 was uploaded as 1.6.0; 153 includes the 1.6.1 mobile and network fixes.
     # 154 is 1.6.2 with desktop chat loading and conversation navigation fixes.
     # 155 is 1.6.3 with program status and the combined work Live Activity.
-    # 156 prepares 1.6.4 with reviewed work overviews and dependencies.
-    CURRENT_PROJECT_VERSION: "156"
+    # 156 was reserved for the unreleased 1.6.4 update.
+    # 157 is the 1.7.0 chat, repository and session experience preview.
+    CURRENT_PROJECT_VERSION: "157"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

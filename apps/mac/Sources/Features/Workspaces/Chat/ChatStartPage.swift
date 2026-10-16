@@ -8,6 +8,7 @@ struct ChatStartPage: View {
     @Bindable var draft: ChatStartDraft
     let repositories: [WorkspaceFolder]
     var isFullScreen = false
+    var titlebarDragHeight: CGFloat = 0
     var hostPicker: AnyView? = nil
     var allowsSend = true
     let onAdd: () -> Void
@@ -82,11 +83,20 @@ struct ChatStartPage: View {
             GeometryReader { geometry in
                 if let anchor {
                     let excluded = geometry[anchor].insetBy(dx: -12, dy: -12)
-                    ChatStartEmptySpace(excluded: excluded, tap: displaceLiquid, hover: moveLiquid)
+                    ChatStartEmptySpace(excluded: excluded, reservedTop: titlebarDragHeight, tap: displaceLiquid, hover: moveLiquid)
                         .allowsHitTesting(active && !agentPickerFocused)
                 }
             }
         }
+        #if os(macOS)
+        .overlay(alignment: .top) {
+            if !isFullScreen && titlebarDragHeight > 0 {
+                TitlebarDragArea()
+                    .frame(height: titlebarDragHeight)
+                    .accessibilityHidden(true)
+            }
+        }
+        #endif
         .environment(\.chatAgentPickerFocus, { focused in
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { agentPickerFocused = focused }
             hoverMotion.point = nil
@@ -320,9 +330,12 @@ private struct ChatStartContentAnchor: PreferenceKey {
 
 private struct ChatStartEmptyShape: Shape {
     let excluded: CGRect
+    let reservedTop: CGFloat
     func path(in rect: CGRect) -> Path {
-        var path = Path(rect)
-        let hole = excluded.intersection(rect)
+        let available = CGRect(x: rect.minX, y: rect.minY + reservedTop,
+                               width: rect.width, height: max(0, rect.height - reservedTop))
+        var path = Path(available)
+        let hole = excluded.intersection(available)
         if !hole.isNull { path.addRect(hole) }
         return path
     }
@@ -330,18 +343,19 @@ private struct ChatStartEmptyShape: Shape {
 
 private struct ChatStartEmptySpace: View {
     let excluded: CGRect
+    let reservedTop: CGFloat
     let tap: (CGPoint) -> Void
     let hover: (CGPoint?) -> Void
     var body: some View {
         Color.clear
-            .contentShape(ChatStartEmptyShape(excluded: excluded), eoFill: true)
+            .contentShape(ChatStartEmptyShape(excluded: excluded, reservedTop: reservedTop), eoFill: true)
             .onTapGesture(coordinateSpace: .local) { point in
-                guard !excluded.contains(point) else { return }
+                guard point.y >= reservedTop, !excluded.contains(point) else { return }
                 tap(point)
             }
             .onContinuousHover { phase in
                 switch phase {
-                case .active(let point): hover(excluded.contains(point) ? nil : point)
+                case .active(let point): hover(point.y < reservedTop || excluded.contains(point) ? nil : point)
                 case .ended: hover(nil)
                 }
             }
