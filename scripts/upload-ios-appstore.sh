@@ -790,6 +790,10 @@ if ! command -v xcodegen >/dev/null; then
     exit 1
 fi
 echo "generating xcode project"
+# The chat start page's surface is a Metal shader, so the bundle needs a
+# compiled metallib and the build needs the Metal compiler.
+"$ROOT/scripts/ensure-metal-toolchain.sh"
+
 (cd "$ROOT/apps/mac" && xcodegen >/dev/null)
 
 resolve_team

@@ -3,7 +3,13 @@ import SwiftUI
 
 /// Repository choice, writing and setup stay local until an explicit Send.
 /// The ordinary chat composer edits an isolated in-memory model, so starting
-/// a conversation offers the same attachment and agent controls as continuing one.
+/// a conversation offers the same attachment and agent controls as continuing
+/// one.
+///
+/// The page is one lit object in a dark room. The repository is the only
+/// choice that blocks a send, so it sits first inside the card rather than
+/// last and least under it, and Send stays on screen while it is impossible
+/// so the disabled state can say what is missing.
 struct ChatStartPage: View {
     @Bindable var draft: ChatStartDraft
     let repositories: [WorkspaceFolder]
@@ -26,10 +32,14 @@ struct ChatStartPage: View {
     @State private var catalogLease = UUID()
     @State private var dropTargeted = false
     @State private var composerDropTargeted = false
-    @State private var touches: [ChatStartGlassTouch] = []
-    @State private var hoverMotion = ChatStartHoverMotion()
-    @State private var wakes: [ChatStartGlassWake] = []
+    @State private var motion = ChatStartSurfaceMotion()
+    @State private var hovering = false
     @State private var agentPickerFocused = false
+    /// Staged arrival, and the still-field countdown.
+    @State private var revealed = false
+    @State private var quiet = false
+    @State private var activity = 0
+    @State private var parallax = CGSize.zero
     private struct CatalogOwner: Equatable {
         var owner: ChatStartDraft.Owner?
         var repository: String?
@@ -39,10 +49,16 @@ struct ChatStartPage: View {
         var reference: WorkReference?
         var agent: ChatStartDraft.AgentChoice?
     }
+    /// What the still-surface countdown restarts for.
+    private struct Vigil: Equatable {
+        var activity: Int
+        var hovering: Bool
+    }
     private var catalogOwner: CatalogOwner { CatalogOwner(owner: draft.owner, repository: selected?.id) }
     private var adapterIdentity: AdapterIdentity { .init(owner: draft.owner, reference: draft.attachmentReference, agent: draft.agent) }
     private var backend: ChatBackend? { backends.first { $0.id == draft.agent?.backend && $0.installed != false } }
     private var selected: WorkspaceFolder? { repositories.first { $0.id == draft.repositoryID } }
+    private var writing: Bool { !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var acceptsDrops: Bool {
         guard let owner = draft.owner else { return false }
         return active && !draft.isSubmitting && draft.attachmentReference != nil
@@ -51,24 +67,42 @@ struct ChatStartPage: View {
 
     var body: some View {
         ZStack {
-            ChatStartLiquidSurface(touches: touches, wakes: wakes, isFullScreen: isFullScreen,
-                                   active: active && !agentPickerFocused && scenePhase == .active)
-            ScrollView {
-                VStack(spacing: 26) {
-                    introduction
-                    composer
-                    if repositories.isEmpty {
-                        Text(L10n.text("common.new_chat.empty")).font(Theme.caption).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
+            ChatStartLiquidSurface(motion: motion, isFullScreen: isFullScreen, lift: writing,
+                                   parallax: parallax, revealed: revealed, hovering: hovering,
+                                   active: active && !agentPickerFocused && scenePhase == .active && !quiet,
+                                   lit: active && !agentPickerFocused && scenePhase == .active)
+            GeometryReader { pane in
+                ScrollView {
+                    VStack(spacing: 26) {
+                        introduction
+                        composer
+                        if repositories.isEmpty {
+                            Text(L10n.text("common.new_chat.empty")).font(Theme.caption).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        if let error = draft.error ?? catalogError {
+                            Text(error).font(Theme.caption).foregroundStyle(Theme.danger).textSelection(.enabled)
+                        }
                     }
-                    if let error = draft.error ?? catalogError {
-                        Text(error).font(Theme.caption).foregroundStyle(Theme.danger).textSelection(.enabled)
+                    .frame(maxWidth: 700)
+                    .anchorPreference(key: ChatStartContentAnchor.self, value: .bounds) { $0 }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 48)
+                    // Centred in the pane, then biased up by a few percent,
+                    // because optical centre sits above geometric centre. The
+                    // bias is padding rather than an offset so the exclusion
+                    // anchor above still describes where the card really is.
+                    .padding(.bottom, 48 + min(96, pane.size.height * 0.07))
+                    .frame(maxWidth: .infinity, minHeight: pane.size.height, alignment: .center)
+                }
+                .overlayPreferenceValue(ChatStartContentAnchor.self) { anchor in
+                    if let anchor {
+                        let excluded = pane[anchor].insetBy(dx: -12, dy: -12)
+                        ChatStartEmptySpace(excluded: excluded, reservedTop: titlebarDragHeight,
+                                            tap: displaceLiquid, hover: { moveLiquid(to: $0, in: pane.size) })
+                            .allowsHitTesting(active && !agentPickerFocused)
                     }
                 }
-                .frame(maxWidth: 700)
-                .anchorPreference(key: ChatStartContentAnchor.self, value: .bounds) { $0 }
-                .padding(.horizontal, 24).padding(.vertical, 70)
-                .frame(maxWidth: .infinity)
             }
             .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: receive)
             .blur(radius: agentPickerFocused && !reduceTransparency ? 7 : 0)
@@ -78,15 +112,6 @@ struct ChatStartPage: View {
                 }
             }
             if acceptsDrops && (dropTargeted || composerDropTargeted) { ChatDropExperience() }
-        }
-        .overlayPreferenceValue(ChatStartContentAnchor.self) { anchor in
-            GeometryReader { geometry in
-                if let anchor {
-                    let excluded = geometry[anchor].insetBy(dx: -12, dy: -12)
-                    ChatStartEmptySpace(excluded: excluded, reservedTop: titlebarDragHeight, tap: displaceLiquid, hover: moveLiquid)
-                        .allowsHitTesting(active && !agentPickerFocused)
-                }
-            }
         }
         #if os(macOS)
         .overlay(alignment: .top) {
@@ -99,15 +124,35 @@ struct ChatStartPage: View {
         #endif
         .environment(\.chatAgentPickerFocus, { focused in
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { agentPickerFocused = focused }
-            hoverMotion.point = nil
+            // The overlay stops hit testing while the picker is up, so no
+            // `.ended` hover ever arrives to say the pointer has gone.
+            if focused { hovering = false }
+            motion.settled = nil
         })
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: receive)
-        .onAppear { active = true; synchronizeComposer() }
-        .onDisappear { active = false; catalogLease = UUID(); touches = []; wakes = []; hoverMotion.reset(); agentPickerFocused = false }
+        .onAppear { active = true; synchronizeComposer(); revealed = true }
+        .onDisappear {
+            active = false; catalogLease = UUID(); hovering = false
+            motion.reset(); agentPickerFocused = false; parallax = .zero
+        }
+        // Nothing has happened for a while, so the field holds its last frame.
+        // The light behind it keeps breathing on the compositor, which costs
+        // nothing, and any impulse starts the clock again where it stopped.
+        .task(id: Vigil(activity: activity, hovering: hovering)) {
+            quiet = false
+            // A pointer that has stopped moving stops bumping the count, so a
+            // hand left resting on the page settles the surface as well.
+            try? await Task.sleep(for: .seconds(hovering ? 6 : 3.2))
+            guard !Task.isCancelled else { return }
+            quiet = true
+        }
         .onChange(of: adapterIdentity) { _, _ in synchronizeComposer() }
         .onChange(of: draft.text) { _, text in if model.draft != text { model.draft = text } }
+        // Starting to write, or clearing the field, is worth one more look at
+        // the folds under the brighter light. Then it settles again.
+        .onChange(of: writing) { _, _ in activity &+= 1 }
         .onChange(of: draft.attachments) { _, _ in synchronizeComposer() }
         .onChange(of: allowsSend) { _, _ in updateAvailability() }
         .onChange(of: draft.isSubmitting) { _, _ in updateAvailability() }
@@ -115,18 +160,40 @@ struct ChatStartPage: View {
     }
 
     private var introduction: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "sparkle").font(Theme.font(29, weight: .light)).foregroundStyle(Theme.accent)
+        VStack(spacing: 14) {
+            // The one thing on this page nobody else can draw. A held pose or
+            // a sparkle glyph is what every other agent window opens with.
+            PersonaPastime(seed: personaSeed(for: "new-chat"), size: 58, doing: .leisure)
+                .frame(width: 92, height: 74)
+                .accessibilityHidden(true)
             Text(L10n.text("common.new_chat.title"))
-                .font(Theme.font(34, weight: .semibold)).multilineTextAlignment(.center)
+                .font(Theme.font(30, weight: .medium))
+                .tracking(-0.4)
+                .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
             Text(L10n.text("common.new_chat.subtitle"))
                 .font(Theme.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
+        .opacity(revealed ? 1 : 0)
+        .offset(y: revealed ? 0 : 8)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.45).delay(0.10), value: revealed)
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            // The blocking choice, first. It used to sit under the agent and
+            // autonomy controls, smallest of the three, which put the one
+            // thing a send cannot happen without at the bottom of the card.
+            HStack(spacing: 10) {
+                if let hostPicker { hostPicker }
+                repositoryPicker
+                Spacer(minLength: 0)
+                if catalogLoading { ProgressView().controlSize(.small) }
+                if catalogError != nil {
+                    Button(L10n.text("common.retry"), systemImage: "arrow.clockwise") { Task { await loadCatalog() } }
+                        .font(Theme.caption).disabled(catalogLoading)
+                }
+            }
             if let chat = model.selected {
                 #if os(macOS)
                 ChatComposer(model: model, chat: chat, draft: $model.draft, selection: $selection,
@@ -146,22 +213,15 @@ struct ChatStartPage: View {
                     onDropTargeted: { composerDropTargeted = $0 })
                 #endif
             }
-            HStack(spacing: 12) {
-                if let hostPicker { hostPicker }
-                repositoryPicker
-                Spacer(minLength: 0)
-                if catalogLoading { ProgressView().controlSize(.small) }
-                if catalogError != nil {
-                    Button(L10n.text("common.retry"), systemImage: "arrow.clockwise") { Task { await loadCatalog() } }
-                        .font(Theme.caption).disabled(catalogLoading)
-                }
-            }
         }
         .padding(12)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22))
         .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(Theme.border))
         .shadow(color: Theme.accent.opacity(0.06), radius: 35, y: 12)
         .disabled(draft.isSubmitting)
+        .opacity(revealed ? 1 : 0)
+        .scaleEffect(revealed ? 1 : 0.985, anchor: .top)
+        .animation(reduceMotion ? nil : .spring(duration: 0.55, bounce: 0.12).delay(0.22), value: revealed)
     }
 
     private func synchronizeComposer() {
@@ -172,6 +232,19 @@ struct ChatStartPage: View {
 
     private func updateAvailability() {
         model.landingCanSubmit = allowsSend && selected != nil && backend != nil && !catalogLoading
+        model.landingBlockReason = blockReason
+    }
+
+    /// What Send says while it cannot be pressed. A disabled control that
+    /// names the missing piece teaches the requirement; one that is absent
+    /// leaves a first-time reader with nothing to aim at.
+    private var blockReason: String? {
+        if draft.isSubmitting { return nil }
+        if selected == nil { return L10n.text("common.new_chat.needs_repository") }
+        if catalogLoading { return L10n.text("common.new_chat.finding_agents") }
+        if backend == nil { return L10n.text("common.new_chat.needs_agent") }
+        if !allowsSend { return L10n.text("common.new_chat.send_unavailable") }
+        return nil
     }
 
     private func loadCatalog() async {
@@ -242,48 +315,59 @@ struct ChatStartPage: View {
         for case .attachment(let item) in drops { if let file = item.file { try? FileManager.default.removeItem(at: file) } }
     }
 
+    /// A click drops a ring that travels out, bends the surface as it goes
+    /// and leaves it flat behind. Three can be in the air at once.
     private func displaceLiquid(at point: CGPoint) {
         guard active, !agentPickerFocused, !reduceMotion, !dimFlashingLights, scenePhase == .active else { return }
-        let touch = ChatStartGlassTouch(point: point)
-        touches = Array(touches.suffix(3)) + [touch]
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(ChatStartGlassField.touchLifetime))
-            touches.removeAll { $0.id == touch.id }
-        }
+        motion.strike(point, at: Date.timeIntervalSinceReferenceDate)
+        activity &+= 1
     }
 
-    private func moveLiquid(to point: CGPoint?) {
-        guard active, !agentPickerFocused, !reduceMotion, !dimFlashingLights, scenePhase == .active else {
-            hoverMotion.point = nil
+    /// The pointer wipes the condensation off the glass, drags what is
+    /// under it along, and the room leans away from it.
+    ///
+    /// The first two are samples the shader reads straight out of a plain
+    /// object, so following the mouse closely invalidates no view at all. The
+    /// lean is the only published part, it moves once the pointer has really
+    /// gone somewhere, and the compositor animates it. The page used to spray
+    /// ripples here instead, which pinned it at 60 Hz for as long as the
+    /// mouse moved and read as a toy rather than as depth.
+    private func moveLiquid(to point: CGPoint?, in size: CGSize) {
+        guard active, !agentPickerFocused, !reduceMotion, !dimFlashingLights, scenePhase == .active,
+              let point, size.width > 0, size.height > 0 else {
+            if hovering { hovering = false }
+            motion.settled = nil
+            settle(nil)
             return
         }
-        guard let point else { hoverMotion.point = nil; return }
         let now = Date.timeIntervalSinceReferenceDate
-        let elapsed = now - hoverMotion.lastPointerUpdate
-        guard elapsed >= 1 / 45 else { return }
-        defer { hoverMotion.lastPointerUpdate = now }
-        guard let previous = hoverMotion.point, elapsed < 0.3 else { hoverMotion.point = point; return }
-        // A low-pass pointer has some mass. Sparse motion impulses then keep
-        // drifting after hover leaves; crossing into the composer adds none.
-        let blend = 1 - exp(-min(0.1, elapsed) / 0.115)
-        let smoothed = CGPoint(x: previous.x + (point.x - previous.x) * blend,
-                               y: previous.y + (point.y - previous.y) * blend)
-        hoverMotion.point = smoothed
-        guard now - hoverMotion.lastWakeUpdate >= 0.20 else { return }
-        let velocity = CGVector(dx: (smoothed.x - previous.x) / elapsed,
-                                dy: (smoothed.y - previous.y) / elapsed)
-        guard hypot(velocity.dx, velocity.dy) > 16 else { return }
-        hoverMotion.lastWakeUpdate = now
-        wakes.removeAll { now - $0.began >= ChatStartGlassField.wakeLifetime }
-        wakes = Array(wakes.suffix(ChatStartGlassField.maximumWakes - 1))
-        wakes.append(.init(point: smoothed, velocity: velocity, began: now))
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(ChatStartGlassField.wakeLifetime))
-            let expiration = Date.timeIntervalSinceReferenceDate
-            wakes.removeAll { expiration - $0.began >= ChatStartGlassField.wakeLifetime }
+        let sampled = motion.note(point, at: now)
+        if !hovering { hovering = true }
+        // At most one state change a second, and only while the pointer is
+        // really travelling: enough to hold the surface awake, far too rare
+        // to be worth avoiding.
+        if sampled, now - motion.lastWake >= 0.9 {
+            motion.lastWake = now
+            activity &+= 1
         }
+        guard let previous = motion.settled else { motion.settled = point; return }
+        guard hypot(point.x - previous.x, point.y - previous.y) >= 36 else { return }
+        motion.settled = point
+        let fromCentre = CGSize(width: (point.x - size.width / 2) / size.width,
+                                height: (point.y - size.height / 2) / size.height)
+        settle(CGSize(width: -fromCentre.width * 18, height: -fromCentre.height * 13))
     }
 
+    private func settle(_ offset: CGSize?) {
+        let resolved = offset ?? .zero
+        guard resolved != parallax else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 1.3)) { parallax = resolved }
+    }
+
+    /// One idiom for every control in the card: the same chrome, font and
+    /// padding as the agent field and the mode pills beside it. It used to be
+    /// a taller menu in its own shape, which made three controls read as
+    /// three unrelated widgets.
     private var repositoryPicker: some View {
         Menu {
             ForEach(repositories) { repository in
@@ -294,30 +378,40 @@ struct ChatStartPage: View {
             }
             Button(L10n.text("common.new_chat.add_repository"), systemImage: "folder.badge.plus", action: onAdd)
         } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "folder").foregroundStyle(Theme.accent)
-                Text(selected?.name ?? L10n.text("common.new_chat.choose_repository")).lineLimit(1).truncationMode(.middle)
-                Image(systemName: "chevron.down").font(Theme.caption)
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(Theme.fixed(11, weight: .medium))
+                    .foregroundStyle(selected == nil ? Theme.accent : Color.secondary)
+                Text(selected?.name ?? L10n.text("common.new_chat.choose_repository"))
+                    .font(Theme.font(12, weight: .medium))
+                    .lineLimit(1).truncationMode(.middle)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(Theme.fixed(8, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .font(Theme.callout).padding(.horizontal, 10).frame(minHeight: 44)
-            .background(Theme.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 10)).contentShape(Rectangle())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            #if !os(macOS)
+            .frame(minHeight: 44)
+            #endif
+            .chatControlChrome(cornerRadius: 10)
+            .overlay {
+                // Lit until the choice is made. Nothing else on the page is.
+                if selected == nil {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Theme.accent.opacity(0.55), lineWidth: 1)
+                }
+            }
+            .contentShape(Rectangle())
         }
         #if os(macOS)
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         #endif
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityLabel(L10n.text("common.new_chat.repository"))
         .accessibilityValue(selected?.name ?? L10n.text("common.new_chat.choose_repository"))
     }
-}
-
-/// Hover samples are input history, not view state. Keeping each sample in
-/// a plain reference avoids rebuilding the composer at pointer frequency;
-/// only the bounded visual wake list publishes an update.
-private final class ChatStartHoverMotion {
-    var point: CGPoint?
-    var lastWakeUpdate = 0.0
-    var lastPointerUpdate = 0.0
-    func reset() { point = nil; lastWakeUpdate = 0; lastPointerUpdate = 0 }
 }
 
 /// Resolving the content anchor in this overlay avoids mixed window/local
@@ -363,53 +457,109 @@ private struct ChatStartEmptySpace: View {
     }
 }
 
-/// Native glass remains a complete, unmasked surface. Broad translucent
-/// optical layers above it bend and settle with continuous inertial wakes.
+/// One light behind the composer, and the surface in front of it.
+///
+/// Three layers. Native glass stays a complete, unmasked surface underneath.
+/// The light is an elliptical gradient the compositor owns, so its twenty
+/// second breath and its lean after the pointer never cost a frame. The
+/// surface on top is `ChatStartField.metal`, evaluated per pixel on the GPU,
+/// which is what affords the condensation, the rings and the dispersion that
+/// the old CPU raster could not have drawn at 72 pixels across.
+///
+/// It still stops. A few seconds after the last thing happened the timeline
+/// pauses and the surface holds its frame, because a full-window shader is
+/// cheap but a laptop running one forever is not.
 private struct ChatStartLiquidSurface: View {
-    let touches: [ChatStartGlassTouch]
-    let wakes: [ChatStartGlassWake]
+    let motion: ChatStartSurfaceMotion
     let isFullScreen: Bool
+    let lift: Bool
+    let parallax: CGSize
+    let revealed: Bool
+    /// The pointer is on the page, so the surface is worth a full frame rate.
+    let hovering: Bool
+    /// The surface is being drawn.
     let active: Bool
+    /// The page is on screen, so the light is up even while the surface rests.
+    let lit: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityDimFlashingLights) private var dimFlashingLights
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.self) private var environment
     @State private var elapsed = 0.0
     @State private var clockStarted: Double?
+    @State private var breathing = false
 
     private var animates: Bool { active && !reduceMotion && !dimFlashingLights }
 
     var body: some View {
         ZStack {
             glass
-            TimelineView(.animation(minimumInterval: touches.isEmpty && wakes.isEmpty ? 1 / 24 : 1 / 60, paused: !animates)) { context in
-                let now = context.date.timeIntervalSinceReferenceDate
-                let time = elapsed + (clockStarted.map { max(0, now - $0) } ?? 0)
-                let accent = Theme.accent.resolve(in: environment)
-                let secondary = Theme.secondary.resolve(in: environment)
-                let background = Theme.background.resolve(in: environment)
-                let palette = ChatStartGlassField.Palette(
-                    background: .init(background.red, background.green, background.blue),
-                    accent: .init(accent.red, accent.green, accent.blue),
-                    secondary: .init(secondary.red, secondary.green, secondary.blue),
-                    dark: colorScheme == .dark)
-                Canvas(rendersAsynchronously: true) { context, size in
-                    if let image = ChatStartGlassField.image(size: size, time: time,
-                        now: now, touches: touches, wakes: wakes, palette: palette) {
-                        context.addFilter(.blur(radius: 9))
-                        context.draw(Image(decorative: image, scale: 1).interpolation(.high), in: CGRect(origin: .zero, size: size))
+            keyLight
+            if !reduceTransparency {
+                TimelineView(.animation(minimumInterval: hovering ? 1 / 60 : 1 / 24, paused: !animates)) { context in
+                    let now = context.date.timeIntervalSinceReferenceDate
+                    let time = elapsed + (clockStarted.map { max(0, now - $0) } ?? 0)
+                    GeometryReader { pane in
+                        // Not a black fill: a shader that fails to resolve
+                        // leaves the layer as it was drawn, and the page is
+                        // the one place that would be a solid slab.
+                        Rectangle()
+                            .fill(Theme.background)
+                            .colorEffect(ChatStartGlassField.shader(
+                                size: pane.size, time: time, now: now, motion: motion,
+                                lift: lift ? 1 : 0,
+                                palette: .init(accent: Theme.accent, secondary: Theme.secondary,
+                                               background: Theme.background, dark: colorScheme == .dark)))
                     }
+                    // No parallax here, deliberately. The light is the deep
+                    // layer and leans; the surface is at the glass and holds
+                    // still. Offsetting it too would draw the wipe up to
+                    // eighteen points from the pointer that made it.
                 }
+                .opacity(revealed ? 1 : 0)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.8), value: revealed)
             }
         }
         .allowsHitTesting(false).accessibilityHidden(true)
-        .onAppear { if animates { clockStarted = Date.timeIntervalSinceReferenceDate } }
+        .onAppear {
+            if animates { clockStarted = Date.timeIntervalSinceReferenceDate }
+            breathing = true
+        }
         .onChange(of: animates) { _, running in
             let now = Date.timeIntervalSinceReferenceDate
             if let started = clockStarted { elapsed += max(0, now - started) }
             clockStarted = running ? now : nil
         }
+    }
+
+    /// Accent at the centre, nothing at the corners. Drawn once and animated
+    /// by the compositor, so neither the breath nor the lean costs a frame.
+    @ViewBuilder private var keyLight: some View {
+        if !reduceTransparency {
+            EllipticalGradient(
+                stops: [
+                    .init(color: Theme.accent.opacity(colorScheme == .dark ? 0.20 : 0.10), location: 0),
+                    .init(color: Theme.accent.opacity(colorScheme == .dark ? 0.065 : 0.035), location: 0.48),
+                    .init(color: .clear, location: 1),
+                ],
+                center: UnitPoint(x: 0.5, y: 0.46),
+                startRadiusFraction: 0,
+                endRadiusFraction: 0.60
+            )
+            .opacity(brightness)
+            .animation(reduceMotion || dimFlashingLights ? nil : .easeInOut(duration: 10).repeatForever(autoreverses: true),
+                       value: breathing)
+            .offset(parallax)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.7), value: lift)
+            // The light blooms before anything is written on it.
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.8), value: revealed)
+        }
+    }
+
+    private var brightness: Double {
+        guard lit, revealed else { return 0 }
+        let breath = breathing ? 1.0 : 0.90
+        return breath * (lift ? 1.14 : 1)
     }
 
     @ViewBuilder private var glass: some View {

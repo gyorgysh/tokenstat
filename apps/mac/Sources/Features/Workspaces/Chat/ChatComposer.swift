@@ -308,7 +308,7 @@ struct ChatComposer: View {
                     Button(L10n.text("common.stop"), .stop) {}
                         .buttonStyle(DestructiveButtonStyle(small: true))
                 }
-                if !cannotSend {
+                if showsSend {
                     Button(sendTitle, .send) {}
                         .buttonStyle(AccentButtonStyle(small: true))
                 }
@@ -324,11 +324,12 @@ struct ChatComposer: View {
                         .environment(\.compactActions, true)
                         .keyboardShortcut(.cancelAction)
                 }
-                if !cannotSend {
+                if showsSend {
                     Button(sendTitle, .send, action: onSend)
                         .buttonStyle(AccentButtonStyle(small: true))
                         .environment(\.compactActions, true)
-                        .help(sendsAsNote ? (model.selected?.nativeSteer == true ? L10n.text("common.chat.steer_help") : L10n.text("apple.chatcomposer.the_agent_reads_this_on_its_next_step.aab7b1c7")) : running ? L10n.text("apple.chatcomposer.waits_until_this_turn_finishes_stop_and_se.2df81427") : L10n.text("apple.chatcomposer.send.f6f4688f"))
+                        .disabled(cannotSend)
+                        .help(sendHelp)
                         .contextMenu {
                             if running {
                                 Button(L10n.text("apple.chatcomposer.stop_and_send_now.8ad0a50d"), .send, action: onSendNow)
@@ -388,6 +389,27 @@ struct ChatComposer: View {
     }
 
     private var setupLocked: Bool { running || (model.landingDraft != nil && !model.landingCanSubmit) }
+
+    /// On the landing page Send stays on screen while it cannot be pressed,
+    /// so the disabled control can name the piece that is missing. A reader
+    /// opening the app for the first time otherwise has nothing to aim at,
+    /// and nothing telling them a repository is what Send is waiting for.
+    /// Inside a live chat it still comes and goes with something to send.
+    private var landingBlocked: Bool { model.landingDraft != nil && model.landingBlockReason != nil }
+
+    private var showsSend: Bool { !cannotSend || landingBlocked }
+
+    private var sendHelp: String {
+        if model.landingDraft != nil, cannotSend, let reason = model.landingBlockReason { return reason }
+        if sendsAsNote {
+            return model.selected?.nativeSteer == true
+                ? L10n.text("common.chat.steer_help")
+                : L10n.text("apple.chatcomposer.the_agent_reads_this_on_its_next_step.aab7b1c7")
+        }
+        return running
+            ? L10n.text("apple.chatcomposer.waits_until_this_turn_finishes_stop_and_se.2df81427")
+            : L10n.text("apple.chatcomposer.send.f6f4688f")
+    }
 
     private var cannotSend: Bool {
         if let landing = model.landingDraft { return !model.landingCanSubmit || landing.isSubmitting || landing.stagingAttachments > 0 }

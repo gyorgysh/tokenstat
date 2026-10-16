@@ -401,6 +401,9 @@ jobs:
       - name: Build the macOS FFI
         run: scripts/build-ffi-xcframework.sh macos
 
+      - name: Ensure the Metal toolchain
+        run: scripts/ensure-metal-toolchain.sh
+
       - name: Generate the Xcode project
         run: |
           brew install xcodegen
@@ -439,6 +442,9 @@ jobs:
       # something the test matrix already proves.
       - name: Build the FFI for the simulator
         run: scripts/build-ffi-xcframework.sh sim
+
+      - name: Ensure the Metal toolchain
+        run: scripts/ensure-metal-toolchain.sh
 
       # Compile the phone root and shared views without requiring signing.
       - name: Generate the Xcode project

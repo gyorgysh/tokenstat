@@ -60,6 +60,10 @@ echo "Building TokenstatFFI (universal: $FFI_PLATFORMS)"
 "$ROOT/scripts/build-ffi-xcframework.sh" $FFI_PLATFORMS
 
 echo "Generating the Xcode project"
+# The chat start page's surface is a Metal shader, so the bundle needs a
+# compiled metallib and the build needs the Metal compiler.
+"$ROOT/scripts/ensure-metal-toolchain.sh"
+
 (cd "$ROOT/apps/mac" && xcodegen > /dev/null)
 
 DERIVED="$ROOT/target/xcode-release"

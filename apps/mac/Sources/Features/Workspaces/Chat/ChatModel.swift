@@ -24,6 +24,9 @@ final class ChatModel {
     var newChatChoice: ChatStartDraft.AgentChoice?
     weak var landingDraft: ChatStartDraft?
     var landingCanSubmit = false
+    /// Why a landing Send cannot be pressed, in the words the button
+    /// shows when somebody points at it. Nil once it can.
+    var landingBlockReason: String?
 
     /// An in-memory adapter lets the real composer edit local landing state.
     /// Its synthetic ID is never dispatched to a host or a conversation store.

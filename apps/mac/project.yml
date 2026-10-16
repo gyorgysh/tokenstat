@@ -27,10 +27,14 @@ packages:
   # view fed from the host's pty.read needs.
   #
   # Pinned to 1.11.2, the last release before the Metal renderer landed. 1.12+
-  # compiles a .metal shader as a package resource, so every build needs the
-  # `metal` compiler from the Metal toolchain component, which is not installed
-  # on a stock Xcode. Bump when the app ships and the renderer is measured; a
-  # fresh checkout must build without downloading extra toolchains.
+  # swaps the terminal's renderer, which is a change worth measuring on its
+  # own rather than taking as a side effect of a version bump, so the pin
+  # stays until the app ships and somebody measures it.
+  #
+  # The pin was originally about the toolchain: 1.12+ compiles a .metal
+  # shader, and that compiler is a separate Xcode component. The app now
+  # carries a shader of its own, so every build already fetches it through
+  # `scripts/ensure-metal-toolchain.sh`, and that half of the reason is gone.
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm.git
     exactVersion: 1.11.2
