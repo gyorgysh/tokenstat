@@ -1001,49 +1001,107 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
 
     #[cfg(windows)]
     #[test]
-    fn reaping_a_model_list_launcher_also_stops_its_child() {
-        use std::io::{BufRead, BufReader};
+    #[ignore = "child process entry point"]
+    fn model_list_launcher_fixture() {
         use std::os::windows::process::CommandExt;
 
-        let mut child = Command::new("powershell.exe")
+        let mut agent = Command::new(std::env::current_exe().unwrap())
             .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "$start = [Diagnostics.ProcessStartInfo]::new('powershell.exe', '-NoProfile -Command \"Start-Sleep -Seconds 300\"'); $start.UseShellExecute = $false; $start.CreateNoWindow = $true; $agent = [Diagnostics.Process]::Start($start); [Console]::WriteLine('CHILD:' + $agent.Id); $agent.WaitForExit()",
+                "--ignored",
+                "--exact",
+                "agent_models::tests::model_list_agent_fixture",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x08000000)
+            .spawn()
+            .unwrap();
+        // Start a fresh line after libtest's own progress label.
+        println!("\nCHILD:{}", agent.id());
+        std::io::stdout().flush().unwrap();
+        let _ = agent.wait();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "child process entry point"]
+    fn model_list_agent_fixture() {
+        std::thread::sleep(Duration::from_secs(300));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn reaping_a_model_list_launcher_also_stops_its_child() {
+        use std::io::{BufRead, BufReader};
+        use std::os::windows::io::AsRawHandle;
+        use std::os::windows::process::CommandExt;
+
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn WaitForSingleObject(handle: crate::win32::Handle, milliseconds: u32) -> u32;
+        }
+
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "--nocapture",
+                "agent_models::tests::model_list_launcher_fixture",
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .creation_flags(0x08000000)
             .spawn()
             .unwrap();
         let output = child.stdout.take().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut line = String::new();
-            let _ = BufReader::new(output).read_line(&mut line);
-            let _ = tx.send(line);
+        let reader = std::thread::spawn(move || {
+            for line in BufReader::new(output.take(LIST_CAP as u64))
+                .lines()
+                .map_while(Result::ok)
+            {
+                if let Some(pid) = line
+                    .strip_prefix("CHILD:")
+                    .and_then(|pid| pid.trim().parse::<u32>().ok())
+                {
+                    let _ = tx.send(pid);
+                    return;
+                }
+            }
         });
-        // A readiness handshake permits slow PowerShell startup on CI. The
-        // child cannot naturally exit before we exercise launcher cleanup.
-        let pid = rx
-            .recv_timeout(Duration::from_secs(20))
-            .ok()
-            .and_then(|line| line.strip_prefix("CHILD:")?.trim().parse::<u32>().ok());
+        // Native fixtures avoid PowerShell startup and output dependencies.
+        // Hold the exact descendant's handle so PID reuse cannot make the
+        // post-cleanup assertion inspect an unrelated process.
+        let ready = rx.recv_timeout(Duration::from_secs(20));
+        let process = ready.as_ref().ok().and_then(|pid| unsafe {
+            crate::win32::handle_to_owned(crate::win32::OpenProcess(0x00100000, 0, *pid))
+        });
+        let was_running = process.as_ref().is_some_and(|process| unsafe {
+            WaitForSingleObject(process.as_raw_handle(), 0) == 0x102
+        });
         reap_list_child(&mut child);
-        let pid = pid.expect("the model-list launcher must report its child PID");
-        let check = format!(
-            "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 1 }} else {{ exit 0 }}"
-        );
+        reader.join().unwrap();
+        let mut errors = String::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .take(4096)
+            .read_to_string(&mut errors)
+            .unwrap();
+        let pid = ready.unwrap_or_else(|error| {
+            panic!("the model-list launcher must report its child PID: {error}; {errors}")
+        });
         assert!(
-            run_list_with_timeout(
-                "powershell.exe",
-                &["-NoProfile", "-NonInteractive", "-Command", &check],
-                Duration::from_secs(20),
-            )
-            .is_some(),
-            "the model-list launcher's child survived cleanup"
+            was_running,
+            "the model-list launcher's child {pid} must be alive before cleanup; {errors}"
+        );
+        assert_eq!(
+            unsafe { WaitForSingleObject(process.unwrap().as_raw_handle(), 5000) },
+            0,
+            "the model-list launcher's child {pid} survived cleanup"
         );
     }
 
