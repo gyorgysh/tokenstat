@@ -2041,7 +2041,8 @@ public sealed partial class MainWindow : Window
                 && WorkspaceSshTabs.In(folderId).Contains(Format.Text(session, "id"))))
             {
                 var id = "ssh:" + Format.Text(session, "id");
-                var row = new NavigationViewItem { Tag = LiveRoute.Join(SidebarLive.SessionPrefix, folderId, id), Content = SshHostPlatform.SessionRow(session) };
+                var row = new NavigationViewItem { Tag = LiveRoute.Join(SidebarLive.SessionPrefix, folderId, id),
+                    Content = SidebarHoverPresenter.WithDetails(SshHostPlatform.SessionRow(session)) };
                 SidebarHoverCard.AttachSsh(row, folderId, session, folder);
                 var menu = ContextMenus.Menu(row);
                 ContextMenus.Add(menu, L10n.Text("common.open"), () => AppServices.OpenTerminal?.Invoke(folderId, id));

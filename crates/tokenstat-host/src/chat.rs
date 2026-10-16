@@ -4543,6 +4543,7 @@ impl Store {
             None => events,
         };
         loop {
+            let mut received_output = false;
             let stop_path = self.root.join(safe_file_name(id)).join("stop-request.json");
             if let Ok(meta) = fs::symlink_metadata(&stop_path)
                 && meta.file_type().is_file()
@@ -4574,6 +4575,7 @@ impl Store {
             if let Ok(chunk) = manager.read_for_stream(pty, &reader, offset) {
                 offset = chunk.next_offset;
                 if !chunk.bytes.is_empty() {
+                    received_output = true;
                     let _ = append_raw(raw_path, &chunk.bytes);
                     let events = measured(parser.push_events(&chunk.bytes));
                     if let Some(snapshot) = parser.take_inspection() {
@@ -4604,9 +4606,10 @@ impl Store {
             match manager.info(pty) {
                 Err(_) => break,
                 Ok(info) if !info.alive => {
-                    // The output stream can close before the child exits.
-                    // Reap it before choosing the turn's final status, with
-                    // a bounded grace for a child that closes output and hangs.
+                    // EOF and child exit can arrive in either order. Drain
+                    // the reader's last bytes before finalizing inspection,
+                    // images and status, with a bounded grace for descendants
+                    // that inherit stdout or a child that closes it and hangs.
                     let eof_at = eof_at.get_or_insert_with(Instant::now);
                     let stopped = self
                         .killed
@@ -4615,11 +4618,18 @@ impl Store {
                         .contains(id);
                     if !wait_for_exit_status(
                         info.exit_code,
+                        manager.output_end_offset(pty).unwrap_or(Some(offset)),
+                        offset,
                         stopped,
                         muse_sign_in_required,
                         eof_at.elapsed(),
                     ) {
                         break;
+                    }
+                    if received_output {
+                        // A finished producer can leave many bounded chunks.
+                        // Consume that backlog without one polling delay each.
+                        continue;
                     }
                 }
                 Ok(_) => {}
@@ -4799,6 +4809,10 @@ impl Store {
     ) {
         use crate::chat_images::Source;
         use std::io::Read;
+        enum Contents {
+            Bytes(Vec<u8>),
+            File(fs::File),
+        }
         if images.is_empty() {
             return;
         }
@@ -4823,7 +4837,7 @@ impl Store {
                     };
                     let size = bytes.len() as u64;
                     (
-                        Source::Bytes(bytes),
+                        Contents::Bytes(bytes),
                         size,
                         mime,
                         format!("image.{extension}"),
@@ -4859,7 +4873,7 @@ impl Store {
                         .and_then(|name| name.to_str())
                         .map(safe_file_name)
                         .unwrap_or_else(|| format!("image.{extension}"));
-                    (Source::File(path), metadata.len(), mime, name)
+                    (Contents::File(file), metadata.len(), mime, name)
                 }
             };
             if files::ensure_storage(&self.root.join(id), size).is_err() {
@@ -4871,8 +4885,8 @@ impl Store {
             }
             let destination = self.attachment_path(id, &attachment_id, &name);
             let copied = match source {
-                Source::Bytes(bytes) => write_private_file(&destination, &bytes).map(|()| size),
-                Source::File(path) => files::copy_attachment(&path, &destination),
+                Contents::Bytes(bytes) => write_private_file(&destination, &bytes).map(|()| size),
+                Contents::File(file) => files::copy_open_attachment(file, &destination),
             };
             let recorded = copied.is_ok_and(|actual| actual == size)
                 && self
@@ -5547,15 +5561,24 @@ impl Store {
     }
 }
 
-/// EOF does not establish the child's exit status. Keep polling only while
-/// the result is unknown and its bounded reconciliation grace remains.
+/// A closed output stream has a finite tail: finish consuming it even when
+/// parsing or archiving previous chunks spent the reconciliation grace.
+/// Waiting for inherited stdout or an unknown child exit remains bounded.
 fn wait_for_exit_status(
     exit: Option<i32>,
+    output_end: Option<u64>,
+    offset: u64,
     stopped: bool,
     sign_in_required: bool,
     eof_elapsed: Duration,
 ) -> bool {
-    exit.is_none() && !stopped && !sign_in_required && eof_elapsed < EXIT_STATUS_GRACE
+    match output_end {
+        Some(end) if offset < end => true,
+        Some(_) => {
+            exit.is_none() && !stopped && !sign_in_required && eof_elapsed < EXIT_STATUS_GRACE
+        }
+        None => eof_elapsed < EXIT_STATUS_GRACE,
+    }
 }
 
 fn turn_status(exit: Option<i32>, stopped: bool) -> &'static str {
@@ -7444,7 +7467,125 @@ mod tests {
         store.steers.lock().unwrap().get(id).cloned()
     }
 
-    #[cfg(unix)]
+    #[ignore = "native child process entry point"]
+    #[test]
+    fn native_steering_process_fixture() {
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
+    #[ignore = "native child process entry point"]
+    #[test]
+    fn native_transcript_process_fixture() {
+        use std::io::Write;
+        let path = std::env::var_os("TOKENSTAT_CHAT_TRANSCRIPT_FIXTURE").unwrap();
+        let mut source = fs::File::open(path).unwrap();
+        let mut output = std::io::stdout().lock();
+        std::io::copy(&mut source, &mut output).unwrap();
+        output.flush().unwrap();
+    }
+
+    #[test]
+    fn finished_chat_drains_the_entire_buffer_before_publishing_its_final_records() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        let id = "final-transcript";
+        conversation_for_receipts(&store, id);
+        store
+            .edit_conversation(id, |chat| {
+                chat.backend = "claude".into();
+                chat.run_revision = Some(1);
+                chat.running = true;
+                Ok(())
+            })
+            .unwrap();
+        let png = b"\x89PNG\r\n\x1a\nfixture";
+        let native_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let mut transcript = String::new();
+        for _ in 0..6 {
+            transcript.push_str(
+                &(json!({"type":"heartbeat","padding":"x".repeat(200_000)}).to_string() + "\n"),
+            );
+        }
+        for record in [
+            json!({"type":"system","subtype":"init","session_id":native_id,"model":"final-model"}),
+            json!({"type":"assistant","message":{"usage":{"input_tokens":17},"content":[{"type":"tool_use","id":"final-image","name":"screenshot","input":{}},{"type":"text","text":"Final preserved answer."}]}}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"final-image","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":crate::base64::encode(png)}}]}]}}),
+            json!({"type":"result","subtype":"success","result":"Final preserved answer.","usage":{"input_tokens":17,"output_tokens":4},"exit_code":0}),
+        ] {
+            transcript.push_str(&(record.to_string() + "\n"));
+        }
+        let path = root.path().join("transcript.ndjson");
+        fs::write(&path, &transcript).unwrap();
+        let manager = tokenstat_pty::manager();
+        let process = manager
+            .spawn(&tokenstat_pty::Spawn {
+                command: std::env::current_exe().unwrap().display().to_string(),
+                args: vec![
+                    "--ignored".into(),
+                    "--exact".into(),
+                    "chat::tests::native_transcript_process_fixture".into(),
+                    "--nocapture".into(),
+                ],
+                cwd: root.path().into(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: vec![(
+                    "TOKENSTAT_CHAT_TRANSCRIPT_FIXTURE".into(),
+                    path.display().to_string(),
+                )],
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while manager.info(&process.id).unwrap().exit_code.is_none() {
+            assert!(Instant::now() < deadline, "transcript fixture did not exit");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let raw = root.path().join("raw.ndjson");
+        Arc::clone(&store).drain(
+            id,
+            &crate::chat_inspection::Launch {
+                backend: "claude".into(),
+                requested_model: None,
+                revision: 1,
+                maintenance: false,
+            },
+            &process.id,
+            &raw,
+            &root.path().join("output"),
+            None,
+        );
+        assert!(fs::metadata(raw).unwrap().len() >= transcript.len() as u64);
+        let inspection = store.inspection(id).unwrap();
+        assert_eq!(inspection["model"], "final-model");
+        assert_eq!(inspection["contextUsed"], 17);
+        assert_eq!(
+            store.get(id).unwrap().resume_token.as_deref(),
+            Some(native_id)
+        );
+        let events = store.events(id, 0).unwrap().0;
+        assert!(
+            events
+                .iter()
+                .any(|event| event["event"]["delta"] == "Final preserved answer.")
+        );
+        let image = events
+            .iter()
+            .find(|event| {
+                event["event"]["callId"] == "final-image"
+                    && event["event"]["mediaType"] == "image/png"
+            })
+            .expect("the final tool screenshot must survive process exit");
+        let saved = store
+            .attachment_data(id, image["event"]["id"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(crate::base64::decode(&saved.data).unwrap(), png);
+        assert_eq!(events.last().unwrap()["event"]["status"], "ok");
+    }
+
     #[test]
     fn native_steering_is_receipted_once_without_stopping_the_turn() {
         for backend in ["claude", "codex"] {
@@ -7479,8 +7620,15 @@ mod tests {
                 let manager = tokenstat_pty::manager();
                 let process = manager
                     .spawn(&tokenstat_pty::Spawn {
-                        command: "/bin/sleep".into(),
-                        args: vec!["30".into()],
+                        command: std::env::current_exe()
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned(),
+                        args: vec![
+                            "--ignored".into(),
+                            "--exact".into(),
+                            "chat::tests::native_steering_process_fixture".into(),
+                        ],
                         cwd: root.path().into(),
                         workspace_id: None,
                         hidden: true,
@@ -7738,9 +7886,18 @@ mod tests {
         // EOF and process exit are separate observations. The policy used by
         // drain must defer completion until the exit status arrives, without
         // depending on an OS's controlling-terminal or pipe EOF behavior.
-        assert!(wait_for_exit_status(None, false, false, Duration::ZERO));
         assert!(wait_for_exit_status(
             None,
+            Some(0),
+            0,
+            false,
+            false,
+            Duration::ZERO
+        ));
+        assert!(wait_for_exit_status(
+            None,
+            Some(0),
+            0,
             false,
             false,
             EXIT_STATUS_GRACE - Duration::from_nanos(1)
@@ -7748,6 +7905,8 @@ mod tests {
         for code in [0, 7] {
             assert!(!wait_for_exit_status(
                 Some(code),
+                Some(0),
+                0,
                 false,
                 false,
                 Duration::ZERO
@@ -7757,22 +7916,87 @@ mod tests {
                 if code == 0 { "ok" } else { "error" }
             );
         }
+        for exit in [None, Some(0), Some(7)] {
+            for stopped in [false, true] {
+                assert!(wait_for_exit_status(
+                    exit,
+                    None,
+                    0,
+                    stopped,
+                    false,
+                    Duration::ZERO
+                ));
+            }
+        }
     }
 
     #[test]
     fn chat_completion_after_pty_eof_is_bounded_and_can_be_stopped() {
         // Explicit Stop and Muse's authentication failure already establish
         // the result. Neither must spend the remaining grace waiting to reap.
-        assert!(!wait_for_exit_status(None, true, false, Duration::ZERO));
-        assert!(!wait_for_exit_status(None, false, true, Duration::ZERO));
+        assert!(!wait_for_exit_status(
+            None,
+            Some(0),
+            0,
+            true,
+            false,
+            Duration::ZERO
+        ));
+        assert!(!wait_for_exit_status(
+            None,
+            Some(0),
+            0,
+            false,
+            true,
+            Duration::ZERO
+        ));
         for elapsed in [
             EXIT_STATUS_GRACE,
             EXIT_STATUS_GRACE + Duration::from_secs(1),
         ] {
-            assert!(!wait_for_exit_status(None, false, false, elapsed));
+            for end in [None, Some(0)] {
+                for exit in [None, Some(0), Some(7)] {
+                    assert!(!wait_for_exit_status(exit, end, 0, false, false, elapsed));
+                }
+            }
         }
         assert_eq!(turn_status(None, true), "stopped");
         assert_eq!(turn_status(None, false), "error");
+    }
+
+    #[test]
+    fn chat_completion_drains_a_finite_tail_after_the_exit_grace() {
+        // A completed producer can leave several 256 KiB reads. Archiving a
+        // tool image or writing transcript events may spend the grace between
+        // reads, but EOF proves that no descendant can extend this backlog.
+        let end = 1_200_000;
+        let elapsed = EXIT_STATUS_GRACE + Duration::from_secs(1);
+        for exit in [None, Some(0), Some(7)] {
+            for stopped in [false, true] {
+                for offset in [0, 256 * 1024, 512 * 1024, end - 1] {
+                    assert!(wait_for_exit_status(
+                        exit,
+                        Some(end),
+                        offset,
+                        stopped,
+                        false,
+                        elapsed
+                    ));
+                }
+                assert!(!wait_for_exit_status(
+                    exit,
+                    Some(end),
+                    end,
+                    stopped,
+                    false,
+                    elapsed
+                ));
+                // An inherited output handle still uses the absolute bound.
+                assert!(!wait_for_exit_status(
+                    exit, None, 0, stopped, false, elapsed
+                ));
+            }
+        }
     }
 
     #[test]

@@ -80,8 +80,6 @@ struct ChatContextCard: View {
                         ChatDisclosureRow(title: L10n.text("common.chat.stats.history"), expanded: $historyOpen)
                         if historyOpen { ChatContextHistory(points: history) }
                     }
-                    ChatDisclosureRow(title: L10n.text("common.chat.stats.conversation"), expanded: $conversationOpen)
-                    if conversationOpen { ChatCostMeter(totals: model.turnUsage) }
                     ChatDisclosureRow(title: L10n.text("common.chat.stats.details"), expanded: $promptOpen)
                     if promptOpen {
                         note(L10n.text("apple.chatcontext.last_prompt"))
@@ -95,6 +93,13 @@ struct ChatContextCard: View {
                 }
             } else {
                 unavailable
+            }
+            if contextOpen {
+                if currentInspection == nil { ThemeRule() }
+                // Verified event-page totals predate chat.inspection. Keep
+                // them available when an older host cannot report context.
+                ChatDisclosureRow(title: L10n.text("common.chat.stats.conversation"), expanded: $conversationOpen)
+                if conversationOpen { ChatCostMeter(totals: model.turnUsage) }
             }
         }
     }

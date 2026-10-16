@@ -105,16 +105,16 @@ class NewChatRequestTest {
     }
 
     @Test fun returningAttachmentResultsCannotCrossRepositoryOrVisitGeneration() {
-        val firstVisit = NewChatInputLease(owner)
+        val firstVisit = ChatAttachmentInputLease(owner)
         assertTrue(firstVisit.accepts(firstVisit))
-        val otherRepository = NewChatInputLease(newChatDraftOwner("account", "host", "other-repository"))
+        val otherRepository = ChatAttachmentInputLease(newChatDraftOwner("account", "host", "other-repository"))
         assertFalse(firstVisit.accepts(otherRepository))
         firstVisit.retire()
-        val returnedVisit = NewChatInputLease(owner)
+        val returnedVisit = ChatAttachmentInputLease(owner)
         assertFalse(firstVisit.accepts(returnedVisit))
         assertFalse(firstVisit.accepts(firstVisit))
         assertTrue(returnedVisit.accepts(returnedVisit))
-        val signedOut = NewChatInputLease(null)
+        val signedOut = ChatAttachmentInputLease(null)
         assertFalse(signedOut.accepts(signedOut))
     }
 

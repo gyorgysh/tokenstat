@@ -15,7 +15,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
@@ -28,9 +27,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.draganddrop.DragAndDropEvent
-import androidx.compose.ui.draganddrop.DragAndDropTarget
-import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -92,13 +88,6 @@ internal fun adoptUnboundNewChatDraft(drafts: ChatComposerSessions<StagedAttachm
     if (drafts.update(target, source.snapshot)) drafts.clearIfUnchanged(source.owner, source)
 }
 
-/** A returning picker must belong to this visit, including after an A → B → A switch. */
-internal class NewChatInputLease(val owner: String?) {
-    private var active = true
-    fun retire() { active = false }
-    fun accepts(current: NewChatInputLease) = active && this === current && owner != null
-}
-
 /** A Send intent is claimed once, even if navigation recreates its composition. */
 class NewChatRequest(val peer: String, val workspace: String, val accountScope: String,
     val source: ChatComposerSessions.Capture<StagedAttachment>, val id: String = UUID.randomUUID().toString(), val setup: NewChatSetup? = null) {
@@ -137,14 +126,14 @@ fun NewChatScreen(
     var catalogAttempt by remember(accountOwner) { mutableIntStateOf(0) }
     var catalogReady by remember(accountOwner) { mutableStateOf(false) }
     var agentMenu by remember(accountOwner) { mutableStateOf(false) }
-    val inputLease = remember(accountOwner, connectedPeer) { NewChatInputLease(accountOwner) }
+    val inputLease = remember(accountOwner, connectedPeer) { ChatAttachmentInputLease(accountOwner) }
     val currentLease by rememberUpdatedState(inputLease)
     DisposableEffect(inputLease) { onDispose { inputLease.retire() } }
-    var pickerLease by remember { mutableStateOf<NewChatInputLease?>(null) }
+    var pickerLease by remember { mutableStateOf<ChatAttachmentInputLease?>(null) }
     var reading by remember(accountOwner) { mutableStateOf(false) }
     fun owns(owner: String?) = owner != null && owner == currentOwner &&
         ProjectOwner.from(model.state.value.account, "unselected", "new-chat")?.accountScope == accountScope
-    fun importFiles(lease: NewChatInputLease, uris: List<android.net.Uri>, release: () -> Unit = {}) {
+    fun importFiles(lease: ChatAttachmentInputLease, uris: List<android.net.Uri>, release: () -> Unit = {}) {
         if (uris.isEmpty() || !lease.accepts(currentLease) || !owns(lease.owner) || reading) { release(); return }
         // Enter the finally block before the first suspension so even immediate
         // navigation cancellation releases a cross-app drop's permission.
@@ -167,7 +156,7 @@ fun NewChatScreen(
                     }
                     val attachment = (read as? AttachmentRead.Ok)?.attachment
                     if (!lease.accepts(currentLease) || !owns(owner)) { attachment?.filePath?.let { java.io.File(it).delete() }; return@launch }
-                    if (attachment == null) { attachError = (read as? AttachmentRead.Failed)?.reason; break }
+                    if (attachment == null) { attachError = (read as? AttachmentRead.Failed)?.reason; continue }
                     val now = model.chatComposers.snapshot(owner)
                     if (now.attachments.size >= 20 || now.attachments.sumOf { it.bytes.toLong() } + attachment.bytes > FILE_MAX ||
                         !model.chatComposers.update(owner, now.copy(attachments = now.attachments + attachment))) {
@@ -185,25 +174,7 @@ fun NewChatScreen(
         pickerLease = null
         if (lease != null) importFiles(lease, uris.orEmpty())
     }
-    val receiveFiles by rememberUpdatedState(::importFiles)
-    val dropEnabled by rememberUpdatedState(selectedRepository != null && !connecting && !reading)
-    val dropTarget = remember(context, inputLease) {
-        object : DragAndDropTarget {
-            override fun onDrop(event: DragAndDropEvent): Boolean {
-                if (!dropEnabled || !inputLease.accepts(currentLease) || !owns(inputLease.owner)) return false
-                val native = event.toAndroidDragEvent()
-                val clip = native.clipData ?: return false
-                val uris = (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
-                    .filter { it.scheme == "content" || it.scheme == "file" }
-                if (uris.isEmpty()) return false
-                val activity = generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }
-                    .filterIsInstance<android.app.Activity>().firstOrNull()
-                val permission = activity?.requestDragAndDropPermissions(native)
-                receiveFiles(inputLease, uris) { permission?.release() }
-                return true
-            }
-        }
-    }
+    val drops = chatAttachmentDrops(inputLease, selectedRepository != null && !connecting && !reading, ::importFiles)
     LaunchedEffect(accountOwner, connectedPeer, catalogAttempt) {
         catalogReady = false; setupError = null
         val peer = connectedPeer ?: return@LaunchedEffect
@@ -238,9 +209,7 @@ fun NewChatScreen(
     }
     // Observe the final pass without consuming anything. Text fields, buttons,
     // pickers and scrolling keep their own input; only unused background taps ripple.
-    Box(Modifier.fillMaxSize().onGloballyPositioned { rootCoordinates = it }.dragAndDropTarget(
-        shouldStartDragAndDrop = { dropEnabled && inputLease.accepts(currentLease) }, target = dropTarget,
-    ).pointerInput(reduced, accountOwner) {
+    Box(Modifier.fillMaxSize().onGloballyPositioned { rootCoordinates = it }.then(drops).pointerInput(reduced, accountOwner) {
         if (!reduced) awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
             val rootPoint = rootCoordinates?.takeIf { it.isAttached }?.localToRoot(down.position)

@@ -32,6 +32,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Fixed
 
 - Sending and resuming long conversations, previewing local images and screenshots, and keeping attachments when steering capabilities change.
+- Final messages, tool results and screenshots getting lost when an agent exits quickly or leaves a large amount of queued output.
 - Native compaction in plan mode and after instruction changes, and stopping work after switching chats.
 - Pull and Push dialogs closing when the Mac inspector hides in a narrow window, and resize cursors lingering over hidden pane dividers.
 - Mac terminal details opening while hovering through the sidebar; use the info button, just as with chats.

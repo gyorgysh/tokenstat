@@ -46,7 +46,9 @@ fn prompt_breakdown(usage: &Value, separate: bool) -> Option<PromptBreakdown> {
         &[
             "cache_read_input_tokens",
             "cache_read_tokens",
+            "cached_input_tokens",
             "cacheReadTokens",
+            "cachedInputTokens",
         ],
     )
     .or_else(|| usage.pointer("/cache/read").and_then(Value::as_u64))
@@ -55,6 +57,7 @@ fn prompt_breakdown(usage: &Value, separate: bool) -> Option<PromptBreakdown> {
         usage,
         &[
             "cache_creation_input_tokens",
+            "cache_write_input_tokens",
             "cache_write_tokens",
             "cacheWriteTokens",
         ],
@@ -154,14 +157,31 @@ fn prompt_tokens(usage: &Value, cache_is_separate: bool) -> Option<u64> {
     }
     input
         .checked_add(
-            count(usage, &["cache_read_input_tokens", "cacheReadTokens"])
-                .or_else(|| usage.pointer("/cache/read").and_then(Value::as_u64))
-                .unwrap_or(0),
+            count(
+                usage,
+                &[
+                    "cache_read_input_tokens",
+                    "cache_read_tokens",
+                    "cached_input_tokens",
+                    "cacheReadTokens",
+                    "cachedInputTokens",
+                ],
+            )
+            .or_else(|| usage.pointer("/cache/read").and_then(Value::as_u64))
+            .unwrap_or(0),
         )?
         .checked_add(
-            count(usage, &["cache_creation_input_tokens", "cacheWriteTokens"])
-                .or_else(|| usage.pointer("/cache/write").and_then(Value::as_u64))
-                .unwrap_or(0),
+            count(
+                usage,
+                &[
+                    "cache_creation_input_tokens",
+                    "cache_write_input_tokens",
+                    "cache_write_tokens",
+                    "cacheWriteTokens",
+                ],
+            )
+            .or_else(|| usage.pointer("/cache/write").and_then(Value::as_u64))
+            .unwrap_or(0),
         )
 }
 
@@ -177,9 +197,11 @@ impl Snapshot {
                 .pointer("/payload/event/kind")
                 .is_some_and(|v| v == "model_completed");
         let agy_init = backend == "agy" && value["event"] == "init";
+        let grok_tools = backend == "grok" && kind == "available_commands";
         let relevant = init
             || muse_model
             || agy_init
+            || grok_tools
             || matches!(kind, "tokenstat.context" | "tokenstat.mcp")
             || matches!(
                 (backend, kind),
@@ -192,6 +214,10 @@ impl Snapshot {
             return activity_changed;
         }
         let previous = self.clone();
+        if grok_tools && let Some(tools) = names(&value["tools"]) {
+            self.inventory_partial |= oversized(&value["tools"], ITEMS);
+            self.tools = Some(tools);
+        }
         if init {
             self.model = value["model"].as_str().and_then(name);
             self.tools = names(&value["tools"]);
@@ -294,14 +320,20 @@ impl Snapshot {
         if let Some(usage) = usage
             && let Some(used) = prompt_tokens(
                 usage,
-                matches!(backend, "claude" | "opencode" | "opencode2"),
+                matches!(
+                    backend,
+                    "claude" | "cursor" | "grok" | "opencode" | "opencode2"
+                ),
             )
         {
             self.context_used = Some(used);
             self.context_source = Some("lastInput".into());
             self.context_breakdown = prompt_breakdown(
                 usage,
-                matches!(backend, "claude" | "opencode" | "opencode2"),
+                matches!(
+                    backend,
+                    "claude" | "cursor" | "grok" | "opencode" | "opencode2"
+                ),
             );
         }
         if backend == "claude"
@@ -759,7 +791,96 @@ mod tests {
             "grok",
             &json!({"type":"usage","input_tokens":44,"cache_read_input_tokens":30}),
         );
-        assert_eq!(grok.context_used, Some(44));
+        assert_eq!(grok.context_used, Some(74));
+    }
+
+    #[test]
+    fn inclusive_prompt_breakdowns_preserve_cache_aliases_used_by_usage_events() {
+        for (read_key, write_key) in [
+            ("cached_input_tokens", "cache_write_input_tokens"),
+            ("cachedInputTokens", "cacheWriteTokens"),
+        ] {
+            let mut usage = json!({"input_tokens":100,"output_tokens":3});
+            usage[read_key] = json!(70);
+            usage[write_key] = json!(10);
+            assert_eq!(
+                prompt_breakdown(&usage, false),
+                Some(PromptBreakdown {
+                    input: 20,
+                    cache_read: 70,
+                    cache_write: 10,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn grok_and_cursor_keep_disjoint_prompt_buckets_separate() {
+        let mut grok = Snapshot::default();
+        grok.observe(
+            "grok",
+            &json!({"type":"usage","usage":{
+                "input_tokens":7210,"cache_read_input_tokens":41000,
+                "cache_creation_input_tokens":50,"output_tokens":3
+            }}),
+        );
+        assert_eq!(grok.context_used, Some(48_260));
+        assert_eq!(
+            grok.context_breakdown,
+            Some(PromptBreakdown {
+                input: 7210,
+                cache_read: 41000,
+                cache_write: 50
+            })
+        );
+
+        let mut cursor = Snapshot::default();
+        cursor.observe(
+            "cursor",
+            &json!({"type":"assistant","message":{"usage":{
+                "inputTokens":25665,"cacheReadTokens":43392,"cacheWriteTokens":0
+            }}}),
+        );
+        assert_eq!(cursor.context_used, Some(69_057));
+        assert_eq!(
+            cursor.context_breakdown,
+            Some(PromptBreakdown {
+                input: 25665,
+                cache_read: 43392,
+                cache_write: 0
+            })
+        );
+    }
+
+    #[test]
+    fn grok_available_command_records_report_bounded_tool_names() {
+        let mut snapshot = Snapshot::default();
+        assert!(snapshot.observe(
+            "grok",
+            &json!({"type":"available_commands",
+                "tools":["read_file","bash"],"commands":["private command body"]
+            })
+        ));
+        assert_eq!(
+            snapshot.tools,
+            Some(vec!["bash".into(), "read_file".into()])
+        );
+        assert!(
+            !serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains("private")
+        );
+        let many: Vec<_> = (0..ITEMS + 1).map(|n| format!("tool-{n}")).collect();
+        snapshot.observe("grok", &json!({"type":"available_commands","tools":many}));
+        assert_eq!(snapshot.tools.as_ref().unwrap().len(), ITEMS);
+        assert!(snapshot.inventory_partial);
+        snapshot.observe(
+            "grok",
+            &json!({"type":"tool_result",
+                "content":{"type":"available_commands","tools":["fake"]}
+            }),
+        );
+        assert_eq!(snapshot.tools.as_ref().unwrap().len(), ITEMS);
     }
 
     #[test]

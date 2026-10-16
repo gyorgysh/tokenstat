@@ -2261,5 +2261,8 @@
   "windows.workspacetabspage_companion.browser_beside_chat.84f3340a": "Browser beside chat",
   "windows.workspacetabspage_companion.close_companion_pane.319641bf": "Close companion pane",
   "windows.workspacetabspage_companion.terminal.e0926fda": "Terminal",
-  "windows.workspacetabspage_companion.terminal_beside_chat.40991a3f": "Terminal beside chat"
+  "windows.workspacetabspage_companion.terminal_beside_chat.40991a3f": "Terminal beside chat",
+  "windows.chatpage.drop_to_attach": "Drop to attach",
+  "windows.chatpage.drop_files_not_folders": "Attach files, not folders.",
+  "windows.sidebarhovercard.details": "Details"
 }

@@ -70,6 +70,7 @@ internal static class SessionIdentityRows
         };
         var help = L10n.Text("common.session_identity.copy", label);
         AutomationProperties.SetName(copy, help + ": " + id);
+        AutomationProperties.SetAutomationId(copy, "session.identity." + id);
         ToolTipService.SetToolTip(copy, help + "\n" + id);
         return copy;
     }

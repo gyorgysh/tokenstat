@@ -45,7 +45,12 @@ internal static class SidebarHoverCard
     {
         SidebarHoverPresenter.Attach(row, async token =>
         {
-            JsonNode? usage = null; JsonNode? conversation = chat; var failed = false;
+            JsonNode? usage = null; JsonNode? conversation = chat; JsonNode? sessions = null; var failed = false;
+            async Task ReadSessions()
+            {
+                try { sessions = (await Call(workspaceId, "chat.inspection", new() { ["id"] = Format.Text(chat, "id") }))["sessions"]; }
+                catch { /* Older hosts still provide the Tokenstat chat ID. */ }
+            }
             async Task ReadUsage()
             {
                 try { usage = (await Call(workspaceId, "chat.eventPage", new() { ["id"] = Format.Text(chat, "id"), ["limit"] = 1, ["stablePositions"] = true }))["usage"]; }
@@ -61,7 +66,7 @@ internal static class SidebarHoverCard
                 }
                 catch { }
             }
-            await Task.WhenAll(ReadUsage(), ReadConversation());
+            await Task.WhenAll(ReadUsage(), ReadConversation(), ReadSessions());
             token.ThrowIfCancellationRequested();
             var remote = RemoteWorkspaces.CachedFolder(workspaceId);
             var fields = Identity(folderName, remote);
@@ -81,14 +86,18 @@ internal static class SidebarHoverCard
             fields.Add(new(Text("last_message"), Date(Format.Long(chat, "lastMessageAtMs"), Text("no_messages"))));
             return Card(Format.Text(chat, "title", L10n.Text("windows.sidebarlive.untitled_conversation.31d248c4")),
                 L10n.Text("windows.chatpage.chat.460b3a7d") + " · " + SidebarLive.HarnessName(Format.Text(chat, "backend")), fields,
-                Format.Text(folder, "path", remote?.Path ?? ""), folder?["git"] ?? remote?.Git);
-        });
+                Format.Text(folder, "path", remote?.Path ?? ""), folder?["git"] ?? remote?.Git,
+                SessionIdentityRows.Build(Format.Text(chat, "id"), "common.session_identity.conversation", SessionIdentities.Read(sessions)));
+        }, explicitOpen: true);
     }
 
     public static void AttachTerminal(FrameworkElement row, string workspaceId, JsonNode session, JsonNode? folder = null)
     {
-        SidebarHoverPresenter.Attach(row, _ =>
+        SidebarHoverPresenter.Attach(row, async token =>
         {
+            JsonNode info = session;
+            try { info = await Call(workspaceId, "pty.info", new() { ["id"] = Format.Text(session, "id") }); } catch { }
+            token.ThrowIfCancellationRequested();
             var remote = RemoteWorkspaces.CachedFolder(workspaceId);
             var fields = Identity(Format.Text(folder, "name", remote?.Name ?? L10n.Text("windows.sidebarlive.project.98595978")), remote);
             fields.Add(new(L10n.Text("windows.machinespage.status.920e413c"), SidebarLive.SessionState(session).Label));
@@ -98,9 +107,10 @@ internal static class SidebarHoverCard
             if (window > 0) fields.Add(new(Text("context"), Number(Format.Number(session, "contextUsed")) + " / " + Number(window), true));
             if (session["tokens"] is not null) fields.Add(new(L10n.Text("windows.insightspage.tokens.a039dfb9"), Number(Format.Number(session, "tokens")), true));
             fields.Add(new(Text("last_activity"), Date(Format.Long(session, "lastActivityAtMs"), "—")));
-            return Task.FromResult(Card(SidebarLive.SessionTitle(Format.Text(session, "command", "shell")), L10n.Text("windows.terminalpage.terminal.e0926fda"), fields,
-                Format.Text(session, "cwd", Format.Text(folder, "path", remote?.Path ?? "")), folder?["git"] ?? remote?.Git));
-        });
+            return Card(SidebarLive.SessionTitle(Format.Text(session, "command", "shell")), L10n.Text("windows.terminalpage.terminal.e0926fda"), fields,
+                Format.Text(session, "cwd", Format.Text(folder, "path", remote?.Path ?? "")), folder?["git"] ?? remote?.Git,
+                SessionIdentityRows.Build(Format.Text(session, "id"), "common.session_identity.terminal", SessionIdentities.Read(info["sessionIdentities"])));
+        }, explicitOpen: true);
     }
 
     public static void AttachSsh(FrameworkElement row, string workspaceId, JsonNode? session, JsonNode? folder = null)
@@ -112,14 +122,15 @@ internal static class SidebarHoverCard
             fields.Add(new(L10n.Text("windows.machinespage.status.920e413c"), Format.Flag(session, "alive") ? Text("ready") : L10n.Text("windows.terminalpage.closed.c21ead06")));
             // SessionLabel resolves the saved friendly name and suppresses connection addresses.
             return Task.FromResult(Card(SshHostPlatform.SessionLabel(session), L10n.Text("windows.sshhostplatform.ssh_session.25493005"), fields,
-                Format.Text(folder, "path", remote?.Path ?? ""), folder?["git"] ?? remote?.Git));
-        });
+                Format.Text(folder, "path", remote?.Path ?? ""), folder?["git"] ?? remote?.Git,
+                SessionIdentityRows.Build(Format.Text(session, "id"), "common.session_identity.terminal", SessionIdentities.Read(null))));
+        }, explicitOpen: true);
     }
 
     private static List<Field> Identity(string name, RemoteFolder? remote) =>
     [ new(L10n.Text("windows.sidebarlive.project.98595978"), name), new(L10n.Text("windows.machinespage.computer.76ed42d2"), remote?.MachineLabel is { Length: > 0 } machine ? machine : Text(remote is null ? "this_computer" : "other_computer")) ];
 
-    private static FrameworkElement Card(string title, string subtitle, IEnumerable<Field> fields, string path, JsonNode? git)
+    private static FrameworkElement Card(string title, string subtitle, IEnumerable<Field> fields, string path, JsonNode? git, FrameworkElement? identifiers = null)
     {
         var body = new StackPanel { Spacing = 10 };
         body.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxLines = 3 });
@@ -131,6 +142,7 @@ internal static class SidebarHoverCard
             body.Children.Add(new Border { Height = 1, Background = Theme.BorderBrush });
             body.Children.Add(new TextBlock { Text = path, FontSize = 11, Foreground = Theme.Brush(static () => Theme.ControlGlyph), TextWrapping = TextWrapping.Wrap, MaxLines = 3, IsTextSelectionEnabled = true });
         }
+        if (identifiers is not null) { body.Children.Add(new Border { Height = 1, Background = Theme.BorderBrush }); body.Children.Add(identifiers); }
         return new Border
         {
             Width = 340, Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14),

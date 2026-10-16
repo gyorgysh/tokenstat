@@ -16,6 +16,16 @@ data class SessionIdentities(val entries: List<SessionIdentity> = emptyList(), v
 fun parseChatSessionIdentities(inspection: JsonObject?): SessionIdentities = parseSessionIdentities(inspection?.get("sessions"))
 fun parseTerminalSessionIdentities(info: JsonObject?): SessionIdentities = parseSessionIdentities(info?.get("sessionIdentities"))
 
+private val nativeSessionUuid = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+private val openCodeSessionId = Regex("ses_[0-9a-fA-F]{12}[0-9a-zA-Z]{14}")
+
+private fun validNativeSessionId(backend: String, id: String): Boolean = when (backend) {
+    "claude", "codex", "cursor", "muse", "grok", "agy" ->
+        nativeSessionUuid.matches(id) && id != "00000000-0000-0000-0000-000000000000"
+    "opencode", "opencode2" -> openCodeSessionId.matches(id)
+    else -> false
+}
+
 private fun parseSessionIdentities(value: JsonElement?): SessionIdentities {
     val objectValue = value as? JsonObject ?: return SessionIdentities()
     val rows = objectValue["entries"] as? JsonArray ?: return SessionIdentities()
@@ -23,14 +33,14 @@ private fun parseSessionIdentities(value: JsonElement?): SessionIdentities {
         ?.takeIf { it.isString }?.contentOrNull
     fun id(value: String?): String? = value?.takeIf {
         it.isNotEmpty() && it.length <= 512 && it.none { char -> char.isWhitespace() || char.isISOControl() } &&
-            !it.startsWith('{') && !it.startsWith('[')
+            it.none { char -> char == '/' || char == '\\' || char == '{' || char == '[' }
     }
     val validEntries = rows.take(256).mapNotNull { element ->
         val row = element as? JsonObject ?: return@mapNotNull null
         val backend = text(row, "backend")?.takeIf { name ->
             name.isNotEmpty() && name.length <= 64 && name.all { it.isLetterOrDigit() || it == '_' || it == '-' }
         } ?: return@mapNotNull null
-        val sessionId = id(text(row, "id")) ?: return@mapNotNull null
+        val sessionId = text(row, "id")?.takeIf { validNativeSessionId(backend, it) } ?: return@mapNotNull null
         val status = when (text(row, "status")) {
             "current" -> SessionIdentityStatus.Current
             "saved" -> SessionIdentityStatus.Saved

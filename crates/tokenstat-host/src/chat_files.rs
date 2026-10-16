@@ -46,7 +46,19 @@ pub(super) fn open_regular(path: &Path) -> Result<fs::File, String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    options.open(path).map_err(|e| e.to_string())
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x00200000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    let file = options.open(path).map_err(|e| e.to_string())?;
+    // Validate the opened object too: the pathname can change after regular().
+    // In particular, a no-follow Windows handle can name a reparse point.
+    let metadata = file.metadata().map_err(|e| e.to_string())?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("invalid attachment file".into());
+    }
+    Ok(file)
 }
 pub(super) fn create_attachment_directory(chat: &Path, id: &str) -> Result<(), String> {
     let files = chat.join("files");
@@ -87,19 +99,21 @@ fn hash_file(path: &Path) -> Result<String, String> {
         .collect())
 }
 pub(super) fn copy_attachment(source: &Path, destination: &Path) -> Result<u64, String> {
-    regular(source)?;
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    copy_open_attachment(open_regular(source)?, destination)
+}
+
+/// Keep an already validated image handle alive through publication. A tool
+/// can remove or replace its temporary pathname as soon as it reports success.
+pub(super) fn copy_open_attachment(mut input: fs::File, destination: &Path) -> Result<u64, String> {
+    let metadata = input.metadata().map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("invalid attachment file".into());
     }
-    let input = options.open(source).map_err(|e| e.to_string())?;
-    let expected = input.metadata().map_err(|e| e.to_string())?.len();
+    let expected = metadata.len();
     if expected == 0 || expected > FILE_BYTES {
         return Err("file exceeds transfer limit".into());
     }
+    input.rewind().map_err(|e| e.to_string())?;
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -521,6 +535,54 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn regular_attachment_handles_reject_directories() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(open_regular(root.path()).is_err());
+        let source = root.path().join("attachment");
+        fs::write(&source, b"original").unwrap();
+        assert!(open_regular(&source).is_ok());
+        fs::remove_file(&source).unwrap();
+        fs::create_dir(&source).unwrap();
+        assert!(open_regular(&source).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regular_attachment_handles_reject_symlinks_and_special_files() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("private");
+        let link = root.path().join("link");
+        fs::write(&source, b"private").unwrap();
+        symlink(&source, &link).unwrap();
+        assert!(open_regular(&link).is_err());
+        assert!(open_regular(Path::new("/dev/null")).is_err());
+    }
+
+    #[test]
+    fn image_copy_retains_the_validated_file_after_its_path_is_replaced() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("screen.png");
+        let replacement = root.path().join("replacement");
+        let destination = root.path().join("saved.png");
+        let original = b"\x89PNG\r\n\x1a\noriginal image";
+        fs::write(&source, original).unwrap();
+        let mut opened = open_regular(&source).unwrap();
+        let mut header = [0; 8];
+        opened.read_exact(&mut header).unwrap();
+        assert_eq!(&header, b"\x89PNG\r\n\x1a\n");
+        fs::write(&replacement, b"unrelated replacement content").unwrap();
+        fs::rename(replacement, &source).unwrap();
+        assert_eq!(
+            copy_open_attachment(opened, &destination).unwrap(),
+            original.len() as u64
+        );
+        assert_eq!(fs::read(destination).unwrap(), original);
+        assert_eq!(fs::read(source).unwrap(), b"unrelated replacement content");
+    }
+
     fn fixture() -> (tempfile::TempDir, Store) {
         let temp = tempfile::tempdir().unwrap();
         let store = Store::at(temp.path().join("chat"));

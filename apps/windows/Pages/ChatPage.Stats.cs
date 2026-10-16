@@ -18,6 +18,7 @@ internal sealed partial class ChatPage
 {
     private readonly StackPanel _inspectionHost = new() { Spacing = Theme.SpaceM };
     private readonly StackPanel _sessionIdentityHost = new();
+    private StackPanel? _sessionIdentityOwner;
     private JsonNode? _inspection;
     private bool _inspectionRunning;
     private string? _inspectionOwner;
@@ -31,6 +32,7 @@ internal sealed partial class ChatPage
     private int _commandIndex;
     private bool _commandsDismissed;
     private bool _commandInFlight;
+    private bool _commandDialogOpening;
     private ContentDialog? _commandDialog;
     private StackPanel? _commandDialogBody;
     private string? _commandDialogOwner;
@@ -85,11 +87,12 @@ internal sealed partial class ChatPage
             ChatCommandRules.Kind.Running => L10n.Text("common.chat.command.idle"), _ => null,
         };
         if (refusal is not null) { Banner(refusal); return true; }
-        if (_commandInFlight) return true;
+        if (_commandInFlight || _commandDialogOpening || _commandDialog is not null || _imageDialog is not null) return true;
         _commandInFlight = true;
         var id = _openId;
         var generation = _openGeneration;
         var account = AppServices.AccountGeneration;
+        var openingInspection = false;
         bool Current() => id == _openId && generation == _openGeneration && account == AppServices.AccountGeneration && IsLoaded;
         try {
             if (action.Kind == ChatCommandRules.Kind.Stop) await StopAsync();
@@ -101,6 +104,8 @@ internal sealed partial class ChatPage
                     if (Current() && _draft.Text.Trim() == text) _draft.Text = "";
                     return true;
                 }
+                _commandDialogOpening = true;
+                openingInspection = true;
                 await RefreshInspectionAsync(force: true);
                 if (id != _openId || generation != _openGeneration || account != AppServices.AccountGeneration || !IsLoaded) return true;
                 var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -116,7 +121,7 @@ internal sealed partial class ChatPage
             if (id == _openId && generation == _openGeneration && account == AppServices.AccountGeneration && _draft.Text.Trim() == text) _draft.Text = "";
             return true;
         } catch (Exception error) { if (Current()) Banner(error.Message); return true; }
-        finally { _commandInFlight = false; }
+        finally { _commandInFlight = false; if (openingInspection) _commandDialogOpening = false; }
     }
     private string? InspectionOwner() => _openId is null ? null : $"{AppServices.AccountGeneration}/{_openGeneration}/{_openId}/{Format.Text(_openChat, "backend")}/{Format.Text(_openChat, "model")}/{_workspaceId}/{_openChat?["runRevision"] ?? _openChat?["sendRevision"]}";
     private async Task RefreshInspectionAsync(bool force = false)

@@ -304,7 +304,7 @@ internal sealed partial class ChatPage
     }
     private async Task ShowImageGalleryAsync(DisplayItem[] images, int selected)
     {
-        if (_imageDialog is not null || images.Length == 0) return;
+        if (_imageDialog is not null || _commandDialogOpening || _commandDialog is not null || images.Length == 0) return;
         _imageViewerRevision++;
         using var viewerCancellation = CancellationTokenSource.CreateLinkedTokenSource(_imageCancellation.Token);
         var owner = ImageOwner();

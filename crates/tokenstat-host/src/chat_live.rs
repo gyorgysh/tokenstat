@@ -186,7 +186,7 @@ impl Launch {
         }
     }
 
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn test_mailbox(directory: tempfile::TempDir) -> Self {
         Self {
             directory,
@@ -575,10 +575,8 @@ impl Protocol {
                         Some("item/started" | "item/completed")
                     ) =>
                 {
-                    if let Some(item) = codex_item(&message["params"]["item"]) {
-                        let _ = emit(
-                            &json!({"type":if message["method"] == "item/started" {"item.started"} else {"item.completed"},"item":item}),
-                        );
+                    if let Some(item) = codex_owned_item(&message, &self.thread, &self.turn) {
+                        let _ = emit(&item);
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,

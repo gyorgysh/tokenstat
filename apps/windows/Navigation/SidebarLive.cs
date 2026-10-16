@@ -178,7 +178,7 @@ internal static class SidebarLive
 
         var row = new NavigationViewItem
         {
-            Content = AgentMark.Row(command, panel, 18),
+            Content = SidebarHoverPresenter.WithDetails(AgentMark.Row(command, panel, 18)),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = LiveRoute.Join(SessionPrefix, folderId, id),
         };
@@ -263,7 +263,7 @@ internal static class SidebarLive
 
         var row = new NavigationViewItem
         {
-            Content = AgentMark.Row(Format.Text(chat, "backend"), panel, 18),
+            Content = SidebarHoverPresenter.WithDetails(AgentMark.Row(Format.Text(chat, "backend"), panel, 18)),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = LiveRoute.Join(ChatPrefix, folderId, id),
         };

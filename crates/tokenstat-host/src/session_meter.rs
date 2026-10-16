@@ -93,6 +93,7 @@ pub(crate) fn reading(
         started_at_ms,
         siblings,
     };
+    let mut native_parent = None;
     let events = match harness {
         "claude" => claude_events(cwd, spawn)?,
         "grok" => grok_events(cwd, spawn)?,
@@ -102,7 +103,11 @@ pub(crate) fn reading(
         "hermes" => hermes_events(cwd, spawn)?,
         "pi" => pi_events(cwd, spawn)?,
         "dsh" => dsh_events(cwd, spawn)?,
-        "muse" => muse_events(cwd, spawn)?,
+        "muse" => {
+            let (events, parent_id) = muse_events(cwd, spawn)?;
+            native_parent = Some(parent_id);
+            events
+        }
         "devin" => devin_events(cwd, spawn)?,
         "kimi" => kimi_events(cwd, spawn)?,
         "qwen" => qwen_events(cwd, spawn)?,
@@ -114,7 +119,8 @@ pub(crate) fn reading(
         return None;
     }
     let mut reading = fold(&mine, &current_prices())?;
-    reading.session_identities = terminal_session_identities(harness, &mine);
+    reading.session_identities =
+        terminal_session_identities(harness, &mine, native_parent.as_deref());
     // Grok's own log says nothing about how the session is paid for, but the
     // login it runs under does: an OIDC login is a SuperGrok subscription, an
     // API key is metered. Read, never written, and no token leaves this call.
@@ -127,6 +133,7 @@ pub(crate) fn reading(
 fn terminal_session_identities(
     harness: &str,
     events: &[&UsageEvent],
+    native_parent: Option<&str>,
 ) -> Option<crate::chat_sessions::SessionInventory> {
     use crate::chat_sessions::{SessionInventory, SessionReference, valid_native_id};
     let backend = if harness == "antigravity" {
@@ -136,12 +143,15 @@ fn terminal_session_identities(
     };
     let latest = events
         .iter()
+        .filter(|event| native_parent.is_none_or(|parent| event.session == parent))
         .max_by_key(|event| event.ts.utc_ms)?
         .session
         .as_str();
     let mut identities: HashMap<&str, (i64, i64)> = HashMap::new();
     for event in events {
-        if !valid_native_id(backend, &event.session) {
+        if native_parent.is_some_and(|parent| event.session != parent)
+            || !valid_native_id(backend, &event.session)
+        {
             continue;
         }
         identities
@@ -821,7 +831,7 @@ fn qwen_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
 ///
 /// A session is the parent directory. Subagent logs under it fold into the
 /// same reading. A second Muse window in the folder is a later parent.
-fn muse_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
+fn muse_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<(Arc<Vec<UsageEvent>>, String)> {
     let parent = resolve_logs("muse", cwd, spawn, || {
         let home = tokenstat_paths::home_dir()?;
         let sessions = muse::discover(&home)?;
@@ -841,6 +851,7 @@ fn muse_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
                 .collect(),
         )
     })?;
+    let parent_id = parent.file_name()?.to_str()?.to_owned();
     let mut all = Vec::new();
     for path in muse::shards(&parent) {
         if let Some(events) =
@@ -849,7 +860,7 @@ fn muse_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
             all.extend(events.iter().cloned());
         }
     }
-    (!all.is_empty()).then_some(Arc::new(all))
+    (!all.is_empty()).then_some((Arc::new(all), parent_id))
 }
 
 /// How many matching logs a locator will keep for one folder.
@@ -1461,7 +1472,8 @@ mod tests {
         other.session = b.into();
         let mut repeated = stamped(300);
         repeated.session = a.into();
-        let entries = terminal_session_identities("claude", &[&repeated, &first, &other]).unwrap();
+        let entries =
+            terminal_session_identities("claude", &[&repeated, &first, &other], None).unwrap();
         assert_eq!(entries.total, 2);
         assert!(!entries.truncated);
         assert_eq!(entries.entries[0].id, a);
@@ -1477,10 +1489,10 @@ mod tests {
         );
         let mut unknown = stamped(400);
         unknown.session = "unknown".into();
-        let historic = terminal_session_identities("claude", &[&first, &unknown]).unwrap();
+        let historic = terminal_session_identities("claude", &[&first, &unknown], None).unwrap();
         assert_eq!(historic.entries[0].status, "historical");
-        assert!(terminal_session_identities("claude", &[&unknown]).is_none());
-        assert!(terminal_session_identities("sh", &[&first]).is_none());
+        assert!(terminal_session_identities("claude", &[&unknown], None).is_none());
+        assert!(terminal_session_identities("sh", &[&first], None).is_none());
     }
 
     #[test]
@@ -1491,7 +1503,7 @@ mod tests {
         current.session = "550e8400-e29b-41d4-a716-446655440001".into();
         let events = vec![old, current];
         let mine = since(&events, 4_000);
-        let identities = terminal_session_identities("claude", &mine).unwrap();
+        let identities = terminal_session_identities("claude", &mine, None).unwrap();
         assert_eq!(identities.total, 1);
         assert_eq!(identities.entries[0].id, events[1].session);
 
@@ -1503,7 +1515,7 @@ mod tests {
             })
             .collect();
         let refs: Vec<_> = events.iter().collect();
-        let identities = terminal_session_identities("claude", &refs).unwrap();
+        let identities = terminal_session_identities("claude", &refs, None).unwrap();
         assert_eq!(identities.total, 70);
         assert_eq!(identities.entries.len(), 64);
         assert!(identities.truncated);
@@ -1516,6 +1528,22 @@ mod tests {
     }
 
     #[test]
+    fn muse_terminal_identity_stays_with_parent_when_child_usage_is_newer() {
+        let parent_id = "550e8400-e29b-41d4-a716-446655440000";
+        let child_id = "550e8400-e29b-41d4-a716-446655440001";
+        let mut parent = stamped(100);
+        parent.session = parent_id.into();
+        let mut child = stamped(200);
+        child.session = child_id.into();
+        let identities =
+            terminal_session_identities("muse", &[&parent, &child], Some(parent_id)).unwrap();
+        assert_eq!(identities.total, 1);
+        assert_eq!(identities.entries[0].id, parent_id);
+        assert_eq!(identities.entries[0].status, "current");
+        assert!(terminal_session_identities("muse", &[&child], Some(parent_id)).is_none());
+    }
+
+    #[test]
     fn terminal_native_id_limit_keeps_current_when_latest_timestamps_tie() {
         let events: Vec<_> = (0..70)
             .map(|index| {
@@ -1525,7 +1553,7 @@ mod tests {
             })
             .collect();
         let refs: Vec<_> = events.iter().collect();
-        let identities = terminal_session_identities("claude", &refs).unwrap();
+        let identities = terminal_session_identities("claude", &refs, None).unwrap();
         assert!(identities.truncated);
         assert_eq!(identities.entries.len(), 64);
         assert_eq!(identities.entries[0].id, events[69].session);

@@ -49,6 +49,7 @@ internal sealed partial class ChatPage
         _inspectionWindow = null; _inspectionLiveLease = false; _inspectionVisibilityGeneration++;
     }
     private void InspectionAccountChanged() => DispatcherQueue.TryEnqueue(() => {
+        CancelDropImport();
         _inspectionVisibilityGeneration++; _inspectionLiveLease = false; _inspection = null; _inspectionOwner = null; _inspectionAt = default;
         RenderInspection(); _commandDialog?.Hide();
     });
@@ -108,24 +109,35 @@ internal sealed partial class ChatPage
         var button = new Button { Content = row, Padding = new Thickness(10, 7, 10, 7), MinHeight = 32,
             Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         AutomationProperties.SetName(button, ActivityText("details") + ": " + ActivitySummary(data));
-        button.Click += async (_, _) => await ShowActivityAsync("all");
+        button.Click += async (_, _) => {
+            var owner = InspectionOwner();
+            try { await ShowActivityAsync("all"); }
+            catch (Exception error) { if (InspectionOwner() == owner && IsLoaded) Banner(error.Message); }
+        };
         _activitySummaryHost.Children.Add(button);
     }
     private async Task ShowActivityAsync(string section)
     {
-        if (_commandDialog is not null || _openId is null) return;
-        var owner = InspectionOwner();
-        await RefreshInspectionAsync(force: true);
-        if (InspectionOwner() != owner || !IsLoaded) return;
-        foreach (var key in _statsExpanded.Keys.Where(key => key.StartsWith("activity/dialog/", StringComparison.Ordinal)).ToArray()) _statsExpanded.Remove(key);
-        var body = new StackPanel { Spacing = Theme.SpaceS };
-        _commandDialogBody = body; _commandDialogOwner = owner; _commandActivitySection = section;
-        RenderCommandStats();
-        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = ActivityText("title"),
-            Content = new ScrollViewer { Content = body, MaxHeight = 560 }, CloseButtonText = L10n.Text("common.done") };
-        _commandDialog = dialog;
-        try { await dialog.ShowAsync(); }
-        finally { _commandDialog = null; _commandDialogBody = null; _commandDialogOwner = null; _commandActivitySection = null; }
+        if (_commandDialog is not null || _commandDialogOpening || _imageDialog is not null || _openId is null) return;
+        // Claim the dialog before discovery yields. A second tap or composer
+        // command must not race this fetch into a second native modal window.
+        _commandDialogOpening = true;
+        try
+        {
+            var owner = InspectionOwner();
+            await RefreshInspectionAsync(force: true);
+            if (InspectionOwner() != owner || !IsLoaded) return;
+            foreach (var key in _statsExpanded.Keys.Where(key => key.StartsWith("activity/dialog/", StringComparison.Ordinal)).ToArray()) _statsExpanded.Remove(key);
+            var body = new StackPanel { Spacing = Theme.SpaceS };
+            _commandDialogBody = body; _commandDialogOwner = owner; _commandActivitySection = section;
+            RenderCommandStats();
+            var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = ActivityText("title"),
+                Content = new ScrollViewer { Content = body, MaxHeight = 560 }, CloseButtonText = L10n.Text("common.done") };
+            _commandDialog = dialog;
+            try { await dialog.ShowAsync(); }
+            finally { _commandDialog = null; _commandDialogBody = null; _commandDialogOwner = null; _commandActivitySection = null; }
+        }
+        finally { _commandDialogOpening = false; }
     }
     private UIElement ActivityCard(JsonNode? inspection, bool expanded = false, string? section = null)
     {

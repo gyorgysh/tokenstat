@@ -240,6 +240,9 @@ struct Session {
     master: Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>,
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     alive: Arc<AtomicBool>,
+    /// Set only after the reader has published every byte and reached EOF.
+    /// The child can exit before the independent output reader catches up.
+    output_closed: Arc<AtomicBool>,
     exit_code: Arc<AtomicI32>,
     /// Output offset at the last keystroke sent to this session.
     ///
@@ -442,6 +445,7 @@ impl Manager {
         let buffer = Arc::new(Mutex::new(Buffer::new()));
         let buffer_space = Arc::new(Condvar::new());
         let alive = Arc::new(AtomicBool::new(true));
+        let output_closed = Arc::new(AtomicBool::new(false));
         let exit_code = Arc::new(AtomicI32::new(i32::MIN));
         let last_activity = Arc::new(Mutex::new(None));
         let writer = Arc::new(Mutex::new(writer));
@@ -451,6 +455,7 @@ impl Manager {
             let buffer = Arc::clone(&buffer);
             let buffer_space = Arc::clone(&buffer_space);
             let alive = Arc::clone(&alive);
+            let output_closed = Arc::clone(&output_closed);
             let last_activity = Arc::clone(&last_activity);
             let writer = Arc::clone(&writer);
             let program_status = Arc::clone(&program_status);
@@ -498,6 +503,7 @@ impl Manager {
                         Err(_) => break,
                     }
                 }
+                output_closed.store(true, Ordering::SeqCst);
                 alive.store(false, Ordering::SeqCst);
                 program_status
                     .lock()
@@ -532,6 +538,7 @@ impl Manager {
             master: Mutex::new(master),
             child: Mutex::new(child),
             alive,
+            output_closed,
             exit_code,
             input_mark: Arc::new(AtomicU64::new(0)),
             last_input_at_ms: AtomicU64::new(0),
@@ -952,6 +959,20 @@ impl Manager {
     pub fn read_for_stream(&self, id: &str, reader: &str, offset: u64) -> Result<Chunk, PtyError> {
         let s = self.get(id)?;
         self.read_acknowledged(&s, reader, offset, true)
+    }
+
+    /// The immutable final output offset once the reader has reached EOF.
+    /// Process exit alone cannot establish this: pipe/PTY bytes may still be
+    /// waiting in the OS. A consumer can finish draining this finite window
+    /// independently of the grace for waiting on an open output stream.
+    /// This state does not change the wire's process-liveness fields.
+    pub fn output_end_offset(&self, id: &str) -> Result<Option<u64>, PtyError> {
+        let s = self.get(id)?;
+        if !s.output_closed.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        let buffer = s.buffer.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(Some(buffer.total))
     }
 
     /// Forget a stream reader so it cannot hold the shared output window.
@@ -3275,6 +3296,80 @@ mod tests {
         let second = m.read(&s.id, first.next_offset).unwrap();
         assert!(!String::from_utf8_lossy(&second.bytes).contains("hello-from-pty"));
         assert_eq!(second.dropped, 0);
+    }
+
+    #[ignore = "native child process entry point"]
+    #[test]
+    fn eof_process_fixture() {
+        let directory = std::path::PathBuf::from(
+            std::env::var_os("TOKENSTAT_PTY_EOF_FIXTURE").expect("fixture directory"),
+        );
+        let mut output = std::io::stdout().lock();
+        output.write_all(b"native output ready\n").unwrap();
+        output.flush().unwrap();
+        drop(output);
+        assert!(wait_for(|| directory.join("go").exists()));
+        let mut output = std::io::stdout().lock();
+        output.write_all(b"final native output\n").unwrap();
+        output.flush().unwrap();
+    }
+
+    #[test]
+    fn child_exit_is_not_output_eof_or_acknowledgement() {
+        let directory = std::env::temp_dir().join(format!(
+            "tokenstat-eof-fixture-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let m = Manager::new();
+        let process = m
+            .spawn(&Spawn {
+                command: std::env::current_exe().unwrap().display().to_string(),
+                args: vec![
+                    "--ignored".into(),
+                    "--exact".into(),
+                    "tests::eof_process_fixture".into(),
+                    "--nocapture".into(),
+                ],
+                cwd: directory.clone(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: vec![(
+                    "TOKENSTAT_PTY_EOF_FIXTURE".into(),
+                    directory.display().to_string(),
+                )],
+            })
+            .unwrap();
+        assert!(wait_for(|| {
+            m.read(&process.id, 0).is_ok_and(|chunk| {
+                String::from_utf8_lossy(&chunk.bytes).contains("native output ready")
+            })
+        }));
+        let session = m.get(&process.id).unwrap();
+        // Hold publication while allowing the native child to write and exit.
+        // This deterministically recreates the scheduler ordering that lost
+        // final chat records when liveness alone ended the host's drainer.
+        let publication = session.buffer.lock().unwrap();
+        std::fs::write(directory.join("go"), b"").unwrap();
+        assert!(wait_for(|| {
+            session.child.lock().unwrap().try_wait().unwrap().is_some()
+        }));
+        assert_eq!(m.output_end_offset(&process.id).unwrap(), None);
+        drop(publication);
+        assert!(wait_for(|| session.output_closed.load(Ordering::SeqCst)));
+        let end = m.output_end_offset(&process.id).unwrap().unwrap();
+        assert!(end > 0);
+        let chunk = m.read(&process.id, 0).unwrap();
+        assert!(String::from_utf8_lossy(&chunk.bytes).contains("native output ready"));
+        assert_eq!(chunk.next_offset, end);
+        assert_eq!(m.output_end_offset(&process.id).unwrap(), Some(end));
+        m.close(&process.id).unwrap();
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

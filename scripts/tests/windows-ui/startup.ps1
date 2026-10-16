@@ -70,7 +70,7 @@ try {
         $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
         $invoke.Invoke()
     }
-    function Wait-ForControl([string]$Id, [int]$Seconds = 10, [switch]$Enabled) {
+    function Wait-ForControl([string]$Id, [int]$Seconds = 10, [switch]$Enabled, [switch]$IncludePopups) {
         Write-Host "Waiting for '$Id'"
         $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
         for ($attempt = 0; $attempt -lt $Seconds * 4; $attempt++) {
@@ -78,6 +78,15 @@ try {
             if ($process.HasExited) { throw "GUI exited while waiting for '$Id'" }
             $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
             $control = $window.FindFirst($descendants, $condition)
+            if (!$control -and $IncludePopups) {
+                # WinUI may expose Popup in a separate native window. Keep
+                # the search inside this production application's process.
+                $sameProcess = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id)
+                foreach ($surface in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $sameProcess)) {
+                    $candidate = $surface.FindFirst($descendants, $condition)
+                    if ($candidate -and !$candidate.Current.IsOffscreen) { $control = $candidate; break }
+                }
+            }
             if ($control -and !$control.Current.IsOffscreen -and (!$Enabled -or $control.Current.IsEnabled)) { return $control }
             Start-Sleep -Milliseconds 250
         }
@@ -171,20 +180,55 @@ try {
     $draft = Wait-ForControl 'chat.composer'
     $value = $draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     $value.SetValue('Retained unsent smoke draft')
+    $text = $draft.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+    $selectedText = $text.DocumentRange.FindText('unsent', $false, $false)
+    if (!$selectedText) { throw 'The production composer did not expose its unsent text selection' }
+    $selectedText.Select()
     Wait-ForControl 'chat.title' | Out-Null
     # Backend/persona discovery can repaint the composer after the transcript
     # opens. Wait for its new native control to finish layout before invoking.
     Invoke-Control (Wait-ForControl 'chat.setup')
+    $agent = Wait-ForControl 'chat.setup.agent' 10 -Enabled
+    $selection = $agent.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
+    $selectedAgent = @($selection.Current.GetSelection())
+    if ($selectedAgent.Count -ne 1 -or $selectedAgent[0].Current.Name -ne 'Codex') {
+        throw 'Opening Setup did not render the selected native agent control'
+    }
     $draft = Wait-ForControl 'chat.composer'
     Wait-ForControl 'chat.send' | Out-Null
     if ($draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne 'Retained unsent smoke draft') {
         throw 'Rebuilding the chat setup lost the draft'
     }
+    $draftSelection = $draft.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern).GetSelection()
+    if ($draftSelection.Count -ne 1 -or $draftSelection[0].GetText(-1) -ne 'unsent') {
+        throw 'Opening Setup lost the composer text selection'
+    }
+    Invoke-Control (Wait-ForControl 'chat.setup.done')
+    Wait-ForControl 'chat.composer' | Out-Null
     Open-Place 'Reload chats'
     $draft = Wait-ForControl 'chat.composer'
     if ($draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne 'Retained unsent smoke draft') {
         throw 'Reopening the chat composer lost the draft'
     }
+    # Repeat the production setup rebuild after reopening. Nested inspector
+    # content must release its logical owner even if its card was unmounted.
+    Invoke-Control (Wait-ForControl 'chat.setup')
+    $agent = Wait-ForControl 'chat.setup.agent' 10 -Enabled
+    $selectedAgent = @($agent.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection())
+    if ($selectedAgent.Count -ne 1 -or $selectedAgent[0].Current.Name -ne 'Codex') {
+        throw 'Reopening Setup lost the selected agent'
+    }
+    Invoke-Control (Wait-ForControl 'chat.setup.done')
+    # Explicit information is the same action for chat and terminal rows.
+    # Resolve within the retained row, then confirm the native copyable ID
+    # surface appears without replacing or navigating the composer.
+    $chatRow = Wait-ForControl "sidebar.chat.$($chats[-1].id)"
+    $detailsId = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'sidebar.details')
+    $details = $chatRow.FindFirst($descendants, $detailsId)
+    if (!$details) { throw 'The chat row is missing its explicit information button' }
+    Invoke-Control $details
+    $copyId = Wait-ForControl "session.identity.$($chats[-1].id)" -IncludePopups
+    if ($copyId.Current.Name -notlike '*Tokenstat chat ID*') { throw 'The information card did not expose the full chat ID for copying' }
     Invoke-Control (Wait-ForControl 'sidebar.chatMore')
     Wait-ForControl "sidebar.chat.$($chats[4].id)" | Out-Null
     Invoke-Control (Wait-ForControl 'sidebar.chatAll')
@@ -224,7 +268,7 @@ try {
     }
     Wait-ForControl "sidebar.chat.$($latest.id)" | Out-Null
     $trace = Get-Content "$env:LOCALAPPDATA/tokenstat/logs/startup.log" | Where-Object { $_ -match "pid=$($process.Id) " }
-    if ($trace -match 'Chat open failed|[Uu]nhandled exception') { throw 'Production chat or sidebar raised a XAML exception' }
+    if ($trace -match 'Chat open failed|Chat (composer|inspector) construction failed|[Uu]nhandled exception') { throw 'Production chat or sidebar raised a XAML exception' }
     Write-Output 'PASS: production chats retain drafts, expand history, keep New chat drafts without ghost conversations, and explicitly open one empty chat without sending'
 } finally {
     $env:PATH = $originalPath

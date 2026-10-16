@@ -11,6 +11,8 @@ import android.graphics.Paint
 import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -28,13 +30,30 @@ import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
+import org.junit.rules.RuleChain
+import org.junit.rules.TestRule
+import org.junit.runners.model.Statement
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /** Render production components with local fixtures; no account or host is used. */
 @RunWith(AndroidJUnit4::class)
 class ChatImageLayoutTest {
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    private val compose = createAndroidComposeRule<ComponentActivity>()
+    private val screenRequirement = TestRule { base, description ->
+        object : Statement() {
+            override fun evaluate() {
+                description.getAnnotation(MinimumScreenWidth::class.java)?.let { required ->
+                    val metrics = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics
+                    assumeTrue("Requires at least ${required.dp}dp of screen width", metrics.widthPixels / metrics.density >= required.dp)
+                }
+                base.evaluate()
+            }
+        }
+    }
+    // Compose v2 executes tests inside a coroutine. Keep environment assumptions
+    // outside that rule so JUnit reports an incompatible device as skipped.
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(screenRequirement).around(compose)
     private val images = (0..5).map { ChatDisplayItem.Attachment("image-$it", "$it", "preview-$it.png", "image/png", 100) }
 
     private fun fixtures(): Map<String, File> {
@@ -60,7 +79,7 @@ class ChatImageLayoutTest {
 
     private fun show(width: Dp = 352.dp, content: @Composable () -> Unit) {
         compose.setContent { TsTheme(DarkColors) { MaterialTheme(colorScheme = DarkColors.toColorScheme(), typography = TsType.typography) {
-            Surface(Modifier.fillMaxSize()) { Column(Modifier.width(width).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
+            Surface(Modifier.fillMaxSize()) { Column(Modifier.width(width).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
         } } }
     }
 
@@ -92,14 +111,13 @@ class ChatImageLayoutTest {
         assertTrue(three[0].right <= three[1].left && three[1].right <= three[2].left)
         assertTrue(three.last().right <= compose.onNodeWithTag("three").getUnclippedBoundsInRoot().right)
         compose.onAllNodesWithText(L10n.text("common.chat.images.count", "3")).assertCountEquals(1)
-        compose.onNodeWithText(L10n.text("common.chat.images.more", "2")).assertIsDisplayed().performClick()
+        compose.onNodeWithText(L10n.text("common.chat.images.more", "2")).performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(3, selected) }
         screenshot("android-chat-galleries")
     }
 
+    @MinimumScreenWidth(672)
     @Test fun tabletGalleryUses640DpWithoutAnEmptyCellForThreeImages() {
-        val metrics = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics
-        assumeTrue(metrics.widthPixels / metrics.density >= 672)
         val files = fixtures()
         show(width = 704.dp) {
             Box(Modifier.testTag("wide-three")) { ChatImageTiles(images.take(3), files) {} }
@@ -144,7 +162,16 @@ class ChatImageLayoutTest {
         val data = Json.parseToJsonElement("""{"model":"gpt-6.1-sol","contextUsed":24500,"contextWindow":1000000,"windowSource":"previousAgent","contextBreakdown":{"input":3500,"cacheRead":21000,"cacheWrite":0},"usage":{"input":999999,"output":24000},"currentRun":true,"mcpServers":[{"name":"images","source":"agent","status":"connected"},{"name":"files","source":"agent","status":"connected"},{"name":"archive","source":"config","status":"disabled"}]}""").jsonObject
         val chat = Json.parseToJsonElement("""{"id":"preview","backend":"codex","model":"gpt-6.1-sol","running":true}""").jsonObject
         show { Column(Modifier.testTag("inspector"), verticalArrangement = Arrangement.spacedBy(8.dp)) { ChatInspectionCards(data, chat) } }
-        assertTrue(height("inspector") < 190.dp)
+        val cards = compose.onNodeWithTag("inspector").fetchSemanticsNode().children
+        assertEquals("Activity, context and MCP each keep their own compact card", 3, cards.size)
+        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        val heights = cards.map { (it.boundsInRoot.height / density).dp }
+        assertTrue("Collapsed activity is one row: ${heights[0]}", heights[0] <= 56.dp)
+        assertTrue("Context summary keeps its token/capacity rows: ${heights[1]}", heights[1] <= 112.dp)
+        assertTrue("Collapsed MCP summary is one row: ${heights[2]}", heights[2] <= 56.dp)
+        // The original 190dp budget covered Context + MCP. Activity adds one
+        // independently bounded row, rather than relaxing either old card.
+        assertTrue(heights[1] + heights[2] + 8.dp < 190.dp)
         compose.onNodeWithText(L10n.text("common.chat.stats.connection_summary", "2", "1")).assertIsDisplayed()
         compose.onNodeWithText(L10n.text("common.chat.stats.last_window")).assertDoesNotExist()
         screenshot("android-chat-context-collapsed")
@@ -173,3 +200,7 @@ class ChatImageLayoutTest {
         resolver.openOutputStream(uri)!!.use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 }
+
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+private annotation class MinimumScreenWidth(val dp: Int)

@@ -6,6 +6,8 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Media;
 using Tokenstat.Pages;
 using Tokenstat.Navigation;
 using Windows.Foundation;
@@ -33,31 +35,68 @@ internal sealed class SidebarHoverPresenter
     private FrameworkElement? _root;
     private SidebarHoverState _state = new();
     private HoverRect? _cardBounds;
+    private bool _explicitOpen;
     private readonly PointerEventHandler _pressed;
     private readonly PointerEventHandler _wheel;
     private readonly KeyEventHandler _key;
 
-    public static void Attach(FrameworkElement row, Func<CancellationToken, Task<FrameworkElement>> content)
+    public static void Attach(FrameworkElement row, Func<CancellationToken, Task<FrameworkElement>> content, bool explicitOpen = false)
     {
-        if (Presenters.TryGetValue(row, out var presenter)) presenter._content = content;
-        else Presenters.Add(row, new SidebarHoverPresenter(row, content));
+        if (Presenters.TryGetValue(row, out var presenter)) { presenter._content = content; presenter._explicitOpen = explicitOpen; }
+        else Presenters.Add(row, new SidebarHoverPresenter(row, content, explicitOpen));
     }
     public static void Transfer(FrameworkElement from, FrameworkElement to)
-    { if (Presenters.TryGetValue(from, out var presenter)) Attach(to, presenter._content); }
-    private SidebarHoverPresenter(FrameworkElement row, Func<CancellationToken, Task<FrameworkElement>> content)
+    { if (Presenters.TryGetValue(from, out var presenter)) Attach(to, presenter._content, presenter._explicitOpen); }
+
+    public static Button DetailsButton()
     {
-        _row = row; _content = content;
+        var button = new Button { Name = "SidebarDetails", Width = 28, Height = 28, MinWidth = 0, MinHeight = 0,
+            Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Content = new FontIcon { Glyph = "\uE946", FontSize = 14, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") } };
+        var label = L10n.Text("windows.sidebarhovercard.details");
+        AutomationProperties.SetName(button, label); AutomationProperties.SetAutomationId(button, "sidebar.details");
+        ToolTipService.SetToolTip(button, label);
+        button.Click += (_, _) => {
+            // NavigationRows can move fresh content into a retained container.
+            // Resolve its current row instead of capturing the discarded one.
+            for (DependencyObject? parent = button; parent is not null; parent = VisualTreeHelper.GetParent(parent))
+                if (parent is NavigationViewItem row && Presenters.TryGetValue(row, out var presenter))
+                { if (presenter._popup is not null || presenter._pending is not null) presenter.Close(); else presenter.Begin(); break; }
+        };
+        return button;
+    }
+
+    public static FrameworkElement WithDetails(UIElement content)
+    {
+        var row = new Grid { ColumnSpacing = 4, Tag = (content as FrameworkElement)?.Tag };
+        row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        row.Children.Add(content);
+        var details = DetailsButton(); Grid.SetColumn(details, 1); row.Children.Add(details);
+        return row;
+    }
+
+    private SidebarHoverPresenter(FrameworkElement row, Func<CancellationToken, Task<FrameworkElement>> content, bool explicitOpen)
+    {
+        _row = row; _content = content; _explicitOpen = explicitOpen;
         _pressed = (_, args) =>
         {
             if (_root is null) return;
             var point = args.GetCurrentPoint(_root).Position;
+            if (_explicitOpen && Bounds()?.Contains(point.X, point.Y, 0) == true) return;
             if (_cardBounds?.Contains(point.X, point.Y, 0) != true) Close();
         };
-        _wheel = (_, _) => Close();
-        _key = (_, _) => Close();
+        _wheel = (_, _) => { if (!_explicitOpen || !Pointer(out var point) || _cardBounds?.Contains(point.X, point.Y, 0) != true) Close(); };
+        _key = (_, args) => { if (!_explicitOpen || args.Key == Windows.System.VirtualKey.Escape) Close(); };
         row.PointerEntered += (_, args) =>
-        { if (args.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse) Begin(); };
-        row.PointerExited += (_, _) => { if (_popup is null) CancelPending(); };
+        { if (!_explicitOpen && args.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse) Begin(); };
+        row.PointerExited += (_, _) => { if (!_explicitOpen && _popup is null) CancelPending(); };
+        row.PointerPressed += (_, args) => {
+            if (!_explicitOpen) return;
+            for (var element = args.OriginalSource as DependencyObject; element is not null; element = VisualTreeHelper.GetParent(element))
+                if (element is Button { Name: "SidebarDetails" }) return;
+            Close();
+        };
         row.Unloaded += (_, _) => Close();
         row.ContextRequested += (_, _) => Close();
         if (row.ContextFlyout is { } menu) menu.Opening += (_, _) => Close();
@@ -75,10 +114,10 @@ internal sealed class SidebarHoverPresenter
         try
         {
             var account = BrowserProjectMemory.AccountEpoch.Revision;
-            await Task.Delay(450, token);
-            if (token.IsCancellationRequested || !_row.IsLoaded || !PointerInsideRow() || account != BrowserProjectMemory.AccountEpoch.Revision) return;
+            if (!_explicitOpen) await Task.Delay(450, token);
+            if (token.IsCancellationRequested || !_row.IsLoaded || (!_explicitOpen && !PointerInsideRow()) || account != BrowserProjectMemory.AccountEpoch.Revision) return;
             var card = await _content(token);
-            if (token.IsCancellationRequested || !_row.IsLoaded || !PointerInsideRow() || account != BrowserProjectMemory.AccountEpoch.Revision) return;
+            if (token.IsCancellationRequested || !_row.IsLoaded || (!_explicitOpen && !PointerInsideRow()) || account != BrowserProjectMemory.AccountEpoch.Revision) return;
             var root = _row.XamlRoot;
             if (root?.Content is not FrameworkElement host) return;
             var size = root.Size;
@@ -96,20 +135,22 @@ internal sealed class SidebarHoverPresenter
             var y = Math.Clamp(row.Value.Y, 8, Math.Max(8, size.Height - height - 8));
             _cardBounds = new HoverRect(x, y, width, height);
             _state = new();
-            _popup = new Popup { XamlRoot = root, Child = card, HorizontalOffset = x, VerticalOffset = y, IsLightDismissEnabled = false, ShouldConstrainToRootBounds = true };
+            _popup = new Popup { XamlRoot = root, Child = card, HorizontalOffset = x, VerticalOffset = y, IsLightDismissEnabled = _explicitOpen, ShouldConstrainToRootBounds = true };
             _popup.Closed += (_, _) => Close();
             _root = host;
             host.AddHandler(UIElement.PointerPressedEvent, _pressed, true);
             host.AddHandler(UIElement.PointerWheelChangedEvent, _wheel, true);
             host.AddHandler(UIElement.KeyDownEvent, _key, true);
             _popup.IsOpen = true;
-            _timer = _row.DispatcherQueue.CreateTimer();
-            _timer.Interval = TimeSpan.FromMilliseconds(80);
-            _timer.Tick += (_, _) => CheckPointer();
-            _timer.Start();
+            if (!_explicitOpen) {
+                _timer = _row.DispatcherQueue.CreateTimer();
+                _timer.Interval = TimeSpan.FromMilliseconds(80);
+                _timer.Tick += (_, _) => CheckPointer(); _timer.Start();
+            }
         }
         catch (OperationCanceledException) { }
         catch { Close(); } // A preview must never break a row's normal navigation.
+        finally { if (_popup is null && _pending?.Token == token) CancelPending(); }
     }
     private HoverRect? Bounds()
     {

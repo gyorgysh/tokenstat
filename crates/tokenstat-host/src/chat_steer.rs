@@ -157,6 +157,7 @@ impl Store {
         }
         OpenOptions::new()
             .read(true)
+            .write(true)
             .open(self.events_path(id))
             .and_then(|file| file.sync_all())
             .map_err(|error| DispatchError::delivery_unknown(error.to_string()))?;

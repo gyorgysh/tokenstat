@@ -174,6 +174,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Grid.SetRow(_composerDock, 1);
         layout.Children.Add(transcriptHost);
         layout.Children.Add(_composerDock);
+        AttachChatDropSurface(layout);
         Content = layout;
         SizeChanged += (_, _) => FitSetupViewport();
         RenderInspector();
@@ -188,7 +189,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             else if (_openId is not null) StartPoll();
             else await ShowListAsync();
         };
-        Unloaded += (_, _) => { DetachInspectionWindow(); AppServices.AccountChanged -= ImagesAccountChanged; RemoteWorkspaces.Changed -= ImagesPeerChanged; RememberDraft(); _openGeneration++; ResetImagePreviews(); _poll?.Cancel(); _commandDialog?.Hide(); _inspection = null; _inspectionHost.Children.Clear(); };
+        Unloaded += (_, _) => { DetachInspectionWindow(); AppServices.AccountChanged -= ImagesAccountChanged; RemoteWorkspaces.Changed -= ImagesPeerChanged; RememberDraft(); _openGeneration++; CancelDropImport(); ResetImagePreviews(); _poll?.Cancel(); _commandDialog?.Hide(); _inspection = null; _inspectionHost.Children.Clear(); };
         AutomationProperties.SetAutomationId(_draft, "chat.composer");
         AutomationProperties.SetAutomationId(_titleBox, "chat.title");
     }
@@ -236,6 +237,23 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void RenderInspector()
     {
+        try { RenderInspectorContent(); }
+        catch (Exception error)
+        {
+            // Native UI Automation may receive a XAML exception directly
+            // from a Click handler without the app's unhandled event firing.
+            Program.LogStartup($"Chat inspector construction failed: {error}");
+            throw;
+        }
+    }
+
+    private void RenderInspectorContent()
+    {
+        // The nested body retains logical ownership after its outer card is
+        // unmounted. Release this shared host through that body, including
+        // when the inspector was hidden and WinUI has no visual parent.
+        _sessionIdentityOwner?.Children.Remove(_sessionIdentityHost);
+        _sessionIdentityOwner = null;
         _inspector.Children.Clear();
         if (_openChat is null)
         {
@@ -295,7 +313,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 L10n.Text("windows.chatpage.approvals.2bfc3471"), L10n.Text("windows.chatpage.0_waiting.15f51b52", $"{_approvals.Count}"),
                 L10n.Text("windows.chatpage.answer_them_in_the_transcript.fd152eae")));
         }
-        Detach(_sessionIdentityHost);
+        _sessionIdentityOwner = conversation;
         conversation.Children.Add(_sessionIdentityHost);
         RenderSessionIdentities();
         _inspector.Children.Add(CollapsibleStatsCard(L10n.Text("windows.chatpage.conversation.8b34dbc2"), "conversation",
@@ -382,6 +400,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RememberDraft();
         _poll?.Cancel();
         var generation = ++_openGeneration;
+        CancelDropImport();
         ResetImagePreviews();
         AbandonSteerDelivery();
         _opening = false;
@@ -693,6 +712,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RememberDraft();
         _poll?.Cancel();
         var generation = ++_openGeneration;
+        CancelDropImport();
         ResetImagePreviews();
         AbandonSteerDelivery();
         _opening = true;
@@ -801,16 +821,23 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var bypassOnly = gate == "bypassOnly";
         var running = Format.Flag(chat, "running");
         var body = new StackPanel { Spacing = Theme.SpaceM };
-        if (!inspector) body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.done"), ActionIcon.Done, (_, _) =>
+        if (!inspector)
         {
-            _setupExpanded = false;
-            PaintConversation();
-        }));
+            var done = ActionIconGlyph.Button(L10n.Text("common.done"), ActionIcon.Done, (_, _) =>
+            {
+                _setupExpanded = false;
+                PaintConversation();
+            });
+            AutomationProperties.SetAutomationId(done, "chat.setup.done");
+            body.Children.Add(done);
+        }
         var help = new StackPanel { Spacing = Theme.SpaceS };
         help.Children.Add(Chrome.SectionLabel(L10n.Text("windows.chatpage.how_this_chat_should_work.b5eec3c8")));
         help.Children.Add(Muted(L10n.Text("windows.chatpage.agent_model_and_mode_also_live_on_the_comp.23ec79e1")));
 
-        body.Children.Add(Labeled(L10n.Text("windows.chatpage.agent.11b39c93"), AgentPicker(backendId, running)));
+        var agent = AgentPicker(backendId, running);
+        if (!inspector) AutomationProperties.SetAutomationId(agent, "chat.setup.agent");
+        body.Children.Add(Labeled(L10n.Text("windows.chatpage.agent.11b39c93"), agent));
         if (_personas.Count > 0)
         {
             body.Children.Add(Labeled(L10n.Text("windows.chatpage.persona.31bdeef9"), PersonaPicker(Format.Text(chat, "personaId"), running)));
@@ -1715,7 +1742,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var attach = Buttons.ToolbarIcon(ActionIcon.Attach, L10n.Text("windows.chatpage.attach_a_file.21298c62"), async (_, _) => await AttachAsync());
-        attach.IsEnabled = !Busy();
+        attach.IsEnabled = !_queueing && !_sending && !_pickingAttachment && _fileTransfer is null && _dropImport is null;
         var attachmentTools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         attachmentTools.Children.Add(attach);
         attachmentTools.Children.Add(FastModeButton());
@@ -1808,6 +1835,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var setup = ActionIconGlyph.Button(L10n.Text("windows.chatpage.setup.7013af4c"), ActionIcon.Settings, (_, _) =>
         {
             _setupExpanded = true;
+            // Setup reveals its native agent and working-style controls.
+            _statsExpanded["setup/" + L10n.Text("common.chat_agent_behavior")] = true;
             PaintConversation();
         });
         AutomationProperties.SetAutomationId(setup, "chat.setup");
@@ -2013,6 +2042,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void RebuildComposerActions()
     {
+        if (_dropImport is not null) {
+            _composerActions.Children.Clear();
+            _composerActions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Stop, (_, _) => CancelDropImport()));
+            return;
+        }
         if (_fileTransfer is not null) {
             _composerActions.Children.Clear();
             _composerActions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Stop, (_, _) => _fileTransfer?.Cancel()));
@@ -2062,22 +2096,25 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
+    private bool _pickingAttachment;
+
     private async Task AttachAsync()
     {
-        if (_openId is not string chat || _queueing || _sending || _fileTransfer is not null) return;
+        if (_openId is not string chat || _queueing || _sending || _pickingAttachment || _fileTransfer is not null || _dropImport is not null) return;
         var generation = _openGeneration;
         var accountGeneration = AppServices.AccountGeneration;
         bool Current() => OpenChatIs(chat) && generation == _openGeneration && accountGeneration == AppServices.AccountGeneration;
-        var picker = new FileOpenPicker();
-        picker.FileTypeFilter.Add("*");
-        if (App.CurrentWindow is { } window)
-        {
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
-        }
-        var file = await picker.PickSingleFileAsync();
-        if (file is null || !Current() || _queueing || _sending || _fileTransfer is not null) return;
+        _pickingAttachment = true;
         try
         {
+            var picker = new FileOpenPicker();
+            picker.FileTypeFilter.Add("*");
+            if (App.CurrentWindow is { } window)
+            {
+                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
+            }
+            var file = await picker.PickSingleFileAsync();
+            if (file is null || !Current() || _queueing || _sending || _fileTransfer is not null) return;
             if (_attachments.Count >= NewChatFile.MaximumCount) throw new IOException(L10n.Text("common.chat_files_busy"));
             var attached = await UploadFileAsync(chat, file, Current);
             if (!Current()) return;
@@ -2087,6 +2124,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             RememberDraft(); RebuildAttachStrip(); RebuildComposerActions();
         }
         catch (Exception ex) { if (Current()) Banner(ex.Message); }
+        finally { _pickingAttachment = false; }
     }
 
     /// A send is in flight. Set synchronously before the first await so a

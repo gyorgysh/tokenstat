@@ -384,6 +384,9 @@ for line in sys.stdin:
  elif method=='turn/interrupt':
   assert m['params']=={'threadId':'session','turnId':'turn'}
   emit({'id':m['id'],'result':{}})
+  for thread,turn in [('foreign-thread','turn'),('session','foreign-turn')]:
+   emit({'method':'item/started','params':{'threadId':thread,'turnId':turn,'item':{'id':'foreign','type':'commandExecution','command':'foreign-private-command'}}})
+   emit({'method':'item/completed','params':{'threadId':thread,'turnId':turn,'item':{'id':'foreign','type':'commandExecution','status':'failed','command':'foreign-private-command','aggregatedOutput':'foreign-private-output'}}})
   # Persisting a cancelled tool can exceed the PTY kill's 200ms signal grace.
   time.sleep(0.4)
   with (root/'history').open('a') as f:f.write('custom_tool_call_output: aborted by user\n')
@@ -423,6 +426,7 @@ time.sleep(0.4)
     assert!(root.path().join("flushed").is_file());
     let output = fs::read_to_string(root.path().join("output")).unwrap();
     assert!(output.contains("aborted by user"));
+    assert!(!output.contains("foreign-private"));
 }
 
 #[test]

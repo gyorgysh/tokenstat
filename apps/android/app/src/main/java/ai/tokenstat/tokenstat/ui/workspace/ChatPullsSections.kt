@@ -24,8 +24,6 @@ import androidx.compose.foundation.border
 import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import android.provider.OpenableColumns
 import android.util.Base64
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -368,43 +366,7 @@ fun ChatSection(
             dismissButton = { androidx.compose.material3.TextButton(onClick = { fileRelayAnswer?.complete(false) }) { Text(L10n.text("common.cancel")) } })
     }
     val pendingQueue = ChatOutboxRules.pending(queued, deliveringFromComposer)
-    // The document picker, which needs no storage permission: the user hands
-    // us one file at a time and nothing else on the device is readable.
-    val picker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris ->
-        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
-        val conversation = openId
-        scope.launch {
-            attachError = null
-            for (uri in uris) {
-                val remaining = FILE_MAX - staged.sumOf { it.bytes }
-                if (remaining <= 0) {
-                    attachError = L10n.text("android.chatpullssections.send_or_remove_the_staged_files_before_add.40e8ba5e")
-                    break
-                }
-                val read = withContext(Dispatchers.IO) {
-                    readAttachment(context, uri, minOf(FILE_MAX, remaining))
-                }
-                if (openId != conversation || !ownsProject()) {
-                    (read as? AttachmentRead.Ok)?.attachment?.filePath?.let { java.io.File(it).delete() }
-                    return@launch
-                }
-                when (read) {
-                    is AttachmentRead.Ok -> {
-                        // Another picker result may have completed while this read suspended.
-                        if (staged.size >= 20 || staged.sumOf { it.bytes } + read.attachment.bytes > FILE_MAX) {
-                            read.attachment.filePath?.let { java.io.File(it).delete() }
-                            attachError = L10n.text("android.chatpullssections.send_or_remove_the_staged_files_before_add.40e8ba5e")
-                            break
-                        }
-                        staged = staged + read.attachment
-                    }
-                    is AttachmentRead.Failed -> { attachError = read.reason; break }
-                }
-            }
-        }
-    }
+    val attachmentInputs = rememberChatAttachmentInputs(model, composerKey, ::ownsProject, !sending) { attachError = it }
 
     fun retireSteer(id: String) {
         steerVersions.changed(id)
@@ -1365,7 +1327,9 @@ fun ChatSection(
 
     val place = folderName.ifBlank { L10n.text("android.chatpullssections.this_folder.9d6325c8") }
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val chatPane = modifier.then(attachmentInputs.drops).then(if (attachmentInputs.targeted)
+        Modifier.border(2.dp, LocalTsColors.current.accent, RoundedCornerShape(12.dp)) else Modifier)
+    Column(chatPane, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Only the list wears the section label. A conversation is a screen
         // of its own and carries its own title.
         if (openId == null) SectionLabel(L10n.text("android.chatpullssections.conversations.1d432f58"))
@@ -1929,7 +1893,8 @@ fun ChatSection(
                 parking = parkingSteer,
                 sendLabel = if (noteForStep && openChat?.bol("nativeSteer") == true) L10n.text("common.chat.steer") else if (noteForStep) L10n.text("android.chatpullssections.add_a_note_for_the_next_step.4778177a") else L10n.text("android.chatpullssections.send.f6f4688f"),
                 staged = staged,
-                onPick = { attachError = null; picker.launch(arrayOf("*/*")) },
+                onPick = attachmentInputs.pick,
+                attachmentEnabled = !attachmentInputs.reading, submitEnabled = !attachmentInputs.reading,
                 onRemove = { staged = staged - it },
                 onSend = { scope.launch { send(draft) } },
                 onStop = {
