@@ -128,7 +128,7 @@ class ChatAgentPanelTest {
             chatAgentSummary(backends, chat("muse", model = "opus", effort = "max")),
         )
         assertEquals("Muse", chatAgentSummary(backends, chat("muse")))
-        assertEquals("Agent", chatAgentSummary(backends, null))
+        assertEquals("Select agent", chatAgentSummary(backends, null))
         assertEquals(
             "Codex · gpt-5.4",
             chatAgentSummary(backends, chat("codex", model = "gpt-5.4", effort = "max")),

@@ -188,7 +188,7 @@ internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): St
     val backend = backendOf(backends, id)
     val agent = backend?.str("label")?.ifBlank { null }
         ?: id.ifBlank { null }?.let { ai.tokenstat.tokenstat.ui.logic.harnessName(it) }
-        ?: L10n.text("android.chatagentpanel.agent.11b39c93")
+        ?: L10n.text("common.chat.select_agent")
     val parts = mutableListOf(agent)
     chat?.str("model")?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
     val effort = chat?.str("effort")?.takeIf { it.isNotBlank() }

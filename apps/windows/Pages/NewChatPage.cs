@@ -35,7 +35,8 @@ internal sealed class NewChatPage : Page
     private readonly ComboBox _repository = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _draft = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 160, MaxHeight = 360 };
     private readonly TextBlock _notice = new() { TextWrapping = TextWrapping.Wrap, Opacity = .7 };
-    private readonly ComboBox _agent = new() { Header = L10n.Text("windows.chatpage.agent.11b39c93"), HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ComboBox _agent = new() { Header = L10n.Text("windows.chatpage.agent.11b39c93"),
+        PlaceholderText = L10n.Text("common.chat.select_agent"), HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _model = new() { Header = L10n.Text("windows.chatpage.model.5e2c614c"), HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly ComboBox _effort = new() { Header = L10n.Text("windows.chatpage.effort.4387e5d3"), HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly FlowPanel _workingStyle = new() { Spacing = Theme.SpaceS };

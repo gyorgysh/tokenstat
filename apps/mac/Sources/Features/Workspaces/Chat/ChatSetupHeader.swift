@@ -536,6 +536,11 @@ struct ChatAgentChoices {
     }
 
     var backend: ChatBackend? { model.backend(for: chat.backend) }
+    private var agentLabel: String {
+        if let backend { return backend.label }
+        return chat.backend.isEmpty || chat.backend == "agent"
+            ? L10n.text("common.chat.select_agent") : chat.backend
+    }
 
     /// Every row, in the order the sections have always been read in.
     var choices: [PickerChoice<Choice>] {
@@ -583,7 +588,7 @@ struct ChatAgentChoices {
     /// scrolling to find which row carries the mark.
     func currentValue(_ section: String) -> String? {
         let values: [String: String?] = [
-            L10n.text("apple.chatsetupheader.agent.11b39c93"): backend?.label ?? chat.backend,
+            L10n.text("apple.chatsetupheader.agent.11b39c93"): agentLabel,
             L10n.text("apple.chatsetupheader.model.5e2c614c"): chat.model?.isEmpty == false ? chat.model : L10n.text("apple.chatsetupheader.default.21b111cb"),
             L10n.text("apple.chatsetupheader.effort.4387e5d3"): chat.effort?.isEmpty == false ? chat.effort : L10n.text("apple.chatsetupheader.default.21b111cb"),
         ]
@@ -637,7 +642,7 @@ struct ChatAgentChoices {
     /// Default" said three times that nothing was changed; the panel this
     /// opens shows every setting, defaults included.
     var summary: String {
-        let agent = backend?.label ?? chat.backend
+        let agent = agentLabel
         var parts = [agent]
         if let name = chat.model, !name.isEmpty {
             parts.append(name)
