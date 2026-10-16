@@ -50,7 +50,19 @@ import ImageIO
             let rotated = await metadata.dimensions(data: encoded, file: nil)
             let expected = (5...8).contains(orientation)
                 ? ChatImageDimensions(width: 83, height: 37) : ChatImageDimensions(width: 37, height: 83)
-            precondition(rotated == expected, "EXIF rotation must also rotate the gallery's aspect")
+            precondition(rotated == expected,
+                         "EXIF orientation \(orientation): expected \(expected), got \(String(describing: rotated))")
+        }
+        // These fixtures have identical lengths and differ only in an EXIF
+        // field beyond the prefix sampled by older Foundation data hashes.
+        // Revisit both cached variants: hash/count alone cannot identify them.
+        let portrait = try image(width: 37, height: 83, orientation: 1)
+        let landscape = try image(width: 37, height: 83, orientation: 6)
+        precondition(portrait.count == landscape.count && portrait != landscape)
+        for rotated in [false, true, false, true] {
+            let cached = await metadata.dimensions(data: rotated ? landscape : portrait, file: nil)
+            precondition(cached == (rotated ? .init(width: 83, height: 37) : .init(width: 37, height: 83)),
+                         "Same-size EXIF variants must retain independent metadata cache entries")
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

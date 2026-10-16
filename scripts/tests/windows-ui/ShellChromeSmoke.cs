@@ -40,13 +40,13 @@ internal static class ShellChromeSmoke
         var setup = ActionIconGlyph.Button("Setup", ActionIcon.Settings, (_, _) => { });
         if (Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(setup) != "Setup")
             throw new Exception("Icon-and-text actions must expose their label to accessibility and automation");
-        var sidebar = Buttons.ToolbarIcon(ActionIcon.Sidebar, "Projects", (_, _) => { });
+        var sidebar = Buttons.ToolbarIcon(ActionIcon.Sidebar, "Repositories", (_, _) => { });
         var scope = SegmentedCapsule.View(new List<(string Value, string Label, ActionIcon? Glyph)>
         {
             ("local", "This device", ActionIcon.Computer), ("account", "All devices", ActionIcon.Browser),
         }, "account", _ => Task.CompletedTask);
         scope.Width = 280;
-        var project = new ComboBox { Width = 160, ItemsSource = new[] { "All projects", "tokenstat" }, SelectedIndex = 1 };
+        var project = new ComboBox { Width = 160, ItemsSource = new[] { "All repositories", "tokenstat" }, SelectedIndex = 1 };
         var sort = new TextBox { Width = 220, Text = "Retained filter" };
         var refresh = Buttons.ToolbarIcon(ActionIcon.Refresh, "Refresh", (_, _) => { });
         var inspector = Buttons.ToolbarIcon(ActionIcon.Collapse, "Inspector", (_, _) => { });

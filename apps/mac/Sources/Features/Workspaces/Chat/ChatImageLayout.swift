@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 import ImageIO
+import CryptoKit
 
 struct ChatImageDimensions: Equatable, Sendable {
     let width: CGFloat
@@ -66,14 +67,20 @@ struct ChatImageGalleryGeometry {
 /// The actor keeps at most 256 small entries and never retains image bytes.
 actor ChatImageMetadata {
     static let shared = ChatImageMetadata()
-    private enum Key: Hashable { case data(Int, Int), file(URL, UInt64?, UInt64?, Date?) }
+    private enum Key: Hashable { case data(Data), file(URL, UInt64?, UInt64?, Date?) }
     private struct Entry { let dimensions: ChatImageDimensions? }
     private var entries: [Key: Entry] = [:]
     private var recency: [Key] = []
 
     func dimensions(data: Data?, file: URL?) -> ChatImageDimensions? {
         let key: Key
-        if let data { key = .data(data.hashValue, data.count) }
+        if let data {
+            // A hashValue is a bucket hint, not content identity. Some
+            // Foundation versions sample bytes, so equal-size images whose
+            // EXIF metadata differs can otherwise share cached dimensions.
+            // Retain only the fixed-size digest, never the original pixels.
+            key = .data(Data(SHA256.hash(data: data)))
+        }
         else if let file {
             let attributes = try? FileManager.default.attributesOfItem(atPath: file.path)
             key = .file(file, (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value,

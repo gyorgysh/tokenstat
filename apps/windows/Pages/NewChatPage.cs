@@ -117,7 +117,8 @@ internal sealed class NewChatPage : Page
             && _catalogRepository == repository.Id && _agent.SelectedItem is ComboBoxItem;
         _repository.IsEnabled = _draft.IsEnabled = _addButton.IsEnabled = !_sending;
         _agent.IsEnabled = _model.IsEnabled = !_sending;
-        _submit.Content = Copy(_sending ? "preparing" : NewChatSetup.ShouldSend(_draft.Text) ? "send" : "open_chat");
+        var action = Copy(_sending ? "preparing" : NewChatSetup.ShouldSend(_draft.Text) ? "send" : "open_chat");
+        _submit.Content = action; AutomationProperties.SetName(_submit, action);
     }
     private async Task LoadAgentsAsync()
     {

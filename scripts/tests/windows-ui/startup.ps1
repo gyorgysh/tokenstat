@@ -17,9 +17,24 @@ if ($AppPath) {
 if (!(Test-Path -LiteralPath (Join-Path $app.DirectoryName 'tokenstat-hostd.exe') -PathType Leaf)) {
     throw 'The application folder is missing its host helper.'
 }
+# The landing page offers installed agents. Advertise a disposable, fail-closed
+# fixture so this check does not depend on a runner's real agent installation.
+# Use a conventional agent directory too: a scheduled helper need not inherit
+# this PowerShell process's PATH. Restore any existing command after the check.
+# Opening an empty chat must never execute a turn through this command.
+$agentBin = Join-Path $env:USERPROFILE '.local/bin'
+New-Item -Path $agentBin -ItemType Directory -Force | Out-Null
+$agentFile = Join-Path $agentBin 'codex.cmd'
+$previousAgent = Join-Path $env:RUNNER_TEMP 'codex.cmd.before-ui-smoke'
+$hadAgent = Test-Path -LiteralPath $agentFile
+if ($hadAgent) { Copy-Item -LiteralPath $agentFile -Destination $previousAgent -Force }
+$originalPath = $env:PATH
 $started = Get-Date
-$process = Start-Process -FilePath $app.FullName -WorkingDirectory $app.DirectoryName -PassThru
+$process = $null
 try {
+    [System.IO.File]::WriteAllText($agentFile, "@echo off`r`necho UI startup fixture cannot run an agent. 1>&2`r`nexit /b 64`r`n")
+    $env:PATH = "$agentBin;$originalPath"
+    $process = Start-Process -FilePath $app.FullName -WorkingDirectory $app.DirectoryName -PassThru
     for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 500
         $process.Refresh()
@@ -55,7 +70,7 @@ try {
         $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
         $invoke.Invoke()
     }
-    function Wait-ForControl([string]$Id, [int]$Seconds = 10) {
+    function Wait-ForControl([string]$Id, [int]$Seconds = 10, [switch]$Enabled) {
         Write-Host "Waiting for '$Id'"
         $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
         for ($attempt = 0; $attempt -lt $Seconds * 4; $attempt++) {
@@ -63,11 +78,11 @@ try {
             if ($process.HasExited) { throw "GUI exited while waiting for '$Id'" }
             $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
             $control = $window.FindFirst($descendants, $condition)
-            if ($control -and !$control.Current.IsOffscreen) { return $control }
+            if ($control -and !$control.Current.IsOffscreen -and (!$Enabled -or $control.Current.IsEnabled)) { return $control }
             Start-Sleep -Milliseconds 250
         }
         $window.FindAll($descendants, [System.Windows.Automation.Condition]::TrueCondition) |
-            Where-Object { $_.Current.AutomationId -match '^(sidebar|chat|projects)\.' -or (!$_.Current.IsOffscreen -and $_.Current.Name) } |
+            Where-Object { $_.Current.AutomationId -match '^(sidebar|chat|newChat|projects)\.' -or (!$_.Current.IsOffscreen -and $_.Current.Name) } |
             Select-Object -First 100 |
             ForEach-Object { Write-Host "UI: $($_.Current.AutomationId); offscreen=$($_.Current.IsOffscreen); $($_.Current.Name)" }
         throw "Production page did not render '$Id'"
@@ -150,7 +165,7 @@ try {
     Call-Host 'chat.update' @{id = $chats[-1].id; title = $chats[-1].title} | Out-Null
     if (@(Call-Host 'chat.recent' @{limit = 50}).Count -lt 12) { throw 'Archived fixture chats did not enter the recent feed' }
     # The slow sidebar poll discovers externally registered folders once a minute.
-    Open-Place 'Projects'
+    Open-Place 'Repositories'
     $chatRow = Wait-ForControl "sidebar.chat.$($chats[-1].id)" 65
     Invoke-Control $chatRow
     $draft = Wait-ForControl 'chat.composer'
@@ -174,20 +189,54 @@ try {
     Wait-ForControl "sidebar.chat.$($chats[4].id)" | Out-Null
     Invoke-Control (Wait-ForControl 'sidebar.chatAll')
     Wait-ForControl 'chat.list.create' | Out-Null
-    # Create uses the same composer path as opening an archived conversation.
+    # Opening New chat is an unsent landing draft, with no durable conversation.
+    $before = @(Call-Host 'chat.list' @{workspaceId = $folder.id})
     Open-Place 'New chat in UI smoke project'
+    Wait-ForControl 'newChat.repository' | Out-Null
+    $landing = Wait-ForControl 'newChat.composer'
+    Wait-ForControl 'newChat.send' 30 -Enabled | Out-Null
+    if (@(Call-Host 'chat.list' @{workspaceId = $folder.id}).Count -ne $before.Count) {
+        throw 'Opening the new chat landing page created a conversation'
+    }
+    $landing.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Retained landing smoke draft')
+    Open-Place 'Home'
+    Open-Place 'New chat in UI smoke project'
+    $landing = Wait-ForControl 'newChat.composer'
+    $landingValue = $landing.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    if ($landingValue.Current.Value -ne 'Retained landing smoke draft') { throw 'Reopening New chat lost the landing draft' }
+    if (@(Call-Host 'chat.list' @{workspaceId = $folder.id}).Count -ne $before.Count) {
+        throw 'Reopening the new chat landing page created a conversation'
+    }
+    # An explicit empty Open chat restores file/image-first prompts without
+    # sending a message. It uses the production creation and composer path.
+    $landingValue.SetValue('')
+    $openChat = Wait-ForControl 'newChat.send' 30 -Enabled
+    if ($openChat.Current.Name -ne 'Open chat') { throw 'The empty landing prompt must offer Open chat' }
+    Invoke-Control $openChat
     Wait-ForControl 'chat.composer' 30 | Out-Null
-    $latest = @(Call-Host 'chat.list' @{workspaceId = $folder.id}) | Select-Object -First 1
+    $after = @(Call-Host 'chat.list' @{workspaceId = $folder.id})
+    $created = @($after | Where-Object { $_.id -notin $before.id })
+    if ($after.Count -ne $before.Count + 1 -or $created.Count -ne 1) { throw 'Explicit Open chat must create exactly one conversation' }
+    $latest = $created[0]
+    if ($latest.running -or $latest.sendRevision -ne 0) { throw 'Empty Open chat started an agent turn' }
+    if (@((Call-Host 'chat.events' @{id = $latest.id; offset = 0}).events).Count -ne 0) {
+        throw 'Empty Open chat appended transcript events'
+    }
     Wait-ForControl "sidebar.chat.$($latest.id)" | Out-Null
     $trace = Get-Content "$env:LOCALAPPDATA/tokenstat/logs/startup.log" | Where-Object { $_ -match "pid=$($process.Id) " }
     if ($trace -match 'Chat open failed|[Uu]nhandled exception') { throw 'Production chat or sidebar raised a XAML exception' }
-    Write-Output 'PASS: production chats open, rebuild setup, retain drafts on reopen, expand history and create a new conversation'
+    Write-Output 'PASS: production chats retain drafts, expand history, keep New chat drafts without ghost conversations, and explicitly open one empty chat without sending'
 } finally {
+    $env:PATH = $originalPath
+    if ($hadAgent) { Move-Item -LiteralPath $previousAgent -Destination $agentFile -Force }
+    elseif (Test-Path -LiteralPath $agentFile) { Remove-Item -LiteralPath $agentFile -Force }
     Get-ChildItem "$env:LOCALAPPDATA/tokenstat/logs" -Filter '*.log' -ErrorAction SilentlyContinue |
         ForEach-Object { Write-Output "--- $($_.Name) ---"; Get-Content $_.FullName -Tail 80 }
     Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=$started; Id=1000,1001,1026} -ErrorAction SilentlyContinue |
         Where-Object { $_.Message -match 'Tokenstat|Microsoft.UI.Xaml' } |
         Select-Object TimeCreated,Id,Message | Format-List
-    if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
-    $process.Dispose()
+    if ($process) {
+        if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
+        $process.Dispose()
+    }
 }

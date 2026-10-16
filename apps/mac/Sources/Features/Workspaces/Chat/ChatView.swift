@@ -234,7 +234,7 @@ struct ChatView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
-    var body: some View {
+    private var paneContent: some View {
         VStack(spacing: 0) {
             #if os(macOS)
             DetailChromeBar(
@@ -440,6 +440,12 @@ struct ChatView: View {
             }
             }
         }
+    }
+
+    // Opaque boundaries keep this pane's large content tree and modifier
+    // chain independently type-checkable on the shipping Xcode toolchains.
+    private var presentedChat: some View {
+        paneContent
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $paneDropTargeted, receive: receive)
@@ -466,6 +472,10 @@ struct ChatView: View {
         .sheet(isPresented: $showingHandoff) { WorkHandoffSheet(chat: model) }
         .chatImageViewer(model: model)
         .chatActivityPresentation(model: model, active: isActive && !showingOverview)
+    }
+
+    private var observedChat: some View {
+        presentedChat
         // Asked again when the branch moves and when a turn ends, since an
         // agent may have just opened the pull request.
         .task(id: "\(workspaceID)|\(git?.branch ?? "")|\(model.busy)|\(isActive)") {
@@ -559,6 +569,10 @@ struct ChatView: View {
             }
         }
         .onDisappear { dropPresentation &+= 1; model.saveDraftNow() }
+    }
+
+    var body: some View {
+        observedChat
         // And the same fact to the host, which is the one deciding whether a
         // phone hears about this turn.
         .watching(conversationID: model.selected?.id, peer: model.peer,
