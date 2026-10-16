@@ -2238,6 +2238,9 @@ struct RootView: View {
                           }
                           workspaces.requestAdd()
                       }, onSend: { Task { await sendNewChat() } })
+            // The native backdrop and optical layers cover the titlebar band
+            // together; extending only a background is clipped by the page.
+            .ignoresSafeArea(.container, edges: .top)
             .onAppear {
                 chatStart.activate(scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation)
             }

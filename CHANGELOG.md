@@ -14,7 +14,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Added
 
 - New chat opens a dedicated composer with a repository picker and the existing Add repository flow on Mac, iPhone/iPad, Android and Windows. It includes file/image attachments, agent/model/effort, working style, permissions and supported fast mode. Local drafts stay with their repository. Opening the landing page, selecting files or choosing a repository does not create an empty conversation. Open chat supports image/file-first messages without starting a model turn. Empty background interactions produce motion-aware effects.
-- The Apple new-chat canvas reveals frosted glass beneath a liquid glow as the pointer moves or the empty background is clicked. Mac glass follows sidebar appearance settings; reduced motion and transparency are respected. The agent selector softens the canvas behind it to keep attention on the choices.
+- The Apple new-chat canvas layers flowing violet folds over frosted glass. Hover bends the layers with momentum; clicks spread gradually and settle. Mac glass follows sidebar appearance settings and fills the titlebar. Reduced motion and transparency are respected, and the agent selector softens the canvas behind it to keep attention on the choices.
 - Chat and terminal details offer click-to-copy Tokenstat and verified agent session IDs. Chat handoffs preserve earlier session references and point incoming agents to saved transcripts, including after a native session has been replaced.
 - Chat composers on Mac, iPhone, iPad, Android and Windows offer slash commands for context, usage, tools, MCP servers, stopping work and native Claude/Codex compaction.
 - Chat inspectors combine context and conversation usage, recent context history, tool groups and reported MCP connections in compact, expandable panels.
@@ -37,6 +37,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Fresh composers show Execute and Don't ask before agent discovery finishes, while remembered choices and older conversation settings stay intact.
 - Mac pane dividers limit resize cursors to their visible bounds when columns move, hide or close.
 - Mac terminal session details open from an info button, matching chats, and no longer open while hovering through the sidebar.
+- Session ID history refreshes after transcript replacement on Windows, including when file size and timestamps match.
 
 ### Changed
 

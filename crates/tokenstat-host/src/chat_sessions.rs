@@ -19,13 +19,20 @@ const RECORD_BYTES: u64 = 2048;
 const ARCHIVE: &str = "session-history.ndjson";
 
 #[derive(PartialEq, Eq)]
+enum LegacyFileIdentity {
+    #[cfg(unix)]
+    Unix(u64, u64),
+    #[cfg(windows)]
+    Windows(u64, [u8; 16]),
+}
+
+#[derive(PartialEq, Eq)]
 struct LegacyKey {
     path: PathBuf,
     length: u64,
     modified: Option<SystemTime>,
     created: Option<SystemTime>,
-    #[cfg(unix)]
-    identity: (u64, u64),
+    identity: Option<LegacyFileIdentity>,
     chat_id: String,
     backend: String,
     chat_created: i64,
@@ -36,26 +43,34 @@ struct LegacyKey {
 type LegacyCache = VecDeque<(LegacyKey, SessionInventory)>;
 static LEGACY_CACHE: OnceLock<Mutex<LegacyCache>> = OnceLock::new();
 
+fn legacy_file_identity(_file: &fs::File, _metadata: &fs::Metadata) -> Option<LegacyFileIdentity> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(LegacyFileIdentity::Unix(_metadata.dev(), _metadata.ino()))
+    }
+    #[cfg(windows)]
+    {
+        crate::win32::file_identity(_file)
+            .map(|(volume, id)| LegacyFileIdentity::Windows(volume, id))
+    }
+    #[cfg(not(any(unix, windows)))]
+    None
+}
+
 fn legacy_projection(directory: &Path, chat: &Conversation) -> Result<SessionInventory, String> {
     let path = directory.join("events.ndjson");
-    let metadata = match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(SessionInventory::default());
-        }
-        _ => return Err("session transcript is not a regular private file".into()),
+    let Some(file) = open_legacy_transcript(&path)? else {
+        return Ok(SessionInventory::default());
     };
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
     let candidates = candidates(chat);
     let key = LegacyKey {
         path,
         length: metadata.len(),
         modified: metadata.modified().ok(),
         created: metadata.created().ok(),
-        #[cfg(unix)]
-        identity: {
-            use std::os::unix::fs::MetadataExt;
-            (metadata.dev(), metadata.ino())
-        },
+        identity: legacy_file_identity(&file, &metadata),
         chat_id: chat.id.clone(),
         backend: chat.backend.clone(),
         chat_created: chat.created_at_ms,
@@ -65,16 +80,20 @@ fn legacy_projection(directory: &Path, chat: &Conversation) -> Result<SessionInv
             .map(|entry| (entry.backend.clone(), entry.id.clone()))
             .collect(),
     };
+    // Some remote filesystems do not report stable IDs. Re-read those files
+    // rather than treating matching timestamps as proof of identity.
+    let cacheable = key.identity.is_some() && key.modified.is_some();
     let cache = LEGACY_CACHE.get_or_init(|| Mutex::new(VecDeque::new()));
-    if let Some((_, inventory)) = cache
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .iter()
-        .find(|(stored, _)| *stored == key)
+    if cacheable
+        && let Some((_, inventory)) = cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .find(|(stored, _)| *stored == key)
     {
         return Ok(inventory.clone());
     }
-    let legacy = legacy_entries(directory, chat)?;
+    let legacy = legacy_entries_from_file(file, chat)?;
     let mut inventory = SessionInventory {
         total: legacy.len() as u64,
         entries: legacy.iter().rev().take(VISIBLE_LIMIT).cloned().collect(),
@@ -96,12 +115,14 @@ fn legacy_projection(directory: &Path, chat: &Conversation) -> Result<SessionInv
             }
         }
     }
-    let mut cache = cache
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    cache.push_back((key, inventory.clone()));
-    while cache.len() > 16 {
-        cache.pop_front();
+    if cacheable {
+        let mut cache = cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.push_back((key, inventory.clone()));
+        while cache.len() > 16 {
+            cache.pop_front();
+        }
     }
     Ok(inventory)
 }
@@ -480,9 +501,8 @@ pub(crate) fn inventory(directory: &Path, chat: &Conversation) -> SessionInvento
     inventory
 }
 
-fn legacy_entries(directory: &Path, chat: &Conversation) -> Result<Vec<SessionReference>, String> {
-    let path = directory.join("events.ndjson");
-    if fs::symlink_metadata(&path)
+fn open_legacy_transcript(path: &Path) -> Result<Option<fs::File>, String> {
+    if fs::symlink_metadata(path)
         .is_ok_and(|metadata| !metadata.is_file() || metadata.file_type().is_symlink())
     {
         return Err("session transcript is not a regular private file".into());
@@ -492,13 +512,36 @@ fn legacy_entries(directory: &Path, chat: &Conversation) -> Result<Vec<SessionRe
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x00200000); // FILE_FLAG_OPEN_REPARSE_POINT
     }
     let file = match options.open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.to_string()),
     };
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("session transcript is not a regular private file".into());
+    }
+    Ok(Some(file))
+}
+
+fn legacy_entries(directory: &Path, chat: &Conversation) -> Result<Vec<SessionReference>, String> {
+    let Some(file) = open_legacy_transcript(&directory.join("events.ndjson"))? else {
+        return Ok(Vec::new());
+    };
+    legacy_entries_from_file(file, chat)
+}
+
+fn legacy_entries_from_file(
+    file: fs::File,
+    chat: &Conversation,
+) -> Result<Vec<SessionReference>, String> {
     let mut input = BufReader::new(file);
     let mut entries: Vec<SessionReference> = Vec::new();
     loop {
@@ -662,9 +705,11 @@ mod tests {
                 + "\n"
         };
         fs::write(&path, row(FIRST)).unwrap();
+        let original = open_legacy_transcript(&path).unwrap().unwrap();
+        let original_identity = legacy_file_identity(&original, &original.metadata().unwrap());
         assert_eq!(inventory(temp.path(), &chat).entries[0].id, FIRST);
-        // Atomic replacement can have the same length and timestamp; inode
-        // identity still retires the old projection on Unix.
+        // Atomic replacement can have the same length and timestamps. The
+        // opened file's identity still retires the old projection.
         let previous_time = fs::metadata(&path).unwrap().modified().unwrap();
         let replacement = temp.path().join("replacement");
         fs::write(&replacement, row(SECOND)).unwrap();
@@ -676,6 +721,18 @@ mod tests {
             .unwrap();
         fs::rename(replacement, &path).unwrap();
         assert_eq!(inventory(temp.path(), &chat).entries[0].id, SECOND);
+        let replacement = open_legacy_transcript(&path).unwrap().unwrap();
+        let replacement_identity =
+            legacy_file_identity(&replacement, &replacement.metadata().unwrap());
+        if original_identity.is_some() {
+            assert!(original_identity != replacement_identity);
+        }
+        // Parse the same handle from which the identity and metadata came,
+        // even if the name was replaced between opening and reading.
+        assert_eq!(
+            legacy_entries_from_file(original, &chat).unwrap()[0].id,
+            FIRST
+        );
         chat.id = "another-owner".into();
         let next = inventory(temp.path(), &chat);
         assert_eq!(

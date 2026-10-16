@@ -155,6 +155,12 @@ pub(crate) struct ProcessMemoryCounters {
 #[cfg(feature = "local-host")]
 #[link(name = "kernel32")]
 unsafe extern "system" {
+    fn GetFileInformationByHandleEx(
+        file: Handle,
+        information_class: i32,
+        information: *mut c_void,
+        size: Dword,
+    ) -> Bool;
     pub(crate) fn CreateToolhelp32Snapshot(flags: Dword, pid: Dword) -> Handle;
     pub(crate) fn Process32FirstW(snapshot: Handle, entry: *mut ProcessEntry32) -> Bool;
     pub(crate) fn Process32NextW(snapshot: Handle, entry: *mut ProcessEntry32) -> Bool;
@@ -171,6 +177,34 @@ unsafe extern "system" {
         counters: *mut ProcessMemoryCounters,
         size: Dword,
     ) -> Bool;
+}
+
+/// The volume plus 128-bit identifier distinguishes an atomic replacement
+/// even when the filesystem preserves its name, length and timestamps.
+#[cfg(feature = "local-host")]
+pub(crate) fn file_identity(file: &std::fs::File) -> Option<(u64, [u8; 16])> {
+    use std::os::windows::io::AsRawHandle;
+
+    #[repr(C)]
+    struct FileIdInfo {
+        volume_serial_number: u64,
+        file_id: [u8; 16],
+    }
+    let mut information = FileIdInfo {
+        volume_serial_number: 0,
+        file_id: [0; 16],
+    };
+    // SAFETY: FileIdInfo is the FILE_ID_INFO C layout for class FileIdInfo
+    // (18), and the buffer size and live file handle match that call.
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            18,
+            (&mut information as *mut FileIdInfo).cast(),
+            std::mem::size_of::<FileIdInfo>() as Dword,
+        )
+    };
+    (ok != 0).then_some((information.volume_serial_number, information.file_id))
 }
 
 #[link(name = "kernel32")]
