@@ -70,7 +70,7 @@ try {
         $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
         $invoke.Invoke()
     }
-    function Wait-ForControl([string]$Id, [int]$Seconds = 10, [switch]$Enabled, [switch]$IncludePopups) {
+    function Wait-ForControl([string]$Id, [int]$Seconds = 10, [switch]$Enabled, [switch]$IncludePopups, [string]$ExpectedName = '') {
         Write-Host "Waiting for '$Id'"
         $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
         for ($attempt = 0; $attempt -lt $Seconds * 4; $attempt++) {
@@ -87,7 +87,8 @@ try {
                     if ($candidate -and !$candidate.Current.IsOffscreen) { $control = $candidate; break }
                 }
             }
-            if ($control -and !$control.Current.IsOffscreen -and (!$Enabled -or $control.Current.IsEnabled)) { return $control }
+            if ($control -and !$control.Current.IsOffscreen -and (!$Enabled -or $control.Current.IsEnabled) -and
+                (!$ExpectedName -or $control.Current.Name -eq $ExpectedName)) { return $control }
             Start-Sleep -Milliseconds 250
         }
         $window.FindAll($descendants, [System.Windows.Automation.Condition]::TrueCondition) |
@@ -254,7 +255,10 @@ try {
     # An explicit empty Open chat restores file/image-first prompts without
     # sending a message. It uses the production creation and composer path.
     $landingValue.SetValue('')
-    $openChat = Wait-ForControl 'newChat.send' 30 -Enabled
+    # ValuePattern.SetValue can return before TextChanged updates the button's
+    # accessible name. The existing Send button is already enabled, so wait
+    # for the expected action as well before asserting and invoking it.
+    $openChat = Wait-ForControl 'newChat.send' 30 -Enabled -ExpectedName 'Open chat'
     if ($openChat.Current.Name -ne 'Open chat') { throw 'The empty landing prompt must offer Open chat' }
     Invoke-Control $openChat
     Wait-ForControl 'chat.composer' 30 | Out-Null
