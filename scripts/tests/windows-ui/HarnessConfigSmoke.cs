@@ -98,6 +98,11 @@ internal static class HarnessConfigSmoke
             await Until(host, () => reads == 2 && dialog.IsPrimaryButtonEnabled, "Installer completion did not reload the configuration");
             if (Find<TextBox>(dialog, "harness.field.model")!.Text != "unsaved model" || saved is not null)
                 throw new Exception("Reinstall discarded or saved pending edits");
+            // Detached TextBoxes can still deliver a deferred TextChanged.
+            model.Text = "detached editor";
+            await Task.Delay(20);
+            if (Find<TextBox>(dialog, "harness.field.model")!.Text != "unsaved model")
+                throw new Exception("A detached editor changed the reloaded draft");
             var save = Descendants(dialog).OfType<Button>().FirstOrDefault(button => button.Name == "PrimaryButton")
                 ?? throw new Exception("Native Save button was not mounted");
             ContextMenus.Invoke(save);

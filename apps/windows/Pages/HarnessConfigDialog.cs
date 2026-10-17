@@ -16,6 +16,8 @@ internal static class HarnessConfigDialog
         var id = Format.Text(profile, "id");
         var name = Format.Text(profile, "name", id);
         var state = new HarnessConfigState();
+        var editors = new Dictionary<string, Func<string>>(StringComparer.Ordinal);
+        var generation = 0;
         var fields = new StackPanel { Spacing = Theme.SpaceM };
         var notices = new StackPanel { Spacing = Theme.SpaceS };
         var installation = new StackPanel { Spacing = Theme.SpaceS };
@@ -57,8 +59,14 @@ internal static class HarnessConfigDialog
             notices.Children.Add(Chrome.Banner(text, success ? Theme.Success : Theme.Danger, success ? Symbol.Accept : Symbol.Important));
         }
         void Set(string key, string value) { state.Values[key] = value; UpdateButtons(); }
+        void CaptureEdits()
+        {
+            foreach (var editor in editors) state.Values[editor.Key] = editor.Value();
+        }
         void RenderFields()
         {
+            var renderedGeneration = ++generation;
+            editors.Clear();
             fields.Children.Clear();
             path.Text = Format.Text(state.Config, "path");
             if (!Format.Flag(state.Config, "available") || !state.Fields.Any())
@@ -69,6 +77,10 @@ internal static class HarnessConfigDialog
             foreach (var field in state.Fields)
             {
                 var key = Format.Text(field, "key");
+                void Change(string value)
+                {
+                    if (generation == renderedGeneration) Set(key, value);
+                }
                 var current = state.Values.GetValueOrDefault(key, "");
                 var row = new StackPanel { Spacing = 6 };
                 row.Children.Add(new TextBlock { Text = Format.Text(field, "label", key), FontSize = 12, Opacity = 0.7 });
@@ -77,14 +89,16 @@ internal static class HarnessConfigDialog
                     case "bool":
                         var toggle = new ToggleSwitch { IsOn = current == "true",
                             OnContent = L10n.Text("windows.harnessconfig.on"), OffContent = L10n.Text("windows.harnessconfig.off") };
-                        toggle.Toggled += (_, _) => Set(key, toggle.IsOn ? "true" : "false");
+                        toggle.Toggled += (_, _) => Change(toggle.IsOn ? "true" : "false");
+                        editors[key] = () => toggle.IsOn ? "true" : "false";
                         row.Children.Add(toggle);
                         break;
                     case "choice":
                         var choices = (field["options"] as JsonArray ?? new JsonArray()).Select(value => value?.ToString() ?? "").ToList();
                         if (current.Length > 0 && !choices.Contains(current)) choices.Add(current);
                         var selection = new ComboBox { ItemsSource = choices, SelectedItem = current, HorizontalAlignment = HorizontalAlignment.Stretch };
-                        selection.SelectionChanged += (_, _) => { if (selection.SelectedItem is string value) Set(key, value); };
+                        selection.SelectionChanged += (_, _) => { if (selection.SelectedItem is string value) Change(value); };
+                        editors[key] = () => selection.SelectedItem as string ?? current;
                         row.Children.Add(selection);
                         break;
                     case "number" when field["min"] is not null && field["max"] is not null:
@@ -94,13 +108,16 @@ internal static class HarnessConfigDialog
                         var number = double.TryParse(current, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
                         var slider = new Slider { Minimum = low, Maximum = high, StepFrequency = Math.Max(1, field["step"]?.GetValue<double>() ?? 1), Value = Math.Clamp(number, low, high) };
                         var valueLabel = new TextBlock { Text = current.Length == 0 ? L10n.Text("windows.harnessconfig.default_value", fallback) : current, FontFamily = Fonts.Mono, FontSize = 11 };
-                        slider.ValueChanged += (_, args) => { var value = Math.Round(args.NewValue).ToString(CultureInfo.InvariantCulture); valueLabel.Text = value; Set(key, value); };
+                        var numberEdited = false;
+                        slider.ValueChanged += (_, args) => { numberEdited = true; var value = Math.Round(args.NewValue).ToString(CultureInfo.InvariantCulture); valueLabel.Text = value; Change(value); };
+                        editors[key] = () => numberEdited ? Math.Round(slider.Value).ToString(CultureInfo.InvariantCulture) : current;
                         row.Children.Add(slider);
                         row.Children.Add(valueLabel);
                         break;
                     default:
                         var input = new TextBox { Text = current, HorizontalAlignment = HorizontalAlignment.Stretch };
-                        input.TextChanged += (_, _) => Set(key, input.Text);
+                        input.TextChanged += (_, _) => Change(input.Text);
+                        editors[key] = () => input.Text;
                         row.Children.Add(input);
                         break;
                 }
@@ -144,6 +161,7 @@ internal static class HarnessConfigDialog
             reinstall.Click += async (_, _) =>
             {
                 if (busy) return;
+                CaptureEdits();
                 busy = true; notices.Children.Clear(); UpdateButtons();
                 try
                 {
@@ -170,7 +188,9 @@ internal static class HarnessConfigDialog
         dialog.PrimaryButtonClick += async (_, args) =>
         {
             args.Cancel = true;
-            if (busy || !state.Dirty) return;
+            if (busy) return;
+            CaptureEdits();
+            if (!state.Dirty) return;
             busy = true; notices.Children.Clear(); UpdateButtons();
             var deferral = args.GetDeferral();
             try
