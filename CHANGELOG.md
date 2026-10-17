@@ -9,11 +9,11 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.7.1]
+## [1.7.1] - 2026-10-17
 
 ### Improved
 
-- Installed tools with an official installer can be updated or repaired from their configurator with Reinstall. The action shows the installer command, asks before replacing an installation, and keeps unsaved settings in the form. Failed downloads report an error, and remote installs wait for completion without automatically rerunning after a lost connection.
+- On Mac, installed tools with an official installer can be updated or repaired from their configurator with Reinstall. The action shows the installer command, asks before replacing an installation, and keeps unsaved settings in the form. Failed downloads report an error, and remote installs wait for completion without automatically rerunning after a lost connection.
 - The new chat screen on iPhone and iPad sits on a deeper, opaque background. The light, the ripples and the prism read as part of the app rather than as frosted glass over nothing. The Mac keeps its window glass.
 - The Android new chat screen keeps as much of itself as the keyboard leaves. The heading steps aside only when the room is genuinely too small, and the repository, the agent choices and the composer stay together in the middle of what is left rather than being pushed around. On phones that used to slide the whole window out from under the keyboard, the page now makes room for it instead.
 - The Android new chat screen says why it cannot send yet, instead of leaving Send grey with no explanation, and marks the repository choice until one is made.
