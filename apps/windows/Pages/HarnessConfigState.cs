@@ -15,10 +15,10 @@ internal sealed class HarnessConfigState
         get
         {
             var changes = new JsonObject();
-            foreach (var field in Fields)
+            foreach (var setting in Fields)
             {
-                var key = Format.Text(field, "key");
-                if (Values.TryGetValue(key, out var value) && value != Format.Text(field, "value")) changes[key] = value;
+                var key = Format.Text(setting, "key");
+                if (Values.TryGetValue(key, out var value) && value != Format.Text(setting, "value")) changes[key] = value;
             }
             return changes;
         }
