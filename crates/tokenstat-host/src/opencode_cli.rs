@@ -480,15 +480,18 @@ mod tests {
 
     #[cfg(unix)]
     fn fake_api(root: &Path, output: &str, cold: bool) -> String {
+        fake_api_delayed(root, output, cold, false)
+    }
+
+    #[cfg(unix)]
+    fn fake_api_delayed(root: &Path, output: &str, cold: bool, slow: bool) -> String {
         use std::os::unix::fs::PermissionsExt;
         let path = root.join("opencode");
+        let server = root.join("opencode-api.py");
         let payload = serde_json::to_string(output).unwrap();
         let script = format!(
-            r#"#!/usr/bin/env python3
-import json,sys,os,base64,threading,time
+            r#"import json,sys,os,base64,threading,time
 from http.server import BaseHTTPRequestHandler,HTTPServer
-if '--version' in sys.argv:
- print('opencode v2.0.32');sys.exit(0)
 PAYLOAD={payload}
 count=0
 class Handler(BaseHTTPRequestHandler):
@@ -496,11 +499,11 @@ class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
   global count
   count+=1
-  if {cold} and count==1:time.sleep(2.1)
+  if {slow} and count==1:time.sleep(3)
   expected='Basic '+base64.b64encode(('opencode:'+os.environ['OPENCODE_PASSWORD']).encode()).decode()
   if self.headers.get('Authorization')!=expected:
    self.send_response(401);self.end_headers();return
-  with open(sys.argv[0]+'.args','a') as f:f.write('GET '+self.path+'\nx-opencode-directory:'+self.headers.get('x-opencode-directory','')+'\n')
+  with open(sys.argv[1]+'.args','a') as f:f.write('GET '+self.path+'\nx-opencode-directory:'+self.headers.get('x-opencode-directory','')+'\n')
   self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers()
   body=('{{"data":[]}}' if count==1 else '{{"data":[{{"providerID":"stale","id":"bundled"}},{{"providerID":"opencode-go","id":"gemini","variants":[]}}]}}') if {cold} and count<=3 else PAYLOAD
   self.wfile.write(body.encode())
@@ -511,9 +514,21 @@ def lease():
 threading.Thread(target=lease,daemon=True).start()
 server.serve_forever()
 "#,
-            cold = if cold { "True" } else { "False" }
+            cold = if cold { "True" } else { "False" },
+            slow = if slow { "True" } else { "False" },
         );
-        std::fs::write(&path, script).unwrap();
+        std::fs::write(&server, script).unwrap();
+        // Version detection is exercised separately with shell fixtures.
+        // Keep Python's cold HTTP imports out of its three-second budget
+        // when the full suite saturates a hosted runner.
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'opencode v2.0.32'; exit 0; fi\nexec python3 {} \"$0\" \"$@\"\n",
+                crate::chat_gate::shell_quote(&server.display().to_string())
+            ),
+        )
+        .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path.to_str().unwrap().to_string()
     }
@@ -588,6 +603,27 @@ server.serve_forever()
             Some(root.path()),
         );
         assert_eq!(args, ["--model", "opencode-go/gemini", "--variant", "max"]);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn catalog_retries_a_request_timeout_within_the_remaining_lease() {
+        let root = tempfile::tempdir().unwrap();
+        let binary = fake_api_delayed(
+            root.path(),
+            r#"{"data":[{"providerID":"custom","id":"slow","variants":[{"id":"high"}]}]}"#,
+            false,
+            true,
+        );
+        // Give this deliberate three-second HTTP stall its own lease. Cold
+        // catalog settlement above should not also consume a timeout, and a
+        // loaded CI worker need not cold-import Python within that margin.
+        let server = probe::Server::start(&binary, root.path(), Duration::from_secs(20)).unwrap();
+        let catalog = settled_snapshot(&server, "/api/model", parse_variants, |models| {
+            models.contains_key("custom/slow")
+        })
+        .expect("a short request timeout must not abandon a still-valid lease");
+        assert_eq!(catalog["custom/slow"], ["high"]);
     }
 
     #[test]
