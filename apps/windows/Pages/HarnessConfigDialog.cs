@@ -106,7 +106,10 @@ internal static class HarnessConfigDialog
                 }
                 var hint = Format.Text(field, "hint");
                 foreach (var control in row.Children.OfType<Control>())
+                {
                     Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(control, "harness.field." + key);
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(control, Format.Text(field, "label", key));
+                }
                 if (hint.Length > 0) row.Children.Add(new TextBlock { Text = hint, TextWrapping = TextWrapping.Wrap, FontSize = 11, Opacity = 0.6 });
                 fields.Children.Add(row);
             }

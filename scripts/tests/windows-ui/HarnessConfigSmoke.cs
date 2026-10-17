@@ -81,6 +81,7 @@ internal static class HarnessConfigSmoke
             await Until(host, () => (dialog = OpenDialog(host)) is not null && Find<TextBox>(dialog, "harness.field.model") is not null
                 && Find<Button>(dialog, "harness.reinstall") is not null, "Configurator did not render settings and Reinstall");
             var model = Find<TextBox>(dialog!, "harness.field.model")!;
+            if (AutomationProperties.GetName(model) != "Model") throw new Exception("The model field lost its accessible label");
             model.Text = "unsaved model";
             Find<ComboBox>(dialog!, "harness.field.effort")!.SelectedItem = "high";
             Find<ToggleSwitch>(dialog!, "harness.field.thinking")!.IsOn = true;

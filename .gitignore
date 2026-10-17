@@ -142,6 +142,8 @@ xcuserdata/
 # Portable client regression build outputs.
 /scripts/tests/windows-shell/bin/
 /scripts/tests/windows-shell/obj/
+/scripts/tests/windows-harness/bin/
+/scripts/tests/windows-harness/obj/
 /scripts/tests/windows-automations/bin/
 /scripts/tests/windows-automations/obj/
 /scripts/tests/windows-localization/bin/
