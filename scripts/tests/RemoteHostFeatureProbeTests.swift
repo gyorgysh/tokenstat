@@ -68,6 +68,12 @@ struct RemoteHostFeatureProbeTests {
         Bridge.version = 28
         let newPullSupport = await RemoteHostFeature.pullCreation.isSupported(peer: "peer")
         check(newPullSupport, "the first PR-creation host is accepted")
+        Bridge.version = 36
+        let oldReinstallSupport = await RemoteHostFeature.agentReinstall.isSupported(peer: "peer")
+        check(!oldReinstallSupport, "an older host cannot receive launcher.reinstall")
+        Bridge.version = 37
+        let newReinstallSupport = await RemoteHostFeature.agentReinstall.isSupported(peer: "peer")
+        check(newReinstallSupport, "the first reinstall-capable host is accepted")
         Bridge.version = 99
         // The first run asks.
         do {

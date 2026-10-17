@@ -11,14 +11,20 @@ struct LauncherInstallResult: Codable { var ok = true; var output = ""; var exit
 @MainActor enum Bridge {
     static var waiters: [String: CheckedContinuation<LauncherInstallResult, Never>] = [:]
     static var hideCalls = 0
+    static var installerCalls: [(String, String, TimeInterval)] = []
+    enum Patience { static let long: TimeInterval = 300 }
     static func launcherCatalog() async throws -> [RemoteLaunchProfile] { [] }
     static func launcherHide(id: String) async throws {}
     static func launcherShow(id: String) async throws {}
-    static func launcherInstall(id: String) async throws -> LauncherInstallResult { LauncherInstallResult() }
-    static func onPeer<T: Decodable>(_ peer: String, _ method: String, _ params: [String: String] = [:], as: T.Type) async throws -> T {
+    static func launcherInstall(id: String, reinstall: Bool = false) async throws -> LauncherInstallResult {
+        installerCalls.append(("local", reinstall ? "launcher.reinstall" : "launcher.install", Patience.long))
+        return LauncherInstallResult()
+    }
+    static func onPeer<T: Decodable>(_ peer: String, _ method: String, _ params: [String: String] = [:], patience: TimeInterval = 30, as: T.Type) async throws -> T {
         switch method {
         case "launcher.catalog": return [RemoteLaunchProfile()] as! T
-        case "launcher.install":
+        case "launcher.install", "launcher.reinstall":
+            installerCalls.append((peer, method, patience))
             return await withCheckedContinuation { waiters[peer] = $0 } as! T
         case "launcher.hide":
             hideCalls += 1
@@ -59,6 +65,16 @@ struct LauncherInstallResult: Codable { var ok = true; var output = ""; var exit
         Bridge.waiters.removeValue(forKey: firstPeer)?.resume(returning: LauncherInstallResult())
         Bridge.waiters.removeValue(forKey: secondPeer)?.resume(returning: LauncherInstallResult())
         _ = await first.value; _ = await second.value
-        print("Launcher host visibility and independent installation passed")
+        let repair = Task { await catalog.install(profile, peer: firstPeer, reinstall: true) }
+        while Bridge.waiters[firstPeer] == nil { await Task.yield() }
+        let duplicate = await catalog.install(profile, peer: firstPeer, reinstall: true)
+        assert(duplicate == nil && Bridge.installerCalls.filter { $0.1 == "launcher.reinstall" }.count == 1)
+        Bridge.waiters.removeValue(forKey: firstPeer)?.resume(returning: LauncherInstallResult(ok: false, output: "fixture installer failed", exitCode: 7))
+        let failedRepair = await repair.value
+        assert(failedRepair == "fixture installer failed" && !catalog.isInstalling(profile.id, peer: firstPeer))
+        _ = await catalog.install(profile, peer: nil, reinstall: true)
+        assert(Bridge.installerCalls.last?.1 == "launcher.reinstall" && Bridge.installerCalls.last?.0 == "local")
+        assert(Bridge.installerCalls.allSatisfy { $0.2 == Bridge.Patience.long }, "installers need the long timeout on both hosts")
+        print("Launcher visibility, host routing, installation/reinstallation and failure recovery passed")
     }
 }

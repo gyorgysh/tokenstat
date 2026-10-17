@@ -2717,9 +2717,9 @@ extension Bridge {
     /// refreshes the catalog. The id selects a command hardcoded in the host,
     /// never a string from this app, so this stays "the user clicked Install
     /// on a known tile". Long by nature: installers download binaries.
-    static func launcherInstall(id: String) async throws -> LauncherInstallResult {
+    static func launcherInstall(id: String, reinstall: Bool = false) async throws -> LauncherInstallResult {
         try await background(
-            "launcher.install",
+            reinstall ? "launcher.reinstall" : "launcher.install",
             ["id": id],
             patience: Patience.long,
             as: LauncherInstallResult.self

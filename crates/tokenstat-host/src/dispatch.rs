@@ -4308,7 +4308,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
         // names a command hardcoded in the catalog, never one supplied by the
         // client, so over a remote connection this stays "the user clicked
         // Install on a known tile" rather than "a peer runs anything".
-        "launcher.install" => {
+        "launcher.install" | "launcher.reinstall" => {
             #[derive(Deserialize)]
             struct InstallParams {
                 id: String,
@@ -4317,7 +4317,11 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 Ok(p) => p,
                 Err(e) => return Err(e.to_string()),
             };
-            crate::launcher::install(&p.id)
+            if method == "launcher.reinstall" {
+                crate::launcher::reinstall(&p.id)
+            } else {
+                crate::launcher::install(&p.id)
+            }
         }
 
         // Start an agent's own sign-in in a terminal on this machine. Id

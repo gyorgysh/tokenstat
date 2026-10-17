@@ -462,7 +462,7 @@ final class LaunchCatalog {
     /// peer's daemon for a remote workspace. A host that finished but reported
     /// failure counts as a failure: the installer's own output is the message.
     @discardableResult
-    func install(_ profile: LaunchProfile, peer: String?) async -> String? {
+    func install(_ profile: LaunchProfile, peer: String?, reinstall: Bool = false) async -> String? {
         let key = InstallKey(peer: peer, profile: profile.id)
         guard installing.insert(key).inserted else { return nil }
         defer { installing.remove(key) }
@@ -471,12 +471,13 @@ final class LaunchCatalog {
             if let peer {
                 result = try await Bridge.onPeer(
                     peer,
-                    "launcher.install",
+                    reinstall ? "launcher.reinstall" : "launcher.install",
                     ["id": profile.id],
+                    patience: Bridge.Patience.long,
                     as: LauncherInstallResult.self
                 )
             } else {
-                result = try await Bridge.launcherInstall(id: profile.id)
+                result = try await Bridge.launcherInstall(id: profile.id, reinstall: reinstall)
             }
         } catch {
             return error.localizedDescription

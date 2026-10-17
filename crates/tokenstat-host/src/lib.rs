@@ -257,4 +257,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 34 adds revision-checked chat recovery and cooperative runner stop.
 /// Version 35 adds the opt-in work overview across chats and terminals.
 /// Version 36 adds Git LFS preflight and explicitly consented repository setup.
-pub const PROTOCOL_VERSION: &str = "36";
+/// Version 37 adds explicit agent reinstallation through `launcher.reinstall`.
+pub const PROTOCOL_VERSION: &str = "37";

@@ -11,7 +11,8 @@ import SwiftUI
 /// How this harness starts a long session: model, effort, compaction.
 ///
 /// A sheet, same shape as New automation, because a bubble next to a 22pt
-/// badge could only show one line at a time. Save is the only write.
+/// badge could only show one line at a time. Settings are written by Save;
+/// reinstallation is a separate, explicitly confirmed action.
 struct HarnessConfigView: View {
     let profile: LaunchProfile
     var peer: String? = nil
@@ -24,6 +25,14 @@ struct HarnessConfigView: View {
     @State private var loading = true
     @State private var saving = false
     @State private var error: String?
+    @State private var supportsReinstall = false
+    @State private var confirmingReinstall = false
+    @State private var reinstallError: String?
+    @State private var reinstalled = false
+
+    private var installing: Bool {
+        LaunchCatalog.shared.isInstalling(profile.id, peer: peer)
+    }
 
     var body: some View {
         ThemedSheet(
@@ -59,7 +68,7 @@ struct HarnessConfigView: View {
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                         ForEach(config.fields) { field in
-                            fieldRow(field).disabled(saving)
+                            fieldRow(field).disabled(saving || installing)
                         }
                     }
                 } else {
@@ -68,6 +77,10 @@ struct HarnessConfigView: View {
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if !loading, profile.installed, profile.installCommand != nil, supportsReinstall {
+                    installationSection
                 }
             }
         } actions: {
@@ -88,10 +101,64 @@ struct HarnessConfigView: View {
             }
             .buttonStyle(AccentButtonStyle())
             .keyboardShortcut(.defaultAction)
-            .disabled(saving || loading || !dirty)
+            .disabled(saving || loading || installing || !dirty)
         }
         .modalFrame(width: 560, height: 560)
-        .task { await load() }
+        .task {
+            await load()
+            if profile.installed, profile.installCommand != nil {
+                supportsReinstall = await RemoteHostFeature.agentReinstall.isSupported(peer: peer)
+            }
+        }
+        .confirmationDialog(
+            L10n.text("apple.harnessconfigview.reinstall_title", profile.name),
+            isPresented: $confirmingReinstall,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.text("apple.harnessconfigview.reinstall")) {
+                Task { await reinstall() }
+            }
+            Button(L10n.text("common.cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.text("apple.harnessconfigview.reinstall_confirmation"))
+        }
+    }
+
+    private var installationSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Divider()
+                .padding(.bottom, Theme.Space.s)
+            Text(L10n.text("apple.harnessconfigview.installation"))
+                .font(Theme.font(13, weight: .semibold))
+            Text(L10n.text("apple.harnessconfigview.reinstall_hint"))
+                .font(Theme.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let command = profile.installCommand {
+                Text(command)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.controlGlyph)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: Theme.Space.s) {
+                Button(installing ? L10n.text("apple.harnessconfigview.reinstalling") : L10n.text("apple.harnessconfigview.reinstall"), .refresh) {
+                    confirmingReinstall = true
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(saving || installing)
+                if installing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Theme.accent)
+                }
+            }
+            if let reinstallError {
+                Banner(text: reinstallError, severity: .warning)
+            } else if reinstalled {
+                Banner(text: L10n.text("apple.harnessconfigview.reinstall_complete"), severity: .success)
+            }
+        }
     }
 
     private var dirty: Bool {
@@ -207,7 +274,10 @@ struct HarnessConfigView: View {
         onClose()
     }
 
-    private func load() async {
+    private func load(preservingDraft: Bool = false) async {
+        let edits = preservingDraft ? draft.filter { key, value in
+            config?.fields.contains { $0.key == key && ($0.value ?? "") != value } == true
+        } : [:]
         loading = true
         error = nil
         do {
@@ -220,7 +290,7 @@ struct HarnessConfigView: View {
             guard !Task.isCancelled else { return }
             config = loaded
             draft = Dictionary(uniqueKeysWithValues: loaded.fields.map {
-                ($0.key, $0.value ?? "")
+                ($0.key, edits[$0.key] ?? $0.value ?? "")
             })
         } catch {
             self.error = error.localizedDescription
@@ -228,8 +298,20 @@ struct HarnessConfigView: View {
         loading = false
     }
 
+    private func reinstall() async {
+        guard supportsReinstall, !saving, !installing else { return }
+        reinstallError = nil
+        reinstalled = false
+        if let message = await LaunchCatalog.shared.install(profile, peer: peer, reinstall: true) {
+            reinstallError = message
+        } else {
+            await load(preservingDraft: true)
+            reinstalled = true
+        }
+    }
+
     private func save() async {
-        guard let config, dirty, !saving else { return }
+        guard let config, dirty, !saving, !installing else { return }
         saving = true
         error = nil
         var values: [String: String] = [:]

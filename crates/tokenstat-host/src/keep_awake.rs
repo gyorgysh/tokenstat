@@ -525,6 +525,7 @@ mod tests {
             "automation.edit",
             "automation.createOnce",
             "launcher.install",
+            "launcher.reinstall",
             "harness.config.set",
             "todo.delegate",
             "work.continuity.put",

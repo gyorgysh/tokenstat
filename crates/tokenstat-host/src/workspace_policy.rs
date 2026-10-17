@@ -1257,6 +1257,7 @@ mod tests {
             "todo.runReceipt",
             "todo.stopTask",
             "launcher.install",
+            "launcher.reinstall",
             "harness.config.set",
             "proxy.listen",
             "app.watching",

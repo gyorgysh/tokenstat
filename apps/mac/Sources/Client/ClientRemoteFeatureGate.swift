@@ -20,6 +20,7 @@ enum RemoteHostFeature: Hashable {
     case provisioning
     case inviteCode
     case agentSignIn
+    case agentReinstall
     case confirmedSend
     case handoff
     case workSearch
@@ -55,6 +56,7 @@ enum RemoteHostFeature: Hashable {
         case .provisioning: L10n.text("apple.clientremotefeaturegate.setup.7013af4c")
         case .inviteCode: L10n.text("apple.clientremotefeaturegate.adding_this_device.4bb25dcd")
         case .agentSignIn: L10n.text("apple.clientremotefeaturegate.signing_in_to_an_agent.7a8b7e31")
+        case .agentReinstall: L10n.text("apple.harnessconfigview.reinstall")
         case .confirmedSend: L10n.text("apple.clientremotefeaturegate.confirming_a_sent_message.86a0a4b6")
         case .handoff: L10n.text("apple.clientremotefeaturegate.handoff.f89e2d72")
         case .workSearch: L10n.text("apple.clientremotefeaturegate.search_work.cc46cedc")
@@ -106,6 +108,7 @@ enum RemoteHostFeature: Hashable {
     /// the branch and pull request beside each conversation.
     /// Version 33 adds `pulls.commitAvatars`, so history can show a public
     /// picture for every author the forge knows.
+    /// Version 37 adds explicitly requested agent reinstallation.
     var minimumProtocol: Int {
         switch self {
         case .worktrees: 24
@@ -119,6 +122,7 @@ enum RemoteHostFeature: Hashable {
         case .provisioning: 7
         case .inviteCode: 7
         case .agentSignIn: 9
+        case .agentReinstall: 37
         case .confirmedSend: 14
         case .handoff: 12
         case .workSearch: 12
@@ -158,6 +162,7 @@ enum RemoteHostFeature: Hashable {
         case .provisioning: "sparkles"
         case .inviteCode: "key.horizontal.fill"
         case .agentSignIn: "person.badge.key.fill"
+        case .agentReinstall: "arrow.clockwise"
         case .confirmedSend: "checkmark.message.fill"
         case .handoff: "arrow.left.arrow.right"
         case .workSearch: "magnifyingglass"

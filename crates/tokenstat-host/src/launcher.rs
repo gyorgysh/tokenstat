@@ -820,6 +820,39 @@ fn opencode_install_conflict(home: &Path, path: &[String]) -> Option<PathBuf> {
 /// with the login environment so `npm`, `brew` and friends resolve, and its
 /// output is captured so the calling app can say what happened.
 pub(crate) fn install(id: &str) -> Result<Value, String> {
+    run_installer(id, false)
+}
+
+/// An explicit repair/update action may replace an installed command.
+/// Ordinary Install requests retain their existing-file protections.
+pub(crate) fn reinstall(id: &str) -> Result<Value, String> {
+    run_installer(id, true)
+}
+
+fn install_preflight(
+    profile: &Profile,
+    reinstall: bool,
+    home: &Path,
+    path: &[String],
+) -> Result<(), String> {
+    if reinstall {
+        return Ok(());
+    }
+    if !absolute_command(profile.command) && resolve_profile(profile, path, home).is_some() {
+        return Err(format!("{} is already installed", profile.id));
+    }
+    if profile.id == "opencode"
+        && let Some(existing) = opencode_install_conflict(home, path)
+    {
+        return Err(format!(
+            "OpenCode already has a command or wrapper at {}. Automatic installation is disabled to preserve it; manage that installation directly.",
+            existing.display()
+        ));
+    }
+    Ok(())
+}
+
+fn run_installer(id: &str, reinstall: bool) -> Result<Value, String> {
     let profile = PROFILES
         .iter()
         .find(|p| p.id == id)
@@ -832,16 +865,7 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
         .try_lock()
         .map_err(|_| "An agent installation is already running")?;
 
-    // Refuse when the tool is already where the catalog looks for it. The
-    // front end never offers this, so the guard is for a stale tile or a
-    // remote caller asking twice: reinstalling something that is present is
-    // at best pointless and at worst a way to burn a peer's CPU.
     let home = user_home();
-    if !absolute_command(profile.command)
-        && resolve_profile(profile, &search_path(), Path::new(&home)).is_some()
-    {
-        return Err(format!("{id} is already installed"));
-    }
 
     // PowerShell, not `cmd.exe`. Every Windows installer a vendor publishes is
     // a `.ps1` fetched with `irm` and run with `iex`, which is PowerShell
@@ -903,19 +927,12 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
             cmd.env(key, value);
         }
     }
-    if id == "opencode" {
-        let install_home = login_env
-            .as_ref()
-            .and_then(|env| env.vars.get("HOME"))
-            .map(Path::new)
-            .unwrap_or_else(|| Path::new(&home));
-        if let Some(existing) = opencode_install_conflict(install_home, &search_path()) {
-            return Err(format!(
-                "OpenCode already has a command or wrapper at {}. Automatic installation is disabled to preserve it; manage that installation directly.",
-                existing.display()
-            ));
-        }
-    }
+    let install_home = login_env
+        .as_ref()
+        .and_then(|env| env.vars.get("HOME"))
+        .map(Path::new)
+        .unwrap_or_else(|| Path::new(&home));
+    install_preflight(profile, reinstall, install_home, &search_path())?;
 
     let mut child = cmd
         .spawn()
@@ -2146,8 +2163,54 @@ mod tests {
     /// a command of its own.
     #[test]
     fn install_refuses_unknown_profiles() {
-        let error = install("definitely-not-a-launcher-profile").expect_err("unknown id");
-        assert!(error.contains("no launcher profile"), "{error}");
+        for request in [install, super::reinstall] {
+            let error = request("definitely-not-a-launcher-profile").expect_err("unknown id");
+            assert!(error.contains("no launcher profile"), "{error}");
+            assert!(request("shell").unwrap_err().contains("no installer"));
+            assert!(request("opencode2").unwrap_err().contains("no installer"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_explicit_reinstallation_can_replace_installed_commands_or_wrappers() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let binary = bin.join("claude");
+        std::fs::write(&binary, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = [bin.display().to_string()];
+        let claude = PROFILES
+            .iter()
+            .find(|profile| profile.id == "claude_code")
+            .unwrap();
+        assert!(
+            super::install_preflight(claude, false, root.path(), &path)
+                .unwrap_err()
+                .contains("already installed")
+        );
+        assert!(super::install_preflight(claude, true, root.path(), &path).is_ok());
+
+        let alias = root.path().join(".opencode/bin/opencode2");
+        std::fs::create_dir_all(alias.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("missing-real-binary", &alias).unwrap();
+        let opencode = PROFILES
+            .iter()
+            .find(|profile| profile.id == "opencode")
+            .unwrap();
+        assert!(
+            super::install_preflight(opencode, false, root.path(), &[])
+                .unwrap_err()
+                .contains("preserve it")
+        );
+        assert!(super::install_preflight(opencode, true, root.path(), &[]).is_ok());
+        assert_eq!(std::fs::read(&binary).unwrap(), b"#!/bin/sh\nexit 1\n");
+        assert_eq!(
+            std::fs::read_link(alias).unwrap(),
+            Path::new("missing-real-binary")
+        );
     }
 
     /// A profile without an installer for this machine is refused too, rather
