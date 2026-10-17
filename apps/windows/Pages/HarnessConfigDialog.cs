@@ -89,8 +89,9 @@ internal static class HarnessConfigDialog
                     case "bool":
                         var toggle = new ToggleSwitch { IsOn = current == "true",
                             OnContent = L10n.Text("windows.harnessconfig.on"), OffContent = L10n.Text("windows.harnessconfig.off") };
-                        toggle.Toggled += (_, _) => Change(toggle.IsOn ? "true" : "false");
-                        editors[key] = () => toggle.IsOn ? "true" : "false";
+                        string ToggleValue() => toggle.IsOn == (current == "true") ? current : toggle.IsOn ? "true" : "false";
+                        toggle.Toggled += (_, _) => Change(ToggleValue());
+                        editors[key] = ToggleValue;
                         row.Children.Add(toggle);
                         break;
                     case "choice":
@@ -109,7 +110,11 @@ internal static class HarnessConfigDialog
                         var slider = new Slider { Minimum = low, Maximum = high, StepFrequency = Math.Max(1, field["step"]?.GetValue<double>() ?? 1), Value = Math.Clamp(number, low, high) };
                         var valueLabel = new TextBlock { Text = current.Length == 0 ? L10n.Text("windows.harnessconfig.default_value", fallback) : current, FontFamily = Fonts.Mono, FontSize = 11 };
                         var numberEdited = false;
-                        slider.ValueChanged += (_, args) => { numberEdited = true; var value = Math.Round(args.NewValue).ToString(CultureInfo.InvariantCulture); valueLabel.Text = value; Change(value); };
+                        var initialNumber = slider.Value;
+                        slider.ValueChanged += (_, args) => {
+                            if (!numberEdited && args.NewValue == initialNumber) return;
+                            numberEdited = true; var value = Math.Round(args.NewValue).ToString(CultureInfo.InvariantCulture); valueLabel.Text = value; Change(value);
+                        };
                         editors[key] = () => numberEdited ? Math.Round(slider.Value).ToString(CultureInfo.InvariantCulture) : current;
                         row.Children.Add(slider);
                         row.Children.Add(valueLabel);

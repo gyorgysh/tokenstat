@@ -37,7 +37,9 @@ internal static class HarnessConfigSmoke
           {"key":"model","label":"Model","kind":"text","value":"original"},
           {"key":"effort","label":"Effort","kind":"choice","options":["low","high"],"value":"low"},
           {"key":"thinking","label":"Always thinking","kind":"bool","value":"false"},
-          {"key":"compact","label":"Auto compact","kind":"number","min":0,"max":100,"step":1,"default":30,"value":null}]}
+          {"key":"compact","label":"Auto compact","kind":"number","min":0,"max":100,"step":1,"default":30,"value":null},
+          {"key":"defaultFlag","label":"Default toggle","kind":"bool","value":null},
+          {"key":"defaultNumber","label":"Default number","kind":"number","min":0,"max":100,"default":30,"value":null}]}
         """)!;
 
     internal static async Task Run(StackPanel host)
@@ -110,7 +112,8 @@ internal static class HarnessConfigSmoke
             if (!await showing || saved?["values"]?["model"]?.GetValue<string>() != "unsaved model"
                 || saved?["values"]?["effort"]?.GetValue<string>() != "high"
                 || saved?["values"]?["thinking"]?.GetValue<string>() != "true"
-                || saved?["values"]?["compact"]?.GetValue<string>() != "80")
+                || saved?["values"]?["compact"]?.GetValue<string>() != "80"
+                || saved?["values"]?.AsObject().Count != 4)
                 throw new Exception("Save did not submit the changed tool settings");
             Program.Log("PASS: native harness settings edit/save and confirmed reinstall preserve drafts and disable busy actions");
         }
