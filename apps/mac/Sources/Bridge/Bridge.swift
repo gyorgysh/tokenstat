@@ -90,6 +90,10 @@ enum Bridge {
         /// `scan` walks every log on the machine and `sync` uploads. Both can
         /// legitimately say nothing for minutes on a large archive.
         static let long: TimeInterval = 600
+
+        /// The host captures installer output and answers after exit. Wait
+        /// past its twenty-minute limit and the remote forwarder's grace.
+        static let installer: TimeInterval = 21 * 60
     }
 
     /// How calls leave this process, and whether a daemon owns them.
@@ -2721,7 +2725,7 @@ extension Bridge {
         try await background(
             reinstall ? "launcher.reinstall" : "launcher.install",
             ["id": id],
-            patience: Patience.long,
+            patience: Patience.installer,
             as: LauncherInstallResult.self
         )
     }

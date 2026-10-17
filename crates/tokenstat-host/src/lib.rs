@@ -45,6 +45,10 @@
 //! - [`remote`] serves other machines and reaches them, over the same dispatch.
 //! - [`server`] is the socket listener.
 
+/// Installer work is bounded on desktop; clients must allow that full budget
+/// while forwarding the request, since output arrives only after completion.
+pub(crate) const INSTALLER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+
 pub(crate) mod access_audit;
 pub mod account_activity;
 #[cfg(feature = "local-host")]

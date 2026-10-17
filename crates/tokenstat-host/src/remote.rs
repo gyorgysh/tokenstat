@@ -3096,7 +3096,11 @@ const ANSWER_IDLE: Duration = Duration::from_secs(45);
 const QUIET_WORK_IDLE: Duration = Duration::from_secs(600);
 
 fn answer_idle(method: &str) -> Duration {
-    if matches!(
+    if matches!(method, "launcher.install" | "launcher.reinstall") {
+        // Installers answer only after exit, including their captured output.
+        // Allow the host's full deadline plus pipe-drain and response time.
+        crate::INSTALLER_TIMEOUT + Duration::from_secs(30)
+    } else if matches!(
         method,
         "workspace.lfsSetup" | "workspace.pullReviewed" | "workspace.pushReviewed"
     ) {
@@ -3113,6 +3117,8 @@ fn refuses_redial(method: &str) -> bool {
         "chat.send"
             | "chat.compact"
             | "chat.steerSend"
+            | "launcher.install"
+            | "launcher.reinstall"
             | "workspace.lfsSetup"
             | "workspace.pullReviewed"
             | "workspace.pushReviewed"
@@ -4098,6 +4104,16 @@ mod tests {
         for method in ["chat.send", "chat.compact", "chat.steerSend"] {
             assert!(refuses_redial(method));
         }
+    }
+
+    #[test]
+    fn installers_wait_for_the_host_deadline_and_are_never_replayed() {
+        for method in ["launcher.install", "launcher.reinstall"] {
+            assert!(answer_idle(method) > crate::INSTALLER_TIMEOUT);
+            assert!(refuses_redial(method));
+        }
+        assert_eq!(answer_idle("launcher.catalog"), ANSWER_IDLE);
+        assert!(!refuses_redial("launcher.catalog"));
     }
 
     #[test]

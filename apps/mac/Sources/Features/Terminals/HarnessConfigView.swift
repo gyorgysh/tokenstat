@@ -126,7 +126,7 @@ struct HarnessConfigView: View {
 
     private var installationSection: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Divider()
+            Rectangle().fill(Theme.border).frame(height: 1)
                 .padding(.bottom, Theme.Space.s)
             Text(L10n.text("apple.harnessconfigview.installation"))
                 .font(Theme.font(13, weight: .semibold))

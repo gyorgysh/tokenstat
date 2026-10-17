@@ -2738,6 +2738,7 @@
   "apple.harnessconfigview.reinstall_hint": "Run the official installer again to update or repair this tool.",
   "apple.harnessconfigview.reinstall_title": "Reinstall {0}?",
   "apple.harnessconfigview.reinstalling": "Reinstalling…",
+  "apple.launchcatalog.installer_already_running": "An installer is already running for this tool on this machine.",
   "apple.harnessconfigview.0_default.bf9cca93": "{0} (default)",
   "apple.harnessconfigview.configure_0.76d41ce7": "Configure {0}",
   "apple.harnessconfigview.model_effort_and_compaction_for_the_next_s.7b884582": "Model, effort and compaction for the next session. Saved into this tool's own config.",

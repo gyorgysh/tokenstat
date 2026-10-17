@@ -12,12 +12,12 @@ struct LauncherInstallResult: Codable { var ok = true; var output = ""; var exit
     static var waiters: [String: CheckedContinuation<LauncherInstallResult, Never>] = [:]
     static var hideCalls = 0
     static var installerCalls: [(String, String, TimeInterval)] = []
-    enum Patience { static let long: TimeInterval = 300 }
+    enum Patience { static let installer: TimeInterval = 21 * 60 }
     static func launcherCatalog() async throws -> [RemoteLaunchProfile] { [] }
     static func launcherHide(id: String) async throws {}
     static func launcherShow(id: String) async throws {}
     static func launcherInstall(id: String, reinstall: Bool = false) async throws -> LauncherInstallResult {
-        installerCalls.append(("local", reinstall ? "launcher.reinstall" : "launcher.install", Patience.long))
+        installerCalls.append(("local", reinstall ? "launcher.reinstall" : "launcher.install", Patience.installer))
         return LauncherInstallResult()
     }
     static func onPeer<T: Decodable>(_ peer: String, _ method: String, _ params: [String: String] = [:], patience: TimeInterval = 30, as: T.Type) async throws -> T {
@@ -68,13 +68,15 @@ struct LauncherInstallResult: Codable { var ok = true; var output = ""; var exit
         let repair = Task { await catalog.install(profile, peer: firstPeer, reinstall: true) }
         while Bridge.waiters[firstPeer] == nil { await Task.yield() }
         let duplicate = await catalog.install(profile, peer: firstPeer, reinstall: true)
-        assert(duplicate == nil && Bridge.installerCalls.filter { $0.1 == "launcher.reinstall" }.count == 1)
+        assert(duplicate != nil, "a duplicate request must not report success before the running installer finishes")
+        assert(catalog.isInstalling(profile.id, peer: firstPeer), "the duplicate must not clear the original request's progress")
+        assert(Bridge.installerCalls.filter { $0.1 == "launcher.reinstall" }.count == 1)
         Bridge.waiters.removeValue(forKey: firstPeer)?.resume(returning: LauncherInstallResult(ok: false, output: "fixture installer failed", exitCode: 7))
         let failedRepair = await repair.value
         assert(failedRepair == "fixture installer failed" && !catalog.isInstalling(profile.id, peer: firstPeer))
         _ = await catalog.install(profile, peer: nil, reinstall: true)
         assert(Bridge.installerCalls.last?.1 == "launcher.reinstall" && Bridge.installerCalls.last?.0 == "local")
-        assert(Bridge.installerCalls.allSatisfy { $0.2 == Bridge.Patience.long }, "installers need the long timeout on both hosts")
+        assert(Bridge.installerCalls.allSatisfy { $0.2 == Bridge.Patience.installer }, "installers need their full timeout on both hosts")
         print("Launcher visibility, host routing, installation/reinstallation and failure recovery passed")
     }
 }

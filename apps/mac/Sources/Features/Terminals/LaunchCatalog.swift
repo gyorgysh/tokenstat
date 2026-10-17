@@ -464,7 +464,9 @@ final class LaunchCatalog {
     @discardableResult
     func install(_ profile: LaunchProfile, peer: String?, reinstall: Bool = false) async -> String? {
         let key = InstallKey(peer: peer, profile: profile.id)
-        guard installing.insert(key).inserted else { return nil }
+        guard installing.insert(key).inserted else {
+            return L10n.text("apple.launchcatalog.installer_already_running")
+        }
         defer { installing.remove(key) }
         let result: LauncherInstallResult
         do {
@@ -473,7 +475,7 @@ final class LaunchCatalog {
                     peer,
                     reinstall ? "launcher.reinstall" : "launcher.install",
                     ["id": profile.id],
-                    patience: Bridge.Patience.long,
+                    patience: Bridge.Patience.installer,
                     as: LauncherInstallResult.self
                 )
             } else {

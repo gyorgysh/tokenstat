@@ -479,58 +479,121 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn fake_api(root: &Path, output: &str, cold: bool) -> String {
+    struct FakeApi {
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        address: std::net::SocketAddr,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    #[cfg(unix)]
+    impl Drop for FakeApi {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            let _ = std::net::TcpStream::connect(self.address);
+            let _ = self.thread.take().unwrap().join();
+        }
+    }
+
+    #[cfg(unix)]
+    fn fake_api(root: &Path, output: &str, cold: bool) -> (String, FakeApi) {
         fake_api_delayed(root, output, cold, false)
     }
 
     #[cfg(unix)]
-    fn fake_api_delayed(root: &Path, output: &str, cold: bool, slow: bool) -> String {
-        use std::os::unix::fs::PermissionsExt;
-        let path = root.join("opencode");
-        let server = root.join("opencode-api.py");
-        let payload = serde_json::to_string(output).unwrap();
-        let script = format!(
-            r#"import json,sys,os,base64,threading,time
-from http.server import BaseHTTPRequestHandler,HTTPServer
-PAYLOAD={payload}
-count=0
-class Handler(BaseHTTPRequestHandler):
- def log_message(self,*args):pass
- def do_GET(self):
-  global count
-  count+=1
-  if {slow} and count==1:time.sleep(3)
-  expected='Basic '+base64.b64encode(('opencode:'+os.environ['OPENCODE_PASSWORD']).encode()).decode()
-  if self.headers.get('Authorization')!=expected:
-   self.send_response(401);self.end_headers();return
-  with open(sys.argv[1]+'.args','a') as f:f.write('GET '+self.path+'\nx-opencode-directory:'+self.headers.get('x-opencode-directory','')+'\n')
-  self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers()
-  body=('{{"data":[]}}' if count==1 else '{{"data":[{{"providerID":"stale","id":"bundled"}},{{"providerID":"opencode-go","id":"gemini","variants":[]}}]}}') if {cold} and count<=3 else PAYLOAD
-  self.wfile.write(body.encode())
-server=HTTPServer(('127.0.0.1',0),Handler)
-print(json.dumps({{'url':'http://127.0.0.1:'+str(server.server_port)}}),flush=True)
-def lease():
- sys.stdin.read();server.shutdown()
-threading.Thread(target=lease,daemon=True).start()
-server.serve_forever()
-"#,
-            cold = if cold { "True" } else { "False" },
-            slow = if slow { "True" } else { "False" },
-        );
-        std::fs::write(&server, script).unwrap();
-        // Version detection is exercised separately with shell fixtures.
-        // Keep Python's cold HTTP imports out of its three-second budget
-        // when the full suite saturates a hosted runner.
-        std::fs::write(
-            &path,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'opencode v2.0.32'; exit 0; fi\nexec python3 {} \"$0\" \"$@\"\n",
-                crate::chat_gate::shell_quote(&server.display().to_string())
+    fn fake_api_delayed(root: &Path, output: &str, cold: bool, slow: bool) -> (String, FakeApi) {
+        use std::io::{BufRead, Write};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // Start the fixture outside the production lease. Spawning Python and
+        // cold-importing its HTTP server consumed the probe's eight-second
+        // budget on busy CI workers before any discovery was exercised.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let ready = serde_json::json!({"url": format!("http://{address}")});
+        let binary = fake_cli(
+            root,
+            &format!(
+                "if [ \"$1\" = --version ]; then echo 'opencode v2.0.32'; exit 0; fi\nprintf '%s' \"$OPENCODE_PASSWORD\" > \"$0.password\"\nprintf '%s\\n' '{ready}'\nexec /bin/cat >/dev/null"
             ),
+        );
+        let password_file = root.join("opencode.password");
+        let args_file = root.join("opencode.args");
+        let payload = output.to_owned();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::clone(&stop);
+        let thread = std::thread::spawn(move || {
+            let mut count = 0;
+            for connection in listener.incoming() {
+                if stopped.load(Ordering::Relaxed) {
+                    break;
+                }
+                let mut connection = connection.unwrap();
+                connection
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut reader = std::io::BufReader::new(&mut connection);
+                let mut request = String::new();
+                reader.read_line(&mut request).unwrap();
+                let mut authorization = String::new();
+                let mut directory = String::new();
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("authorization") {
+                            authorization = value.trim().to_owned();
+                        }
+                        if name.eq_ignore_ascii_case("x-opencode-directory") {
+                            directory = value.trim().to_owned();
+                        }
+                    }
+                }
+                let password = std::fs::read_to_string(&password_file).unwrap();
+                let expected = format!(
+                    "Basic {}",
+                    crate::base64::encode(format!("opencode:{password}").as_bytes())
+                );
+                assert_eq!(
+                    authorization, expected,
+                    "the probe must authenticate to its leased server"
+                );
+                let route = request.split_whitespace().nth(1).unwrap();
+                let mut log = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&args_file)
+                    .unwrap();
+                writeln!(log, "GET {route}\nx-opencode-directory:{directory}").unwrap();
+                count += 1;
+                if slow && count == 1 {
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+                let body = if cold && count == 1 {
+                    r#"{"data":[]}"#
+                } else if cold && count <= 3 {
+                    r#"{"data":[{"providerID":"stale","id":"bundled"},{"providerID":"opencode-go","id":"gemini","variants":[]}]}"#
+                } else {
+                    &payload
+                };
+                // The timeout fixture deliberately loses its first reader.
+                let _ = write!(
+                    connection,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        (
+            binary,
+            FakeApi {
+                stop,
+                address,
+                thread: Some(thread),
+            },
         )
-        .unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        path.to_str().unwrap().to_string()
     }
 
     #[test]
@@ -556,7 +619,7 @@ server.serve_forever()
     #[cfg(unix)]
     fn model_probe_is_project_scoped_and_does_not_guess_unsupported_efforts() {
         let root = tempfile::tempdir().unwrap();
-        let binary = fake_api(
+        let (binary, _api) = fake_api(
             root.path(),
             r#"{"data":[{"providerID":"opencode-go","id":"gemini","variants":[{"id":"high"}]}]}"#,
             true,
@@ -609,7 +672,7 @@ server.serve_forever()
     #[cfg(unix)]
     fn catalog_retries_a_request_timeout_within_the_remaining_lease() {
         let root = tempfile::tempdir().unwrap();
-        let binary = fake_api_delayed(
+        let (binary, _api) = fake_api_delayed(
             root.path(),
             r#"{"data":[{"providerID":"custom","id":"slow","variants":[{"id":"high"}]}]}"#,
             false,
@@ -617,7 +680,7 @@ server.serve_forever()
         );
         // Give this deliberate three-second HTTP stall its own lease. Cold
         // catalog settlement above should not also consume a timeout, and a
-        // loaded CI worker need not cold-import Python within that margin.
+        // loaded CI worker still needs scheduling time within that margin.
         let server = probe::Server::start(&binary, root.path(), Duration::from_secs(20)).unwrap();
         let catalog = settled_snapshot(&server, "/api/model", parse_variants, |models| {
             models.contains_key("custom/slow")
@@ -767,7 +830,7 @@ server.serve_forever()
     #[cfg(unix)]
     fn effort_can_select_a_variant_of_the_configured_default() {
         let root = tempfile::tempdir().unwrap();
-        let binary = fake_api(
+        let (binary, _api) = fake_api(
             root.path(),
             r#"{"data":{"providerID":"custom","id":"default","variants":[{"id":"high"}]}}"#,
             false,

@@ -25,14 +25,7 @@ use std::os::unix::process::CommandExt;
 
 use serde_json::{Value, json};
 
-/// How long a profile installer may run before the host gives up on it.
-///
-/// Downloading a large CLI can take minutes on a slow link, so twenty minutes
-/// is generous. The client's patience is a per-silence budget, so a live
-/// download that keeps writing output is never cut off by the client; this
-/// cap is the hard bound that keeps a silent hang from holding a connection
-/// thread forever.
-const INSTALL_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+use crate::INSTALLER_TIMEOUT;
 
 struct Profile {
     id: &'static str,
@@ -852,6 +845,44 @@ fn install_preflight(
     Ok(())
 }
 
+fn installer_process(command: &str) -> std::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("powershell.exe");
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'; {command}; if ($LASTEXITCODE) {{ exit $LASTEXITCODE }}"
+        );
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ]);
+        cmd
+    }
+    #[cfg(not(windows))]
+    {
+        // A pipeline only reports the interpreter's exit status. During a
+        // reinstall the old binary still exists, so even the delivery check
+        // cannot catch `curl` failing and `bash` succeeding on an empty script.
+        // Finish the download before starting the interpreter: failed or
+        // partial scripts must never run. These are hardcoded catalog commands.
+        let script = match command.split_once(" | ") {
+            Some((download, runner)) if download.starts_with("curl ") => format!(
+                "installer_script=$({download}) || exit $?; printf '%s\\n' \"$installer_script\" | {runner}"
+            ),
+            _ => command.to_owned(),
+        };
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.arg("-c").arg(script);
+        cmd
+    }
+}
+
 fn run_installer(id: &str, reinstall: bool) -> Result<Value, String> {
     let profile = PROFILES
         .iter()
@@ -879,27 +910,7 @@ fn run_installer(id: &str, reinstall: bool) -> Result<Value, String> {
     // sees. `-NonInteractive` alongside the null stdin below, so an installer
     // that wants to ask something fails rather than hanging on a prompt no
     // one can answer.
-    #[cfg(windows)]
-    let mut cmd = {
-        use std::os::windows::process::CommandExt;
-        let mut cmd = std::process::Command::new("powershell.exe");
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        cmd.args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            command,
-        ]);
-        cmd
-    };
-    #[cfg(not(windows))]
-    let mut cmd = {
-        let mut cmd = std::process::Command::new("/bin/sh");
-        cmd.arg("-c").arg(command);
-        cmd
-    };
+    let mut cmd = installer_process(command);
     // From the home folder, never the host's own working directory. On
     // Windows hostd runs from the app's install folder, a self-contained .NET
     // app that ships facade `System.dll` and friends. Windows PowerShell's
@@ -951,7 +962,7 @@ fn run_installer(id: &str, reinstall: bool) -> Result<Value, String> {
     // The pipes are drained on the reader threads, so waiting on the child
     // cannot deadlock on a full buffer. The deadline bounds a hung installer
     // so the connection thread it runs on does not stay busy forever.
-    let deadline = Instant::now() + INSTALL_TIMEOUT;
+    let deadline = Instant::now() + INSTALLER_TIMEOUT;
     let status = loop {
         match child.try_wait() {
             Err(error) => {
@@ -2210,6 +2221,96 @@ mod tests {
         assert_eq!(
             std::fs::read_link(alias).unwrap(),
             Path::new("missing-real-binary")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reinstall_download_failures_cannot_succeed_or_execute_a_partial_script() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let curl = root.path().join("curl");
+        let existing = root.path().join("tool");
+        std::fs::write(&existing, "old installation").unwrap();
+        std::fs::write(
+            &curl,
+            "#!/bin/sh\nprintf '%s\\n' 'echo replaced > \"$FIXTURE_TOOL\"'\nexit 22\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for profile in PROFILES.iter().filter(|p| {
+            p.install_command
+                .is_some_and(|command| command.starts_with("curl "))
+        }) {
+            let output = super::installer_process(profile.install_command.unwrap())
+                .env("PATH", format!("{}:/usr/bin:/bin", root.path().display()))
+                .env("FIXTURE_TOOL", &existing)
+                .output()
+                .unwrap();
+            assert_eq!(
+                std::fs::read_to_string(&existing).unwrap(),
+                "old installation",
+                "{} executed a failed download",
+                profile.id
+            );
+            assert!(
+                !output.status.success(),
+                "{} reported a failed download as success",
+                profile.id
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn installer_downloads_run_only_after_success_and_keep_runner_arguments() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let curl = root.path().join("curl");
+        std::fs::write(
+            &curl,
+            "#!/bin/sh\nprintf '%s\\n' 'printf \"%s\\n\" \"$*\"; exit 7'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let output = super::installer_process(
+            "curl fixture.invalid | bash -s -- --non-interactive --skip-setup",
+        )
+        .env("PATH", format!("{}:/usr/bin:/bin", root.path().display()))
+        .output()
+        .unwrap();
+        assert_eq!(output.status.code(), Some(7));
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            "--non-interactive --skip-setup\n"
+        );
+        assert!(super::installer_process("exit 9").status().unwrap().code() == Some(9));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn installer_powershell_reports_cmdlet_and_native_failures() {
+        assert!(
+            !super::installer_process("Write-Error 'fixture download failure'")
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert_eq!(
+            super::installer_process("cmd.exe /d /c exit 17")
+                .output()
+                .unwrap()
+                .status
+                .code(),
+            Some(17)
+        );
+        assert!(
+            super::installer_process("Write-Output 'fixture success'")
+                .output()
+                .unwrap()
+                .status
+                .success()
         );
     }
 

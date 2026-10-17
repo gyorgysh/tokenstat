@@ -192,6 +192,7 @@ enum ClientRemote {
             peer,
             "launcher.install",
             ["id": id],
+            patience: Bridge.Patience.installer,
             as: LauncherInstallResult.self
         )
     }
