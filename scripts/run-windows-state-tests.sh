@@ -12,6 +12,7 @@ projects=(
   windows-devices/WindowsDeviceTests.csproj
   windows-persona/WindowsPersonaTests.csproj
   windows-shell/WindowsShellTests.csproj
+  windows-harness/WindowsHarnessTests.csproj
   windows-automations/WindowsAutomationTests.csproj
 )
 for project in "${projects[@]}"; do

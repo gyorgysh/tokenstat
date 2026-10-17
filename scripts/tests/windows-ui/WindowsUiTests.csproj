@@ -44,6 +44,11 @@
     <Compile Include="../../../apps/windows/Pages/TerminalPalette.cs" Link="TerminalPalette.cs" />
     <Compile Include="../../../apps/windows/Design/NativeContentLayout.cs" Link="NativeContentLayout.cs" />
     <Compile Include="../../../apps/windows/Design/ContextMenus.cs" Link="ContextMenus.cs" />
+    <Compile Include="../../../apps/windows/Design/Chrome.cs" Link="Chrome.cs" />
+    <Compile Include="../../../apps/windows/Design/Motion.cs" Link="Motion.cs" />
+    <Compile Include="../../../apps/windows/Pages/Format.cs" Link="Format.cs" />
+    <Compile Include="../../../apps/windows/Pages/HarnessConfigState.cs" Link="HarnessConfigState.cs" />
+    <Compile Include="../../../apps/windows/Pages/HarnessConfigDialog.cs" Link="HarnessConfigDialog.cs" />
     <Compile Include="../../../apps/windows/Design/InspectorHost.cs" Link="InspectorHost.cs" />
     <Compile Include="../../../apps/windows/Design/ShellWidths.cs" Link="ShellWidths.cs" />
     <Compile Include="../../../apps/windows/Design/ResizeHandle.cs" Link="ResizeHandle.cs" />

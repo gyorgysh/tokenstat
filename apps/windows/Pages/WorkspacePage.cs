@@ -894,6 +894,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         try
         {
             var catalog = await CallTargetAsync("launcher.catalog");
+            var machine = RemoteWorkspaces.TrySplit(_id, out var launcherPeer, out _) ? launcherPeer : "local";
             var profiles = (Format.Items(catalog) ?? new JsonArray()).OfType<JsonNode>().ToArray();
             host.Children.Add(LauncherHeading(L10n.Text("windows.workspacepage.run_an_agent.b7046310")));
             var tiles = new FlowPanel { MinimumItemWidth = LauncherTileMinWidth, Spacing = Theme.SpaceM };
@@ -918,7 +919,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 // click does.
                 var body = TileBody(AgentMark.View(Format.Text(profile, "harnessId", id), 34),
                     Format.Text(profile, "name", id), onLauncher ? 1 : 0.35);
-                var actions = new StackPanel { Spacing = Theme.SpaceS };
                 async Task RunAsync(Button button, string operation)
                 {
                     button.IsEnabled = false;
@@ -932,8 +932,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                         }
                         if (operation == "install")
                         {
-                            var result = await CallTargetAsync("launcher.install", new JsonObject { ["id"] = id }, TimeSpan.FromMinutes(5));
-                            if (!Format.Flag(result, "ok")) throw new InvalidOperationException(Format.Text(result, "output", L10n.Text("windows.workspacepage.installation_failed.bfb3106f")));
+                            await LauncherInstaller.RunAsync(machine, id, false, CallTargetAsync, () => Task.FromResult(false));
                             await LoadLaunchersAsync(host);
                             return;
                         }
@@ -975,19 +974,23 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 setup.Margin = new Thickness(8);
                 setup.Width = 24; setup.Height = 24;
                 setup.Foreground = Theme.AccentBrush;
-                setup.Content = new FontIcon { Glyph = "\uE713", FontSize = 14 };
-                var options = new Flyout { Content = actions };
-                setup.Flyout = options;
-                if (!string.IsNullOrEmpty(Format.Text(profile, "installCommand")))
+                setup.Click += async (_, _) =>
                 {
-                    var install = ActionIconGlyph.Button(installed ? L10n.Text("windows.workspacepage.reinstall.c630a782") : L10n.Text("windows.workspacepage.install.569ca49f"), ActionIcon.Download, (_, _) => { });
-                    install.Click += async (_, _) => { options.Hide(); await RunAsync(install, "install"); };
-                    actions.Children.Add(install);
-                }
-                if (installed && !hidden && actions.Children.Count > 0) tile.Children.Add(setup);
+                    setup.IsEnabled = false;
+                    launch.IsEnabled = false;
+                    try
+                    {
+                        if (await HarnessConfigDialog.ShowAsync(this, profile, machine, CallTargetAsync))
+                            await LoadLaunchersAsync(host);
+                    }
+                    catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
+                    finally { setup.IsEnabled = true; launch.IsEnabled = installed || canInstall; }
+                };
+                if (installed && !hidden && id != "shell") tile.Children.Add(setup);
                 var menu = ContextMenus.Menu(tile);
                 ContextMenus.AddButton(menu, launch, actionLabel);
-                ContextMenus.AddButtons(menu, actions);
+                if (installed && id != "shell") ContextMenus.AddButton(menu, setup,
+                    L10n.Text("windows.harnessconfig.title", Format.Text(profile, "name", id)));
                 if (installed && !hidden) ContextMenus.AddAsync(menu, L10n.Text("windows.workspacepage.remove_from_launcher.b107a73b"), async () =>
                 {
                     try { await CallTargetAsync("launcher.hide", new JsonObject { ["id"] = id }); await LoadLaunchersAsync(host); }
