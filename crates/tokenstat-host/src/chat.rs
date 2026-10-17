@@ -3791,6 +3791,8 @@ impl Store {
         let attachments = self.attachment_paths(id, attachment_ids)?;
         let response_output_dir = self.prepare_response_output_dir(id)?;
         self.recover_codex_session(&mut chat);
+        let workspace = crate::workspaces::folder(&chat.workspace_id)?;
+        self.recover_opencode_session(&mut chat, &workspace.path);
         let resume_token = chat
             .resume_tokens
             .get(&chat.backend)
@@ -3871,7 +3873,7 @@ impl Store {
         let cursor_hook_home =
             (chat.backend == "cursor" && helper.is_some() && !cursor_plan(&chat))
                 .then(|| self.cursor_hook_home(id));
-        let mut argv = crate::automations::chat_agent_command(
+        let mut argv = crate::automations::chat_agent_command_in(
             &chat.backend,
             prompt,
             chat.model.as_deref(),
@@ -3888,6 +3890,7 @@ impl Store {
                 grok_allow_rules: &grok_allow_rules,
                 attachments: &attachments,
             },
+            Some(&workspace.path),
         )?;
         crate::chat_fast::apply(
             &chat.backend,
@@ -3964,20 +3967,17 @@ impl Store {
         let opencode_hook_home = if matches!(chat.backend.as_str(), "opencode" | "opencode2")
             && let Some(helper) = &helper
         {
+            let generation = crate::opencode_cli::require_generation(&chat.backend)?;
             let (home, plugin) = self.write_opencode_hook_home(id)?;
             environment.push(("OPENCODE_CONFIG_DIR".into(), home.display().to_string()));
+            let plugin = if generation == crate::opencode_cli::Generation::V2 {
+                home.join("v2")
+            } else {
+                plugin
+            };
             environment.push((
                 "OPENCODE_CONFIG_CONTENT".into(),
-                json!({
-                    "plugin": [plugin.display().to_string()],
-                    "permission": {
-                        "edit": "allow",
-                        "bash": "allow",
-                        "webfetch": "allow",
-                        "external_directory": "allow"
-                    }
-                })
-                .to_string(),
+                crate::opencode_cli::gate_config(generation, &plugin).to_string(),
             ));
             // The raw path, not a command line. The plugin spawns this as
             // argv rather than through a shell, so the quoting every other
@@ -4028,10 +4028,6 @@ impl Store {
                 pending_muse.arm(root);
             }
         }
-        // Read last of the things that can refuse this send, so a repeat of a
-        // message the host already took is answered even if the folder has
-        // since been unregistered.
-        let workspace = crate::workspaces::folder(&chat.workspace_id)?;
         let prompt_file = crate::chat_turn::PromptFile::for_windows_muse(
             &chat.backend,
             &mut argv,
@@ -5277,23 +5273,61 @@ impl Store {
 
     fn recover_codex_session(&self, chat: &mut Conversation) {
         if self.codex_session_missing(chat) {
-            if let Ok(_lifecycle) = crate::work_handoff_store::lifecycle_lock(&self.root)
-                && let Ok(directory) = safe_join(&self.root, &chat.id)
-            {
-                let _ = crate::chat_sessions::remember(&directory, chat);
-                if let Some(id) = chat
-                    .resume_tokens
-                    .get("codex")
-                    .or(chat.resume_token.as_ref())
-                {
-                    let _ =
-                        crate::chat_sessions::invalidated(&directory, chat, "codex", id, now_ms());
-                }
-            }
-            chat.resume_tokens.remove("codex");
-            chat.resume_token = None;
-            chat.standing_sent.remove("codex");
+            self.invalidate_native_session(chat);
         }
+    }
+
+    fn recover_opencode_session(&self, chat: &mut Conversation, directory: &Path) {
+        self.recover_opencode_session_using(chat, |backend, token| {
+            crate::opencode_cli::session_exists(backend, token, Some(directory))
+        });
+    }
+
+    fn recover_opencode_session_using(
+        &self,
+        chat: &mut Conversation,
+        lookup: impl FnOnce(&str, &str) -> Option<bool>,
+    ) {
+        if !matches!(chat.backend.as_str(), "opencode" | "opencode2") {
+            return;
+        }
+        let token = chat.resume_tokens.get(&chat.backend).or_else(|| {
+            chat.resume_tokens
+                .is_empty()
+                .then_some(chat.resume_token.as_ref())
+                .flatten()
+        });
+        if let Some(token) = token
+            && lookup(&chat.backend, token) == Some(false)
+        {
+            self.invalidate_native_session(chat);
+        }
+    }
+
+    /// Keep the old ID in the private history, but rebuild the launch's
+    /// standing rules and handover before starting a replacement session.
+    fn invalidate_native_session(&self, chat: &mut Conversation) {
+        if let Ok(_lifecycle) = crate::work_handoff_store::lifecycle_lock(&self.root)
+            && let Ok(directory) = safe_join(&self.root, &chat.id)
+        {
+            let _ = crate::chat_sessions::remember(&directory, chat);
+            if let Some(id) = chat
+                .resume_tokens
+                .get(&chat.backend)
+                .or(chat.resume_token.as_ref())
+            {
+                let _ = crate::chat_sessions::invalidated(
+                    &directory,
+                    chat,
+                    &chat.backend,
+                    id,
+                    now_ms(),
+                );
+            }
+        }
+        chat.resume_tokens.remove(&chat.backend);
+        chat.resume_token = None;
+        chat.standing_sent.remove(&chat.backend);
     }
 
     /// The folder this conversation's outputs are staged in.
@@ -5372,13 +5406,7 @@ impl Store {
 
     fn write_opencode_hook_home(&self, id: &str) -> Result<(PathBuf, PathBuf), String> {
         let home = safe_join(&self.root, id)?.join("opencode-hook");
-        fs::create_dir_all(&home).map_err(|error| error.to_string())?;
-        let plugin = home.join("tokenstat-gate.js");
-        fs::write(
-            &plugin,
-            include_str!("../../../scripts/cli-bridge/opencode-plugin.js"),
-        )
-        .map_err(|error| error.to_string())?;
+        let plugin = crate::opencode_cli::write_gate_home(&home)?;
         Ok((home, plugin))
     }
 
@@ -9002,6 +9030,100 @@ mod tests {
                 .iter()
                 .any(|entry| entry["id"] == OLD && entry["status"] == "historical")
         );
+    }
+
+    #[test]
+    fn opencode_session_replacement_rebuilds_context_and_keeps_native_history() {
+        const OLD: &str = "ses_012345abcdef0123456789abcd";
+        const NEW: &str = "ses_112345abcdef0123456789abcd";
+        for backend in ["opencode", "opencode2"] {
+            let root = tempfile::tempdir().unwrap();
+            let store = Store::at(root.path().join("chat"));
+            prepare_live_chat(&store, "chat-test");
+            retune_chat(&store, "chat-test", backend, "standard");
+            store
+                .set_resume("chat-test", "claude", "claude-session")
+                .unwrap();
+            store.set_resume("chat-test", backend, OLD).unwrap();
+            store
+                .mark_standing_sent("chat-test", backend, "rules")
+                .unwrap();
+            store
+                .append(
+                    "chat-test",
+                    &StoredEvent::User {
+                        steer: false,
+                        text: "Continue the uploader fix".into(),
+                        at_ms: now_ms(),
+                    },
+                )
+                .unwrap();
+            store.record_events(
+                "chat-test",
+                backend,
+                vec![Event::Text {
+                    delta: "Added upload retries".into(),
+                }],
+            );
+            let original = store.get("chat-test").unwrap();
+            assert!(store.handover(&original).unwrap().is_none());
+            for presence in [Some(true), None] {
+                let mut retained = original.clone();
+                store.recover_opencode_session_using(&mut retained, |backend_seen, token| {
+                    assert_eq!(backend_seen, backend);
+                    assert_eq!(token, OLD);
+                    presence
+                });
+                assert_eq!(retained.resume_tokens, original.resume_tokens);
+                assert_eq!(retained.standing_sent, original.standing_sent);
+                assert!(store.handover(&retained).unwrap().is_none());
+            }
+            let mut other_only = original.clone();
+            other_only.resume_tokens.remove(backend);
+            store.recover_opencode_session_using(&mut other_only, |_, _| {
+                panic!("a legacy token must not be borrowed across backends")
+            });
+            let mut legacy = original.clone();
+            legacy.resume_tokens.clear();
+            store.recover_opencode_session_using(&mut legacy, |_, token| {
+                assert_eq!(token, OLD);
+                Some(false)
+            });
+            assert!(legacy.resume_token.is_none());
+            let mut replacement = original.clone();
+            store.recover_opencode_session_using(&mut replacement, |_, token| {
+                assert_eq!(token, OLD);
+                Some(false)
+            });
+            assert!(!replacement.resume_tokens.contains_key(backend));
+            assert!(replacement.resume_token.is_none());
+            assert!(!replacement.standing_sent.contains_key(backend));
+            assert_eq!(
+                replacement.resume_tokens.get("claude").map(String::as_str),
+                Some("claude-session")
+            );
+            let handover = store.handover(&replacement).unwrap().unwrap();
+            assert!(handover.brief.contains("Continue the uploader fix"));
+            assert!(handover.brief.contains("Added upload retries"));
+            assert!(!handover.announce);
+            assert_eq!(
+                store.get("chat-test").unwrap().resume_token,
+                original.resume_token
+            );
+            store.set_resume("chat-test", backend, NEW).unwrap();
+            let inspection = store.inspection("chat-test").unwrap();
+            let entries = inspection["sessions"]["entries"].as_array().unwrap();
+            assert!(
+                entries
+                    .iter()
+                    .any(|entry| entry["id"] == OLD && entry["status"] == "historical")
+            );
+            assert!(
+                entries
+                    .iter()
+                    .any(|entry| entry["id"] == NEW && entry["status"] == "current")
+            );
+        }
     }
 
     #[test]

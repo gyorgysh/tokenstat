@@ -758,6 +758,12 @@ impl Parser {
         for mut event in events {
             match &mut event {
                 Event::Session { id } => {
+                    // Startup failures can include sessionID:"". Emitting
+                    // that as a new session would overwrite the saved resume
+                    // token and suppress the next turn's history handover.
+                    if id.trim().is_empty() || id.len() > 160 || id.chars().any(char::is_control) {
+                        continue;
+                    }
                     if self.last_session.as_deref() == Some(id.as_str()) {
                         continue;
                     }
@@ -4758,6 +4764,34 @@ mod tests {
             event,
             Event::ToolStart { verb, .. } if verb == "Shell"
         )));
+    }
+
+    #[test]
+    fn opencode_startup_errors_do_not_replace_a_valid_resume_token_with_an_empty_id() {
+        for backend in ["opencode", "opencode2"] {
+            let mut parser = Parser::new(backend);
+            let first = parser.push_events(b"{\"type\":\"text\",\"sessionID\":\"ses_existing\",\"part\":{\"text\":\"Ready\"}}\n");
+            assert!(
+                first
+                    .iter()
+                    .any(|event| matches!(event, Event::Session { id } if id == "ses_existing"))
+            );
+            let error = parser.push_events(b"{\"type\":\"error\",\"sessionID\":\"\",\"error\":{\"message\":\"Session not found\"}}\n");
+            assert!(
+                error
+                    .iter()
+                    .any(|event| matches!(event, Event::Failed { .. }))
+            );
+            assert!(
+                !error
+                    .iter()
+                    .any(|event| matches!(event, Event::Session { .. }))
+            );
+            assert_eq!(
+                parser.inspection.session_id.as_deref(),
+                Some("ses_existing")
+            );
+        }
     }
 
     #[test]

@@ -2835,7 +2835,8 @@ extension Bridge {
         backend: String,
         prompt: String,
         model: String? = nil,
-        effort: String? = nil
+        effort: String? = nil,
+        workspaceID: String? = nil
     ) async throws -> [String] {
         var params: [String: Any] = [
             "backend": backend,
@@ -2843,6 +2844,7 @@ extension Bridge {
         ]
         if let model, !model.isEmpty { params["model"] = model }
         if let effort, !effort.isEmpty { params["effort"] = effort }
+        if let workspaceID { params["workspaceId"] = workspaceID }
         let result = try await background(
             "automation.interactiveCommand",
             params,

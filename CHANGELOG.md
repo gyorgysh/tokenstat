@@ -19,6 +19,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
+- OpenCode chats, automations and workflows support v2 installed as `opencode` or an existing `opencode2` alias, while keeping installed v1 agents compatible. Model flags follow the selected CLI, reasoning variants are checked against the model catalog, and unavailable native sessions restart with the saved conversation history. New agent installations use v2 and leave installed executables and wrappers alone.
+- OpenCode v2 asks Tokenstat before running tools in Standard mode. Interactive runs keep the chosen model and effort, and local-model settings work with both CLI versions.
 - Starting a chat on iPhone or iPad with no computer on the account. New chat now says what is missing and offers machine setup, or the plans screen when the account has no remote, instead of a composer that cannot send.
 
 ## [1.7.0] - 2026-10-16

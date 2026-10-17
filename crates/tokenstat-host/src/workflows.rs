@@ -954,12 +954,13 @@ impl Store {
             return Err("the run budget is spent".into());
         }
         let remaining = remaining_budget(run);
-        let argv = automations::agent_command(
+        let argv = automations::agent_command_in(
             backend,
             &prompt,
             node.model.as_deref(),
             node.effort.as_deref(),
             remaining,
+            Some(Path::new(workspace_path)),
         )?;
         let run_id = run.id.clone();
         let node_id = node.id.clone();
@@ -1150,13 +1151,19 @@ pub fn design(
     let brief = format!(
         "{DESIGN_PROMPT}\n\nAvailable backends: {backends}\nExisting automations: {automations}\nWorkspace path: {folder}\n\nIntent:\n{intent}\n"
     );
-    let argv =
-        automations::agent_command(&backend, &brief, model.as_deref(), effort.as_deref(), 180)?;
     let cwd = if folder.is_empty() {
         std::env::temp_dir().display().to_string()
     } else {
         folder
     };
+    let argv = automations::agent_command_in(
+        &backend,
+        &brief,
+        model.as_deref(),
+        effort.as_deref(),
+        180,
+        Some(Path::new(&cwd)),
+    )?;
     let mut scratch = WorkflowRun {
         id: format!("design-{}", now_ms()),
         workflow_id: String::new(),

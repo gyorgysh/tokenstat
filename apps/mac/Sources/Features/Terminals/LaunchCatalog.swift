@@ -103,14 +103,13 @@ struct LaunchProfile: Identifiable, Sendable {
             bypassArgs: ["--auto"],
             harnessID: "opencode", symbol: nil,
             installDirs: [".opencode/bin"],
-            installCommand: "curl -fsSL https://opencode.ai/install | bash"
+            installCommand: "curl -fsSL https://opencode.ai/v2/install | bash"
         ),
         LaunchProfile(
             id: "opencode2", name: "OpenCode 2", command: "opencode2", args: [],
             bypassArgs: ["--auto"],
             harnessID: "opencode", symbol: nil,
-            installDirs: [".opencode/bin"],
-            installCommand: "curl -fsSL https://opencode.ai/v2/install | bash"
+            installDirs: [".opencode/bin"]
         ),
         LaunchProfile(
             id: "grok", name: L10n.text("apple.launchcatalog.grok_build.fd3bf01a"), command: "grok", args: [],

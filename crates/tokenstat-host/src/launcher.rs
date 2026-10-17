@@ -144,8 +144,8 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--auto"],
         harness_id: Some("opencode"),
         symbol: None,
-        install_command: Some("curl -fsSL https://opencode.ai/install | bash"),
-        install_command_windows: Some("npm install -g opencode-ai"),
+        install_command: Some("curl -fsSL https://opencode.ai/v2/install | bash"),
+        install_command_windows: Some("npm install -g @opencode/cli"),
         install_dirs: &[".opencode/bin"],
         open_url: None,
     },
@@ -157,8 +157,10 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--auto"],
         harness_id: Some("opencode"),
         symbol: None,
-        install_command: Some("curl -fsSL https://opencode.ai/v2/install | bash"),
-        install_command_windows: Some("npm install -g @opencode/cli"),
+        // The current v2 installer delivers `opencode`, not `opencode2`.
+        // Keep existing aliases runnable without reinstalling over `opencode`.
+        install_command: None,
+        install_command_windows: None,
         install_dirs: &[".opencode/bin"],
         open_url: None,
     },
@@ -790,6 +792,26 @@ fn install_delivered(profile: &Profile, path: &[String], home: &Path) -> bool {
     absolute_command(profile.command) || resolve_profile(profile, path, home).is_some()
 }
 
+fn opencode_install_conflict(home: &Path, path: &[String]) -> Option<PathBuf> {
+    // The vendor's primary installer also removes/recreates its legacy
+    // alias. Preserve wrappers even if they are broken or not executable.
+    for name in [
+        "opencode",
+        "opencode.exe",
+        "opencode.cmd",
+        "opencode2",
+        "opencode2.exe",
+        "opencode2.cmd",
+    ] {
+        let target = home.join(".opencode/bin").join(name);
+        if std::fs::symlink_metadata(&target).is_ok() {
+            return Some(target);
+        }
+    }
+    let alias = PROFILES.iter().find(|profile| profile.id == "opencode2")?;
+    resolve_profile(alias, path, home).map(PathBuf::from)
+}
+
 /// Run a catalog profile's official installer on this machine.
 ///
 /// The command comes from the hardcoded [`PROFILES`] table, never from the
@@ -879,6 +901,19 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
         cmd.env("PATH", &env.path);
         for (key, value) in &env.vars {
             cmd.env(key, value);
+        }
+    }
+    if id == "opencode" {
+        let install_home = login_env
+            .as_ref()
+            .and_then(|env| env.vars.get("HOME"))
+            .map(Path::new)
+            .unwrap_or_else(|| Path::new(&home));
+        if let Some(existing) = opencode_install_conflict(install_home, &search_path()) {
+            return Err(format!(
+                "OpenCode already has a command or wrapper at {}. Automatic installation is disabled to preserve it; manage that installation directly.",
+                existing.display()
+            ));
         }
     }
 
@@ -1111,7 +1146,11 @@ pub(crate) fn model_environment(
             let model = model.ok_or("local model selection needs both a provider and a model")?;
             Ok(vec![(
                 "OPENCODE_CONFIG_CONTENT".into(),
-                opencode_model_config(provider, model)?,
+                opencode_model_config(
+                    provider,
+                    model,
+                    crate::opencode_cli::require_generation(command)?,
+                )?,
             )])
         }
         (_, Some(provider)) => Err(format!(
@@ -1130,13 +1169,30 @@ pub(crate) fn model_environment(
 /// `model` is the default the TUI starts on. OpenCode 1 also accepts
 /// `--model` on the root command. OpenCode 2 does not, so this field is
 /// the only way to point that CLI at the selection.
-fn opencode_model_config(provider: &str, model: &str) -> Result<String, String> {
+fn opencode_model_config(
+    provider: &str,
+    model: &str,
+    generation: crate::opencode_cli::Generation,
+) -> Result<String, String> {
     let name = model.rsplit('/').next().unwrap_or(model);
+    let base_url = format!("{}/v1", crate::local_models::origin(provider)?);
+    if generation == crate::opencode_cli::Generation::V2 {
+        return serde_json::to_string(&json!({
+            "model": format!("{provider}/{model}"),
+            "providers": {provider: {
+                "package": "@opencode/ai/providers/openai-compatible",
+                "settings": {"baseURL": base_url},
+                "models": {model: {"name": name}}
+            }}
+        }))
+        .map_err(|error| error.to_string());
+    }
     serde_json::to_string(&json!({
         "model": format!("{provider}/{model}"),
         "provider": {
             provider: {
-                "options": { "baseURL": format!("{}/v1", crate::local_models::origin(provider)?) },
+                "npm": "@ai-sdk/openai-compatible",
+                "options": { "baseURL": base_url },
                 "models": {
                     model: { "name": name }
                 }
@@ -1179,8 +1235,13 @@ pub(crate) fn model_arguments(
         // lives in `OPENCODE_CONFIG_CONTENT` instead, and `--standalone`
         // keeps that config on this process rather than on a background
         // service that never saw it.
-        "opencode" => vec!["--model".into(), format!("{provider}/{model}")],
-        "opencode2" => vec!["--standalone".into()],
+        "opencode" | "opencode2" => {
+            if crate::opencode_cli::generation(command) == crate::opencode_cli::Generation::V1 {
+                vec!["--model".into(), format!("{provider}/{model}")]
+            } else {
+                vec!["--standalone".into()]
+            }
+        }
         "claude" | "copilot" => vec!["--model".into(), model.into()],
         _ => Vec::new(),
     }
@@ -1992,20 +2053,54 @@ mod tests {
     }
 
     #[test]
-    fn the_next_opencode_build_is_its_own_profile() {
-        let next = PROFILES
-            .iter()
-            .find(|p| p.id == "opencode2")
-            .expect("OpenCode 2 must be in the catalog");
-        assert_eq!(next.name, "OpenCode 2");
-        assert_eq!(next.command, "opencode2");
-        assert_eq!(next.harness_id, Some("opencode"));
-        let command = next.install_command.expect("a bundled installer");
-        assert_eq!(command, "curl -fsSL https://opencode.ai/v2/install | bash");
+    fn new_opencode_installs_use_v2_and_existing_aliases_remain_launchable() {
+        let current = PROFILES.iter().find(|p| p.id == "opencode").unwrap();
+        assert_eq!(current.command, "opencode");
         assert_eq!(
-            next.install_command_windows,
+            current.install_command,
+            Some("curl -fsSL https://opencode.ai/v2/install | bash")
+        );
+        assert_eq!(
+            current.install_command_windows,
             Some("npm install -g @opencode/cli")
         );
+        let alias = PROFILES.iter().find(|p| p.id == "opencode2").unwrap();
+        assert_eq!(alias.command, "opencode2");
+        assert_eq!(alias.harness_id, Some("opencode"));
+        assert!(alias.install_command.is_none());
+        assert!(alias.install_command_windows.is_none());
+        assert!(install("opencode2").is_err());
+    }
+
+    #[test]
+    fn opencode_install_preserves_aliases_and_non_executable_wrappers() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join(".opencode/bin");
+        std::fs::create_dir_all(&directory).unwrap();
+        assert!(super::opencode_install_conflict(root.path(), &[]).is_none());
+        for name in ["opencode", "opencode2", "opencode2.cmd", "opencode2.exe"] {
+            let wrapper = directory.join(name);
+            std::fs::write(&wrapper, "local workaround").unwrap();
+            assert_eq!(
+                super::opencode_install_conflict(root.path(), &[]),
+                Some(wrapper.clone())
+            );
+            assert_eq!(
+                std::fs::read_to_string(&wrapper).unwrap(),
+                "local workaround"
+            );
+            std::fs::remove_file(wrapper).unwrap();
+        }
+        #[cfg(unix)]
+        {
+            let wrapper = directory.join("opencode2");
+            std::os::unix::fs::symlink(directory.join("missing-real-binary"), &wrapper).unwrap();
+            assert_eq!(
+                super::opencode_install_conflict(root.path(), &[]),
+                Some(wrapper.clone())
+            );
+            assert!(std::fs::symlink_metadata(wrapper).unwrap().is_symlink());
+        }
     }
 
     /// The catalog answers for the whole supported list, not only what is on
@@ -2241,7 +2336,11 @@ mod tests {
     fn opencode_addresses_a_model_by_provider() {
         assert_eq!(
             model_arguments("opencode", Some("lmstudio"), Some("qwen/a")),
-            vec!["--model", "lmstudio/qwen/a"]
+            if crate::opencode_cli::generation("opencode") == crate::opencode_cli::Generation::V1 {
+                vec!["--model", "lmstudio/qwen/a"]
+            } else {
+                vec!["--standalone"]
+            }
         );
         assert_eq!(
             model_arguments(
@@ -2257,24 +2356,36 @@ mod tests {
     #[test]
     fn opencode_registers_a_slashed_local_model_for_this_process() {
         crate::test_identity::isolated(|| {
-            let env = model_environment("opencode2", Some("lmstudio"), Some("meta/muse-glimmer"))
-                .expect("environment");
-            let content = env
-                .iter()
-                .find(|(key, _)| key == "OPENCODE_CONFIG_CONTENT")
-                .map(|(_, value)| value.as_str())
-                .expect("OPENCODE_CONFIG_CONTENT");
-            let parsed: serde_json::Value = serde_json::from_str(content).expect("json");
-            assert_eq!(parsed["model"], "lmstudio/meta/muse-glimmer");
-            assert_eq!(
-                parsed["provider"]["lmstudio"]["models"]["meta/muse-glimmer"]["name"],
-                "muse-glimmer"
-            );
-            assert_eq!(
-                parsed["provider"]["lmstudio"]["options"]["baseURL"],
-                "http://127.0.0.1:1234/v1"
-            );
-            assert_eq!(env.len(), 1);
+            for generation in [
+                crate::opencode_cli::Generation::V1,
+                crate::opencode_cli::Generation::V2,
+            ] {
+                let content =
+                    super::opencode_model_config("lmstudio", "meta/muse-glimmer", generation)
+                        .unwrap();
+                let env = [("OPENCODE_CONFIG_CONTENT".to_string(), content)];
+                let content = env
+                    .iter()
+                    .find(|(key, _)| key == "OPENCODE_CONFIG_CONTENT")
+                    .map(|(_, value)| value.as_str())
+                    .expect("OPENCODE_CONFIG_CONTENT");
+                let parsed: serde_json::Value = serde_json::from_str(content).expect("json");
+                assert_eq!(parsed["model"], "lmstudio/meta/muse-glimmer");
+                let (providers, settings) = if generation == crate::opencode_cli::Generation::V1 {
+                    ("provider", "options")
+                } else {
+                    ("providers", "settings")
+                };
+                assert_eq!(
+                    parsed[providers]["lmstudio"]["models"]["meta/muse-glimmer"]["name"],
+                    "muse-glimmer"
+                );
+                assert_eq!(
+                    parsed[providers]["lmstudio"][settings]["baseURL"],
+                    "http://127.0.0.1:1234/v1"
+                );
+                assert_eq!(env.len(), 1);
+            }
         });
     }
 
@@ -2306,7 +2417,12 @@ mod tests {
                     let config: serde_json::Value =
                         serde_json::from_str(&env[0].1).expect("config");
                     assert_eq!(
-                        config["provider"][provider]["options"]["baseURL"],
+                        config["provider"][provider]["options"]["baseURL"]
+                            .as_str()
+                            .or_else(
+                                || config["providers"][provider]["settings"]["baseURL"].as_str()
+                            )
+                            .unwrap(),
                         format!("{origin}/v1")
                     );
                 }

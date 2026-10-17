@@ -609,6 +609,7 @@ struct AutomationParams {
     max_concurrent: Option<u32>,
     /// `automation.interactiveCommand` only.
     backend: Option<String>,
+    workspace_id: Option<String>,
     prompt: Option<String>,
     model: Option<String>,
     effort: Option<String>,
@@ -2645,11 +2646,17 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 .prompt
                 .as_deref()
                 .ok_or("automation.interactiveCommand needs prompt")?;
-            let argv = crate::automations::interactive_agent_command(
+            let workspace = p
+                .workspace_id
+                .as_deref()
+                .map(crate::workspaces::folder)
+                .transpose()?;
+            let argv = crate::automations::interactive_agent_command_in(
                 backend,
                 prompt,
                 p.model.as_deref(),
                 p.effort.as_deref(),
+                workspace.as_ref().map(|workspace| workspace.path.as_path()),
             )?;
             Ok(json!({"argv": argv}))
         }

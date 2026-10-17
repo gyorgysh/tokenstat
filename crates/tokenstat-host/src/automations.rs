@@ -262,6 +262,17 @@ pub fn agent_command(
     effort: Option<&str>,
     budget_seconds: u64,
 ) -> Result<Vec<String>, String> {
+    agent_command_in(backend, prompt, model, effort, budget_seconds, None)
+}
+
+pub(crate) fn agent_command_in(
+    backend: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    budget_seconds: u64,
+    directory: Option<&Path>,
+) -> Result<Vec<String>, String> {
     let p = prompt.trim();
     if p.is_empty() {
         return Err("an automation needs a prompt".into());
@@ -408,31 +419,19 @@ pub fn agent_command(
                 .map(str::to_string),
             );
         }
-        "opencode" => {
-            args.push("opencode".into());
-            if let Some(m) = model {
-                args.push("--model".into());
-                args.push(m.into());
-            }
-            if let Some(e) = effort {
-                args.push("--variant".into());
-                args.push(e.into());
-            }
-            args.extend(["run", "--auto", "--format", "json", "--", p].map(str::to_string));
-        }
-        "opencode2" => {
-            // OpenCode 2 rejects `--model` on the root command. Flags belong
-            // on `run`.
-            args.push("opencode2".into());
+        "opencode" | "opencode2" => {
+            args.push(backend.into());
             args.extend(["run", "--auto", "--format", "json"].map(str::to_string));
-            if let Some(m) = model {
-                args.push("--model".into());
-                args.push(m.into());
+            let generation = crate::opencode_cli::require_generation(backend)?;
+            if generation == crate::opencode_cli::Generation::V2 {
+                // Per-turn configuration and hook credentials must reach the
+                // server that executes this turn, even if a shared service
+                // is already running with a different version or environment.
+                args.push("--standalone".into());
             }
-            if let Some(e) = effort {
-                args.push("--variant".into());
-                args.push(e.into());
-            }
+            args.extend(crate::opencode_cli::model_arguments(
+                backend, generation, model, effort, directory,
+            ));
             args.extend(["--", p].map(str::to_string));
         }
         other => return Err(format!("unknown backend {other}")),
@@ -614,6 +613,19 @@ pub fn chat_agent_command(
     budget_seconds: u64,
     launch: ChatLaunch<'_>,
 ) -> Result<Vec<String>, String> {
+    chat_agent_command_in(backend, prompt, model, effort, budget_seconds, launch, None)
+}
+
+#[allow(clippy::too_many_arguments)] // The public launch contract plus its host working directory.
+pub(crate) fn chat_agent_command_in(
+    backend: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    budget_seconds: u64,
+    launch: ChatLaunch<'_>,
+    directory: Option<&Path>,
+) -> Result<Vec<String>, String> {
     let plan = launch.mode == "plan";
     // Everything this function has to say to the model, in one tagged block
     // ahead of the turn, rather than several bare paragraphs the model cannot
@@ -650,7 +662,7 @@ pub fn chat_agent_command(
             .map(|value| value.trim().is_empty() || value.trim() == "auto")
             .unwrap_or(true);
     let model = if cursor_default { Some("auto") } else { model };
-    let mut argv = agent_command(backend, prompt, model, effort, budget_seconds)?;
+    let mut argv = agent_command_in(backend, prompt, model, effort, budget_seconds, directory)?;
     if backend == "muse" && (!launch.bypass || plan) {
         // `agent_command` is shared with unattended automations, where Muse
         // must be allowed to run its workspace tools. A persona draft is a
@@ -704,6 +716,9 @@ pub fn chat_agent_command(
         }
     }
     let mut extra = Vec::new();
+    if plan && matches!(backend, "opencode" | "opencode2") {
+        extra.extend(["--agent".into(), "plan".into()]);
+    }
     if backend == "grok" {
         // Rebuild the pair as a whole. Stripping `bypassPermissions` and then
         // splicing at `len - 1` used to leave `--output-format` without a
@@ -912,6 +927,16 @@ pub fn interactive_agent_command(
     model: Option<&str>,
     effort: Option<&str>,
 ) -> Result<Vec<String>, String> {
+    interactive_agent_command_in(backend, prompt, model, effort, None)
+}
+
+pub(crate) fn interactive_agent_command_in(
+    backend: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    directory: Option<&Path>,
+) -> Result<Vec<String>, String> {
     let p = prompt.trim();
     if p.is_empty() {
         return Err("an interactive run needs a prompt".into());
@@ -998,28 +1023,28 @@ pub fn interactive_agent_command(
                 ["--dangerously-skip-permissions", "--prompt-interactive", p].map(str::to_string),
             );
         }
-        "opencode" => {
+        "opencode" | "opencode2" => {
+            let generation = crate::opencode_cli::require_generation(backend)?;
+            if generation == crate::opencode_cli::Generation::V2 {
+                // The full-screen TUI rejects model flags. Mini accepts the
+                // selection and submits its initial prompt without a timed
+                // synthetic Enter that could race startup or type twice.
+                args.extend([backend, "mini", "--standalone"].map(str::to_string));
+                args.extend(crate::opencode_cli::model_arguments(
+                    backend, generation, model, effort, directory,
+                ));
+                args.extend(["--prompt", p].map(str::to_string));
+                return Ok(args);
+            }
             // `--prompt` only fills the TUI box. `run -i` sends the first
             // message and stays in the interactive split-footer, so a task
             // opened In front does not wait for Enter.
-            args.push("opencode".into());
+            args.push(backend.into());
             args.extend(["run", "-i", "--auto"].map(str::to_string));
-            if let Some(m) = model {
-                args.push("--model".into());
-                args.push(m.into());
-            }
-            if let Some(e) = effort {
-                args.push("--variant".into());
-                args.push(e.into());
-            }
+            args.extend(crate::opencode_cli::model_arguments(
+                backend, generation, model, effort, directory,
+            ));
             args.extend(["--", p].map(str::to_string));
-        }
-        "opencode2" => {
-            // Root command rejects `--model`. `--prompt` is the TUI seed.
-            // OpenCode 2 has no `run -i`. The front end submits Enter once
-            // the TUI is up.
-            args.push("opencode2".into());
-            args.extend(["--auto", "--prompt", p].map(str::to_string));
         }
         other => return Err(format!("unknown backend {other}")),
     }
@@ -1764,12 +1789,13 @@ impl Store {
             snapshot.prompt = over.to_string();
         }
         let workspace = crate::workspaces::folder(&snapshot.workspace_id)?;
-        let _argv = agent_command(
+        let _argv = agent_command_in(
             &snapshot.backend,
             &snapshot.prompt,
             snapshot.model.as_deref(),
             snapshot.effort.as_deref(),
             snapshot.budget_seconds,
+            Some(&workspace.path),
         )?;
         let run_id = mint_run_id();
         let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
@@ -1986,19 +2012,21 @@ impl Store {
         self.ensure_runs_available()?;
         let workspace = crate::workspaces::folder(&job.workspace_id)?;
         if interactive {
-            interactive_agent_command(
+            interactive_agent_command_in(
                 &job.backend,
                 &job.prompt,
                 job.model.as_deref(),
                 job.effort.as_deref(),
+                Some(&workspace.path),
             )?;
         } else {
-            agent_command(
+            agent_command_in(
                 &job.backend,
                 &job.prompt,
                 job.model.as_deref(),
                 job.effort.as_deref(),
                 job.budget_seconds,
+                Some(&workspace.path),
             )?;
         }
         let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
@@ -2107,19 +2135,21 @@ impl Store {
         }
         let workspace = crate::workspaces::folder(&pending.job.workspace_id)?;
         let argv = if pending.interactive {
-            interactive_agent_command(
+            interactive_agent_command_in(
                 &pending.job.backend,
                 &pending.job.prompt,
                 pending.job.model.as_deref(),
                 pending.job.effort.as_deref(),
+                Some(&workspace.path),
             )?
         } else {
-            agent_command(
+            agent_command_in(
                 &pending.job.backend,
                 &pending.job.prompt,
                 pending.job.model.as_deref(),
                 pending.job.effort.as_deref(),
                 pending.job.budget_seconds,
+                Some(&workspace.path),
             )?
         };
         let info = tokenstat_pty::manager()
@@ -2584,21 +2614,23 @@ fn validate(job: &Automation) -> Result<(), String> {
 /// Validate the complete task launch before its board claim is persisted.
 pub(crate) fn validate_task_run(job: &Automation, interactive: bool) -> Result<(), String> {
     validate(job)?;
-    let _workspace = crate::workspaces::folder(&job.workspace_id)?;
+    let workspace = crate::workspaces::folder(&job.workspace_id)?;
     if interactive {
-        interactive_agent_command(
+        interactive_agent_command_in(
             &job.backend,
             &job.prompt,
             job.model.as_deref(),
             job.effort.as_deref(),
+            Some(&workspace.path),
         )?;
     } else {
-        agent_command(
+        agent_command_in(
             &job.backend,
             &job.prompt,
             job.model.as_deref(),
             job.effort.as_deref(),
             job.budget_seconds,
+            Some(&workspace.path),
         )?;
     }
     Ok(())
@@ -4023,6 +4055,9 @@ mod tests {
                 },
             )
             .unwrap();
+            if matches!(backend, "opencode" | "opencode2") {
+                assert!(argv.windows(2).any(|pair| pair == ["--agent", "plan"]));
+            }
             assert!(
                 !argv.iter().any(|arg| matches!(
                     arg.as_str(),
@@ -4152,30 +4187,73 @@ mod tests {
                 .any(|w| w == ["--prompt-interactive", "do it"])
         );
 
-        let next =
-            interactive_agent_command("opencode2", "do it", Some("opencode/foo"), None).unwrap();
-        assert_eq!(next, vec!["opencode2", "--auto", "--prompt", "do it"]);
-
-        let oc = interactive_agent_command("opencode", "do it", Some("opencode/foo"), Some("high"))
-            .unwrap();
-        assert_eq!(
-            oc,
-            vec![
-                "opencode",
-                "run",
-                "-i",
-                "--auto",
-                "--model",
-                "opencode/foo",
-                "--variant",
-                "high",
-                "--",
-                "do it"
-            ]
-        );
+        for backend in ["opencode", "opencode2"] {
+            let argv =
+                interactive_agent_command(backend, "do it", Some("opencode/foo"), Some("high"))
+                    .unwrap();
+            assert_eq!(argv[0], backend);
+            assert!(!argv.iter().any(|arg| arg == "--format"));
+            if argv[1] == "run" {
+                assert!(argv.iter().any(|arg| arg == "--auto"));
+                assert!(argv.iter().any(|arg| arg == "-i"));
+                assert!(
+                    argv.windows(2)
+                        .any(|pair| pair == ["--model", "opencode/foo"])
+                );
+                assert!(argv.windows(2).any(|pair| pair == ["--variant", "high"]));
+                assert_eq!(argv.last().unwrap(), "do it");
+            } else {
+                assert_eq!(argv[1], "mini");
+                assert!(!argv.iter().any(|arg| arg == "--auto"));
+                assert!(
+                    argv.windows(2)
+                        .any(|pair| pair == ["--model", "opencode/foo"])
+                );
+                assert_eq!(&argv[argv.len() - 2..], ["--prompt", "do it"]);
+            }
+        }
 
         assert!(interactive_agent_command("nope", "do it", None, None).is_err());
         assert!(interactive_agent_command("claude", "   ", None, None).is_err());
+    }
+
+    #[test]
+    fn opencode_new_and_resumed_runs_keep_options_after_run_and_preserve_the_prompt() {
+        const PROMPT: &str = "run --variant max --model other/model -- -s prompt";
+        for backend in ["opencode", "opencode2"] {
+            for resume in [None, Some("ses_012345abcdef0123456789abcd")] {
+                let argv = chat_agent_command(
+                    backend,
+                    PROMPT,
+                    Some("opencode/beam-free#max"),
+                    None,
+                    0,
+                    ChatLaunch {
+                        resume,
+                        bypass: true,
+                        mode: "execute",
+                        hook_helper: None,
+                        system_append: None,
+                        agy_customization_dir: None,
+                        cursor_plugin_dir: None,
+                        grok_allow_rules: &[],
+                        attachments: &[],
+                    },
+                )
+                .unwrap();
+                assert_eq!(argv[0], backend);
+                assert_eq!(argv[1], "run");
+                assert!(
+                    argv.windows(2)
+                        .any(|pair| pair == ["--model", "opencode/beam-free#max"])
+                );
+                assert!(!argv.iter().any(|arg| arg == "--variant"));
+                assert_eq!(&argv[argv.len() - 2..], ["--", PROMPT]);
+                if let Some(id) = resume {
+                    assert_eq!(&argv[2..4], ["-s", id]);
+                }
+            }
+        }
     }
 
     #[test]

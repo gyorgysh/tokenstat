@@ -103,6 +103,8 @@ mod live_work;
 pub(crate) mod local_models;
 mod machine;
 pub mod open_files;
+#[cfg(feature = "local-host")]
+mod opencode_cli;
 pub mod ownership;
 pub(crate) mod presence;
 pub mod pricing;

@@ -18,7 +18,7 @@
 
 const HELPER = "TOKENSTAT_CHAT_HOOK_PATH";
 
-async function hostHook(phase, payload) {
+export async function hostHook(phase, payload) {
   const helper = process.env[HELPER];
   if (!helper) throw new Error("tokenstat cannot approve this: no host hook");
 

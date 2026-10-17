@@ -3160,7 +3160,8 @@ struct RootView: View {
                     backend: launch.backend,
                     prompt: launch.prompt,
                     model: launch.model,
-                    effort: launch.effort
+                    effort: launch.effort,
+                    workspaceID: folder.id
                 )
                 guard let command = argv.first else {
                     todo.errorMessage = L10n.text("apple.rootview.the_agent_command_was_empty.793c23f6")
@@ -3181,9 +3182,10 @@ struct RootView: View {
                         ?? L10n.text("apple.rootview.could_not_start_a_terminal.6e9cc764")
                     return
                 }
-                // OpenCode 2 seeds the prompt box but does not submit it.
-                // Wait for first output (the TUI), then a short settle.
-                if launch.backend == "opencode2", let session {
+                // Older hosts return a root TUI command that only seeds the
+                // prompt. New hosts use mini, which submits it directly.
+                if ["opencode", "opencode2"].contains(launch.backend),
+                   argv.dropFirst().first == "--auto", argv.contains("--prompt"), let session {
                     let deadline = Date().addingTimeInterval(5)
                     while session.showsStartingState, Date() < deadline {
                         try? await Task.sleep(for: .milliseconds(100))

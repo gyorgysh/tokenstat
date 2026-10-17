@@ -41,6 +41,35 @@ pub fn discover(home: &Path) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// Check the session namespace used by the installed CLI without changing
+/// the database. A v1 row alone cannot be resumed by a v2 executable.
+pub fn session_exists(path: &Path, id: &str, v2: bool) -> Result<bool, String> {
+    let conn = rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| error.to_string())?;
+    conn.busy_timeout(std::time::Duration::from_millis(100))
+        .map_err(|error| error.to_string())?;
+    let table = if v2 { "session_v2" } else { "session" };
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            [table],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !table_exists {
+        return Ok(false);
+    }
+    conn.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id = ?1)"),
+        [id],
+        |row| row.get(0),
+    )
+    .map_err(|error| error.to_string())
+}
+
 #[derive(Debug, Default)]
 pub struct ParseOutput {
     pub events: Vec<UsageEvent>,
@@ -405,6 +434,40 @@ fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resume_checks_the_installed_generations_namespace_read_only() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("opencode.db");
+        assert!(session_exists(&path, "missing", true).is_err());
+        assert!(!path.exists());
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT PRIMARY KEY);
+             INSERT INTO session VALUES ('old');",
+        )
+        .unwrap();
+        assert!(session_exists(&path, "old", false).unwrap());
+        assert!(!session_exists(&path, "old", true).unwrap());
+        conn.execute_batch(
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
+             INSERT INTO session_v2 VALUES ('new'), ('migrated');
+             INSERT INTO session VALUES ('migrated');",
+        )
+        .unwrap();
+        assert!(!session_exists(&path, "old", true).unwrap());
+        assert!(session_exists(&path, "new", true).unwrap());
+        assert!(!session_exists(&path, "new", false).unwrap());
+        assert!(session_exists(&path, "migrated", false).unwrap());
+        assert!(session_exists(&path, "migrated", true).unwrap());
+        assert!(!session_exists(&path, "stale", true).unwrap());
+        assert!(!session_exists(&path, "' OR 1=1 --", true).unwrap());
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM session", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+    }
 
     fn temp_db(rows: &[(&str, &str, i64, &str, &str)]) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};

@@ -229,12 +229,12 @@ fn probe_all(force: bool) {
         scope.spawn(|| fill("muse", force, muse_models));
         scope.spawn(|| {
             fill("opencode", force, || {
-                list("opencode", &["models"], parse_opencode_models)
+                crate::opencode_cli::models("opencode", force)
             })
         });
         scope.spawn(|| {
             fill("opencode2", force, || {
-                list("opencode2", &["models"], parse_opencode_models)
+                crate::opencode_cli::models("opencode2", force)
             })
         });
     });
@@ -327,17 +327,53 @@ fn run_list(bin: &str, args: &[&str]) -> Option<String> {
 }
 
 pub(crate) fn run_list_with_timeout(bin: &str, args: &[&str], timeout: Duration) -> Option<String> {
+    run_list_with_cap(bin, args, timeout, LIST_CAP)
+}
+
+pub(crate) fn run_list_with_cap(
+    bin: &str,
+    args: &[&str],
+    timeout: Duration,
+    cap: usize,
+) -> Option<String> {
+    let output = run_cli_probe(bin, args, timeout, cap, None, &[])?;
+    output.success.then_some(output.stdout)
+}
+
+pub(crate) struct CliProbe {
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Capture both streams: several CLIs write successful help to stderr.
+/// The probe inherits the same login environment as the eventual PTY.
+pub(crate) fn run_cli_probe(
+    bin: &str,
+    args: &[&str],
+    timeout: Duration,
+    cap: usize,
+    directory: Option<&std::path::Path>,
+    environment: &[(String, String)],
+) -> Option<CliProbe> {
     let mut cmd = Command::new(bin);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
+    if let Some(login) = tokenstat_pty::login_env() {
+        cmd.env_clear().envs(&login.vars);
+    }
+    if let Some(directory) = directory {
+        cmd.current_dir(directory).env("PWD", directory);
+    }
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env("PATH", crate::launcher::search_path_var());
+        .stderr(Stdio::piped())
+        .env("PATH", crate::launcher::search_path_var())
+        .envs(environment.iter().map(|(key, value)| (key, value)));
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -345,12 +381,20 @@ pub(crate) fn run_list_with_timeout(bin: &str, args: &[&str], timeout: Duration)
     }
     let mut child = cmd.spawn().ok()?;
     let stdout = child.stdout.take()?;
+    let stderr = child.stderr.take()?;
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let read = stdout.take(LIST_CAP as u64 + 1).read_to_end(&mut buf);
-        let _ = tx.send(read.ok().filter(|_| buf.len() <= LIST_CAP).map(|_| buf));
-    });
+    for (index, pipe) in [Box::new(stdout) as Box<dyn Read + Send>, Box::new(stderr)]
+        .into_iter()
+        .enumerate()
+    {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let read = pipe.take(cap as u64 + 1).read_to_end(&mut buf);
+            let _ = tx.send((index, read.ok().filter(|_| buf.len() <= cap).map(|_| buf)));
+        });
+    }
+    drop(tx);
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
@@ -360,7 +404,7 @@ pub(crate) fn run_list_with_timeout(bin: &str, args: &[&str], timeout: Duration)
                     reap_list_child(&mut child);
                     return None;
                 }
-                std::thread::sleep(Duration::from_millis(50));
+                std::thread::sleep(Duration::from_millis(25));
             }
             Err(_) => {
                 reap_list_child(&mut child);
@@ -368,11 +412,23 @@ pub(crate) fn run_list_with_timeout(bin: &str, args: &[&str], timeout: Duration)
             }
         }
     };
-    if !status.success() {
-        return None;
+    let mut streams = [String::new(), String::new()];
+    for _ in 0..2 {
+        let Some((index, Some(bytes))) = rx
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .ok()
+        else {
+            reap_list_child(&mut child);
+            return None;
+        };
+        streams[index] = String::from_utf8_lossy_owned(bytes);
     }
-    let bytes = rx.recv_timeout(Duration::from_secs(1)).ok()??;
-    Some(String::from_utf8_lossy_owned(bytes))
+    let [stdout, stderr] = streams;
+    Some(CliProbe {
+        success: status.success(),
+        stdout,
+        stderr,
+    })
 }
 
 fn reap_list_child(child: &mut std::process::Child) {
