@@ -322,5 +322,7 @@
   "common.session_identity.copied": "ID copied",
   "common.session_identity.not_reported": "No agent session ID reported yet.",
   "common.session_identity.history_help": "Previous IDs can help locate transcripts. They may no longer resume.",
-  "common.session_identity.truncated": "Showing {0} of {1} reported IDs."
+  "common.session_identity.truncated": "Showing {0} of {1} reported IDs.",
+  "common.chat.images.enlarge_viewer": "Enlarge viewer",
+  "common.chat.images.restore_viewer": "Restore viewer size"
 }

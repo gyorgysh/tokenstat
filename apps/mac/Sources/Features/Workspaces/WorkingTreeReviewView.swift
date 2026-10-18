@@ -8,6 +8,7 @@ import SwiftUI
 struct WorkingTreeReviewView: View {
     let folder: WorkspaceFolder
     @Bindable var model: WorkspacesModel
+    var isActive = true
 
     @State private var diffs: [FileDiff] = []
     @State private var loading = true
@@ -72,7 +73,9 @@ struct WorkingTreeReviewView: View {
             }
         }
         .background(Theme.background)
-        .task(id: reviewKey) { await load() }
+        .task(id: isActive ? reviewKey : nil) {
+            if isActive { await load() }
+        }
     }
 
     private var header: some View {

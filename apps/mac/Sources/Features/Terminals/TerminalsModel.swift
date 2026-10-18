@@ -133,6 +133,7 @@ final class TerminalsModel {
     private(set) var splitTrailingID: [String: String] = [:]
     /// Sessions the main pane is showing.
     private var paneFocusIDs: Set<String> = []
+    private var paneFocusClaims = TerminalFocusClaims()
 
     func layout(for workspaceID: String) -> TerminalSplitLayout {
         if let cached = splitLayout[workspaceID] { return cached }
@@ -220,6 +221,12 @@ final class TerminalsModel {
         focus(id.map { [$0] } ?? [])
     }
 
+    func focus(owner: UUID, ids: Set<String>) {
+        paneFocusIDs = []
+        paneFocusClaims.update(owner: owner, ids: ids)
+        applyFocus()
+    }
+
     /// Somebody came back to the app. Anything on screen has been seen.
     ///
     /// The `isFocused` hook cannot cover this: the session that raised the
@@ -233,8 +240,9 @@ final class TerminalsModel {
     }
 
     private func applyFocus() {
+        let visible = paneFocusIDs.union(paneFocusClaims.visibleIDs)
         for session in sessions {
-            let next = paneFocusIDs.contains(session.id)
+            let next = visible.contains(session.id)
             if session.isFocused != next { session.isFocused = next }
         }
     }

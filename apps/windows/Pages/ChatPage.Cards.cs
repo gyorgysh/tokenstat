@@ -561,6 +561,13 @@ internal sealed partial class ChatPage
     /// ChatTurnChangesCard.swift: the first four files, the rest one press
     /// away, and Review opens the folder's Changes beside the chat.
     /// </summary>
+    private readonly Dictionary<string, IReadOnlyList<ChangedFile>> _turnReviews = new();
+
+    private void ReviewTurnChanges(string id, string? path)
+    {
+        if (_turnReviews.TryGetValue(id, out var files)) ReviewTurnChangesRequested?.Invoke(files, path);
+    }
+
     private UIElement ChangesCard(string id, IReadOnlyList<ChangedFile> files)
     {
         const int shownFiles = 4;
@@ -582,7 +589,7 @@ internal sealed partial class ChatPage
         Grid.SetColumn(total, 1);
         header.Children.Add(total);
         var review = Buttons.Secondary(L10n.Text("windows.chatchanges.review"), ActionIcon.Preview,
-            (_, _) => ReviewChangesRequested?.Invoke(null), small: true);
+            (_, _) => ReviewTurnChanges(id, null), small: true);
         Grid.SetColumn(review, 3);
         header.Children.Add(review);
         stack.Children.Add(header);
@@ -614,7 +621,7 @@ internal sealed partial class ChatPage
             };
             ToolTipService.SetToolTip(fileButton, file.Path);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(fileButton, file.Path);
-            fileButton.Click += (_, _) => ReviewChangesRequested?.Invoke(file.Path);
+            fileButton.Click += (_, _) => ReviewTurnChanges(id, file.Path);
             stack.Children.Add(fileButton);
         }
         if (files.Count > shownFiles)

@@ -13,6 +13,8 @@ struct ChatTerminalPane: View {
     @Bindable var sshSessions: SSHSessionsModel
     let onManageServers: () -> Void
     let onClose: () -> Void
+    var isActive = true
+    @State private var focusOwner = UUID()
     @State private var showingLauncher = false
     @State private var connectingServer: SSHHost?
     @State private var paneSize: CGSize = .zero
@@ -30,7 +32,7 @@ struct ChatTerminalPane: View {
     private var leading: WorkspaceTerminal? { showingLauncher ? nil : terminals.leadingTerminal(in: folder.id) }
     private var trailing: WorkspaceTerminal? { showingLauncher ? nil : terminals.trailingTerminal(in: folder.id) }
     private var focusedIDs: Set<String> {
-        Set([leading, trailing].compactMap { $0?.local?.id })
+        isActive ? Set([leading, trailing].compactMap { $0?.local?.id }) : []
     }
     private var peer: String? { Bridge.chatRoute(workspaceID: folder.id).peer }
     private var profiles: [LaunchProfile] {
@@ -118,8 +120,9 @@ struct ChatTerminalPane: View {
                     Theme.background
                     TerminalStack(sessions: sessions, leading: leading, trailing: trailing, focused: active,
                                   splitAxis: layout.axis, fraction: CGFloat(terminals.fraction(for: folder.id)),
-                                  isSurfaceVisible: active != nil, onActivate: { select($0) })
-                        .allowsHitTesting(active != nil)
+                                  claimsFocus: isActive,
+                                  isSurfaceVisible: isActive && active != nil, onActivate: { select($0) })
+                        .allowsHitTesting(isActive && active != nil)
                         .modifier(PaletteSnippetSheet(session: active?.ssh))
                     if active != nil, layout.isSplit {
                         TerminalSplitHandle(axis: layout.axis ?? .horizontal, fraction: Binding(
@@ -154,9 +157,9 @@ struct ChatTerminalPane: View {
             guard !Task.isCancelled else { return }
             resolved = true
         }
-        .onChange(of: focusedIDs, initial: true) { terminals.focus(focusedIDs) }
+        .onChange(of: focusedIDs, initial: true) { terminals.focus(owner: focusOwner, ids: focusedIDs) }
         .onChange(of: sessions.map(\.id)) { terminals.reconcilePane(in: folder.id) }
-        .onDisappear { terminals.focus(nil) }
+        .onDisappear { terminals.focus(owner: focusOwner, ids: []) }
         .sheet(item: $connectingServer) { host in
             SSHConnectForm(host: host, model: ssh) { session in
                 sshSessions.adopt(session, startup: session.hostID.map { ssh.startupSnippets(for: $0) } ?? [])
@@ -215,14 +218,14 @@ struct ChatTerminalPane: View {
     private func select(_ session: WorkspaceTerminal) {
         showingLauncher = false
         terminals.select(session, in: folder.id)
-        terminals.focus(focusedIDs)
+        terminals.focus(owner: focusOwner, ids: focusedIDs)
     }
 
     private func selectServerSession(_ session: SSHLiveTerminal) {
         launchError = nil
         showingLauncher = false
         terminals.attach(session, in: folder.id)
-        terminals.focus(focusedIDs)
+        terminals.focus(owner: focusOwner, ids: focusedIDs)
     }
 
     private func openServer(_ host: SSHHost) {

@@ -444,8 +444,8 @@ final class WorkspacesModel {
     }
 
     /// Read a commit and show it. The tab appears at once and fills in.
-    func showCommit(_ id: String, in workspaceID: String) async {
-        show(.commit(id), in: workspaceID)
+    func showCommit(_ id: String, in workspaceID: String, asDocument: Bool = true) async {
+        if asDocument { show(.commit(id), in: workspaceID) }
         guard commit(id, in: workspaceID) == nil else { return }
         let key = Self.treeKey(workspaceID, id)
         loadingCommit[workspaceID] = id
@@ -470,13 +470,18 @@ final class WorkspacesModel {
     }
 
     func reviewWorkingTree(in workspaceID: String, focusing path: String? = nil) {
+        focusWorkingTree(in: workspaceID, path: path)
+        show(.changes, in: workspaceID)
+    }
+
+    /// A side review shares focus and diff snapshots without changing documents.
+    func focusWorkingTree(in workspaceID: String, path: String?) {
         if let path {
             changeFocusGeneration += 1
             workingTreeReviewFocus = ChangeFocus(folderID: workspaceID, path: path, generation: changeFocusGeneration)
         } else if workingTreeReviewFocus?.folderID == workspaceID {
             workingTreeReviewFocus = nil
         }
-        show(.changes, in: workspaceID)
     }
 
     func closeWorkingTreeReview(in workspaceID: String) {

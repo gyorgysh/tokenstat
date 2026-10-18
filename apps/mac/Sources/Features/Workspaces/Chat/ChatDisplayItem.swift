@@ -280,6 +280,9 @@ struct ChatTurnChanges: Equatable, Sendable {
         let path: String
         var added: UInt64
         var removed: UInt64
+        /// The recorded edits survive commits and later turns. Empty entries
+        /// mean that the agent reported an edit without its patch.
+        var patches: [String] = []
         var id: String { path }
 
         var fileName: String {

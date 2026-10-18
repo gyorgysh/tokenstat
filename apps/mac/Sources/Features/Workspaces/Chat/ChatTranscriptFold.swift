@@ -157,9 +157,10 @@ enum ChatTranscriptFold {
                 if let index = building[state.path] {
                     current.files[index].added += UInt64(state.added)
                     current.files[index].removed += UInt64(state.removed)
+                    current.files[index].patches.append(state.patch)
                 } else {
                     building[state.path] = current.files.count
-                    current.files.append(.init(path: state.path, added: UInt64(state.added), removed: UInt64(state.removed)))
+                    current.files.append(.init(path: state.path, added: UInt64(state.added), removed: UInt64(state.removed), patches: [state.patch]))
                 }
             default:
                 continue

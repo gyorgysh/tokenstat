@@ -178,6 +178,16 @@ browser use encrypted forwarding; tabs share a listener until the last user
 closes it. SSH connections explicitly choose a saved key, a password, or pasted
 private-key material.
 
+Chat's side workbench has Changes, Browser, Terminal and Inspector tabs. The add
+button opens or selects a tool, and hiding the pane retains browser tabs and
+terminal sessions. Reviewing a changed-files card opens the recorded edits from
+that turn, including after a commit, with the pressed file first. Repeated edits
+remain in order, and a missing patch is identified. Working tree returns to the
+live Changes page and its commit and sync actions. Full diffs and History commits
+open beside chat. Live status refreshes replace the Changes snapshot together,
+preserving the reading position. Desktop image viewers also provide Enlarge
+viewer and Restore viewer size separately from Fit image.
+
 Windows screen viewing uses Media Foundation with Annex-B H.264 samples. The
 Windows host also captures an unlocked desktop and encodes H.264 for Apple,
 Android, and Windows viewers. Capture lives in hostd, so it survives quitting the

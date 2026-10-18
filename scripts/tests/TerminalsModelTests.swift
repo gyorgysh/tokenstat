@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with TerminalsModel.swift TerminalPaneSelection.swift.
+// Compile with TerminalsModel.swift TerminalPaneSelection.swift TerminalFocusClaims.swift.
 import AppKit
 import Foundation
 struct WorkspaceFolder { var id: String; var path = "/tmp" }

@@ -988,6 +988,9 @@ public sealed partial class MainWindow : Window
         if (_deviceDetailsSource is not null) _deviceDetailsSource.DetailsRequested -= OnDeviceDetailsRequested;
         _deviceDetailsSource = page as IInspectorRequest;
         if (_deviceDetailsSource is not null) _deviceDetailsSource.DetailsRequested += OnDeviceDetailsRequested;
+        if (_inspectorDismissSource is not null) _inspectorDismissSource.DetailsDismissRequested -= OnInspectorDismissRequested;
+        _inspectorDismissSource = page as IInspectorDismissRequest;
+        if (_inspectorDismissSource is not null) _inspectorDismissSource.DetailsDismissRequested += OnInspectorDismissRequested;
         _toolbarSource = page as IToolbarItems;
         if (_toolbarSource is not null)
         {
@@ -1011,6 +1014,15 @@ public sealed partial class MainWindow : Window
 
     private IToolbarItems? _toolbarSource;
     private IInspectorRequest? _deviceDetailsSource;
+    private IInspectorDismissRequest? _inspectorDismissSource;
+
+    private void OnInspectorDismissRequested()
+    {
+        _inspectorHost.IsOpen = false;
+        _inspectorPopover?.Hide();
+        _inspectorHost.Refresh();
+        RebuildToolbar();
+    }
     private bool _inspectorInPopover;
     private Flyout? _inspectorPopover;
 

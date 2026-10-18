@@ -44,6 +44,7 @@ internal enum PlainStep
 /// <summary>One file a turn changed. Counts are summed over the turn's edits to it.</summary>
 internal sealed record ChangedFile(string Path, long Added, long Removed)
 {
+    public IReadOnlyList<string> Patches { get; init; } = Array.Empty<string>();
     public string FileName
     {
         get
@@ -151,12 +152,13 @@ internal static class ChatDetailFold
                 if (index.TryGetValue(item.Path, out var at))
                 {
                     var prior = files[at];
-                    files[at] = prior with { Added = prior.Added + item.Added, Removed = prior.Removed + item.Removed };
+                    files[at] = prior with { Added = prior.Added + item.Added, Removed = prior.Removed + item.Removed,
+                        Patches = [.. prior.Patches, item.Patch] };
                 }
                 else
                 {
                     index[item.Path] = files.Count;
-                    files.Add(new ChangedFile(item.Path, item.Added, item.Removed));
+                    files.Add(new ChangedFile(item.Path, item.Added, item.Removed) { Patches = [item.Patch] });
                 }
             }
         }

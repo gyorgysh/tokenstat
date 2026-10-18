@@ -188,6 +188,18 @@ Pull and Push dialogs are owned by the desktop window, so an inspector peek
 can auto-hide while a review remains open.
 On Mac, clicking the dimmed chat outside the image viewer closes it and consumes
 the click. Viewer controls, other windows and nested dialogs keep it open.
+The Mac viewer opens at a larger size. Enlarge viewer fills the available app
+window, Restore viewer size returns to the usual size, and Reset zoom only
+changes magnification. Escape closes the viewer.
+
+Desktop chats have a resizable side workbench with Changes, Browser, Terminal
+and Inspector tabs. The add menu opens or selects a tool. Hiding the workbench
+retains its tabs, browser page and terminal sessions. A changed-files card opens
+that turn's recorded patches, with the pressed file first and repeated edits in
+order. Committing or editing again does not replace those patches. Missing
+patches remain unavailable. Working tree switches to current Git changes, with
+Commit and sync for the existing commit, pull and push controls. History commits
+open in the same side review. Mobile navigation is unchanged.
 Pull and Push detect Git LFS in the checkout and reviewed commits. Their setup
 card asks before installing through an existing Homebrew installation or enabling
 repository-local LFS; other hosts get the installation guide and a recheck action.

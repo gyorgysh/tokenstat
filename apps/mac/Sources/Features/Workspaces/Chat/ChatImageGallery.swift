@@ -202,6 +202,10 @@ private struct ChatImageViewer: View {
     @State private var zoom: CGFloat = 1
     @State private var gestureZoom: CGFloat = 1
     @State private var error: String?
+    #if os(macOS)
+    @State private var enlarged = false
+    @State private var viewerAvailable = CGSize(width: 1240, height: 900)
+    #endif
     #if !os(macOS)
     @State private var openingFile: ChatPreviewedFile?
     @State private var savingFile: ChatPreviewedFile?
@@ -229,7 +233,9 @@ private struct ChatImageViewer: View {
         .background(Theme.background)
         .modifier(ChatFileRelayConsent(model: model, presenter: request.id))
         #if os(macOS)
-        .frame(minWidth: 480, idealWidth: 880, minHeight: 480, idealHeight: 680)
+        .frame(width: ChatImageViewerGeometry.size(available: viewerAvailable, enlarged: enlarged).width,
+               height: ChatImageViewerGeometry.size(available: viewerAvailable, enlarged: enlarged).height)
+        .background(ChatImageViewerSize(available: $viewerAvailable))
         .background(ChatImageOutsideDismiss { dismiss() })
         .onExitCommand { dismiss() }
         #else
@@ -291,7 +297,15 @@ private struct ChatImageViewer: View {
             Spacer(minLength: 0)
             iconButton(L10n.text("common.chat.images.zoom_out"), symbol: "minus.magnifyingglass") { setZoom(zoom - 0.5) }
                 .disabled(zoom <= 1)
+            #if os(macOS)
+            iconButton(L10n.text("common.chat.images.reset_zoom"), symbol: "arrow.counterclockwise") { setZoom(1) }
+            iconButton(L10n.text(enlarged ? "common.chat.images.restore_viewer" : "common.chat.images.enlarge_viewer"),
+                       symbol: enlarged ? ActionIcon.exitFullScreen.symbol : ActionIcon.enterFullScreen.symbol) {
+                enlarged.toggle()
+            }
+            #else
             iconButton(L10n.text("common.chat.images.reset_zoom"), symbol: "arrow.up.left.and.arrow.down.right") { setZoom(1) }
+            #endif
             iconButton(L10n.text("common.chat.images.zoom_in"), symbol: "plus.magnifyingglass") { setZoom(zoom + 0.5) }
                 .disabled(zoom >= 4)
             Spacer(minLength: 0)
@@ -395,6 +409,52 @@ private struct ChatImageViewer: View {
         }
     }
 }
+
+#if os(macOS)
+/// Measure the parent. SwiftUI owns sheet sizing and keeps every control in frame.
+private struct ChatImageViewerSize: NSViewRepresentable {
+    @Binding var available: CGSize
+    func makeNSView(context: Context) -> SizingView { SizingView() }
+    func updateNSView(_ view: SizingView, context: Context) {
+        view.reportSize = { if available != $0 { available = $0 } }
+        view.report()
+    }
+    final class SizingView: NSView {
+        var reportSize: (CGSize) -> Void = { _ in }
+        private var observers: [NSObjectProtocol] = []
+        private weak var measuredParent: NSWindow?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers = []
+            measuredParent = nil
+            if let window {
+                observers.append(NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification,
+                    object: window, queue: .main) { [weak self] _ in self?.report() })
+            }
+            report()
+        }
+        func report() {
+            // AppKit assigns sheetParent after the hosting view joins its window.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let parent = self.window?.sheetParent else { return }
+                if self.measuredParent !== parent {
+                    self.measuredParent = parent
+                    for name in [NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification] {
+                        self.observers.append(NotificationCenter.default.addObserver(forName: name, object: parent, queue: .main) { [weak self] _ in
+                            self?.report()
+                        })
+                    }
+                }
+                let frame = parent.contentLayoutRect.size
+                let target = CGSize(width: max(1, frame.width - 32), height: max(1, frame.height - 48))
+                self.reportSize(target)
+            }
+        }
+        deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+    }
+}
+#endif
 
 #if os(macOS)
 /// Keep native sheet focus and keyboard behavior while making its dimmed

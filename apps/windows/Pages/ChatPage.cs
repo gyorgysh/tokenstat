@@ -120,6 +120,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     /// tabs answer it by opening the Changes inspector beside the chat.
     /// </summary>
     public event Action<string?>? ReviewChangesRequested;
+    public event Action<IReadOnlyList<ChangedFile>, string?>? ReviewTurnChangesRequested;
+    internal event Action<string, bool>? WorkspaceGitChanged;
+    internal string ReviewTitle => Format.Text(_openChat, "title");
 
     /// <param name="chatId">One conversation to reveal on load, from a deep
     /// link. The list loads first and the thread opens on top of it, like
@@ -1183,6 +1186,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var raw = Coalesce(_events);
         var busy = Busy(raw);
         var items = ChatImageGallery.Compose(ChatDetailFold.Fold(raw, ChatDetailPreference.Level, _running, IsGroupOpen));
+        // Reused count cards resolve their review at click time. A late patch
+        // can change without changing the card's file names or line counts.
+        _turnReviews.Clear();
+        foreach (var item in items)
+            if (item.Kind == ItemKind.Changes && item.Changes is { } files) _turnReviews[item.Id] = files;
         _sliceOlder = SliceClamp(_sliceOlder, items.Count);
         var start = SliceStart(items.Count, _sliceOlder);
         var end = SliceEnd(items.Count, _sliceOlder);

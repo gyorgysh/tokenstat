@@ -229,6 +229,7 @@ struct WorkspaceChangesView: View {
     var onOpenAutomation: ((String, String?) -> Void)? = nil
     #endif
     @State private var expandedDiffs: Set<String> = []
+    var onReview: (() -> Void)? = nil
 
     var body: some View {
         changesSurface
@@ -320,7 +321,8 @@ struct WorkspaceChangesView: View {
                     summary(git)
                     Spacer(minLength: Theme.Space.s)
                     Button(L10n.text("apple.workspacesview.review_all.d05163fa"), .preview) {
-                        model.reviewWorkingTree(in: folder.id)
+                        if let onReview { onReview() }
+                        else { model.reviewWorkingTree(in: folder.id) }
                     }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .fixedSize()
@@ -440,7 +442,10 @@ struct WorkspaceChangesView: View {
                                     Task { await model.loadDiff(file.path, in: folder.id) }
                                 }.buttonStyle(SecondaryButtonStyle(small: true))
                             } else if let diff = model.diff(for: file.path, in: folder.id) {
-                                InlineDiffView(diff: diff) { model.reviewWorkingTree(in: folder.id) }
+                                InlineDiffView(diff: diff) {
+                                    if let onReview { onReview() }
+                                    else { model.reviewWorkingTree(in: folder.id) }
+                                }
                             } else {
                                 ProgressView().controlSize(.small)
                             }

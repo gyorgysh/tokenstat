@@ -308,6 +308,7 @@ internal sealed partial class ChatPage
         _imageViewerRevision++;
         using var viewerCancellation = CancellationTokenSource.CreateLinkedTokenSource(_imageCancellation.Token);
         var owner = ImageOwner();
+        var viewerRoot = XamlRoot;
         var image = new Image { Stretch = Stretch.Uniform };
         var viewer = new ScrollViewer { Content = image, ZoomMode = ZoomMode.Enabled, MinZoomFactor = .1f, MaxZoomFactor = 5,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -323,7 +324,23 @@ internal sealed partial class ChatPage
             HorizontalScrollMode = ScrollMode.Enabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollMode = ScrollMode.Disabled });
         var dialog = new ContentDialog { XamlRoot = XamlRoot, Content = body, CloseButtonText = L10n.Text("common.close") };
-        dialog.Resources["ContentDialogMaxWidth"] = 1100d;
+        var enlarged = false;
+        Button? enlargeButton = null;
+        void ResizeViewer()
+        {
+            var width = Math.Max(240, viewerRoot.Size.Width - (enlarged ? 80 : 100));
+            body.Width = enlarged ? width : Math.Min(1040, width);
+            viewer.Height = Math.Max(120, Math.Min(enlarged ? double.MaxValue : 680, viewerRoot.Size.Height - (enlarged ? 220 : 280)));
+            dialog.Resources["ContentDialogMaxWidth"] = Math.Max(320, viewerRoot.Size.Width - 24);
+            dialog.Resources["ContentDialogMaxHeight"] = Math.Max(240, viewerRoot.Size.Height - 24);
+            image.MaxWidth = body.Width;
+            image.MaxHeight = viewer.Height;
+            if (enlargeButton is not null) enlargeButton.Content = enlarged
+                ? L10n.Text("common.chat.images.restore_viewer") : L10n.Text("common.chat.images.enlarge_viewer");
+        }
+        void ViewerRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => ResizeViewer();
+        viewerRoot.Changed += ViewerRootChanged;
+        ResizeViewer();
         _imageDialog = dialog;
         var revision = 0;
         CancellationTokenSource? selectionCancellation = null;
@@ -371,6 +388,7 @@ internal sealed partial class ChatPage
         var zoomIn = Action("+", () => viewer.ChangeView(null, null, Math.Min(5, viewer.ZoomFactor * 1.25f)));
         AutomationProperties.SetName(zoomIn, L10n.Text("common.chat.images.zoom_in"));
         Action(L10n.Text("common.chat.images.fit"), () => viewer.ChangeView(0, 0, 1));
+        enlargeButton = Action(L10n.Text("common.chat.images.enlarge_viewer"), () => { enlarged = !enlarged; ResizeViewer(); });
         Action(L10n.Text("common.open"), async () => { try { if (currentFile is string file && Current()) { var original = await StorageFile.GetFileFromPathAsync(file); if (Current()) await Launcher.LaunchFileAsync(original); } } catch (Exception error) { if (Current()) count.Text = error.Message; } });
         Action(L10n.Text("common.save"), () => { if (currentFile is string file && Current()) _ = SaveImageFileAsync(file, images[selected], owner); });
         dialog.PreviewKeyDown += (_, args) => {
@@ -379,6 +397,6 @@ internal sealed partial class ChatPage
             else if (args.Key == VirtualKey.Right) { _ = Show(selected + 1); args.Handled = true; }
         };
         try { _ = Show(selected); await dialog.ShowAsync(); }
-        finally { viewerCancellation.Cancel(); revision++; image.Source = null; if (_imageDialog == dialog) { _imageDialog = null; _imageViewedFile = null; _imageConsent?.TrySetResult(false); _imageConsentHost = null; } }
+        finally { viewerRoot.Changed -= ViewerRootChanged; viewerCancellation.Cancel(); revision++; image.Source = null; if (_imageDialog == dialog) { _imageDialog = null; _imageViewedFile = null; _imageConsent?.TrySetResult(false); _imageConsentHost = null; } }
     }
 }

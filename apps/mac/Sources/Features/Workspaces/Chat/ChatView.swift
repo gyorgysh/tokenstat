@@ -175,6 +175,7 @@ struct ChatView: View {
     /// Opens the folder's changes beside the chat, at one file or all of
     /// them. Nil where this pane has no place to open them.
     var onReviewChanges: ((String?) -> Void)? = nil
+    var onReviewTurnChanges: ((ChatTurnChanges, String?) -> Void)? = nil
     var onNewChat: (() -> Void)? = nil
     @Binding var showingOverview: Bool
     /// Whether this pane is the one in front.
@@ -938,7 +939,8 @@ struct ChatView: View {
                     },
                     answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
                     canAnswerQuestions: model.savedCopy == nil && !model.isShowingCachedTranscript,
-                    reviewChanges: model.savedCopy == nil ? onReviewChanges : nil
+                    reviewChanges: model.savedCopy == nil ? onReviewChanges : nil,
+                    reviewTurnChanges: onReviewTurnChanges
                 )
                 .equatable()
             }

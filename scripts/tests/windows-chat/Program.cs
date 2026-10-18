@@ -640,6 +640,14 @@ var liveChanges = FoldRows(changed, ChatDetail.Minimal, running: true);
 Check(string.Join(",", liveChanges.Where(row => row.Kind == ChatPage.ItemKind.Changes).Select(row => row.Id)) == "changes:e1",
     "the live turn has no card yet");
 var firstTurn = liveChanges.First(row => row.Id == "changes:e1").Changes!;
+var recorded1 = EditRow("recorded1", "same.cs", 1, 1); recorded1.Patch = "-old\n+one";
+var recorded2 = EditRow("recorded2", "same.cs", 1, 1); recorded2.Patch = "-one\n+two";
+var laterEdit = EditRow("later", "same.cs", 1, 1); laterEdit.Patch = "-two\n+later";
+var recordedTurns = FoldRows([Ask("first"), recorded1, recorded2, Say("done"), Ask("second"), laterEdit, Say("done2")], ChatDetail.Minimal)
+    .Where(row => row.Kind == ChatPage.ItemKind.Changes).Select(row => row.Changes!).ToArray();
+Check(recordedTurns.Length == 2 && recordedTurns[0][0].Patches.SequenceEqual(new[] { "-old\n+one", "-one\n+two" })
+    && recordedTurns[1][0].Patches.SequenceEqual(new[] { "-two\n+later" }), "recorded turn patches were replaced or reordered by later edits");
+Check(firstTurn[0].Patches.SequenceEqual(new[] { "", "" }), "missing patches must remain explicitly unavailable");
 Check(string.Join(",", firstTurn.Select(file => file.Path)) == "/w/a.cs,/w/b.cs" && firstTurn[0].Added == 5 && firstTurn[0].Removed == 1,
     "one row per file, summed, failures left out");
 Check(FoldRows(changed, ChatDetail.Minimal).Last().Changes is { Count: 1 }, "a finished turn gets its card");

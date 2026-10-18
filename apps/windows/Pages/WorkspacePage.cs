@@ -24,7 +24,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 
     /// <summary>Which section this page shows, so the tab bar knows the launcher.</summary>
     internal WorkspaceSection Section => _section;
-    private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
+    private StackPanel _root = new() { Spacing = Theme.SpaceL };
+    private bool _changesLoaded;
     private readonly StackPanel _inspector = new()
     {
         Spacing = Theme.SpaceM,
@@ -52,6 +53,11 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     {
         _reviewPath = path;
         if (IsLoaded) _ = LoadAsync();
+    }
+
+    internal void RefreshChanges()
+    {
+        if (_section == WorkspaceSection.Changes && IsLoaded) _ = LoadAsync();
     }
 
     public WorkspacePage(string id, WorkspaceSection section)
@@ -161,6 +167,32 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     }
 
     private async Task LoadOnceAsync()
+    {
+        if (_section != WorkspaceSection.Changes || !_changesLoaded)
+        {
+            await BuildPageAsync();
+            _changesLoaded = _section == WorkspaceSection.Changes;
+            return;
+        }
+        // Build the next live snapshot offscreen. Keep the current review
+        // and reading position visible while remote status and diffs arrive.
+        var previous = _root;
+        _root = new StackPanel { Spacing = Theme.SpaceL };
+        try
+        {
+            await BuildPageAsync();
+            if (Content is ScrollViewer viewer)
+            {
+                var offset = viewer.VerticalOffset;
+                viewer.Content = _root;
+                viewer.UpdateLayout();
+                viewer.ChangeView(null, offset, null, true);
+            }
+        }
+        catch { _root = previous; throw; }
+    }
+
+    private async Task BuildPageAsync()
     {
         _root.Children.Clear();
         _summary = "";

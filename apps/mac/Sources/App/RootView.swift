@@ -87,8 +87,9 @@ struct RootView: View {
     @AppStorage("chat.browserPaneWidth") private var browserPaneWidth = 520.0
     @State private var browserResizeStart: Double?
     @State private var browserLiveWidth: Double?
-    @State private var browserWorkspaceID: String?
-    @State private var terminalWorkspaceID: String?
+    @State private var desktopWorkbenches: [String: DesktopWorkbenchState] = [:]
+    @State private var desktopTurnReviews: [String: ChatTurnReview] = [:]
+    @State private var desktopCommitReviews: [String: String] = [:]
     @State private var workspaceBrowserURLs: [String: String] = [:]
     /// Explicit sidebar preference, preserved when a narrow window uses a peek.
     @State private var columnVisibilityChoice: NavigationSplitViewVisibility = .all
@@ -153,7 +154,7 @@ struct RootView: View {
             windowWidthStorage.value = width
             let next = WindowWidthSignature(
                 isKnown: width > 0,
-                sidebarFits: Self.sidebarColumnFits(
+                sidebarFits: sidebarColumnFits(
                     width: width, browserOpen: showsWorkspaceCompanion, persistedBrowser: browserPaneWidth
                 ),
                 inspectorFits: inspectorFits(at: width),
@@ -271,6 +272,10 @@ struct RootView: View {
                     }
                 }
                 expandedWorkspaces.formIntersection(incoming)
+                desktopWorkbenches = desktopWorkbenches.filter { incoming.contains($0.key) }
+                desktopTurnReviews = desktopTurnReviews.filter { incoming.contains($0.key) }
+                desktopCommitReviews = desktopCommitReviews.filter { incoming.contains($0.key) }
+                workspaceBrowserURLs = workspaceBrowserURLs.filter { incoming.contains($0.key) }
                 knownSidebarProjects = incoming
                 guard let id = route.workspaceID, !ids.contains(id) else { return }
                 lastSection[id] = nil
@@ -540,8 +545,9 @@ struct RootView: View {
         }
         .task(id: WorkSessionContext.shared.scope) {
             workspaceBrowserURLs = [:]
-            browserWorkspaceID = nil
-            terminalWorkspaceID = nil
+            desktopWorkbenches = [:]
+            desktopTurnReviews = [:]
+            desktopCommitReviews = [:]
             pendingChatLink = nil
             worktreeProject = nil
             await BridgeLaunch.wait()
@@ -886,8 +892,7 @@ struct RootView: View {
 
     private func openChatBrowser(_ url: URL, workspaceID: String) {
         workspaceBrowserURLs[workspaceID] = url.absoluteString
-        terminalWorkspaceID = nil
-        browserWorkspaceID = workspaceID
+        openWorkbench(.browser, in: workspaceID)
     }
 
     /// The rail and the sidebar, on one surface.
@@ -1208,28 +1213,31 @@ struct RootView: View {
     private var rightInspectorToolbarButton: some View {
         HStack(spacing: Theme.Space.xs) {
         if supportsWorkspaceBrowser {
-            ToolbarIconButton(systemImage: "globe", help: L10n.text("apple.rootview.browser_open_a_web_preview_beside_this_pro.fc5d34f3"), isAccent: showsWorkspaceBrowser) {
-                if showsWorkspaceBrowser { browserWorkspaceID = nil }
-                else {
-                    terminalWorkspaceID = nil
-                    browserWorkspaceID = route.workspaceID
+            ToolbarIconButton(systemImage: ActionIcon.compare.symbol,
+                              help: L10n.text("apple.workbench.review_beside_chat"),
+                              isAccent: workbenchState.isPresented && workbenchState.selected == .changes) {
+                if let id = route.workspaceID {
+                    desktopTurnReviews[id] = nil
+                    desktopCommitReviews[id] = nil
                 }
+                openWorkbench(.changes)
+            }
+            ToolbarIconButton(systemImage: "globe", help: L10n.text("apple.rootview.browser_open_a_web_preview_beside_this_pro.fc5d34f3"), isAccent: showsWorkspaceBrowser) {
+                openWorkbench(.browser)
             }
             .accessibilityLabel(L10n.text("common.browser"))
             ToolbarIconButton(systemImage: "terminal", help: L10n.text("apple.rootview.shell_or_agent_beside_this_chat.2a4ad70d"), isAccent: showsWorkspaceTerminal) {
-                if showsWorkspaceTerminal { terminalWorkspaceID = nil }
-                else {
-                    browserWorkspaceID = nil
-                    terminalWorkspaceID = route.workspaceID
-                }
+                openWorkbench(.terminal)
             }
             .accessibilityLabel(L10n.text("apple.rootview.terminal_beside_chat.40991a3f"))
         }
         SidebarToggleButton(
             edge: .trailing,
-            isOpen: isRightSidebarOpen && !showsWorkspaceCompanion,
+            isOpen: supportsWorkspaceBrowser ? showsWorkspaceCompanion : isRightSidebarOpen,
             action: toggleRightSidebar,
-            help: showsWorkspaceCompanion ? L10n.text("apple.rootview.show_inspector.aa711c1a") : isRightSidebarOpen
+            help: supportsWorkspaceBrowser
+                ? (showsWorkspaceCompanion ? L10n.text("apple.workbench.hide") : L10n.text("apple.rootview.show_inspector.aa711c1a"))
+                : isRightSidebarOpen
                 ? L10n.text("apple.rootview.hide_inspector_b.ff55655a")
                 : (inspectorFits
                     ? L10n.text("apple.rootview.show_inspector_b.6cabbee7")
@@ -1288,11 +1296,16 @@ struct RootView: View {
         }
     }
 
-    /// Open the full working-tree review in the workspace's document strip.
-    /// A file pressed in the chat is placed first in that review.
+    /// Review beside the running conversation without changing its route.
     private func revealChanges(in folderID: String, path: String?) {
-        browserWorkspaceID = nil
-        terminalWorkspaceID = nil
+        if route == .workspace(id: folderID, section: .chat) {
+            desktopTurnReviews[folderID] = nil
+            desktopCommitReviews[folderID] = nil
+            workspaces.focusWorkingTree(in: folderID, path: path)
+            openWorkbench(.changes, in: folderID)
+            Task { await workspaces.refresh() }
+            return
+        }
         openSection(.changes, in: folderID) {
             if let path { workspaces.reviewWorkingTree(in: folderID, focusing: path) }
         }
@@ -1313,14 +1326,9 @@ struct RootView: View {
     /// not.
     private func toggleRightSidebar() {
         guard route.hasInspector else { return }
-        if showsWorkspaceCompanion {
-            browserWorkspaceID = nil
-            terminalWorkspaceID = nil
-            isInspectorPresented = true
-            if !inspectorFits {
-                isOverlayVisible = true
-                overlayHeldByPress = true
-            }
+        if supportsWorkspaceBrowser {
+            if showsWorkspaceCompanion { hideWorkbench() }
+            else { openWorkbench(workbenchState.selected ?? .inspector) }
             return
         }
         if isInspectorPresented {
@@ -1403,27 +1411,26 @@ struct RootView: View {
     /// `showsSidebar` for a width that has not been stored yet.
     private func showsSidebarColumn(at width: CGFloat) -> Bool {
         columnVisibilityChoice != .detailOnly
-            && (width <= 0 || Self.sidebarColumnFits(
+            && (width <= 0 || sidebarColumnFits(
                 width: width, browserOpen: showsWorkspaceCompanion, persistedBrowser: browserPaneWidth
             ))
     }
 
     /// Whether the sidebar keeps its column at this width.
     ///
-    /// The legacy edge below, plus room for the browser at the user's own
-    /// width when it is open: sidebar, dividers, comfortable detail, and
-    /// the pane. Below the edge the sidebar peeks like the inspector
-    /// instead of squeezing the detail (see `ChromeFit`). Static so
-    /// `applyWidth` can ask about the width it was given rather than the
-    /// one already stored.
-    private static func sidebarColumnFits(width: Double, browserOpen: Bool, persistedBrowser: Double) -> Bool {
-        width >= widthForSidebar
-            && (!browserOpen || ChromeFit.sidebarRoomForBrowser(width: width, persistedBrowser: persistedBrowser))
+    /// Keep chat and the chosen tool beside one another before making room
+    /// for the project sidebar. Use the person's saved widths for each pane.
+    private func sidebarColumnFits(width: Double, browserOpen: Bool, persistedBrowser: Double) -> Bool {
+        if browserOpen {
+            let rail = ShellMetrics.railWidth + (ShellMetrics.usesGlass ? ShellMetrics.panelInset * 2 : 6)
+            return DesktopWorkbenchLayout.sidebarFits(width: width, rail: rail, sidebar: sidebarWidth, preferredTool: persistedBrowser)
+        }
+        return width >= Self.widthForSidebar
     }
 
     private var sidebarColumnFits: Bool {
         windowContentWidth > 0
-            && Self.sidebarColumnFits(
+            && sidebarColumnFits(
                 width: windowContentWidth,
                 browserOpen: showsWorkspaceCompanion,
                 persistedBrowser: browserPaneWidth
@@ -1442,7 +1449,7 @@ struct RootView: View {
         // again. A popup pinned below the edge is the user saying "keep the
         // sidebar", so hand it to the column. Otherwise the collapsed choice
         // stands, and the next narrowing auto-closes again.
-        if Self.sidebarColumnFits(width: width, browserOpen: showsWorkspaceCompanion, persistedBrowser: browserPaneWidth) {
+        if sidebarColumnFits(width: width, browserOpen: showsWorkspaceCompanion, persistedBrowser: browserPaneWidth) {
             if isSidebarPinned {
                 columnVisibilityChoice = .all
             }
@@ -1624,7 +1631,7 @@ struct RootView: View {
     /// column and the pane becomes a peek that opens on hover instead of a
     /// door that stays shut.
     private var usesOverlayInspector: Bool {
-        route.hasInspector && (!isInspectorPresented || !inspectorFits)
+        route.hasInspector && !supportsWorkspaceBrowser && (!isInspectorPresented || !inspectorFits)
     }
 
     /// Whether the floating inspector stays put without the pointer.
@@ -1688,12 +1695,8 @@ struct RootView: View {
                 .background(route.isGlobal(.newChat) ? Color.clear : Theme.background)
                 .frame(minWidth: Self.detailMinimumWidth, maxWidth: .infinity, maxHeight: .infinity)
             if showsWorkspaceCompanion && browserFitsBesideWorkspace {
-                browserResizeHandle
-                workspaceCompanionPane
-                .frame(width: fittedBrowserWidth)
-                .frame(maxHeight: .infinity)
-                .background(Theme.sidebar.ignoresSafeArea(.container, edges: .top))
-            } else if showsInspector && !showsWorkspaceCompanion {
+                Color.clear.frame(width: fittedBrowserWidth + 5)
+            } else if showsInspector && !supportsWorkspaceBrowser {
                 boundedInspector { inspectorContent }
                     .frame(width: currentInspectorWidth)
                     .background(Theme.sidebar)
@@ -1722,7 +1725,7 @@ struct RootView: View {
             .overlay(alignment: .leading) { sidebarFloatLayer }
             .overlay(alignment: .trailing) { inspectorFloatLayer }
             .overlay(alignment: .trailing) {
-                if showsWorkspaceCompanion && !browserFitsBesideWorkspace {
+                if let id = chatFolder, !(desktopWorkbenches[id]?.tabs.isEmpty ?? true) {
                     HStack(spacing: 0) {
                         browserResizeHandle
                         workspaceCompanionPane
@@ -1731,7 +1734,10 @@ struct RootView: View {
                     }
                     .frame(maxHeight: .infinity)
                     .background(Theme.background)
-                    .shadow(color: Theme.shadow(0.2), radius: 12, x: -5)
+                    .shadow(color: Theme.shadow(showsWorkspaceCompanion && !browserFitsBesideWorkspace ? 0.2 : 0), radius: 12, x: -5)
+                    .opacity(showsWorkspaceCompanion ? 1 : 0)
+                    .allowsHitTesting(showsWorkspaceCompanion)
+                    .accessibilityHidden(!showsWorkspaceCompanion)
                 }
             }
             .animation(
@@ -1751,59 +1757,101 @@ struct RootView: View {
     }
 
     private var showsWorkspaceBrowser: Bool {
-        supportsWorkspaceBrowser && route.workspaceID != nil && browserWorkspaceID == route.workspaceID
+        showsWorkspaceCompanion && workbenchState.selected == .browser
     }
 
     private var showsWorkspaceTerminal: Bool {
-        supportsWorkspaceBrowser && route.workspaceID != nil && terminalWorkspaceID == route.workspaceID
+        showsWorkspaceCompanion && workbenchState.selected == .terminal
     }
 
-    private var showsWorkspaceCompanion: Bool { showsWorkspaceBrowser || showsWorkspaceTerminal }
+    private var workbenchState: DesktopWorkbenchState {
+        (route.workspaceID ?? chatFolder).flatMap { desktopWorkbenches[$0] } ?? DesktopWorkbenchState()
+    }
+
+    private var showsWorkspaceCompanion: Bool { supportsWorkspaceBrowser && workbenchState.isPresented }
+
+    private func openWorkbench(_ tool: DesktopWorkbenchState.Tool, in workspaceID: String? = nil) {
+        guard let id = workspaceID ?? route.workspaceID else { return }
+        desktopWorkbenches[id, default: DesktopWorkbenchState()].open(tool)
+    }
+
+    private func hideWorkbench() {
+        guard let id = route.workspaceID else { return }
+        desktopWorkbenches[id]?.hide()
+    }
+
+    private func closeWorkbench(_ tool: DesktopWorkbenchState.Tool, in workspaceID: String) {
+        desktopWorkbenches[workspaceID]?.close(tool)
+        if tool == .changes {
+            desktopTurnReviews[workspaceID] = nil
+            desktopCommitReviews[workspaceID] = nil
+        }
+        if tool == .browser { workspaceBrowserURLs[workspaceID] = nil }
+    }
 
     @ViewBuilder private var workspaceCompanionPane: some View {
-        #if os(macOS)
-        if showsWorkspaceTerminal, let id = route.workspaceID,
+        if let id = chatFolder,
            let folder = workspaces.folders.first(where: { $0.id == id }) {
+            let state = desktopWorkbenches[id] ?? DesktopWorkbenchState()
+            VStack(spacing: 0) {
+                DesktopWorkbenchBar(state: state,
+                    open: { openWorkbench($0, in: id) },
+                    close: { closeWorkbench($0, in: id) },
+                    hide: { desktopWorkbenches[id]?.hide() })
+                ZStack {
+                    ForEach(state.tabs) { tool in
+                        let active = showsWorkspaceCompanion && state.selected == tool
+                        workbenchContent(tool, folder: folder, active: active)
+                            .retainedPane(isActive: active)
+                            .opacity(active ? 1 : 0)
+                            .allowsHitTesting(active)
+                            .accessibilityHidden(!active)
+                            .zIndex(active ? 1 : 0)
+                    }
+                }
+            }
+            .id(id)
+        }
+    }
+
+    @ViewBuilder private func workbenchContent(_ tool: DesktopWorkbenchState.Tool, folder: WorkspaceFolder, active: Bool) -> some View {
+        switch tool {
+        case .changes:
+            ChatChangesWorkbenchView(folder: folder, model: workspaces, automations: automations,
+                review: desktopTurnReviews[folder.id], commitID: desktopCommitReviews[folder.id], isActive: active,
+                showWorkingTree: {
+                    desktopTurnReviews[folder.id] = nil
+                    desktopCommitReviews[folder.id] = nil
+                })
+        case .browser:
+            ProjectBrowserView(workspaceID: folder.id, initialURL: workspaceBrowserURLs[folder.id] ?? "", allowsExternalNavigation: true) {
+                workspaceBrowserURLs[folder.id] = $0
+            }
+        case .terminal:
             ChatTerminalPane(folder: folder, terminals: terminals, workspaces: workspaces,
                              ssh: ssh, sshSessions: sshSessions,
                              onManageServers: { openSSH(.hosts(folder: nil)) },
-                             onClose: { terminalWorkspaceID = nil })
-                .id(id)
-        } else {
-            workspaceBrowserPane
+                             onClose: { desktopWorkbenches[folder.id]?.hide() }, isActive: active)
+        case .inspector:
+            WorkspaceInspector(model: workspaces, automations: automations,
+                account: account.account, onClose: { desktopWorkbenches[folder.id]?.hide() },
+                chat: chat, workspace: folder, showsChatOverview: showingChatOverview,
+                onOpenAutomation: { id, runID in openAutomation(jobID: id, runID: runID) },
+                onReviewWorkingTree: {
+                    desktopTurnReviews[folder.id] = nil
+                    desktopCommitReviews[folder.id] = nil
+                    openWorkbench(.changes, in: folder.id)
+                }, onReviewCommit: { commitID in
+                    desktopTurnReviews[folder.id] = nil
+                    desktopCommitReviews[folder.id] = commitID
+                    openWorkbench(.changes, in: folder.id)
+                })
         }
-        #else
-        workspaceBrowserPane
-        #endif
     }
 
-    /// Whether the browser sits beside the workspace rather than floating.
-    ///
-    /// The inspector's standard, not the detail minimum: the detail keeps
-    /// its comfort width, and below that the pane floats instead of
-    /// crushing the content (see `ChromeFit`). Takes the persisted width,
-    /// so modes flip on drag end, never mid-gesture.
+    /// A workbench keeps at least 480 points of chat visible beside its tool.
     private var browserFitsBesideWorkspace: Bool {
-        ChromeFit.browserBeside(
-            width: windowContentWidth,
-            sidebarShowing: showsSidebar,
-            persistedBrowser: browserPaneWidth
-        )
-    }
-
-    @ViewBuilder private var workspaceBrowserPane: some View {
-        if let id = route.workspaceID {
-            VStack(spacing: 0) {
-                InspectorChromeBar(onClose: { browserWorkspaceID = nil }, closeLabel: L10n.text("apple.rootview.close_browser.dd33033e")) {
-                    InspectorTitle(title: L10n.text("common.browser"), symbol: "globe")
-                    Spacer(minLength: 0)
-                }
-                ProjectBrowserView(workspaceID: id, initialURL: workspaceBrowserURLs[id] ?? "", allowsExternalNavigation: true) {
-                    workspaceBrowserURLs[id] = $0
-                }
-                .id(id)
-            }
-        }
+        DesktopWorkbenchLayout.fitsBeside(available: windowContentWidth - leftChromeWidth)
     }
 
     private var fittedBrowserWidth: CGFloat {
@@ -1873,7 +1921,7 @@ struct RootView: View {
     /// left. Same non-overlapping hit model as the sidebar float.
     @ViewBuilder
     private var inspectorFloatLayer: some View {
-        if showsOverlayInspector && !showsWorkspaceCompanion {
+        if showsOverlayInspector && !supportsWorkspaceBrowser {
             HStack(spacing: 0) {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2852,6 +2900,12 @@ struct RootView: View {
                     git: folder?.git,
                     onBranchChanged: { await workspaces.refresh() },
                     onReviewChanges: { revealChanges(in: id, path: $0) },
+                    onReviewTurnChanges: { changes, path in
+                        desktopCommitReviews[id] = nil
+                        desktopTurnReviews[id] = ChatTurnReview(changes: changes, focus: path,
+                            conversation: chat.selected?.title ?? folder?.name ?? "")
+                        openWorkbench(.changes, in: id)
+                    },
                     onNewChat: { startNewChat(in: folder) },
                     showingOverview: $showingChatOverview,
                     isActive: showsChat

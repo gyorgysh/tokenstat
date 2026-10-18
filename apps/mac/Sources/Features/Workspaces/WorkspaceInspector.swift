@@ -101,7 +101,9 @@ struct WorkspaceInspector: View {
     #if os(macOS)
     /// After Auto commit starts, open that job on the Automations screen.
     var onOpenAutomation: ((String, String?) -> Void)? = nil
+    var onReviewWorkingTree: (() -> Void)? = nil
     #endif
+    var onReviewCommit: ((String) -> Void)? = nil
 
     /// The chosen tab lives in the model, not in `@State` here.
     ///
@@ -198,7 +200,8 @@ struct WorkspaceInspector: View {
                 model: model,
                 folder: folder,
                 automations: automations,
-                onOpenAutomation: onOpenAutomation
+                onOpenAutomation: onOpenAutomation,
+                onReview: onReviewWorkingTree
             )
             #else
             WorkspaceChangesView(model: model, folder: folder)
@@ -206,7 +209,8 @@ struct WorkspaceInspector: View {
         case .files:
             WorkspaceFilesView(model: model, folder: folder)
         case .history:
-            WorkspaceHistoryView(model: model, folder: folder, account: account)
+            WorkspaceHistoryView(model: model, folder: folder, account: account,
+                onReviewCommit: onReviewCommit)
         }
         }
     }
@@ -219,6 +223,7 @@ struct WorkspaceHistoryView: View {
     /// For the picture beside a commit of your own. Optional so the view can
     /// still be built without an account in front of it.
     var account: Account?
+    var onReviewCommit: ((String) -> Void)? = nil
     /// Forge pictures for the authors of the list on screen. Empty until the
     /// lookup returns, and empty for good when there is nothing to show.
     @State private var pictures = HistoryAvatarIndex.empty
@@ -294,7 +299,8 @@ struct WorkspaceHistoryView: View {
                                     ),
                                     isOpen: model.isFront(.commit(commit.id), in: folder.id)
                                 ) {
-                                    Task { await model.showCommit(commit.id, in: folder.id) }
+                                    if let onReviewCommit { onReviewCommit(commit.id) }
+                                    else { Task { await model.showCommit(commit.id, in: folder.id) } }
                                 }
                             }
                         }

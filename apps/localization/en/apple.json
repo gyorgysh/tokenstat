@@ -3737,7 +3737,6 @@
   "apple.rootview.close_0_1_on_2_anything_still_running_in_t.402ac91d": "Close {0} {1} on {2}? Anything still running in them stops.",
   "apple.rootview.close_all.5d1552a8": "Close all",
   "apple.rootview.close_all_sessions.d07695b4": "Close all sessions",
-  "apple.rootview.close_browser.dd33033e": "Close browser",
   "apple.rootview.close_every_session_on_this_server.306d4ecd": "Close every session on this server?",
   "apple.rootview.close_terminal.7d02fb04": "Close terminal",
   "apple.rootview.collapse_0.61eb8723": "Collapse {0}",
@@ -5706,5 +5705,15 @@
   "apple.gitlfs.install": "Install and enable Git LFS",
   "apple.gitlfs.guide": "Git LFS installation guide",
   "apple.gitlfs.check": "Check again",
-  "apple.gitlfs.setting_up": "Setting up Git LFS…"
+  "apple.gitlfs.setting_up": "Setting up Git LFS…",
+  "apple.workbench.inspector": "Inspector",
+  "apple.workbench.close_tool": "Close {0}",
+  "apple.workbench.add_tool": "Open a tool beside chat",
+  "apple.workbench.hide": "Hide side workbench",
+  "apple.workbench.review_beside_chat": "Review working tree beside chat",
+  "apple.workbench.turn_changes": "Turn changes",
+  "apple.workbench.manage_changes": "Commit and sync",
+  "apple.workbench.recorded_edits": "Recorded edits from this turn, shown in order. Later edits and commits do not change this view.",
+  "apple.workbench.edit_number": "Edit {0}",
+  "apple.workbench.patch_unavailable": "The agent did not record a patch for this edit."
 }

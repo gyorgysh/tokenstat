@@ -42,6 +42,7 @@ internal sealed partial class ChatPage
             var status = await RemoteWorkspaces.CallWorkspaceAsync(_workspaceId, "workspace.status", new JsonObject { ["id"] = _workspaceId });
             if (!Current()) return;
             _workspaceGit = status["git"];
+            WorkspaceGitChanged?.Invoke(_workspaceGit?.ToJsonString() ?? "", refreshPull);
             var branch = Format.Text(_workspaceGit, "branch");
             if (branch != _pullBranch) _branchPull = null;
             RenderGitStrip();

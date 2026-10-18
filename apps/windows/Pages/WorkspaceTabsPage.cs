@@ -7,7 +7,7 @@ using Tokenstat.Navigation;
 namespace Tokenstat.Pages;
 
 /// <summary>One persistent desktop workbench per local or remote workspace.</summary>
-internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems, IInspectorRequest
+internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems, IInspectorRequest, IInspectorDismissRequest
 {
     private readonly WorkspaceTabStrip _tabStrip = new();
     private TabView _tabs => _tabStrip.View;
@@ -16,6 +16,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     private readonly BrowserPage _browser;
     private readonly Grid _inspector = new();
     private readonly ContentControl _details = new();
+    private ScrollViewer? _inspectorScroll;
     private string _inspectorTab = "Files";
     private readonly Dictionary<string, Button> _inspectorButtons = new();
     private readonly Dictionary<string, Page> _inspectorPages = new();
@@ -35,6 +36,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         _editor = new EditorPage(workspaceId, _tabs);
         _browser = new BrowserPage("", "127.0.0.1", 0, false,
             RemoteWorkspaces.TrySplit(workspaceId, out var peer, out _) ? peer : null, _tabs, workspaceId);
+        _inspector.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _inspector.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _inspector.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         var inspectorTabs = _inspectorTabs;
@@ -62,8 +64,9 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         _details.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         _details.VerticalContentAlignment = VerticalAlignment.Stretch;
         _inspector.Children.Add(inspectorTabs);
-        Grid.SetRow(_editor.FileTree, 1);
-        Grid.SetRow(_details, 1);
+        Grid.SetRow(inspectorTabs, 1);
+        Grid.SetRow(_editor.FileTree, 2);
+        Grid.SetRow(_details, 2);
         _inspector.Children.Add(_editor.FileTree);
         _inspector.Children.Add(_details);
         Loaded += async (_, _) => await _editor.InitializeAsync();
@@ -110,7 +113,15 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     private Page Created(WorkspaceSection section)
     {
         var page = _create(section);
-        if (page is ChatPage chat) chat.ReviewChangesRequested += ShowChangesInspector;
+        if (page is ChatPage chat)
+        {
+            chat.ReviewChangesRequested += ShowChangesInspector;
+            chat.ReviewTurnChangesRequested += ShowTurnReview;
+            chat.WorkspaceGitChanged += (status, force) =>
+            {
+                if (ActivePage == chat) RefreshLiveChanges(status, force);
+            };
+        }
         return page;
     }
 
@@ -120,7 +131,13 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     /// </summary>
     public void ShowChangesInspector(string? path = null)
     {
-        _companion = null;
+        if (ActivePage is ChatPage)
+        {
+            _companionReview = null;
+            ShowCompanion(DesktopWorkbenchTool.Changes);
+            (_companionChanges as WorkspacePage)?.RevealChangedFile(path);
+            return;
+        }
         _inspectorTab = "Changes";
         RefreshChrome();
         DetailsRequested?.Invoke();
@@ -138,7 +155,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
 
     internal async Task OpenServerAsync(System.Text.Json.Nodes.JsonNode host)
     {
-        if (ActivePage is ChatPage) ShowCompanion("Terminal");
+        if (ActivePage is ChatPage) ShowCompanion(DesktopWorkbenchTool.Terminal);
         else OpenSurface("section:Terminals", L10n.Text("windows.terminalpane.terminals"), () => TerminalPane);
         await _terminalController.OpenServerAsync(host);
     }
@@ -160,7 +177,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         if (ActivePage is ChatPage)
         {
             CompanionBrowser.AddTab(url, host, port, unlisten, peer);
-            ShowCompanion("Browser");
+            ShowCompanion(DesktopWorkbenchTool.Browser);
         }
         else _browser.AddTab(url, host, port, unlisten, peer);
     }
@@ -170,6 +187,25 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         if (MustDefer)
         {
             WhenLoaded(() => OpenReview(title, content));
+            return;
+        }
+        if (ActivePage is ChatPage)
+        {
+            var review = new Grid();
+            review.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            review.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            var header = new FlowPanel { Spacing = Theme.SpaceS, Margin = new Thickness(8) };
+            header.Children.Add(new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center, IsTextSelectionEnabled = true });
+            header.Children.Add(Buttons.Secondary(L10n.Text("windows.workbench.working_tree"), ActionIcon.Compare,
+                (_, _) => ShowChangesInspector(), small: true));
+            review.Children.Add(header);
+            var document = new ContentControl { Content = content,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+            Grid.SetRow(document, 1);
+            review.Children.Add(document);
+            _companionReview = review;
+            ShowCompanion(DesktopWorkbenchTool.Changes);
             return;
         }
         var tab = _tabStrip.Open("review:" + title, title, () => content);
@@ -282,7 +318,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     public UIElement? Inspector => _inspector;
     public double MinimumContentWidth => (ActiveSource as IInspectorContent)?.MinimumContentWidth ?? ShellWidths.ContentMinimum;
     public UIElement? ToolbarScope => (ActiveSource as IToolbarItems)?.ToolbarScope;
-    public double MinimumInspectorWidth => _companion is not null && ActivePage is ChatPage ? 320 : ShellWidths.Minimum;
+    public double MinimumInspectorWidth => ActivePage is ChatPage ? 320 : ShellWidths.Minimum;
     public IList<UIElement> ToolbarActions()
     {
         // A copy: the switch is inserted at the front, and a page is free to
@@ -316,7 +352,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     }
     private void RefreshChrome()
     {
-        var hasCompanion = _companion is not null && ActivePage is ChatPage;
+        var hasCompanion = ActivePage is ChatPage;
         // One tree keeps expansion, selection and its loaded directory cache
         // while moving between the Files page and the workspace inspector.
         var filesPage = ReferenceEquals(ActivePage, _editor);
@@ -333,11 +369,27 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         if (_toolbar is not null) _toolbar.ToolbarChanged -= Changed;
         _toolbar = ActiveSource as IToolbarItems;
         if (_toolbar is not null) _toolbar.ToolbarChanged += Changed;
-        if (_details.Content is ScrollViewer previous) previous.Content = null;
+        if (_inspectorScroll is not null) { _inspectorScroll.Content = null; _inspectorScroll = null; }
         _inspectorTabs.Visibility = hasCompanion ? Visibility.Collapsed : Visibility.Visible;
         _companionHeader.Visibility = hasCompanion ? Visibility.Visible : Visibility.Collapsed;
-        if (hasCompanion) _details.Content = _companion == "Browser" ? CompanionBrowser : CompanionTerminal;
-        else if (_inspectorTab is "Changes" or "History")
+        if (hasCompanion) RefreshCompanion();
+        else SetInspectorDetails();
+        if (!hasCompanion)
+        {
+            _details.Visibility = _inspectorTab == "Files" && !filesPage ? Visibility.Collapsed : Visibility.Visible;
+            _editor.FileTree.Visibility = filesPage || _inspectorTab == "Files" ? Visibility.Visible : Visibility.Collapsed;
+        }
+        foreach (var (label, button) in _inspectorButtons)
+        {
+            button.Background = label == _inspectorTab ? Theme.Brush(static () => Theme.RowSelected) : Theme.PanelBrush;
+        }
+        Changed();
+    }
+
+    private void SetInspectorDetails()
+    {
+        var filesPage = ReferenceEquals(ActivePage, _editor);
+        if (_inspectorTab is "Changes" or "History")
         {
             if (!_inspectorPages.TryGetValue(_inspectorTab, out var page))
             {
@@ -349,14 +401,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         else
         {
             _details.Content = _inspectorTab == "Details" || (filesPage && _inspectorTab == "Files")
-                ? new ScrollViewer { Content = (ActiveSource as IInspectorContent)?.Inspector } : null;
+                ? _inspectorScroll = new ScrollViewer { Content = (ActiveSource as IInspectorContent)?.Inspector } : null;
         }
-        _details.Visibility = !hasCompanion && _inspectorTab == "Files" && !filesPage ? Visibility.Collapsed : Visibility.Visible;
-        _editor.FileTree.Visibility = filesPage || !hasCompanion && _inspectorTab == "Files" ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var (label, button) in _inspectorButtons)
-        {
-            button.Background = label == _inspectorTab ? Theme.Brush(static () => Theme.RowSelected) : Theme.PanelBrush;
-        }
-        Changed();
     }
 }

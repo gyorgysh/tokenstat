@@ -94,6 +94,7 @@ for name in ['contextOpen', 'serversOpen', 'otherServersOpen', 'promptOpen', 'hi
     context = context.replace(name + ' = false', name + ' = GalleryQAState.expanded')
 pieces += [context]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageLayout.swift').read_text()]
+pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageViewerGeometry.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageDecode.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatImageGallery.swift').read_text()]
 pieces += [declaration('scripts/tests/ChatImageDecodeTests.swift', '    static func tiff(').replace('static func', 'func', 1)]
@@ -207,8 +208,9 @@ pieces += [r'''
             }.padding(20).frame(width: 360, height: 135, alignment: .topLeading).background(Theme.background)
             try await capture(AnyView(compact), size: CGSize(width: 360, height: 135), name: "tool-\(dark ? "dark" : "light")", window: window)
             let request = ChatImagePresentation(reference: model.currentReference, attachments: files, selectedID: files[1].id)
-            let viewer = ChatImageViewer(model: model, request: request).frame(width: 880, height: 680)
-            try await capture(AnyView(viewer), size: CGSize(width: 880, height: 680), name: "viewer-\(dark ? "dark" : "light")", window: window)
+            let viewerSize = ChatImageViewerGeometry.size(available: CGSize(width: 1240, height: 900), enlarged: false)
+            let viewer = ChatImageViewer(model: model, request: request).frame(width: viewerSize.width, height: viewerSize.height)
+            try await capture(AnyView(viewer), size: viewerSize, name: "viewer-\(dark ? "dark" : "light")", window: window)
             for width: CGFloat in [320, 360] {
                 for expanded in [false, true] {
                     GalleryQAState.expanded = expanded

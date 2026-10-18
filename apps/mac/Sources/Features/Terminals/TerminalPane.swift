@@ -28,6 +28,7 @@ struct TerminalPane: View {
     /// hierarchy so paint is not lost; focus and keystroke-speed polling only
     /// apply when this is true.
     var isSurfaceActive: Bool = true
+    @State private var focusOwner = UUID()
     @State private var closingSession: WorkspaceTerminal?
     @State private var connectingServer: SSHHost?
     @State private var browserWorkspaces: Set<String> = []
@@ -169,9 +170,9 @@ struct TerminalPane: View {
         // difference between a few round trips a second and a few hundred when
         // several agents are running at once.
         .onChange(of: focusedSessionIDs, initial: true) {
-            terminals.focus(focusedSessionIDs)
+            terminals.focus(owner: focusOwner, ids: focusedSessionIDs)
         }
-        .onDisappear { terminals.focus(nil) }
+        .onDisappear { terminals.focus(owner: focusOwner, ids: []) }
         .onChange(of: sessions.map(\.id)) { terminals.reconcilePane(in: folder.id) }
         .sheet(item: $connectingServer) { host in
             SSHConnectForm(host: host, model: ssh) { session in

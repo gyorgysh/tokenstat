@@ -81,6 +81,11 @@ internal interface IInspectorRequest
     event Action? DetailsRequested;
 }
 
+internal interface IInspectorDismissRequest
+{
+    event Action? DetailsDismissRequested;
+}
+
 /// <summary>
 /// Pages whose numbers depend on the toolbar scope implement this. The shell
 /// pushes the current scope on navigation and on every change, so the page

@@ -29,6 +29,8 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
     private readonly string? _peer;
     private readonly string? _workspaceId;
     private readonly bool _sharedTabs;
+    private readonly List<TabViewItem> _pendingTabs = new();
+    private Window? _ownerWindow;
     private readonly TabView _tabs = new()
     {
         IsAddTabButtonVisible = true,
@@ -64,19 +66,39 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 AddTab(url, host, port, unlisten, peer);
             }
         };
+        _tabs.Loaded += (_, _) =>
+        {
+            foreach (var item in _pendingTabs.ToArray())
+            {
+                _tabs.TabItems.Add(item);
+                _tabs.SelectedItem = item;
+            }
+            _pendingTabs.Clear();
+            RenderInspector();
+        };
         // Keep tabs alive while switching workspace sections. Release native
         // WebViews and listeners when the window closes, or a tab is closed.
-        void CloseAll()
+        _ownerWindow = App.CurrentWindow;
+        if (_ownerWindow is not null) _ownerWindow.Closed += WindowClosed;
+    }
+
+    private void WindowClosed(object sender, WindowEventArgs args) => Release();
+
+    /// <summary>Closing a tool releases its pages and bridge leases. Hiding retains them.</summary>
+    internal void Release()
+    {
+        if (_ownerWindow is not null) _ownerWindow.Closed -= WindowClosed;
+        _ownerWindow = null;
+        foreach (var item in _pendingTabs)
+            if (item.Tag is BrowserTab pending) _ = pending.CloseAsync();
+        _pendingTabs.Clear();
+        foreach (var entry in _tabs.TabItems)
         {
-            foreach (var entry in _tabs.TabItems)
+            if (entry is TabViewItem item && item.Tag is BrowserTab tab)
             {
-                if (entry is TabViewItem item && item.Tag is BrowserTab tab)
-                {
-                    _ = tab.CloseAsync();
-                }
+                _ = tab.CloseAsync();
             }
         }
-        if (App.CurrentWindow is { } window) window.Closed += (_, _) => CloseAll();
     }
 
     /// <summary>
@@ -175,6 +197,13 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         };
         ContextMenus.AddAsync(ContextMenus.Menu(item), L10n.Text("common.close"), async () => await CloseTabAsync(tab));
         item.Tag = tab;
+        // A hidden companion can receive several links before its TabView
+        // mounts. WinUI cannot add a second native tab until it is loaded.
+        if (!_tabs.IsLoaded && _tabs.TabItems.Count > 0)
+        {
+            _pendingTabs.Add(item);
+            return;
+        }
         _tabs.TabItems.Add(item);
         _tabs.SelectedItem = item;
         RenderInspector();

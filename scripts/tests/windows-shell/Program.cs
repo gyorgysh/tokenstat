@@ -9,6 +9,24 @@ var directory = Path.Combine(Path.GetTempPath(), "tokenstat-shell-test-" + Guid.
 Directory.CreateDirectory(directory);
 try
 {
+    var bench = new DesktopWorkbenchState();
+    foreach (var tool in Enum.GetValues<DesktopWorkbenchTool>()) bench.Open(tool);
+    bench.Open(DesktopWorkbenchTool.Browser);
+    Check(bench.Tabs.Count == 4 && bench.Selected == DesktopWorkbenchTool.Browser, "Opening a tool duplicated its tab");
+    bench.Hide();
+    Check(!bench.IsPresented && bench.Tabs.Count == 4, "Hiding destroyed tool state");
+    bench.Open(DesktopWorkbenchTool.Browser);
+    bench.Close(DesktopWorkbenchTool.Terminal);
+    Check(bench.Selected == DesktopWorkbenchTool.Browser, "Closing a background tool changed selection");
+    bench.Close(DesktopWorkbenchTool.Browser);
+    Check(bench.Selected == DesktopWorkbenchTool.Changes, "Closing a selected tool lost its neighbor");
+    bench.Close(DesktopWorkbenchTool.Changes);
+    bench.Close(DesktopWorkbenchTool.Inspector);
+    Check(!bench.IsPresented && bench.Selected is null, "Closing the last tool did not hide the pane");
+    bench.Close(DesktopWorkbenchTool.Inspector);
+    bench.Open(DesktopWorkbenchTool.Terminal);
+    Check(bench.IsPresented && bench.Tabs.SequenceEqual(new[] { DesktopWorkbenchTool.Terminal }), "Closed pane did not reopen cleanly");
+    Check(new DesktopWorkbenchState().Tabs.Count == 0, "Another workspace inherited tool state");
     var request = new System.Text.Json.Nodes.JsonObject { ["workspaceId"] = "remote:peer:folder", ["branch"] = "feature" };
     var forwarded = RemoteWorkspaceParameters.Forward(request, "remote:peer:folder", "folder");
     Check(forwarded["workspaceId"]!.GetValue<string>() == "folder" && forwarded["id"]!.GetValue<string>() == "folder"

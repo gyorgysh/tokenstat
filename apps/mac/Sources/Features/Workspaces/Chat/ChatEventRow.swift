@@ -49,6 +49,7 @@ struct ChatEventRow: View {
     /// Opens the folder's changes beside the chat, at one file or all of
     /// them. Nil where there is no live folder to open.
     var reviewChanges: ((String?) -> Void)? = nil
+    var reviewTurnChanges: ((ChatTurnChanges, String?) -> Void)? = nil
     #if os(macOS)
     /// Whole-card hover for the copy action. Scoping this to the header
     /// saved nothing measurable once segment init was cached and the pin
@@ -224,7 +225,9 @@ struct ChatEventRow: View {
                 answerQuestion(question, text)
             }
         case let .changes(changes):
-            ChatTurnChangesCard(changes: changes, review: reviewChanges)
+            ChatTurnChangesCard(changes: changes, review: reviewTurnChanges.map { callback in
+                { path in callback(changes, path) }
+            } ?? reviewChanges, reviewHelp: reviewTurnChanges == nil ? nil : L10n.text("apple.workbench.recorded_edits"))
         case let .attachment(attachment) where attachment.mediaType?.hasPrefix("image/") == true:
             EmptyView()
         case let .attachment(attachment):
@@ -323,7 +326,7 @@ private struct SelectableWhen: ViewModifier {
 /// every transcript measuring pass re-stamps; a live sample of a stopped
 /// application sat in exactly that. One `Text` with colored runs measures
 /// once, selects and copies as a whole, and reads the same.
-func diffColoredText(_ patch: String, lineLimit: Int) -> (text: AttributedString, cut: Int) {
+func diffColoredText(_ patch: String, lineLimit: Int, clipLongLines: Bool = true) -> (text: AttributedString, cut: Int) {
     var out = AttributedString()
     var shown = 0
     var total = 0
@@ -331,7 +334,7 @@ func diffColoredText(_ patch: String, lineLimit: Int) -> (text: AttributedString
         total += 1
         guard shown < lineLimit else { continue }
         shown += 1
-        var line = AttributedString(ChatToolState.clip(String(raw)) + "\n")
+        var line = AttributedString((clipLongLines ? ChatToolState.clip(String(raw)) : String(raw)) + "\n")
         line.foregroundColor =
             (raw.hasPrefix("+") && !raw.hasPrefix("+++")) ? Theme.diffAdded
             : (raw.hasPrefix("-") && !raw.hasPrefix("---")) ? Theme.diffRemoved
@@ -817,6 +820,7 @@ extension ChatEventRow: Equatable {
             && lhs.answeringQuestion == rhs.answeringQuestion
             && lhs.canAnswerQuestions == rhs.canAnswerQuestions
             && (lhs.reviewChanges == nil) == (rhs.reviewChanges == nil)
+            && (lhs.reviewTurnChanges == nil) == (rhs.reviewTurnChanges == nil)
             && lhs.imageResources == rhs.imageResources
         else { return false }
         if case .attachment = lhs.item.kind {

@@ -79,6 +79,7 @@ struct ChatTranscriptFoldTests {
         compactRecoversOlderMuseToolMetadata()
         compactKeepsRunningStepsAndOpensToTheRow()
         turnChangesSumPerFileAndWaitForTheTurn()
+        turnReviewsKeepRecordedPatches()
         print("ChatTranscriptFoldTests passed")
     }
 
@@ -381,5 +382,25 @@ struct ChatTranscriptFoldTests {
         guard case let .changes(totals)? = large.last?.kind else { fatalError("missing totals") }
         require(totals.added == UInt64(UInt32.max) * 2 && totals.removed == totals.added,
                 "large edits must not overflow per-file or turn counters")
+    }
+
+    static func turnReviewsKeepRecordedPatches() {
+        func patch(_ id: String, _ text: String, failed: Bool = false) -> ChatDisplayItem {
+            .init(id: id, kind: .edit(ChatEditState(path: "same.swift", added: 1, removed: 1,
+                patch: text, revision: 1, running: false, failed: failed, startedAtMs: 0, endedAtMs: 1)))
+        }
+        let rows = [user("first"), patch("edit1", "-old\n+one"), patch("edit2", "-one\n+two"),
+                    patch("failed", "never applied", failed: true), say("done"),
+                    user("second"), patch("edit3", "-two\n+later"), say("done2")]
+        let cards = fold(rows, .minimal).compactMap { item -> ChatTurnChanges? in
+            if case let .changes(value) = item.kind { return value }
+            return nil
+        }
+        require(cards.count == 2, "each turn has a separate immutable review")
+        require(cards[0].files[0].patches == ["-old\n+one", "-one\n+two"], "retain edit order without failed edits")
+        require(cards[1].files[0].patches == ["-two\n+later"], "later changes must not replace an earlier turn's patch")
+        let unavailable = fold([user("q"), edit("no-patch", "file", added: 3)], .minimal)
+        guard case let .changes(missing)? = unavailable.last?.kind else { fatalError("missing review") }
+        require(missing.files[0].patches == [""], "missing patches must stay explicitly unavailable")
     }
 }

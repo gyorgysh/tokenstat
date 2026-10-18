@@ -5,13 +5,13 @@ import SwiftUI
 /// The files a finished turn changed, under its last reply.
 ///
 /// Shared by the Mac and the phone. The first few files are listed with
-/// what each one gained and lost, the rest are one tap away, and Review opens
-/// the folder's full changes review, in a document tab on desktop.
+/// what each one gained and lost. Desktop review opens the recorded turn's
+/// patches beside the conversation, including after those edits are committed.
 struct ChatTurnChangesCard: View {
     let changes: ChatTurnChanges
-    /// Opens the folder's changes, at one file when a row was pressed. Nil
-    /// for a saved copy, which has no folder to open.
+    /// The caller supplies the review scope. A pressed file goes first.
     var review: ((String?) -> Void)?
+    var reviewHelp: String? = nil
     @State private var showingAll = false
 
     static let shownFiles = 4
@@ -44,7 +44,7 @@ struct ChatTurnChangesCard: View {
                     Button(L10n.text("apple.chatchanges.review"), .preview) { review(nil) }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                         .fixedSize()
-                        .help(L10n.text("apple.chatchanges.review_help"))
+                        .help(reviewHelp ?? L10n.text("apple.chatchanges.review_help"))
                 }
             }
             .padding(.bottom, Theme.Space.xs)

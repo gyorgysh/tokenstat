@@ -13,6 +13,9 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Improved
 
+- Mac and Windows chats have a side workbench with tabs for Changes, Browser, Terminal and Inspector. Review code and commits while the conversation stays visible, switch tools without starting over, and hide the pane while terminal sessions keep running.
+- Review on a chat's changed-files card opens the edits recorded for that turn, including after a commit or later edits. Repeated edits appear in order, with a separate Working tree view for current changes and commit actions. An edit without a recorded patch is identified clearly.
+- Desktop image viewers open larger and have separate controls for enlarging the viewer and resetting zoom. Enlarging keeps the image inside the app, with navigation, Open and Save still available.
 - The Mac download opens to a designed install window: the app and the Applications folder side by side with an arrow between them, the disk carries the tokenstat icon, and the art stays sharp on Retina displays and readable in light and dark mode.
 
 ## [1.7.2] - 2026-10-18
