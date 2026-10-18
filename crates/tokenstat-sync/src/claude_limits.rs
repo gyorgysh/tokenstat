@@ -124,7 +124,6 @@ pub fn fetch_with_force(force: bool) -> ProviderLimits {
         }
     };
 
-    use sha2::{Digest, Sha256};
     use std::sync::{Mutex, OnceLock};
     static PACER: OnceLock<Mutex<LimitsPacer>> = OnceLock::new();
     let mut pacer = PACER
@@ -133,7 +132,7 @@ pub fn fetch_with_force(force: bool) -> ProviderLimits {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     // The credential fingerprint stays in memory; only retry deadlines and
     // counters survive a restart, never credentials or their fingerprints.
-    let owner: [u8; 32] = Sha256::digest(token.access_token.as_bytes()).into();
+    let owner = credential_owner(&token.access_token);
     let previous = pacer.retry.clone();
     let result = pacer.read(owner, force, now_ms(), || fetch_stored(&stored, &token));
     if pacer.retry != previous {
@@ -142,7 +141,16 @@ pub fn fetch_with_force(force: bool) -> ProviderLimits {
     result
 }
 
-fn fetch_stored(stored: &Stored, token: &OauthToken) -> (ProviderLimits, Option<RateLimit>) {
+fn credential_owner(access_token: &str) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(access_token.as_bytes()).into()
+}
+
+fn fetch_stored(
+    stored: &Stored,
+    token: &OauthToken,
+) -> ([u8; 32], ProviderLimits, Option<RateLimit>) {
+    let mut owner = credential_owner(&token.access_token);
     let mut retry_after = None;
     let result = (|| {
         let client = match crate::http::client_builder()
@@ -166,6 +174,10 @@ fn fetch_stored(stored: &Stored, token: &OauthToken) -> (ProviderLimits, Option<
         } else {
             token.access_token.clone()
         };
+        // Renewal writes this token back to Claude's credential store. Cache
+        // the reading under that same token, rather than the expired one that
+        // initiated the request, so the next automatic pass can reuse it.
+        owner = credential_owner(&access_token);
 
         let response = client
             .get(USAGE_URL)
@@ -245,7 +257,7 @@ fn fetch_stored(stored: &Stored, token: &OauthToken) -> (ProviderLimits, Option<
             stale: false,
         }
     })();
-    (result, retry_after)
+    (owner, result, retry_after)
 }
 
 const RATE_LIMIT_NOTE: &str =
@@ -291,7 +303,7 @@ impl LimitsPacer {
         owner: [u8; 32],
         force: bool,
         now: i64,
-        fetch: impl FnOnce() -> (ProviderLimits, Option<RateLimit>),
+        fetch: impl FnOnce() -> ([u8; 32], ProviderLimits, Option<RateLimit>),
     ) -> ProviderLimits {
         if now < self.retry.until_ms {
             return ProviderLimits::unavailable("claude_code", RATE_LIMIT_NOTE);
@@ -305,7 +317,7 @@ impl LimitsPacer {
             return reading.clone();
         }
         let started = std::time::Instant::now();
-        let (reading, limited) = fetch();
+        let (fetched_owner, reading, limited) = fetch();
         let completed =
             now.saturating_add(started.elapsed().as_millis().min(i64::MAX as u128) as i64);
         if let Some(header) = limited {
@@ -320,7 +332,7 @@ impl LimitsPacer {
         }
         if reading.has_reading() {
             self.retry = RetryState::default();
-            self.cached = Some((owner, completed, reading.clone()));
+            self.cached = Some((fetched_owner, completed, reading.clone()));
         } else {
             // A failed explicit refresh retires the successful in-memory
             // shortcut too. Only a real later success may clear its warning.
@@ -713,7 +725,7 @@ mod tests {
         let mut pacer = LimitsPacer::default();
         assert!(
             pacer
-                .read([1; 32], false, 1000, || (reading(), None))
+                .read([1; 32], false, 1000, || ([1; 32], reading(), None))
                 .has_reading()
         );
         assert!(
@@ -725,6 +737,7 @@ mod tests {
         );
         let result = pacer.read([1; 32], true, 10_000, || {
             (
+                [1; 32],
                 ProviderLimits::unavailable("claude_code", "429"),
                 Some(RateLimit {
                     retry_after: Some("900".into()),
@@ -749,6 +762,7 @@ mod tests {
         let after = restarted.retry.until_ms + 1;
         restarted.read([1; 32], false, after, || {
             (
+                [1; 32],
                 ProviderLimits::unavailable("claude_code", "429"),
                 Some(RateLimit { retry_after: None }),
             )
@@ -760,18 +774,43 @@ mod tests {
         let after = restarted.retry.until_ms + 1;
         assert!(
             restarted
-                .read([1; 32], false, after, || (reading(), None))
+                .read([1; 32], false, after, || ([1; 32], reading(), None))
                 .has_reading()
         );
         assert_eq!(restarted.retry, RetryState::default());
         let called = std::cell::Cell::new(false);
         restarted.read([2; 32], false, after + 1, || {
             called.set(true);
-            (reading(), None)
+            ([2; 32], reading(), None)
         });
         assert!(
             called.get(),
             "a replaced Claude credential cannot reuse another login's fresh reading"
+        );
+    }
+
+    #[test]
+    fn a_renewed_credential_keeps_the_five_minute_success_cache() {
+        let mut pacer = LimitsPacer::default();
+        let expired = credential_owner("expired");
+        let renewed = credential_owner("renewed");
+        pacer.read(expired, false, 1000, || (renewed, reading(), None));
+        assert!(
+            pacer
+                .read(renewed, false, 2000, || panic!(
+                    "renewal must not trigger another usage request"
+                ))
+                .has_reading()
+        );
+        let replaced = credential_owner("different login");
+        let called = std::cell::Cell::new(false);
+        pacer.read(replaced, false, 3000, || {
+            called.set(true);
+            (replaced, reading(), None)
+        });
+        assert!(
+            called.get(),
+            "an unrelated login still requires its own reading"
         );
     }
 
@@ -796,14 +835,18 @@ mod tests {
     #[test]
     fn a_failed_manual_refresh_cannot_become_a_fresh_cached_success() {
         let mut pacer = LimitsPacer::default();
-        pacer.read([1; 32], false, 1000, || (reading(), None));
+        pacer.read([1; 32], false, 1000, || ([1; 32], reading(), None));
         pacer.read([1; 32], true, 2000, || {
-            (ProviderLimits::unavailable("claude_code", "offline"), None)
+            (
+                [1; 32],
+                ProviderLimits::unavailable("claude_code", "offline"),
+                None,
+            )
         });
         let called = std::cell::Cell::new(false);
         pacer.read([1; 32], false, 3000, || {
             called.set(true);
-            (reading(), None)
+            ([1; 32], reading(), None)
         });
         assert!(
             called.get(),

@@ -19,11 +19,15 @@ import SwiftUI
 /// to the identical flow would be a fake choice, so the line under the button
 /// says what actually happens instead.
 #if !os(macOS)
+import UIKit
+
 struct ClientLoginView: View {
     @Environment(ConnectivityModel.self) private var connectivity: ConnectivityModel?
     @Environment(AccountModel.self) private var account
     @AppStorage("client.hasOnboarded") private var hasOnboarded = false
     @State private var webURL: URL?
+    @State private var developerUnlock = ReviewBuild.LoginLogoUnlock()
+    @State private var developerNotice: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,7 +37,17 @@ struct ClientLoginView: View {
             // bottom of the same screen says it, and saying it twice made the
             // product's own name look like a subtitle to the word above it.
             VStack(spacing: Theme.Space.m) {
-                LogoMark(size: 52)
+                Button {
+                    if developerUnlock.tap() {
+                        let notice = L10n.text("apple.clientloginview.developer_mode_enabled")
+                        developerNotice = notice
+                        UIAccessibility.post(notification: .announcement, argument: notice)
+                    }
+                } label: {
+                    LogoMark(size: 52).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("apple.marks.tokenstat.63d30539"))
                 Wordmark(size: 28, fills: false, showsMark: false)
                 Text(L10n.text("apple.clientloginview.your_coding_agents_projects_and_ai_usage_t.6cfcf32f"))
                     .font(ClientType.body)
@@ -119,6 +133,10 @@ struct ClientLoginView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
+        .overlay(alignment: .bottom) {
+            TransientToast(message: $developerNotice)
+                .padding(Theme.Space.m)
+        }
         .sheet(isPresented: Binding(
             get: { webURL != nil },
             set: { if !$0 { webURL = nil } }

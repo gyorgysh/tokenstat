@@ -84,7 +84,8 @@ final class ClientWebAuth: NSObject {
             URLQueryItem(name: "app", value: "ios"),
             URLQueryItem(name: "mobile", value: "1"),
         ]
-        // TestFlight and App Review only. Every screen in this app is behind a
+        // TestFlight, App Review, or the explicit login-logo developer mode.
+        // Every screen in this app is behind a
         // sign-in, and sign-in is Apple, Google, GitHub or X through this page:
         // there is no password field, so Apple's usual "here are the demo
         // account details" cannot be honoured. The flag asks the page to offer
@@ -95,7 +96,7 @@ final class ClientWebAuth: NSObject {
         // can be closed after a review round without a new build. Harmless on
         // a site that does not know the parameter yet, the same way `app` and
         // `mobile` were harmless before it did.
-        if ReviewBuild.isTestFlight {
+        if ReviewBuild.offersDemoLogin() {
             flags.append(URLQueryItem(name: "review", value: "1"))
         }
         let tagged = url.appending(queryItems: flags)

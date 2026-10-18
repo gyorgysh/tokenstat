@@ -2,7 +2,10 @@
 // Compile with PlanLimitsStore.swift and PlanLimitsOrder.swift using swiftc -parse-as-library, then run.
 import Foundation
 
-struct ProviderLimits: Sendable, Equatable { var source: String; var reading: Int; var stale: Bool? = nil }
+struct ProviderLimits: Sendable, Equatable {
+    var source: String; var reading: Int; var stale: Bool? = nil
+    var observedAtMs: Int64 = 1
+}
 struct LimitsSyncState: Sendable {
     var enabled = false
     var skip: [String] = []
@@ -65,7 +68,8 @@ enum Bridge {
         store.settingsChanged(LimitsSyncState(enabled: true, skip: ["claude_code"]))
         gate.answer(4)
         do { try await overdue.value; preconditionFailure("sharing edit overwritten") } catch is CancellationError {}
-        precondition(store.enabled && store.visible.isEmpty && store.providers.isEmpty, "empty cache clears an old reading")
+        precondition(store.enabled && store.visible.isEmpty && store.providers.first?.reading == 3,
+                     "A settings reply changes visibility without replacing the current reading")
         let skipped = PlanLimitsStore(owner: { owner }, readCache: {
             LimitsSyncState(skip: ["claude_code"], providers: [ProviderLimits(source: "claude_code", reading: 1)])
         }, readLive: { _ in [] })
@@ -92,6 +96,17 @@ enum Bridge {
         orderedGate.fail()
         do { try await failedRead.value; preconditionFailure("expected transport failure") } catch {}
         precondition(ordered.providers.allSatisfy { $0.reading == 2 && $0.stale == true }, "transport errors preserve and date the last reading")
+        let lastGood = LimitsSyncState(enabled: true, providers: ids.map { ProviderLimits(source: $0, reading: 1) })
+        ordered.settingsChanged(lastGood)
+        precondition(ordered.enabled && ordered.providers.allSatisfy { $0.reading == 2 && $0.stale == true },
+                     "A sharing edit must not restore the disk cache over a failed live refresh")
+        ordered.acceptCachedSettings(lastGood, requested: ordered.settingsRead())
+        precondition(ordered.providers.allSatisfy { $0.reading == 2 && $0.stale == true },
+                     "The periodic widget cache read must preserve equal-dated failure status")
+        let newer = LimitsSyncState(enabled: true, providers: ids.map { ProviderLimits(source: $0, reading: 3, observedAtMs: 2) })
+        ordered.acceptCachedSettings(newer, requested: ordered.settingsRead())
+        precondition(ordered.providers.allSatisfy { $0.reading == 3 && $0.stale != true },
+                     "A newer daemon reading reaches all surfaces and can clear the old failure")
         print("PlanLimitsStoreTests passed: cache, sharing, cancellation, throttle and account retirement")
     }
 }

@@ -820,7 +820,11 @@ mod tests {
         )
         .unwrap();
         std::fs::write(&rollout, record("2026-07-12T06:05:00Z", 300, 35)).unwrap();
-        let found = limits_from_native(&[db.clone()], &[rollout.clone()], 1_784_400_000_000);
+        let found = limits_from_native(
+            std::slice::from_ref(&db),
+            std::slice::from_ref(&rollout),
+            1_784_400_000_000,
+        );
         assert_eq!(
             found
                 .windows

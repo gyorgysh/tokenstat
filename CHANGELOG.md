@@ -17,6 +17,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Tapping or clicking the new-chat glass sends waves through its folds, gently bending the light as well as lighting the ripple.
 - Mac terminal and chat detail cards refresh while open, including usage, native session IDs and repository changes. Context shows reported token counts and capacity; an unreported count stays unknown.
 - Home, Account and chat composers share plan-limit readings and refresh while visible. Overlapping refreshes share the vendor request, and background readings update every five minutes even when account sharing is off.
+- On iPhone and iPad, tapping the login logo ten times enables developer mode and offers the existing Demo login on the sign-in page, including production builds.
 
 ### Fixed
 
@@ -27,6 +28,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Older Codex SQLite quota readings hiding newer CLI readings. Quota windows now use the latest reported timestamp across both native sources.
 - Plan-limit cards changing positions while refreshing. Cached and live readings now use the same provider order, keep existing readings visible, and preserve failure warnings until a refresh succeeds. Claude quota reads use a five-minute automatic cadence and respect rate-limit cooldowns, including after restarting the helper.
 - Late Account settings reads undoing a sharing edit, phone plan-limit cards blinking to placeholders during automatic refresh, and scheduled uploads using a stale archive while another scan is still running.
+- Sharing edits and widget cache refreshes replacing current quota readings and clearing failure status. Newer background readings now reach the shared store, and renewing Claude's login preserves its five-minute quota cache.
 
 ## [1.7.1] - 2026-10-17
 

@@ -13,8 +13,8 @@ import Foundation
 /// Exists for one reason: every screen in the client is behind a sign-in, and
 /// sign-in is Apple, Google, GitHub or X through a page. There is no password
 /// field, so Apple's usual "here are the demo account details" cannot be
-/// honoured. A reviewer needs a door, and that door must not exist for anybody
-/// who installed the app normally.
+/// honoured. TestFlight and App Review offer the demo sign-in automatically.
+/// An App Store install can opt in through ten taps on the login logo.
 ///
 /// What this gates is a query flag on the sign-in page, nothing more. The
 /// account it leads to is a real one on the account service, and whether the
@@ -23,12 +23,32 @@ import Foundation
 /// The receipt is what tells them apart. A build delivered by TestFlight, and a
 /// build App Review is running, carry `sandboxReceipt`; an App Store install
 /// carries `receipt`. App Review therefore sees the door, which is the point,
-/// and a paying customer does not.
+/// and an App Store install needs the explicit developer-mode gesture.
 ///
-/// **Fails closed.** No receipt at all, or a name this does not recognise, and
-/// the answer is no. A check that guesses yes when it cannot tell is a check
-/// that ships a demo door to everybody the first time Apple changes a filename.
+/// An absent or unrecognised receipt never enables the automatic offer.
 enum ReviewBuild {
+    static func offersDemoLogin(testFlight: Bool = isTestFlight, defaults: UserDefaults = .standard) -> Bool {
+        testFlight || defaults.bool(forKey: LoginLogoUnlock.preference)
+    }
+
+    /// Counts only taps made on this login presentation. The one persisted
+    /// preference changes the web sign-in flag; it grants no local access.
+    struct LoginLogoUnlock {
+        fileprivate static let preference = "client.developerDemoLoginEnabled"
+        private let defaults: UserDefaults
+        private var taps = 0
+
+        init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+        mutating func tap() -> Bool {
+            taps += 1
+            guard taps == 10 else { return false }
+            taps = 0
+            defaults.set(true, forKey: Self.preference)
+            return true
+        }
+    }
+
     static let isTestFlight: Bool = {
         #if targetEnvironment(simulator)
         // A simulator has no receipt, and a developer running one is not a

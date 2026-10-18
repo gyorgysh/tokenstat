@@ -63,7 +63,7 @@ final class PlanLimitsStore {
                 guard held == owner(), flight?.id == id else { throw CancellationError() }
                 // Retain live readings and failure notes until their replacement
                 // arrives. The last-good disk cache cannot clear a rate-limit warning.
-                if state.providers.isEmpty { state = cached }
+                mergeCachedProviders(cached.providers)
                 state.enabled = cached.enabled; state.skip = cached.skip
                 let providers = try await readLive(force)
                 guard held == owner(), flight?.id == id else { throw CancellationError() }
@@ -87,7 +87,11 @@ final class PlanLimitsStore {
     /// A sharing edit retires earlier reads so a late cache reply cannot undo it.
     func settingsChanged(_ settings: LimitsSyncState) {
         settingsRevision &+= 1
-        generation = owner(); state = settings; flight = nil; lastAttempt = nil
+        if generation != owner() { state = LimitsSyncState() }
+        generation = owner()
+        state.enabled = settings.enabled; state.skip = settings.skip
+        mergeCachedProviders(settings.providers)
+        flight = nil; lastAttempt = nil
     }
 
     func settingsRead() -> SettingsRead { SettingsRead(owner: owner(), revision: settingsRevision) }
@@ -96,6 +100,21 @@ final class PlanLimitsStore {
         guard requested.owner == owner(), requested.revision == settingsRevision else { return }
         if generation != owner() { settingsChanged(settings); return }
         state.enabled = settings.enabled; state.skip = settings.skip
-        if state.providers.isEmpty { state.providers = settings.providers }
+        mergeCachedProviders(settings.providers)
+    }
+
+    /// Settings replies carry last-good numbers, not the outcome of the last
+    /// attempt. Equal-dated cache entries must not clear a live failure, while
+    /// a newer background reading should reach every surface without HTTP.
+    private func mergeCachedProviders(_ providers: [ProviderLimits]) {
+        for provider in providers {
+            if let index = state.providers.firstIndex(where: { $0.source == provider.source }) {
+                if provider.observedAtMs > state.providers[index].observedAtMs {
+                    state.providers[index] = provider
+                }
+            } else {
+                state.providers.append(provider)
+            }
+        }
     }
 }

@@ -56,8 +56,10 @@ enum EcosystemPublisher {
             cachedLimitsTask = Task {
                 while !Task.isCancelled {
                     // Read the daemon's dated cache, without polling vendors again.
+                    let requested = PlanLimitsStore.shared.settingsRead()
                     if let lease, let settings = try? await Bridge.limitsSync(), isCurrent(lease) {
-                        publish(limits: settings.providers.filter { !settings.skip.contains($0.source) }, lease: lease)
+                        PlanLimitsStore.shared.acceptCachedSettings(settings, requested: requested)
+                        publish(limits: PlanLimitsStore.shared.visible, lease: lease)
                     }
                     try? await Task.sleep(for: .seconds(60))
                 }
