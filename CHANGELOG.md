@@ -16,12 +16,15 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - On Mac, iPhone and iPad, starting a chat draws the interactive glass field and its pointer trails into the tokenstat logo. Its three glass bars refract the light while the first message prepares in the background. Quick sends open with their content ready; longer sends continue in the conversation. Reduced motion and transparency settings are respected.
 - Tapping or clicking the new-chat glass sends waves through its folds, gently bending the light as well as lighting the ripple.
 - Mac terminal and chat detail cards refresh while open, including usage, native session IDs and repository changes. Context shows reported token counts and capacity; an unreported count stays unknown.
+- Home, Account and chat composers share plan-limit readings and refresh while visible. Overlapping refreshes share the vendor request, and background readings update every five minutes even when account sharing is off.
 
 ### Fixed
 
 - First-message attachments failing with “No such file or directory” when a new chat has no storage folder yet, including messages held for Claude sign-in. Retrying keeps the original message and images.
 - Local Mac debug builds crashing at launch after Developer ID signing. Embedded debug and preview libraries now use the app's signing team, with validation before launch.
 - iPhone and iPad terminals jumping into long scrollback while typing or showing the keyboard. Caret scrolling now preserves the latest output or the reading position chosen by a drag.
+- New local Claude and Codex sessions waiting for an hourly CLI scan to appear. The desktop helper checks archive freshness every minute, scans when five minutes old, and catches up after waking. Scheduled CLI uploads refresh the archive first; an open CLI dashboard also keeps scanning in the background.
+- Older Codex SQLite quota readings hiding newer CLI readings. Quota windows now use the latest reported timestamp across both native sources.
 
 ## [1.7.1] - 2026-10-17
 

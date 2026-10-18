@@ -243,6 +243,10 @@ pub struct Totals {
 }
 
 impl Store {
+    pub(crate) fn archive_path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
     /// Default location, following platform conventions.
     pub fn default_path() -> Result<PathBuf, CoreError> {
         Ok(tokenstat_paths::data_dir()

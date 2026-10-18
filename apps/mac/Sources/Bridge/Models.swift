@@ -1246,6 +1246,7 @@ struct Info: Codable, Sendable, Hashable {
     /// Whether this host can answer about its own machine's logs. False on a
     /// client, where Insights comes from the account and nowhere else.
     var hasArchive: Bool
+    var lastScanMs: Int64? = nil
     var timezone: String
     var priceBookEffectiveFrom: String
     var hasPrices: Bool

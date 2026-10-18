@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-import OSLog
 import SwiftUI
 
 /// At-a-glance quota for the agent this conversation runs on, in the composer.
@@ -9,32 +8,17 @@ import SwiftUI
 /// away. Vendors that report no quota leave no badge rather than a zero:
 /// "we could not look" and "nothing is used" are different answers.
 ///
-/// Reads the cached readings on appear and asks the vendors live only when
-/// the cache holds nothing for this agent, the same rule the Account screen
-/// uses. A manual refresh lives in the popover for the moment somebody is
-/// deciding whether to start another session.
+/// Shares dated readings with Home and Account, refreshing while visible.
 struct ComposerLimitsBadge: View {
-    private static let log = Logger(
-        subsystem: "ai.tokenstat.tokenstat", category: "limits")
-
     /// Canonical source matching runs against this, so "claude" meets the
     /// "claude_code" readings.
     let backend: String
 
-    @State private var providers: [ProviderLimits] = []
-    @State private var skip: Set<String> = []
-    @State private var refreshing = false
+    @State private var readings = PlanLimitsStore.shared
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showingDetail = false
-    /// When vendors were last asked live, per backend across composer mounts.
-    /// Per-view state resets on every conversation switch and re-fires the
-    /// live probe; the throttle belongs to the backend, not the view.
-    /// Bounded: backends are a small fixed set, but a static dict must not
-    /// grow without limit if new ids ever appear.
-    private static var lastLiveAttemptByBackend: [String: Date] = [:]
-    private static let liveAttemptCap = 64
-
     private var shared: [ProviderLimits] {
-        providers.filter { !skip.contains($0.source) }
+        readings.visible
     }
 
     /// The readings for the agent this conversation runs on, and nobody
@@ -95,15 +79,19 @@ struct ComposerLimitsBadge: View {
                         ComposerLimitsDetail(
                             source: provider.source,
                             providers: shared,
-                            refreshing: refreshing,
-                            refresh: { Task { await refresh() } }
+                            refreshing: readings.isRefreshing,
+                            refresh: { Task { try? await readings.refresh(force: true) } }
                         )
                     }
                 }
             }
         }
-        .task(id: backend) {
-            await load()
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                try? await readings.refresh()
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
         }
     }
 
@@ -138,50 +126,7 @@ struct ComposerLimitsBadge: View {
             .joined(separator: ", ")
     }
 
-    private func apply(_ state: LimitsSyncState) {
-        skip = Set(state.skip)
-        let visible = PlanLimits.visible(state.providers).filter { !skip.contains($0.source) }
-        // Always assign so a revoked/empty reading clears a stale badge.
-        providers = visible
-    }
 
-    private func load() async {
-        let cached: LimitsSyncState
-        do {
-            cached = try await Bridge.limitsSync()
-        } catch {
-            Self.log.error("composer badge cache read failed: \(error.localizedDescription, privacy: .public)")
-            cached = LimitsSyncState()
-        }
-        apply(cached)
-        Self.log.debug("composer badge backend=\(self.backend, privacy: .public) cached=\(cached.providers.count, privacy: .public) shown=\(self.provider?.source ?? "none", privacy: .public)")
-        guard provider == nil else { return }
-        // Live only when the cache has nothing for this agent, and at most
-        // every five minutes: backends without vendor readings must not ask
-        // on every composer mount. The popover's Refresh always asks.
-        let last = Self.lastLiveAttemptByBackend[backend]
-        guard last.map({ Date().timeIntervalSince($0) > 300 }) ?? true else { return }
-        Self.noteLiveAttempt(backend: backend)
-        await refresh()
-        Self.log.debug("composer badge live backend=\(self.backend, privacy: .public) shown=\(self.provider?.source ?? "none", privacy: .public)")
-    }
-
-    private func refresh() async {
-        guard !refreshing else { return }
-        refreshing = true
-        defer { refreshing = false }
-        guard let fresh = try? await Bridge.usageLimits() else { return }
-        let visible = PlanLimits.visible(fresh).filter { !skip.contains($0.source) }
-        providers = visible
-    }
-
-    private static func noteLiveAttempt(backend: String) {
-        if lastLiveAttemptByBackend[backend] == nil, lastLiveAttemptByBackend.count >= liveAttemptCap,
-           let drop = lastLiveAttemptByBackend.keys.sorted().first {
-            lastLiveAttemptByBackend.removeValue(forKey: drop)
-        }
-        lastLiveAttemptByBackend[backend] = Date()
-    }
 }
 
 /// The full windows behind the badge: bars, reset times, and the reading's

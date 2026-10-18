@@ -56,7 +56,7 @@ pub use model::{
 pub use pricing::{
     Charged, EquivalentValue, EstimateSource, PriceTable, Rates, display_usage_model_id,
 };
-pub use scan::{ScanReport, reconcile, scan};
+pub use scan::{AUTO_SCAN_INTERVAL, ScanReport, reconcile, scan, scan_if_stale, scan_with_reset};
 pub use sources::claude_stats::Reconciliation;
 pub use store::{
     BLOCK_DURATION_MS, Bucket, DayPart, EventRow, GroupBy, Query, SplitBucket, Store, Totals,

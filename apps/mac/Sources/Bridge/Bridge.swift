@@ -1901,10 +1901,10 @@ extension Bridge {
 extension Bridge {
     /// What each vendor says is left of its plan.
     ///
-    /// Slow: Codex reads off the disk but Claude is a request. Treat it as a
-    /// refresh the user asked for, not something to poll.
-    static func usageLimits() async throws -> [ProviderLimits] {
-        try await background("usage.limits", patience: Patience.long, as: [ProviderLimits].self)
+    /// Automatic reads share the helper's minute cache. Explicit Refresh asks
+    /// again; simultaneous readers still share the same vendor pass.
+    static func usageLimits(force: Bool = true) async throws -> [ProviderLimits] {
+        try await background("usage.limits", ["force": force], patience: Patience.long, as: [ProviderLimits].self)
     }
 
     /// Whether this machine posts plan-limit readings after sync / refresh (P2),

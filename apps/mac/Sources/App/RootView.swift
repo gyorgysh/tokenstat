@@ -670,6 +670,9 @@ struct RootView: View {
             .onReceive(NotificationCenter.default.publisher(for: .tokenstatDidSync)) { _ in
                 refreshAfterSync()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .archiveDidChange)) { _ in
+                model.reload()
+            }
             // After the heatmap is up, warm secondary surfaces so Machines /
             // remote workspaces / agent tiles are a cache hit on first click.
             // Never starts before archive ready, so Home keeps the host first.

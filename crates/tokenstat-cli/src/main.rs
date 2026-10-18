@@ -452,11 +452,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
         let mut store = Store::open(&db_path)?;
-        if reset {
-            store.clear_events()?;
-            store.clear_watermarks()?;
-        }
-        let report = tokenstat_core::scan(&mut store, &tz)?;
+        let report = tokenstat_core::scan_with_reset(&mut store, &tz, reset)?;
         let mut json_report = render::scan_report_value(&report);
         if !cli.json {
             render::scan_report(&report, false)?;
@@ -584,7 +580,7 @@ fn main() -> Result<()> {
             return render::profile_sync_status(host.as_deref(), cli.json);
         }
         if *scheduled {
-            let store = match Store::open(&db_path) {
+            let mut store = match Store::open(&db_path) {
                 Ok(s) => s,
                 Err(e) if e.is_busy() => {
                     if cli.json {
@@ -596,6 +592,9 @@ fn main() -> Result<()> {
                 }
                 Err(e) => return Err(e.into()),
             };
+            if tokenstat_sync::scheduled_network_allowed() {
+                tokenstat_core::scan_if_stale(&mut store, &tz, tokenstat_core::AUTO_SCAN_INTERVAL)?;
+            }
             return render::profile_sync_scheduled(
                 &store,
                 host.as_deref(),

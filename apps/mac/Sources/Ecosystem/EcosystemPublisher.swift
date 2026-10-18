@@ -239,10 +239,9 @@ enum EcosystemPublisher {
 
     @discardableResult private static func refreshLimits(lease: EcosystemPublicationLease) async -> Bool {
         do {
-            let settings = try await Bridge.limitsSync()
+            try await PlanLimitsStore.shared.refresh(force: true)
             guard isCurrent(lease) else { return false }
-            let providers = try await Bridge.usageLimits()
-            publish(limits: providers.filter { !settings.skip.contains($0.source) }, lease: lease)
+            publish(limits: PlanLimitsStore.shared.visible, lease: lease)
             return isCurrent(lease)
         } catch {
             guard isCurrent(lease) else { return false }

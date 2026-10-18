@@ -302,19 +302,14 @@ const CODEX_MODEL_SCOPE: &str = "current model";
 /// so the current picture is the last one it wrote. No request, no token, and
 /// nothing to authenticate: this is a file Codex already put on the disk.
 pub fn codex_limits() -> ProviderLimits {
-    let now_ms = now_ms();
-    if let Some(limits) = limits_in_sqlite(now_ms) {
-        return limits;
-    }
+    limits_from_native(
+        &codex_sqlite_db_candidates(),
+        &recent_rollouts(RECENT_ROLLOUTS),
+        now_ms(),
+    )
+}
 
-    let files = recent_rollouts(RECENT_ROLLOUTS);
-    if files.is_empty() {
-        return ProviderLimits::unavailable(
-            "codex",
-            "No Codex sessions found, so it has not reported a limit yet.",
-        );
-    }
-
+fn limits_from_native(databases: &[PathBuf], files: &[PathBuf], now_ms: i64) -> ProviderLimits {
     // Every recent file, not the newest one that happens to carry a block.
     // Codex reports the allowance for whatever model a turn ran on, so the
     // account's own weekly window and a model's rolling window arrive in
@@ -322,7 +317,13 @@ pub fn codex_limits() -> ProviderLimits {
     // file with a block reported the model the last session used and hid an
     // account-wide limit that had already run out.
     let mut scan = CodexLimitScan::default();
-    for file in &files {
+    // SQLite and rollout logs can be updated by different Codex clients.
+    // Merge their dated windows instead of preferring any SQLite result,
+    // which could hide a newer reading emitted by an active CLI session.
+    for db in databases {
+        let _ = absorb_sqlite(&mut scan, db);
+    }
+    for file in files {
         absorb_rollout(&mut scan, file);
     }
 
@@ -411,16 +412,7 @@ fn limits_in(file: &Path, now_ms: i64) -> Option<ProviderLimits> {
         })
 }
 
-fn limits_in_sqlite(now_ms: i64) -> Option<ProviderLimits> {
-    for path in codex_sqlite_db_candidates() {
-        if let Some(found) = limits_in_sqlite_file(&path, now_ms) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-fn limits_in_sqlite_file(db_path: &Path, now_ms: i64) -> Option<ProviderLimits> {
+fn absorb_sqlite(scan: &mut CodexLimitScan, db_path: &Path) -> Option<()> {
     let conn = Connection::open_with_flags(
         db_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -451,20 +443,10 @@ fn limits_in_sqlite_file(db_path: &Path, now_ms: i64) -> Option<ProviderLimits> 
         return None;
     }
 
-    let mut scan = CodexLimitScan::default();
     for line in &lines {
         scan.absorb(line);
     }
-
-    scan.finish(now_ms)
-        .map(|(windows, observed_at_ms, plan)| ProviderLimits {
-            source: "codex".to_string(),
-            plan,
-            windows,
-            observed_at_ms,
-            note: None,
-            stale: false,
-        })
+    Some(())
 }
 
 /// Which allowance a window belongs to: the limit, and its place in the block.
@@ -815,6 +797,65 @@ fn collect_rollouts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn newer_cli_limits_override_old_sqlite_without_losing_other_windows() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = temp.path().join("state.sqlite");
+        let rollout = temp.path().join("rollout.jsonl");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute("CREATE TABLE thread_items (item_json TEXT)", [])
+            .unwrap();
+        let record = |at: &str, minutes, percent| {
+            serde_json::json!({"timestamp":at,"payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":percent,"window_minutes":minutes,"resets_at":1784460506i64},"plan_type":"pro"}}}).to_string()
+        };
+        conn.execute(
+            "INSERT INTO thread_items VALUES (?)",
+            [record("2026-07-12T06:00:00Z", 300, 10)],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO thread_items VALUES (?)",
+            [record("2026-07-12T06:01:00Z", 10080, 80)],
+        )
+        .unwrap();
+        std::fs::write(&rollout, record("2026-07-12T06:05:00Z", 300, 35)).unwrap();
+        let found = limits_from_native(&[db.clone()], &[rollout.clone()], 1_784_400_000_000);
+        assert_eq!(
+            found
+                .windows
+                .iter()
+                .find(|w| w.label == "5-hour")
+                .unwrap()
+                .percent,
+            35.0
+        );
+        assert_eq!(
+            found
+                .windows
+                .iter()
+                .find(|w| w.label == "weekly")
+                .unwrap()
+                .percent,
+            80.0
+        );
+        // The inverse matters too: a newer desktop report must beat an old CLI.
+        conn.execute(
+            "INSERT INTO thread_items VALUES (?)",
+            [record("2026-07-12T06:10:00Z", 300, 40)],
+        )
+        .unwrap();
+        let found = limits_from_native(&[db], &[rollout], 1_784_400_000_000);
+        assert_eq!(
+            found
+                .windows
+                .iter()
+                .find(|w| w.label == "5-hour")
+                .unwrap()
+                .percent,
+            40.0
+        );
+    }
 
     #[test]
     fn exact_codex_home_reads_only_its_own_reported_reset() {

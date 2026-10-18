@@ -3,7 +3,7 @@
 //! Takes over the terminal (alternate screen, raw mode) the way agent CLIs do.
 //! Tabs switch reports, Summary opens with headline stats already drawn, and
 //! the command field filters slash-command help as you type. On open, if the
-//! archive has not been scanned in the last ten minutes, a scan runs before
+//! archive has not been scanned in the last five minutes, a scan runs before
 //! the first interactive frame settles. Logic stays in `tokenstat-core`. This
 //! module is layout and input only.
 //!
@@ -313,7 +313,7 @@ const SUMMARY_MODEL_PREVIEW: usize = 10;
 /// `scan` step. Ten minutes matches the Patron sync floor: denser than the
 /// free/supporter intervals, short enough that a coding session still refreshes
 /// on the next open.
-const AUTO_SCAN_MAX_AGE: Duration = Duration::from_secs(10 * 60);
+const AUTO_SCAN_MAX_AGE: Duration = tokenstat_core::AUTO_SCAN_INTERVAL;
 
 /// Enter alternate screen, run until quit, then restore the terminal.
 ///
@@ -358,6 +358,8 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
             app.status = "Archive empty. Continue setup, or Esc to browse.".into();
         }
         let mut last_minute = epoch_minutes();
+        let mut scan_check = std::time::Instant::now();
+        let mut scan_job: Option<std::sync::mpsc::Receiver<Result<Option<String>, String>>> = None;
         loop {
             // Idle is the common case, and repainting the whole frame on a
             // timer burns CPU for no visible change. Draw only when a key
@@ -387,6 +389,48 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
                 start_sync(&mut app, Some(host.as_str()));
             }
             poll_sync_result(&mut app);
+            let scan_reply = scan_job.as_ref().and_then(|job| match job.try_recv() {
+                Ok(reply) => Some(reply),
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    Some(Err("scan worker stopped; retrying next minute".into()))
+                }
+            });
+            if let Some(reply) = scan_reply {
+                scan_job = None;
+                match reply {
+                    Ok(stamp) if stamp != app.last_scan => {
+                        let store = tokenstat_core::Store::open(db_path)?;
+                        app.reload(&store)?;
+                        app.dirty = true;
+                    }
+                    Err(error) => {
+                        app.status = format!("Auto-scan failed: {error}");
+                        app.dirty = true;
+                    }
+                    _ => {}
+                }
+            }
+            if scan_job.is_none() && scan_check.elapsed() >= Duration::from_secs(60) {
+                scan_check = std::time::Instant::now();
+                let (send, receive) = std::sync::mpsc::channel();
+                let path = db_path.to_path_buf();
+                let zone = tz.clone();
+                scan_job = Some(receive);
+                std::thread::spawn(move || {
+                    let result = (|| {
+                        let mut store = tokenstat_core::Store::open(&path)?;
+                        tokenstat_core::scan_if_stale(
+                            &mut store,
+                            &zone,
+                            tokenstat_core::AUTO_SCAN_INTERVAL,
+                        )?;
+                        store.meta("last_scan_ms")
+                    })()
+                    .map_err(|e: tokenstat_core::CoreError| e.to_string());
+                    let _ = send.send(result);
+                });
+            }
             if app.should_quit || STOP_SIGNAL.load(std::sync::atomic::Ordering::Relaxed) != 0 {
                 break;
             }

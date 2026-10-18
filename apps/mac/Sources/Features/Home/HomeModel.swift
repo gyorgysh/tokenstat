@@ -79,7 +79,7 @@ final class HomeModel {
     private(set) var needsAccountSignIn = false
 
     /// What each vendor says is left of its plan.
-    var planLimits: [ProviderLimits] = []
+    var planLimits: [ProviderLimits] { PlanLimitsStore.shared.visible }
     var isLoadingLimits = false
     private var planUsageError: String?
     private var planLimitsError: String?
@@ -307,7 +307,7 @@ final class HomeModel {
         softInvalidateForRefresh()
         await load(quiet: true)
         if let pinned, let fresh = cell(on: pinned) { select(day: fresh) }
-        await loadPlanLimits()
+        await loadPlanLimits(force: false)
     }
 
     /// Clear per-day caches but keep the Inspector's current content on
@@ -562,12 +562,14 @@ final class HomeModel {
     /// publish before a slower provider reply, without delaying the calendar.
     func loadPlanLimits(force: Bool = true) async {
         let ecosystemLease = EcosystemPublisher.lease
+        let owner = WorkSessionContext.shared.generation
         if !force, let last = lastLimitsLoadedAt, Date().timeIntervalSince(last) < 60 { return }
         guard !layout.hidden.contains(.limits), !Task.isCancelled, !isLoadingLimits else { return }
         limitsGeneration &+= 1
         let generation = limitsGeneration
         func current() -> Bool {
-            generation == limitsGeneration && !layout.hidden.contains(.limits) && !Task.isCancelled
+            generation == limitsGeneration && owner == WorkSessionContext.shared.generation
+                && !layout.hidden.contains(.limits) && !Task.isCancelled
         }
         isLoadingLimits = true
         defer { if generation == limitsGeneration { isLoadingLimits = false } }
@@ -575,16 +577,14 @@ final class HomeModel {
         // have no archive and must not initiate that query for a hidden card.
         async let usage: Void = loadPlanUsage(generation: generation)
         do {
-            let settings = try await Bridge.limitsSync()
+            try await PlanLimitsStore.shared.refresh(force: force)
             guard current() else { return }
-            let all = try await Bridge.usageLimits()
-            guard current() else { return }
-            let skip = Set(settings.skip)
-            planLimits = all.filter { !skip.contains($0.source) }
             EcosystemPublisher.publish(limits: planLimits, lease: ecosystemLease)
             hasLoadedPlanLimits = true
             lastLimitsLoadedAt = Date()
             planLimitsError = nil
+        } catch is CancellationError {
+            // A sharing edit or account switch retired this shared read.
         } catch {
             guard current() else { return }
             planLimitsError = error.localizedDescription

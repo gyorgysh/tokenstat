@@ -117,6 +117,94 @@ impl ScanReport {
 
 /// Read every discoverable source into the archive.
 pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, CoreError> {
+    scan_with_reset(store, tz, false)
+}
+
+/// Reset and ingest under the same lock as automatic scans.
+pub fn scan_with_reset(
+    store: &mut Store,
+    tz: &jiff::tz::TimeZone,
+    reset: bool,
+) -> Result<ScanReport, CoreError> {
+    let lock = scan_lock(store)?;
+    if let Some((file, path)) = &lock {
+        file.lock().map_err(|source| CoreError::Io {
+            path: path.clone(),
+            source,
+        })?;
+    }
+    if reset {
+        store.clear_events()?;
+        store.clear_watermarks()?;
+    }
+    scan_unlocked(store, tz)
+}
+
+/// Local archive freshness is independent of account uploads and vendor HTTP.
+pub const AUTO_SCAN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Scheduled callers share a persistent OS lock with manual scans. A busy
+/// scanner is left alone; after acquiring, re-read its completion stamp.
+pub fn scan_if_stale(
+    store: &mut Store,
+    tz: &jiff::tz::TimeZone,
+    max_age: std::time::Duration,
+) -> Result<Option<ScanReport>, CoreError> {
+    scan_if_stale_with(store, max_age, |store| scan_unlocked(store, tz))
+}
+
+fn scan_if_stale_with<T>(
+    store: &mut Store,
+    max_age: std::time::Duration,
+    run: impl FnOnce(&mut Store) -> Result<T, CoreError>,
+) -> Result<Option<T>, CoreError> {
+    let lock = scan_lock(store)?;
+    if let Some((file, path)) = &lock {
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::fs::TryLockError::Error(source)) => {
+                return Err(CoreError::Io {
+                    path: path.clone(),
+                    source,
+                });
+            }
+        }
+    }
+    let now = now_ms();
+    let last = store
+        .meta("last_scan_ms")?
+        .and_then(|raw| raw.parse::<i64>().ok());
+    if last.is_some_and(|last| {
+        last > 0
+            && last <= now
+            && now.saturating_sub(last) < i64::try_from(max_age.as_millis()).unwrap_or(i64::MAX)
+    }) {
+        return Ok(None);
+    }
+    run(store).map(Some)
+}
+
+fn scan_lock(store: &Store) -> Result<Option<(std::fs::File, PathBuf)>, CoreError> {
+    let Some(db) = store.archive_path() else {
+        return Ok(None);
+    };
+    let path = db.with_extension("scan.lock");
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|source| CoreError::Io {
+            path: path.clone(),
+            source,
+        })?;
+    // Never remove this file: another process may already be waiting on its inode.
+    Ok(Some((file, path)))
+}
+
+fn scan_unlocked(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, CoreError> {
     // Parsing logs is CPU, memory, and storage intensive at the same time.
     // Rayon defaults to every logical CPU, which makes a two- or four-core
     // Intel laptop feel frozen while a background scan competes with SwiftUI,
@@ -1056,6 +1144,73 @@ fn vendor_daily_tokens(store: &Store) -> Result<Vec<DailyModelTokens>, CoreError
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_scans_share_completion_and_release_the_lock_after_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("archive.db");
+        let mut first = Store::open(&db).unwrap();
+        let mut second = Store::open(&db).unwrap();
+        let held = scan_lock(&first).unwrap().unwrap();
+        held.0.lock().unwrap();
+        assert!(
+            scan_if_stale_with(
+                &mut second,
+                AUTO_SCAN_INTERVAL,
+                |_| -> Result<(), CoreError> { panic!("busy scan") }
+            )
+            .unwrap()
+            .is_none()
+        );
+        drop(held);
+        let fail = scan_if_stale_with(
+            &mut first,
+            AUTO_SCAN_INTERVAL,
+            |_| -> Result<(), CoreError> { Err(CoreError::NoDataDir) },
+        );
+        assert!(fail.is_err());
+        assert!(
+            scan_if_stale_with(&mut second, AUTO_SCAN_INTERVAL, |s| {
+                s.set_meta("last_scan_ms", &now_ms().to_string())?;
+                Ok(())
+            })
+            .unwrap()
+            .is_some()
+        );
+        assert!(
+            scan_if_stale_with(
+                &mut first,
+                AUTO_SCAN_INTERVAL,
+                |_| -> Result<(), CoreError> {
+                    panic!("completion must be re-read across handles")
+                }
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(db.with_extension("scan.lock").exists());
+    }
+
+    #[test]
+    fn missing_invalid_old_and_future_scan_stamps_trigger_catch_up() {
+        let mut store = Store::open_in_memory().unwrap();
+        for value in [
+            None,
+            Some("invalid".into()),
+            Some("0".into()),
+            Some((now_ms() - 600_000).to_string()),
+            Some((now_ms() + 600_000).to_string()),
+        ] {
+            if let Some(value) = value {
+                store.set_meta("last_scan_ms", &value).unwrap();
+            }
+            assert!(
+                scan_if_stale_with(&mut store, AUTO_SCAN_INTERVAL, |_| Ok(()))
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
 
     #[test]
     fn scan_workers_keep_a_quarter_of_each_machine_available() {

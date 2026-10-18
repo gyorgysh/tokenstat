@@ -15,8 +15,9 @@
 #[cfg(feature = "local-host")]
 use std::collections::HashMap;
 #[cfg(feature = "local-host")]
+use std::sync::Mutex;
+#[cfg(feature = "local-host")]
 use std::sync::OnceLock;
-use std::sync::{Mutex, PoisonError};
 #[cfg(feature = "local-host")]
 use std::time::Duration;
 use std::time::Instant;
@@ -1142,6 +1143,11 @@ fn info_dto(b: &Session) -> InfoDto {
         core_version: tokenstat_core::VERSION.to_string(),
         db_path: b.engine().ok().map(|e| e.db_path().display().to_string()),
         has_archive: b.has_archive(),
+        last_scan_ms: b
+            .engine()
+            .ok()
+            .and_then(|e| e.store().meta("last_scan_ms").ok().flatten())
+            .and_then(|v| v.parse().ok()),
         timezone: b.timezone().iana_name().unwrap_or("unknown").to_string(),
         price_book_effective_from: b.prices.effective_from.clone(),
         has_prices: !b.prices.is_empty(),
@@ -3951,15 +3957,21 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
             // percentage we worked out ourselves would be a guess wearing a
             // number's clothes.
             //
-            // Codex reads off the disk and is instant. The other providers make a
-            // request, so this is a refresh rather than something to poll.
+            // Codex reads off disk. Other providers make requests, so automatic
+            // readers share a minute cache and manual refresh bypasses its TTL.
             //
             // Sessionless, and that is the important part. Five vendor requests
             // with timeouts measured in tens of seconds used to run while holding
             // the session, so one unreachable vendor froze reports, the workspace
             // list and every other screen for as long as it took to give up. None
             // of this reads the archive.
-            "usage.limits" => Ok(usage_limits()),
+            "usage.limits" => {
+                #[derive(Default, Deserialize)]
+                struct Params {
+                    force: Option<bool>,
+                }
+                parse::<Params>(params).map(|p| usage_limits(p.force.unwrap_or(true)))
+            }
 
             // Call a device on this account something, from any front end. The
             // label lives on the account row rather than on the machine, which is
@@ -4471,7 +4483,7 @@ fn client_proxy_unlisten(params: &str) -> Result<Value, String> {
 /// stay unix-only.
 #[cfg(feature = "local-host")]
 pub(crate) fn refresh_plan_limits() {
-    let _ = usage_limits();
+    let _ = usage_limits(false);
 }
 
 /// Ask every vendor what is left of its plan.
@@ -4484,10 +4496,19 @@ pub(crate) fn refresh_plan_limits() {
 /// against. The session used to provide the same guarantee by accident, and it
 /// charged every other screen for it. Two screens asking at once should share
 /// the wait, not fan out ten requests.
-fn usage_limits() -> Value {
-    static REFRESH: Mutex<()> = Mutex::new(());
-    let _one_at_a_time = REFRESH.lock().unwrap_or_else(PoisonError::into_inner);
+fn usage_limits(force: bool) -> Value {
+    static REFRESH: crate::limits_refresh::LimitsRefresh =
+        crate::limits_refresh::LimitsRefresh::new();
+    let key = format!(
+        "{}:{:?}:{}",
+        crate::vault::AUTH_EPOCH.load(std::sync::atomic::Ordering::SeqCst),
+        tokenstat_sync::config::limits_skip(),
+        tokenstat_sync::config::limits_sync_enabled()
+    );
+    REFRESH.run(key, force, fetch_usage_limits)
+}
 
+fn fetch_usage_limits() -> Value {
     // A tail expression, not a `return`: with `local-host` off this block is
     // the whole function body, and clippy's client-build pass rejects the
     // early return that reads naturally when both halves are present.

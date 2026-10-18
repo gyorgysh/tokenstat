@@ -36,6 +36,7 @@ private enum AccountSettingsPane: String, CaseIterable, Hashable {
 struct AccountView: View {
     @Bindable var model: AccountModel
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     /// Whether the third-party notices sheet is open.
     @State private var confirmSignOut = false
     @State private var showLicenses = false
@@ -537,7 +538,13 @@ struct AccountView: View {
                 }
             }
         }
-        .task { await model.loadLimitsIfNeeded() }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await model.loadLimitsIfNeeded()
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
+        }
     }
 
     private func planLimitRow(_ provider: ProviderLimits) -> some View {

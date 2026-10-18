@@ -116,12 +116,16 @@ struct HomeView: View {
         .onChange(of: layout.hidden.contains(.limits)) { _, hidden in
             if hidden { model.hidePlanLimits() }
         }
-        .task(id: layout.hidden.contains(.limits)) {
+        .task(id: "\(layout.hidden.contains(.limits))-\(scenePhase)") {
             guard !layout.hidden.contains(.limits) else { return }
+            guard scenePhase == .active else { return }
             await Self.waitForHost()
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            await model.loadPlanLimits(force: false)
+            while !Task.isCancelled {
+                await model.loadPlanLimits(force: false)
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
         }
         // App came back to the front: quiet re-read if the last load is old.
         .onChange(of: scenePhase) { _, phase in

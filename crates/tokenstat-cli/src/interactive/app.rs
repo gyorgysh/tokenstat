@@ -152,11 +152,7 @@ impl App {
     pub(super) fn run_scan(&mut self, reset: bool) -> Result<()> {
         self.status = "Scanning…".into();
         let mut store = Store::open(&self.db_path)?;
-        if reset {
-            store.clear_events()?;
-            store.clear_watermarks()?;
-        }
-        let report = tokenstat_core::scan(&mut store, &self.tz)?;
+        let report = tokenstat_core::scan_with_reset(&mut store, &self.tz, reset)?;
         self.reload(&store)?;
         self.status = format!(
             "Scanned {} of {} files · {} new · {}ms",

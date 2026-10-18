@@ -19,6 +19,17 @@ const SYNC_CHECK_INTERVAL: Duration = Duration::from_secs(15);
 /// file does not establish that the timer ran. The shared sync lock and cursor
 /// serialize uploads across the app, host daemon, and CLI.
 pub fn start(session: Arc<Mutex<Session>>) {
+    let scan_session = Arc::clone(&session);
+    // Discover newly created sessions even when no account is linked. This
+    // thread never waits for vendor HTTP or holds the interactive Session.
+    std::thread::spawn(move || {
+        loop {
+            if tokenstat_sync::scheduled_network_allowed() {
+                scan_archive(&scan_session);
+            }
+            std::thread::sleep(UNLINKED_CHECK_INTERVAL);
+        }
+    });
     let maintenance_session = Arc::clone(&session);
     // Slow pricing/vendor requests must not postpone an upload deadline.
     std::thread::spawn(move || {
@@ -44,57 +55,20 @@ pub fn start(session: Arc<Mutex<Session>>) {
     });
 }
 
-/// Put this machine's plan-limit readings on the account, if the user asked
-/// for that.
-///
-/// It used to ride `usage.limits`, which only runs when a front end asks. So
-/// the phone's copy was as old as the last time somebody opened Home or
-/// Insights **on the Mac**, and a Mac that was working all day without its
-/// window in front never posted at all. The whole point of the setting is that
-/// the phone can see the numbers while the Mac is asleep, which cannot depend
-/// on somebody having looked at the Mac first.
-///
-/// Off unless the setting is on. This runs the same vendor pass `usage.limits`
-/// runs, and that pass posts, so a scheduled refresh and a person opening
-/// Insights take the identical path and cannot disagree about what was sent.
-/// Quiet on failure: a machine that is offline keeps whatever the account
-/// already has, and the next pass retries.
-///
-/// The remembered account-plan interval paces vendor reads. Keep a five-minute
-/// floor and an hourly fallback until the server has established the cadence.
-/// Slow vendor calls stay on maintenance's thread, away from upload deadlines.
+/// Local quota freshness does not depend on Tokenstat sign-in, the sharing
+/// switch, or the account's aggregate-upload cadence. The refresh itself
+/// still posts only when sharing is enabled.
 fn post_limits() {
     if !tokenstat_sync::scheduled_network_allowed() {
         return;
     }
-    if !tokenstat_sync::config::limits_sync_enabled() {
-        return;
-    }
-    // Posting needs the login credential. Without one the vendor reads have
-    // nowhere to go, and the switch being on is a statement of intent for when
-    // the machine is signed in again, not a licence to keep polling.
-    let Ok(info) = tokenstat_sync::scheduling_info(None) else {
-        return;
-    };
-    if !info.logged_in {
-        return;
-    }
-    if !limits_pass_is_due(limits_refresh_interval(info.min_interval)) {
+    if !limits_pass_is_due(Duration::from_secs(300)) {
         return;
     }
     crate::dispatch::refresh_plan_limits();
 }
 
 const PRICING_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
-
-fn limits_refresh_interval(plan_interval: Option<u64>) -> Duration {
-    Duration::from_secs(
-        plan_interval
-            .filter(|seconds| *seconds > 0)
-            .unwrap_or(3600)
-            .max(300),
-    )
-}
 
 fn limits_pass_is_due(interval: Duration) -> bool {
     use std::sync::OnceLock;
@@ -168,6 +142,8 @@ fn run_once(session: &Mutex<Session>) {
     if !info.logged_in || !sync_due(info.next_allowed_at.as_deref(), jiff::Timestamp::now()) {
         return;
     }
+    // A five-minute upload must not repeatedly upload an hour-old archive.
+    scan_archive(session);
     // Snapshot path and timezone under the lock, then open a separate Store for
     // the HTTP phase. Holding Session across the upload freezes Home/Insights.
     let snapshot = {
@@ -220,6 +196,29 @@ fn run_once(session: &Mutex<Session>) {
     }
 }
 
+fn scan_archive(session: &Mutex<Session>) {
+    let snapshot = session.lock().ok().and_then(|guard| {
+        guard
+            .engine()
+            .ok()
+            .map(|engine| (engine.db_path().to_path_buf(), engine.timezone().clone()))
+    });
+    let Some((db_path, tz)) = snapshot else {
+        return;
+    };
+    let result = tokenstat_core::Store::open(&db_path).and_then(|mut store| {
+        tokenstat_core::scan_if_stale(&mut store, &tz, tokenstat_core::AUTO_SCAN_INTERVAL)
+    });
+    match result {
+        Ok(Some(report)) => eprintln!(
+            "scan: automatic pass files={} new={} elapsed_ms={}",
+            report.files_read, report.events_new, report.elapsed_ms
+        ),
+        Ok(None) => {}
+        Err(error) => eprintln!("scan: automatic pass failed, retrying next minute: {error}"),
+    }
+}
+
 fn sync_due(next: Option<&str>, now: jiff::Timestamp) -> bool {
     next.and_then(|s| s.parse::<jiff::Timestamp>().ok())
         .is_none_or(|next| now >= next)
@@ -228,19 +227,6 @@ fn sync_due(next: Option<&str>, now: jiff::Timestamp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn limits_follow_account_plan_without_rapid_polling() {
-        assert_eq!(limits_refresh_interval(Some(300)), Duration::from_secs(300));
-        assert_eq!(limits_refresh_interval(Some(900)), Duration::from_secs(900));
-        assert_eq!(
-            limits_refresh_interval(Some(86400)),
-            Duration::from_secs(86400)
-        );
-        assert_eq!(limits_refresh_interval(Some(60)), Duration::from_secs(300));
-        assert_eq!(limits_refresh_interval(Some(0)), Duration::from_secs(3600));
-        assert_eq!(limits_refresh_interval(None), Duration::from_secs(3600));
-    }
 
     #[test]
     fn shared_deadline_controls_sync_instead_of_cli_installation() {

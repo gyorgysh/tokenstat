@@ -261,6 +261,7 @@ pub struct InfoDto {
     /// The one flag a front end needs to decide whether to offer local reports
     /// at all, instead of offering them and rendering the refusal.
     pub has_archive: bool,
+    pub last_scan_ms: Option<i64>,
     pub timezone: String,
     /// Date the loaded price book took effect, empty when no book is present.
     pub price_book_effective_from: String,

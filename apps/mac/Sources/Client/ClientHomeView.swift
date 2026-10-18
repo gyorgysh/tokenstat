@@ -20,6 +20,7 @@ struct ClientHomeView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.openClientAccount) private var openAccount
+    @Environment(\.scenePhase) private var scenePhase
     /// The session's, from `ClientSessionModels`, so a layout swap keeps it.
     @Environment(HomeModel.self) private var model
     @State private var layout = HomeLayout.shared
@@ -92,9 +93,13 @@ struct ClientHomeView: View {
         .onChange(of: layout.hidden.contains(.limits)) { _, hidden in
             if hidden { model.hidePlanLimits() }
         }
-        .task(id: layout.hidden.contains(.limits)) {
+        .task(id: "\(layout.hidden.contains(.limits))-\(scenePhase)") {
             guard !layout.hidden.contains(.limits) else { return }
-            await model.loadPlanLimits()
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await model.loadPlanLimits(force: false)
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
         }
         // The connection came back. Fetch now rather than leaving somebody
         // looking at an offline card on a phone that is plainly online again,

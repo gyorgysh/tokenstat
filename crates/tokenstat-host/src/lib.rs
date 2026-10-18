@@ -101,6 +101,7 @@ pub(crate) mod identity_storage;
 pub(crate) mod keep_awake;
 #[cfg(feature = "local-host")]
 pub(crate) mod launcher;
+mod limits_refresh;
 #[cfg(feature = "local-host")]
 mod live_work;
 #[cfg(feature = "local-host")]
