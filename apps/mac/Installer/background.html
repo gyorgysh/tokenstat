@@ -1,0 +1,53 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
+  The disk image window's background, 660 x 400 points. This file is the
+  source. background.png and background@2x.png are rendered from it by
+  scripts/render-dmg-background.sh and committed, so a release needs no
+  browser.
+
+  Finder draws the two icons on top, centred at (180, 205) and (480, 205)
+  with 128 point icons, as set in dmg-settings.py. The arrow sits on that
+  centre line. Move one and move the other.
+
+  The ground is light on purpose. Finder picks the icon label colour from the
+  background, not from the system appearance, so dark labels stay readable
+  on this paper in both light and dark mode.
+
+  Type is the app's own: Manrope and JetBrains Mono from Resources/Fonts.
+  Colours follow Theme.swift and the website's share card: paper #fbfbfd,
+  the accent #6a3dff with a magenta wash, "stat" in #6231e8.
+-->
+<html><head><meta charset="utf-8"><style>
+@font-face { font-family: Manrope; src: url(../Resources/Fonts/Manrope-Variable.ttf) format("truetype"); font-weight: 200 800 }
+@font-face { font-family: "JetBrains Mono"; src: url(../Resources/Fonts/JetBrainsMono-Variable.ttf) format("truetype"); font-weight: 100 800 }
+html, body { margin: 0; width: 660px; height: 400px; overflow: hidden }
+body { position: relative; background: #fbfbfd; font-family: Manrope; -webkit-font-smoothing: antialiased }
+.wash { position: absolute; inset: 0 }
+.violet { background: radial-gradient(75% 90% at 8% -10%, rgba(106, 61, 255, .13), rgba(106, 61, 255, 0) 60%) }
+.magenta { background: radial-gradient(80% 100% at 105% 110%, rgba(192, 38, 211, .11), rgba(192, 38, 211, 0) 60%) }
+.mark { position: absolute; top: 44px; width: 100%; text-align: center; font-weight: 800; font-size: 26px; letter-spacing: -.027em; color: #14121c }
+.mark span { color: #6231e8 }
+.tagline { position: absolute; top: 82px; width: 100%; text-align: center; font-weight: 500; font-size: 13px; color: #66627a }
+svg { position: absolute; left: 0; top: 0 }
+.hint { position: absolute; top: 322px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; background: #f0ecff; color: #4b26c4; font-weight: 600; font-size: 12px; white-space: nowrap }
+.domain { position: absolute; bottom: 22px; width: 100%; text-align: center; font-family: "JetBrains Mono"; font-weight: 500; font-size: 10.5px; letter-spacing: .32em; color: #6231e8 }
+</style></head><body>
+<div class="wash violet"></div>
+<div class="wash magenta"></div>
+<div class="mark">token<span>stat</span></div>
+<div class="tagline">Token usage stats for AI coding agents</div>
+<svg width="660" height="400" viewBox="0 0 660 400">
+  <defs>
+    <linearGradient id="trail" x1="290" x2="368" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6a3dff" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#6a3dff"/>
+    </linearGradient>
+  </defs>
+  <path d="M290 205 H366" stroke="url(#trail)" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M359 197 L367.5 205 L359 213" fill="none" stroke="#6a3dff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+<div class="hint">Drag to Applications</div>
+<div class="domain">TOKENSTAT.AI</div>
+</body></html>

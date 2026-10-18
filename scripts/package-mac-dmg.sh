@@ -10,6 +10,11 @@
 # download went, so the app ends up running from Downloads and every update
 # leaves another copy behind.
 #
+# The window carries the background in apps/mac/Installer, with the icons fixed
+# where its arrow points. dmgbuild writes that layout straight into the image's
+# .DS_Store, so it works on a headless runner where scripting Finder does not.
+# It is installed into target/ from the pinned, hashed requirements on first use.
+#
 # Signing and notarization are the caller's, because the identity lives on the
 # release environment. Sign the app before calling this, and sign, notarize and
 # staple the image afterwards.
@@ -20,9 +25,25 @@ APP="${1:?usage: package-mac-dmg.sh <app-bundle> <output.dmg> [volume-name]}"
 DMG="${2:?usage: package-mac-dmg.sh <app-bundle> <output.dmg> [volume-name]}"
 VOLUME="${3:-tokenstat}"
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INSTALLER="$ROOT/apps/mac/Installer"
+
 if [ ! -d "$APP" ]; then
     echo "no app bundle at $APP" >&2
     exit 1
+fi
+
+VOLUME_ICON="$APP/Contents/Resources/AppIcon.icns"
+if [ ! -f "$VOLUME_ICON" ]; then
+    echo "no AppIcon.icns in $APP" >&2
+    exit 1
+fi
+
+VENV="$ROOT/target/dmgbuild-venv"
+if [ ! -x "$VENV/bin/dmgbuild" ]; then
+    python3 -m venv "$VENV"
+    "$VENV/bin/pip" install --quiet --disable-pip-version-check \
+        --require-hashes --only-binary :all: -r "$INSTALLER/requirements.txt"
 fi
 
 STAGE="$(mktemp -d)"
@@ -31,14 +52,26 @@ trap 'rm -rf "$STAGE"' EXIT
 # ditto rather than cp: a bundle carries symlinks and extended attributes, and
 # a signature does not survive cp flattening them.
 ditto "$APP" "$STAGE/$(basename "$APP")"
-ln -s /Applications "$STAGE/Applications"
+
+# One TIFF holding both resolutions, so Finder picks the sharp one on Retina.
+tiffutil -cathidpicheck "$INSTALLER/background.png" "$INSTALLER/background@2x.png" \
+    -out "$STAGE/background.tiff" > /dev/null 2>&1
 
 rm -f "$DMG"
-hdiutil create \
-    -volname "$VOLUME" \
-    -srcfolder "$STAGE" \
-    -ov \
-    -format UDZO \
-    "$DMG" > /dev/null
+# hdiutil warns that each of its verbs is deprecated on every call. Drop those
+# lines and keep anything else, with dmgbuild's own exit status.
+set +e
+"$VENV/bin/dmgbuild" \
+    -s "$INSTALLER/dmg-settings.py" \
+    -D app="$STAGE/$(basename "$APP")" \
+    -D background="$STAGE/background.tiff" \
+    -D volume_icon="$VOLUME_ICON" \
+    "$VOLUME" "$DMG" 2>&1 | grep -v "is deprecated"
+status="${PIPESTATUS[0]}"
+set -e
+if [ "$status" -ne 0 ] || [ ! -f "$DMG" ]; then
+    echo "dmgbuild failed to write $DMG" >&2
+    exit 1
+fi
 
 echo "Wrote $DMG"

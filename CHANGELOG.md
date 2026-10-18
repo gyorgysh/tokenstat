@@ -9,6 +9,12 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.7.3]
+
+### Improved
+
+- The Mac download opens to a designed install window: the app and the Applications folder side by side with an arrow between them, the disk carries the tokenstat icon, and the art stays sharp on Retina displays and readable in light and dark mode.
+
 ## [1.7.2] - 2026-10-18
 
 ### Improved
