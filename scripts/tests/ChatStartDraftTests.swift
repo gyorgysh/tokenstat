@@ -8,9 +8,12 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
 
 @main struct ChatStartDraftTests {
     @MainActor static func main() {
+        let suite = "ChatStartDraftTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
         let alice = WorkReference.Scope.local(installationID: "alice")
         let bob = WorkReference.Scope.local(installationID: "bob")
-        let draft = ChatStartDraft()
+        let draft = ChatStartDraft(defaults: defaults)
         let fresh = ChatStartDraft.AgentChoice(backend: "codex", model: nil, effort: nil)
         precondition(fresh.mode == "execute" && fresh.autonomy == "bypass",
                      "An untouched landing composer starts in Execute/Don't ask before any catalog is loaded")
@@ -90,7 +93,7 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         draft.repositoryID = "removed"
         draft.text = "Still here"; draft.agent = codex
         precondition(draft.begin(available: ["repo"]) == nil && draft.text == "Still here")
-        let firstCopy = ChatStartDraft()
+        let firstCopy = ChatStartDraft(defaults: defaults)
         firstCopy.activate(scope: alice, session: 4, repositoryID: "fresh")
         let firstCopyOwner = firstCopy.attachmentReference!
         precondition(firstCopy.beginImport(firstCopyOwner))
@@ -98,10 +101,10 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         firstCopy.finishImport(firstCopyOwner, attachment: picture)
         firstCopy.activate(scope: alice, session: 4)
         precondition(firstCopy.attachments == [picture], "Closing a never-saved repository during its first copy cannot orphan the original")
-        let cap = ChatStartDraft(); cap.activate(scope: alice, session: 4, repositoryID: "cap"); cap.agent = codex
+        let cap = ChatStartDraft(defaults: defaults); cap.activate(scope: alice, session: 4, repositoryID: "cap"); cap.agent = codex
         cap.attachments = (0..<20).map { .init(id: "file-\($0)", name: "file", mediaType: nil, size: 1) }
         precondition(!cap.beginImport(cap.attachmentReference!), "The twenty-file limit applies to staged landing files")
-        let preparing = ChatStartDraft()
+        let preparing = ChatStartDraft(defaults: defaults)
         preparing.activate(scope: alice, session: 4, repositoryID: "fresh")
         preparing.text = "Send once"; preparing.agent = codex; preparing.attachments = [picture]
         let sending = preparing.begin(available: ["fresh"])!
@@ -128,6 +131,36 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
                      "An old preload completion cannot dismiss a newer presentation")
         preparing.finishPresentation(later)
         precondition(!preparing.isSubmitting && preparing.preparationStartedAt == nil)
+        repositoryDefaults(defaults)
         print("New chat landing: local attachment ownership, repository/account restoration, one-time unbound carry, stale picker/drop guards, immutable setup, failure retention and explicit empty Open chat passed")
+    }
+
+    @MainActor private static func repositoryDefaults(_ defaults: UserDefaults) {
+        let account = WorkReference.Scope.account(origin: "https://example.com/a", handle: "b.c")!
+        let other = WorkReference.Scope.account(origin: "https://example.com/a.b", handle: "c")!
+        let seed = ChatStartDraft(defaults: defaults)
+        seed.activate(scope: account, session: 1, repositoryID: "remote:host:repo")
+        let reopened = ChatStartDraft(defaults: defaults)
+        reopened.activate(scope: account, session: 2)
+        precondition(reopened.rememberedRepository == "remote:host:repo",
+                     "An explicitly opened repository is remembered across launches")
+        reopened.chooseDefaultRepository(available: ["local"], isLoading: false)
+        precondition(reopened.repositoryID == nil && reopened.rememberedRepository == "remote:host:repo",
+                     "Early local folders cannot replace a remembered remote repository")
+        reopened.chooseDefaultRepository(available: ["local", "remote:host:repo"], isLoading: false)
+        precondition(reopened.repositoryID == "remote:host:repo")
+        reopened.repositoryID = "local"
+        reopened.chooseDefaultRepository(available: ["remote:host:repo"], isLoading: false)
+        precondition(reopened.repositoryID == "local", "Discovery cannot replace an explicit choice")
+        let separate = ChatStartDraft(defaults: defaults)
+        separate.activate(scope: other, session: 3)
+        precondition(separate.rememberedRepository == nil,
+                     "Dots in an origin or account ID cannot alias another account's preference")
+        separate.chooseDefaultRepository(available: ["only"], isLoading: true)
+        precondition(separate.repositoryID == nil, "A connecting host's old folder list is not selected")
+        separate.chooseDefaultRepository(available: ["only"], isLoading: false)
+        precondition(separate.repositoryID == "only", "A completed single-folder list is selected")
+        separate.activate(scope: account, session: 4)
+        precondition(separate.rememberedRepository == "local", "Accounts keep independent choices")
     }
 }

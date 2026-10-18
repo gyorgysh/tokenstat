@@ -150,6 +150,8 @@ ALLOWED = [
     # including its existing mark. This wrapper adds ownership, not chrome.
     ("Client/ClientChatLayoutHandoff.swift", "navigation.pushOwned(ClientOwnedPush(id: presentationID,"),
     ("Client/ClientLoginView.swift", "Button(title) {"),
+    # The tappable logo is already the complete glyph and label.
+    ("Client/ClientLoginView.swift", "developerUnlock.tap()"),
     ("Client/ClientOnboarding.swift", 'Button("Skip")'),
     # Billing interval is a two-option segmented pill. The text is the whole
     # label, as with the shared segmented control allowlisted above.

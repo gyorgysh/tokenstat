@@ -2242,7 +2242,7 @@ struct RootView: View {
         ChatStartPage(draft: chatStart, repositories: workspaces.folders,
                       isFullScreen: isFullScreen,
                       titlebarDragHeight: isFullScreen ? 0 : max(titlebarInset, ShellMetrics.titleBand),
-                      repositoriesLoading: workspaces.directoryPresentation == .loading,
+                      repositoriesLoading: workspaces.isLoading || workspaces.directoryPresentation == .loading,
                       onAdd: {
                           if let owner = chatStart.owner {
                               chatStartAdd = (owner, Set(workspaces.folders.map(\.id)))
@@ -2250,12 +2250,14 @@ struct RootView: View {
                           workspaces.requestAdd()
                       }, onSend: { Task { await sendNewChat() } },
                       onAddFolders: { urls in
-                          if let owner = chatStart.owner {
-                              chatStartAdd = (owner, Set(workspaces.folders.map(\.id)))
-                          }
+                          guard let owner = chatStart.owner else { return }
+                          let selection = chatStart.repositoryID
                           Task {
-                              await workspaces.add(urls)
-                              finishChatStartAdd()
+                              let added = await workspaces.add(urls)
+                              guard route.isGlobal(.newChat), chatStart.owner == owner,
+                                    chatStart.repositoryID == selection, !chatStart.isSubmitting,
+                                    let added, workspaces.folders.contains(where: { $0.id == added }) else { return }
+                              chatStart.repositoryID = added
                           }
                       })
             // The native backdrop and optical layers cover the titlebar band

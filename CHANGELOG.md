@@ -9,12 +9,13 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.7.2]
+## [1.7.2] - 2026-10-18
 
 ### Improved
 
 - On Mac, iPhone and iPad, starting a chat draws the interactive glass field and its pointer trails into the tokenstat logo. Its three glass bars refract the light while the first message prepares in the background. Quick sends open with their content ready; longer sends continue in the conversation. Reduced motion and transparency settings are respected.
 - Tapping or clicking the new-chat glass sends waves through its folds, gently bending the light as well as lighting the ripple.
+- New chats on Apple devices explain how to add a repository, choose an agent and send, with starter prompts and a remembered repository per account. On Mac, drop a folder onto the first-run screen to add it. Layered mist, light and dust give the glass more depth.
 - Mac terminal and chat detail cards refresh while open, including usage, native session IDs and repository changes. Context shows reported token counts and capacity; an unreported count stays unknown.
 - Home, Account and chat composers share plan-limit readings and refresh while visible. Overlapping refreshes share the vendor request, and background readings update every five minutes even when account sharing is off.
 - On iPhone and iPad, tapping the login logo ten times enables developer mode and offers the existing Demo login on the sign-in page, including production builds. The login screen explains the gesture.
@@ -29,6 +30,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Plan-limit cards changing positions while refreshing. Cached and live readings now use the same provider order, keep existing readings visible, and preserve failure warnings until a refresh succeeds. Claude quota reads use a five-minute automatic cadence and respect rate-limit cooldowns, including after restarting the helper.
 - Late Account settings reads undoing a sharing edit, phone plan-limit cards blinking to placeholders during automatic refresh, and scheduled uploads using a stale archive while another scan is still running.
 - Sharing edits and widget cache refreshes replacing current quota readings and clearing failure status. Newer background readings now reach the shared store, and renewing Claude's login preserves its five-minute quota cache.
+- New-chat repository discovery replacing a remembered remote folder with an early local result, and a completed folder drop changing a newer selection.
 
 ## [1.7.1] - 2026-10-17
 

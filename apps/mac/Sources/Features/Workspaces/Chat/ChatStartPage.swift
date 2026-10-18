@@ -178,6 +178,7 @@ struct ChatStartPage: View {
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: receive)
         .onAppear { active = true; synchronizeComposer(); revealed = true; chooseDefaultRepository() }
         .onChange(of: repositories.map(\.id)) { _, _ in chooseDefaultRepository() }
+        .onChange(of: repositoriesLoading) { _, _ in chooseDefaultRepository() }
         .onChange(of: draft.owner) { _, _ in chooseDefaultRepository() }
         .onDisappear {
             active = false; catalogLease = UUID(); hovering = false
@@ -287,14 +288,10 @@ struct ChatStartPage: View {
     /// Opens on the repository used last, from this launch or an earlier
     /// one, once it is in the list. With exactly one repository there is
     /// nothing to choose, so the page chooses it. Several and none
-    /// remembered still asks. A choice already made is never replaced.
+    /// remembered still asks. An unavailable remembered repository waits for
+    /// discovery or an explicit choice. A choice already made is never replaced.
     private func chooseDefaultRepository() {
-        guard draft.owner != nil, draft.repositoryID == nil, !draft.isSubmitting, !repositories.isEmpty else { return }
-        if let remembered = draft.rememberedRepository, repositories.contains(where: { $0.id == remembered }) {
-            draft.repositoryID = remembered
-        } else if repositories.count == 1, let only = repositories.first {
-            draft.repositoryID = only.id
-        }
+        draft.chooseDefaultRepository(available: repositories.map(\.id), isLoading: repositoriesLoading)
     }
 
     private func synchronizeComposer() {

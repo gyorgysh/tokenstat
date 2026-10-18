@@ -34,6 +34,7 @@ final class ChatStartDraft {
     }
     private var writings: [Key: Writing] = [:]
     private var lastRepository: [WorkReference.Scope: String] = [:]
+    @ObservationIgnored private let defaults: UserDefaults
     private var claimedUnbound: Set<WorkReference.Scope> = []
     private var changingOwner = false
     private var localID = UUID().uuidString
@@ -79,6 +80,8 @@ final class ChatStartDraft {
     }
     var stagingAttachments: Int { attachmentReference.flatMap(WorkReferenceKey.conversation).map { imports[$0] ?? 0 } ?? 0 }
 
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
     func activate(scope: WorkReference.Scope?, session: UInt64, repositoryID requested: String? = nil) {
         let next = scope.map { Owner(scope: $0, session: session) }
         if owner?.scope != next?.scope {
@@ -91,7 +94,10 @@ final class ChatStartDraft {
             changingOwner = false
             retire()
         } else if owner != next { owner = next; retire() }
-        if let requested { repositoryID = requested }
+        if let requested {
+            repositoryID = requested
+            if let scope { remember(requested, for: scope) }
+        }
         if let owner, let parked = writings[Key(scope: owner.scope, repository: repositoryID)], parked.localID == localID {
             for file in parked.attachments where !attachments.contains(where: { $0.id == file.id }) { attachments.append(file) }
             previews = parked.previews.merging(previews) { _, current in current }
@@ -179,7 +185,7 @@ final class ChatStartDraft {
     /// machine.
     private func remember(_ repository: String, for scope: WorkReference.Scope) {
         lastRepository[scope] = repository
-        UserDefaults.standard.set(repository, forKey: Self.storageKey(for: scope))
+        defaults.set(repository, forKey: Self.storageKey(for: scope))
     }
 
     /// The repository this account last started a chat in, from an earlier
@@ -188,11 +194,23 @@ final class ChatStartDraft {
     /// back.
     var rememberedRepository: String? {
         guard let owner else { return nil }
-        return UserDefaults.standard.string(forKey: Self.storageKey(for: owner.scope))
+        return defaults.string(forKey: Self.storageKey(for: owner.scope))
     }
 
     private static func storageKey(for scope: WorkReference.Scope) -> String {
-        "chatStart.lastRepository.\(scope.kind.rawValue).\(scope.origin).\(scope.identity)"
+        "chatStart.lastRepository.v2." + [scope.kind.rawValue, scope.origin, scope.identity]
+            .map(WorkReferenceKey.encode).joined(separator: "|")
+    }
+
+    /// A remembered remote folder may arrive after the local ones. Keep the
+    /// choice open until it appears, or the user explicitly chooses another.
+    func chooseDefaultRepository(available: [String], isLoading: Bool) {
+        guard owner != nil, repositoryID == nil, !isSubmitting, !isLoading else { return }
+        if let remembered = rememberedRepository {
+            if available.contains(remembered) { repositoryID = remembered }
+        } else if available.count == 1 {
+            repositoryID = available[0]
+        }
     }
 
     private func save(scope: WorkReference.Scope, repository: String?) {

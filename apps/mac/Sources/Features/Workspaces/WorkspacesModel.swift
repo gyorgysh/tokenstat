@@ -1637,16 +1637,20 @@ final class WorkspacesModel {
 
     /// Register folders the person has already picked, by the panel or by
     /// dropping them on the app.
-    func add(_ urls: [URL]) async {
+    @discardableResult
+    func add(_ urls: [URL]) async -> String? {
+        var lastAdded: String?
         for url in urls {
             do {
                 let added = try await Bridge.addWorkspace(path: url.path)
                 selectedID = added.id
+                lastAdded = added.id
             } catch {
                 errorMessage = error.localizedDescription
             }
         }
         await load()
+        return lastAdded
     }
     #endif
 
