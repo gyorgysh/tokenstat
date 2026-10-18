@@ -4505,10 +4505,10 @@ fn usage_limits(force: bool) -> Value {
         tokenstat_sync::config::limits_skip(),
         tokenstat_sync::config::limits_sync_enabled()
     );
-    REFRESH.run(key, force, fetch_usage_limits)
+    REFRESH.run(key, force, || fetch_usage_limits(force))
 }
 
-fn fetch_usage_limits() -> Value {
+fn fetch_usage_limits(_force: bool) -> Value {
     // A tail expression, not a `return`: with `local-host` off this block is
     // the whole function body, and clippy's client-build pass rejects the
     // early return that reads naturally when both halves are present.
@@ -4523,7 +4523,7 @@ fn fetch_usage_limits() -> Value {
         let skipped = |id: &str| skip.iter().any(|s| s == id);
         let providers = std::thread::scope(|scope| {
             let claude = (!skipped("claude_code"))
-                .then(|| scope.spawn(tokenstat_sync::claude_limits::fetch));
+                .then(|| scope.spawn(|| tokenstat_sync::claude_limits::fetch_with_force(_force)));
             let cursor = (!skipped("cursor")).then(|| scope.spawn(tokenstat_sync::cursor::limits));
             let grok = (!skipped("grok")).then(|| scope.spawn(tokenstat_sync::grok_limits::fetch));
             let muse = (!skipped("muse")).then(|| scope.spawn(tokenstat_sync::muse_limits::fetch));

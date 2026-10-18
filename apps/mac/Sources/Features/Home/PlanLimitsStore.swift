@@ -16,6 +16,11 @@ final class PlanLimitsStore {
     private var generation: UInt64?
     private var lastAttempt: Date?
     private var flight: (id: UUID, task: Task<Void, Error>)?
+    private var settingsRevision: UInt64 = 0
+    struct SettingsRead {
+        fileprivate let owner: UInt64
+        fileprivate let revision: UInt64
+    }
     private let owner: () -> UInt64
     private let readCache: () async throws -> LimitsSyncState
     private let readLive: (Bool) async throws -> [ProviderLimits]
@@ -28,7 +33,9 @@ final class PlanLimitsStore {
         self.owner = owner; self.readCache = readCache; self.readLive = readLive; self.now = now
     }
 
-    var providers: [ProviderLimits] { generation == owner() ? state.providers : [] }
+    var providers: [ProviderLimits] {
+        generation == owner() ? PlanLimitsOrder.ordered(state.providers, source: \.source) : []
+    }
     var skip: [String] { generation == owner() ? state.skip : [] }
     var enabled: Bool { generation == owner() && state.enabled }
     var visible: [ProviderLimits] { PlanLimits.visible(providers).filter { !skip.contains($0.source) } }
@@ -44,19 +51,31 @@ final class PlanLimitsStore {
             guard held == owner(), !Task.isCancelled else { throw CancellationError() }
             return
         }
-        if !force, let lastAttempt, now().timeIntervalSince(lastAttempt) < 30 { return }
+        if !force, let lastAttempt {
+            let age = now().timeIntervalSince(lastAttempt)
+            if age >= 0 && age < 30 { return }
+        }
         lastAttempt = now()
         let id = UUID()
         let task = Task { @MainActor in
-            let cached = try await readCache()
-            guard held == owner(), flight?.id == id else { throw CancellationError() }
-            state = cached
-            let providers = try await readLive(force)
-            guard held == owner(), flight?.id == id else { throw CancellationError() }
-            // Account keeps disabled sources so their switches can be turned
-            // back on. Other surfaces filter them through `visible`.
-            state.providers = providers + cached.providers.filter { previous in
-                cached.skip.contains(previous.source) && !providers.contains { $0.source == previous.source }
+            do {
+                let cached = try await readCache()
+                guard held == owner(), flight?.id == id else { throw CancellationError() }
+                // Retain live readings and failure notes until their replacement
+                // arrives. The last-good disk cache cannot clear a rate-limit warning.
+                if state.providers.isEmpty { state = cached }
+                state.enabled = cached.enabled; state.skip = cached.skip
+                let providers = try await readLive(force)
+                guard held == owner(), flight?.id == id else { throw CancellationError() }
+                // Account retains disabled sources so their switches can be turned back on.
+                state.providers = providers + cached.providers.filter { previous in
+                    cached.skip.contains(previous.source) && !providers.contains { $0.source == previous.source }
+                }
+            } catch {
+                if held == owner(), flight?.id == id, !(error is CancellationError) {
+                    state.providers = state.providers.map { var value = $0; value.stale = true; return value }
+                }
+                throw error
             }
         }
         flight = (id, task)
@@ -67,10 +86,14 @@ final class PlanLimitsStore {
 
     /// A sharing edit retires earlier reads so a late cache reply cannot undo it.
     func settingsChanged(_ settings: LimitsSyncState) {
+        settingsRevision &+= 1
         generation = owner(); state = settings; flight = nil; lastAttempt = nil
     }
 
-    func acceptCachedSettings(_ settings: LimitsSyncState) {
+    func settingsRead() -> SettingsRead { SettingsRead(owner: owner(), revision: settingsRevision) }
+
+    func acceptCachedSettings(_ settings: LimitsSyncState, requested: SettingsRead) {
+        guard requested.owner == owner(), requested.revision == settingsRevision else { return }
         if generation != owner() { settingsChanged(settings); return }
         state.enabled = settings.enabled; state.skip = settings.skip
         if state.providers.isEmpty { state.providers = settings.providers }

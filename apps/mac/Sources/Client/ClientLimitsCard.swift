@@ -36,7 +36,7 @@ struct ClientLimitsCard: View {
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.controlGlyph)
             }
-            if isLoading {
+            if isLoading && readable.isEmpty {
                 ClientWireframe.Rows(count: 2)
             } else if readable.isEmpty && errorMessage == nil {
                 // Not an error. A computer posts readings only when "Share with
@@ -102,13 +102,9 @@ struct ClientLimitsCard: View {
         providers.filter(\.hasWindows)
     }
 
-    /// Closest to full first. The window about to stop somebody working is the
-    /// one worth the top of the card.
+    /// Match the desktop's stable provider order during refreshes.
     private var sorted: [ProviderLimits] {
-        readable.sorted { a, b in
-            let peak = { (p: ProviderLimits) in p.windows.map(\.percent).max() ?? -1 }
-            return peak(a) > peak(b)
-        }
+        PlanLimitsOrder.ordered(readable, source: \.source)
     }
 }
 

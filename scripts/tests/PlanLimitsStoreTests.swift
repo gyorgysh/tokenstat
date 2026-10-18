@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with PlanLimitsStore.swift using swiftc -parse-as-library, then run.
+// Compile with PlanLimitsStore.swift and PlanLimitsOrder.swift using swiftc -parse-as-library, then run.
 import Foundation
 
-struct ProviderLimits: Sendable, Equatable { var source: String; var reading: Int }
+struct ProviderLimits: Sendable, Equatable { var source: String; var reading: Int; var stale: Bool? = nil }
 struct LimitsSyncState: Sendable {
     var enabled = false
     var skip: [String] = []
@@ -22,6 +22,7 @@ enum Bridge {
         calls += 1
         return try await withCheckedThrowingContinuation { waiting.append($0) }
     }
+    func fail() { waiting.removeFirst().resume(throwing: URLError(.notConnectedToInternet)) }
     func answer(_ value: Int) { waiting.removeFirst().resume(returning: [ProviderLimits(source: "claude_code", reading: value)]) }
 }
 
@@ -70,6 +71,27 @@ enum Bridge {
         }, readLive: { _ in [] })
         try await skipped.refresh()
         precondition(skipped.providers.count == 1 && skipped.visible.isEmpty, "Account retains a disabled source's switch; composers and Home hide it")
+        let ticket = skipped.settingsRead()
+        skipped.settingsChanged(LimitsSyncState(enabled: true, skip: ["claude_code"]))
+        skipped.acceptCachedSettings(LimitsSyncState(), requested: ticket)
+        precondition(skipped.enabled && skipped.skip == ["claude_code"], "late Account cache cannot undo a sharing edit")
+        let orderedGate = Gate()
+        let ordered = PlanLimitsStore(owner: { owner }, readCache: {
+            LimitsSyncState(providers: ["antigravity", "claude_code", "codex", "cursor"].map { ProviderLimits(source: $0, reading: 1) })
+        }, readLive: { _ in try await orderedGate.read() })
+        let initial = Task { try await ordered.refresh() }
+        while orderedGate.calls == 0 { await Task.yield() }
+        let ids = ordered.providers.map(\.source)
+        precondition(ids == ["codex", "claude_code", "cursor", "antigravity"], "alphabetical disk cache has stable provider order")
+        orderedGate.waiting.removeFirst().resume(returning: ids.reversed().map { ProviderLimits(source: $0, reading: 2) })
+        try await initial.value
+        precondition(ordered.providers.map(\.source) == ids, "live responses cannot reorder cards")
+        let failedRead = Task { try await ordered.refresh(force: true) }
+        while orderedGate.calls < 2 { await Task.yield() }
+        precondition(ordered.providers.allSatisfy { $0.reading == 2 }, "refresh retains live readings while vendors work")
+        orderedGate.fail()
+        do { try await failedRead.value; preconditionFailure("expected transport failure") } catch {}
+        precondition(ordered.providers.allSatisfy { $0.reading == 2 && $0.stale == true }, "transport errors preserve and date the last reading")
         print("PlanLimitsStoreTests passed: cache, sharing, cancellation, throttle and account retirement")
     }
 }

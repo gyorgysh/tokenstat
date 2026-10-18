@@ -310,9 +310,8 @@ const SUMMARY_MODEL_PREVIEW: usize = 10;
 /// Rescan when opening the interactive client if the archive is this old.
 ///
 /// People open `tokenstat` to see current usage, not to remember a separate
-/// `scan` step. Ten minutes matches the Patron sync floor: denser than the
-/// free/supporter intervals, short enough that a coding session still refreshes
-/// on the next open.
+/// `scan` step. The shared five-minute freshness window also governs the
+/// helper and scheduled uploads.
 const AUTO_SCAN_MAX_AGE: Duration = tokenstat_core::AUTO_SCAN_INTERVAL;
 
 /// Enter alternate screen, run until quit, then restore the terminal.

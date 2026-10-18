@@ -22,6 +22,7 @@ enum DesktopSyncScheduler {
                     // local discovery even without an account or an upload.
                     let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
                     if !Bridge.isHosted,
+                       (try? await Bridge.syncScheduleStatus())?.scheduledNetworkAllowed == true,
                        info.lastScanMs.map({ $0 > nowMs || nowMs - $0 >= 300_000 }) ?? true,
                        (try? await Bridge.scan()) != nil {
                         info = (try? await Bridge.info()) ?? info

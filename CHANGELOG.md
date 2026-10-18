@@ -25,6 +25,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - iPhone and iPad terminals jumping into long scrollback while typing or showing the keyboard. Caret scrolling now preserves the latest output or the reading position chosen by a drag.
 - New local Claude and Codex sessions waiting for an hourly CLI scan to appear. The desktop helper checks archive freshness every minute, scans when five minutes old, and catches up after waking. Scheduled CLI uploads refresh the archive first; an open CLI dashboard also keeps scanning in the background.
 - Older Codex SQLite quota readings hiding newer CLI readings. Quota windows now use the latest reported timestamp across both native sources.
+- Plan-limit cards changing positions while refreshing. Cached and live readings now use the same provider order, keep existing readings visible, and preserve failure warnings until a refresh succeeds. Claude quota reads use a five-minute automatic cadence and respect rate-limit cooldowns, including after restarting the helper.
+- Late Account settings reads undoing a sharing edit, phone plan-limit cards blinking to placeholders during automatic refresh, and scheduled uploads using a stale archive while another scan is still running.
 
 ## [1.7.1] - 2026-10-17
 

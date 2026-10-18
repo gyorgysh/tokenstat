@@ -143,6 +143,20 @@ pub fn scan_with_reset(
 /// Local archive freshness is independent of account uploads and vendor HTTP.
 pub const AUTO_SCAN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// An upload may proceed only after a completed scan. A skipped busy scan
+/// alone does not establish freshness.
+pub fn archive_is_fresh(store: &Store, max_age: std::time::Duration) -> Result<bool, CoreError> {
+    let now = now_ms();
+    let last = store
+        .meta("last_scan_ms")?
+        .and_then(|raw| raw.parse::<i64>().ok());
+    Ok(last.is_some_and(|last| {
+        last > 0
+            && last <= now
+            && now.saturating_sub(last) < i64::try_from(max_age.as_millis()).unwrap_or(i64::MAX)
+    }))
+}
+
 /// Scheduled callers share a persistent OS lock with manual scans. A busy
 /// scanner is left alone; after acquiring, re-read its completion stamp.
 pub fn scan_if_stale(
@@ -171,15 +185,7 @@ fn scan_if_stale_with<T>(
             }
         }
     }
-    let now = now_ms();
-    let last = store
-        .meta("last_scan_ms")?
-        .and_then(|raw| raw.parse::<i64>().ok());
-    if last.is_some_and(|last| {
-        last > 0
-            && last <= now
-            && now.saturating_sub(last) < i64::try_from(max_age.as_millis()).unwrap_or(i64::MAX)
-    }) {
+    if archive_is_fresh(store, max_age)? {
         return Ok(None);
     }
     run(store).map(Some)
@@ -1153,6 +1159,7 @@ mod tests {
         let mut second = Store::open(&db).unwrap();
         let held = scan_lock(&first).unwrap().unwrap();
         held.0.lock().unwrap();
+        assert!(!archive_is_fresh(&second, AUTO_SCAN_INTERVAL).unwrap());
         assert!(
             scan_if_stale_with(
                 &mut second,
@@ -1189,6 +1196,7 @@ mod tests {
             .is_none()
         );
         assert!(db.with_extension("scan.lock").exists());
+        assert!(archive_is_fresh(&first, AUTO_SCAN_INTERVAL).unwrap());
     }
 
     #[test]

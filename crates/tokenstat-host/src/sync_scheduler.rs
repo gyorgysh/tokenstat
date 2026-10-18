@@ -143,7 +143,9 @@ fn run_once(session: &Mutex<Session>) {
         return;
     }
     // A five-minute upload must not repeatedly upload an hour-old archive.
-    scan_archive(session);
+    if !scan_archive(session) {
+        return;
+    }
     // Snapshot path and timezone under the lock, then open a separate Store for
     // the HTTP phase. Holding Session across the upload freezes Home/Insights.
     let snapshot = {
@@ -196,7 +198,7 @@ fn run_once(session: &Mutex<Session>) {
     }
 }
 
-fn scan_archive(session: &Mutex<Session>) {
+fn scan_archive(session: &Mutex<Session>) -> bool {
     let snapshot = session.lock().ok().and_then(|guard| {
         guard
             .engine()
@@ -204,19 +206,25 @@ fn scan_archive(session: &Mutex<Session>) {
             .map(|engine| (engine.db_path().to_path_buf(), engine.timezone().clone()))
     });
     let Some((db_path, tz)) = snapshot else {
-        return;
+        return false;
     };
     let result = tokenstat_core::Store::open(&db_path).and_then(|mut store| {
-        tokenstat_core::scan_if_stale(&mut store, &tz, tokenstat_core::AUTO_SCAN_INTERVAL)
+        let report =
+            tokenstat_core::scan_if_stale(&mut store, &tz, tokenstat_core::AUTO_SCAN_INTERVAL)?;
+        Ok((
+            report,
+            tokenstat_core::archive_is_fresh(&store, tokenstat_core::AUTO_SCAN_INTERVAL)?,
+        ))
     });
     match result {
-        Ok(Some(report)) => eprintln!(
+        Ok((Some(ref report), _)) => eprintln!(
             "scan: automatic pass files={} new={} elapsed_ms={}",
             report.files_read, report.events_new, report.elapsed_ms
         ),
-        Ok(None) => {}
-        Err(error) => eprintln!("scan: automatic pass failed, retrying next minute: {error}"),
+        Ok((None, _)) => {}
+        Err(ref error) => eprintln!("scan: automatic pass failed, retrying next minute: {error}"),
     }
+    result.is_ok_and(|(_, fresh)| fresh)
 }
 
 fn sync_due(next: Option<&str>, now: jiff::Timestamp) -> bool {

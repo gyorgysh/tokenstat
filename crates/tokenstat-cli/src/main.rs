@@ -594,6 +594,14 @@ fn main() -> Result<()> {
             };
             if tokenstat_sync::scheduled_network_allowed() {
                 tokenstat_core::scan_if_stale(&mut store, &tz, tokenstat_core::AUTO_SCAN_INTERVAL)?;
+                if !tokenstat_core::archive_is_fresh(&store, tokenstat_core::AUTO_SCAN_INTERVAL)? {
+                    if cli.json {
+                        println!(r#"{{"skipped":"deferred","reason":"archive scan in progress"}}"#);
+                    } else {
+                        println!("archive scan in progress, will retry next run");
+                    }
+                    return Ok(());
+                }
             }
             return render::profile_sync_scheduled(
                 &store,

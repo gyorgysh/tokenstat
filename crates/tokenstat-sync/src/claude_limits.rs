@@ -17,7 +17,7 @@
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokenstat_core::limits::{LimitSeverity, ProviderLimits, UsageWindow};
 
 /// Anthropic's OAuth API wants this on every call, and returns 401 without it.
@@ -98,6 +98,12 @@ struct UsageWindowDto {
 /// that are known. Saying so in words is the honest answer, and reporting zero
 /// would be a lie about someone's remaining quota.
 pub fn fetch() -> ProviderLimits {
+    fetch_with_force(false)
+}
+
+/// Automatic reads reuse Claude's last good reading for five minutes. Explicit
+/// refresh may ask sooner, but neither path can bypass the vendor's cooldown.
+pub fn fetch_with_force(force: bool) -> ProviderLimits {
     let stored = match stored_credentials() {
         Some(s) => s,
         None => {
@@ -118,98 +124,224 @@ pub fn fetch() -> ProviderLimits {
         }
     };
 
-    let client = match crate::http::client_builder()
-        .timeout(Duration::from_secs(15))
-        .connect_timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => return ProviderLimits::unavailable("claude_code", e.to_string()),
-    };
+    use sha2::{Digest, Sha256};
+    use std::sync::{Mutex, OnceLock};
+    static PACER: OnceLock<Mutex<LimitsPacer>> = OnceLock::new();
+    let mut pacer = PACER
+        .get_or_init(|| Mutex::new(LimitsPacer::load()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // The credential fingerprint stays in memory; only retry deadlines and
+    // counters survive a restart, never credentials or their fingerprints.
+    let owner: [u8; 32] = Sha256::digest(token.access_token.as_bytes()).into();
+    let previous = pacer.retry.clone();
+    let result = pacer.read(owner, force, now_ms(), || fetch_stored(&stored, &token));
+    if pacer.retry != previous {
+        pacer.save();
+    }
+    result
+}
 
-    let access_token = if token
-        .expires_at
-        .is_some_and(|ms| ms <= now_ms().saturating_add(60_000))
-    {
-        match refresh(&client, &stored, &token) {
-            Ok(fresh) => fresh,
-            Err(note) => return ProviderLimits::unavailable("claude_code", note),
-        }
-    } else {
-        token.access_token.clone()
-    };
-
-    let response = client
-        .get(USAGE_URL)
-        .bearer_auth(&access_token)
-        .header("anthropic-beta", OAUTH_BETA)
-        .header("content-type", "application/json")
-        .send();
-
-    let response = match response {
-        Ok(r) => r,
-        Err(e) => {
-            return ProviderLimits::unavailable(
-                "claude_code",
-                format!("Could not reach Anthropic: {e}"),
-            );
-        }
-    };
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let hint = if status == reqwest::StatusCode::UNAUTHORIZED {
-            "The stored Claude Code login was refused. Run any `claude` command to refresh it."
-                .to_string()
-        } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            "Anthropic is rate limiting the usage endpoint. Try again shortly.".to_string()
-        } else {
-            format!("Anthropic returned {status} for the usage endpoint.")
+fn fetch_stored(stored: &Stored, token: &OauthToken) -> (ProviderLimits, Option<RateLimit>) {
+    let mut retry_after = None;
+    let result = (|| {
+        let client = match crate::http::client_builder()
+            .timeout(Duration::from_secs(15))
+            .connect_timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => return ProviderLimits::unavailable("claude_code", e.to_string()),
         };
-        return ProviderLimits::unavailable("claude_code", hint);
-    }
 
-    let usage: UsageResponse = match response.json() {
-        Ok(u) => u,
-        Err(e) => {
+        let access_token = if token
+            .expires_at
+            .is_some_and(|ms| ms <= now_ms().saturating_add(60_000))
+        {
+            match refresh(&client, stored, token) {
+                Ok(fresh) => fresh,
+                Err(note) => return ProviderLimits::unavailable("claude_code", note),
+            }
+        } else {
+            token.access_token.clone()
+        };
+
+        let response = client
+            .get(USAGE_URL)
+            .bearer_auth(&access_token)
+            .header("anthropic-beta", OAUTH_BETA)
+            .header("content-type", "application/json")
+            .send();
+
+        let response = match response {
+            Ok(r) => r,
+            Err(e) => {
+                return ProviderLimits::unavailable(
+                    "claude_code",
+                    format!("Could not reach Anthropic: {e}"),
+                );
+            }
+        };
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let hint = if status == reqwest::StatusCode::UNAUTHORIZED {
+                "The stored Claude Code login was refused. Run any `claude` command to refresh it."
+                    .to_string()
+            } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                retry_after = Some(RateLimit {
+                    retry_after: response
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|value| value.to_str().ok())
+                        .map(str::to_string),
+                });
+                "Anthropic is rate limiting the usage endpoint. Try again shortly.".to_string()
+            } else {
+                format!("Anthropic returned {status} for the usage endpoint.")
+            };
+            return ProviderLimits::unavailable("claude_code", hint);
+        }
+
+        let usage: UsageResponse = match response.json() {
+            Ok(u) => u,
+            Err(e) => {
+                return ProviderLimits::unavailable(
+                    "claude_code",
+                    format!("Could not read Anthropic's answer: {e}"),
+                );
+            }
+        };
+
+        let windows: Vec<UsageWindow> = [("5-hour", usage.five_hour), ("weekly", usage.seven_day)]
+            .into_iter()
+            .filter_map(|(label, dto)| {
+                let dto = dto?;
+                let percent = dto.utilization?;
+                Some(UsageWindow {
+                    label: label.to_string(),
+                    scope: None,
+                    percent,
+                    resets_at_ms: dto.resets_at.as_deref().and_then(parse_iso_ms),
+                    severity: LimitSeverity::from_percent(percent),
+                })
+            })
+            .collect();
+
+        if windows.is_empty() {
             return ProviderLimits::unavailable(
                 "claude_code",
-                format!("Could not read Anthropic's answer: {e}"),
+                "Anthropic reported no usage windows for this account.",
             );
         }
-    };
 
-    let windows: Vec<UsageWindow> = [("5-hour", usage.five_hour), ("weekly", usage.seven_day)]
-        .into_iter()
-        .filter_map(|(label, dto)| {
-            let dto = dto?;
-            let percent = dto.utilization?;
-            Some(UsageWindow {
-                label: label.to_string(),
-                scope: None,
-                percent,
-                resets_at_ms: dto.resets_at.as_deref().and_then(parse_iso_ms),
-                severity: LimitSeverity::from_percent(percent),
-            })
-        })
-        .collect();
+        ProviderLimits {
+            source: "claude_code".to_string(),
+            plan: None,
+            windows,
+            observed_at_ms: now_ms(),
+            note: None,
+            stale: false,
+        }
+    })();
+    (result, retry_after)
+}
 
-    if windows.is_empty() {
-        return ProviderLimits::unavailable(
-            "claude_code",
-            "Anthropic reported no usage windows for this account.",
-        );
+const RATE_LIMIT_NOTE: &str =
+    "Anthropic is rate limiting the usage endpoint. Tokenstat will retry after the cooldown.";
+
+#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct RetryState {
+    until_ms: i64,
+    failures: u32,
+}
+
+struct RateLimit {
+    retry_after: Option<String>,
+}
+
+#[derive(Default)]
+struct LimitsPacer {
+    retry: RetryState,
+    cached: Option<([u8; 32], i64, ProviderLimits)>,
+}
+
+impl LimitsPacer {
+    fn path() -> Option<std::path::PathBuf> {
+        Some(tokenstat_paths::data_dir()?.join("claude-limits-retry.json"))
     }
-
-    ProviderLimits {
-        source: "claude_code".to_string(),
-        plan: None,
-        windows,
-        observed_at_ms: now_ms(),
-        note: None,
-        stale: false,
+    fn load() -> Self {
+        let retry = Self::path()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        Self {
+            retry,
+            cached: None,
+        }
     }
+    fn save(&self) {
+        if let (Some(path), Ok(json)) = (Self::path(), serde_json::to_string(&self.retry)) {
+            let _ = crate::snapshot::write_private_atomically(&path, &json);
+        }
+    }
+    fn read(
+        &mut self,
+        owner: [u8; 32],
+        force: bool,
+        now: i64,
+        fetch: impl FnOnce() -> (ProviderLimits, Option<RateLimit>),
+    ) -> ProviderLimits {
+        if now < self.retry.until_ms {
+            return ProviderLimits::unavailable("claude_code", RATE_LIMIT_NOTE);
+        }
+        if !force
+            && let Some((held, at, reading)) = &self.cached
+            && *held == owner
+            && now >= *at
+            && now - *at < 300_000
+        {
+            return reading.clone();
+        }
+        let started = std::time::Instant::now();
+        let (reading, limited) = fetch();
+        let completed =
+            now.saturating_add(started.elapsed().as_millis().min(i64::MAX as u128) as i64);
+        if let Some(header) = limited {
+            self.cached = None;
+            let fallback = (300_i64 * (1_i64 << self.retry.failures.min(3))).min(1800);
+            let seconds = retry_after_seconds(header.retry_after.as_deref(), completed)
+                .unwrap_or(fallback)
+                .max(fallback);
+            self.retry.until_ms = completed.saturating_add(seconds.saturating_mul(1000));
+            self.retry.failures = self.retry.failures.saturating_add(1);
+            return ProviderLimits::unavailable("claude_code", RATE_LIMIT_NOTE);
+        }
+        if reading.has_reading() {
+            self.retry = RetryState::default();
+            self.cached = Some((owner, completed, reading.clone()));
+        } else {
+            // A failed explicit refresh retires the successful in-memory
+            // shortcut too. Only a real later success may clear its warning.
+            self.cached = None;
+        }
+        reading
+    }
+}
+
+fn retry_after_seconds(header: Option<&str>, now: i64) -> Option<i64> {
+    let raw = header?.trim();
+    if let Ok(seconds) = raw.parse::<u64>() {
+        return Some(seconds.min(86400) as i64);
+    }
+    let date = jiff::civil::DateTime::strptime("%a, %d %b %Y %H:%M:%S GMT", raw).ok()?;
+    let at = date
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .ok()?
+        .timestamp()
+        .as_millisecond();
+    Some((at.saturating_sub(now).saturating_add(999) / 1000).clamp(0, 86400))
 }
 
 fn now_ms() -> i64 {
@@ -569,6 +701,115 @@ fn keychain_services_from_dump(dump: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reading() -> ProviderLimits {
+        serde_json::from_value(serde_json::json!({"source":"claude_code","plan":null,
+            "windows":[{"label":"5-hour","scope":null,"percent":10,"resetsAtMs":null,"severity":"normal"}],
+            "observedAtMs":1000,"note":null,"stale":false})).unwrap()
+    }
+
+    #[test]
+    fn quota_reads_reuse_success_and_manual_refresh_respects_persisted_429_cooldown() {
+        let mut pacer = LimitsPacer::default();
+        assert!(
+            pacer
+                .read([1; 32], false, 1000, || (reading(), None))
+                .has_reading()
+        );
+        assert!(
+            pacer
+                .read([1; 32], false, 2000, || panic!(
+                    "automatic reads must reuse five-minute quota"
+                ))
+                .has_reading()
+        );
+        let result = pacer.read([1; 32], true, 10_000, || {
+            (
+                ProviderLimits::unavailable("claude_code", "429"),
+                Some(RateLimit {
+                    retry_after: Some("900".into()),
+                }),
+            )
+        });
+        assert!(!result.has_reading());
+        assert!(pacer.retry.until_ms >= 910_000);
+        let retry: RetryState =
+            serde_json::from_str(&serde_json::to_string(&pacer.retry).unwrap()).unwrap();
+        let mut restarted = LimitsPacer {
+            retry,
+            cached: None,
+        };
+        assert!(
+            !restarted
+                .read([1; 32], true, 20_000, || panic!(
+                    "manual refresh and restart cannot bypass Retry-After"
+                ))
+                .has_reading()
+        );
+        let after = restarted.retry.until_ms + 1;
+        restarted.read([1; 32], false, after, || {
+            (
+                ProviderLimits::unavailable("claude_code", "429"),
+                Some(RateLimit { retry_after: None }),
+            )
+        });
+        assert!(
+            restarted.retry.until_ms >= after + 600_000,
+            "repeated 429s back off further"
+        );
+        let after = restarted.retry.until_ms + 1;
+        assert!(
+            restarted
+                .read([1; 32], false, after, || (reading(), None))
+                .has_reading()
+        );
+        assert_eq!(restarted.retry, RetryState::default());
+        let called = std::cell::Cell::new(false);
+        restarted.read([2; 32], false, after + 1, || {
+            called.set(true);
+            (reading(), None)
+        });
+        assert!(
+            called.get(),
+            "a replaced Claude credential cannot reuse another login's fresh reading"
+        );
+    }
+
+    #[test]
+    fn retry_after_accepts_seconds_and_http_dates_without_overflow() {
+        let now = "2015-10-21T07:26:00Z"
+            .parse::<jiff::Timestamp>()
+            .unwrap()
+            .as_millisecond();
+        assert_eq!(retry_after_seconds(Some("120"), now), Some(120));
+        assert_eq!(
+            retry_after_seconds(Some("Wed, 21 Oct 2015 07:28:00 GMT"), now),
+            Some(120)
+        );
+        assert_eq!(
+            retry_after_seconds(Some("18446744073709551615"), now),
+            Some(86400)
+        );
+        assert_eq!(retry_after_seconds(Some("invalid"), now), None);
+    }
+
+    #[test]
+    fn a_failed_manual_refresh_cannot_become_a_fresh_cached_success() {
+        let mut pacer = LimitsPacer::default();
+        pacer.read([1; 32], false, 1000, || (reading(), None));
+        pacer.read([1; 32], true, 2000, || {
+            (ProviderLimits::unavailable("claude_code", "offline"), None)
+        });
+        let called = std::cell::Cell::new(false);
+        pacer.read([1; 32], false, 3000, || {
+            called.set(true);
+            (reading(), None)
+        });
+        assert!(
+            called.get(),
+            "an old successful quota cannot clear the newer failure"
+        );
+    }
 
     #[test]
     fn a_credential_blob_parses_the_way_claude_code_writes_it() {

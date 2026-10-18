@@ -171,9 +171,10 @@ final class AccountModel {
                 remoteStatus = status
             }
             #if os(macOS)
-            let limits = (try? await Bridge.limitsSync()) ?? LimitsSyncState()
+            let limitsRead = PlanLimitsStore.shared.settingsRead()
+            let limits = try? await Bridge.limitsSync()
             guard generation == accountLoadGeneration else { return }
-            PlanLimitsStore.shared.acceptCachedSettings(limits)
+            if let limits { PlanLimitsStore.shared.acceptCachedSettings(limits, requested: limitsRead) }
             let policy = try? await Bridge.hostPolicy()
             guard generation == accountLoadGeneration else { return }
             hostPolicy = policy
