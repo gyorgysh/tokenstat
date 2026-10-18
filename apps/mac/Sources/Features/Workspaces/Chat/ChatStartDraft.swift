@@ -65,8 +65,10 @@ final class ChatStartDraft {
         }
     }
     private(set) var pending: UUID?
+    private(set) var presentation: UUID?
+    private(set) var preparationStartedAt: Double?
     var error: String?
-    var isSubmitting: Bool { pending != nil }
+    var isSubmitting: Bool { pending != nil || presentation != nil }
     var attachmentReference: WorkReference? {
         guard let owner else { return nil }
         // The namespace stays stable when initial unbound writing is claimed
@@ -97,12 +99,14 @@ final class ChatStartDraft {
     }
     func retire() {
         if let owner { save(scope: owner.scope, repository: repositoryID) }
-        pending = nil; error = nil; importGeneration = UUID()
+        pending = nil; presentation = nil; preparationStartedAt = nil
+        error = nil; importGeneration = UUID()
     }
     func begin(available: Set<String>) -> Submission? {
-        guard pending == nil, stagingAttachments == 0, let owner, let repositoryID, let agent,
+        guard !isSubmitting, stagingAttachments == 0, let owner, let repositoryID, let agent,
               let reference = attachmentReference, available.contains(repositoryID) else { return nil }
         let id = UUID(); pending = id; error = nil
+        preparationStartedAt = Date.timeIntervalSinceReferenceDate
         return Submission(id: id, owner: owner, repositoryID: repositoryID,
                           text: text.trimmingCharacters(in: .whitespacesAndNewlines), agent: agent,
                           attachments: attachments, attachmentReference: reference)
@@ -112,15 +116,27 @@ final class ChatStartDraft {
             && text.trimmingCharacters(in: .whitespacesAndNewlines) == submission.text && agent == submission.agent
             && attachments == submission.attachments && scope == submission.owner.scope && session == submission.owner.session
     }
-    func transferred(_ submission: Submission) {
+    func transferred(_ submission: Submission, preparingPresentation: Bool = false) {
         guard accepts(submission, scope: owner?.scope, session: owner?.session ?? 0) else { return }
+        let started = preparationStartedAt
         if let owner { writings[Key(scope: owner.scope, repository: repositoryID)] = Writing(agent: agent, localID: localID) }
         text = ""; attachments = []; previews = [:]
         retire()
+        // The real conversation owns the draft now. Keep the transition up
+        // while it sends, without leaving another sendable copy on this page.
+        if preparingPresentation { presentation = submission.id; preparationStartedAt = started }
+    }
+    func ownsPresentation(_ submission: Submission, scope: WorkReference.Scope?, session: UInt64) -> Bool {
+        presentation == submission.id && owner == submission.owner && repositoryID == submission.repositoryID
+            && scope == submission.owner.scope && session == submission.owner.session
+    }
+    func finishPresentation(_ submission: Submission) {
+        guard presentation == submission.id else { return }
+        presentation = nil; preparationStartedAt = nil
     }
     func failed(_ submission: Submission, message: String?) {
         guard pending == submission.id, owner == submission.owner else { return }
-        pending = nil; error = message
+        pending = nil; preparationStartedAt = nil; error = message
     }
     func beginImport(_ reference: WorkReference) -> Bool {
         guard reference == attachmentReference, !isSubmitting, let owner,

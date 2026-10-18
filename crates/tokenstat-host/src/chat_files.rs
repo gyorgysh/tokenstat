@@ -239,6 +239,11 @@ impl Store {
     }
     fn upload_directory(&self, id: &str) -> Result<PathBuf, String> {
         let chat = self.verified_append_directory(id)?;
+        // New chats exist in the index before their first turn creates a
+        // transcript. Attachments must be able to initialize storage first.
+        // The caller holds the lifecycle lock and verification above refuses
+        // conversations removed from the persisted index.
+        fs::create_dir_all(&chat).map_err(|e| e.to_string())?;
         directory(&chat)?;
         let path = chat.join("transfers");
         fs::create_dir_all(&path).map_err(|e| e.to_string())?;
@@ -612,6 +617,75 @@ mod tests {
             .unwrap()
             .into()
     }
+    #[test]
+    fn first_message_attachments_create_storage_before_a_turn_starts() {
+        let (_temp, store) = fixture();
+        let chat_directory = store.root.join("file-test");
+        // create() persists the conversation index only. A send held for
+        // sign-in has no transcript or per-conversation directory yet.
+        fs::remove_dir(&chat_directory).unwrap();
+        assert!(store.file_capabilities("file-test").is_ok());
+        assert!(!chat_directory.exists());
+        let bytes = b"first message image";
+        let transfer = start(&store, bytes);
+        store
+            .file_upload_chunk(
+                "file-test",
+                &transfer,
+                0,
+                &crate::base64::encode(bytes),
+                false,
+            )
+            .unwrap();
+        let attachment = store.file_upload_finish("file-test", &transfer).unwrap();
+        assert_eq!(
+            fs::read(store.attachment_path("file-test", &attachment.id, &attachment.name)).unwrap(),
+            bytes
+        );
+        assert!(!chat_directory.join("events.ndjson").exists());
+        let chat = store.get("file-test").unwrap();
+        assert!(!chat.running);
+        assert_eq!(chat.send_revision, 0);
+    }
+
+    #[test]
+    fn first_upload_does_not_recreate_a_removed_conversation() {
+        let (_temp, store) = fixture();
+        let chat_directory = store.root.join("file-test");
+        fs::remove_dir(&chat_directory).unwrap();
+        // Another host removes the persisted chat while this Store still
+        // has its old in-memory index.
+        fs::write(
+            store.root.join("conversations.json"),
+            br#"{"conversations":[]}"#,
+        )
+        .unwrap();
+        assert!(
+            store
+                .file_upload_start("file-test", "image.png", 1, &digest(b"x"), None)
+                .is_err()
+        );
+        assert!(!chat_directory.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn first_upload_refuses_a_symlinked_conversation_directory() {
+        use std::os::unix::fs::symlink;
+        let (temp, store) = fixture();
+        let chat_directory = store.root.join("file-test");
+        fs::remove_dir(&chat_directory).unwrap();
+        let outside = temp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        symlink(&outside, &chat_directory).unwrap();
+        assert!(
+            store
+                .file_upload_start("file-test", "image.png", 1, &digest(b"x"), None)
+                .is_err()
+        );
+        assert_eq!(fs::read_dir(outside).unwrap().count(), 0);
+    }
+
     #[test]
     fn failed_partial_cleanup_preserves_the_transfer_for_retry() {
         let (_temp, store) = fixture();

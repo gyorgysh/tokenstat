@@ -78,6 +78,41 @@ def match_identity(candidates, identity):
     ]
 
 
+def embedded_libraries(bundle):
+    # Xcode's Debug executable loads its implementation from a sibling dylib.
+    # Signing the bundle alone leaves that library linker/ad-hoc signed, which
+    # passes signature verification but fails hardened-runtime library validation.
+    return sorted(path for folder in ("MacOS", "Frameworks")
+                  for path in (bundle / "Contents" / folder).glob("*.dylib"))
+
+
+def sign_libraries(bundle, command):
+    for library in embedded_libraries(bundle):
+        subprocess.run(command + [str(library)], check=True)
+
+
+def verify_library_teams(bundle):
+    libraries = embedded_libraries(bundle)
+    if not libraries:
+        return
+
+    def team(path):
+        signature = subprocess.check_output(
+            ["codesign", "-d", "--verbose=4", str(path)],
+            stderr=subprocess.STDOUT, text=True,
+        )
+        match = re.search(r"^TeamIdentifier=(.+)$", signature, re.MULTILINE)
+        if not match or match[1] == "not set":
+            raise ValueError("No signing team for " + str(path))
+        return match[1]
+
+    expected = team(bundle)
+    for library in libraries:
+        subprocess.run(["codesign", "--verify", "--strict", str(library)], check=True)
+        if team(library) != expected:
+            raise ValueError("Embedded library has a different signing team: " + str(library))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=Path)
@@ -148,8 +183,13 @@ def main():
                 helper = args.app / "Contents/Resources/tokenstat-hostd"
                 if helper.is_file():
                     subprocess.run(fallback + [str(helper)], check=True)
+                bundles = sorted((args.app / "Contents/PlugIns").glob("*.appex")) + [args.app]
+                for bundle in bundles:
+                    sign_libraries(bundle, fallback)
                 subprocess.run(fallback + ["--deep", str(args.app)], check=True)
                 subprocess.run(["codesign", "--verify", "--deep", "--strict", str(args.app)], check=True)
+                for bundle in bundles:
+                    verify_library_teams(bundle)
                 print("Signed without a provisioning profile; biometric vault unlock and shared widgets are unavailable.")
                 return
             raise ValueError(message)
@@ -207,7 +247,9 @@ def main():
             widget_entitlement_path = temporary / ("widget-entitlements-" + str(index) + ".plist")
             widget_entitlement_path.write_bytes(plistlib.dumps(widget_entitlements))
             shutil.copyfile(widget_profile, extension / "Contents/embedded.provisionprofile")
+            sign_libraries(extension, sign)
             subprocess.run(sign + ["--entitlements", str(widget_entitlement_path), str(extension)], check=True)
+        sign_libraries(args.app, sign)
         subprocess.run(sign + ["--entitlements", str(entitlement_path), str(args.app)], check=True)
         # Verify the helper on its own: it lives in Resources, where --deep
         # hashes it as data, so a bundle-wide verify walks past a broken or
@@ -217,6 +259,8 @@ def main():
             check=True,
         )
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(args.app)], check=True)
+        for bundle in extensions + [args.app]:
+            verify_library_teams(bundle)
         actual = plistlib.loads(subprocess.check_output(["codesign", "-d", "--entitlements", "-", "--xml", str(args.app)], stderr=subprocess.DEVNULL))
         if any(actual.get(key) != value for key, value in entitlements.items()):
             raise ValueError("The signed app is missing its required Keychain entitlements.")

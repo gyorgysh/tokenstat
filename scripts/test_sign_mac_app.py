@@ -122,5 +122,81 @@ class OptionalSigningTests(unittest.TestCase):
                     self.assertEqual(run.call_count, 0 if check_only else 3)
 
 
+class DebugLibrarySigningTests(unittest.TestCase):
+    def test_profiled_debug_app_and_widget_sign_libraries_before_their_bundles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = root / "Tokenstat.app"
+            widget = app / "Contents/PlugIns/TokenstatWidgets.appex"
+            libraries = []
+            for bundle, identifier in [(app, signing.BUNDLE_ID), (widget, signing.WIDGET_BUNDLE_ID)]:
+                (bundle / "Contents/MacOS").mkdir(parents=True)
+                (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": identifier}))
+                for name in [bundle.stem + ".debug.dylib", "__preview.dylib"]:
+                    library = bundle / "Contents/MacOS" / name
+                    library.write_bytes(b"linker-signed fixture")
+                    libraries.append((bundle, library))
+            (app / "Contents/Resources").mkdir()
+            (app / "Contents/Resources/tokenstat-hostd").write_bytes(b"fixture")
+            app_profile = root / "app.provisionprofile"
+            widget_profile = root / "widget.provisionprofile"
+            app_profile.write_bytes(b"app profile")
+            widget_profile.write_bytes(b"widget profile")
+            fixture = ProfileTests()
+            fixture.setUp()
+            widget_authorization = copy.deepcopy(fixture.profile)
+            widget_authorization["Entitlements"]["com.apple.application-identifier"] = "EXAMPLETEAM." + signing.WIDGET_BUNDLE_ID
+            signed = []
+
+            def run(command, **kwargs):
+                if "--sign" in command:
+                    signed.append(command)
+
+            def output(command, **kwargs):
+                if command[0] == "security" and command[1] == "find-identity":
+                    return '1) ' + fixture.digest + ' "Developer ID Application: Fixture (EXAMPLETEAM)"'
+                if command[0] == "security":
+                    return plistlib.dumps(fixture.profile if command[-1] == str(app_profile) else widget_authorization)
+                if "--entitlements" in command:
+                    return plistlib.dumps(signing.profile_entitlements(fixture.profile, fixture.digest))
+                # A library keeps its old ad-hoc signature until explicitly signed.
+                if any(str(library) == command[-1] for _, library in libraries):
+                    if not any(call[-1] == command[-1] for call in signed):
+                        return "TeamIdentifier=not set\n"
+                return "TeamIdentifier=EXAMPLETEAM\n"
+
+            with mock.patch.object(sys, "argv", ["sign-mac-app.py", str(app)]), \
+                 mock.patch.dict(signing.os.environ, {
+                     "TOKENSTAT_MAC_PROFILE": str(app_profile),
+                     "TOKENSTAT_MAC_WIDGET_PROFILE": str(widget_profile),
+                 }, clear=True), \
+                 mock.patch.object(signing.subprocess, "check_output", side_effect=output), \
+                 mock.patch.object(signing.subprocess, "run", side_effect=run):
+                signing.main()
+
+            paths = [command[-1] for command in signed]
+            for bundle, library in libraries:
+                self.assertLess(paths.index(str(library)), paths.index(str(bundle)))
+                command = signed[paths.index(str(library))]
+                self.assertNotIn("--entitlements", command)
+            widget_command = signed[paths.index(str(widget))]
+            self.assertIn("widget-entitlements-0.plist", widget_command[-2])
+
+    def test_signature_verification_alone_does_not_accept_a_different_or_missing_library_team(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "Tokenstat.app"
+            (app / "Contents/MacOS").mkdir(parents=True)
+            library = app / "Contents/MacOS/Tokenstat.debug.dylib"
+            library.touch()
+            for team in ("OTHERTEAM", "not set"):
+                with self.subTest(team=team), \
+                     mock.patch.object(signing.subprocess, "run"), \
+                     mock.patch.object(signing.subprocess, "check_output", side_effect=[
+                         "TeamIdentifier=EXAMPLETEAM\n", "TeamIdentifier=" + team + "\n",
+                     ]):
+                    with self.assertRaises(ValueError):
+                        signing.verify_library_teams(app)
+
+
 if __name__ == "__main__":
     unittest.main()

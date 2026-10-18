@@ -9,6 +9,17 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.7.2]
+
+### Improved
+
+- On Mac, iPhone and iPad, starting a chat draws the interactive glass field and its pointer trails into the tokenstat logo. Its three glass bars refract the light while the first message prepares in the background. Quick sends open with their content ready; longer sends continue in the conversation. Reduced motion and transparency settings are respected.
+
+### Fixed
+
+- First-message attachments failing with “No such file or directory” when a new chat has no storage folder yet, including messages held for Claude sign-in. Retrying keeps the original message and images.
+- Local Mac debug builds crashing at launch after Developer ID signing. Embedded debug and preview libraries now use the app's signing team, with validation before launch.
+
 ## [1.7.1] - 2026-10-17
 
 ### Improved

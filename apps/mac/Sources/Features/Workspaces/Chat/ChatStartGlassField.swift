@@ -105,10 +105,10 @@ enum ChatStartGlassField {
     /// lives too.
     @MainActor
     static func shader(size: CGSize, time: Double, now: Double, motion: ChatStartSurfaceMotion,
-                       lift: Float, palette: Palette) -> Shader {
+                       lift: Float, gathering: Double = 0, palette: Palette) -> Shader {
         var arguments: [Shader.Argument] = [
             .float2(size),
-            .float4(Float(time), lift, palette.dark ? 1 : 0, 0),
+            .float4(Float(time), lift, palette.dark ? 1 : 0, Float(gathering)),
             .color(palette.accent),
             .color(palette.secondary),
             .color(palette.background),

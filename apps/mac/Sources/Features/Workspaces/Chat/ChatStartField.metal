@@ -140,11 +140,39 @@ static Wipe wipeAt(float2 point, float4 mark, float2 heading) {
     return wipe;
 }
 
+/// The same light that the pointer disturbed is drawn into the logo. A
+/// curved ribbon keeps its source in the page, with energy travelling inward.
+static float inwardLight(float2 point, float2 source, float2 inlet, float time, float seed) {
+    float2 travel = inlet - source;
+    float reach = length(travel);
+    if (reach < 12.0) { return 0.0; }
+    float2 axis = travel / reach;
+    float2 normal = float2(-axis.y, axis.x);
+    float2 offset = point - source;
+    float along = dot(offset, axis) / reach;
+    if (along < 0.0 || along > 1.0) { return 0.0; }
+    float curve = sin(along * M_PI_F) * min(70.0, reach * 0.12) * sin(seed * 1.7);
+    float across = dot(offset, normal) - curve;
+    float width = mix(9.0, 2.5, along);
+    float soft = exp(-across * across / (width * width));
+    float core = exp(-across * across / 2.5);
+    float front = fract(time * 0.62 + seed * 0.19);
+    float packet = exp(-pow((along - front) * 7.0, 2.0));
+    float ends = smoothstep(0.0, 0.12, along) * (1.0 - smoothstep(0.96, 1.0, along));
+    return (soft * 0.36 + core * 0.42) * (0.35 + packet * 0.65) * ends;
+}
+
+static float4 gatherMark(float4 mark, float2 focus, float gathering) {
+    mark.xy = mix(mark.xy, focus, gathering);
+    mark.z *= 1.0 - gathering * 0.82;
+    return mark;
+}
+
 }
 
 using namespace tokenstat;
 
-/// `clock` is (time, lift, dark, unused). Trail marks are (x, y, age,
+/// `clock` is (time, lift, dark, send elapsed). Trail marks are (x, y, age,
 /// strength), newest first, so each one's heading comes from the sample
 /// behind it and no direction has to be passed in. Rings are the same shape.
 [[ stitchable ]] half4 chatStartField(
@@ -160,8 +188,19 @@ using namespace tokenstat;
     float time = clock.x;
     float lift = clock.y;
     float dark = clock.z;
+    float sendTime = max(0.0, clock.w);
+    float gathering = 1.0 - exp(-sendTime * 2.6);
+    float2 focus = size * kLightCentre;
+    float2 inlet = focus - float2(42.0, 0.0);
+    float4 originalClick = ring0;
 
     float4 trail[5] = { trail0, trail1, trail2, trail3, trail4 };
+    for (int index = 0; index < 5; ++index) {
+        trail[index] = gatherMark(trail[index], inlet, gathering);
+    }
+    ring0 = gatherMark(ring0, inlet, gathering);
+    ring1 = gatherMark(ring1, inlet, gathering);
+    ring2 = gatherMark(ring2, inlet, gathering);
     float2 drag = float2(0.0);
     float cleared = 0.0;
     // Carried across the loop, so the oldest sample, which has no older
@@ -184,6 +223,9 @@ using namespace tokenstat;
     // The surface is read where the pointer dragged it from, which is what
     // makes the water move with the mouse and flow back when it stops.
     float2 warped = position - drag;
+    // Sampling farther from the focus pulls the existing folds inward as
+    // send time advances; they do not disappear behind a separate animation.
+    warped = focus + (warped - focus) * (1.0 + sendTime * 0.95);
     Surface here = surfaceAt(warped, time);
 
     // The slope that matters for the prism is the slope of the disturbance,
@@ -243,9 +285,27 @@ using namespace tokenstat;
         + creaseG * catchGain * (0.55 + 1.10 * cleared)
         + crest * 0.055 + trough * 0.020;
     alpha *= mask * (1.0 + lift * 0.18);
+    float concentration = exp(-length((position - focus) / max(float2(1.0), size * 0.24)));
+    alpha *= mix(1.0, 0.18 + concentration * 0.82, gathering);
 
     colour += (hash21(position + time) - 0.5) / 255.0;
     colour = clamp(colour, 0.0, 1.0);
     alpha = clamp(alpha, 0.0, 0.30);
-    return half4(half3(colour * alpha), half(alpha));
+    float incoming = 0.0;
+    if (sendTime > 0.0) {
+        incoming = inwardLight(position, float2(-size.x * 0.05, size.y * 0.18), inlet, sendTime, 1.0)
+            + inwardLight(position, float2(size.x * 0.08, size.y * 0.88), inlet, sendTime, 2.0)
+            + inwardLight(position, float2(size.x * 0.28, -size.y * 0.05), inlet, sendTime, 3.0);
+        if (trail0.w > 0.0) { incoming += inwardLight(position, trail0.xy, inlet, sendTime, 4.0) * trail0.w; }
+        if (trail2.w > 0.0) { incoming += inwardLight(position, trail2.xy, inlet, sendTime, 5.0) * trail2.w; }
+        // Use the original click location for its incoming light, even as
+        // the actual ring collapses towards the mark.
+        if (originalClick.w > 0.0) {
+            incoming += inwardLight(position, originalClick.xy, inlet, sendTime, 6.0) * originalClick.w;
+        }
+    }
+    float lightAlpha = min(0.55, incoming * gathering * mask * 0.75);
+    float3 lightColour = mix(float3(accent.rgb), float3(0.84, 0.91, 1.0), 0.52);
+    return half4(half3(colour * alpha + lightColour * lightAlpha * (1.0 - alpha)),
+                 half(alpha + lightAlpha * (1.0 - alpha)));
 }

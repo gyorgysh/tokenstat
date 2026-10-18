@@ -546,6 +546,11 @@ private struct ClientRecentChatContent: View {
                 && machine != nil && account.signedIn && !needsSavedCopy && model.savedCopy == nil
         }
         guard stillCurrent() else { return }
+        if !refresh, model.consumePreparedInitialPresentation(workspaceID: workspaceID, conversationID: chatID) {
+            loaded = true
+            liveItemExists = true
+            return
+        }
         savedUnavailable = false
         accessAllowed = nil
         hostProtocol = nil

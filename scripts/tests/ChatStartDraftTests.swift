@@ -101,6 +101,33 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
         let cap = ChatStartDraft(); cap.activate(scope: alice, session: 4, repositoryID: "cap"); cap.agent = codex
         cap.attachments = (0..<20).map { .init(id: "file-\($0)", name: "file", mediaType: nil, size: 1) }
         precondition(!cap.beginImport(cap.attachmentReference!), "The twenty-file limit applies to staged landing files")
+        let preparing = ChatStartDraft()
+        preparing.activate(scope: alice, session: 4, repositoryID: "fresh")
+        preparing.text = "Send once"; preparing.agent = codex; preparing.attachments = [picture]
+        let sending = preparing.begin(available: ["fresh"])!
+        let began = preparing.preparationStartedAt
+        preparing.transferred(sending, preparingPresentation: true)
+        precondition(preparing.text.isEmpty && preparing.attachments.isEmpty && preparing.isSubmitting,
+                     "The retained conversation owns the only sendable copy while the prism stays up")
+        precondition(preparing.preparationStartedAt == began && began != nil,
+                     "Transferring ownership must not restart the prism animation")
+        precondition(preparing.begin(available: ["fresh"]) == nil)
+        precondition(preparing.ownsPresentation(sending, scope: alice, session: 4))
+        precondition(!preparing.ownsPresentation(sending, scope: bob, session: 4))
+        precondition(!preparing.ownsPresentation(sending, scope: alice, session: 5))
+        preparing.retire()
+        precondition(!preparing.isSubmitting && !preparing.ownsPresentation(sending, scope: alice, session: 4))
+        preparing.activate(scope: alice, session: 4, repositoryID: "fresh")
+        precondition(preparing.text.isEmpty && preparing.attachments.isEmpty,
+                     "Leaving during preload cannot restore a duplicate of the transferred send")
+        preparing.text = "Later message"
+        let later = preparing.begin(available: ["fresh"])!
+        preparing.transferred(later, preparingPresentation: true)
+        preparing.finishPresentation(sending)
+        precondition(preparing.ownsPresentation(later, scope: alice, session: 4),
+                     "An old preload completion cannot dismiss a newer presentation")
+        preparing.finishPresentation(later)
+        precondition(!preparing.isSubmitting && preparing.preparationStartedAt == nil)
         print("New chat landing: local attachment ownership, repository/account restoration, one-time unbound carry, stale picker/drop guards, immutable setup, failure retention and explicit empty Open chat passed")
     }
 }

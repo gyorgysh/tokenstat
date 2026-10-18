@@ -546,20 +546,10 @@ struct LogoMark: View {
     /// mark's job here is only to acknowledge the pull.
     @State private var pulse = false
 
-    /// Ink bounds inside the 64 unit artboard.
-    private static let inkOrigin = CGPoint(x: 11, y: 10)
-    private static let inkSide: CGFloat = 42
-
-    private static let bars: [(y: CGFloat, height: CGFloat, color: Color)] = [
-        (34, 18, Color(red: 0xC3 / 255, green: 0xB0 / 255, blue: 0xFF / 255)),
-        (22, 30, Color(red: 0x8B / 255, green: 0x5C / 255, blue: 0xF6 / 255)),
-        (10, 42, Color(red: 0xE8 / 255, green: 0x79 / 255, blue: 0xF9 / 255)),
-    ]
-
     var body: some View {
         // One scale factor from the artboard, so every number above is the
         // website's own and none of them are re-derived by hand.
-        let unit = size / Self.inkSide
+        let unit = size / TokenstatLogoGeometry.inkSide
 
         ZStack(alignment: .topLeading) {
             // Offsets do not participate in layout, so without this the ZStack
@@ -570,10 +560,10 @@ struct LogoMark: View {
             Color.clear
                 .frame(width: size, height: size)
                 .allowsHitTesting(false)
-            ForEach(Array(Self.bars.enumerated()), id: \.offset) { index, bar in
-                RoundedRectangle(cornerRadius: 3.5 * unit)
+            ForEach(Array(TokenstatLogoGeometry.bars.enumerated()), id: \.offset) { index, bar in
+                RoundedRectangle(cornerRadius: TokenstatLogoGeometry.cornerRadius * unit)
                     .fill(bar.color)
-                    .frame(width: 12 * unit, height: bar.height * unit)
+                    .frame(width: bar.rect.width * unit, height: bar.rect.height * unit)
                     // Anchored at the foot, so a bar grows out of the baseline
                     // it shares with the other two rather than shrinking in
                     // place. Each starts a beat after the one before it.
@@ -597,8 +587,8 @@ struct LogoMark: View {
                         value: pulse
                     )
                     .offset(
-                        x: (11 + CGFloat(index) * 15 - Self.inkOrigin.x) * unit,
-                        y: (bar.y - Self.inkOrigin.y) * unit
+                        x: bar.rect.minX * unit,
+                        y: bar.rect.minY * unit
                     )
             }
         }

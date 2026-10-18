@@ -2267,7 +2267,8 @@ struct RootView: View {
 
     private func sendNewChat() async {
         guard let submission = chatStart.begin(available: Set(workspaces.folders.map(\.id))) else { return }
-        defer { chatStart.failed(submission, message: nil) }
+        let deadline = ContinuousClock.now.advanced(by: ChatStartPreparation.budget)
+        defer { chatStart.failed(submission, message: nil); chatStart.finishPresentation(submission) }
         func current() -> Bool {
             !Task.isCancelled && route.isGlobal(.newChat)
                 && chatStart.accepts(submission, scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation)
@@ -2309,11 +2310,17 @@ struct RootView: View {
             await abandon(nil)
             return
         }
+        chatStart.transferred(submission, preparingPresentation: true)
+        await ChatStartPreparation.preload(until: deadline) { await reader.sendInitialDraft() }
+        guard !Task.isCancelled, route.isGlobal(.newChat),
+              workspaces.folders.contains(where: { $0.id == submission.repositoryID }),
+              chatStart.ownsPresentation(submission, scope: WorkSessionContext.shared.scope,
+                                        session: WorkSessionContext.shared.generation) else { return }
+        // Fold the first rows while the prism still covers the page.
+        reader.prepareInitialPresentation()
         chat.saveDraftNow()
         chat = reader
-        chatStart.transferred(submission)
         openSection(.chat, in: submission.repositoryID)
-        await reader.sendInitialDraft()
     }
 
     /// Every registered folder, each opening onto its chats and sessions.

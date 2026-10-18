@@ -85,6 +85,15 @@ Open chat creates the normal composer for image/file-first messages without
 starting a model turn. Repository identifiers,
 host requests and saved sidebar preferences retain their existing formats.
 
+Send draws the interactive glass field into the tokenstat logo, whose three
+bars refract the light while creation, attachment staging and
+the first delivery prepare the retained conversation. Preloading uses up to
+1.6 seconds from the send, with no minimum animation delay; slower deliveries
+continue in the chat. Opening the prepared reader avoids a second fetch and
+loading cover. Leaving during this handoff keeps the transferred draft and
+any in-flight delivery with its conversation. Reduced motion, dim flashing
+lights and reduced transparency use a still or solid prism.
+
 ## Chat inspector
 
 Context and MCP details use the host's read-only `chat.inspection` response.

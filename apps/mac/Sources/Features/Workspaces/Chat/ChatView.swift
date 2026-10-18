@@ -520,6 +520,7 @@ struct ChatView: View {
             Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
                 .error("view task ws=\(workspaceID) active=\(isActive)")
             guard isActive, loadsWorkspace else { return }
+            guard !model.consumePreparedInitialPresentation(workspaceID: workspaceID) else { return }
             await model.load(workspaceID: workspaceID)
         }
         // What is on screen, for the notifier. This pane stays mounted behind

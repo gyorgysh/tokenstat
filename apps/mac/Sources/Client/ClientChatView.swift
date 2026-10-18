@@ -980,11 +980,11 @@ struct ClientChatThread: View {
             model.draft = offered
         }
         guard let chat = model.chats.first(where: { $0.id == chatID }) else { return }
-        // Already open, with rows on screen. Re-selecting would empty the
-        // transcript and read it back, which is this screen blanking and
-        // re-scrolling every time it is pushed, including straight after
-        // the launcher picked the conversation for you.
-        if model.savedCopy == nil && (model.selected?.id != chat.id || model.transcriptItems.isEmpty) {
+        // An already loaded page can be empty while the first upload or
+        // sign-in waits. Re-selecting it would put the loading cover back
+        // over the reader prepared by the new-chat screen.
+        if model.savedCopy == nil && (model.selected?.id != chat.id
+            || (model.transcriptItems.isEmpty && !model.hasPreparedInitialTranscript)) {
             guard !Task.isCancelled, isActive else { return }
             if let session { await session.select(chat) }
             else { await model.select(chat) }

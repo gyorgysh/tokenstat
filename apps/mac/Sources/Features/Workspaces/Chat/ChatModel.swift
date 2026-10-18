@@ -841,6 +841,33 @@ final class ChatModel {
         await sendFromComposer()
     }
 
+    @ObservationIgnored private var preparedInitialPresentation: (reference: WorkReference, session: UInt64, epoch: UInt64, consumed: Bool)?
+
+    /// The retained reader already owns a live page, including a valid empty
+    /// page while an upload or sign-in is pending. Its first mount should not
+    /// open it again and put a loading cover over the work just prepared.
+    func prepareInitialPresentation() {
+        guard liveWindowLoaded, let reference = currentReference else { return }
+        preparedInitialPresentation = (reference, WorkSessionContext.shared.generation, eventsEpoch, false)
+        _ = transcriptItems
+    }
+
+    func consumePreparedInitialPresentation(workspaceID: String, conversationID: String? = nil) -> Bool {
+        guard isReady(for: workspaceID), let preparedInitialPresentation,
+              !preparedInitialPresentation.consumed, hasPreparedInitialTranscript,
+              conversationID == nil || preparedInitialPresentation.reference.itemID == conversationID else { return false }
+        self.preparedInitialPresentation?.consumed = true
+        return true
+    }
+
+    var hasPreparedInitialTranscript: Bool {
+        guard liveWindowLoaded, let preparedInitialPresentation else { return false }
+        return preparedInitialPresentation.reference == currentReference
+            && preparedInitialPresentation.reference.scope == WorkSessionContext.shared.scope
+            && preparedInitialPresentation.session == WorkSessionContext.shared.generation
+            && preparedInitialPresentation.epoch == eventsEpoch
+    }
+
     func sendFromComposer() async {
         guard let submission = heldSubmission else { return }
         let outer = composerSendToken

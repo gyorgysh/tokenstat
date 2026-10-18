@@ -173,7 +173,8 @@ struct ClientNewChatScreen: View {
     private func send() async {
         guard workspaces.isConnecting == nil, let host, let submission = draft.begin(available: Set(workspaces.folders.map(\.id))),
               let folder = workspaces.folders.first(where: { $0.id == submission.repositoryID }) else { return }
-        defer { draft.failed(submission, message: nil) }
+        let deadline = ContinuousClock.now.advanced(by: ChatStartPreparation.budget)
+        defer { draft.failed(submission, message: nil); draft.finishPresentation(submission) }
         let raw = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
         func current() -> Bool {
             !Task.isCancelled && navigation.showingNewChat && workspaces.connectedKey == host.peerKey
@@ -214,7 +215,13 @@ struct ClientNewChatScreen: View {
             await abandon(nil)
             return
         }
-        draft.transferred(submission)
+        draft.transferred(submission, preparingPresentation: true)
+        await ChatStartPreparation.preload(until: deadline) { await reader.sendInitialDraft() }
+        guard !Task.isCancelled, navigation.showingNewChat, workspaces.connectedKey == host.peerKey,
+              workspaces.folders.contains(where: { $0.id == submission.repositoryID }),
+              draft.ownsPresentation(submission, scope: WorkSessionContext.shared.scope,
+                                     session: WorkSessionContext.shared.generation) else { return }
+        reader.prepareInitialPresentation()
         navigation.showingNewChat = false
         navigation.destination = .workspaces
         let presentation = UUID()
@@ -223,7 +230,6 @@ struct ClientNewChatScreen: View {
                 hostName: host.name, chatID: created.id, retainedSession: session)
                 .environment(\.clientChatPresentationID, presentation)
         )), from: nil)
-        await reader.sendInitialDraft()
     }
 }
 #endif

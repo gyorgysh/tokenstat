@@ -67,9 +67,11 @@ struct ChatStartPage: View {
 
     var body: some View {
         ZStack {
-            ChatStartLiquidSurface(motion: motion, isFullScreen: isFullScreen, lift: writing,
-                                   parallax: parallax, revealed: revealed, hovering: hovering,
-                                   active: active && !agentPickerFocused && scenePhase == .active && !quiet,
+            ChatStartLiquidSurface(motion: motion, isFullScreen: isFullScreen, lift: writing || draft.isSubmitting,
+                                   preparingSince: draft.isSubmitting ? draft.preparationStartedAt : nil,
+                                   parallax: draft.isSubmitting ? .zero : parallax, revealed: revealed,
+                                   hovering: hovering || draft.isSubmitting,
+                                   active: active && !agentPickerFocused && scenePhase == .active && (!quiet || draft.isSubmitting),
                                    lit: active && !agentPickerFocused && scenePhase == .active)
             GeometryReader { pane in
                 ScrollView {
@@ -104,12 +106,21 @@ struct ChatStartPage: View {
                     }
                 }
             }
+            .opacity(draft.isSubmitting ? 0 : 1)
+            .scaleEffect(draft.isSubmitting && !reduceMotion ? 0.975 : 1)
+            .accessibilityHidden(draft.isSubmitting)
+            .allowsHitTesting(!draft.isSubmitting)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: draft.isSubmitting)
             .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: receive)
             .blur(radius: agentPickerFocused && !reduceTransparency ? 7 : 0)
             .overlay {
                 if agentPickerFocused {
                     Theme.background.opacity(reduceTransparency ? 0.70 : 0.30).allowsHitTesting(false)
                 }
+            }
+            if draft.isSubmitting, let began = draft.preparationStartedAt {
+                ChatStartSendingView(startedAt: began, active: active && scenePhase == .active)
+                    .transition(.opacity)
             }
             if acceptsDrops && (dropTargeted || composerDropTargeted) { ChatDropExperience() }
         }
@@ -130,6 +141,7 @@ struct ChatStartPage: View {
             motion.settled = nil
         })
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: draft.isSubmitting)
         .clipped()
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: receive)
         .onAppear { active = true; synchronizeComposer(); revealed = true }
@@ -155,15 +167,16 @@ struct ChatStartPage: View {
         .onChange(of: writing) { _, _ in activity &+= 1 }
         .onChange(of: draft.attachments) { _, _ in synchronizeComposer() }
         .onChange(of: allowsSend) { _, _ in updateAvailability() }
-        .onChange(of: draft.isSubmitting) { _, _ in updateAvailability() }
+        .onChange(of: draft.isSubmitting) { _, submitting in
+            updateAvailability()
+            if submitting { agentPickerFocused = false; activity &+= 1 }
+        }
         .task(id: catalogOwner) { await loadCatalog() }
     }
 
     private var introduction: some View {
         VStack(spacing: 14) {
-            // The one thing on this page nobody else can draw. A held pose or
-            // a sparkle glyph is what every other agent window opens with.
-            PersonaPastime(seed: personaSeed(for: "new-chat"), size: 58, doing: .leisure)
+            LogoMark(size: 58)
                 .frame(width: 92, height: 74)
                 .accessibilityHidden(true)
             Text(L10n.text("common.new_chat.title"))
@@ -475,6 +488,7 @@ private struct ChatStartLiquidSurface: View {
     let motion: ChatStartSurfaceMotion
     let isFullScreen: Bool
     let lift: Bool
+    let preparingSince: Double?
     let parallax: CGSize
     let revealed: Bool
     /// The pointer is on the page, so the surface is worth a full frame rate.
@@ -510,6 +524,7 @@ private struct ChatStartLiquidSurface: View {
                             .colorEffect(ChatStartGlassField.shader(
                                 size: pane.size, time: time, now: now, motion: motion,
                                 lift: lift ? 1 : 0,
+                                gathering: preparingSince.map { animates ? max(0.001, now - $0) : 0 } ?? 0,
                                 palette: .init(accent: Theme.accent, secondary: Theme.secondary,
                                                background: ChatStartGlassField.ground, dark: colorScheme == .dark)))
                     }
