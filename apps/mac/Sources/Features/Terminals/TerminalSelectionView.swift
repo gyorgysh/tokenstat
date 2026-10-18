@@ -123,14 +123,22 @@ class ClientTerminalInputView: TerminalView {
     // A user drag can move it, but output must keep the held reading position.
     override var contentOffset: CGPoint {
         get { super.contentOffset }
-        set {
-            if let readingOffset, !movingViewport,
-               updatingTerminal || !draggingViewport {
-                super.contentOffset = CGPoint(x: 0, y: min(bottomOffset, max(0, readingOffset)))
-            } else {
-                super.contentOffset = newValue
-            }
-        }
+        set { super.contentOffset = protectedOffset(newValue) }
+    }
+
+    override func setContentOffset(_ contentOffset: CGPoint, animated: Bool) {
+        // UIKit also scrolls the text-input caret through this method. That
+        // path can bypass the property setter, especially with a keyboard
+        // animation, and send a long transcript back towards its beginning.
+        let protects = !movingViewport && (updatingTerminal || !draggingViewport)
+        super.setContentOffset(protectedOffset(contentOffset), animated: protects ? false : animated)
+    }
+
+    private func protectedOffset(_ proposed: CGPoint) -> CGPoint {
+        guard !movingViewport, updatingTerminal || !draggingViewport else { return proposed }
+        // Following is a deliberate position too. A caret visibility request
+        // must not move it between output packets while somebody types.
+        return CGPoint(x: 0, y: min(bottomOffset, max(0, readingOffset ?? bottomOffset)))
     }
 
     private func configureScrolling() {
@@ -214,7 +222,7 @@ class ClientTerminalInputView: TerminalView {
     }
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { draggingViewport = false }
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard scrollMode, !updatingTerminal, !movingViewport else { return }
+        guard scrollMode, draggingViewport, !updatingTerminal, !movingViewport else { return }
         setReadingOffset(contentOffset.y < bottomOffset - lineHeight / 2 ? max(0, contentOffset.y) : nil)
     }
 

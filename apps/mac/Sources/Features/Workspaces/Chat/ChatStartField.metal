@@ -222,7 +222,18 @@ using namespace tokenstat;
 
     // The surface is read where the pointer dragged it from, which is what
     // makes the water move with the mouse and flow back when it stops.
-    float2 warped = position - drag;
+    float2 surfacePoint = position - drag;
+    const float epsilon = 2.0;
+    float rings = ringsAt(surfacePoint, ring0, ring1, ring2);
+    float2 bend = float2(
+        ringsAt(surfacePoint + float2(epsilon, 0.0), ring0, ring1, ring2)
+            - ringsAt(surfacePoint - float2(epsilon, 0.0), ring0, ring1, ring2),
+        ringsAt(surfacePoint + float2(0.0, epsilon), ring0, ring1, ring2)
+            - ringsAt(surfacePoint - float2(0.0, epsilon), ring0, ring1, ring2)) / (2.0 * epsilon);
+    // A ripple refracts the folds underneath it as well as catching light.
+    // Keep the displacement bounded, so overlapping taps bend the same
+    // glass without tearing it or dislodging the controls above it.
+    float2 warped = surfacePoint - clamp(bend * 160.0, float2(-14.0), float2(14.0));
     // Sampling farther from the focus pulls the existing folds inward as
     // send time advances; they do not disappear behind a separate animation.
     warped = focus + (warped - focus) * (1.0 + sendTime * 0.95);
@@ -234,10 +245,6 @@ using namespace tokenstat;
     // rings are cheap to differentiate (no noise), the wipe's rim is where
     // its falloff is halfway, and the crease supplies a permanent trace of
     // colour along the specular lines. Nothing else bends light.
-    const float epsilon = 2.0;
-    float rings = ringsAt(warped, ring0, ring1, ring2);
-    float2 bend = float2(ringsAt(warped + float2(epsilon, 0.0), ring0, ring1, ring2) - rings,
-                         ringsAt(warped + float2(0.0, epsilon), ring0, ring1, ring2) - rings) / epsilon;
     float bendAmount = length(bend);
     float dragAmount = length(drag);
     float rim = cleared * (1.0 - cleared) * 4.0;

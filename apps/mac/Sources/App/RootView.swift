@@ -5282,10 +5282,10 @@ private struct ActiveSessionRow: View {
 
     /// The context reading: a percentage when a window is known, otherwise
     /// what the last turn sent. `~` when the window came from siblings.
-    /// Zero before the first turn, so the row's shape does not change.
+    /// A missing report stays unknown, including before the first turn.
     private var contextText: String {
         guard let meter = session.meter, let used = meter.contextUsed else {
-            return "0% ctx"
+            return "— ctx"
         }
         guard let window = meter.contextWindow, window > 0 else {
             return L10n.text("apple.rootview.0_ctx.a68da93d", "\(formatTokens(used))")
@@ -5376,14 +5376,7 @@ private struct ActiveSessionRow: View {
                                   deleteTitle: session.alive ? L10n.text("apple.rootview.stop_and_close.52b40c33") : L10n.text("apple.rootview.close_terminal.7d02fb04"),
                                   delete: close, hover: { _ in }, actions: { menu })
                 SidebarDetailButton(title: title, isPresented: $showingDetails) {
-                    SidebarDetailCard(title: title, subtitle: dynamicTitle.map { L10n.text("apple.rootview.terminal_0.f851d42b", "\($0)") } ?? L10n.text("apple.rootview.terminal.e0926fda"),
-                                      symbol: "terminal", path: session.reportedCwd ?? session.cwd,
-                                      fields: detailFields, git: folder.git) {
-                        Text(L10n.text("common.session_identity.title")).font(Theme.callout.weight(.semibold))
-                        SessionIdentityRows(entries: session.identityEntries,
-                                            truncated: session.sessionIdentities?.truncated ?? false,
-                                            reportedTotal: session.sessionIdentities?.total)
-                    }
+                    SidebarTerminalDetailCard(session: session, folder: folder)
                 }
                 .disabled(renaming)
             }
@@ -5415,31 +5408,6 @@ private struct ActiveSessionRow: View {
         items.append(.init(session.alive ? L10n.text("apple.rootview.stop_and_close.9712e7bb") : L10n.text("common.close"), icon: .delete,
                            destructive: true, action: close))
         return items
-    }
-
-    private var detailFields: [SidebarDetailField] {
-        var fields = [
-            SidebarDetailField(title: L10n.text("apple.rootview.project.98595978"), value: folder.name, symbol: "folder"),
-            SidebarDetailField(title: L10n.text("apple.rootview.computer.76ed42d2"), value: folder.sidebarComputer, symbol: "laptopcomputer"),
-            SidebarDetailField(title: L10n.text("apple.rootview.status.920e413c"), value: session.statusLabel, symbol: "circle.dotted", tint: session.state == .needsAttention ? Theme.warning : session.state == .failed ? Theme.danger : session.state == .working || session.state == .starting ? Theme.stateWorking : Theme.controlGlyph),
-            SidebarDetailField(title: L10n.text("apple.rootview.command.71316697"), value: session.command, symbol: "terminal", monospaced: true),
-        ]
-        if let meter = session.meter {
-            fields.append(.init(title: L10n.text("apple.rootview.tokens.a039dfb9"), value: meter.tokens.formatted(), symbol: "number", numeric: true))
-            fields.append(.init(title: L10n.text("apple.rootview.context.a6e600a1"), value: contextText, symbol: "gauge.with.dots.needle.50percent", numeric: true))
-            if let model = meter.model { fields.append(.init(title: L10n.text("apple.rootview.model.5e2c614c"), value: model, symbol: "sparkles")) }
-            if let cost = meter.costMicros {
-                fields.append(.init(title: L10n.text("apple.rootview.list_price.5d5835fd"), value: Money(micros: cost, estimated: meter.estimated,
-                                                                    complete: meter.complete).formatted,
-                                    symbol: "dollarsign.circle"))
-            }
-        } else {
-            fields.append(.init(title: L10n.text("apple.rootview.tokens.a039dfb9"), value: "Not reported by this terminal", symbol: "number"))
-        }
-        if let resources = resourceStats {
-            fields.append(.init(title: L10n.text("apple.rootview.resources.e89b30aa"), value: resources, symbol: "cpu"))
-        }
-        return fields
     }
 
     /// The agent's mark with a small terminal badge, so a terminal running

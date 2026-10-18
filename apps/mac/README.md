@@ -96,6 +96,11 @@ lights and reduced transparency use a still or solid prism.
 
 ## Chat inspector
 
+Mac sidebar detail cards refresh while open, including context counts and
+capacity, usage, native session IDs and repository changes. Terminal cards
+observe their retained session directly, including its final usage after exit.
+Unreported context stays unknown rather than appearing as zero percent.
+
 Context and MCP details use the host's read-only `chat.inspection` response.
 The combined statistics panel shows the latest reported prompt footprint,
 fresh/cache breakdown when reported, and archive-wide conversation totals.

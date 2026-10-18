@@ -866,8 +866,8 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
                         attention: info.attention,
                         programStatus: info.programStatus
                     )
-                    applyMeter(from: info)
                 }
+                applyMeter(from: info)
                 if let code = info.exitCode {
                     clearAttention()
                     exitCode = code
@@ -1266,6 +1266,8 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         idleCheckTask?.cancel()
         idleCheckTask = nil
         if !alive {
+            self.cpuPercent = nil
+            self.memoryMb = nil
             clearAttention()
             state = exitCode != nil ? .stopped : .none
             return
@@ -1406,10 +1408,10 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         // meter that has not logged a turn yet, so the row starts at $0.00
         // and counts up instead of appearing at whatever it has reached.
         let cost = info.costMicros
-        let used = info.contextUsed.flatMap { $0 > 0 ? $0 : nil }
+        let used = info.contextUsed
         let window = info.contextWindow.flatMap { $0 > 0 ? $0 : nil }
         let next: SessionMeter?
-        if tokens > 0 || cost != nil {
+        if tokens > 0 || cost != nil || used != nil {
             next = SessionMeter(
                 tokens: tokens,
                 costMicros: cost,
@@ -1425,6 +1427,24 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
             next = nil
         }
         if meter != next { meter = next }
+    }
+
+    /// The details card can be open while its terminal has backed off or
+    /// exited. Refresh its final counters too, without mounting the emulator.
+    func refreshDetails() async {
+        guard !removed, !isPending, let reference = workReference,
+              WorkCacheAccess.canRead(reference) else { return }
+        let generation = WorkSessionContext.shared.generation
+        guard let info = try? await Bridge.ptyInfo(id: hostID), !Task.isCancelled,
+              !removed, workReference == reference,
+              generation == WorkSessionContext.shared.generation,
+              WorkCacheAccess.canRead(reference) else { return }
+        if alive != info.alive { alive = info.alive }
+        if exitCode != info.exitCode { exitCode = info.exitCode }
+        applyState(alive: info.alive, exitCode: info.exitCode, lastActivityAtMs: info.lastActivityAtMs,
+                   activity: info.activity, cpuPercent: info.cpuPercent, memoryMb: info.memoryMb,
+                   attention: info.attention, programStatus: info.programStatus)
+        applyMeter(from: info)
     }
 
     /// Start the working-to-idle timer if one is not already running.

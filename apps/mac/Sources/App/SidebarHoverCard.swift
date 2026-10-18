@@ -175,11 +175,14 @@ struct SidebarChatDetailCard: View {
     let folder: WorkspaceFolder
     @State private var usage: ChatUsageTotals?
     @State private var sessionIdentities: SessionIdentities?
+    @State private var inspection: ChatInspection?
+    @State private var refreshedConversation: ChatConversation?
+    @State private var refreshedGit: GitStatus?
+    @Environment(\.scenePhase) private var scenePhase
     private struct ReadOwner: Hashable {
         var reference: WorkReference?
         var generation: UInt64
         var backend: String
-        var updatedAtMs: Int64
     }
     private var readOwner: ReadOwner {
         let destination = WorkDestinationResolver.route(folderID: folder.id)
@@ -190,7 +193,7 @@ struct SidebarChatDetailCard: View {
             }
         }
         return ReadOwner(reference: reference, generation: WorkSessionContext.shared.generation,
-                         backend: conversation.backend, updatedAtMs: conversation.updatedAtMs)
+                         backend: conversation.backend)
     }
     @State private var finishedLoading = false
     @State private var loadFailed = false
@@ -202,8 +205,12 @@ struct SidebarChatDetailCard: View {
             symbol: "bubble.left.and.bubble.right",
             path: folder.path,
             fields: fields,
-            git: folder.git
+            git: refreshedGit ?? folder.git
         ) {
+            if loadFailed, finishedLoading {
+                Text(L10n.text("apple.sidebarhovercard.usage_unavailable"))
+                    .font(Theme.caption).foregroundStyle(.secondary)
+            }
             ThemeRule()
             Text(L10n.text("common.session_identity.title")).font(Theme.callout.weight(.semibold))
             SessionIdentityRows(entries: SessionIdentityPresentation.entries(localID: conversation.id, kind: .conversation, sessions: sessionIdentities),
@@ -211,23 +218,48 @@ struct SidebarChatDetailCard: View {
         }
         .task(id: readOwner) {
             let requested = readOwner
-            usage = nil; sessionIdentities = nil; finishedLoading = false
+            usage = nil; sessionIdentities = nil; inspection = nil
+            refreshedConversation = nil; refreshedGit = nil; finishedLoading = false; loadFailed = false
             guard let reference = requested.reference, WorkCacheAccess.canRead(reference) else {
                 loadFailed = true; finishedLoading = true; return
             }
             let route = Bridge.chatRoute(workspaceID: folder.id)
-            async let pageRead = try? Bridge.chatEventPage(id: conversation.id, cursor: nil, limit: 1, peer: route.peer)
-            async let inspectionRead = try? Bridge.chatInspection(id: conversation.id, peer: route.peer)
-            let (page, inspection) = await (pageRead, inspectionRead)
-            guard !Task.isCancelled, readOwner == requested, WorkCacheAccess.canRead(reference) else { return }
-            usage = page?.usage.flatMap { $0.isValid ? $0 : nil }
-            sessionIdentities = inspection?.backend == conversation.backend ? inspection?.sessions : nil
-            loadFailed = page == nil
-            finishedLoading = true
+            while !Task.isCancelled, readOwner == requested, WorkCacheAccess.canRead(reference) {
+                if scenePhase == .active {
+                    async let pageRead = try? Bridge.chatEventPage(id: conversation.id, cursor: nil, limit: 1, peer: route.peer)
+                    async let inspectionRead = try? Bridge.chatInspection(id: conversation.id, peer: route.peer)
+                    async let listRead = try? Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
+                    let (page, freshInspection, chats) = await (pageRead, inspectionRead, listRead)
+                    guard !Task.isCancelled, readOwner == requested, WorkCacheAccess.canRead(reference) else { return }
+                    if let totals = page?.usage, totals.isValid { usage = totals }
+                    if let freshInspection, freshInspection.backend == conversation.backend {
+                        inspection = freshInspection
+                        sessionIdentities = freshInspection.sessions
+                    }
+                    if let chat = chats?.first(where: { $0.id == conversation.id }) { refreshedConversation = chat }
+                    loadFailed = page == nil
+                    finishedLoading = true
+                }
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            }
+        }
+        .task(id: readOwner) {
+            let requested = readOwner
+            guard let reference = requested.reference else { return }
+            // Git can take much longer than an inspection read. Keep it off
+            // the usage loop so a large working tree cannot freeze context.
+            while !Task.isCancelled, readOwner == requested, WorkCacheAccess.canRead(reference) {
+                if scenePhase == .active, let fresh = try? await SidebarDetailRefresh.folder(folder.id) {
+                    guard !Task.isCancelled, readOwner == requested, WorkCacheAccess.canRead(reference) else { return }
+                    refreshedGit = fresh.git
+                }
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            }
         }
     }
 
     private var fields: [SidebarDetailField] {
+        let conversation = refreshedConversation ?? self.conversation
         var fields = [
             SidebarDetailField(title: L10n.text("apple.sidebarhovercard.project.98595978"), value: folder.name, symbol: "folder"),
             SidebarDetailField(title: L10n.text("apple.sidebarhovercard.computer.76ed42d2"), value: folder.sidebarComputer, symbol: "laptopcomputer"),
@@ -235,6 +267,14 @@ struct SidebarChatDetailCard: View {
         ]
         if let model = conversation.model, !model.isEmpty {
             fields.append(.init(title: L10n.text("apple.sidebarhovercard.model.5e2c614c"), value: model, symbol: "sparkles"))
+        }
+        if let inspection {
+            let context = inspection.contextUsed.map { used in
+                inspection.contextWindow.map { "\(used.formatted()) / \($0.formatted())" } ?? used.formatted()
+            } ?? inspection.contextWindow.map { "— / \($0.formatted())" }
+                ?? L10n.text("apple.sidebarhovercard.usage_not_reported")
+            fields.append(.init(title: L10n.text("apple.rootview.context.a6e600a1"), value: context,
+                                symbol: "gauge.with.dots.needle.50percent", numeric: true))
         }
         if let usage, !usage.isEmpty {
             let total = Decimal(usage.input) + Decimal(usage.output) + usage.cache
@@ -249,6 +289,16 @@ struct SidebarChatDetailCard: View {
         }
         fields.append(.init(title: L10n.text("apple.sidebarhovercard.last_message.ee5c88bf"), value: sidebarDate(conversation.lastMessageAtMs), symbol: "clock"))
         return fields
+    }
+}
+
+enum SidebarDetailRefresh {
+    static func folder(_ id: String) async throws -> WorkspaceFolder {
+        let route = WorkDestinationResolver.route(folderID: id)
+        if let peer = route.peer {
+            return try await Bridge.onPeer(peer, "workspace.status", ["id": route.workspaceID], as: WorkspaceFolder.self)
+        }
+        return try await Bridge.workspaceStatus(id: id)
     }
 }
 
