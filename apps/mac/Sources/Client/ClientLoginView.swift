@@ -91,6 +91,12 @@ struct ClientLoginView: View {
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
+                    // Keep the gesture discoverable in production as well as
+                    // review builds; it only requests the existing demo sign-in.
+                    Text(L10n.text("apple.clientloginview.demo_login_instructions"))
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
 
                 if let message = account.errorMessage {
