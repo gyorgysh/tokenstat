@@ -2252,9 +2252,11 @@ struct RootView: View {
                       onAddFolders: { urls in
                           guard let owner = chatStart.owner else { return }
                           let selection = chatStart.repositoryID
+                          let reference = chatStart.attachmentReference
                           Task {
                               let added = await workspaces.add(urls)
                               guard route.isGlobal(.newChat), chatStart.owner == owner,
+                                    chatStart.attachmentReference == reference,
                                     chatStart.repositoryID == selection, !chatStart.isSubmitting,
                                     let added, workspaces.folders.contains(where: { $0.id == added }) else { return }
                               chatStart.repositoryID = added
