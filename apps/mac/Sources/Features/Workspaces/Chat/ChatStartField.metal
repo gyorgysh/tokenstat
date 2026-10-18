@@ -10,6 +10,13 @@
 // that a pointer wipes a healing hole in, rings that travel out from a click
 // and bend the surface as they pass, and chromatic dispersion on any face
 // steep enough to deserve it.
+//
+// Around that surface sit layers at different depths, each leaning by its
+// own amount when the pointer moves, which is what reads as depth rather
+// than as a flat picture: a deep bank of mist, shafts of light falling
+// through it, dust hanging in the shafts at three distances, near wisps in
+// front of the glass, and the spectrum the composer card throws onto the
+// floor where the light passes its edge.
 
 #include <metal_stdlib>
 #include <SwiftUI/SwiftUI_Metal.h>
@@ -27,6 +34,14 @@ constant float2 kLightRadii = float2(0.62, 0.58);
 constant float kFoldScale = 205.0;
 /// How far a ring's front travels each second, in points.
 constant float kRingSpeed = 430.0;
+/// Corner radius of the composer card, for the prism around it.
+constant float kCardRadius = 22.0;
+/// How far each layer leans, in points, for a pointer at the pane's edge.
+/// Negative layers sit behind the glass and lean away like the key light;
+/// positive ones sit in front of it and swing the other way.
+constant float kLeanDeep = -26.0;
+constant float kLeanShafts = -20.0;
+constant float kLeanNear = 14.0;
 
 static float hash21(float2 p) {
     float3 q = fract(float3(p.x, p.y, p.x) * float3(0.1031, 0.1030, 0.0973));
@@ -43,6 +58,21 @@ static float valueNoise(float2 p) {
     float c = hash21(cell + float2(0.0, 1.0));
     float d = hash21(cell + float2(1.0, 1.0));
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+static float2 hash22(float2 p) {
+    return float2(hash21(p), hash21(p + float2(19.19, 7.31)));
+}
+
+static float fbm3(float2 p) {
+    float sum = 0.0;
+    float amplitude = 0.55;
+    for (int octave = 0; octave < 3; ++octave) {
+        sum += valueNoise(p) * amplitude;
+        p = p * 2.07 + float2(1.7, 9.2);
+        amplitude *= 0.5;
+    }
+    return sum;
 }
 
 static float fbm(float2 p) {
@@ -168,22 +198,158 @@ static float4 gatherMark(float4 mark, float2 focus, float gathering) {
     return mark;
 }
 
+
+/// The same mask as `keyLight`, reaching further, for the layers that are
+/// allowed out towards the corners: the shafts fall from above the pane and
+/// the deep mist fills the room the light is in.
+static float roomLight(float2 point, float2 size) {
+    if (size.x < 1.0 || size.y < 1.0) { return 0.0; }
+    float2 offset = (point / size - kLightCentre) / (kLightRadii * 1.55);
+    return 1.0 - smoothstep(0.30, 1.0, length(offset));
+}
+
+/// A bank of fog a long way behind the glass. Two slow layers sheared
+/// against each other, so it billows rather than scrolls.
+static float deepMist(float2 point, float time) {
+    float2 p = point * 0.0024;
+    float2 shear = float2(fbm3(p * 0.7 + float2(time * 0.006, 3.1)),
+                          fbm3(p * 0.6 + float2(7.4, -time * 0.005)));
+    float body = fbm3(p + (shear - 0.5) * 1.6 + float2(-time * 0.010, time * 0.004));
+    return smoothstep(0.22, 0.82, body);
+}
+
+/// Light falling from above the pane through the deep mist. The beams are
+/// noise in angle around a source above the top edge, so they come in uneven
+/// widths, and they sway rather than rotate. Each one is brightest where it
+/// enters and fades on its way down.
+static float shafts(float2 point, float2 size, float2 lean, float time) {
+    float2 source = float2(size.x * 0.56, -size.y * 0.42) + lean * kLeanShafts;
+    float2 ray = point - source;
+    float reach = length(ray);
+    if (reach < 1.0) { return 0.0; }
+    float angle = atan2(ray.x, ray.y);
+    float sway = sin(time * 0.045) * 0.05 + sin(time * 0.027 + 1.3) * 0.03;
+    float beams = valueNoise(float2((angle + sway) * 11.0, time * 0.03));
+    beams = beams * 0.65 + valueNoise(float2((angle - sway * 0.6) * 27.0 + 5.0, time * 0.05)) * 0.35;
+    beams = smoothstep(0.48, 0.92, beams);
+    float span = size.y * 1.45;
+    float fall = saturate(1.0 - (reach - size.y * 0.40) / span);
+    // A cone, not a fan across the whole sky.
+    float cone = 1.0 - smoothstep(0.30, 0.62, abs(angle));
+    return beams * fall * fall * cone;
+}
+
+/// Dust hanging in the light at one depth. One mote at most per cell, kept
+/// clear of the cell's edges, so a pixel only ever has to ask its own cell.
+/// Deeper tiers are smaller, softer and slower; the near one is larger and
+/// out of focus, which is most of what sells the distance.
+static float motes(float2 point, float cell, float radius, float softness,
+                   float density, float rise, float time, float seed) {
+    float2 p = (point + float2(0.0, time * rise)) / cell;
+    float2 id = floor(p);
+    float pick = hash21(id + seed);
+    if (pick > density) { return 0.0; }
+    float2 centre = 0.22 + hash22(id + seed * 3.1) * 0.56;
+    // Each mote wanders a little on its own.
+    float wander = time * (0.10 + pick * 0.25) + pick * 37.0;
+    centre += float2(sin(wander), cos(wander * 0.8)) * 0.08;
+    float distance = length((fract(p) - centre) * cell);
+    float disc = 1.0 - smoothstep(radius * (1.0 - softness), radius, distance);
+    float twinkle = 0.55 + 0.45 * sin(time * (0.6 + pick * 1.3) + pick * 91.0);
+    return disc * twinkle;
+}
+
+/// Wisps in front of the glass. Finer and quicker than the deep bank, and
+/// stretched along their drift, so they read as moving air close to us.
+static float nearMist(float2 point, float time) {
+    float2 p = point * float2(0.0042, 0.0068);
+    float body = fbm3(p + float2(time * 0.022, -time * 0.004));
+    float edge = fbm3(p * 2.3 + float2(-time * 0.017, time * 0.011) + body);
+    return smoothstep(0.50, 0.86, body * 0.7 + edge * 0.45);
+}
+
+/// Signed distance to a rounded rectangle, negative inside.
+static float roundedBox(float2 point, float4 box, float radius) {
+    float2 centre = box.xy + box.zw * 0.5;
+    float2 q = abs(point - centre) - box.zw * 0.5 + radius;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+/// A smooth spectrum from red through violet, for `t` in 0...1.
+static float3 spectrum(float t) {
+    float3 colour = 0.5 + 0.5 * cos(6.28318 * (t * 0.85 + float3(0.0, 0.33, 0.67)));
+    return colour * colour;
+}
+
+/// What the composer card does to the light behind it. Its edge is glass,
+/// so a thin spectral fringe hugs it, brightest on the side the light comes
+/// from, and a caustic falls on the floor under it: a spectrum spread by the
+/// bevel, rippled where the folds pass under.
+static float4 prismAt(float2 point, float4 card, float2 lean, float time, float folds) {
+    if (card.z < 1.0 || card.w < 1.0) { return float4(0.0); }
+    float distance = roundedBox(point, card, kCardRadius);
+    if (distance < 0.0 || distance > 140.0) { return float4(0.0); }
+    float2 centre = card.xy + card.zw * 0.5;
+    float2 outward = normalize(point - centre + float2(0.0001));
+    // The light sits above and leans with the pointer; the edge that faces
+    // it catches the most.
+    float2 toLight = normalize(float2(-lean.x * 0.6, -1.0));
+    // Steep, so the far edges carry almost none of it: a fringe all the
+    // way round reads as an outline, not as light.
+    float facing = pow(saturate(dot(outward, toLight) * 0.5 + 0.5), 4.0);
+
+    float fringeWidth = 8.0;
+    float fringe = 0.0;
+    float3 fringeColour = float3(0.0);
+    if (distance < fringeWidth) {
+        float t = distance / fringeWidth;
+        fringe = (1.0 - t) * t * 4.0;
+        // The band slides along the edge as the light moves, the way a
+        // bevelled edge flashes a different colour from every angle.
+        float along = point.x * 0.0021 + time * 0.018 + lean.x * 0.12;
+        fringeColour = spectrum(t * 0.9 + along) * (0.6 + 0.4 * valueNoise(float2(point.x * 0.02, time * 0.1)));
+    }
+
+    // The caustic: under the card only, a band that spreads as it falls.
+    float under = point.y - (card.y + card.w);
+    float caustic = 0.0;
+    float3 causticColour = float3(0.0);
+    if (under > 0.0 && under < 130.0) {
+        float across = (point.x - card.x) / card.z;
+        float sides = smoothstep(0.02, 0.22, across) * (1.0 - smoothstep(0.78, 0.98, across));
+        float t = under / 130.0;
+        float ripple = 0.55 + 0.45 * sin(point.x * 0.034 + folds * 5.0 + time * 0.35
+                                         + valueNoise(float2(point.x * 0.012, time * 0.05)) * 4.0);
+        caustic = exp(-t * 3.2) * (1.0 - exp(-under / 10.0)) * sides * ripple;
+        causticColour = spectrum(t * 1.15 + across * 0.25 + lean.x * 0.10 + 0.05);
+    }
+    // Light adds, so the colour runs a little ahead of the coverage.
+    float3 colour = fringeColour * fringe * 0.30 * facing + causticColour * caustic * 0.20;
+    float alpha = fringe * 0.070 * facing + caustic * 0.085;
+    return float4(colour, alpha);
+}
+
 }
 
 using namespace tokenstat;
 
-/// `clock` is (time, lift, dark, send elapsed). Trail marks are (x, y, age,
-/// strength), newest first, so each one's heading comes from the sample
-/// behind it and no direction has to be passed in. Rings are the same shape.
+/// `clock` is (time, lift, dark, send elapsed). `scene` is (lean x, lean y,
+/// depth, unused): the lean is the pointer's eased offset from the centre in
+/// -1...1, depth scales every layer outside the surface itself. `card` is the
+/// composer's frame (x, y, width, height), zero when it is not known. Trail
+/// marks are (x, y, age, strength), newest first, so each one's heading comes
+/// from the sample behind it and no direction has to be passed in. Rings are
+/// the same shape.
 [[ stitchable ]] half4 chatStartField(
     float2 position, half4 current,
-    float2 size, float4 clock,
+    float2 size, float4 clock, float4 scene, float4 card,
     half4 accent, half4 secondary, half4 ground,
     float4 trail0, float4 trail1, float4 trail2, float4 trail3, float4 trail4,
     float4 ring0, float4 ring1, float4 ring2)
 {
+    float room = roomLight(position, size);
+    if (room <= 0.004) { return half4(0.0); }
     float mask = keyLight(position, size);
-    if (mask <= 0.004) { return half4(0.0); }
 
     float time = clock.x;
     float lift = clock.y;
@@ -313,6 +479,54 @@ using namespace tokenstat;
     }
     float lightAlpha = min(0.55, incoming * gathering * mask * 0.75);
     float3 lightColour = mix(float3(accent.rgb), float3(0.84, 0.91, 1.0), 0.52);
-    return half4(half3(colour * alpha + lightColour * lightAlpha * (1.0 - alpha)),
-                 half(alpha + lightAlpha * (1.0 - alpha)));
+
+    // Premultiplied from here on, so the layers stack with a plain "over".
+    // The incoming light runs under the surface, as it always has.
+    float4 result = float4(colour * alpha, alpha);
+    result += float4(lightColour * lightAlpha, lightAlpha) * (1.0 - alpha);
+
+    // The layers around the surface. They are drawn in the room the light
+    // is in, they fall back as a send gathers everything to the logo, and
+    // they lean by depth: behind the glass away from the pointer, in front
+    // of it towards.
+    float depth = scene.z * (1.0 - gathering * 0.85);
+    if (depth > 0.001) {
+        float2 lean = scene.xy;
+        float gain = mix(0.62, 1.0, dark) * depth;
+        float2 pulled = focus + (position - focus) * (1.0 + sendTime * 0.95);
+        float3 cool = mix(float3(accent.rgb), float3(secondary.rgb), 0.35);
+        float3 beamColour = mix(float3(accent.rgb), float3(0.90, 0.94, 1.0), mix(0.30, 0.62, dark));
+
+        // Behind the glass: the deep bank, then light falling through it.
+        float fog = deepMist(pulled - lean * kLeanDeep - drag * 0.15, time);
+        float beam = shafts(pulled, size, lean, time) * (0.35 + fog * 0.65);
+        float fogAlpha = fog * 0.065 * room * gain;
+        float beamAlpha = beam * 0.085 * room * gain;
+        float4 back = float4(cool * fogAlpha, fogAlpha);
+        back = float4(beamColour * beamAlpha, beamAlpha) + back * (1.0 - beamAlpha);
+
+        // Dust in the beams at three depths. The pointer's drag pushes the
+        // near tier hardest, because it is nearest the hand.
+        float far = motes(pulled - lean * kLeanDeep * 0.55 - drag * 0.2, 46.0, 1.3, 0.55, 0.30, -5.0, time, 1.0);
+        float middle = motes(pulled - lean * kLeanDeep * 0.20 - drag * 0.5, 88.0, 2.2, 0.70, 0.22, -8.0, time, 2.0);
+        float close = motes(pulled + lean * kLeanNear - drag * 1.1, 170.0, 5.5, 0.95, 0.16, -13.0, time, 3.0);
+        float lit = saturate(beam * 1.6 + mask * 0.35) * room;
+        float dust = (far * 0.55 + middle * 0.75 + close * 0.70) * lit * gain;
+        float dustAlpha = min(0.32, dust * 0.38);
+        back = float4(beamColour * dustAlpha * 1.35, dustAlpha) + back * (1.0 - dustAlpha);
+
+        result = result + back * (1.0 - result.a);
+
+        // The card's spectrum sits on the floor under the glass as well.
+        float4 prism = prismAt(position, card, lean, time, here.tide) * gain;
+        result = prism + result * (1.0 - prism.a);
+
+        // In front: near wisps, which a wipe clears like the condensation.
+        float wisps = nearMist(position - lean * kLeanNear - drag * 0.8, time) * (1.0 - cleared * 0.85);
+        float wispAlpha = wisps * 0.050 * room * gain;
+        float3 wispColour = mix(float3(ground.rgb), mix(cool, float3(1.0), 0.5), mix(0.55, 0.85, dark));
+        result = float4(wispColour * wispAlpha, wispAlpha) + result * (1.0 - wispAlpha);
+    }
+
+    return half4(clamp(result, 0.0, 1.0));
 }

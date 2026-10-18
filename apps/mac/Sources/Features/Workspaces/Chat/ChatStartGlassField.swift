@@ -27,6 +27,13 @@ struct ChatStartMark {
     /// The last position the parallax was told about, so a jittering mouse
     /// does not publish an offset it has not really earned.
     var settled: CGPoint?
+    /// Where the depth layers are leaning to, as the pointer's offset from
+    /// the centre in -1...1. Zero once the pointer leaves.
+    var aim = CGSize.zero
+    /// The composer card's frame in the pane, for the prism around it.
+    var card = CGRect.zero
+    private var lean = CGSize.zero
+    private var leanedAt: Double?
 
     /// True when the sample was taken, so the caller knows whether this was
     /// movement worth waking the surface for.
@@ -50,6 +57,21 @@ struct ChatStartMark {
         lastSample = 0
         lastWake = 0
         settled = nil
+        aim = .zero
+        lean = .zero
+        leanedAt = nil
+    }
+
+    /// The lean, eased towards the aim at the moment the frame is drawn.
+    /// Easing here rather than in an animation keeps it off the view graph
+    /// like the rest of the motion, and a paused timeline simply holds it.
+    func leaning(at now: Double) -> CGSize {
+        let elapsed = leanedAt.map { min(0.25, max(0, now - $0)) } ?? 0
+        leanedAt = now
+        let follow = 1 - exp(-elapsed / ChatStartGlassField.leanLag)
+        lean.width += (aim.width - lean.width) * follow
+        lean.height += (aim.height - lean.height) * follow
+        return lean
     }
 }
 
@@ -71,6 +93,9 @@ enum ChatStartGlassField {
     static let sampleInterval = 1.0 / 45
     static let trailLifetime = 2.4
     static let ringLifetime = 2.2
+    /// How long the depth layers take to follow the pointer. Slower than the
+    /// wipe, so the room drifts after the hand instead of tracking it.
+    static let leanLag = 0.9
 
     struct Palette {
         var accent: Color
@@ -105,10 +130,14 @@ enum ChatStartGlassField {
     /// lives too.
     @MainActor
     static func shader(size: CGSize, time: Double, now: Double, motion: ChatStartSurfaceMotion,
-                       lift: Float, gathering: Double = 0, palette: Palette) -> Shader {
+                       lift: Float, gathering: Double = 0, depth: Float = 1, palette: Palette) -> Shader {
+        let lean = motion.leaning(at: now)
+        let card = motion.card
         var arguments: [Shader.Argument] = [
             .float2(size),
             .float4(Float(time), lift, palette.dark ? 1 : 0, Float(gathering)),
+            .float4(Float(lean.width), Float(lean.height), depth, 0),
+            .float4(Float(card.minX), Float(card.minY), Float(card.width), Float(card.height)),
             .color(palette.accent),
             .color(palette.secondary),
             .color(palette.background),

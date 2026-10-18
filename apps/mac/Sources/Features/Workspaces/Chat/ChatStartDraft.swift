@@ -60,7 +60,7 @@ final class ChatStartDraft {
                 claimedUnbound.insert(owner.scope)
             }
             restore(scope: owner.scope, repository: repositoryID)
-            if let repositoryID { lastRepository[owner.scope] = repositoryID }
+            if let repositoryID { remember(repositoryID, for: owner.scope) }
             retire()
         }
     }
@@ -173,6 +173,28 @@ final class ChatStartDraft {
             writings[key]?.previews[attachment.id] = nil
         }
     }
+    /// The repository a new chat opens on, per account. Kept across launches,
+    /// so a page that was always opened on one repository does not ask for it
+    /// again every morning. It is a local preference and never leaves the
+    /// machine.
+    private func remember(_ repository: String, for scope: WorkReference.Scope) {
+        lastRepository[scope] = repository
+        UserDefaults.standard.set(repository, forKey: Self.storageKey(for: scope))
+    }
+
+    /// The repository this account last started a chat in, from an earlier
+    /// launch. The page applies it only once that repository is in its list,
+    /// so a folder removed since then is never selected behind the reader's
+    /// back.
+    var rememberedRepository: String? {
+        guard let owner else { return nil }
+        return UserDefaults.standard.string(forKey: Self.storageKey(for: owner.scope))
+    }
+
+    private static func storageKey(for scope: WorkReference.Scope) -> String {
+        "chatStart.lastRepository.\(scope.kind.rawValue).\(scope.origin).\(scope.identity)"
+    }
+
     private func save(scope: WorkReference.Scope, repository: String?) {
         let key = Key(scope: scope, repository: repository)
         // Preserve imports that finished while this presentation was retired.

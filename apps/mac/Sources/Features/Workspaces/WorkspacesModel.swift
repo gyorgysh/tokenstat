@@ -1632,7 +1632,13 @@ final class WorkspacesModel {
         panel.message = L10n.text("apple.workspacesmodel.choose_a_project_folder_tokenstat_only_rea.90507456")
 
         guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
+        await add(panel.urls)
+    }
+
+    /// Register folders the person has already picked, by the panel or by
+    /// dropping them on the app.
+    func add(_ urls: [URL]) async {
+        for url in urls {
             do {
                 let added = try await Bridge.addWorkspace(path: url.path)
                 selectedID = added.id

@@ -2242,12 +2242,22 @@ struct RootView: View {
         ChatStartPage(draft: chatStart, repositories: workspaces.folders,
                       isFullScreen: isFullScreen,
                       titlebarDragHeight: isFullScreen ? 0 : max(titlebarInset, ShellMetrics.titleBand),
+                      repositoriesLoading: workspaces.directoryPresentation == .loading,
                       onAdd: {
                           if let owner = chatStart.owner {
                               chatStartAdd = (owner, Set(workspaces.folders.map(\.id)))
                           }
                           workspaces.requestAdd()
-                      }, onSend: { Task { await sendNewChat() } })
+                      }, onSend: { Task { await sendNewChat() } },
+                      onAddFolders: { urls in
+                          if let owner = chatStart.owner {
+                              chatStartAdd = (owner, Set(workspaces.folders.map(\.id)))
+                          }
+                          Task {
+                              await workspaces.add(urls)
+                              finishChatStartAdd()
+                          }
+                      })
             // The native backdrop and optical layers cover the titlebar band
             // together; extending only a background is clipped by the page.
             .ignoresSafeArea(.container, edges: .top)

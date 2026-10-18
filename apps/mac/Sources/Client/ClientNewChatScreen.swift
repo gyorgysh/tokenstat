@@ -102,6 +102,7 @@ struct ClientNewChatScreen: View {
         } else {
             ChatStartPage(draft: draft, repositories: workspaces.folders,
                           hostPicker: AnyView(hostPicker), allowsSend: workspaces.isConnecting == nil && host != nil,
+                          repositoriesLoading: workspaces.isConnecting != nil,
                           onAdd: addRepository,
                           onSend: { Task { await send() } })
         }

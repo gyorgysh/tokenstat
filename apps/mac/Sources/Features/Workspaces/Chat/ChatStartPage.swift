@@ -17,8 +17,14 @@ struct ChatStartPage: View {
     var titlebarDragHeight: CGFloat = 0
     var hostPicker: AnyView? = nil
     var allowsSend = true
+    /// The repository list is still being read, so an empty one says nothing
+    /// yet and the page must not offer first-run help on the strength of it.
+    var repositoriesLoading = false
     let onAdd: () -> Void
     let onSend: () -> Void
+    /// Adds dropped folders as repositories. Only offered where a folder can
+    /// be dropped at all.
+    var onAddFolders: (([URL]) -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityDimFlashingLights) private var dimFlashingLights
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -31,6 +37,7 @@ struct ChatStartPage: View {
     @State private var catalogError: String?
     @State private var catalogLease = UUID()
     @State private var dropTargeted = false
+    @State private var folderDropTargeted = false
     @State private var composerDropTargeted = false
     @State private var motion = ChatStartSurfaceMotion()
     @State private var hovering = false
@@ -59,8 +66,14 @@ struct ChatStartPage: View {
     private var backend: ChatBackend? { backends.first { $0.id == draft.agent?.backend && $0.installed != false } }
     private var selected: WorkspaceFolder? { repositories.first { $0.id == draft.repositoryID } }
     private var writing: Bool { !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// Nothing to talk about yet. The page teaches the first steps instead
+    /// of offering a composer that cannot send.
+    private var needsRepository: Bool { repositories.isEmpty && !repositoriesLoading }
+    private var showsStarters: Bool {
+        selected != nil && !writing && draft.attachments.isEmpty && !draft.isSubmitting
+    }
     private var acceptsDrops: Bool {
-        guard let owner = draft.owner else { return false }
+        guard let owner = draft.owner, !needsRepository else { return false }
         return active && !draft.isSubmitting && draft.attachmentReference != nil
             && owner.scope == WorkSessionContext.shared.scope && owner.session == WorkSessionContext.shared.generation
     }
@@ -77,10 +90,15 @@ struct ChatStartPage: View {
                 ScrollView {
                     VStack(spacing: 26) {
                         introduction
-                        composer
-                        if repositories.isEmpty {
-                            Text(L10n.text("common.new_chat.empty")).font(Theme.caption).foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
+                        if needsRepository {
+                            onboarding
+                        } else {
+                            composer
+                            if showsStarters {
+                                ChatStartStarters(onPick: { draft.text = $0 }, revealed: revealed)
+                                    .padding(.top, -8)
+                                    .transition(.opacity)
+                            }
                         }
                         if let error = draft.error ?? catalogError {
                             Text(error).font(Theme.caption).foregroundStyle(Theme.danger).textSelection(.enabled)
@@ -97,6 +115,18 @@ struct ChatStartPage: View {
                     .padding(.bottom, 48 + min(96, pane.size.height * 0.07))
                     .frame(maxWidth: .infinity, minHeight: pane.size.height, alignment: .center)
                 }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: showsStarters)
+                .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.1), value: needsRepository)
+                // The card's frame goes to the surface, which draws the
+                // spectrum the glass throws. Plain state on the motion
+                // object, like the pointer, so nothing redraws for it.
+                .overlayPreferenceValue(ChatStartCardAnchor.self) { anchor in
+                    let card = anchor.map { pane[$0] } ?? .zero
+                    Color.clear
+                        .onChange(of: card, initial: true) { _, frame in motion.card = frame }
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
                 .overlayPreferenceValue(ChatStartContentAnchor.self) { anchor in
                     if let anchor {
                         let excluded = pane[anchor].insetBy(dx: -12, dy: -12)
@@ -112,6 +142,8 @@ struct ChatStartPage: View {
             .allowsHitTesting(!draft.isSubmitting)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: draft.isSubmitting)
             .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: receive)
+            .modifier(FolderDrop(enabled: needsRepository && onAddFolders != nil && active,
+                                 isTargeted: $folderDropTargeted) { onAddFolders?($0) })
             .blur(radius: agentPickerFocused && !reduceTransparency ? 7 : 0)
             .overlay {
                 if agentPickerFocused {
@@ -144,7 +176,9 @@ struct ChatStartPage: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: draft.isSubmitting)
         .clipped()
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: receive)
-        .onAppear { active = true; synchronizeComposer(); revealed = true }
+        .onAppear { active = true; synchronizeComposer(); revealed = true; chooseDefaultRepository() }
+        .onChange(of: repositories.map(\.id)) { _, _ in chooseDefaultRepository() }
+        .onChange(of: draft.owner) { _, _ in chooseDefaultRepository() }
         .onDisappear {
             active = false; catalogLease = UUID(); hovering = false
             motion.reset(); agentPickerFocused = false; parallax = .zero
@@ -184,7 +218,7 @@ struct ChatStartPage: View {
                 .tracking(-0.4)
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
-            Text(L10n.text("common.new_chat.subtitle"))
+            Text(needsRepository ? L10n.text("common.new_chat.empty") : L10n.text("common.new_chat.subtitle"))
                 .font(Theme.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .opacity(revealed ? 1 : 0)
@@ -227,14 +261,40 @@ struct ChatStartPage: View {
                 #endif
             }
         }
-        .padding(12)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 22))
-        .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(Theme.border))
-        .shadow(color: Theme.accent.opacity(0.06), radius: 35, y: 12)
+        .chatStartCard()
         .disabled(draft.isSubmitting)
         .opacity(revealed ? 1 : 0)
         .scaleEffect(revealed ? 1 : 0.985, anchor: .top)
         .animation(reduceMotion ? nil : .spring(duration: 0.55, bounce: 0.12).delay(0.22), value: revealed)
+    }
+
+    private var onboarding: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // A client picks its computer here too. Another one may already
+            // have repositories, so the choice stays on the page.
+            if let hostPicker { HStack { hostPicker; Spacer(minLength: 0) } }
+            ChatStartOnboarding(onAdd: onAdd, acceptsFolderDrops: onAddFolders != nil, dropTargeted: folderDropTargeted)
+        }
+        .chatStartCard(highlighted: folderDropTargeted)
+        .scaleEffect(folderDropTargeted && !reduceMotion ? 1.012 : 1)
+        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.2), value: folderDropTargeted)
+        .opacity(revealed ? 1 : 0)
+        .scaleEffect(revealed ? 1 : 0.985, anchor: .top)
+        .animation(reduceMotion ? nil : .spring(duration: 0.55, bounce: 0.12).delay(0.22), value: revealed)
+        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+    }
+
+    /// Opens on the repository used last, from this launch or an earlier
+    /// one, once it is in the list. With exactly one repository there is
+    /// nothing to choose, so the page chooses it. Several and none
+    /// remembered still asks. A choice already made is never replaced.
+    private func chooseDefaultRepository() {
+        guard draft.owner != nil, draft.repositoryID == nil, !draft.isSubmitting, !repositories.isEmpty else { return }
+        if let remembered = draft.rememberedRepository, repositories.contains(where: { $0.id == remembered }) {
+            draft.repositoryID = remembered
+        } else if repositories.count == 1, let only = repositories.first {
+            draft.repositoryID = only.id
+        }
     }
 
     private func synchronizeComposer() {
@@ -349,12 +409,17 @@ struct ChatStartPage: View {
         guard active, !agentPickerFocused, !reduceMotion, !dimFlashingLights, scenePhase == .active,
               let point, size.width > 0, size.height > 0 else {
             if hovering { hovering = false }
+            motion.aim = .zero
             motion.settled = nil
             settle(nil)
             return
         }
         let now = Date.timeIntervalSinceReferenceDate
         let sampled = motion.note(point, at: now)
+        // The depth layers follow every move. They ease on their own clock
+        // in the shader's arguments, so this is a plain write.
+        motion.aim = CGSize(width: min(1, max(-1, (point.x - size.width / 2) / (size.width / 2))),
+                            height: min(1, max(-1, (point.y - size.height / 2) / (size.height / 2))))
         if !hovering { hovering = true }
         // At most one state change a second, and only while the pointer is
         // really travelling: enough to hold the surface awake, far too rare
@@ -424,6 +489,30 @@ struct ChatStartPage: View {
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityLabel(L10n.text("common.new_chat.repository"))
         .accessibilityValue(selected?.name ?? L10n.text("common.new_chat.choose_repository"))
+    }
+}
+
+/// A folder dropped on the first-run page becomes a repository. Only
+/// directories count: a file has nowhere to go until there is a
+/// conversation to attach it to.
+private struct FolderDrop: ViewModifier {
+    let enabled: Bool
+    @Binding var isTargeted: Bool
+    let add: ([URL]) -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.dropDestination(for: URL.self) { urls, _ in
+                let folders = urls.filter { url in
+                    (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                }
+                guard !folders.isEmpty else { return false }
+                add(folders)
+                return true
+            } isTargeted: { isTargeted = $0 }
+        } else {
+            content.onAppear { isTargeted = false }
+        }
     }
 }
 
