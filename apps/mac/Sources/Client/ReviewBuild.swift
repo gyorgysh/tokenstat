@@ -13,8 +13,8 @@ import Foundation
 /// Exists for one reason: every screen in the client is behind a sign-in, and
 /// sign-in is Apple, Google, GitHub or X through a page. There is no password
 /// field, so Apple's usual "here are the demo account details" cannot be
-/// honoured. TestFlight and App Review offer the demo sign-in automatically.
-/// An App Store install can opt in through ten taps on the login logo.
+/// honoured. TestFlight and App Review offer the demo sign-in by default.
+/// Ten taps on the login logo toggle that offer in any build.
 ///
 /// What this gates is a query flag on the sign-in page, nothing more. The
 /// account it leads to is a real one on the account service, and whether the
@@ -28,7 +28,7 @@ import Foundation
 /// An absent or unrecognised receipt never enables the automatic offer.
 enum ReviewBuild {
     static func offersDemoLogin(testFlight: Bool = isTestFlight, defaults: UserDefaults = .standard) -> Bool {
-        testFlight || defaults.bool(forKey: LoginLogoUnlock.preference)
+        (defaults.object(forKey: LoginLogoUnlock.preference) as? Bool) ?? testFlight
     }
 
     /// Counts only taps made on this login presentation. The one persisted
@@ -36,16 +36,22 @@ enum ReviewBuild {
     struct LoginLogoUnlock {
         fileprivate static let preference = "client.developerDemoLoginEnabled"
         private let defaults: UserDefaults
+        private let testFlight: Bool
         private var taps = 0
 
-        init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+        init(testFlight: Bool = ReviewBuild.isTestFlight, defaults: UserDefaults = .standard) {
+            self.testFlight = testFlight
+            self.defaults = defaults
+        }
 
-        mutating func tap() -> Bool {
+        /// Nil until the tenth tap; then the newly persisted on/off state.
+        mutating func tap() -> Bool? {
             taps += 1
-            guard taps == 10 else { return false }
+            guard taps == 10 else { return nil }
             taps = 0
-            defaults.set(true, forKey: Self.preference)
-            return true
+            let enabled = !ReviewBuild.offersDemoLogin(testFlight: testFlight, defaults: defaults)
+            defaults.set(enabled, forKey: Self.preference)
+            return enabled
         }
     }
 

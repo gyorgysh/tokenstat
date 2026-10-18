@@ -18,7 +18,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - New chats on Apple devices explain how to add a repository, choose an agent and send, with starter prompts and a remembered repository per account. On Mac, drop a folder onto the first-run screen to add it. Layered mist, light and dust give the glass more depth.
 - Mac terminal and chat detail cards refresh while open, including usage, native session IDs and repository changes. Context shows reported token counts and capacity; an unreported count stays unknown.
 - Home, Account and chat composers share plan-limit readings and refresh while visible. Overlapping refreshes share the vendor request, and background readings update every five minutes even when account sharing is off.
-- On iPhone and iPad, tapping the login logo ten times enables developer mode and offers the existing Demo login on the sign-in page, including production builds. The login screen explains the gesture.
+- On iPhone and iPad, tapping the login logo ten times enables developer mode and offers the existing Demo login on the sign-in page, including production builds. In iOS build 165, ten taps toggle it on or off, with matching confirmation, and the instructions sit above the terms in the same small, subdued type.
 
 ### Fixed
 

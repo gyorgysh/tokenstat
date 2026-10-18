@@ -38,8 +38,10 @@ struct ClientLoginView: View {
             // product's own name look like a subtitle to the word above it.
             VStack(spacing: Theme.Space.m) {
                 Button {
-                    if developerUnlock.tap() {
-                        let notice = L10n.text("apple.clientloginview.developer_mode_enabled")
+                    if let enabled = developerUnlock.tap() {
+                        let notice = enabled
+                            ? L10n.text("apple.clientloginview.developer_mode_enabled")
+                            : L10n.text("apple.clientloginview.developer_mode_disabled")
                         developerNotice = notice
                         UIAccessibility.post(notification: .announcement, argument: notice)
                     }
@@ -91,12 +93,6 @@ struct ClientLoginView: View {
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                    // Keep the gesture discoverable in production as well as
-                    // review builds; it only requests the existing demo sign-in.
-                    Text(L10n.text("apple.clientloginview.demo_login_instructions"))
-                        .font(ClientType.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
                 }
 
                 if let message = account.errorMessage {
@@ -121,11 +117,16 @@ struct ClientLoginView: View {
 
                 // Signing in creates the account, so the two documents that
                 // govern it belong on this screen and not only in Settings.
-                HStack(spacing: 4) {
-                    Text(L10n.text("apple.clientloginview.by_signing_in_you_accept_the.ba0bbbf2"))
-                    legal(L10n.text("apple.clientloginview.terms.ede54899"), url: ClientWebPages.terms())
-                    Text(L10n.text("apple.clientloginview.and.6201111b"))
-                    legal(L10n.text("apple.clientloginview.privacy_policy.ba445cff"), url: ClientWebPages.privacy())
+                VStack(spacing: Theme.Space.xs) {
+                    // Keep the gesture discoverable with the same quiet type
+                    // as the legal text; it only toggles the demo sign-in flag.
+                    Text(L10n.text("apple.clientloginview.demo_login_instructions"))
+                    HStack(spacing: 4) {
+                        Text(L10n.text("apple.clientloginview.by_signing_in_you_accept_the.ba0bbbf2"))
+                        legal(L10n.text("apple.clientloginview.terms.ede54899"), url: ClientWebPages.terms())
+                        Text(L10n.text("apple.clientloginview.and.6201111b"))
+                        legal(L10n.text("apple.clientloginview.privacy_policy.ba445cff"), url: ClientWebPages.privacy())
+                    }
                 }
                 .font(ClientType.caption)
                 .foregroundStyle(.tertiary)
