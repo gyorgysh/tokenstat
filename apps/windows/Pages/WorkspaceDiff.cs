@@ -65,10 +65,33 @@ internal static class WorkspaceDiff
     }
 
     public static async Task ShowFileDiffAsync(
-        UIElement owner, string title, JsonNode? diffNode, bool showAll = false)
+        UIElement owner, string title, JsonNode? diffNode, bool showAll = false, string? workingTreePath = null)
+    {
+        if (workingTreePath is not null && WorkspaceTabsPage.Find(owner)?.ShowWorkingTreeReview(workingTreePath) == true) return;
+        var stack = FullFile(diffNode);
+        if (WorkspaceTabsPage.Find(owner) is { } workbench)
+        {
+            workbench.OpenReview(title, new ScrollViewer
+            {
+                Content = stack, Padding = new Thickness(Theme.SpaceM),
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            });
+            return;
+        }
+        stack.MinWidth = 560;
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = new ScrollViewer { MaxHeight = 560, Content = stack },
+            CloseButtonText = L10n.Text("common.close"),
+        };
+        await Chrome.ShowDialog(owner, dialog);
+    }
+
+    internal static StackPanel FullFile(JsonNode? diffNode)
     {
         var file = Parse(diffNode);
-        var stack = new StackPanel { Spacing = Theme.SpaceS, MinWidth = 560 };
+        var stack = new StackPanel { Spacing = Theme.SpaceS };
         var page = 0;
         void RenderPage()
         {
@@ -88,23 +111,7 @@ internal static class WorkspaceDiff
             stack.Children.Add(navigation);
         }
         RenderPage();
-        if (WorkspaceTabsPage.Find(owner) is { } workbench)
-        {
-            stack.MinWidth = 0;
-            workbench.OpenReview(title, new ScrollViewer
-            {
-                Content = stack, Padding = new Thickness(Theme.SpaceM),
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            });
-            return;
-        }
-        var dialog = new ContentDialog
-        {
-            Title = title,
-            Content = new ScrollViewer { MaxHeight = 560, Content = stack },
-            CloseButtonText = L10n.Text("common.close"),
-        };
-        await Chrome.ShowDialog(owner, dialog);
+        return stack;
     }
 
     /// <summary>A bounded diff in the Changes inspector, with the full review one press away.</summary>
@@ -114,7 +121,7 @@ internal static class WorkspaceDiff
         var stack = new StackPanel { Spacing = Theme.SpaceS };
         stack.Children.Add(RenderFile(file, ReviewLinesPerFile));
         stack.Children.Add(Buttons.Secondary(L10n.Text("windows.workspacepage.diff.7ecf4628"), ActionIcon.Compare,
-            async (_, _) => await ShowFileDiffAsync(owner, path, diff), small: true));
+            async (_, _) => await ShowFileDiffAsync(owner, path, diff, workingTreePath: path), small: true));
         return stack;
     }
 
@@ -167,6 +174,7 @@ internal static class WorkspaceDiff
         string? title = null,
         UIElement? header = null)
     {
+        if (title is null && header is null && WorkspaceTabsPage.Find(owner)?.ShowWorkingTreeReview() == true) return;
         var shown = files.Take(ReviewMaxFiles).ToList();
         var leftover = files.Count - shown.Count;
         var stack = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 560 };
@@ -257,10 +265,10 @@ internal static class WorkspaceDiff
         await pending;
     }
 
-    private static UIElement FileCard(
+    internal static UIElement FileCard(
         UIElement owner,
         (string Path, string Kind, long? Added, long? Removed) file,
-        JsonNode diffNode)
+        JsonNode diffNode, bool workingTree = false)
     {
         var card = new StackPanel { Spacing = Theme.SpaceS };
         var head = new StackPanel
@@ -330,7 +338,8 @@ internal static class WorkspaceDiff
             Content = new TextBlock { Text = L10n.Text("windows.workspacediff.full_diff.79eeb065") },
             HorizontalAlignment = HorizontalAlignment.Left,
         };
-        full.Click += async (_, _) => await ShowFileDiffAsync(owner, file.Path, diffNode);
+        full.Click += async (_, _) => await ShowFileDiffAsync(owner, file.Path, diffNode,
+            workingTreePath: workingTree ? file.Path : null);
         card.Children.Add(full);
         return Chrome.Card(file.Path, card);
     }

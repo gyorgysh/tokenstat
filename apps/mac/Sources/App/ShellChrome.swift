@@ -423,9 +423,13 @@ struct ColumnResizeHandle: View {
 /// AppKit owns the cursor only inside the visible divider. A global cursor
 /// stack can outlive SwiftUI hover exits when columns move or disappear.
 struct ColumnResizeCursorArea: NSViewRepresentable {
+    var isActive = true
     func makeNSView(context: Context) -> ColumnResizeCursorView { ColumnResizeCursorView() }
     func updateNSView(_ view: ColumnResizeCursorView, context: Context) {
-        view.window?.invalidateCursorRects(for: view)
+        if view.isHidden != !isActive {
+            view.isHidden = !isActive
+            view.window?.invalidateCursorRects(for: view)
+        }
     }
     static func dismantleNSView(_ view: ColumnResizeCursorView, coordinator: ()) {
         view.discardCursorRects()

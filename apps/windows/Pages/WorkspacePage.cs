@@ -672,7 +672,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             _root.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
             return;
         }
-        await WorkspaceDiff.ShowFileDiffAsync(this, L10n.Text("windows.workspacepage.diff_0.4cfe00c5", $"{filePath}"), diff);
+        await WorkspaceDiff.ShowFileDiffAsync(this, L10n.Text("windows.workspacepage.diff_0.4cfe00c5", $"{filePath}"), diff,
+            workingTreePath: filePath);
     }
 
     private async Task<JsonNode?> LoadOneDiffAsync(string path)

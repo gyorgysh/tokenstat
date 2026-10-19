@@ -134,6 +134,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         if (ActivePage is ChatPage)
         {
             _companionReview = null;
+            _showsLiveReview = false;
             ShowCompanion(DesktopWorkbenchTool.Changes);
             (_companionChanges as WorkspacePage)?.RevealChangedFile(path);
             return;

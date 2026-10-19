@@ -444,8 +444,8 @@ final class WorkspacesModel {
     }
 
     /// Read a commit and show it. The tab appears at once and fills in.
-    func showCommit(_ id: String, in workspaceID: String, asDocument: Bool = true) async {
-        if asDocument { show(.commit(id), in: workspaceID) }
+    func showCommit(_ id: String, in workspaceID: String) async {
+        show(.commit(id), in: workspaceID)
         guard commit(id, in: workspaceID) == nil else { return }
         let key = Self.treeKey(workspaceID, id)
         loadingCommit[workspaceID] = id

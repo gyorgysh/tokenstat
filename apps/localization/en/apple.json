@@ -3729,7 +3729,6 @@
   "apple.rootview.api_list_price_not_an_extra_bill.a12d94fd": "API list price, not an extra bill.",
   "apple.rootview.branch.52656e81": "Branch",
   "apple.rootview.browser_open_a_web_preview_beside_this_pro.fc5d34f3": "Browser, open a web preview beside this repository",
-  "apple.rootview.browser_width.77c8499c": "Browser width",
   "apple.rootview.changed_files.5d4041aa": "Changed files",
   "apple.rootview.check_for_updates.f26f3275": "Check for updates",
   "apple.rootview.checking_for_updates.497a1998": "Checking for updates…",
@@ -3827,7 +3826,6 @@
   "apple.rootview.terminal.e0926fda": "Terminal",
   "apple.rootview.terminal_0.f851d42b": "Terminal · {0}",
   "apple.rootview.terminal_beside_chat.40991a3f": "Terminal beside chat",
-  "apple.rootview.terminal_pane_width.663c8e5d": "Terminal pane width",
   "apple.rootview.that_server_is_no_longer_saved.eb00734a": "That server is no longer saved",
   "apple.rootview.the_agent_command_was_empty.793c23f6": "The agent command was empty.",
   "apple.rootview.the_process_will_be_killed_a_stopped_sessi.bf3e9249": "The process will be killed. A stopped session can still close in one click.",
@@ -5715,5 +5713,6 @@
   "apple.workbench.manage_changes": "Commit and sync",
   "apple.workbench.recorded_edits": "Recorded edits from this turn, shown in order. Later edits and commits do not change this view.",
   "apple.workbench.edit_number": "Edit {0}",
-  "apple.workbench.patch_unavailable": "The agent did not record a patch for this edit."
+  "apple.workbench.patch_unavailable": "The agent did not record a patch for this edit.",
+  "apple.workbench.resize": "Drag to resize the side workbench. Double-click to reset."
 }

@@ -29,6 +29,20 @@ struct DesktopWorkbenchStateTests {
         precondition(workspaces["local"]?.tabs == [.terminal] && workspaces["local"]?.isPresented == true)
         workspaces = [:]
         precondition(workspaces.isEmpty, "Changing account drops all workspace tool selections")
+        var window = DesktopWorkbenchSession()
+        window.open(.inspector, in: "first")
+        precondition(window.state(in: "second").isPresented && window.state(in: "second").selected == .inspector,
+                     "An open inspector follows chat navigation to another project")
+        window.open(.browser, in: "second")
+        precondition(window.state(in: "first").selected == .browser, "The chosen tool follows the chat")
+        window.hide()
+        precondition(!window.state(in: "first").isPresented && !window.state(in: "third").isPresented,
+                     "An explicit hide must follow navigation too")
+        window.open(.changes, in: "third")
+        window.retain(workspaces: ["third"])
+        precondition(window.state(in: "first").tabs == [.changes], "Removed projects cannot retain stale tabs")
+        window.close(.changes, in: "third")
+        precondition(!window.isPresented && !window.state(in: "second").isPresented)
         precondition(DesktopWorkbenchLayout.fitsBeside(available: 805))
         precondition(!DesktopWorkbenchLayout.fitsBeside(available: 804))
         precondition(DesktopWorkbenchLayout.sidebarFits(width: 1353, rail: 76, sidebar: 272, preferredTool: 520))

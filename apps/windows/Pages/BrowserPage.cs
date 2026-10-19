@@ -30,6 +30,8 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
     private readonly string? _workspaceId;
     private readonly bool _sharedTabs;
     private readonly List<TabViewItem> _pendingTabs = new();
+    private readonly TabViewMount _tabMount;
+    private bool _released;
     private Window? _ownerWindow;
     private readonly TabView _tabs = new()
     {
@@ -48,6 +50,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         _workspaceId = workspaceId;
         _sharedTabs = workspaceTabs is not null;
         if (workspaceTabs is not null) _tabs = workspaceTabs;
+        _tabMount = new TabViewMount(_tabs);
         if (!_sharedTabs) _tabs.AddTabButtonClick += (_, _) => AddTab("", "127.0.0.1", 0, false, peer);
         _tabs.TabCloseRequested += async (_, args) =>
         {
@@ -61,13 +64,14 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
         Loaded += (_, _) =>
         {
-            if (!_sharedTabs && _tabs.TabItems.Count == 0)
+            if (!_released && !_sharedTabs && _tabs.TabItems.Count == 0)
             {
                 AddTab(url, host, port, unlisten, peer);
             }
         };
-        _tabs.Loaded += (_, _) =>
+        _tabMount.Ready += () =>
         {
+            if (_released || !_tabs.IsLoaded) return;
             foreach (var item in _pendingTabs.ToArray())
             {
                 _tabs.TabItems.Add(item);
@@ -87,6 +91,9 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
     /// <summary>Closing a tool releases its pages and bridge leases. Hiding retains them.</summary>
     internal void Release()
     {
+        if (_released) return;
+        _released = true;
+        _tabMount.Dispose();
         if (_ownerWindow is not null) _ownerWindow.Closed -= WindowClosed;
         _ownerWindow = null;
         foreach (var item in _pendingTabs)
@@ -180,6 +187,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
 
     internal void AddTab(string url, string host, int port, bool unlisten, string? peer = null)
     {
+        if (_released) return;
         var tab = new BrowserTab(this, url, host, port, unlisten, peer, CloseRequested, _workspaceId);
         var item = new TabViewItem
         {
@@ -199,7 +207,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         item.Tag = tab;
         // A hidden companion can receive several links before its TabView
         // mounts. WinUI cannot add a second native tab until it is loaded.
-        if (!_tabs.IsLoaded && _tabs.TabItems.Count > 0)
+        if (!_tabMount.IsReady && _tabs.TabItems.Count > 0)
         {
             _pendingTabs.Add(item);
             return;
@@ -230,7 +238,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             _tabs.TabItems.Remove(item);
         }
         await tab.CloseAsync();
-        if (!_sharedTabs && _tabs.TabItems.Count == 0)
+        if (!_released && !_sharedTabs && _tabs.TabItems.Count == 0)
         {
             AddTab("", "127.0.0.1", 0, false, _peer);
         }

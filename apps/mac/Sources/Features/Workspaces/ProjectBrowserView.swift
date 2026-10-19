@@ -8,13 +8,14 @@ struct ProjectBrowserView: View {
     var initialURL = ""
     var waitsForService = false
     var allowsExternalNavigation = false
+    var isSurfaceVisible = true
     var onURLChange: (String) -> Void = { _ in }
 
     var body: some View {
         let owner = WorkViewedChange.owner(folderID: workspaceID)
         let route = WorkDestinationResolver.route(folderID: workspaceID)
         ProjectBrowserContent(owner: owner, peer: route.peer, initialURL: initialURL, waitsForService: waitsForService,
-            allowsExternalNavigation: allowsExternalNavigation, onURLChange: onURLChange)
+            allowsExternalNavigation: allowsExternalNavigation, isSurfaceVisible: isSurfaceVisible, onURLChange: onURLChange)
             .id(BrowserHistory.key(for: owner) ?? workspaceID)
     }
 }
@@ -24,16 +25,18 @@ private struct ProjectBrowserContent: View {
     let initialURL: String
     let waitsForService: Bool
     let allowsExternalNavigation: Bool
+    let isSurfaceVisible: Bool
     let onURLChange: (String) -> Void
     let owner: WorkReference?
     let peer: String?
     @State private var session: ProjectBrowserSession
 
     init(owner: WorkReference?, peer: String?, initialURL: String, waitsForService: Bool,
-         allowsExternalNavigation: Bool, onURLChange: @escaping (String) -> Void) {
+         allowsExternalNavigation: Bool, isSurfaceVisible: Bool, onURLChange: @escaping (String) -> Void) {
         self.initialURL = initialURL
         self.waitsForService = waitsForService
         self.allowsExternalNavigation = allowsExternalNavigation
+        self.isSurfaceVisible = isSurfaceVisible
         self.onURLChange = onURLChange
         self.owner = owner
         self.peer = peer
@@ -46,7 +49,7 @@ private struct ProjectBrowserContent: View {
     var body: some View {
         VStack(spacing: 0) {
             if let error = session.error { Banner(text: error, severity: .danger) }
-            BrowserView(url: session.transportURL, allowsExternalNavigation: allowsExternalNavigation,
+            BrowserView(url: session.transportURL, allowsExternalNavigation: allowsExternalNavigation, isSurfaceVisible: isSurfaceVisible,
                 navigationGeneration: session.navigationGeneration, loadRevision: session.loadRevision,
                 displayURL: session.targetURL, recentPorts: session.recentPorts,
                 onNavigate: { address in Task { await session.open(address) } },

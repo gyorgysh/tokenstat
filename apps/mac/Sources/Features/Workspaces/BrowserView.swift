@@ -14,6 +14,7 @@ struct BrowserView: View {
     var initialURL: String
     var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool
     var allowsExternalNavigation: Bool
+    var isSurfaceVisible: Bool
     var navigationGeneration: Int
     var loadRevision: Int
     var displayURL: String?
@@ -44,7 +45,7 @@ struct BrowserView: View {
     /// A non-loopback URL waiting for the user's go-ahead.
     @State private var remoteURL: RemoteNavigation?
 
-    init(url: String, allowsExternalNavigation: Bool = false, navigationGeneration: Int = 0, loadRevision: Int = 0, displayURL: String? = nil,
+    init(url: String, allowsExternalNavigation: Bool = false, isSurfaceVisible: Bool = true, navigationGeneration: Int = 0, loadRevision: Int = 0, displayURL: String? = nil,
          recentPorts: [Int] = [], onNavigate: ((String) -> Void)? = nil,
          displayAddress: ((String) -> String)? = nil, onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)? = nil,
          canGoBack: Bool? = nil, canGoForward: Bool? = nil,
@@ -55,6 +56,7 @@ struct BrowserView: View {
          onURLChange: @escaping (String, BrowserNavigationEpoch.Completion) -> Bool) {
         initialURL = url
         self.allowsExternalNavigation = allowsExternalNavigation
+        self.isSurfaceVisible = isSurfaceVisible
         self.onURLChange = onURLChange
         self.navigationGeneration = navigationGeneration
         self.loadRevision = loadRevision
@@ -88,6 +90,7 @@ struct BrowserView: View {
             } else {
                 WebBrowser(
                     allowsExternalNavigation: allowsExternalNavigation,
+                    isSurfaceVisible: isSurfaceVisible,
                     url: normalizedURL(loadedURL),
                     navigationGeneration: navigationGeneration,
                     historyItemToRestore: historyItemToRestore,
@@ -305,6 +308,7 @@ private enum BrowserCommand {
 
 private struct WebBrowser: NSViewRepresentable {
     var allowsExternalNavigation: Bool
+    var isSurfaceVisible: Bool
     var url: URL?
     var navigationGeneration: Int
     var historyItemToRestore: UUID?
@@ -337,6 +341,7 @@ private struct WebBrowser: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         context.coordinator.pageHistory.install(in: configuration)
         let view = WKWebView(frame: .zero, configuration: configuration)
+        view.isHidden = !isSurfaceVisible
         // A deterministic, current Safari UA: some sites treat a bare WebKit
         // UA as a bot and stall instead of answering.
         view.customUserAgent = Self.safariUserAgent
@@ -354,6 +359,9 @@ private struct WebBrowser: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
+        // A retained native web view must stop painting and accepting input
+        // when another tool is selected. SwiftUI opacity alone is insufficient.
+        view.isHidden = !isSurfaceVisible
         context.coordinator.webView = view
         context.coordinator.onLocalNavigation = onLocalNavigation
         context.coordinator.onURLChange = onURLChange

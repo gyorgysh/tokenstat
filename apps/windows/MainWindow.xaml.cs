@@ -1020,6 +1020,7 @@ public sealed partial class MainWindow : Window
     {
         _inspectorHost.IsOpen = false;
         _inspectorPopover?.Hide();
+        SyncInspectorFit();
         _inspectorHost.Refresh();
         RebuildToolbar();
     }
@@ -1030,8 +1031,8 @@ public sealed partial class MainWindow : Window
     {
         _inspectorHost.MinimumContentWidth = (_frame.Content as IInspectorContent)?.MinimumContentWidth ?? ShellWidths.ContentMinimum;
         _inspectorHost.MinimumInspectorWidth = (_frame.Content as IInspectorContent)?.MinimumInspectorWidth ?? ShellWidths.Minimum;
-        SyncInspectorFit();
         _inspectorHost.IsOpen = true;
+        SyncInspectorFit();
         if (_inspectorHost.FitsWidth) { _inspectorHost.Refresh(); RebuildToolbar(); }
         else ShowInspectorPopover();
     }
@@ -1216,8 +1217,16 @@ public sealed partial class MainWindow : Window
 
     private void ToggleInspector()
     {
-        if (!_inspectorHost.FitsWidth) { ShowInspectorPopover(); return; }
+        if (_inspectorInPopover) { OnInspectorDismissRequested(); return; }
+        if (!_inspectorHost.FitsWidth)
+        {
+            _inspectorHost.IsOpen = true;
+            SyncInspectorFit();
+            ShowInspectorPopover();
+            return;
+        }
         _inspectorHost.IsOpen = !_inspectorHost.IsOpen;
+        SyncInspectorFit();
         _inspectorHost.Refresh();
         RebuildToolbar();
     }
@@ -1228,7 +1237,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void SyncInspectorFit()
     {
-        var companionWidth = _inspectorHost.MinimumInspectorWidth > ShellWidths.Minimum
+        var companionWidth = _inspectorHost.IsOpen && _inspectorHost.MinimumInspectorWidth > ShellWidths.Minimum
             ? Math.Max(_inspectorHost.MinimumInspectorWidth, ShellWidths.Shared.Inspector) + 6 : 0;
         _nav.ExpandedModeThresholdWidth = ShellWidths.Shared.Sidebar + _inspectorHost.MinimumContentWidth + companionWidth;
         _nav.CompactModeThresholdWidth = _nav.ExpandedModeThresholdWidth - 1;

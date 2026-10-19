@@ -26,6 +26,10 @@ struct ChatChangesWorkbenchView: View {
     let isActive: Bool
     let showWorkingTree: () -> Void
     @State private var managing = false
+    @State private var commitDetail: CommitDetail?
+    @State private var commitError: String?
+    @State private var loadedCommitID: String?
+    @State private var commitLoadGeneration = UUID()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,11 +53,11 @@ struct ChatChangesWorkbenchView: View {
             .padding(Theme.Space.s)
             ThemeRule()
             if let commitID {
-                if let detail = model.commit(commitID, in: folder.id) {
+                if loadedCommitID == commitID, let detail = commitDetail {
                     CommitView(detail: detail).id(commitID)
-                } else if let error = model.commitError(commitID, in: folder.id) {
+                } else if loadedCommitID == commitID, let error = commitError {
                     ErrorBanner(message: error) {
-                        Task { await model.showCommit(commitID, in: folder.id, asDocument: false) }
+                        Task { await loadCommit(commitID) }
                     }
                     Spacer()
                 } else {
@@ -70,7 +74,28 @@ struct ChatChangesWorkbenchView: View {
         }
         .background(Theme.background)
         .task(id: commitID) {
-            if let commitID { await model.showCommit(commitID, in: folder.id, asDocument: false) }
+            await loadCommit(commitID)
+        }
+    }
+
+    /// The side review owns its snapshot. A document tab's concurrent read or
+    /// close must not cancel it or empty the commit currently being reviewed.
+    private func loadCommit(_ id: String?) async {
+        let generation = UUID()
+        commitLoadGeneration = generation
+        loadedCommitID = nil
+        commitDetail = nil
+        commitError = nil
+        guard let id else { return }
+        do {
+            let detail = try await Bridge.workspaceShow(id: folder.id, commit: id)
+            guard !Task.isCancelled, commitLoadGeneration == generation else { return }
+            commitDetail = detail
+            loadedCommitID = id
+        } catch {
+            guard !Task.isCancelled, commitLoadGeneration == generation else { return }
+            commitError = error.localizedDescription
+            loadedCommitID = id
         }
     }
 }

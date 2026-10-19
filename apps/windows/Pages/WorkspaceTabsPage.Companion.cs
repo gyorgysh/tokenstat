@@ -15,10 +15,13 @@ internal sealed partial class WorkspaceTabsPage
     private readonly DesktopWorkbenchState _workbench = new();
     private readonly Dictionary<DesktopWorkbenchTool, TabViewItem> _toolTabs = new();
     private bool _refreshingTools;
+    private TabViewMount? _toolMount;
     private BrowserPage? _companionBrowser;
     private WorkspaceTerminalPane? _companionTerminal;
     private Page? _companionChanges;
     private UIElement? _companionReview;
+    private WorkspaceLiveReviewPage? _liveReview;
+    private bool _showsLiveReview;
     private string? _lastChangesStatus;
 
     private void RefreshLiveChanges(string status, bool force)
@@ -28,7 +31,8 @@ internal sealed partial class WorkspaceTabsPage
             || _workbench.Selected != DesktopWorkbenchTool.Changes) return;
         for (DependencyObject? node = _inspector; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
             if (node is UIElement { Visibility: Visibility.Collapsed }) return;
-        (_companionChanges as WorkspacePage)?.RefreshChanges();
+        if (_showsLiveReview) _liveReview?.Refresh();
+        else (_companionChanges as WorkspacePage)?.RefreshChanges();
         _lastChangesStatus = status;
     }
     private BrowserPage CompanionBrowser => _companionBrowser ??= new BrowserPage("", "127.0.0.1", 0, false,
@@ -57,7 +61,8 @@ internal sealed partial class WorkspaceTabsPage
         _companionHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         _companionHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var tabs = _companionStrip.View;
-        tabs.Loaded += (_, _) => { if (ActivePage is ChatPage) RefreshChrome(); };
+        _toolMount = new TabViewMount(tabs);
+        _toolMount.Ready += () => { if (ActivePage is ChatPage) RefreshChrome(); };
         tabs.Height = 44;
         tabs.IsAddTabButtonVisible = true;
         tabs.AddTabButtonClick += (_, _) =>
@@ -112,7 +117,12 @@ internal sealed partial class WorkspaceTabsPage
             _companionBrowser?.Release();
             _companionBrowser = null;
         }
-        if (tool == DesktopWorkbenchTool.Changes) _companionReview = null;
+        if (tool == DesktopWorkbenchTool.Changes)
+        {
+            _companionReview = null;
+            _showsLiveReview = false;
+            _liveReview = null;
+        }
         RefreshChrome();
         if (_workbench.Tabs.Count == 0) DetailsDismissRequested?.Invoke();
     }
@@ -121,7 +131,7 @@ internal sealed partial class WorkspaceTabsPage
         _refreshingTools = true;
         try
         {
-            if (_companionStrip.View.IsLoaded)
+            if (_toolMount?.IsReady == true)
             {
                 foreach (var tool in _toolTabs.Keys.Except(_workbench.Tabs).ToArray())
                 {
@@ -146,7 +156,8 @@ internal sealed partial class WorkspaceTabsPage
         {
             DesktopWorkbenchTool.Browser => CompanionBrowser,
             DesktopWorkbenchTool.Terminal => CompanionTerminal,
-            DesktopWorkbenchTool.Changes => _companionReview ?? (_companionChanges ??= _create(WorkspaceSection.Changes)),
+            DesktopWorkbenchTool.Changes => _companionReview ?? (_showsLiveReview
+                ? _liveReview : (_companionChanges ??= _create(WorkspaceSection.Changes))),
             _ => null,
         };
         _editor.FileTree.Visibility = inspector && _inspectorTab == "Files" ? Visibility.Visible : Visibility.Collapsed;
@@ -212,5 +223,16 @@ internal sealed partial class WorkspaceTabsPage
         }
         _companionReview = new ScrollViewer { Content = stack };
         ShowCompanion(DesktopWorkbenchTool.Changes);
+    }
+
+    internal bool ShowWorkingTreeReview(string? path = null)
+    {
+        if (ActivePage is not ChatPage) return false;
+        _companionReview = null;
+        _showsLiveReview = true;
+        _liveReview ??= new WorkspaceLiveReviewPage(WorkspaceId, () => ShowChangesInspector()) { Tag = this };
+        _liveReview.Review(path);
+        ShowCompanion(DesktopWorkbenchTool.Changes);
+        return true;
     }
 }

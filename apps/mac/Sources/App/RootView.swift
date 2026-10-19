@@ -85,9 +85,8 @@ struct RootView: View {
     @AppStorage(ChatBrowserPreferences.opensLinksKey) private var opensChatLinksInBrowser = true
     @State private var pendingChatLink: PendingChatLink?
     @AppStorage("chat.browserPaneWidth") private var browserPaneWidth = 520.0
-    @State private var browserResizeStart: Double?
-    @State private var browserLiveWidth: Double?
-    @State private var desktopWorkbenches: [String: DesktopWorkbenchState] = [:]
+    @State private var workbenchResize = DesktopWorkbenchResizeState()
+    @State private var desktopWorkbench = DesktopWorkbenchSession()
     @State private var desktopTurnReviews: [String: ChatTurnReview] = [:]
     @State private var desktopCommitReviews: [String: String] = [:]
     @State private var workspaceBrowserURLs: [String: String] = [:]
@@ -272,7 +271,7 @@ struct RootView: View {
                     }
                 }
                 expandedWorkspaces.formIntersection(incoming)
-                desktopWorkbenches = desktopWorkbenches.filter { incoming.contains($0.key) }
+                desktopWorkbench.retain(workspaces: incoming)
                 desktopTurnReviews = desktopTurnReviews.filter { incoming.contains($0.key) }
                 desktopCommitReviews = desktopCommitReviews.filter { incoming.contains($0.key) }
                 workspaceBrowserURLs = workspaceBrowserURLs.filter { incoming.contains($0.key) }
@@ -545,7 +544,7 @@ struct RootView: View {
         }
         .task(id: WorkSessionContext.shared.scope) {
             workspaceBrowserURLs = [:]
-            desktopWorkbenches = [:]
+            desktopWorkbench = DesktopWorkbenchSession()
             desktopTurnReviews = [:]
             desktopCommitReviews = [:]
             pendingChatLink = nil
@@ -1695,7 +1694,7 @@ struct RootView: View {
                 .background(route.isGlobal(.newChat) ? Color.clear : Theme.background)
                 .frame(minWidth: Self.detailMinimumWidth, maxWidth: .infinity, maxHeight: .infinity)
             if showsWorkspaceCompanion && browserFitsBesideWorkspace {
-                Color.clear.frame(width: fittedBrowserWidth + 5)
+                DesktopWorkbenchSpace(resize: workbenchResize, preferred: browserPaneWidth, cap: maximumWorkbenchWidth)
             } else if showsInspector && !supportsWorkspaceBrowser {
                 boundedInspector { inspectorContent }
                     .frame(width: currentInspectorWidth)
@@ -1725,11 +1724,9 @@ struct RootView: View {
             .overlay(alignment: .leading) { sidebarFloatLayer }
             .overlay(alignment: .trailing) { inspectorFloatLayer }
             .overlay(alignment: .trailing) {
-                if let id = chatFolder, !(desktopWorkbenches[id]?.tabs.isEmpty ?? true) {
-                    HStack(spacing: 0) {
-                        browserResizeHandle
+                if let id = chatFolder, !desktopWorkbench.state(in: id).tabs.isEmpty {
+                    DesktopWorkbenchPanel(resize: workbenchResize, preferred: $browserPaneWidth, cap: maximumWorkbenchWidth, isVisible: showsWorkspaceCompanion) {
                         workspaceCompanionPane
-                            .frame(width: fittedBrowserWidth)
                             .background(Theme.sidebar.ignoresSafeArea(.container, edges: .top))
                     }
                     .frame(maxHeight: .infinity)
@@ -1765,23 +1762,22 @@ struct RootView: View {
     }
 
     private var workbenchState: DesktopWorkbenchState {
-        (route.workspaceID ?? chatFolder).flatMap { desktopWorkbenches[$0] } ?? DesktopWorkbenchState()
+        (route.workspaceID ?? chatFolder).map { desktopWorkbench.state(in: $0) } ?? DesktopWorkbenchState()
     }
 
     private var showsWorkspaceCompanion: Bool { supportsWorkspaceBrowser && workbenchState.isPresented }
 
     private func openWorkbench(_ tool: DesktopWorkbenchState.Tool, in workspaceID: String? = nil) {
         guard let id = workspaceID ?? route.workspaceID else { return }
-        desktopWorkbenches[id, default: DesktopWorkbenchState()].open(tool)
+        desktopWorkbench.open(tool, in: id)
     }
 
     private func hideWorkbench() {
-        guard let id = route.workspaceID else { return }
-        desktopWorkbenches[id]?.hide()
+        desktopWorkbench.hide()
     }
 
     private func closeWorkbench(_ tool: DesktopWorkbenchState.Tool, in workspaceID: String) {
-        desktopWorkbenches[workspaceID]?.close(tool)
+        desktopWorkbench.close(tool, in: workspaceID)
         if tool == .changes {
             desktopTurnReviews[workspaceID] = nil
             desktopCommitReviews[workspaceID] = nil
@@ -1792,12 +1788,12 @@ struct RootView: View {
     @ViewBuilder private var workspaceCompanionPane: some View {
         if let id = chatFolder,
            let folder = workspaces.folders.first(where: { $0.id == id }) {
-            let state = desktopWorkbenches[id] ?? DesktopWorkbenchState()
+            let state = desktopWorkbench.state(in: id)
             VStack(spacing: 0) {
                 DesktopWorkbenchBar(state: state,
                     open: { openWorkbench($0, in: id) },
                     close: { closeWorkbench($0, in: id) },
-                    hide: { desktopWorkbenches[id]?.hide() })
+                    hide: { hideWorkbench() })
                 ZStack {
                     ForEach(state.tabs) { tool in
                         let active = showsWorkspaceCompanion && state.selected == tool
@@ -1824,17 +1820,17 @@ struct RootView: View {
                     desktopCommitReviews[folder.id] = nil
                 })
         case .browser:
-            ProjectBrowserView(workspaceID: folder.id, initialURL: workspaceBrowserURLs[folder.id] ?? "", allowsExternalNavigation: true) {
+            ProjectBrowserView(workspaceID: folder.id, initialURL: workspaceBrowserURLs[folder.id] ?? "", allowsExternalNavigation: true, isSurfaceVisible: active) {
                 workspaceBrowserURLs[folder.id] = $0
             }
         case .terminal:
             ChatTerminalPane(folder: folder, terminals: terminals, workspaces: workspaces,
                              ssh: ssh, sshSessions: sshSessions,
                              onManageServers: { openSSH(.hosts(folder: nil)) },
-                             onClose: { desktopWorkbenches[folder.id]?.hide() }, isActive: active)
+                             onClose: { hideWorkbench() }, isActive: active)
         case .inspector:
             WorkspaceInspector(model: workspaces, automations: automations,
-                account: account.account, onClose: { desktopWorkbenches[folder.id]?.hide() },
+                account: account.account, onClose: { hideWorkbench() },
                 chat: chat, workspace: folder, showsChatOverview: showingChatOverview,
                 onOpenAutomation: { id, runID in openAutomation(jobID: id, runID: runID) },
                 onReviewWorkingTree: {
@@ -1854,46 +1850,11 @@ struct RootView: View {
         DesktopWorkbenchLayout.fitsBeside(available: windowContentWidth - leftChromeWidth)
     }
 
-    private var fittedBrowserWidth: CGFloat {
+    private var maximumWorkbenchWidth: CGFloat {
         let available = windowContentWidth - leftChromeWidth
-        let cap = browserFitsBesideWorkspace
+        return browserFitsBesideWorkspace
             ? ChromeFit.besideMax(available: available)
             : ChromeFit.overlayMax(width: windowContentWidth)
-        return min(max(ChromeFit.browserMinimum, browserLiveWidth ?? browserPaneWidth), cap)
-    }
-
-    private var browserResizeHandle: some View {
-        Color.clear
-            .frame(width: 5)
-            .background {
-                Theme.sidebar.overlay { Theme.border }
-                    .ignoresSafeArea(.container, edges: .top)
-            }
-            .contentShape(.rect)
-            .background { ColumnResizeCursorArea() }
-            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { value in
-                if browserResizeStart == nil { browserResizeStart = fittedBrowserWidth }
-                let available = windowContentWidth - leftChromeWidth
-                let cap = browserFitsBesideWorkspace
-                    ? ChromeFit.besideMax(available: available)
-                    : ChromeFit.overlayMax(width: windowContentWidth)
-                browserLiveWidth = max(
-                    ChromeFit.browserMinimum,
-                    min(cap, (browserResizeStart ?? fittedBrowserWidth) - value.translation.width)
-                )
-            }.onEnded { _ in
-                browserPaneWidth = fittedBrowserWidth
-                browserLiveWidth = nil
-                browserResizeStart = nil
-            })
-            .onDisappear {
-                browserLiveWidth = nil
-                browserResizeStart = nil
-            }
-            .accessibilityLabel(showsWorkspaceTerminal ? L10n.text("apple.rootview.terminal_pane_width.663c8e5d") : L10n.text("apple.rootview.browser_width.77c8499c"))
-            .accessibilityAdjustableAction { direction in
-                browserPaneWidth = max(320, min(1000, fittedBrowserWidth + (direction == .increment ? 40 : -40)))
-            }
     }
 
     /// Floated sidebar: panel on the leading edge, dismiss region to its right.

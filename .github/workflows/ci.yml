@@ -238,6 +238,7 @@ jobs:
       - name: Chat navigation and transcript continuity
         run: |
           python3 scripts/check-chat-navigation.py
+          python3 scripts/check-chat-workbench.py
           python3 scripts/check-transcript-layout.py
           python3 scripts/check-ssh-terminal-lifecycle.py
           python3 scripts/check-chat-projection.py

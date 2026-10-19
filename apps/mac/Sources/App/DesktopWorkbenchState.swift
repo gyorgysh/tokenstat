@@ -28,6 +28,40 @@ struct DesktopWorkbenchState: Equatable {
     mutating func hide() { isPresented = false }
 }
 
+/// Visibility and the selected tool follow the window's chat navigation.
+/// Each project keeps its own open tabs and review/browser/terminal contents.
+struct DesktopWorkbenchSession {
+    private var workspaces: [String: DesktopWorkbenchState] = [:]
+    private(set) var isPresented = false
+    private(set) var preferredTool: DesktopWorkbenchState.Tool = .inspector
+
+    func state(in workspace: String) -> DesktopWorkbenchState {
+        var state = workspaces[workspace] ?? DesktopWorkbenchState()
+        if isPresented { state.open(preferredTool) }
+        else { state.hide() }
+        return state
+    }
+
+    mutating func open(_ tool: DesktopWorkbenchState.Tool, in workspace: String) {
+        var state = state(in: workspace)
+        state.open(tool)
+        workspaces[workspace] = state
+        preferredTool = tool
+        isPresented = true
+    }
+
+    mutating func close(_ tool: DesktopWorkbenchState.Tool, in workspace: String) {
+        var state = state(in: workspace)
+        state.close(tool)
+        workspaces[workspace] = state
+        if let selected = state.selected { preferredTool = selected }
+        isPresented = state.isPresented
+    }
+
+    mutating func hide() { isPresented = false }
+    mutating func retain(workspaces ids: Set<String>) { workspaces = workspaces.filter { ids.contains($0.key) } }
+}
+
 /// Chat needs reading room beside review, including on laptop-sized windows.
 enum DesktopWorkbenchLayout {
     static let detailMinimum = 480.0

@@ -141,12 +141,22 @@ try {
         if ($Control.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) { $pattern.Select(); return }
         throw "Control cannot be invoked: $($Control.Current.Name)"
     }
+    function Reveal-RepositorySidebar {
+        $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+        $id = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'sidebar.addProject')
+        $add = $window.FindFirst($descendants, $id)
+        if (!$add -or $add.Current.IsOffscreen) { Open-Place 'Show or hide repositories' }
+    }
     # Seed only the disposable runner. No agent is started or message sent.
     Wait-ForControl 'sidebar.addProject' | Out-Null
     $folders = @(Call-Host 'workspace.list')
     if ($folders.Count -eq 0) { Wait-ForControl 'projects.firstAdd' | Out-Null }
     $fixture = Join-Path $env:RUNNER_TEMP 'tokenstat-ui-project'
     New-Item -Path $fixture -ItemType Directory -Force | Out-Null
+    & git -C $fixture init --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the disposable workbench repository' }
+    $reviewFile = Join-Path $fixture 'workbench-review.txt'
+    [System.IO.File]::WriteAllText($reviewFile, "workbench-live-first`n")
     $folder = Call-Host 'workspace.add' @{path = $fixture}
     Call-Host 'workspace.rename' @{id = $folder.id; name = 'UI smoke project'} | Out-Null
     $chats = @()
@@ -223,6 +233,9 @@ try {
     # Explicit information is the same action for chat and terminal rows.
     # Resolve within the retained row, then confirm the native copyable ID
     # surface appears without replacing or navigating the composer.
+    # Chat now reserves room for its side workbench. At the runner's narrow
+    # window, the native repository sidebar becomes a drawer.
+    Reveal-RepositorySidebar
     $chatRow = Wait-ForControl "sidebar.chat.$($chats[-1].id)"
     $detailsId = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'sidebar.details')
     $details = $chatRow.FindFirst($descendants, $detailsId)
@@ -270,7 +283,43 @@ try {
     if (@((Call-Host 'chat.events' @{id = $latest.id; offset = 0}).events).Count -ne 0) {
         throw 'Empty Open chat appended transcript events'
     }
+    Reveal-RepositorySidebar
     Wait-ForControl "sidebar.chat.$($latest.id)" | Out-Null
+    Open-Place 'Show or hide repositories'
+    function Wait-ForNativeName([string]$Name, [System.Windows.Automation.ControlType]$Type, [int]$Seconds = 15) {
+        $condition = [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $Name),
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $Type))
+        $sameProcess = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id)
+        for ($attempt = 0; $attempt -lt $Seconds * 4; $attempt++) {
+            $process.Refresh()
+            if ($process.HasExited) { throw "GUI exited while waiting for '$Name'" }
+            foreach ($surface in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $sameProcess)) {
+                $found = $surface.FindAll($descendants, $condition) | Where-Object { !$_.Current.IsOffscreen } | Select-Object -First 1
+                if ($found) { return $found }
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        throw "Workbench control '$Name' did not appear"
+    }
+    $buttonType = [System.Windows.Automation.ControlType]::Button
+    $textType = [System.Windows.Automation.ControlType]::Text
+    Invoke-Control (Wait-ForNativeName 'Review working tree beside chat' $buttonType)
+    Invoke-Control (Wait-ForNativeName 'Review all' $buttonType)
+    Wait-ForNativeName 'workbench-live-first' $textType | Out-Null
+    [System.IO.File]::WriteAllText($reviewFile, "workbench-live-first`nworkbench-live-second`n")
+    Wait-ForNativeName 'workbench-live-second' $textType | Out-Null
+    Invoke-Control (Wait-ForNativeName 'Browser beside chat' $buttonType)
+    Invoke-Control (Wait-ForNativeName 'Changes' ([System.Windows.Automation.ControlType]::TabItem))
+    Wait-ForNativeName 'workbench-live-second' $textType | Out-Null
+    Invoke-Control (Wait-ForNativeName 'Full diff' $buttonType)
+    # Equal line counts must still refresh the actual text, without chat events.
+    [System.IO.File]::WriteAllText($reviewFile, "workbench-live-first`nworkbench-live-third`n")
+    Wait-ForNativeName 'workbench-live-third' $textType | Out-Null
+    if (@((Call-Host 'chat.events' @{id = $latest.id; offset = 0}).events).Count -ne 0) {
+        throw 'Reviewing workspace changes appended chat events'
+    }
+    Write-Output 'PASS: production chat workbench mounts native tabs, retains live review across tools, and refreshes equal-count file edits without sending'
     $trace = Get-Content "$env:LOCALAPPDATA/tokenstat/logs/startup.log" | Where-Object { $_ -match "pid=$($process.Id) " }
     if ($trace -match 'Chat open failed|Chat (composer|inspector) construction failed|[Uu]nhandled exception') { throw 'Production chat or sidebar raised a XAML exception' }
     Write-Output 'PASS: production chats retain drafts, expand history, keep New chat drafts without ghost conversations, and explicitly open one empty chat without sending'
