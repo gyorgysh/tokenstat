@@ -108,7 +108,18 @@ def main():
                         assert response.get("ok"), response
                         return response["result"]
 
-                wait(lambda: socket_path.exists())
+                def host_ready():
+                    if host.poll() is not None:
+                        raise AssertionError("QA host exited before accepting requests")
+                    try:
+                        call("protocol", {})
+                        return True
+                    except (FileNotFoundError, ConnectionRefusedError):
+                        # bind creates the socket path before listen is ready.
+                        # Retry only the read-only startup probe, never actions.
+                        return False
+
+                wait(host_ready)
                 workspace = call("workspace.add", {"path": str(root / "project")})["id"]
 
                 def chat(identifier):
