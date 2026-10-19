@@ -7,7 +7,7 @@ enum MarkdownLinks {
     private static func allows(_ url: URL) -> Bool {
         if schemes.contains(url.scheme?.lowercased() ?? "") { return true }
         #if os(macOS)
-        return SimulatorAttachRequest(url: url) != nil
+        return SimulatorAttachRequest(url: url) != nil || DesktopOpenRequest(url: url) != nil
         #else
         return false
         #endif

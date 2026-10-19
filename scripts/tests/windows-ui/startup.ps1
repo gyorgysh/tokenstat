@@ -320,6 +320,68 @@ try {
         throw 'Reviewing workspace changes appended chat events'
     }
     Write-Output 'PASS: production chat workbench mounts native tabs, retains live review across tools, and refreshes equal-count file edits without sending'
+    function Open-DesktopAction([string]$Tool, [string]$Options = '') {
+        $project = [Uri]::EscapeDataString($folder.id)
+        Start-Process -FilePath "tokenstat://workbench/open?workspace=$project&tool=$Tool$Options"
+    }
+    function Wait-ForDesktopTool([string]$Tool) {
+        for ($attempt = 0; $attempt -lt 60; $attempt++) {
+            $tab = Wait-ForControl "workbench.tool.$Tool" 10
+            $selected = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+            if ($selected.Current.IsSelected) { return }
+            Start-Sleep -Milliseconds 100
+        }
+        throw "Desktop activation did not select $Tool"
+    }
+    $beforeShells = @(Call-Host 'pty.list' | Where-Object { $_.workspaceId -eq $folder.id })
+    Open-DesktopAction 'inspector' '&tab=files'
+    Wait-ForDesktopTool 'inspector'
+    Open-DesktopAction 'browser' '&url=http%3A%2F%2F127.0.0.1%3A65529%2Fdesktop-preview'
+    Wait-ForDesktopTool 'browser'
+    Open-DesktopAction 'terminal' '&new=1'
+    Wait-ForDesktopTool 'terminal'
+    $shell = $null
+    for ($attempt = 0; $attempt -lt 40; $attempt++) {
+        $afterShells = @(Call-Host 'pty.list' | Where-Object { $_.workspaceId -eq $folder.id })
+        $shell = $afterShells | Where-Object { $_.id -notin $beforeShells.id } | Select-Object -First 1
+        if ($shell) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    if (!$shell -or $afterShells.Count -ne $beforeShells.Count + 1) { throw 'A new-terminal desktop action must start exactly one shell' }
+    Open-DesktopAction 'changes'
+    Wait-ForDesktopTool 'changes'
+    & git -C $fixture add workbench-review.txt
+    & git -C $fixture -c user.name=fixture -c user.email=fixture commit --quiet -m 'Desktop action commit fixture'
+    if ($LASTEXITCODE -ne 0) { throw 'The desktop action commit fixture could not be created' }
+    $commit = (& git -C $fixture rev-parse HEAD).Trim()
+    Open-DesktopAction 'changes' ("&commit=" + $commit)
+    Wait-ForDesktopTool 'changes'
+    Wait-ForNativeName 'workbench-live-third' $textType | Out-Null
+    Open-DesktopAction 'terminal' ("&session=" + [Uri]::EscapeDataString($shell.id))
+    Wait-ForDesktopTool 'terminal'
+    Open-Place 'Home'
+    Open-DesktopAction 'terminal'
+    Wait-ForDesktopTool 'terminal'
+    if (@(Call-Host 'pty.list' | Where-Object { $_.workspaceId -eq $folder.id }).Count -ne $afterShells.Count) {
+        throw 'Reopening a terminal pane replayed the new-shell request'
+    }
+    $process.Refresh()
+    if ($process.HasExited -or @((Get-Process Tokenstat -ErrorAction SilentlyContinue) | Where-Object { $_.MainWindowHandle -ne 0 }).Count -ne 1) {
+        throw 'Warm desktop protocol actions must reach the original application window'
+    }
+    Write-Output 'PASS: warm protocol actions select inspector, browser, changes and an exact terminal without duplicate windows or shell replay'
+    if (!$process.CloseMainWindow() -or !$process.WaitForExit(15000)) { throw 'The app did not close before cold protocol activation' }
+    $process.Dispose()
+    Open-DesktopAction 'changes'
+    $process = $null
+    for ($attempt = 0; $attempt -lt 80; $attempt++) {
+        $process = Get-Process Tokenstat -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+        if ($process) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    if (!$process) { throw 'Cold desktop protocol activation did not open the application' }
+    Wait-ForDesktopTool 'changes'
+    Write-Output 'PASS: cold protocol activation waits for the project inventory and opens its changes pane'
     $trace = Get-Content "$env:LOCALAPPDATA/tokenstat/logs/startup.log" | Where-Object { $_ -match "pid=$($process.Id) " }
     if ($trace -match 'Chat open failed|Chat (composer|inspector) construction failed|[Uu]nhandled exception') { throw 'Production chat or sidebar raised a XAML exception' }
     Write-Output 'PASS: production chats retain drafts, expand history, keep New chat drafts without ghost conversations, and explicitly open one empty chat without sending'

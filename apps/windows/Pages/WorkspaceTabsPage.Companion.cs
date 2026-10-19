@@ -134,6 +134,33 @@ internal sealed partial class WorkspaceTabsPage
         DetailsRequested?.Invoke();
     }
 
+    internal void OpenDesktopAction(DesktopOpenRequest request)
+    {
+        switch (request.Tool)
+        {
+            case DesktopWorkbenchTool.Changes:
+                ShowChangesInspector();
+                if (request.CommitId is { } commit) _ = WorkspaceHistory.ShowDetailAsync(this, WorkspaceId, commit);
+                break;
+            case DesktopWorkbenchTool.Inspector:
+                if (request.InspectorTab is { } tab)
+                    _inspectorTab = tab switch { "files" => "Files", "changes" => "Changes", _ => "History" };
+                ShowCompanion(DesktopWorkbenchTool.Inspector);
+                break;
+            case DesktopWorkbenchTool.Browser:
+                if (request.BrowserUrl is { } url)
+                    CompanionBrowser.AddTab(url.AbsoluteUri, url.Host, url.Port, false,
+                        RemoteWorkspaces.TrySplit(WorkspaceId, out var peer, out _) ? peer : null);
+                ShowCompanion(DesktopWorkbenchTool.Browser);
+                break;
+            case DesktopWorkbenchTool.Terminal:
+                ShowCompanion(DesktopWorkbenchTool.Terminal);
+                if (request.SessionId is { } session) _ = _terminalController.RevealAsync(session);
+                else if (request.NewTerminal) _ = _terminalController.StartShellAsync();
+                break;
+        }
+    }
+
     private void CloseCompanion(DesktopWorkbenchTool tool)
     {
         _reviewEpoch.Advance();
@@ -169,6 +196,7 @@ internal sealed partial class WorkspaceTabsPage
                     if (_toolTabs.ContainsKey(tool)) continue;
                     var tab = _companionStrip.Open(tool.ToString(), ToolTitle(tool), () => new Grid());
                     tab.Tag = tool;
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(tab, "workbench.tool." + tool.ToString().ToLowerInvariant());
                     _toolTabs.Add(tool, tab);
                 }
                 _companionStrip.View.SelectedItem = _workbench.Selected is { } selected ? _toolTabs.GetValueOrDefault(selected) : null;

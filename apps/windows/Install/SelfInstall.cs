@@ -200,10 +200,25 @@ internal static class SelfInstall
         TryUnregisterHostTask();
         RemoveStartMenuShortcut();
         RemoveUninstallKey();
+        RemoveProtocolRegistration();
         // This process is Tokenstat.exe inside the install directory. Delete
         // after we exit, or the copy that Add/Remove Programs launched stays
         // locked and the folder is left behind.
         ScheduleDelete(InstallDirectory);
+    }
+
+    private static void RemoveProtocolRegistration()
+    {
+        try
+        {
+            using var command = Registry.CurrentUser.OpenSubKey(@"Software\Classes\tokenstat\shell\open\command");
+            // Another private build can own the scheme. Uninstall removes
+            // this installation's association only.
+            if (command?.GetValue(null) is string value
+                && value.StartsWith("\"" + InstalledExe + "\"", StringComparison.OrdinalIgnoreCase))
+                Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\tokenstat", throwOnMissingSubKey: false);
+        }
+        catch { /* Removing a missing association must not block uninstall. */ }
     }
 
     /// <summary>

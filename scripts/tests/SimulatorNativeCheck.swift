@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 // Built by check-simulator.py with the actual native simulator sources.
 import AppKit
+import simd
+import Metal
 
 private actor SimulatorDiscoveryFixture {
     enum Failure: Error { case temporarilyUnavailable }
@@ -74,6 +76,18 @@ private actor SimulatorSnapshotFixture {
         await discovery.removeAndroid()
         let removed = try await inventory.load(force: true)
         precondition(removed == [tablet], "A successful empty inventory must still remove stopped devices")
+        let missing = SimulatorInventory(apple: { throw SimulatorSetupIssue.missingXcode }, android: { throw SimulatorSetupIssue.missingAndroidSDK })
+        let missingSnapshot = try await missing.inspect(force: true)
+        precondition(missingSnapshot.devices.isEmpty && missingSnapshot.setup.apple == .toolsMissing && missingSnapshot.setup.android == .toolsMissing)
+        precondition(!missingSnapshot.setup.apple.isAuthoritative, "Missing tools cannot disprove an attach request's device identity")
+        let noDevices = SimulatorInventory(apple: { [] }, android: { [] })
+        let noDevicesSnapshot = try await noDevices.inspect(force: true)
+        precondition(noDevicesSnapshot.setup.apple == .noDevices && noDevicesSnapshot.setup.android == .noDevices)
+        precondition(noDevicesSnapshot.setup.apple.isAuthoritative)
+        let mixed = SimulatorInventory(apple: { [phone] }, android: { throw SimulatorSetupIssue.missingAndroidSDK })
+        let mixedSnapshot = try await mixed.inspect(force: true)
+        precondition(mixedSnapshot.devices == [phone] && mixedSnapshot.setup.apple == .ready(1) && mixedSnapshot.setup.android == .toolsMissing,
+                     "A missing optional platform must leave the installed platform usable")
         let recoveringSource = SimulatorDiscoveryFixture(apple: [phone], android: [])
         await recoveringSource.setFailures(apple: true, android: false)
         let recoveringInventory = SimulatorInventory(apple: { try await recoveringSource.apple() }, android: { [] })
@@ -97,6 +111,56 @@ private actor SimulatorSnapshotFixture {
         precondition(oldSnapshot.isEmpty && freshSnapshot == [phone], "An explicit attach reused a discovery started before its device existed")
 
         _ = NSApplication.shared
+        for tablet in [false, true] {
+            for aspect: Float in [0.46, 0.75, 1.5] {
+                let mesh = SimulatorDeviceMesh(aspect: aspect, tablet: tablet)
+                precondition(!mesh.vertices.isEmpty && mesh.vertices.count % 3 == 0)
+                precondition(abs(max(mesh.width, mesh.height) - 2.2) < 0.0001,
+                             "Rotating a device must preserve its physical depth and long edge")
+                let depth = mesh.vertices.map(\.position.z)
+                precondition(depth.max()! - depth.min()! >= mesh.depth,
+                             "The preview must be a solid volume, including edge and rear geometry")
+                precondition(mesh.vertices.contains { $0.texture.z == 1 && $0.normal.z > 0 })
+                precondition(mesh.vertices.contains { $0.normal.z < 0 })
+                precondition(mesh.vertices.allSatisfy { v in
+                    [v.position.x, v.position.y, v.position.z, v.normal.x, v.normal.y, v.normal.z].allSatisfy(\.isFinite)
+                })
+            }
+        }
+        var orbit = SimulatorOrbit()
+        let original = orbit.rotation
+        orbit.advance(velocity: [1, 0, 0], seconds: .pi * 2)
+        precondition(abs(simd_dot(original.vector, orbit.rotation.vector)) > 0.999,
+                     "Orbit must pass both poles and complete a full vertical turn")
+        for _ in 0..<10_000 { orbit.advance(velocity: [0.8, -1.2, 0.3], seconds: 1 / 60) }
+        precondition(abs(simd_length(orbit.rotation.vector) - 1) < 0.0001)
+        _ = orbit.rotate(from: [1, 0, 0], to: [-1, 0, 0])
+        precondition(orbit.rotation.vector.x.isFinite && orbit.rotation.vector.w.isFinite,
+                     "Crossing an opposite arcball edge must not produce an invalid rotation")
+        for orientation in 1...4 {
+            let raw = CGSize(width: 1, height: 2.2)
+            let displayed = SimulatorGeometry.displaySize(pixels: raw, orientation: orientation)
+            let rotation = SimulatorOrbit.deviceRotation(orientation: orientation)
+            for uv in [CGPoint(x: 0.1, y: 0.2), CGPoint(x: 0.9, y: 0.8)] {
+                let point = rotation.act(SIMD3<Float>(Float(uv.x - 0.5), Float((0.5 - uv.y) * raw.height), 0))
+                let screen = CGPoint(x: Double(point.x) / displayed.width + 0.5, y: 0.5 - Double(point.y) / displayed.height)
+                let sampled = SimulatorGeometry.devicePoint(screen, orientation: orientation)
+                precondition(abs(sampled.x - uv.x) < 0.0001 && abs(sampled.y - uv.y) < 0.0001,
+                             "Physical model rotation must preserve the flat display's texture mapping")
+            }
+        }
+        let model = SimulatorDeviceModelView()
+        if MTLCreateSystemDefaultDevice() != nil {
+            precondition(model.isAvailable, "The native solid-device Metal shader must compile")
+        } else { print("SKIP: native Metal rendering requires a GPU, geometry and orbit checks still ran") }
+        model.setShape(pixels: CGSize(width: 1206, height: 2622), tablet: false)
+        first.register(model)
+        first.updateModelOrbit(orbit)
+        let expandedModel = SimulatorDeviceModelView()
+        first.register(expandedModel)
+        precondition(expandedModel.orbit.rotation.vector == model.orbit.rotation.vector,
+                     "Expanding a model must preserve the inspector's current orbit")
+        model.clear()
         let screen = SimulatorScreenNSView(frame: .zero)
         screen.setFrameSize(CGSize(width: 320, height: 640))
         precondition(screen.subviews.first?.frame.size == screen.bounds.size,
@@ -121,6 +185,6 @@ private actor SimulatorSnapshotFixture {
             _ = try NativeSimulatorConnection(developerDirectory: "/missing-tokenstat-test-xcode/Developer", deviceID: phone.id)
             preconditionFailure("Missing Xcode unexpectedly attached a device")
         } catch { precondition(!error.localizedDescription.isEmpty) }
-        print("PASS: production simulator preferences, owner isolation, detach, incremental H264 framing and missing-Xcode recovery")
+        print("PASS: production simulator setup, discovery recovery, preferences, owner isolation, solid device mesh, full orbit, native Metal shader and H264 framing")
     }
 }

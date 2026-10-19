@@ -191,6 +191,33 @@ internal sealed class WorkspaceTerminalController
         catch (Exception ex) { Banner(ex.Message); }
         finally { _startingShell = false; }
     }
+    internal async Task RevealAsync(string id)
+    {
+        try
+        {
+            // Only attach to a live session belonging to this project's tree.
+            // A valid-looking identifier is not proof of that ownership.
+            if (id.StartsWith("ssh:", StringComparison.Ordinal))
+            {
+                if (!WorkspaceSshTabs.In(_workspaceId).Contains(id[4..])) {
+                    Banner(L10n.Text("windows.desktop_actions.session_missing")); return;
+                }
+                var remotes = Format.Items(await AppServices.Host.CallAsync("ssh.session.list"));
+                if (_released) return;
+                var live = remotes?.FirstOrDefault(item => Format.Text(item, "id") == id[4..] && Format.Flag(item, "alive"));
+                if (live is not null) AddSSH(live);
+                else Banner(L10n.Text("windows.desktop_actions.session_missing"));
+                return;
+            }
+            var listed = Format.Items(await AppServices.Host.CallAsync("pty.list"));
+            if (_released) return;
+            var session = listed?.FirstOrDefault(item => Format.Text(item, "id") == id
+                && Format.Text(item, "workspaceId") == _workspaceId && Format.Flag(item, "alive") && !Format.Flag(item, "hidden"));
+            if (session is null) { Banner(L10n.Text("windows.desktop_actions.session_missing")); return; }
+            AddLocal(id);
+        }
+        catch (Exception error) { Banner(error.Message); }
+    }
     public void OpenInSplit(string id)
     {
         if (!_entries.ContainsKey(id)) return;

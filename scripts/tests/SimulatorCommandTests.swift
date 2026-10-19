@@ -4,6 +4,10 @@ import Foundation
 
 @main struct SimulatorCommandTests {
     static func main() async throws {
+        do {
+            _ = try await SimulatorCommand.developerDirectory(selection: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path)
+            preconditionFailure("A missing Xcode selection must not fall back to xcrun or open an installer")
+        } catch is SimulatorCommand.Failure { }
         let value = try await SimulatorCommand.run("/usr/bin/python3", ["-c", "import sys;sys.stdout.buffer.write(bytes(range(256))*1024);sys.stderr.write('e'*200000)"])
         precondition(value.status == 0 && value.data.count == 262144 && value.errors.count == 200000)
         let failed = try await SimulatorCommand.run("/usr/bin/python3", ["-c", "import sys;sys.stderr.write('actual error');sys.exit(7)"])

@@ -42,8 +42,17 @@ private struct SimulatorInspectorContent: View {
         VStack(spacing: 0) {
             header
             SimulatorErrorBanner(session: session)
-            SimulatorDeviceStage(session: session, isActive: isActive)
-            SimulatorControls(session: session, onExpand: openViewer)
+            if session.devices.isEmpty && !session.busy {
+                ScrollView {
+                    SimulatorSetupView(setup: session.setup, refreshing: session.isRefreshing) {
+                        Task { await session.refresh(force: true) }
+                    }.padding(18)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                if session.perspective && !session.hasFrame { SimulatorAttachmentBar(session: session) }
+                SimulatorDeviceStage(session: session, isActive: isActive)
+                SimulatorControls(session: session, onExpand: openViewer)
+            }
         }
         .background(Theme.background)
         .task(id: surfaceIsActive) {
@@ -84,7 +93,12 @@ private struct SimulatorInspectorContent: View {
             // owner's request also prevents replay after navigating away.
             request = nil
             session.attach(id)
-        } else if reportMissing, !session.devices.isEmpty {
+        } else if reportMissing, session.setup.status(for: id.hasPrefix("android:") ? .android : .ios) == .toolsMissing {
+            request = nil
+            // The empty pane already shows setup. With another platform
+            // available, reveal the requested platform's setup cards once.
+            settings = !session.devices.isEmpty
+        } else if reportMissing, session.setup.status(for: id.hasPrefix("android:") ? .android : .ios).isAuthoritative {
             request = nil
             session.error = L10n.text("apple.simulator.device_missing")
         }
@@ -96,6 +110,7 @@ private struct SimulatorInspectorContent: View {
             Menu {
                 ForEach(session.orderedDevices) { device in
                     Button {
+                        request = nil
                         session.selectedID = device.id
                         if session.attachedID != nil { session.attach(device.id) }
                     } label: {
@@ -109,13 +124,15 @@ private struct SimulatorInspectorContent: View {
                     Text(session.selected?.name ?? L10n.text("apple.simulator.choose_device")).font(Theme.font(13, weight: .semibold)).lineLimit(1)
                     Image(systemName: "chevron.down").font(Theme.font(10)).foregroundStyle(Theme.controlGlyph)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-            }.menuStyle(.borderlessButton).disabled(session.busy)
+            }.menuStyle(.borderlessButton).disabled(session.busy || session.devices.isEmpty)
             Text(session.selected?.runtime ?? L10n.text("apple.simulator.ios_subtitle"))
                 .font(Theme.font(11)).foregroundStyle(Theme.controlGlyph).padding(.leading, 24)
             }.frame(maxWidth: .infinity, alignment: .leading)
             ToolbarIconButton(systemImage: ActionIcon.refresh.symbol, help: L10n.text("apple.simulator.refresh")) { Task { await session.refresh(force: true) } }
             ToolbarIconButton(systemImage: ActionIcon.settings.symbol, help: L10n.text("apple.simulator.preferences")) { settings.toggle() }
-                .popover(isPresented: $settings) { preferences.padding(18).frame(width: 300) }
+                .popover(isPresented: $settings) {
+                    ScrollView { preferences.padding(18) }.frame(width: 350).frame(maxHeight: 640)
+                }
         }.padding(12).background(Theme.sidebar).overlay(alignment: .bottom) { ThemeRule() }
     }
 
@@ -136,15 +153,40 @@ private struct SimulatorInspectorContent: View {
             Text(L10n.text("apple.simulator.selection_help")).font(Theme.font(12)).foregroundStyle(Theme.controlGlyph)
             Button(session.selected?.platform == .android ? L10n.text("apple.simulator.open_android_studio") : L10n.text("apple.simulator.open_xcode"), .external) { session.openExternally() }
             Text(L10n.text("apple.simulator.android_help")).font(Theme.font(12)).foregroundStyle(Theme.controlGlyph)
+            ThemeRule()
+            SimulatorSetupView(setup: session.setup, refreshing: session.isRefreshing, showsHeader: false) {
+                Task { await session.refresh(force: true) }
+            }
         }.font(Theme.font(13))
     }
 
 }
 
+private struct SimulatorAttachmentBar: View {
+    let session: SimulatorSession
+    var body: some View {
+        HStack(spacing: 8) {
+            if session.busy {
+                ProgressView().controlSize(.small)
+                Text(L10n.text("apple.simulator.booting")).font(Theme.font(12))
+                Spacer(minLength: 0)
+                Button(L10n.text("apple.simulator.cancel_attach"), .stop) { session.detach() }
+            } else {
+                Button(L10n.text("apple.simulator.attach"), .connect) { session.attach() }
+                    .buttonStyle(.borderedProminent).disabled(session.selected == nil)
+                Spacer(minLength: 0)
+                if session.attachedID != nil {
+                    Button(L10n.text("apple.simulator.detach"), .disconnect) { session.detach() }
+                }
+            }
+        }.padding(12).background(Theme.panel).overlay(alignment: .bottom) { ThemeRule() }
+    }
+}
+
 private struct SimulatorErrorBanner: View {
     let session: SimulatorSession
     @ViewBuilder var body: some View {
-        if let error = session.error {
+        if let error = session.error, error != session.setup.apple.failure, error != session.setup.android.failure {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning)
                 Text(error).font(Theme.font(12)).textSelection(.enabled).lineLimit(4).help(error)
@@ -159,8 +201,6 @@ private struct SimulatorErrorBanner: View {
 private struct SimulatorDeviceStage: View {
     let session: SimulatorSession
     let isActive: Bool
-    @State private var orbitOrigin: CGSize?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geometry in
@@ -171,18 +211,22 @@ private struct SimulatorDeviceStage: View {
             let width = height * aspect
             ZStack {
                 RadialGradient(colors: [Theme.accentSoft.opacity(0.65), Theme.background], center: .center, startRadius: 20, endRadius: max(200, geometry.size.height * 0.65))
+                if session.perspective {
+                    SimulatorDeviceModel(session: session, visible: isActive)
+                    VStack {
+                        Spacer()
+                        Text(L10n.text("apple.simulator.drag_to_rotate"))
+                            .font(Theme.font(11)).foregroundStyle(Theme.controlGlyph)
+                            .padding(12).background(Theme.panel.opacity(0.9), in: Capsule())
+                            .padding(16)
+                    }.allowsHitTesting(false)
+                } else {
                 ScrollView([.horizontal, .vertical]) {
                     VStack(spacing: 14) {
-                        device(width: width, height: height)
-                            .rotation3DEffect(.degrees(session.perspective ? session.pitch : 0), axis: (x: 1, y: 0, z: 0), perspective: 0.45)
-                            .rotation3DEffect(.degrees(session.perspective ? session.yaw : 0), axis: (x: 0, y: 1, z: 0), perspective: 0.45)
-                            .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: session.perspective)
-                            .padding(18)
-                        if session.perspective {
-                            Text(L10n.text("apple.simulator.drag_to_rotate")).font(Theme.font(11)).foregroundStyle(Theme.controlGlyph)
-                        }
+                        device(width: width, height: height).padding(18)
                     }.frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
                 }.scrollIndicators(.hidden)
+                }
             }
         }
         .clipped()
@@ -190,39 +234,18 @@ private struct SimulatorDeviceStage: View {
 
     private func device(width: CGFloat, height: CGFloat) -> some View {
         let radius = min(width * (session.selected?.isTablet == true ? 0.045 : 0.12), 38.0)
-        let back = session.perspective && cos(session.yaw * .pi / 180) < 0
         return ZStack {
             RoundedRectangle(cornerRadius: radius + 8)
                 .fill(LinearGradient(colors: [Theme.controlGlyph.opacity(0.6), Theme.border, Theme.controlGlyph.opacity(0.35)], startPoint: .topLeading, endPoint: .bottomTrailing))
                 .padding(-7)
-                .shadow(color: Theme.controlGlyph.opacity(0.22), radius: 16, x: session.perspective ? 14 : 0, y: 12)
+                .shadow(color: Theme.controlGlyph.opacity(0.22), radius: 16, y: 12)
             RoundedRectangle(cornerRadius: radius + 4).fill(.black).padding(-4)
             if session.attachedID != nil {
-                SimulatorScreen(session: session, interactive: isActive && !session.perspective,
-                    cornerRadius: radius, visible: isActive && session.hasFrame && !back)
+                SimulatorScreen(session: session, interactive: isActive,
+                    cornerRadius: radius, visible: isActive && session.hasFrame)
                     .frame(width: width, height: height)
             }
-            if back {
-                RoundedRectangle(cornerRadius: radius)
-                    .fill(LinearGradient(colors: [Theme.controlSeat, Theme.panel, Theme.border], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .overlay(alignment: .topLeading) {
-                        HStack(spacing: 7) {
-                            ForEach(0..<(session.selected?.isTablet == true ? 1 : 2), id: \.self) { _ in
-                                Circle().fill(.black.gradient)
-                                    .overlay(Circle().strokeBorder(Theme.controlGlyph.opacity(0.6), lineWidth: 2))
-                                    .overlay(Circle().fill(Theme.accent.opacity(0.25)).frame(width: 5, height: 5).offset(x: -3, y: -3))
-                                    .frame(width: min(28, width * 0.09), height: min(28, width * 0.09))
-                            }
-                        }.padding(12)
-                    }
-                    .overlay {
-                        Text(session.selected?.name ?? L10n.text("apple.simulator.title"))
-                            .font(Theme.font(11, weight: .medium)).foregroundStyle(Theme.controlGlyph)
-                    }
-                    .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
-                    .accessibilityHidden(true)
-            }
-            if !session.hasFrame && !back {
+            if !session.hasFrame {
                 VStack(spacing: 16) {
                     Image(systemName: session.selected?.isTablet == true ? "ipad" : "iphone")
                         .font(Theme.font(38, weight: .ultraLight)).foregroundStyle(Theme.controlGlyph)
@@ -240,19 +263,6 @@ private struct SimulatorDeviceStage: View {
                     }
                 }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Theme.panel, in: RoundedRectangle(cornerRadius: radius))
-            }
-            if session.perspective {
-                Color.clear.contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                    if orbitOrigin == nil { orbitOrigin = CGSize(width: session.yaw, height: session.pitch) }
-                    let base = orbitOrigin ?? .zero
-                    session.yaw = Double(base.width + value.translation.width / 2)
-                    session.pitch = min(80, max(-80, Double(base.height - value.translation.height / 3)))
-                }.onEnded { _ in orbitOrigin = nil })
-                .accessibilityElement().accessibilityLabel(L10n.text("apple.simulator.perspective"))
-                .accessibilityAdjustableAction { direction in
-                    if direction == .increment { session.yaw += 15 }
-                    else if direction == .decrement { session.yaw -= 15 }
-                }
             }
         }.frame(width: width, height: height)
     }
@@ -303,12 +313,12 @@ private struct SimulatorControls: View {
             }.disabled(session.attachedID == nil || session.busy || !session.hasFrame)
             HStack(spacing: 4) {
                 ToolbarIconButton(systemImage: "minus.magnifyingglass", help: L10n.text("apple.simulator.zoom_out")) { session.zoom = max(0.5, session.zoom - 0.25) }
-                Button(L10n.text("apple.simulator.fit"), .preview) { session.zoom = 1; session.yaw = 0; session.pitch = 0; session.perspective = false }
+                Button(L10n.text("apple.simulator.fit"), .preview) { session.zoom = 1; session.perspective = false }
                     .buttonStyle(.plain).font(Theme.font(11))
                 ToolbarIconButton(systemImage: "plus.magnifyingglass", help: L10n.text("apple.simulator.zoom_in")) { session.zoom = min(3, session.zoom + 0.25) }
                 Spacer(minLength: 0)
                 ToolbarIconButton(systemImage: "cube", help: L10n.text("apple.simulator.perspective"), isAccent: session.perspective) {
-                    session.perspective.toggle(); session.yaw = 18; session.pitch = 8
+                    session.perspective.toggle()
                 }
                 ToolbarIconButton(systemImage: isExpanded ? ActionIcon.dismiss.symbol : ActionIcon.enterFullScreen.symbol, help: isExpanded ? L10n.text("common.close") : L10n.text("apple.simulator.expand")) { onExpand() }
             }
@@ -367,8 +377,17 @@ private struct SimulatorExpandedContent: View {
                 subtitle: session.attached?.runtime ?? L10n.text("apple.simulator.ios_subtitle"), icon: .device, onClose: onClose)
             ThemeRule()
             SimulatorErrorBanner(session: session)
-            SimulatorDeviceStage(session: session, isActive: true)
-            SimulatorControls(session: session, isExpanded: true, onExpand: onClose)
+            if session.devices.isEmpty && !session.busy {
+                ScrollView {
+                    SimulatorSetupView(setup: session.setup, refreshing: session.isRefreshing) {
+                        Task { await session.refresh(force: true) }
+                    }.padding(18)
+                }
+            } else {
+                if session.perspective && !session.hasFrame { SimulatorAttachmentBar(session: session) }
+                SimulatorDeviceStage(session: session, isActive: true)
+                SimulatorControls(session: session, isExpanded: true, onExpand: onClose)
+            }
         }.frame(minWidth: 540, minHeight: 600).background(Theme.background)
     }
 }

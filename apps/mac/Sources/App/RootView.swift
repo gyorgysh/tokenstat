@@ -87,6 +87,9 @@ struct RootView: View {
     @AppStorage("chat.browserPaneWidth") private var browserPaneWidth = 520.0
     @State private var workbenchResize = DesktopWorkbenchResizeState()
     @State private var simulatorRequests: [String: SimulatorAttachmentIntent] = [:]
+    @State private var desktopTerminalRequests: [String: DesktopTerminalIntent] = [:]
+    @State private var pendingDesktopOpen: PendingDesktopOpen?
+    @State private var desktopActionScope: WorkReference.Scope?
     @State private var pendingSimulatorAttach: PendingSimulatorAttach?
     @State private var desktopWorkbench = DesktopWorkbenchSession()
     @State private var desktopTurnReviews: [String: ChatTurnReview] = [:]
@@ -278,6 +281,8 @@ struct RootView: View {
                 desktopCommitReviews = desktopCommitReviews.filter { incoming.contains($0.key) }
                 workspaceBrowserURLs = workspaceBrowserURLs.filter { incoming.contains($0.key) }
                 simulatorRequests = simulatorRequests.filter { incoming.contains($0.key) }
+                desktopTerminalRequests = desktopTerminalRequests.filter { incoming.contains($0.key) }
+                resolvePendingDesktopOpen()
                 knownSidebarProjects = incoming
                 guard let id = route.workspaceID, !ids.contains(id) else { return }
                 lastSection[id] = nil
@@ -388,12 +393,13 @@ struct RootView: View {
             }
             .onOpenURL { url in
                 if let request = SimulatorAttachRequest(url: url) { openSimulator(request) }
+                else if let request = DesktopOpenRequest(url: url) { openDesktop(request) }
                 else { ecosystemNavigation.receive(url) }
             }
             .onChange(of: ecosystemNavigation.pending, initial: true) { _, _ in openEcosystemDestination() }
-            .onChange(of: placeSettled) { _, _ in openEcosystemDestination() }
-            .onChange(of: workspaces.isLoading) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach() }
-            .onChange(of: WorkSessionContext.shared.scope) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach() }
+            .onChange(of: placeSettled) { _, _ in openEcosystemDestination(); resolvePendingDesktopOpen() }
+            .onChange(of: workspaces.isLoading) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
+            .onChange(of: WorkSessionContext.shared.scope) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: route) { _, _ in resolvePendingSimulatorAttach() }
     }
 
@@ -586,13 +592,16 @@ struct RootView: View {
         .task(id: WorkSessionContext.shared.scope) {
             workspaceBrowserURLs = [:]
             simulatorRequests = [:]
+            desktopTerminalRequests = [:]
             desktopWorkbench = DesktopWorkbenchSession()
             desktopTurnReviews = [:]
             desktopCommitReviews = [:]
             pendingChatLink = nil
             worktreeProject = nil
+            desktopActionScope = WorkSessionContext.shared.scope
             await BridgeLaunch.wait()
             resolvePendingSimulatorAttach()
+            resolvePendingDesktopOpen()
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
         }
         .sheet(item: $worktreeProject) { folder in
@@ -911,6 +920,10 @@ struct RootView: View {
         .toolbar(removing: .sidebarToggle)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .environment(\.openURL, OpenURLAction { url in
+            if let request = DesktopOpenRequest(url: url) {
+                openDesktop(request)
+                return .handled
+            }
             if let request = SimulatorAttachRequest(url: url) {
                 openSimulator(request)
                 return .handled
@@ -940,6 +953,52 @@ struct RootView: View {
     private func openChatBrowser(_ url: URL, workspaceID: String) {
         workspaceBrowserURLs[workspaceID] = url.absoluteString
         openWorkbench(.browser, in: workspaceID)
+    }
+
+    private struct PendingDesktopOpen {
+        let request: DesktopOpenRequest
+        let scope: WorkReference.Scope?
+    }
+    private func openDesktop(_ request: DesktopOpenRequest) {
+        pendingDesktopOpen = PendingDesktopOpen(request: request, scope: WorkSessionContext.shared.scope)
+        resolvePendingDesktopOpen()
+    }
+    private func resolvePendingDesktopOpen() {
+        guard let pending = pendingDesktopOpen else { return }
+        if let scope = pending.scope, scope != WorkSessionContext.shared.scope { pendingDesktopOpen = nil; return }
+        guard placeSettled, !workspaces.isLoading, let scope = WorkSessionContext.shared.scope,
+              desktopActionScope == scope else { return }
+        let request = pending.request
+        guard workspaces.folders.contains(where: { $0.id == request.workspaceID }) else {
+            pendingDesktopOpen = nil
+            workspaces.errorMessage = L10n.text("apple.desktop_actions.project_missing")
+            return
+        }
+        guard WorkViewedChange.owner(folderID: request.workspaceID) != nil else { return }
+        pendingDesktopOpen = nil
+        let id = request.workspaceID
+        if route.workspaceID != id || route.workspaceSection != .chat { navigate(to: .workspace(id: id, section: .chat)) }
+        switch request.tool {
+        case .changes:
+            desktopTurnReviews[id] = nil; desktopCommitReviews[id] = request.commitID
+        case .browser:
+            if let url = request.browserURL { workspaceBrowserURLs[id] = url.absoluteString }
+        case .terminal:
+            if request.sessionID != nil || request.newTerminal {
+                desktopTerminalRequests[id] = DesktopTerminalIntent(sessionID: request.sessionID, newTerminal: request.newTerminal)
+            } else { desktopTerminalRequests[id] = nil }
+        case .inspector:
+            if let tab = request.inspectorTab {
+                workspaces.chatInspectorShowsSettings = false
+                switch tab {
+                case .files: workspaces.inspectorTab = .files
+                case .changes: workspaces.inspectorTab = .changes
+                case .history: workspaces.inspectorTab = .history
+                }
+            }
+        case .simulator: break
+        }
+        openWorkbench(request.tool, in: id)
     }
 
     private func openSimulator(_ request: SimulatorAttachRequest) {
@@ -1858,6 +1917,7 @@ struct RootView: View {
         }
         if tool == .browser { workspaceBrowserURLs[workspaceID] = nil }
         if tool == .simulator { simulatorRequests[workspaceID] = nil }
+        if tool == .terminal { desktopTerminalRequests[workspaceID] = nil }
     }
 
     @ViewBuilder private var workspaceCompanionPane: some View {
@@ -1907,7 +1967,8 @@ struct RootView: View {
             ChatTerminalPane(folder: folder, terminals: terminals, workspaces: workspaces,
                              ssh: ssh, sshSessions: sshSessions,
                              onManageServers: { openSSH(.hosts(folder: nil)) },
-                             onClose: { hideWorkbench() }, isActive: active)
+                             onClose: { hideWorkbench() }, isActive: active,
+                             request: Binding(get: { desktopTerminalRequests[folder.id] }, set: { desktopTerminalRequests[folder.id] = $0 }))
         case .inspector:
             WorkspaceInspector(model: workspaces, automations: automations,
                 account: account.account, onClose: { hideWorkbench() },

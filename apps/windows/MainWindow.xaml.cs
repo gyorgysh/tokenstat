@@ -280,6 +280,7 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(_nav, 1);
         Grid.SetColumn(_nav, 1);
         RootGrid.Children.Add(_nav);
+        InitializeDesktopActions();
         _paneResize.Width = 6;
         _paneResize.HorizontalAlignment = HorizontalAlignment.Left;
         _paneResize.Background = new SolidColorBrush(Colors.Transparent);
@@ -615,6 +616,7 @@ public sealed partial class MainWindow : Window
             DispatcherQueue.TryEnqueue(() =>
             {
                 RebuildFolderItems();
+                ResolveDesktopActions();
             });
             _ = RemoteWorkspaces.SweepAsync();
         }

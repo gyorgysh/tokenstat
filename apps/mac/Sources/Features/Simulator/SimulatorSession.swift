@@ -8,6 +8,9 @@ import IOSurface
 @MainActor @Observable
 final class SimulatorSession {
     var devices: [SimulatorDevice] = []
+    var setup = SimulatorSetupState()
+    var isRefreshing = false
+    @ObservationIgnored private var refreshFlights = 0
     var selectedID: String? { didSet { defaults.set(selectedID, forKey: key + ".selected") } }
     var favorites: Set<String> { didSet { defaults.set(Array(favorites), forKey: key + ".favorites") } }
     var defaultID: String? { didSet { defaults.set(defaultID, forKey: key + ".default") } }
@@ -20,8 +23,7 @@ final class SimulatorSession {
     var orientation = 1
     var hasFrame = false
     var perspective = false
-    var yaw = 0.0
-    var pitch = 0.0
+    @ObservationIgnored private(set) var modelOrbit = SimulatorOrbit()
     var zoom = 1.0
     @ObservationIgnored private(set) var connection: NativeSimulatorConnection?
     @ObservationIgnored var surface: Any?
@@ -35,7 +37,8 @@ final class SimulatorSession {
     @ObservationIgnored private var androidWindowRotation = false
     @ObservationIgnored private var androidFixedRotation = false
     @ObservationIgnored private var androidTouch: (CGPoint, Date)?
-    @ObservationIgnored private var displays = NSHashTable<SimulatorScreenNSView>.weakObjects()
+    @ObservationIgnored private var displays = NSHashTable<AnyObject>.weakObjects()
+    private var frameSinks: [any SimulatorFrameSink] { displays.allObjects.compactMap { $0 as? any SimulatorFrameSink } }
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var inputEpoch = UUID()
     @ObservationIgnored private var operation: Task<Void, Never>?
@@ -73,11 +76,18 @@ final class SimulatorSession {
     }
 
     func refresh(force: Bool = false) async {
+        refreshFlights += 1; isRefreshing = true
+        defer { refreshFlights -= 1; isRefreshing = refreshFlights > 0 }
         do {
-            let found = try await inventory.load(force: force)
+            let snapshot = try await inventory.inspect(force: force)
             try Task.checkCancellation()
+            let found = snapshot.devices
+            setup = snapshot.setup
             if error == discoveryError { error = nil }
             discoveryError = nil
+            if found.isEmpty, let failure = setup.apple.failure ?? setup.android.failure {
+                discoveryError = failure; error = failure
+            }
             devices = found
             if selected == nil { selectedID = SimulatorDevice.preferred(in: found, saved: defaultID ?? selectedID, favorites: favorites)?.id }
             let booted = Set(found.filter(\.isRunning).map(\.id))
@@ -96,7 +106,7 @@ final class SimulatorSession {
         active = value
         if !value {
             inputEpoch = UUID(); androidTouch = nil
-            displays.allObjects.forEach { $0.cancelGestures() }
+            frameSinks.forEach { $0.cancelGestures() }
             connection?.stop(); androidStream?.stop()
         }
         else if let connection { do { try startDisplay(connection) } catch { self.error = error.localizedDescription } }
@@ -113,7 +123,7 @@ final class SimulatorSession {
         connection?.stop(); connection = nil; surface = nil; hasFrame = false
         androidStream?.stop(); androidStream = nil; androidSerial = nil; androidTransportID = nil; videoBacking = nil
         attachedID = nil; selectedID = id; busy = true; error = nil; message = nil
-        displays.allObjects.forEach { $0.clear() }
+        frameSinks.forEach { $0.clear() }
         operation = Task { [weak self] in
             guard let self else { return }
             defer { if self.generation == lease { self.busy = false } }
@@ -237,7 +247,7 @@ final class SimulatorSession {
             let pixels = CGSize(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer))
             if self.pixels != pixels { self.pixels = pixels }
             if !self.hasFrame { self.hasFrame = true }
-            for view in self.displays.allObjects { view.present(surface, pixels: pixels, orientation: 1, backing: buffer) }
+            for view in self.frameSinks { view.present(surface, pixels: pixels, orientation: 1, backing: buffer) }
         }
         stream.onError = { [weak self, weak stream] text in
             guard let self, let stream, self.androidStream === stream, self.generation == lease else { return }
@@ -245,7 +255,7 @@ final class SimulatorSession {
             self.androidInputFlight?.cancel(); self.androidInputFlight = nil
             stream.stop(); self.androidStream = nil; self.androidSerial = nil; self.androidTransportID = nil
             self.surface = nil; self.videoBacking = nil; self.hasFrame = false
-            self.displays.allObjects.forEach { $0.clear() }
+            self.frameSinks.forEach { $0.clear() }
             self.error = text
         }
         androidStream?.stop(); androidStream = stream
@@ -260,13 +270,21 @@ final class SimulatorSession {
                 if self.pixels != size { self.pixels = size }
                 if self.orientation != orientation { self.orientation = orientation }
                 if !self.hasFrame { self.hasFrame = true }
-                for view in self.displays.allObjects { view.present(surface, pixels: pixels, orientation: orientation) }
+                for view in self.frameSinks { view.present(surface, pixels: pixels, orientation: orientation, backing: nil) }
             }
     }
 
-    func register(_ view: SimulatorScreenNSView) {
+    func register(_ view: any SimulatorFrameSink) {
         displays.add(view)
+        if let model = view as? SimulatorDeviceModelView { model.applyOrbit(modelOrbit) }
         if let surface { view.present(surface, pixels: SimulatorGeometry.displaySize(pixels: pixels, orientation: orientation), orientation: orientation, backing: videoBacking) }
+    }
+    func updateModelOrbit(_ value: SimulatorOrbit) {
+        modelOrbit = value
+        for case let view as SimulatorDeviceModelView in frameSinks { view.applyOrbit(value) }
+    }
+    func beginModelInteraction(_ source: SimulatorDeviceModelView) {
+        for case let view as SimulatorDeviceModelView in frameSinks where view !== source { view.stopOrbit() }
     }
 
     func detach(suppressFollow: Bool = true) {
@@ -277,7 +295,7 @@ final class SimulatorSession {
         connection?.stop(); connection = nil; attachedID = nil; busy = false
         androidStream?.stop(); androidStream = nil; androidSerial = nil; androidTransportID = nil; videoBacking = nil
         surface = nil; hasFrame = false
-        displays.allObjects.forEach { $0.clear() }
+        frameSinks.forEach { $0.clear() }
     }
 
     func shutdown() {

@@ -7,6 +7,29 @@ WinUI 3 desktop client for tokenstat. Unpackaged, per-user, talks to
 
 Identifiers stay lowercase: `ai.tokenstat.tokenstat` and `ai.tokenstat.hostd`.
 
+## Agent desktop actions
+
+The app registers the `tokenstat` URL scheme and forwards new activations to
+its existing window. Agents receive `TOKENSTAT_WORKSPACE_ID` and can open a
+tool beside that project's chat, including presenting the working tree after
+completing a requested job:
+
+```powershell
+Start-Process 'tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=changes'
+```
+
+Replace and URL-encode query values. Tools are `inspector`, `changes`, `browser`
+and `terminal`. Changes accepts `commit=FULL_COMMIT_SHA` to show committed work
+using its full 40- or 64-character hexadecimal id. Inspector accepts
+`tab=files`, `tab=changes` or `tab=history`.
+Browser accepts `url=ENCODED_HTTP_OR_HTTPS_URL` for an embedded preview. Terminal
+accepts `session=EXISTING_PROJECT_SESSION_ID` or `new=1` for a fresh normal
+shell. With neither option it shows the project's sessions. Links never accept
+command text. Unknown projects and unavailable sessions show an explanation.
+Cold launches wait for the folder inventory before applying the action, and
+changing tabs never replays a consumed shell request. The [Apple guide](../mac/README.md#agent-desktop-actions)
+lists the shared URL forms.
+
 ## Company metadata
 
 Filled from [tokenstat.ai](https://tokenstat.ai):

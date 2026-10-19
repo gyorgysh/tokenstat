@@ -16,6 +16,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - The Mac chat workbench has a Simulator tab for local iPhone and iPad development. Choose a device and runtime, boot or attach it, and interact with its live screen beside the conversation. Touch, dragging, scrolling, keyboard input, clipboard transfer, Home, lock, orientation, appearance, Settings and full-resolution screenshots are available from the inspector.
 - Simulator preferences remember a default device, pinned devices and whether to follow devices started by agents. Agents receive instructions for building, installing, testing and opening the exact simulator in the current repository's inspector. Hiding or detaching the screen leaves the device running; shutdown is explicit.
 - Fit, zoom, an expanded viewer and a draggable 3D device preview make phones and tablets comfortable to inspect. Compatible foldable iOS runtimes also expose open, halfway and closed postures. Installed Android SDKs add local phone and tablet emulators with live screens, touch, keyboard and device controls.
+- macOS and Windows agents can open a project's Inspector, Changes, embedded Browser or Terminal through explicit app actions, including showing changes after completing a job. Actions can select an inspector tab, open a preview or reveal an exact terminal session. Windows forwards links to the existing window and handles cold launches.
+- Simulator setup cards explain missing Xcode tools, iOS runtimes/devices, Android SDK tools and virtual devices separately, with development-app, download, guide and refresh actions. The 3D preview uses solid generic hardware with live screens, rounded edges, rear cameras, side buttons and continuous rotation in every direction.
 
 ### Fixed
 

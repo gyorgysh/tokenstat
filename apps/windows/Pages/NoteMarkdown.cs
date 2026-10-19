@@ -11,5 +11,5 @@ internal static class NoteMarkdown
         .DisableHtml().UseTaskLists().UseEmphasisExtras(EmphasisExtraOptions.Strikethrough).Build();
     public static MarkdownDocument Parse(string text) => Markdown.Parse(text, Pipeline);
     public static Uri? Link(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri)
-        && uri.Scheme is "https" or "http" or "mailto" ? uri : null;
+        && (uri.Scheme is "https" or "http" or "mailto" || Tokenstat.Navigation.DesktopOpenRequest.Parse(value) is not null) ? uri : null;
 }

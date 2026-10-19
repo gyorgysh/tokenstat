@@ -195,12 +195,41 @@ fn standing_text(persona_name: &str, persona_brief: &str, output_dir: &Path) -> 
     text.push_str(&file_rule(output_dir));
     text.push_str("\n\n");
     text.push_str(browser_rule());
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        text.push_str("\n\n");
+        text.push_str(desktop_rule());
+    }
     #[cfg(target_os = "macos")]
     {
         text.push_str("\n\n");
         text.push_str(simulator_rule());
     }
     text
+}
+
+/// Desktop actions target a project explicitly and carry navigation only.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn desktop_rule() -> &'static str {
+    "You can open tools inside the tokenstat desktop app when the user asks, \
+     including showing the result after completing a job. Use a URL of the form \
+     tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=TOOL, substituting \
+     the TOKENSTAT_WORKSPACE_ID environment value and URL-encoding each query \
+     value. On macOS run open with the quoted URL. On Windows use Start-Process \
+     with the quoted URL. Tools: inspector, changes, browser and terminal. \
+     For inspector, optional tab=files, tab=changes or tab=history selects its \
+     tab. For browser, add url=URL_ENCODED_HTTP_OR_HTTPS_URL to open a preview \
+     directly in the embedded browser without the ordinary web-link chooser. \
+     For terminal, omit options to show the project's sessions, add session=ID \
+     to reveal one existing project session, or new=1 only when asked to start \
+     a fresh shell. Never combine session and new. Links accept no command text. \
+     To show work for review, open tool=changes after completing and testing the \
+     requested edits. If the work was committed, add commit=FULL_COMMIT_SHA \
+     using its full 40- or 64-character hexadecimal id to show that exact commit. \
+     You may also include a \
+     clickable action link in your reply. Only activate these actions on the \
+     user's requested desktop, not on an unrelated remote host. Opening a tool \
+     is navigation, not proof of a successful build or test."
 }
 
 /// The desktop can attach the exact simulator an agent is already testing.
@@ -384,6 +413,11 @@ mod tests {
         assert!(composed.standing_text.contains("tokenstat-chat-output"));
         assert!(composed.standing_text.contains(browser_rule()));
         assert!(!composed.user_text.contains(browser_rule()));
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        {
+            assert!(composed.standing_text.contains(desktop_rule()));
+            assert!(!composed.user_text.contains(desktop_rule()));
+        }
     }
 
     #[test]

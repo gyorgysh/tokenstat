@@ -143,7 +143,7 @@ internal static class WorkspaceHistory
         return list;
     }
 
-    private static async Task ShowDetailAsync(
+    internal static async Task ShowDetailAsync(
         UIElement owner, string workspaceId, string commitId)
     {
         var request = WorkspaceDiff.BeginReviewRequest(owner);

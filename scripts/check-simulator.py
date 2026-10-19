@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix="tokenstat-simulator-") as temporary:
     native = work / "NativeSimulatorConnection.o"
     subprocess.run(["xcrun", "clang", "-target", target, "-fobjc-arc", "-fmodules", "-c",
                     str(sources / "NativeSimulatorConnection.m"), "-o", str(native)], check=True)
-    swift = sorted(str(path) for path in sources.glob("*.swift") if path.name != "SimulatorInspector.swift")
+    swift = sorted(str(path) for path in sources.glob("*.swift") if path.name not in {"SimulatorInspector.swift", "SimulatorSetupView.swift"})
     subprocess.run(["xcrun", "swiftc", "-target", target, "-swift-version", "5", "-D", "TOKENSTAT_TEST",
                     "-parse-as-library", "-module-cache-path", str(work / "ModuleCache"),
                     "-import-objc-header", str(sources / "NativeSimulatorConnection.h"),

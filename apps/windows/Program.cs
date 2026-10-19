@@ -9,6 +9,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using System.Runtime.InteropServices;
 using Tokenstat.Install;
+using Tokenstat.Navigation;
 
 namespace Tokenstat;
 
@@ -95,6 +96,7 @@ internal static class Program
         }
 
         WinRT.ComWrappersSupport.InitializeComWrappers();
+        if (!DesktopActivation.Initialize()) return 0;
         Application.Start(_ =>
         {
             var context = new DispatcherQueueSynchronizationContext(

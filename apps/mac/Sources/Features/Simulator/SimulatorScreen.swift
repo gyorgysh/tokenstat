@@ -4,6 +4,13 @@ import SwiftUI
 import QuartzCore
 import IOSurface
 
+@MainActor
+protocol SimulatorFrameSink: AnyObject {
+    func present(_ surface: Any, pixels: CGSize, orientation: Int, backing: Any?)
+    func clear()
+    func cancelGestures()
+}
+
 struct SimulatorScreen: NSViewRepresentable {
     let session: SimulatorSession
     var interactive = true
@@ -30,7 +37,7 @@ struct SimulatorScreen: NSViewRepresentable {
 
 /// Frames update a native Metal view without publishing every frame
 /// through SwiftUI. Each screen owns input only while it is first responder.
-final class SimulatorScreenNSView: NSView {
+final class SimulatorScreenNSView: NSView, SimulatorFrameSink {
     weak var session: SimulatorSession?
     var interactive = true {
         didSet {

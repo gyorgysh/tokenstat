@@ -106,7 +106,11 @@ Settings and a full-resolution PNG export. The device menu exposes hinge
 postures for supported foldable iOS devices.
 
 Fit restores the normal interactive screen. Zoom and the expanded viewer help
-with larger devices; the cube toggles a draggable 3D preview. Preferences store
+with larger devices. The cube opens a solid generic phone or tablet model with
+rounded metal edges, glass, side buttons and rear cameras. Its screen stays live.
+Drag in any direction for a full orbit, scroll to zoom, and double-click or press
+Home to reset. Arrow keys also rotate. Motion settles when interaction ends and
+respects Reduce Motion. Preferences store
 pinned devices, a default and automatic following per repository and account.
 Newly booted devices can open this tab while that repository's chat is active.
 Hide, close and detach release the live display without shutting down the
@@ -115,8 +119,16 @@ device. Shutdown requires the explicit device action.
 Install full Xcode and at least one iOS runtime, and select that installation
 with `xcode-select` or `DEVELOPER_DIR`. Runtime display and input capabilities
 are checked when attaching; an unsupported runtime reports an error and can
-be opened externally. Restart Tokenstat after switching Xcode installations.
+be opened externally. Restart tokenstat after switching Xcode installations.
 No SDKs are downloaded and no device data is erased by the inspector.
+
+When tools or devices are missing, the Simulator tab shows setup cards for iOS
+and Android separately. They distinguish missing Xcode tools, missing iOS
+runtimes/devices, missing Android SDK tools and missing virtual devices. Each
+card explains where to finish setup, opens the installed development app or its
+official download page, and links to the platform's setup guide. Refresh checks
+again without restarting tokenstat. These status cards also stay available in
+Simulator preferences when one platform already has working devices.
 
 Android support uses an existing SDK found through `ANDROID_SDK_ROOT`,
 `ANDROID_HOME` or the standard Mac SDK location. Install platform-tools, the
@@ -152,6 +164,33 @@ preferences, owner isolation and incremental video framing. These checks do
 not boot devices. Live acceptance additionally covers phone/tablet input,
 rotation, screenshots, hide/reopen, foldable panel switching and Android
 stream cleanup against installed runtimes.
+
+### Agent desktop actions
+
+Agents running in tokenstat receive `TOKENSTAT_WORKSPACE_ID` and instructions
+for opening the desktop UI when asked, including showing changes after a job.
+The same navigation URLs work on macOS and Windows. They can be opened from a
+terminal or included as clickable links in a reply:
+
+```text
+tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=changes
+tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=inspector&tab=files
+tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=browser&url=ENCODED_HTTP_URL
+tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=terminal
+tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=terminal&session=SESSION_ID
+tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=terminal&new=1
+```
+
+URL-encode query values. Use `open 'URL'` on macOS and `Start-Process 'URL'` in
+PowerShell. `changes` shows the current working tree. Add
+`commit=FULL_COMMIT_SHA` to show a committed result using its full 40- or
+64-character hexadecimal id. Inspector tabs are `files`, `changes` and
+`history`. A browser action with `url` opens directly in
+the embedded browser, while ordinary HTTP links keep the user's destination
+choice. Terminal actions show existing sessions, reveal an exact live project
+session, or start a normal fresh shell with `new=1`. Links accept no command
+text, and unknown projects or sessions are reported rather than guessed.
+Requests are consumed once, including across navigation and cold launch.
 
 ## Chat inspector
 

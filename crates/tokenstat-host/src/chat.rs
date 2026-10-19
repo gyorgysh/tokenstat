@@ -2797,6 +2797,11 @@ impl Store {
         added.push_str(&crate::chat_turn::file_rule(&self.response_output_dir(id)));
         added.push_str("\n\n");
         added.push_str(crate::chat_turn::browser_rule());
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        {
+            added.push_str("\n\n");
+            added.push_str(crate::chat_turn::desktop_rule());
+        }
         #[cfg(target_os = "macos")]
         {
             added.push_str("\n\n");
@@ -3923,7 +3928,7 @@ impl Store {
             .map(|(token, file)| PendingTurnCredential::new(self, token.clone(), file.clone()));
         let mut pending_muse = PendingMuseHome::idle();
         let mut environment = Vec::new();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         environment.push(("TOKENSTAT_WORKSPACE_ID".into(), chat.workspace_id.clone()));
         if let Some((_, turn_file)) = &turn {
             environment.push((

@@ -22,6 +22,7 @@ enum SimulatorCommand {
     }
 
     static func simctl(_ arguments: [String], timeout: TimeInterval = 20, input: Data? = nil) async throws -> Data {
+        _ = try await developerDirectory()
         let value = try await run("/usr/bin/xcrun", ["simctl"] + arguments, timeout: timeout, input: input)
         guard value.status == 0 else {
             throw Failure(message: value.errors.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -41,11 +42,25 @@ enum SimulatorCommand {
         return try Data(contentsOf: file)
     }
 
-    static func developerDirectory() async throws -> String {
-        let tool = try await run("/usr/bin/xcrun", ["--find", "simctl"])
-        guard tool.status == 0 else { throw Failure(message: tool.errors) }
-        let path = String(decoding: tool.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        return URL(fileURLWithPath: path).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
+    static func developerDirectory(selection: String? = nil) async throws -> String {
+        let selected: String
+        if let override = selection ?? ProcessInfo.processInfo.environment["DEVELOPER_DIR"], !override.isEmpty {
+            selected = override
+        } else {
+            // Asking xcrun on a pristine Mac can open the command-line-tools
+            // installer, which does not provide Simulator. Inspect selection
+            // first so discovery stays quiet and the app can explain setup.
+            let result = try await run("/usr/bin/xcode-select", ["--print-path"])
+            guard result.status == 0 else { throw Failure(message: L10n.text("apple.simulator.xcode_missing_help")) }
+            selected = String(decoding: result.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var directory = URL(fileURLWithPath: selected)
+        if directory.pathExtension.lowercased() == "app" { directory.appendPathComponent("Contents/Developer") }
+        directory = directory.resolvingSymlinksInPath()
+        guard FileManager.default.isExecutableFile(atPath: directory.appendingPathComponent("usr/bin/simctl").path) else {
+            throw Failure(message: L10n.text("apple.simulator.xcode_missing_help"))
+        }
+        return directory.path
     }
 
     private final class Job: @unchecked Sendable {

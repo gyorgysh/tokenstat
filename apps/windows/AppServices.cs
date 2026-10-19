@@ -32,6 +32,7 @@ internal static class AppServices
     /// </summary>
     public static Action<string, string?>? OpenTerminal { get; set; }
     public static Action<string, string>? OpenTerminalSplit { get; set; }
+    public static Action<DesktopOpenRequest>? OpenDesktopAction { get; set; }
 
     /// <summary>Open a linked device and select its connection details.</summary>
     public static Action<string>? OpenMachine { get; set; }

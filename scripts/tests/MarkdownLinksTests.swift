@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with MarkdownLinks.swift and SimulatorDevice.swift using swiftc -parse-as-library.
+// Compile with MarkdownLinks.swift, SimulatorDevice.swift, DesktopOpenRequest.swift and DesktopWorkbenchState.swift using swiftc -parse-as-library.
 import SwiftUI
 
 // The standalone helper test does not link the application's full palette.
@@ -29,6 +29,9 @@ struct MarkdownLinksTests {
             precondition(run.underlineStyle == nil, "Plain and rejected links must not appear clickable")
         }
         #if os(macOS)
+        let action = try AttributedString(markdown: "[Review](tokenstat://workbench/open?workspace=project-a&tool=changes) [Reject](tokenstat://workbench/open?workspace=project-a&tool=terminal&command=echo)")
+        let actions = MarkdownLinks.styled(action, color: .purple).runs.compactMap(\.link)
+        precondition(actions.count == 1 && actions[0].host == "workbench")
         let map = MarkdownLinkHitMap()
         let first = URL(string: "https://example.com/one")!
         let second = URL(string: "https://example.com/two")!

@@ -4,19 +4,25 @@ import Foundation
 
 /// A visible inspector and agent-follow observer share one discovery flight.
 actor SimulatorInventory {
+    struct Snapshot: Sendable {
+        let devices: [SimulatorDevice]
+        let setup: SimulatorSetupState
+    }
     typealias Loader = @Sendable () async throws -> [SimulatorDevice]
     static let shared = SimulatorInventory()
     private let apple: Loader
     private let android: Loader
     private var lastApple: [SimulatorDevice] = []
     private var lastAndroid: [SimulatorDevice] = []
-    private var cached: [SimulatorDevice] = []
+    private var cached = Snapshot(devices: [], setup: SimulatorSetupState())
     private var readAt = Date.distantPast
-    private var flight: Task<[SimulatorDevice], Error>?
+    private var flight: Task<Snapshot, Never>?
     init(apple: @escaping Loader = {
-        try SimulatorDevice.appleInventory(await SimulatorCommand.simctl(["list", "devices", "available", "--json"]))
+        do { _ = try await SimulatorCommand.developerDirectory() }
+        catch { throw SimulatorSetupIssue.missingXcode }
+        return try SimulatorDevice.appleInventory(await SimulatorCommand.simctl(["list", "devices", "available", "--json"]))
     }, android: @escaping Loader = {
-        guard let tools = AndroidSimulatorTools.installed() else { return [] }
+        guard let tools = AndroidSimulatorTools.installed() else { throw SimulatorSetupIssue.missingAndroidSDK }
         return try await tools.inventory()
     }) {
         self.apple = apple; self.android = android
@@ -26,15 +32,22 @@ actor SimulatorInventory {
         do { return .success(try await loader()) } catch { return .failure(error) }
     }
     func load(force: Bool = false) async throws -> [SimulatorDevice] {
+        let snapshot = try await inspect(force: force)
+        if snapshot.devices.isEmpty, let message = snapshot.setup.apple.failure ?? snapshot.setup.android.failure {
+            throw SimulatorCommand.Failure(message: message)
+        }
+        return snapshot.devices
+    }
+    func inspect(force: Bool = false) async throws -> Snapshot {
         try Task.checkCancellation()
         if !force, Date().timeIntervalSince(readAt) < 2 { return cached }
         if let flight {
-            if !force { return try await flight.value }
+            if !force { return await flight.value }
             // An explicit attach may name a device created after this flight
             // began. Wait for it, then take a fresh snapshot for that request.
-            _ = try? await flight.value
+            _ = await flight.value
             try Task.checkCancellation()
-            return try await load(force: true)
+            return try await inspect(force: true)
         }
         let task = Task {
             defer { flight = nil }
@@ -47,12 +60,13 @@ actor SimulatorInventory {
             if case .success(let devices) = appleResult { lastApple = devices }
             if case .success(let devices) = androidResult { lastAndroid = devices }
             let devices = lastApple + lastAndroid
-            if devices.isEmpty, case .failure(let error) = appleResult { throw error }
-            cached = devices; readAt = Date()
-            return devices
+            let snapshot = Snapshot(devices: devices,
+                setup: SimulatorSetupState(apple: SimulatorSetupState.status(appleResult), android: SimulatorSetupState.status(androidResult)))
+            cached = snapshot; readAt = Date()
+            return snapshot
         }
         flight = task
-        return try await task.value
+        return await task.value
     }
 }
 

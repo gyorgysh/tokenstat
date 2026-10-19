@@ -9,6 +9,7 @@ var directory = Path.Combine(Path.GetTempPath(), "tokenstat-shell-test-" + Guid.
 Directory.CreateDirectory(directory);
 try
 {
+    DesktopOpenRequestTests.Run();
     var fresh = new DesktopWorkbenchState();
     fresh.Open(DesktopWorkbenchTool.Browser);
     Check(fresh.Tabs.SequenceEqual(new[] { DesktopWorkbenchTool.Inspector, DesktopWorkbenchTool.Browser })

@@ -232,7 +232,7 @@ internal static class ChatMarkdown
                 case LinkInline link:
                     if (!link.IsImage && NoteMarkdown.Link(link.Url) is { } uri)
                     {
-                        var anchor = new Hyperlink { NavigateUri = uri };
+                        var anchor = Anchor(uri);
                         Append(link, anchor.Inlines);
                         output.Add(anchor);
                     }
@@ -244,7 +244,7 @@ internal static class ChatMarkdown
                 case AutolinkInline link:
                     if (NoteMarkdown.Link(link.IsEmail ? "mailto:" + link.Url : link.Url) is { } destination)
                     {
-                        var anchor = new Hyperlink { NavigateUri = destination };
+                        var anchor = Anchor(destination);
                         anchor.Inlines.Add(new Run { Text = link.Url });
                         output.Add(anchor);
                     }
@@ -258,5 +258,14 @@ internal static class ChatMarkdown
                     break;
             }
         }
+    }
+
+    private static Hyperlink Anchor(Uri uri)
+    {
+        if (Tokenstat.Navigation.DesktopOpenRequest.Parse(uri.AbsoluteUri) is not { } request)
+            return new Hyperlink { NavigateUri = uri };
+        var anchor = new Hyperlink();
+        anchor.Click += (_, _) => AppServices.OpenDesktopAction?.Invoke(request);
+        return anchor;
     }
 }

@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../apps/windows/Navigation/DesktopOpenRequest.cs" Link="DesktopOpenRequest.cs" />
+    <Compile Include="../../../apps/windows/Pages/DesktopWorkbenchState.cs" Link="DesktopWorkbenchState.cs" />
     <PackageReference Include="Markdig" Version="1.4.0" />
     <Compile Include="../../../apps/windows/Pages/NoteDraftStore.cs" Link="NoteDraftStore.cs" />
     <Compile Include="../../../apps/windows/Pages/NoteMarkdown.cs" Link="NoteMarkdown.cs" />

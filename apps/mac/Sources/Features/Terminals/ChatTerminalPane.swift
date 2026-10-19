@@ -14,6 +14,7 @@ struct ChatTerminalPane: View {
     let onManageServers: () -> Void
     let onClose: () -> Void
     var isActive = true
+    @Binding var request: DesktopTerminalIntent?
     @State private var focusOwner = UUID()
     @State private var showingLauncher = false
     @State private var connectingServer: SSHHost?
@@ -48,7 +49,7 @@ struct ChatTerminalPane: View {
             InspectorChromeBar(onClose: onClose, closeLabel: L10n.text("apple.chatterminalpane.close_terminal_pane.8cf7ffa3")) {
                 InspectorTitle(title: L10n.text("apple.chatterminalpane.terminal.e0926fda"), symbol: "terminal")
                 Spacer(minLength: 0)
-                Button { showingLauncher.toggle() } label: {
+                Button { request = nil; showingLauncher.toggle() } label: {
                     Image(systemName: "square.grid.2x2").frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain).foregroundStyle(showingLauncher ? Theme.accent : Theme.controlGlyph)
@@ -159,7 +160,9 @@ struct ChatTerminalPane: View {
         }
         .onChange(of: focusedIDs, initial: true) { terminals.focus(owner: focusOwner, ids: focusedIDs) }
         .onChange(of: sessions.map(\.id)) { terminals.reconcilePane(in: folder.id) }
-        .onDisappear { terminals.focus(owner: focusOwner, ids: []) }
+        .task(id: isActive ? request?.id : nil) { await applyRequest() }
+        .onChange(of: isActive) { _, active in if !active { request = nil } }
+        .onDisappear { request = nil; terminals.focus(owner: focusOwner, ids: []) }
         .sheet(item: $connectingServer) { host in
             SSHConnectForm(host: host, model: ssh) { session in
                 sshSessions.adopt(session, startup: session.hostID.map { ssh.startupSnippets(for: $0) } ?? [])
@@ -167,6 +170,29 @@ struct ChatTerminalPane: View {
                     selectServerSession(adopted)
                 }
             }
+        }
+    }
+
+    private func applyRequest() async {
+        guard isActive, let intent = request else { return }
+        await terminals.load()
+        if intent.newTerminal {
+            if let peer { await LaunchCatalog.shared.resolveRemote(peer: peer) }
+            else { await LaunchCatalog.shared.resolve() }
+        }
+        guard !Task.isCancelled, isActive, request?.id == intent.id else { return }
+        // Consume before selecting or starting, so tab remounts never spawn
+        // another shell or override a later manual session selection.
+        request = nil
+        if intent.newTerminal {
+            let available = peer.map { LaunchCatalog.shared.remoteAvailable(for: $0) } ?? LaunchCatalog.shared.available
+            if let shell = available.first(where: { $0.id == "shell" }) { start(shell) }
+            else { launchError = L10n.text("apple.desktop_actions.shell_missing") }
+        } else if let id = intent.sessionID,
+                  let session = sessions.first(where: { $0.id == id || $0.local?.hostID == id }) {
+            select(session)
+        } else {
+            launchError = L10n.text("apple.desktop_actions.session_missing")
         }
     }
 
@@ -216,12 +242,14 @@ struct ChatTerminalPane: View {
     }
 
     private func select(_ session: WorkspaceTerminal) {
+        request = nil
         showingLauncher = false
         terminals.select(session, in: folder.id)
         terminals.focus(owner: focusOwner, ids: focusedIDs)
     }
 
     private func selectServerSession(_ session: SSHLiveTerminal) {
+        request = nil
         launchError = nil
         showingLauncher = false
         terminals.attach(session, in: folder.id)

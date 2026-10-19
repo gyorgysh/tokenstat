@@ -1,0 +1,231 @@
+[
+  {
+    "name": "inspector",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=inspector",
+    "tool": "inspector",
+    "workspace": "project-a"
+  },
+  {
+    "name": "changes",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes",
+    "tool": "changes",
+    "workspace": "project-a"
+  },
+  {
+    "name": "browser",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=browser",
+    "tool": "browser",
+    "workspace": "project-a"
+  },
+  {
+    "name": "terminal",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal",
+    "tool": "terminal",
+    "workspace": "project-a"
+  },
+  {
+    "name": "inspector files",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=inspector&tab=files",
+    "tool": "inspector",
+    "workspace": "project-a",
+    "tab": "files"
+  },
+  {
+    "name": "inspector changes",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=inspector&tab=changes",
+    "tool": "inspector",
+    "workspace": "project-a",
+    "tab": "changes"
+  },
+  {
+    "name": "inspector history",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=inspector&tab=history",
+    "tool": "inspector",
+    "workspace": "project-a",
+    "tab": "history"
+  },
+  {
+    "name": "embedded preview",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=browser&url=http%3A%2F%2Flocalhost%3A8000%2Fapp%3Fa%3D1%26b%3D2%23view",
+    "tool": "browser",
+    "workspace": "project-a",
+    "browser": "http://localhost:8000/app?a=1&b=2#view"
+  },
+  {
+    "name": "terminal existing",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&session=session-a",
+    "tool": "terminal",
+    "workspace": "project-a",
+    "session": "session-a"
+  },
+  {
+    "name": "terminal SSH",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&session=ssh%3Asession-a",
+    "tool": "terminal",
+    "workspace": "project-a",
+    "session": "ssh:session-a"
+  },
+  {
+    "name": "terminal new",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&new=1",
+    "tool": "terminal",
+    "workspace": "project-a",
+    "new": true
+  },
+  {
+    "name": "encoded project",
+    "url": "tokenstat://workbench/open?workspace=remote%3Apeer%3Afolder&tool=changes",
+    "tool": "changes",
+    "workspace": "remote:peer:folder"
+  },
+  {
+    "name": "missing project",
+    "url": "tokenstat://workbench/open?tool=changes"
+  },
+  {
+    "name": "empty project",
+    "url": "tokenstat://workbench/open?workspace=&tool=changes"
+  },
+  {
+    "name": "space project",
+    "url": "tokenstat://workbench/open?workspace=project%20a&tool=changes"
+  },
+  {
+    "name": "unknown tool",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=unknown"
+  },
+  {
+    "name": "duplicate tool",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&tool=terminal"
+  },
+  {
+    "name": "duplicate project",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&workspace=other"
+  },
+  {
+    "name": "command injection",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&command=echo%20hello"
+  },
+  {
+    "name": "browser file",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=browser&url=file%3A%2F%2F%2Ftmp%2Ffile"
+  },
+  {
+    "name": "browser script",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=browser&url=javascript%3Aalert(1)"
+  },
+  {
+    "name": "browser credentials",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=browser&url=https%3A%2F%2Fuser%3Apass%40example.invalid"
+  },
+  {
+    "name": "browser invalid",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=browser&url=relative"
+  },
+  {
+    "name": "browser empty",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=browser&url="
+  },
+  {
+    "name": "misplaced URL",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&url=https%3A%2F%2Fexample.invalid"
+  },
+  {
+    "name": "unknown option",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&future=1"
+  },
+  {
+    "name": "unknown tab",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=inspector&tab=anything"
+  },
+  {
+    "name": "misplaced tab",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&tab=files"
+  },
+  {
+    "name": "terminal conflict",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&session=session-a&new=1"
+  },
+  {
+    "name": "terminal false",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&new=false"
+  },
+  {
+    "name": "terminal empty",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&session="
+  },
+  {
+    "name": "terminal traversal",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&session=..%2Fother"
+  },
+  {
+    "name": "duplicate session",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&session=a&session=b"
+  },
+  {
+    "name": "encoded control",
+    "url": "tokenstat://workbench/open?workspace=project%0Aa&tool=changes"
+  },
+  {
+    "name": "wrong host",
+    "url": "tokenstat://elsewhere/open?workspace=project-a&tool=changes"
+  },
+  {
+    "name": "wrong route",
+    "url": "tokenstat://workbench/close?workspace=project-a&tool=changes"
+  },
+  {
+    "name": "wrong scheme",
+    "url": "https://workbench/open?workspace=project-a&tool=changes"
+  },
+  {
+    "name": "outer credentials",
+    "url": "tokenstat://user:pass@workbench/open?workspace=project-a&tool=changes"
+  },
+  {
+    "name": "outer port",
+    "url": "tokenstat://workbench:444/open?workspace=project-a&tool=changes"
+  },
+  {
+    "name": "outer fragment",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes#ignored"
+  },
+  {
+    "name": "empty option",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&"
+  },
+  {
+    "name": "key without value",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&bare"
+  },
+  {
+    "name": "commit 40",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tool": "changes",
+    "workspace": "project-a",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "name": "commit 64",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tool": "changes",
+    "workspace": "project-a",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "name": "symbolic commit",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&commit=HEAD"
+  },
+  {
+    "name": "invalid commit",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&commit=gggggggggggggggggggggggggggggggggggggggg"
+  },
+  {
+    "name": "wrong commit tool",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=terminal&commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "name": "duplicate commit",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&commit=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+]
