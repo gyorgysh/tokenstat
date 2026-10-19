@@ -19,7 +19,7 @@ struct SimulatorDeviceModel: NSViewRepresentable {
     }
     func updateNSView(_ view: SimulatorDeviceModelView, context: Context) {
         let physical = session.hasFrame ? SimulatorGeometry.displaySize(pixels: session.pixels, orientation: session.orientation) : session.previewPixels
-        view.setShape(pixels: physical, tablet: session.selected?.isTablet == true)
+        view.setShape(pixels: physical, hardware: session.selected.map(SimulatorHardware.init) ?? .phone, innerDisplay: session.modelUsesInnerDisplay)
         view.zoom = Float(session.zoom)
         view.reduceMotion = reduceMotion
         view.onZoom = { session.zoom = Double($0) }
@@ -69,8 +69,8 @@ final class SimulatorDeviceModelView: MTKView, MTKViewDelegate, SimulatorFrameSi
         return Pipeline(device: device, queue: queue, state: state, depth: test, blank: blank)
     }()
     private var mesh: MTLBuffer?
-    private var vertexCount = 0
-    private var shape: (aspect: Float, tablet: Bool)?
+    private(set) var vertexCount = 0
+    private var shape: (aspect: Float, hardware: SimulatorHardware, innerDisplay: Bool)?
     private var radius: Float = 1.25
     private var texture: MTLTexture?
     private var surface: IOSurface?
@@ -108,12 +108,12 @@ final class SimulatorDeviceModelView: MTKView, MTKViewDelegate, SimulatorFrameSi
     override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); if window == nil { stopOrbit() }; redraw() }
     override func layout() { super.layout(); redraw() }
     func redraw() { if !isHidden { needsDisplay = true } }
-    func setShape(pixels: CGSize, tablet: Bool) {
+    func setShape(pixels: CGSize, hardware: SimulatorHardware, innerDisplay: Bool = false) {
         let aspect = Float(pixels.width / max(1, pixels.height))
-        guard shape?.aspect != aspect || shape?.tablet != tablet else { return }
-        shape = (aspect, tablet)
-        let model = SimulatorDeviceMesh(aspect: aspect, tablet: tablet)
-        radius = sqrt(model.width * model.width + model.height * model.height + model.depth * model.depth) / 2
+        guard shape?.aspect != aspect || shape?.hardware != hardware || shape?.innerDisplay != innerDisplay else { return }
+        shape = (aspect, hardware, innerDisplay)
+        let model = SimulatorDeviceMesh(aspect: aspect, hardware: hardware, innerDisplay: innerDisplay)
+        radius = model.boundingRadius
         vertexCount = model.vertices.count
         mesh = model.vertices.withUnsafeBytes { bytes in
             guard let pointer = bytes.baseAddress else { return nil }

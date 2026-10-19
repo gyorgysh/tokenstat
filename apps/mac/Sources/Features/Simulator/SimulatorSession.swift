@@ -22,6 +22,7 @@ final class SimulatorSession {
     var pixels = CGSize(width: 1206, height: 2622)
     var orientation = 1
     var hasFrame = false
+    var modelUsesInnerDisplay = false
     var perspective = false
     @ObservationIgnored private(set) var modelOrbit = SimulatorOrbit()
     var zoom = 1.0
@@ -120,7 +121,7 @@ final class SimulatorSession {
         generation = UUID()
         inputEpoch = UUID()
         let lease = generation
-        connection?.stop(); connection = nil; surface = nil; hasFrame = false
+        connection?.stop(); connection = nil; surface = nil; hasFrame = false; modelUsesInnerDisplay = false
         androidStream?.stop(); androidStream = nil; androidSerial = nil; androidTransportID = nil; videoBacking = nil
         attachedID = nil; selectedID = id; busy = true; error = nil; message = nil
         frameSinks.forEach { $0.clear() }
@@ -266,6 +267,8 @@ final class SimulatorSession {
             try connection.start { [weak self, weak connection] surface, pixels, orientation in
                 guard let self, self.active, self.connection === connection else { return }
                 self.surface = surface
+                let inner = self.attached?.isFoldable == true && connection?.displayID == 3
+                if self.modelUsesInnerDisplay != inner { self.modelUsesInnerDisplay = inner }
                 let size = SimulatorGeometry.displaySize(pixels: pixels, orientation: orientation)
                 if self.pixels != size { self.pixels = size }
                 if self.orientation != orientation { self.orientation = orientation }
@@ -294,7 +297,7 @@ final class SimulatorSession {
         androidInputFlight?.cancel(); androidInputFlight = nil; androidTouch = nil
         connection?.stop(); connection = nil; attachedID = nil; busy = false
         androidStream?.stop(); androidStream = nil; androidSerial = nil; androidTransportID = nil; videoBacking = nil
-        surface = nil; hasFrame = false
+        surface = nil; hasFrame = false; modelUsesInnerDisplay = false
         frameSinks.forEach { $0.clear() }
     }
 

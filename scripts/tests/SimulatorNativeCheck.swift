@@ -110,10 +110,13 @@ private actor SimulatorSnapshotFixture {
         let oldSnapshot = try await oldFlight.value, freshSnapshot = try await force.value
         precondition(oldSnapshot.isEmpty && freshSnapshot == [phone], "An explicit attach reused a discovery started before its device existed")
 
+        first.modelUsesInnerDisplay = true
+        first.detach()
+        precondition(!first.modelUsesInnerDisplay, "A detached Duo retained the previous active panel")
         _ = NSApplication.shared
-        for tablet in [false, true] {
+        for hardware in SimulatorHardware.allCases {
             for aspect: Float in [0.46, 0.75, 1.5] {
-                let mesh = SimulatorDeviceMesh(aspect: aspect, tablet: tablet)
+                let mesh = SimulatorDeviceMesh(aspect: aspect, hardware: hardware)
                 precondition(!mesh.vertices.isEmpty && mesh.vertices.count % 3 == 0)
                 precondition(abs(max(mesh.width, mesh.height) - 2.2) < 0.0001,
                              "Rotating a device must preserve its physical depth and long edge")
@@ -153,7 +156,14 @@ private actor SimulatorSnapshotFixture {
         if MTLCreateSystemDefaultDevice() != nil {
             precondition(model.isAvailable, "The native solid-device Metal shader must compile")
         } else { print("SKIP: native Metal rendering requires a GPU, geometry and orbit checks still ran") }
-        model.setShape(pixels: CGSize(width: 1206, height: 2622), tablet: false)
+        model.setShape(pixels: CGSize(width: 1206, height: 2622), hardware: .iPhoneDualVertical)
+        let dualVertices = model.vertexCount
+        model.setShape(pixels: CGSize(width: 1206, height: 2622), hardware: .iPhoneProPlateau)
+        precondition(model.vertexCount != dualVertices, "Switching equal-size devices reused the previous hardware mesh")
+        model.setShape(pixels: CGSize(width: 1398, height: 2034), hardware: .iPhoneDuo)
+        let closedVertices = model.vertexCount
+        model.setShape(pixels: CGSize(width: 1398, height: 2034), hardware: .iPhoneDuo, innerDisplay: true)
+        precondition(model.vertexCount != closedVertices, "Switching Duo panels reused the closed enclosure")
         first.register(model)
         first.updateModelOrbit(orbit)
         let expandedModel = SimulatorDeviceModelView()

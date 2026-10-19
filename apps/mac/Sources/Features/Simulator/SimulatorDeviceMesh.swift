@@ -3,8 +3,8 @@
 import simd
 import CoreGraphics
 
-/// Solid, rounded hardware with a separate front display. All dimensions are
-/// generic proportions, rather than a claim to match a manufacturer's model.
+/// Procedural, solid hardware families with a separate live display.
+/// Dimensions are illustrative proportions, rather than exact CAD measurements.
 struct SimulatorDeviceMesh {
     struct Vertex {
         var position: SIMD4<Float>
@@ -17,51 +17,176 @@ struct SimulatorDeviceMesh {
     let height: Float
     let depth: Float
 
-    init(aspect: Float, tablet: Bool) {
-        let ratio = max(0.35, min(2.8, aspect))
-        // Keep physical depth proportional to the long edge in either pose.
-        // Scaling only width would turn a landscape phone into a thin slab.
+    private(set) var rearCameraCenters: [SIMD3<Float>] = []
+    /// Include lenses, buttons and the hinge in the fit at every orbit angle.
+    var boundingRadius: Float { vertices.reduce(0) { max($0, simd_length(SIMD3($1.position.x, $1.position.y, $1.position.z))) } }
+
+    init(aspect: Float, hardware: SimulatorHardware, innerDisplay: Bool = false) {
+        let ratio = aspect.isFinite ? max(0.35, min(2.8, aspect)) : 0.46
         height = ratio > 1 ? 2.2 / ratio : 2.2
         width = ratio > 1 ? 2.2 : 2.2 * ratio
-        depth = tablet ? 0.10 : 0.15
-        let radius = min(width, height) * (tablet ? 0.045 : 0.105)
-        let bezel: Float = tablet ? 0.045 : 0.025
-        let metal = SIMD4<Float>(0.43, 0.47, 0.54, 0.9)
-        let coating = SIMD4<Float>(0.13, 0.16, 0.21, 0.45)
-        let glass = SIMD4<Float>(0.016, 0.022, 0.032, 0.35)
-        box(width, height, depth, radius: radius, bevel: 0.012, color: metal)
-        box(width - 0.018, height - 0.018, 0.012, radius: radius - 0.009,
+        let openDuo = hardware == .iPhoneDuo && innerDisplay
+        depth = openDuo ? 0.07 : hardware.depth
+        // Duo's inner panel has a landscape physical orientation, even when
+        // its framebuffer arrives in portrait. Rotate hardware with its UVs.
+        let transpose = openDuo && ratio < 1
+        let w = transpose ? height : width, h = transpose ? width : height
+        let radius = min(w, h) * (hardware.isTablet ? 0.045 : (hardware == .iPhoneDuo ? 0.065 : 0.105))
+        let bezel: Float = hardware.isTablet ? 0.042 : 0.025
+        let metal = SIMD4<Float>(0.56, 0.60, 0.66, 0.85)
+        let coating = SIMD4<Float>(0.28, 0.33, 0.41, 0.24)
+        let glass = SIMD4<Float>(0.016, 0.022, 0.032, 0.55)
+        if hardware == .iPhoneDuo && !openDuo {
+            // Two enclosures, a real gap and a separate hinge, not a thick slab.
+            for side: Float in [-1, 1] {
+                box(w, h, depth / 2 - 0.006, radius: radius, bevel: 0.008,
+                    center: [0, 0, side * (depth / 4 + 0.003)], color: metal)
+            }
+        } else { box(w, h, depth, radius: radius, bevel: 0.009, color: metal) }
+        box(w - 0.018, h - 0.018, 0.012, radius: radius - 0.009,
             center: [0, 0, -depth / 2 - 0.003], color: coating)
-        box(width - 0.012, height - 0.012, 0.008, radius: radius - 0.006,
+        box(w - 0.012, h - 0.012, 0.008, radius: radius - 0.006,
             center: [0, 0, depth / 2 + 0.002], color: glass)
-        face(width - bezel * 2, height - bezel * 2, radius: max(0.012, radius - bezel),
+        let screenHeight = hardware.hasHomeButton ? h - 0.40 : h - bezel * 2
+        face(w - bezel * 2, screenHeight, radius: hardware.hasHomeButton ? 0.008 : max(0.012, radius - bezel),
              z: depth / 2 + 0.007, color: [1, 1, 1, 0], screen: true)
-        // Physical side buttons remain visible at edge-on and rear angles.
-        box(0.027, 0.22, depth * 0.45, radius: 0.012,
-            center: [width / 2 + 0.008, height * 0.22, 0], color: metal)
-        for y: Float in [0.23, 0.08] {
-            box(0.027, 0.11, depth * 0.42, radius: 0.012,
-                center: [-width / 2 - 0.008, height * y, 0], color: metal)
+        // System cutouts already exist in the live framebuffer. Add only the
+        // physical home button and earpiece outside legacy displays.
+        if hardware.hasHomeButton {
+            cylinder(radius: 0.058, length: 0.006, center: [0, -h / 2 + 0.097, depth / 2 + 0.005], color: metal)
+            cylinder(radius: 0.047, length: 0.008, center: [0, -h / 2 + 0.097, depth / 2 + 0.007], color: glass)
+            box(0.14, 0.014, 0.008, radius: 0.006, center: [0, h / 2 - 0.10, depth / 2 + 0.007], color: glass)
         }
-        let cameraX = -width / 2 + (tablet ? 0.13 : 0.17)
-        let cameraY = height / 2 - (tablet ? 0.13 : 0.18)
-        box(tablet ? 0.20 : 0.25, tablet ? 0.20 : 0.44, 0.035, radius: 0.055,
-            center: [cameraX, cameraY - (tablet ? 0 : 0.08), -depth / 2 - 0.026], color: coating)
-        for index in 0..<(tablet ? 1 : 2) {
-            let y = cameraY - Float(index) * 0.20
-            cylinder(radius: 0.077, length: 0.034, center: [cameraX, y, -depth / 2 - 0.05], color: metal)
-            cylinder(radius: 0.061, length: 0.037, center: [cameraX, y, -depth / 2 - 0.055], color: glass)
-            cylinder(radius: 0.025, length: 0.038, center: [cameraX - 0.008, y + 0.009, -depth / 2 - 0.057], color: [0.08, 0.14, 0.22, 0.8])
+        if hardware.isTablet {
+            box(0.17, 0.022, depth * 0.5, radius: 0.009, center: [-w * 0.30, h / 2 + 0.006, 0], color: metal)
+            for y: Float in [0.34, 0.23] {
+                box(0.022, 0.12, depth * 0.5, radius: 0.009, center: [w / 2 + 0.006, h * y, 0], color: metal)
+            }
+        } else {
+            box(0.025, 0.22, depth * 0.48, radius: 0.011, center: [w / 2 + 0.008, h * 0.22, 0], color: metal)
+            for y: Float in [0.23, 0.08] {
+                box(0.025, 0.11, depth * 0.45, radius: 0.011, center: [-w / 2 - 0.008, h * y, 0], color: metal)
+            }
+            box(0.022, 0.065, depth * 0.42, radius: 0.008, center: [-w / 2 - 0.008, h * 0.33, 0], color: metal)
         }
-        // A connector and speaker openings are inset into the bottom edge.
-        box(0.14, 0.008, depth * 0.32, radius: 0.003,
-            center: [0, -height / 2 - 0.001, 0], color: glass)
+        if hardware == .iPhoneProPlateau || hardware == .iPhoneAir {
+            box(0.018, 0.18, depth * 0.45, radius: 0.008, center: [w / 2 + 0.007, -h * 0.22, 0], color: coating)
+        }
+        addCameras(width: w, height: h, hardware: hardware, openDuo: openDuo, metal: metal, coating: coating, glass: glass)
+        if hardware == .iPhoneDuo {
+            let hingeX: Float = openDuo ? 0 : -w / 2
+            box(0.035, h - 0.08, depth - 0.012, radius: 0.014, center: [hingeX, 0, 0], color: metal)
+            if openDuo {
+                // The other enclosure carries the inactive outer display.
+                box(w / 2 - 0.05, h - 0.06, 0.009, radius: radius * 0.8,
+                    center: [-w / 4, 0, -depth / 2 - 0.015], color: glass)
+                box(0.012, h - 0.08, 0.012, radius: 0.004, center: [0, 0, -depth / 2 - 0.014], color: glass)
+            } else {
+                for y: Float in [-0.42, 0.42] {
+                    box(0.042, 0.012, depth - 0.008, radius: 0.004, center: [hingeX, h * y, 0], color: glass)
+                }
+            }
+        }
+        // Connector, speaker openings and antenna breaks remain solid geometry.
+        box(0.14, 0.008, depth * 0.32, radius: 0.003, center: [0, -h / 2 - 0.001, 0], color: glass)
         for side: Float in [-1, 1] {
             for hole in 0..<4 {
                 box(0.016, 0.008, 0.026, radius: 0.003,
-                    center: [side * (0.14 + Float(hole) * 0.035), -height / 2 - 0.001, 0], color: glass)
+                    center: [side * (0.14 + Float(hole) * 0.035), -h / 2 - 0.001, 0], color: glass)
+            }
+            for y: Float in [-0.36, 0.36] {
+                box(0.009, 0.012, depth * 0.9, radius: 0.003, center: [side * w / 2, h * y, 0], color: coating)
             }
         }
+        if [.iPadPro, .iPadProDual, .iPadProThin].contains(hardware) {
+            for x: Float in [-0.06, 0, 0.06] {
+                cylinder(radius: 0.015, length: 0.008, center: [x, -h / 2 + 0.13, -depth / 2 - 0.012], color: metal)
+            }
+        }
+        if transpose {
+            for index in vertices.indices {
+                let p = vertices[index].position, n = vertices[index].normal
+                vertices[index].position = [-p.y, p.x, p.z, 1]
+                vertices[index].normal = [-n.y, n.x, n.z, 0]
+                if vertices[index].texture.z == 1 {
+                    vertices[index].texture.x = -p.y / (width - bezel * 2) + 0.5
+                    vertices[index].texture.y = 0.5 - p.x / (height - bezel * 2)
+                }
+            }
+            rearCameraCenters = rearCameraCenters.map { [-$0.y, $0.x, $0.z] }
+        }
+    }
+
+    private mutating func addCameras(width w: Float, height h: Float, hardware: SimulatorHardware, openDuo: Bool,
+                                     metal: SIMD4<Float>, coating: SIMD4<Float>, glass: SIMD4<Float>) {
+        let back = -depth / 2 - 0.012
+        // Positive X is the left side when viewed from behind the device.
+        var center = SIMD2<Float>(w / 2 - 0.25, h / 2 - 0.28)
+        var lenses: [SIMD2<Float>] = []
+        var lensRadius: Float = 0.087
+        var flash: SIMD2<Float>?
+        var lidar: SIMD2<Float>?
+        func point(_ x: Float, _ y: Float) -> SIMD2<Float> { center + SIMD2(x, y) }
+        func bump(_ width: Float, _ height: Float, _ radius: Float) {
+            box(width, height, 0.032, radius: radius, bevel: 0.007,
+                center: [center.x, center.y, back - 0.012], color: coating)
+        }
+        switch hardware.cameras {
+        case .triple, .plateau:
+            center = [w / 2 - 0.28, h / 2 - 0.32]
+            if hardware.cameras == .plateau {
+                box(w - 0.07, 0.56, 0.042, radius: 0.09, bevel: 0.009,
+                    center: [0, center.y, back - 0.015], color: metal)
+                box(w - 0.13, h - 0.76, 0.010, radius: 0.09, center: [0, -0.30, back - 0.003], color: coating)
+                flash = [-w / 2 + 0.16, center.y + 0.13]; lidar = [-w / 2 + 0.16, center.y - 0.13]
+            } else { bump(0.51, 0.54, 0.09); flash = point(-0.13, 0.17); lidar = point(-0.13, -0.17) }
+            lenses = [point(0.12, 0.13), point(0.12, -0.13), point(-0.11, 0)]
+            lensRadius = 0.10
+        case .square, .diagonal:
+            bump(0.42, 0.44, 0.085)
+            lenses = hardware.cameras == .diagonal ? [point(0.095, 0.105), point(-0.095, -0.105)] : [point(0.08, 0.105), point(0.08, -0.105)]
+            flash = point(-0.10, 0.12)
+        case .air:
+            center = [0, h / 2 - 0.20]
+            bump(w - 0.07, 0.30, 0.10)
+            lenses = [point(w / 2 - 0.18, 0)]; flash = point(-w / 2 + 0.17, 0)
+            lensRadius = 0.095
+        case .duo, .horizontal:
+            center = [w / 2 - 0.37, h / 2 - 0.22]
+            if openDuo { center.x = w / 4 }
+            bump(0.62, 0.29, 0.12)
+            lenses = [point(0.19, 0), point(-0.02, 0)]; flash = point(-0.23, -0.04)
+            lensRadius = hardware == .iPhoneHomeDual ? 0.07 : 0.09
+        case .single:
+            center = [w / 2 - 0.17, h / 2 - 0.18]
+            lenses = [center]; flash = point(-0.19, 0)
+            lensRadius = 0.08
+        case .tablet, .tabletPro, .tabletDual:
+            center = [w / 2 - 0.13, h / 2 - 0.14]
+            lensRadius = 0.058
+            lenses = [center]
+            if hardware.cameras != .tablet {
+                center = [w / 2 - 0.17, h / 2 - 0.19]
+                bump(0.27, 0.29, 0.055)
+                lenses = [point(0.045, 0.06)]; flash = point(-0.065, 0.06)
+                if hardware.cameras == .tabletDual { lenses.append(point(0.045, -0.065)) }
+                if hardware != .iPadPro { lidar = point(-0.065, -0.065) }
+            }
+        case .vertical:
+            center = [w / 2 - 0.18, h / 2 - 0.29]
+            bump(0.25, 0.45, 0.12)
+            lenses = [point(0, 0.105), point(0, -0.105)]; flash = point(-0.19, 0)
+        }
+        for position in lenses {
+            let center = SIMD3<Float>(position.x, position.y, back - 0.044)
+            rearCameraCenters.append(center)
+            cylinder(radius: lensRadius, length: 0.034, center: center, color: metal)
+            cylinder(radius: lensRadius * 0.81, length: 0.018, center: center - [0, 0, 0.012], color: glass)
+            cylinder(radius: lensRadius * 0.38, length: 0.004, center: center - [0, 0, 0.021], color: [0.055, 0.09, 0.15, 0.75])
+            cylinder(radius: lensRadius * 0.12, length: 0.003, center: center + [0.018, 0.022, -0.024], color: [0.22, 0.29, 0.40, 0.5])
+        }
+        if let flash { cylinder(radius: 0.027, length: 0.012, center: [flash.x, flash.y, back - 0.034], color: [0.86, 0.84, 0.73, 0.25]) }
+        if let lidar { cylinder(radius: 0.026, length: 0.012, center: [lidar.x, lidar.y, back - 0.034], color: glass) }
     }
 
     private func perimeter(_ width: Float, _ height: Float, radius: Float) -> [(SIMD2<Float>, SIMD2<Float>)] {
