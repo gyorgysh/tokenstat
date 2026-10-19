@@ -1350,6 +1350,13 @@ extension Bridge {
         peer: String? = nil
     ) async throws -> ChatConversation {
         var params: [String: Any] = ["id": id, "text": text, "attachmentIds": attachmentIDs]
+        #if os(macOS)
+        // LaunchServices may associate tokenstat:// with a different installed
+        // copy. Local agents must return to the bundle that sent this turn.
+        if peer == nil, Bundle.main.bundleURL.pathExtension.lowercased() == "app" {
+            params["desktopApp"] = Bundle.main.bundleURL.path
+        }
+        #endif
         if let clientMessageID { params["clientMessageId"] = clientMessageID }
         if let expectedRevision { params["expectedRevision"] = expectedRevision }
         if let clientMessageCreatedAt {

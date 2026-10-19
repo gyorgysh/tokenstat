@@ -144,8 +144,8 @@ Windows clients or remote repositories.
 
 Mac agents receive the current `TOKENSTAT_WORKSPACE_ID` and simulator
 instructions. After building, installing and launching on a concrete device,
-an agent can run `open` with a quoted attachment URL, or include it as a link
-in its reply:
+an agent can use the app-targeted macOS command described below with an
+attachment URL, or include it as a link in its reply:
 
 ```text
 tokenstat://simulator/attach?device=DEVICE_UUID&workspace=WORKSPACE_ID
@@ -183,8 +183,12 @@ tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=terminal&new=1
 
 Workspace IDs are the registered paths, with a remote prefix when applicable.
 URL-encode the complete value. A query `+` represents a space. Encode a literal
-plus as `%2B`. Use `open 'URL'` on macOS and `Start-Process 'URL'` in
-PowerShell. `changes` shows the current working tree. Add
+plus as `%2B`. Local Mac chat turns also receive `TOKENSTAT_DESKTOP_APP`, the
+sending application's bundle path. When it is nonempty, use
+`open -a "$TOKENSTAT_DESKTOP_APP" "$url"` with the constructed URL in `url`.
+This directs actions to the same app, including a local Debug build. Without
+that value, `open 'URL'` uses the registered application. On Windows use
+`Start-Process 'URL'` in PowerShell. `changes` shows the current working tree. Add
 `commit=FULL_COMMIT_SHA` to show a committed result using its full 40- or
 64-character hexadecimal id. Inspector tabs are `files`, `changes` and
 `history`. A browser action with `url` opens directly in

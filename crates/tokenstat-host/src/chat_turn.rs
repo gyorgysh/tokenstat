@@ -215,7 +215,12 @@ pub fn desktop_rule() -> &'static str {
      including showing the result after completing a job. Use a URL of the form \
      tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=TOOL, substituting \
      the TOKENSTAT_WORKSPACE_ID environment value and URL-encoding each query \
-     value. On macOS run open with the quoted URL. On Windows use Start-Process \
+     value. On macOS, when TOKENSTAT_DESKTOP_APP is nonempty, use \
+     open -a \"$TOKENSTAT_DESKTOP_APP\" \"$url\" with the exact bundle path and \
+     constructed URL as separate quoted arguments (or a subprocess argv array). \
+     This returns to the app that sent the turn, including a local Debug build. \
+     Do not use plain open, an app name, or a bundle id in that case. If it is \
+     empty or absent, use open with the quoted URL. On Windows use Start-Process \
      with the quoted URL. Tools: inspector, changes, browser and terminal. \
      For inspector, optional tab=files, tab=changes or tab=history selects its \
      tab. For browser, add url=URL_ENCODED_HTTP_OR_HTTPS_URL to open a preview \
@@ -240,9 +245,10 @@ pub fn simulator_rule() -> &'static str {
      and install and launch the app on that exact device UUID. Prefer the user's \
      selected or already booted device. Never erase, delete or replace a device \
      without being asked. To show a booted device inside tokenstat's Simulator \
-     inspector, run open with a quoted URL of the form \
-     tokenstat://simulator/attach?device=DEVICE_UUID&workspace=WORKSPACE_ID, \
-     substituting the exact UUID and the TOKENSTAT_WORKSPACE_ID environment value \
+     inspector, use a URL of the form \
+     tokenstat://simulator/attach?device=DEVICE_UUID&workspace=WORKSPACE_ID. \
+     Use the same macOS app-targeted open command described for desktop tools. \
+     Substitute the exact UUID and the TOKENSTAT_WORKSPACE_ID environment value \
      (URL-encode query values). You may also include that URL as an attach link \
      in your reply. The inspector provides live touch, keyboard and device \
      controls. Use xcrun simctl io DEVICE_UUID screenshot for your own visual \

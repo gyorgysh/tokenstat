@@ -648,6 +648,8 @@ struct TodoParams {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct ChatParams {
+    #[cfg(target_os = "macos")]
+    desktop_app: Option<String>,
     id: Option<String>,
     workspace_id: Option<String>,
     /// `chat.backends` only. See `AutomationParams::refresh`.
@@ -2222,6 +2224,14 @@ fn attach_branch_pulls(rows: &mut Value) {
 #[cfg(feature = "local-host")]
 fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     let p: ChatParams = parse(params)?;
+    #[cfg(target_os = "macos")]
+    let _desktop_app = crate::request_context::enter_desktop_app(
+        if matches!(method, "chat.send" | "chat.compact" | "chat.steerSend") {
+            p.desktop_app.as_deref()
+        } else {
+            None
+        },
+    )?;
     let store = crate::chat::shared();
     // Refresh directory views, without adding disk/lock work to streaming polls.
     if matches!(method, "chat.list" | "chat.recent") {

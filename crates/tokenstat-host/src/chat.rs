@@ -513,6 +513,9 @@ pub struct Store {
     conversations: Mutex<Vec<Conversation>>,
     active: Mutex<HashMap<String, String>>,
     live_speed: Mutex<HashMap<String, (String, Arc<crate::chat_live::Launch>)>>,
+    /// Local app origin for parked continuations; never part of chat storage.
+    #[cfg(target_os = "macos")]
+    desktop_apps: Mutex<HashMap<String, String>>,
     /// Conversations whose live process the person explicitly stopped.
     /// Memory-only and consumed by drain: a persisted `running` bit after a
     /// daemon restart is stale state, not evidence that somebody pressed Stop.
@@ -679,6 +682,14 @@ pub fn shared() -> Arc<Store> {
 }
 
 impl Store {
+    #[cfg(all(test, target_os = "macos"))]
+    fn fixture_desktop_app(&self, id: &str, app: &str) {
+        self.desktop_apps
+            .lock()
+            .unwrap()
+            .insert(id.to_owned(), app.to_owned());
+    }
+
     #[cfg(test)]
     fn at(root: PathBuf) -> Self {
         Self {
@@ -686,6 +697,8 @@ impl Store {
             conversations: Mutex::new(Vec::new()),
             active: Mutex::new(HashMap::new()),
             live_speed: Mutex::new(HashMap::new()),
+            #[cfg(target_os = "macos")]
+            desktop_apps: Mutex::new(HashMap::new()),
             killed: Mutex::new(HashSet::new()),
             personas: Mutex::new(PersonaIndex::default()),
             approvals: Mutex::new(Vec::new()),
@@ -745,6 +758,8 @@ impl Store {
             conversations: Mutex::new(conversations),
             active: Mutex::new(HashMap::new()),
             live_speed: Mutex::new(HashMap::new()),
+            #[cfg(target_os = "macos")]
+            desktop_apps: Mutex::new(HashMap::new()),
             killed: Mutex::new(HashSet::new()),
             personas: Mutex::new(personas),
             approvals: Mutex::new(Vec::new()),
@@ -2598,6 +2613,11 @@ impl Store {
             Ok(current.len() != before)
         })?;
         if removed {
+            #[cfg(target_os = "macos")]
+            self.desktop_apps
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(id);
             let _ = fs::remove_dir_all(safe_join(&self.root, id)?);
         }
         Ok(removed)
@@ -2767,6 +2787,11 @@ impl Store {
             Ok(targets)
         })?;
         for id in &targets {
+            #[cfg(target_os = "macos")]
+            self.desktop_apps
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(id);
             if let Ok(path) = safe_join(&self.root, id) {
                 let _ = fs::remove_dir_all(path);
             }
@@ -3592,6 +3617,20 @@ impl Store {
             .map(|(_, chat)| chat)
     }
 
+    #[cfg(target_os = "macos")]
+    fn desktop_app_for_turn(&self, id: &str) -> Option<String> {
+        let mut origins = self.desktop_apps.lock().unwrap_or_else(|e| e.into_inner());
+        if crate::request_context::remote_peer().is_some() {
+            origins.remove(id);
+            return None;
+        }
+        if let Some(app) = crate::request_context::desktop_app() {
+            origins.insert(id.to_owned(), app.clone());
+            return Some(app);
+        }
+        origins.get(id).cloned()
+    }
+
     pub fn send(
         self: &Arc<Self>,
         id: &str,
@@ -3930,6 +3969,11 @@ impl Store {
         let mut environment = Vec::new();
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         environment.push(("TOKENSTAT_WORKSPACE_ID".into(), chat.workspace_id.clone()));
+        #[cfg(target_os = "macos")]
+        environment.push((
+            "TOKENSTAT_DESKTOP_APP".into(),
+            self.desktop_app_for_turn(id).unwrap_or_default(),
+        ));
         if let Some((_, turn_file)) = &turn {
             environment.push((
                 "TOKENSTAT_CHAT_SOCKET".into(),
@@ -14253,5 +14297,33 @@ mod tests {
             .collect();
         assert!(other_ids.contains(&shared.id.as_str()));
         assert!(!other_ids.contains(&starter.id.as_str()));
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_origin_stays_with_its_conversation_and_parked_followups() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().to_path_buf());
+        store.fixture_desktop_app("first", "/workspace/Debug build.app");
+        store.fixture_desktop_app("second", "/workspace/Other build.app");
+        assert_eq!(
+            store.desktop_app_for_turn("first").as_deref(),
+            Some("/workspace/Debug build.app")
+        );
+        assert_eq!(
+            store.desktop_app_for_turn("second").as_deref(),
+            Some("/workspace/Other build.app")
+        );
+        assert!(store.desktop_app_for_turn("unrelated").is_none());
+        crate::request_context::with_remote_peer("fixture-peer", || {
+            assert!(store.desktop_app_for_turn("first").is_none());
+        });
+        assert!(store.desktop_app_for_turn("first").is_none());
+        assert!(store.desktop_app_for_turn("second").is_some());
+        assert!(
+            Store::at(root.path().to_path_buf())
+                .desktop_app_for_turn("second")
+                .is_none(),
+            "Local bundle paths must never be persisted"
+        );
     }
 }

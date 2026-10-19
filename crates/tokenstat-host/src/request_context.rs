@@ -56,6 +56,68 @@ pub(crate) fn with_relay<T>(relay: bool, work: impl FnOnce() -> T) -> T {
     work()
 }
 
+#[cfg(all(target_os = "macos", feature = "local-host"))]
+thread_local! {
+    static DESKTOP_APP: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+#[cfg(all(target_os = "macos", feature = "local-host"))]
+pub(crate) fn desktop_app() -> Option<String> {
+    DESKTOP_APP.with(|app| app.borrow().clone())
+}
+
+/// Request-scoped, local-only application identity. Never serialized into a
+/// conversation or accepted from an authenticated remote peer.
+#[cfg(all(target_os = "macos", feature = "local-host"))]
+pub(crate) struct DesktopAppScope(Option<String>);
+
+#[cfg(all(target_os = "macos", feature = "local-host"))]
+impl Drop for DesktopAppScope {
+    fn drop(&mut self) {
+        DESKTOP_APP.with(|app| *app.borrow_mut() = self.0.take());
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "local-host"))]
+pub(crate) fn enter_desktop_app(app: Option<&str>) -> Result<DesktopAppScope, String> {
+    let app = app.map(validate_desktop_app).transpose()?;
+    Ok(DesktopAppScope(DESKTOP_APP.with(|slot| slot.replace(app))))
+}
+
+#[cfg(all(target_os = "macos", feature = "local-host"))]
+fn validate_desktop_app(value: &str) -> Result<String, String> {
+    refuse_remote("desktop application targeting")?;
+    let invalid = || "The desktop application bundle is not usable".to_string();
+    let path = std::path::Path::new(value);
+    if value.len() > 4096
+        || value.chars().any(char::is_control)
+        || !path.is_absolute()
+        || !path.extension().is_some_and(|ext| {
+            ext.to_str()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("app"))
+        })
+    {
+        return Err(invalid());
+    }
+    let path = path.canonicalize().map_err(|_| invalid())?;
+    if !path.join("Contents/MacOS/Tokenstat").is_file() {
+        return Err(invalid());
+    }
+    // Read both XML and binary bundle plists with the system reader. This is
+    // an argv-only call to a fixed system executable, never a shell command.
+    let identity = std::process::Command::new("/usr/libexec/PlistBuddy")
+        .args(["-c", "Print:CFBundleIdentifier"])
+        .arg(path.join("Contents/Info.plist"))
+        .output()
+        .map_err(|_| invalid())?;
+    if !identity.status.success()
+        || String::from_utf8_lossy(&identity.stdout).trim() != "ai.tokenstat.tokenstat"
+    {
+        return Err(invalid());
+    }
+    path.to_str().map(str::to_owned).ok_or_else(invalid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,5 +131,42 @@ mod tests {
             assert_eq!(remote_peer().as_deref(), Some("a"));
         });
         assert_eq!(remote_peer(), None);
+    }
+    #[cfg(all(target_os = "macos", feature = "local-host"))]
+    #[test]
+    fn desktop_origin_is_local_validated_scoped_and_shell_safe() {
+        use std::fs;
+        let root = tempfile::tempdir().unwrap();
+        let app = root.path().join("QA space ü $(touch marker).app");
+        fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        fs::write(app.join("Contents/MacOS/Tokenstat"), b"fixture").unwrap();
+        let plist = app.join("Contents/Info.plist");
+        fs::write(&plist, br#"<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>ai.tokenstat.tokenstat</string></dict></plist>"#).unwrap();
+        assert!(desktop_app().is_none());
+        {
+            let _origin = enter_desktop_app(Some(app.to_str().unwrap())).unwrap();
+            assert_eq!(
+                desktop_app(),
+                Some(app.canonicalize().unwrap().display().to_string())
+            );
+            {
+                let _nested = enter_desktop_app(None).unwrap();
+                assert!(desktop_app().is_none());
+            }
+            assert!(desktop_app().is_some());
+            assert!(enter_desktop_app(Some("relative.app")).is_err());
+            assert!(
+                desktop_app().is_some(),
+                "Rejected input replaced the outer scope"
+            );
+        }
+        assert!(desktop_app().is_none());
+        assert!(!root.path().join("marker").exists());
+        with_remote_peer("fixture-peer", || {
+            assert!(enter_desktop_app(Some(app.to_str().unwrap())).is_err());
+        });
+        fs::write(&plist, br#"<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>example.other</string></dict></plist>"#).unwrap();
+        assert!(enter_desktop_app(Some(app.to_str().unwrap())).is_err());
+        assert!(enter_desktop_app(Some("/missing-test-desktop.app")).is_err());
     }
 }

@@ -10,6 +10,7 @@ Stop that fixture with target/routing-qa/native-fixture.stop.
 import argparse
 import json
 import os
+import plistlib
 from pathlib import Path
 import socket
 import subprocess
@@ -38,7 +39,7 @@ with (root / 'control.json').open('r+') as file:
     file.truncate()
 with (root / 'trace.ndjson').open('a') as file:
     file.write(json.dumps({'backend': backend, 'args': sys.argv[1:], 'cwd': os.getcwd(),
-                           'step': step, 'at': int(time.time() * 1000)}) + '\n')
+                           'step': step, 'desktopApp': os.environ.get('TOKENSTAT_DESKTOP_APP', ''), 'at': int(time.time() * 1000)}) + '\n')
 def emit(value):
     print(json.dumps(value), flush=True)
 if step['kind'] == 'quota':
@@ -70,6 +71,7 @@ def main():
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--fixture-only", action="store_true", help="Serve the native fixture after a separate E2E run")
     parser.add_argument("--host", type=Path, default=ROOT / "target/debug/tokenstat-hostd")
+    parser.add_argument("--desktop-app", type=Path, help="Validate local agent targeting of this Mac bundle instead of a fixture")
     args = parser.parse_args()
     if args.fixture_only and not args.serve:
         parser.error("--fixture-only requires --serve")
@@ -82,16 +84,30 @@ def main():
         (root / "home" / ".grok" / "auth.json").write_text("{}")
         (root / "home" / ".codex").mkdir()
         (root / "home" / ".codex" / "auth.json").write_text("{}")
+        # macOS /etc/zshrc enables history for idle pooled shells. Keep those
+        # writers out of the temporary home while the daemon is torn down.
+        (root / "home" / ".zshrc").write_text("HISTFILE=/dev/null\nSAVEHIST=0\n")
         control = root / "control.json"
         control.write_text(json.dumps({"codex": [], "grok": []}))
         for backend in ("codex", "grok"):
             executable = root / "bin" / backend
             executable.write_text(FAKE_PROVIDER.replace("#!/usr/bin/python3", f"#!{sys.executable}", 1))
             executable.chmod(0o700)
+        desktop_app = None
+        if sys.platform == "darwin":
+            desktop_app = args.desktop_app.resolve() if args.desktop_app else root / "Desktop QA space ü.app"
+            if args.desktop_app is None:
+                (desktop_app / "Contents/MacOS").mkdir(parents=True)
+                (desktop_app / "Contents/MacOS/Tokenstat").write_text("fixture")
+                (desktop_app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "ai.tokenstat.tokenstat"}))
+            desktop_app = desktop_app.resolve()
+        elif args.desktop_app:
+            parser.error("--desktop-app requires macOS")
         socket_path = root / "host.sock"
         environment = dict(os.environ, TOKENSTAT_DATA_DIR=str(root / "data"),
                            TOKENSTAT_IDENTITY_DIR=str(root / "identity"),
-                           HOME=str(root / "home"),
+                           HOME=str(root / "home"), ZDOTDIR=str(root / "home"),
+                           HISTFILE=os.devnull,
                            PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
         environment.pop("CODEX_HOME", None)
         with (root / "host.log").open("w") as log:
@@ -146,9 +162,12 @@ def main():
                     return chat(identifier)
 
                 def send(conversation, text):
-                    call("chat.send", {"id": conversation["id"], "text": text,
+                    params = {"id": conversation["id"], "text": text,
                         "expectedRevision": conversation["sendRevision"], "clientMessageId": str(uuid.uuid4()),
-                        "clientMessageCreatedAtMs": int(time.time() * 1000)})
+                        "clientMessageCreatedAtMs": int(time.time() * 1000)}
+                    if desktop_app:
+                        params["desktopApp"] = str(desktop_app)
+                    call("chat.send", params)
 
                 def completed(identifier, count):
                     return len(traces()) >= count and not chat(identifier)["running"]
@@ -217,6 +236,10 @@ def main():
                     wait(lambda: int(time.time() * 1000) > reset + 10000)
                     assert len(traces()) == start + 1, "Cancelled wait must not launch after reset"
                     proofs.append("cancelled wait stays cancelled after reset and scheduler tick")
+
+                    if desktop_app:
+                        assert traces() and all(row["desktopApp"] == str(desktop_app) for row in traces()), "An agent or continuation lost its originating Mac app"
+                        proofs.append("local Mac app origin preserved across manual turns and automatic routing continuations")
 
                     (OUT / "routing-e2e-proof.json").write_text(json.dumps({"proofs": proofs, "trace": traces()}, indent=2))
                     for proof in proofs:
