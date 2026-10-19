@@ -49,9 +49,10 @@ public sealed partial class SmokeApp : Application
         InitializeComponent();
         UnhandledException += (_, e) => { Program.Result = 1; Program.Log(e.Exception.ToString()); e.Handled = true; Exit(); };
     }
-    private static async Task WaitForLayoutAsync(FrameworkElement root, Func<bool> ready, Func<string> diagnostics)
+    private static async Task WaitForLayoutAsync(FrameworkElement root, Func<bool> ready, Func<string> diagnostics,
+        TimeSpan? patience = null)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        var deadline = DateTime.UtcNow + (patience ?? TimeSpan.FromSeconds(3));
         do
         {
             root.UpdateLayout();
@@ -59,6 +60,28 @@ public sealed partial class SmokeApp : Application
             await Task.Delay(30);
         } while (DateTime.UtcNow < deadline);
         throw new Exception(diagnostics());
+    }
+
+    private static async Task WaitForTerminalLayoutAsync(FrameworkElement root, TerminalSurface terminal,
+        Func<bool> ready, string scope)
+    {
+        try
+        {
+            await WaitForLayoutAsync(root, ready,
+                () => $"{scope}: terminal={terminal.ActualWidth:F1}x{terminal.ActualHeight:F1}, rows={terminal.Rows}, cols={terminal.Cols}",
+                TimeSpan.FromSeconds(10));
+        }
+        catch
+        {
+            try
+            {
+                var web = (WebView2)terminal.Children[0];
+                Program.Log("Terminal DOM viewport: " + await web.ExecuteScriptAsync(
+                    "JSON.stringify({width:innerWidth,height:innerHeight,scale:devicePixelRatio,rows:terminal.rows,cols:terminal.cols,fontSize:terminal.options.fontSize})"));
+            }
+            catch (Exception error) { Program.Log("Terminal viewport unavailable: " + error.Message); }
+            throw;
+        }
     }
 
     private sealed class PlaybackProbe
@@ -235,13 +258,21 @@ public sealed partial class SmokeApp : Application
                 Grid.SetRow(terminal, 1);
                 terminalGrid.Children.Add(terminal);
                 tabView.Height = 400;
-                body.Children.Add(tabView);
+                // WebView2 may retain its old viewport while clipped below
+                // the editor/video fixtures. Give this geometry test the
+                // visible client area it has in the production shell.
+                var scale = body.XamlRoot.RasterizationScale;
+                _window.AppWindow.ResizeClient(new Windows.Graphics.SizeInt32(
+                    (int)Math.Ceiling(1200 * scale), (int)Math.Ceiling(800 * scale)));
+                var terminalHost = new Grid { Children = { tabView } };
+                using var terminalMount = new TabViewMount(tabView);
+                _window.Content = terminalHost;
+                await WaitForLayoutAsync(terminalHost, () => terminalMount.IsReady,
+                    () => $"Terminal tabs mounted: loaded={tabView.IsLoaded}, ready={terminalMount.IsReady}");
                 workspaceTabs.Open("terminal:test", "Shell", () => new Page { Content = terminalGrid });
-                body.UpdateLayout();
-                await Task.Delay(500);
-                if (terminal.ActualHeight < 300 || terminal.Rows < 15)
-                    throw new Exception($"Terminal tab collapsed to {terminal.ActualHeight}px / {terminal.Rows} rows");
-                body.Children.Remove(tabView);
+                await WaitForTerminalLayoutAsync(terminalHost, terminal,
+                    () => terminal.ActualHeight >= 300 && terminal.Rows >= 15, "Terminal tab viewport");
+                terminalHost.Children.Remove(tabView);
                 Program.Log("PASS: a terminal page fills the native workspace tab content area");
                 // Exercise the outer production shell too: NavigationView has
                 // a second content presenter, independent of TabView's.
@@ -260,16 +291,13 @@ public sealed partial class SmokeApp : Application
                 var navigation = new NavigationView { Content = contentHost, Height = 650, Width = 1100 };
                 navigation.Loaded += (_, _) => NativeContentLayout.Stretch(navigation, contentHost);
                 _window.Content = navigation;
-                navigation.UpdateLayout();
-                await Task.Delay(500);
+                await WaitForTerminalLayoutAsync(navigation, terminal,
+                    () => terminal.ActualHeight >= 450 && terminal.Rows >= 25, "Shell terminal viewport");
                 Program.Log($"Shell sizes: nav={navigation.ActualHeight}, content={contentHost.ActualHeight}, body={shellBody.ActualHeight}, inspector={inspectorHost.ActualHeight}, frame={workspaceFrame.ActualHeight}, page={((Page)workspaceFrame.Content).ActualHeight}, tabs={tabView.ActualHeight}, terminalGrid={terminalGrid.ActualHeight}, terminal={terminal.ActualHeight}");
-                if (terminal.ActualHeight < 450 || terminal.Rows < 25)
-                    throw new Exception($"Shell terminal collapsed: {terminal.ActualHeight}px / {terminal.Rows} rows");
                 navigation.Height = 450;
-                navigation.UpdateLayout();
-                await Task.Delay(350);
-                if (terminal.ActualHeight < 250 || terminal.ActualHeight > 400)
-                    throw new Exception($"Shell terminal failed resize: {terminal.ActualHeight}px");
+                await WaitForTerminalLayoutAsync(navigation, terminal,
+                    () => terminal.ActualHeight >= 250 && terminal.ActualHeight <= 400 && terminal.Rows < 25,
+                    "Resized shell terminal viewport");
                 _window.Content = body;
                 await Task.Delay(100);
                 Program.Log("PASS: terminal fills NavigationView, Frame, inspector host, page and tab after resize");
