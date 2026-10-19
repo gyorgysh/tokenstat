@@ -38,7 +38,12 @@ pub(crate) fn bridge(
     let mut local = local;
     let first = match read_until_headers(&mut local) {
         Ok(buf) if !buf.is_empty() => buf,
-        _ => return,
+        Ok(_) => return,
+        Err(_error) => {
+            #[cfg(test)]
+            eprintln!("proxy: local preamble read failed: {_error}");
+            return;
+        }
     };
     if !looks_like_http(&first) {
         clear_timeouts(&local);
@@ -205,8 +210,10 @@ fn pump_raw(local: TcpStream, connection: Connection, prefix: Option<Vec<u8>>) {
     let (reader, writer) = connection.split();
     if let Some(prefix) = prefix
         && !prefix.is_empty()
-        && writer.write(&prefix).is_err()
+        && let Err(_error) = writer.write(&prefix)
     {
+        #[cfg(test)]
+        eprintln!("proxy: initial stream write failed: {_error}");
         finish(reader, writer);
         return;
     }
@@ -248,12 +255,18 @@ fn pump_split(
                 match tcp_reader.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if writer.write(&buffer[..n]).is_err() {
+                        if let Err(_error) = writer.write(&buffer[..n]) {
+                            #[cfg(test)]
+                            eprintln!("proxy: upload stream write failed: {_error}");
                             break;
                         }
                     }
                     Err(err) if is_idle(&err) => continue,
-                    Err(_) => break,
+                    Err(_error) => {
+                        #[cfg(test)]
+                        eprintln!("proxy: upload socket read failed: {_error}");
+                        break;
+                    }
                 }
             }
             let _ = writer.write(&[]);
@@ -268,11 +281,17 @@ fn pump_split(
                 match reader.read(1 << 20) {
                     Ok(data) if data.is_empty() => break,
                     Ok(data) => {
-                        if tcp.write_all(&data).is_err() {
+                        if let Err(_error) = tcp.write_all(&data) {
+                            #[cfg(test)]
+                            eprintln!("proxy: download socket write failed: {_error}");
                             break;
                         }
                     }
-                    Err(_) => break,
+                    Err(_error) => {
+                        #[cfg(test)]
+                        eprintln!("proxy: download stream read failed: {_error}");
+                        break;
+                    }
                 }
             }
             reader.close();

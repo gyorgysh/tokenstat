@@ -239,7 +239,7 @@ private struct NavigationSurface: View {
         navigation.workbench.open(.inspector, in: "first")
         window.contentView = NSHostingView(rootView: NavigationSurface(probe: navigation, identities: identities))
         await wait { identities.values["inspector:first"] != nil && identities.values["browser:first"] != nil }
-        let inspector = identities.values["inspector:first"]!, browser = identities.values["browser:first"]!
+        let inspector = identities.values["inspector:first"]!, browserIdentity = identities.values["browser:first"]!
         navigation.workbench.activate(in: "second")
         navigation.workspace = "second"
         await wait { identities.values["inspector:second"] != nil }
@@ -247,7 +247,7 @@ private struct NavigationSurface: View {
                      "Repository navigation rebuilt the inspector shell instead of updating its owner")
         navigation.workbench.open(.browser, in: "second")
         await wait { identities.values["browser:second"] != nil }
-        precondition(identities.values["browser:second"] != browser,
+        precondition(identities.values["browser:second"] != browserIdentity,
                      "A repository-specific native tool inherited another repository's state")
         print("PASS: actual workbench keeps inspector identity across repositories while scoping native tools independently")
     }

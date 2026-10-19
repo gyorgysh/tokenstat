@@ -270,11 +270,17 @@ fn pump_tcp_connection(tcp: TcpStream, connection: Connection, access: StreamAcc
                 match tcp_reader.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if writer.write(&buffer[..n]).is_err() {
+                        if let Err(_error) = writer.write(&buffer[..n]) {
+                            #[cfg(test)]
+                            eprintln!("remote proxy: download stream write failed: {_error}");
                             break;
                         }
                     }
-                    Err(_) => break,
+                    Err(_error) => {
+                        #[cfg(test)]
+                        eprintln!("remote proxy: service socket read failed: {_error}");
+                        break;
+                    }
                 }
             }
             let _ = writer.write(&[]);
@@ -288,11 +294,17 @@ fn pump_tcp_connection(tcp: TcpStream, connection: Connection, access: StreamAcc
             match reader.read(1 << 20) {
                 Ok(data) if data.is_empty() => break,
                 Ok(data) => {
-                    if tcp.write_all(&data).is_err() {
+                    if let Err(_error) = tcp.write_all(&data) {
+                        #[cfg(test)]
+                        eprintln!("remote proxy: upload socket write failed: {_error}");
                         break;
                     }
                 }
-                Err(_) => break,
+                Err(_error) => {
+                    #[cfg(test)]
+                    eprintln!("remote proxy: upload stream read failed: {_error}");
+                    break;
+                }
             }
         }
         reader.close();
@@ -939,6 +951,7 @@ pub(crate) fn invalidate_all_pty_lists() {
 mod tests {
     use std::io::{Read, Write};
     use std::net::TcpStream;
+    use std::time::Duration;
 
     use tokenstat_identity::MachineIdentity;
     use tokenstat_remote::{handshake_initiator, handshake_responder};
@@ -1221,6 +1234,7 @@ mod tests {
 
         let peer_side = std::thread::spawn(move || {
             let (stream, _) = listener.accept().expect("a peer connection");
+            stream.set_nodelay(true).expect("production socket setup");
             let connection =
                 handshake_responder(Box::new(stream), &responder_ident).expect("handshake");
             pump_proxy(
@@ -1232,6 +1246,9 @@ mod tests {
         });
 
         let stream = TcpStream::connect(address).expect("dial the peer");
+        // The production direct dialer disables Nagle before the handshake.
+        // Mirror it here rather than adding delayed-ACK stalls to the fixture.
+        stream.set_nodelay(true).expect("production socket setup");
         let connection = handshake_initiator(
             Box::new(stream),
             &initiator_ident,
@@ -1248,13 +1265,22 @@ mod tests {
         });
 
         let mut client = TcpStream::connect(("127.0.0.1", local_port)).expect("connect locally");
-        client.write_all(b"ping").expect("write");
-        let mut reply = [0u8; 4];
-        client.read_exact(&mut reply).expect("read");
-        assert_eq!(
-            &reply, b"ping",
-            "the service's reply came back through the stream"
-        );
+        client.set_nodelay(true).expect("client socket setup");
+        client
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("bounded reply wait");
+        for payload in [b"ping", b"pong"] {
+            // Exercise idle split-reader timeouts both before the first byte
+            // and after traffic, rather than relying on scheduler timing.
+            std::thread::sleep(Duration::from_millis(200));
+            client.write_all(payload).expect("write");
+            let mut reply = [0u8; 4];
+            client.read_exact(&mut reply).expect("read");
+            assert_eq!(
+                &reply, payload,
+                "the service's reply came back through the stream"
+            );
+        }
 
         drop(client);
         let _ = local_side.join();
