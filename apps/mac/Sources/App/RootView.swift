@@ -400,7 +400,7 @@ struct RootView: View {
             .onChange(of: ecosystemNavigation.pending, initial: true) { _, _ in openEcosystemDestination() }
             .onChange(of: placeSettled) { _, _ in openEcosystemDestination(); resolvePendingDesktopOpen() }
             .onChange(of: workspaces.isLoading) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
-            .onChange(of: workspaces.hasLoadedDirectory) { _, _ in resolvePendingDesktopOpen() }
+            .onChange(of: workspaces.hasLoadedDirectory) { _, _ in resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: WorkSessionContext.shared.scope) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: WorkSessionContext.shared.localHostIdentity) { _, _ in resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: route) { _, _ in resolvePendingSimulatorAttach() }
@@ -1028,11 +1028,19 @@ struct RootView: View {
             pendingSimulatorAttach = nil
             return
         }
-        guard let id = pending.request.workspaceID ?? route.workspaceID,
-              workspaces.folders.contains(where: { $0.id == id }),
-              WorkViewedChange.owner(folderID: id) != nil,
-              WorkDestinationResolver.route(folderID: id).peer == nil else { return }
+        guard let id = pending.request.workspaceID ?? route.workspaceID else { return }
+        guard workspaces.folders.contains(where: { $0.id == id }) else {
+            // A link naming a project this account lacks must not linger and
+            // fire later, when that project happens to appear.
+            guard pending.request.workspaceID != nil, workspaces.hasLoadedDirectory, !workspaces.isLoading else { return }
+            pendingSimulatorAttach = nil
+            desktopActionError = L10n.text("apple.desktop_actions.project_missing")
+            return
+        }
+        guard WorkViewedChange.owner(folderID: id) != nil else { return }
         pendingSimulatorAttach = nil
+        // Simulators are local hardware. A remote project can never take one.
+        guard WorkDestinationResolver.route(folderID: id).peer == nil else { return }
         simulatorRequests[id] = SimulatorAttachmentIntent(deviceID: pending.request.deviceID)
         if route.workspaceID != id { navigate(to: .workspace(id: id, section: .chat)) }
         openWorkbench(.simulator, in: id)
