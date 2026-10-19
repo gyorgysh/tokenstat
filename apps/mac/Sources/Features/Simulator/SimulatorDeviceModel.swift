@@ -59,7 +59,9 @@ final class SimulatorDeviceModelView: MTKView, MTKViewDelegate, SimulatorFrameSi
         guard let state = try? device.makeRenderPipelineState(descriptor: descriptor),
               let test = device.makeDepthStencilState(descriptor: depth) else { return nil }
         let pixel = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 1, height: 1, mipmapped: false)
-        pixel.storageMode = .shared; pixel.usage = .shaderRead
+        // Let Metal select shared or managed memory for this CPU-populated
+        // texture on Apple silicon and Intel GPUs respectively.
+        pixel.usage = .shaderRead
         guard let blank = device.makeTexture(descriptor: pixel) else { return nil }
         [UInt8(0), 0, 0, 255].withUnsafeBytes { bytes in
             blank.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: bytes.baseAddress!, bytesPerRow: 4)

@@ -36,6 +36,7 @@ public sealed partial class MainWindow
     }
     private void QueueDesktopAction(DesktopOpenRequest request)
     {
+        Program.LogStartup("Desktop action queued; tool=" + request.Tool);
         while (_desktopActions.Count >= 16) _desktopActions.Dequeue();
         _desktopActions.Enqueue((request, AppServices.AccountGeneration));
         ResolveDesktopActions();
@@ -50,6 +51,7 @@ public sealed partial class MainWindow
             if (!_localFolders.Any(folder => Format.Text(folder, "id") == request.WorkspaceId)
                 && RemoteWorkspaces.CachedFolder(request.WorkspaceId) is null)
             {
+                Program.LogStartup("Desktop action rejected; project unavailable");
                 _desktopActionError.Message = L10n.Text("windows.desktop_actions.project_missing");
                 _desktopActionError.IsOpen = true;
                 continue;
@@ -57,7 +59,15 @@ public sealed partial class MainWindow
             _desktopActionError.IsOpen = false;
             NavigateTo("ws:" + request.WorkspaceId + ":Chat");
             var workbench = WorkspaceTabs(request.WorkspaceId);
-            workbench.WhenLoaded(() => workbench.OpenDesktopAction(request));
+            var account = item.Account;
+            workbench.WhenLoaded(() =>
+            {
+                if (account == AppServices.AccountGeneration)
+                {
+                    Program.LogStartup("Desktop action applied; tool=" + request.Tool);
+                    workbench.OpenDesktopAction(request);
+                }
+            });
         }
     }
 }

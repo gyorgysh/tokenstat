@@ -61,7 +61,7 @@ static class WorkspaceDiff {
 ''' + method('apps/windows/Pages/WorkspaceDiff.cs', '    internal static OperationEpoch.Operation BeginReviewRequest(') + r'''
 }
 static class LocalHistory {
-''' + method('apps/windows/Pages/WorkspaceHistory.cs', '    private static async Task ShowDetailAsync(') + r'''
+''' + method('apps/windows/Pages/WorkspaceHistory.cs', '    internal static async Task ShowDetailAsync(') + r'''
 }
 static class RemoteHistory {
 ''' + method('apps/windows/Pages/WorkspaceRemoteHistory.cs', '    private static async Task ShowDetailAsync(') + r'''

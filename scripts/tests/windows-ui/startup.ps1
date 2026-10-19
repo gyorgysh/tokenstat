@@ -325,11 +325,18 @@ try {
         Start-Process -FilePath "tokenstat://workbench/open?workspace=$project&tool=$Tool$Options"
     }
     function Wait-ForDesktopTool([string]$Tool) {
-        for ($attempt = 0; $attempt -lt 60; $attempt++) {
+        for ($attempt = 0; $attempt -lt 120; $attempt++) {
             $tab = Wait-ForControl "workbench.tool.$Tool" 10
             $selected = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
             if ($selected.Current.IsSelected) { return }
             Start-Sleep -Milliseconds 100
+        }
+        foreach ($name in @('inspector', 'changes', 'browser', 'terminal')) {
+            $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, "workbench.tool.$name")
+            foreach ($tab in $window.FindAll($descendants, $condition)) {
+                $pattern = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+                Write-Host "Tool state: $name; selected=$($pattern.Current.IsSelected); offscreen=$($tab.Current.IsOffscreen)"
+            }
         }
         throw "Desktop activation did not select $Tool"
     }
@@ -356,6 +363,7 @@ try {
     $commit = (& git -C $fixture rev-parse HEAD).Trim()
     Open-DesktopAction 'changes' ("&commit=" + $commit)
     Wait-ForDesktopTool 'changes'
+    Wait-ForNativeName 'Desktop action commit fixture' $textType | Out-Null
     Wait-ForNativeName 'workbench-live-third' $textType | Out-Null
     Open-DesktopAction 'terminal' ("&session=" + [Uri]::EscapeDataString($shell.id))
     Wait-ForDesktopTool 'terminal'

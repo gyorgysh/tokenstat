@@ -400,6 +400,7 @@ struct RootView: View {
             .onChange(of: placeSettled) { _, _ in openEcosystemDestination(); resolvePendingDesktopOpen() }
             .onChange(of: workspaces.isLoading) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: WorkSessionContext.shared.scope) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
+            .onChange(of: WorkSessionContext.shared.localHostIdentity) { _, _ in resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: route) { _, _ in resolvePendingSimulatorAttach() }
     }
 

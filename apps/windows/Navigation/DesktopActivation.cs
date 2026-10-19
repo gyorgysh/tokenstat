@@ -17,6 +17,7 @@ internal static class DesktopActivation
     public static bool Initialize()
     {
         var activation = AppInstance.GetCurrent().GetActivatedEventArgs();
+        Program.LogStartup("Desktop startup activation; kind=" + activation.Kind);
         var instance = AppInstance.FindOrRegisterForKey("desktop");
         if (!instance.IsCurrent)
         {
@@ -54,9 +55,11 @@ internal static class DesktopActivation
     private static extern int CoWaitForMultipleHandles(uint flags, uint timeout, uint count, [In] IntPtr[] handles, out uint index);
     private static void Receive(AppActivationArguments activation)
     {
+        Program.LogStartup("Desktop activation; kind=" + activation.Kind + "; protocol=" + (activation.Data is IProtocolActivatedEventArgs));
         if (activation.Data is IProtocolActivatedEventArgs protocol
             && DesktopOpenRequest.Parse(protocol.Uri.AbsoluteUri) is { } request)
         {
+            Program.LogStartup("Desktop action received; tool=" + request.Tool);
             while (Pending.Count >= 16) Pending.TryDequeue(out _);
             Pending.Enqueue(request);
         }

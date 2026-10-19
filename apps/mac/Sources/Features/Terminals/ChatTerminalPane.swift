@@ -189,7 +189,7 @@ struct ChatTerminalPane: View {
             if let shell = available.first(where: { $0.id == "shell" }) { start(shell) }
             else { launchError = L10n.text("apple.desktop_actions.shell_missing") }
         } else if let id = intent.sessionID,
-                  let session = sessions.first(where: { $0.id == id || $0.local?.hostID == id }) {
+                  let session = sessions.first(where: { $0.alive && ($0.id == id || $0.local?.hostID == id) }) {
             select(session)
         } else {
             launchError = L10n.text("apple.desktop_actions.session_missing")
