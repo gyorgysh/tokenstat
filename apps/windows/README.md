@@ -18,7 +18,9 @@ completing a requested job:
 Start-Process 'tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=changes'
 ```
 
-Replace and URL-encode query values. Tools are `inspector`, `changes`, `browser`
+Workspace IDs are the registered paths, with a remote prefix when applicable.
+URL-encode the complete value. A query `+` represents a space. Encode a literal
+plus as `%2B`. Tools are `inspector`, `changes`, `browser`
 and `terminal`. Changes accepts `commit=FULL_COMMIT_SHA` to show committed work
 using its full 40- or 64-character hexadecimal id. Inspector accepts
 `tab=files`, `tab=changes` or `tab=history`.

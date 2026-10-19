@@ -268,6 +268,7 @@ struct TokenstatApp: App {
                     minWidth: RootView.minimumContentWidth,
                     minHeight: RootView.minimumContentHeight
                 )
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
             #else
             // The phone and the iPad get their own root, not a narrow window.
             // A minimum size would be meaningless here: the scene is whatever

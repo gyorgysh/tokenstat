@@ -87,8 +87,10 @@
     "url": "tokenstat://workbench/open?workspace=&tool=changes"
   },
   {
-    "name": "space project",
-    "url": "tokenstat://workbench/open?workspace=project%20a&tool=changes"
+    "name": "space in workspace ID",
+    "url": "tokenstat://workbench/open?workspace=project%20a&tool=changes",
+    "tool": "changes",
+    "workspace": "project a"
   },
   {
     "name": "unknown tool",
@@ -227,5 +229,96 @@
   {
     "name": "duplicate commit",
     "url": "tokenstat://workbench/open?workspace=project-a&tool=changes&commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&commit=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  {
+    "name": "POSIX canonical path",
+    "url": "tokenstat://workbench/open?workspace=%2Fworkspace%2Fproject&tool=changes",
+    "tool": "changes",
+    "workspace": "/workspace/project"
+  },
+  {
+    "name": "spaces in canonical path",
+    "url": "tokenstat://workbench/open?workspace=%2Fworkspace%2Fproject%20app&tool=changes",
+    "tool": "changes",
+    "workspace": "/workspace/project app"
+  },
+  {
+    "name": "Unicode project",
+    "url": "tokenstat://workbench/open?workspace=%2Fworkspace%2Fcaf%C3%A9-%E7%8C%AB&tool=changes",
+    "tool": "changes",
+    "workspace": "/workspace/café-猫"
+  },
+  {
+    "name": "Windows drive path",
+    "url": "tokenstat://workbench/open?workspace=C%3A%5Cwork%5Cproject%20app&tool=changes",
+    "tool": "changes",
+    "workspace": "C:\\work\\project app"
+  },
+  {
+    "name": "Windows canonical verbatim path",
+    "url": "tokenstat://workbench/open?workspace=%5C%5C%3F%5CC%3A%5Cwork%5Cproject%20app&tool=changes",
+    "tool": "changes",
+    "workspace": "\\\\?\\C:\\work\\project app"
+  },
+  {
+    "name": "Windows UNC path",
+    "url": "tokenstat://workbench/open?workspace=%5C%5Cserver%5Cshare%5Cproject&tool=changes",
+    "tool": "changes",
+    "workspace": "\\\\server\\share\\project"
+  },
+  {
+    "name": "Windows verbatim UNC path",
+    "url": "tokenstat://workbench/open?workspace=%5C%5C%3F%5CUNC%5Cserver%5Cshare%5Cproject&tool=changes",
+    "tool": "changes",
+    "workspace": "\\\\?\\UNC\\server\\share\\project"
+  },
+  {
+    "name": "remote POSIX path",
+    "url": "tokenstat://workbench/open?workspace=remote%3Apeer%3A%2Fworkspace%2Fproject%20app&tool=changes",
+    "tool": "changes",
+    "workspace": "remote:peer:/workspace/project app"
+  },
+  {
+    "name": "remote Windows path",
+    "url": "tokenstat://workbench/open?workspace=remote%3Apeer%3AC%3A%5Cwork%5Cproject%20app&tool=changes",
+    "tool": "changes",
+    "workspace": "remote:peer:C:\\work\\project app"
+  },
+  {
+    "name": "query punctuation in path",
+    "url": "tokenstat://workbench/open?workspace=%2Fworkspace%2Fproject%20%26%20notes%231%3F%3Dyes&tool=changes",
+    "tool": "changes",
+    "workspace": "/workspace/project & notes#1?=yes"
+  },
+  {
+    "name": "whitespace only",
+    "url": "tokenstat://workbench/open?workspace=%20%20%20&tool=changes"
+  },
+  {
+    "name": "control in project",
+    "url": "tokenstat://workbench/open?workspace=%2Fworkspace%2Fproject%00&tool=changes"
+  },
+  {
+    "name": "C1 control in project",
+    "url": "tokenstat://workbench/open?workspace=%2Fworkspace%2Fproject%C2%85&tool=changes"
+  },
+  {
+    "name": "form-encoded spaces",
+    "url": "tokenstat://workbench/open?workspace=%2Fworkspace%2Fproject+app&tool=changes",
+    "tool": "changes",
+    "workspace": "/workspace/project app"
+  },
+  {
+    "name": "literal plus in project",
+    "url": "tokenstat://workbench/open?workspace=%2Fworkspace%2Fproject%2Bapp&tool=changes",
+    "tool": "changes",
+    "workspace": "/workspace/project+app"
+  },
+  {
+    "name": "literal plus in preview",
+    "url": "tokenstat://workbench/open?workspace=project-a&tool=browser&url=https%3A%2F%2Fexample.invalid%2Fsearch%3Fq%3Da%2Bb",
+    "tool": "browser",
+    "workspace": "project-a",
+    "browser": "https://example.invalid/search?q=a+b"
   }
 ]

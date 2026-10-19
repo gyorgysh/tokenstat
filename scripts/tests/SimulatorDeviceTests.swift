@@ -32,6 +32,10 @@ import CoreGraphics
         let valid = URL(string: "tokenstat://simulator/attach?device=\(first)&workspace=project")!
         precondition(SimulatorAttachRequest(url: valid)?.deviceID == first)
         precondition(SimulatorAttachRequest(url: valid)?.workspaceID == "project")
+        let spaced = URL(string: "tokenstat://simulator/attach?device=\(first)&workspace=%2Fworkspace%2Fproject+app")!
+        precondition(SimulatorAttachRequest(url: spaced)?.workspaceID == "/workspace/project app")
+        let plus = URL(string: "tokenstat://simulator/attach?device=\(first)&workspace=%2Fworkspace%2Fproject%2Bapp")!
+        precondition(SimulatorAttachRequest(url: plus)?.workspaceID == "/workspace/project+app")
         for value in ["tokenstat://simulator/erase?device=\(first)",
                       "https://simulator/attach?device=\(first)",
                       "tokenstat://simulator/attach?device=booted",

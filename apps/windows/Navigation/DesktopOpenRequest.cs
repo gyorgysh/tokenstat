@@ -18,11 +18,11 @@ internal sealed record DesktopOpenRequest(DesktopWorkbenchTool Tool, string Work
             var pair = part.Split('=', 2);
             if (pair.Length != 2) return null;
             string key, item;
-            try { key = Uri.UnescapeDataString(pair[0]); item = Uri.UnescapeDataString(pair[1]); }
+            try { key = Uri.UnescapeDataString(pair[0].Replace('+', ' ')); item = Uri.UnescapeDataString(pair[1].Replace('+', ' ')); }
             catch (UriFormatException) { return null; }
             if (!query.TryAdd(key, item)) return null;
         }
-        if (!query.TryGetValue("workspace", out var workspace) || !ValidId(workspace)
+        if (!query.TryGetValue("workspace", out var workspace) || !ValidWorkspaceId(workspace)
             || !query.TryGetValue("tool", out var name)) return null;
         var tool = name switch
         {
@@ -44,13 +44,18 @@ internal sealed record DesktopOpenRequest(DesktopWorkbenchTool Tool, string Work
             && (address.Length > 8192 || !Uri.TryCreate(address, UriKind.Absolute, out browser)
                 || browser.Scheme is not ("http" or "https") || browser.Host.Length == 0 || browser.UserInfo.Length != 0)) return null;
         var session = query.GetValueOrDefault("session");
-        if (session is not null && !ValidId(session)) return null;
+        if (session is not null && !ValidSessionId(session)) return null;
         var spawn = query.GetValueOrDefault("new");
         if (spawn is not null && (spawn != "1" || session is not null)) return null;
         var commit = query.GetValueOrDefault("commit");
         if (commit is not null && (commit.Length is not (40 or 64) || !commit.All(char.IsAsciiHexDigit))) return null;
         return new(tool.Value, workspace, tab, browser, session, spawn == "1", commit);
     }
-    private static bool ValidId(string value) => value.Length is > 0 and <= 512
+    private static bool ValidSessionId(string value) => value.Length is > 0 and <= 512
         && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' or ':');
+    // Registry IDs are paths. Exact registered-project lookup, rather than
+    // an ASCII session-ID grammar, proves ownership before navigation.
+    private static bool ValidWorkspaceId(string value) => !string.IsNullOrWhiteSpace(value)
+        && System.Text.Encoding.UTF8.GetByteCount(value) <= 4096
+        && !value.Any(c => c < 32 || c is >= '\u007f' and <= '\u009f');
 }

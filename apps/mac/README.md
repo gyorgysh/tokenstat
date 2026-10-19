@@ -181,7 +181,9 @@ tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=terminal&session=SESSION_
 tokenstat://workbench/open?workspace=WORKSPACE_ID&tool=terminal&new=1
 ```
 
-URL-encode query values. Use `open 'URL'` on macOS and `Start-Process 'URL'` in
+Workspace IDs are the registered paths, with a remote prefix when applicable.
+URL-encode the complete value. A query `+` represents a space. Encode a literal
+plus as `%2B`. Use `open 'URL'` on macOS and `Start-Process 'URL'` in
 PowerShell. `changes` shows the current working tree. Add
 `commit=FULL_COMMIT_SHA` to show a committed result using its full 40- or
 64-character hexadecimal id. Inspector tabs are `files`, `changes` and

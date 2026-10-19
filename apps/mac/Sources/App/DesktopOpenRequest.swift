@@ -16,13 +16,15 @@ struct DesktopOpenRequest: Equatable {
     init?(url: URL) {
         guard url.absoluteString.count <= 16384, url.user == nil, url.password == nil, url.port == nil, url.fragment == nil,
               url.scheme?.lowercased() == "tokenstat", url.host == "workbench", url.path == "/open",
-              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false), let items = parts.queryItems else { return nil }
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        parts.percentEncodedQuery = parts.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%20")
+        guard let items = parts.queryItems else { return nil }
         var query: [String: String] = [:]
         for item in items {
             guard query[item.name] == nil, let value = item.value else { return nil }
             query[item.name] = value
         }
-        guard let workspace = query["workspace"], Self.validID(workspace),
+        guard let workspace = query["workspace"], Self.validWorkspaceID(workspace),
               let name = query["tool"], let tool = DesktopWorkbenchState.Tool(rawValue: name) else { return nil }
         let extras: Set<String>
         switch tool {
@@ -41,17 +43,23 @@ struct DesktopOpenRequest: Equatable {
                   let host = parsed.host, !host.isEmpty, parsed.user == nil, parsed.password == nil else { return nil }
             browser = parsed
         }
-        if let session = query["session"], !Self.validID(session) { return nil }
+        if let session = query["session"], !Self.validSessionID(session) { return nil }
         if let spawn = query["new"], spawn != "1" || query["session"] != nil { return nil }
         if let commit = query["commit"], ![40, 64].contains(commit.utf8.count) || !commit.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) { return nil }
         self.tool = tool; workspaceID = workspace; inspectorTab = tab; browserURL = browser
         sessionID = query["session"]; newTerminal = query["new"] == "1"
         commitID = query["commit"]
     }
-    private static func validID(_ value: String) -> Bool {
+    private static func validSessionID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 512 && value.utf8.allSatisfy {
             (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 58, 95].contains($0)
         }
+    }
+    private static func validWorkspaceID(_ value: String) -> Bool {
+        // Registered IDs are canonical paths, including Windows verbatim
+        // paths and remote prefixes. Routing checks exact inventory ownership.
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && value.utf8.count <= 4096
+            && value.unicodeScalars.allSatisfy { $0.value >= 32 && !(127...159).contains($0.value) }
     }
 }
 

@@ -5790,10 +5790,11 @@
   "apple.simulator.cancel_attach": "Cancel attachment",
   "apple.simulator.open_android_studio": "Open Android Studio",
   "apple.simulator.android_studio_missing": "Android Studio is not installed. Use the Android SDK tools to manage this emulator.",
-  "apple.desktop_actions.project_missing": "This project is not available in the current account. Open it from Projects, then try the action again.",
+  "apple.desktop_actions.project_missing": "This project is not available in the current account. Add it from Repositories, then try the action again.",
   "apple.desktop_actions.session_missing": "This terminal is not running in this project. Choose a session here or start a new shell.",
   "apple.desktop_actions.shell_missing": "No shell is available on this computer. Check the terminal launcher and try again.",
   "apple.simulator.android_missing_title": "Android SDK tools are not ready",
   "apple.simulator.get_xcode": "Get Xcode",
-  "apple.simulator.get_android_studio": "Get Android Studio"
+  "apple.simulator.get_android_studio": "Get Android Studio",
+  "apple.desktop_actions.unavailable_title": "Could not open this tool"
 }

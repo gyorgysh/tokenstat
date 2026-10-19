@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-"""Exercise the side review's actual commit loader with held host replies."""
+"""Exercise production desktop navigation, side reviews and native pane lifetimes."""
 from pathlib import Path
 import subprocess
 import tempfile
+
+def declaration(text, marker):
+    start = text.index(marker)
+    end, depth = text.index('{', start) + 1, 1
+    while depth:
+        depth += (text[end] == '{') - (text[end] == '}')
+        end += 1
+    return text[start:end]
+
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatChangesWorkbenchView.swift').read_text()
@@ -80,15 +89,140 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-chat-workbench-') as temporar
                     str(folder / 'main.swift'), '-o', str(folder / 'check')], check=True)
     subprocess.run([str(folder / 'check')], check=True)
 
+# Exercise the production desktop action coordinator separately from native
+# windows. Readiness, account ownership and consumed shell intents must not
+# depend on a restored window or a live host being available in the test.
+desktop_root = (root / 'apps/mac/Sources/App/RootView.swift').read_text()
+coordinator = r'''import Foundation
+enum Fixture { static let project = "/workspace/project app" }
+enum WorkReference { struct Scope: Equatable { let id: String } }
+@MainActor final class WorkSessionContext {
+    static let shared = WorkSessionContext()
+    var scope: WorkReference.Scope?
+}
+enum Section { case chat, files }
+enum Route: Equatable {
+    case home, workspace(id: String, section: Section)
+    var workspaceID: String? { if case .workspace(let id, _) = self { id } else { nil } }
+    var workspaceSection: Section? { if case .workspace(_, let section) = self { section } else { nil } }
+}
+struct Folder { let id: String }
+final class Folders {
+    var folders = [Folder(id: Fixture.project), Folder(id: "other")]
+    var isLoading = true
+    var hasLoadedDirectory = false
+    var errorMessage: String?
+    var chatInspectorShowsSettings = true
+    var inspectorTab = DesktopOpenRequest.InspectorTab.files
+}
+@MainActor enum WorkViewedChange {
+    static var hostReady = false
+    static func owner(folderID: String) -> String? { hostReady ? folderID : nil }
+}
+enum L10n { static func text(_ key: String) -> String { key } }
+@MainActor final class Desktop {
+    var placeSettled = false
+    var desktopActionScope: WorkReference.Scope?
+    var desktopActionError: String?
+    let workspaces = Folders()
+    var pendingDesktopOpen: PendingDesktopOpen?
+    var route = Route.home
+    var navigation: [Route] = []
+    var desktopWorkbench = DesktopWorkbenchSession()
+    var desktopTurnReviews: [String: String] = [:]
+    var desktopCommitReviews: [String: String] = [:]
+    var workspaceBrowserURLs: [String: String] = [:]
+    var desktopTerminalRequests: [String: DesktopTerminalIntent] = [:]
+    var simulatorRequests: [String: String] = [:]
+    func navigate(to value: Route) { route = value; navigation.append(value) }
+''' + '\n'.join(declaration(desktop_root, marker).replace('private ', '') for marker in [
+    'private struct PendingDesktopOpen', 'private func openDesktop(',
+    'private func resolvePendingDesktopOpen(', 'private func openWorkbench(',
+    'private func closeWorkbench(',
+]) + r'''
+}
+@main struct DesktopChecks {
+    static func request(_ options: String) -> DesktopOpenRequest {
+        DesktopOpenRequest(url: URL(string: "tokenstat://workbench/open?workspace=" + Fixture.project.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&" + options)!)!
+    }
+    @MainActor static func main() {
+        let account = WorkReference.Scope(id: "first")
+        let app = Desktop()
+        app.openDesktop(request("tool=terminal&new=1"))
+        precondition(app.pendingDesktopOpen != nil && app.navigation.isEmpty)
+        app.placeSettled = true
+        app.resolvePendingDesktopOpen()
+        precondition(app.pendingDesktopOpen != nil, "Loading folders consumed a cold request")
+        app.workspaces.isLoading = false
+        app.resolvePendingDesktopOpen()
+        precondition(app.pendingDesktopOpen != nil, "Unknown account consumed a cold request")
+        WorkSessionContext.shared.scope = account
+        app.resolvePendingDesktopOpen()
+        precondition(app.pendingDesktopOpen != nil, "Action ran before scope-owned state reset")
+        app.desktopActionScope = account
+        app.resolvePendingDesktopOpen()
+        precondition(app.pendingDesktopOpen != nil, "Missing host identity consumed a cold request")
+        WorkViewedChange.hostReady = true
+        app.resolvePendingDesktopOpen()
+        let first = app.desktopTerminalRequests[Fixture.project]!
+        precondition(first.newTerminal && app.pendingDesktopOpen == nil && app.navigation.count == 1)
+        precondition(app.desktopWorkbench.state(in: Fixture.project).selected == .terminal)
+        app.resolvePendingDesktopOpen()
+        precondition(app.desktopTerminalRequests[Fixture.project]?.id == first.id && app.navigation.count == 1)
+        app.closeWorkbench(.terminal, in: Fixture.project)
+        app.openDesktop(request("tool=terminal"))
+        precondition(app.desktopTerminalRequests[Fixture.project] == nil, "Reopening replayed a shell intent")
+        app.openDesktop(request("tool=terminal&session=session-a"))
+        precondition(app.desktopTerminalRequests[Fixture.project]?.sessionID == "session-a")
+        app.openDesktop(request("tool=terminal&new=1"))
+        precondition(app.desktopTerminalRequests[Fixture.project]?.id != first.id)
+        app.openDesktop(request("tool=browser&url=http%3A%2F%2Flocalhost%3A8000%2Fpreview"))
+        precondition(app.workspaceBrowserURLs[Fixture.project] == "http://localhost:8000/preview")
+        precondition(app.desktopWorkbench.state(in: Fixture.project).selected == .browser)
+        app.openDesktop(request("tool=inspector&tab=history"))
+        precondition(app.workspaces.inspectorTab == .history && !app.workspaces.chatInspectorShowsSettings)
+        app.desktopTurnReviews = [Fixture.project: "turn", "other": "retained"]
+        let commit = String(repeating: "a", count: 40)
+        app.openDesktop(request("tool=changes&commit=" + commit))
+        precondition(app.desktopTurnReviews[Fixture.project] == nil && app.desktopTurnReviews["other"] == "retained")
+        precondition(app.desktopCommitReviews[Fixture.project] == commit)
+        app.openDesktop(request("tool=changes"))
+        precondition(app.desktopCommitReviews[Fixture.project] == nil)
+        let stale = Desktop()
+        stale.openDesktop(request("tool=terminal&new=1"))
+        WorkSessionContext.shared.scope = WorkReference.Scope(id: "second")
+        stale.resolvePendingDesktopOpen()
+        precondition(stale.pendingDesktopOpen == nil && stale.navigation.isEmpty && stale.desktopTerminalRequests.isEmpty)
+        let missing = Desktop()
+        missing.placeSettled = true; missing.desktopActionScope = WorkSessionContext.shared.scope
+        missing.workspaces.isLoading = false; missing.workspaces.folders = []
+        missing.openDesktop(request("tool=changes"))
+        precondition(missing.pendingDesktopOpen != nil && missing.desktopActionError == nil,
+                     "An idle initial inventory was mistaken for an authoritative empty list")
+        missing.workspaces.hasLoadedDirectory = true
+        missing.resolvePendingDesktopOpen()
+        precondition(missing.desktopActionError != nil && missing.pendingDesktopOpen == nil && missing.navigation.isEmpty)
+        let refreshing = Desktop()
+        refreshing.placeSettled = true; refreshing.desktopActionScope = WorkSessionContext.shared.scope
+        refreshing.workspaces.isLoading = true
+        refreshing.openDesktop(request("tool=inspector"))
+        precondition(refreshing.pendingDesktopOpen == nil && refreshing.navigation.count == 1,
+                     "A background refresh blocked a known registered project")
+        print("PASS: actual desktop coordinator waits for launch, folders, scope reset and host identity, rejects retired accounts and missing projects, and consumes scoped tool intents once")
+    }
+}
+'''
+with tempfile.TemporaryDirectory(prefix='tokenstat-desktop-navigation-') as temporary:
+    folder = Path(temporary)
+    (folder / 'main.swift').write_text(coordinator)
+    subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5',
+                    str(root / 'apps/mac/Sources/App/DesktopOpenRequest.swift'),
+                    str(root / 'apps/mac/Sources/App/DesktopWorkbenchState.swift'),
+                    str(folder / 'main.swift'), '-o', str(folder / 'check')], check=True)
+    subprocess.run([str(folder / 'check')], check=True)
+
 # Use the actual representable and WebKit coordinator, without a project host
 # or URL. This catches native surfaces that survive SwiftUI opacity changes.
-def declaration(text, marker):
-    start = text.index(marker)
-    end, depth = text.index('{', start) + 1, 1
-    while depth:
-        depth += (text[end] == '{') - (text[end] == '}')
-        end += 1
-    return text[start:end]
 
 browser = (root / 'apps/mac/Sources/Features/Workspaces/BrowserView.swift').read_text()
 target = (root / 'apps/mac/Sources/Features/Workspaces/BrowserHistory.swift').read_text()

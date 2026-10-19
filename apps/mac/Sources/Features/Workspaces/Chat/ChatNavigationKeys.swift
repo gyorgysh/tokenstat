@@ -36,6 +36,7 @@ struct ChatNavigationKeys: NSViewRepresentable {
                       window.attachedSheet == nil,
                       event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
                       !(window.firstResponder is TerminalView),
+                      !(window.firstResponder is any SimulatorFrameSink),
                       (!(window.firstResponder is NSTextView)
                         || ChatDraftTextView.yieldsArrowKeys(window.firstResponder)),
                       !(window.firstResponder is NSControl) else { return event }

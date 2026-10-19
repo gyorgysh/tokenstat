@@ -2286,6 +2286,6 @@
   "windows.workbench.recorded_edits": "Recorded edits from this turn, shown in order. Later edits and commits do not change this view.",
   "windows.workbench.patch_unavailable": "The agent did not record a patch for this edit.",
   "windows.workbench.edit_number": "Edit {0}",
-  "windows.desktop_actions.project_missing": "This project is not available in the current account. Open it from Projects, then try the action again.",
+  "windows.desktop_actions.project_missing": "This project is not available in the current account. Add it from Repositories, then try the action again.",
   "windows.desktop_actions.session_missing": "This terminal is not running in this project. Choose a session here or start a new shell."
 }

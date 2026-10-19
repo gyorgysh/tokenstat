@@ -79,8 +79,9 @@ struct SimulatorAttachRequest: Equatable {
     init?(url: URL) {
         guard url.user == nil, url.password == nil, url.port == nil, url.fragment == nil,
               url.scheme?.lowercased() == "tokenstat", url.host == "simulator", url.path == "/attach",
-              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let values = parts.queryItems,
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        parts.percentEncodedQuery = parts.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%20")
+        guard let values = parts.queryItems,
               values.filter({ $0.name == "device" }).count == 1,
               let id = values.first(where: { $0.name == "device" })?.value,
               UUID(uuidString: id) != nil || (id.hasPrefix("android:") && SimulatorDevice.validAndroidName(String(id.dropFirst(8)))) else { return nil }

@@ -22,8 +22,15 @@ internal static class DesktopOpenRequestTests
                 || request.CommitId != Read(example, "commit")
                 || request.NewTerminal != (example.TryGetProperty("new", out var spawn) && spawn.GetBoolean())) throw new Exception(name);
         }
-        if (DesktopOpenRequest.Parse("tokenstat://workbench/open?workspace=" + new string('a', 513) + "&tool=changes") is not null)
+        if (DesktopOpenRequest.Parse("tokenstat://workbench/open?workspace=" + new string('a', 4097) + "&tool=changes") is not null)
             throw new Exception("Oversized project accepted");
+        foreach (var size in new[] { 2048, 2049 })
+        {
+            var address = "tokenstat://workbench/open?workspace=" + string.Concat(Enumerable.Repeat("%C3%A9", size)) + "&tool=changes";
+            if ((DesktopOpenRequest.Parse(address) is not null) != (size == 2048)) throw new Exception("Project bounds must count decoded UTF-8 bytes");
+        }
+        if (DesktopOpenRequest.Parse("tokenstat://workbench/open?workspace=project-a&tool=terminal&session=" + new string('a', 513)) is not null)
+            throw new Exception("Oversized session accepted");
         Console.WriteLine($"Desktop action contract: {count} shared Mac/Windows cases passed");
     }
 }

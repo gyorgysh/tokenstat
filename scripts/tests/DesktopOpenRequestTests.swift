@@ -26,8 +26,14 @@ import Foundation
             precondition(request.sessionID == example.session && request.newTerminal == (example.new ?? false), example.name)
             precondition(request.commitID == example.commit, example.name)
         }
-        let oversized = URL(string: "tokenstat://workbench/open?workspace=" + String(repeating: "a", count: 513) + "&tool=changes")!
+        let oversized = URL(string: "tokenstat://workbench/open?workspace=" + String(repeating: "a", count: 4097) + "&tool=changes")!
         precondition(DesktopOpenRequest(url: oversized) == nil)
+        for count in [2048, 2049] {
+            let boundary = URL(string: "tokenstat://workbench/open?workspace=" + String(repeating: "%C3%A9", count: count) + "&tool=changes")!
+            precondition((DesktopOpenRequest(url: boundary) != nil) == (count == 2048), "Project bounds must count decoded UTF-8 bytes")
+        }
+        let longSession = URL(string: "tokenstat://workbench/open?workspace=project-a&tool=terminal&session=" + String(repeating: "a", count: 513))!
+        precondition(DesktopOpenRequest(url: longSession) == nil)
         let one = DesktopTerminalIntent(sessionID: nil, newTerminal: true)
         let two = DesktopTerminalIntent(sessionID: nil, newTerminal: true)
         precondition(one.id != two.id, "An explicit repeated action needs its own consumable identity")

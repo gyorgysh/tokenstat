@@ -90,6 +90,7 @@ struct RootView: View {
     @State private var desktopTerminalRequests: [String: DesktopTerminalIntent] = [:]
     @State private var pendingDesktopOpen: PendingDesktopOpen?
     @State private var desktopActionScope: WorkReference.Scope?
+    @State private var desktopActionError: String?
     @State private var pendingSimulatorAttach: PendingSimulatorAttach?
     @State private var desktopWorkbench = DesktopWorkbenchSession()
     @State private var desktopTurnReviews: [String: ChatTurnReview] = [:]
@@ -399,9 +400,15 @@ struct RootView: View {
             .onChange(of: ecosystemNavigation.pending, initial: true) { _, _ in openEcosystemDestination() }
             .onChange(of: placeSettled) { _, _ in openEcosystemDestination(); resolvePendingDesktopOpen() }
             .onChange(of: workspaces.isLoading) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
+            .onChange(of: workspaces.hasLoadedDirectory) { _, _ in resolvePendingDesktopOpen() }
             .onChange(of: WorkSessionContext.shared.scope) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: WorkSessionContext.shared.localHostIdentity) { _, _ in resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: route) { _, _ in resolvePendingSimulatorAttach() }
+            .alert(L10n.text("apple.desktop_actions.unavailable_title"), isPresented: Binding(
+                get: { desktopActionError != nil }, set: { if !$0 { desktopActionError = nil } }
+            )) {
+                Button(L10n.text("common.close"), role: .cancel) { desktopActionError = nil }
+            } message: { Text(desktopActionError ?? "") }
     }
 
     private struct SimulatorWatchIdentity: Hashable {
@@ -594,6 +601,7 @@ struct RootView: View {
             workspaceBrowserURLs = [:]
             simulatorRequests = [:]
             desktopTerminalRequests = [:]
+            desktopActionError = nil
             desktopWorkbench = DesktopWorkbenchSession()
             desktopTurnReviews = [:]
             desktopCommitReviews = [:]
@@ -961,18 +969,20 @@ struct RootView: View {
         let scope: WorkReference.Scope?
     }
     private func openDesktop(_ request: DesktopOpenRequest) {
+        desktopActionError = nil
         pendingDesktopOpen = PendingDesktopOpen(request: request, scope: WorkSessionContext.shared.scope)
         resolvePendingDesktopOpen()
     }
     private func resolvePendingDesktopOpen() {
         guard let pending = pendingDesktopOpen else { return }
         if let scope = pending.scope, scope != WorkSessionContext.shared.scope { pendingDesktopOpen = nil; return }
-        guard placeSettled, !workspaces.isLoading, let scope = WorkSessionContext.shared.scope,
+        guard placeSettled, let scope = WorkSessionContext.shared.scope,
               desktopActionScope == scope else { return }
         let request = pending.request
         guard workspaces.folders.contains(where: { $0.id == request.workspaceID }) else {
+            guard workspaces.hasLoadedDirectory, !workspaces.isLoading else { return }
             pendingDesktopOpen = nil
-            workspaces.errorMessage = L10n.text("apple.desktop_actions.project_missing")
+            desktopActionError = L10n.text("apple.desktop_actions.project_missing")
             return
         }
         guard WorkViewedChange.owner(folderID: request.workspaceID) != nil else { return }
