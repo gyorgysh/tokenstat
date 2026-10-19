@@ -437,7 +437,11 @@ public sealed partial class MainWindow : Window
         {
             RebuildFolderItems();
         });
-        AppServices.AccountChanged += () => DispatcherQueue.TryEnqueue(() => _ = RefreshSidebarLiveAsync(slow: true));
+        AppServices.AccountChanged += () => DispatcherQueue.TryEnqueue(() =>
+        {
+            foreach (var workbench in _workbenches.Values) workbench.ResetReviewScope();
+            _ = RefreshSidebarLiveAsync(slow: true);
+        });
         AppServices.ConversationsChanged += () => DispatcherQueue.TryEnqueue(() => _ = RefreshSidebarLiveAsync());
         AppServices.Update.Changed += () => DispatcherQueue.TryEnqueue(RefreshUpdateBadge);
     }

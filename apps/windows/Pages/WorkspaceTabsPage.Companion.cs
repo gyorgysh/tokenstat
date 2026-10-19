@@ -24,6 +24,17 @@ internal sealed partial class WorkspaceTabsPage
     private bool _showsLiveReview;
     private string? _lastChangesStatus;
 
+    internal void ResetReviewScope()
+    {
+        _companionReview = null;
+        _companionChanges = null;
+        _liveReview = null;
+        _showsLiveReview = false;
+        _lastChangesStatus = null;
+        _inspectorPages.Clear();
+        if (IsLoaded) RefreshChrome();
+    }
+
     private void RefreshLiveChanges(string status, bool force)
     {
         var changed = status != _lastChangesStatus;
