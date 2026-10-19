@@ -5726,7 +5726,7 @@
   "apple.simulator.android_missing_help": "Install Android Studio. In its SDK Manager, install Android Emulator and Android SDK Platform-Tools. A custom SDK can be selected with ANDROID_HOME or ANDROID_SDK_ROOT when launching tokenstat.",
   "apple.simulator.android_devices_missing": "No Android virtual devices available",
   "apple.simulator.android_devices_help": "In Android Studio, open Tools → Device Manager and create a phone or tablet virtual device with a system image. Refresh here after creating it.",
-  "apple.simulator.devices_available": "Devices available: %@",
+  "apple.simulator.devices_available": "Devices available: {0}",
   "apple.simulator.discovery_failed": "Could not refresh this platform",
   "apple.simulator.setup_guide": "Setup guide",
   "apple.simulator.orbit_help": "Drag in any direction to orbit the solid device. Scroll to zoom. Double-click or press Home to reset. Arrow keys rotate. Switch off 3D to use the live touch screen.",
