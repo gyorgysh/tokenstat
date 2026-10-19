@@ -297,6 +297,7 @@ jobs:
         run: |
           python3 scripts/check-windows-chat-loading.py
           python3 scripts/check-windows-review-loading.py
+          python3 scripts/check-windows-tab-mount.py
       - name: Check lazy Windows chat inspector and projection
         run: |
           python3 scripts/check-windows-chat-inspector.py

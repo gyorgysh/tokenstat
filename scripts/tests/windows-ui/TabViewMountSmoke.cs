@@ -15,15 +15,23 @@ internal static class TabViewMountSmoke
         view.Height = 44;
         using var mount = new TabViewMount(view);
         var loads = 0;
+        var unloads = 0;
         var ready = 0;
         view.Loaded += (_, _) =>
         {
             loads++;
+            Program.Log($"Tab mount Loaded: loads={loads}, unloads={unloads}, ready={ready}, isLoaded={view.IsLoaded}");
             if (mount.IsReady) throw new Exception("Native tabs became mutable inside Loaded");
+        };
+        view.Unloaded += (_, _) =>
+        {
+            unloads++;
+            Program.Log($"Tab mount Unloaded: loads={loads}, unloads={unloads}, ready={ready}, isLoaded={view.IsLoaded}");
         };
         mount.Ready += () =>
         {
             ready++;
+            Program.Log($"Tab mount ready: loads={loads}, unloads={unloads}, ready={ready}");
             foreach (var name in new[] { "Changes", "Browser", "Terminal", "Inspector" })
                 strip.Open(name, name, () => new Grid());
         };
@@ -35,7 +43,7 @@ internal static class TabViewMountSmoke
                 if (condition()) return;
                 await Task.Delay(20);
             }
-            throw new Exception($"Native tab mount did not settle: loads={loads}, ready={ready}, tabs={view.TabItems.Count}");
+            throw new Exception($"Native tab mount did not settle: loads={loads}, unloads={unloads}, ready={ready}, tabs={view.TabItems.Count}, isLoaded={view.IsLoaded}, isReady={mount.IsReady}, attached={Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(view) is not null}");
         }
         try
         {
