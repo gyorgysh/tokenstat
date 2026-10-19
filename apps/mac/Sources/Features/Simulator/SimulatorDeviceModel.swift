@@ -128,7 +128,9 @@ final class SimulatorDeviceModelView: MTKView, MTKViewDelegate, SimulatorFrameSi
         if surfaceID != id || texture?.width != IOSurfaceGetWidth(surface) || texture?.height != IOSurfaceGetHeight(surface) {
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm,
                 width: IOSurfaceGetWidth(surface), height: IOSurfaceGetHeight(surface), mipmapped: false)
-            descriptor.usage = .shaderRead; descriptor.storageMode = .shared
+            // Use the device default for IOSurface textures too: shared on
+            // Apple GPUs, managed on Intel/AMD GPUs.
+            descriptor.usage = .shaderRead
             texture = device?.makeTexture(descriptor: descriptor, iosurface: surface, plane: 0)
             surfaceID = id
         }
