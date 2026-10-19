@@ -4,6 +4,9 @@
 struct DesktopWorkbenchState: Equatable {
     enum Tool: String, CaseIterable, Identifiable {
         case changes, browser, terminal, inspector
+        #if os(macOS)
+        case simulator
+        #endif
         var id: String { rawValue }
     }
 

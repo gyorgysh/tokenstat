@@ -94,6 +94,63 @@ loading cover. Leaving during this handoff keeps the transferred draft and
 any in-flight delivery with its conversation. Reduced motion, dim flashing
 lights and reduced transparency use a still or solid prism.
 
+## Simulator inspector (macOS)
+
+Open **Simulator** from the chat workbench's tool picker. Select an available
+iPhone or iPad and choose **Attach simulator**; a stopped device boots first.
+The live display uses a native Metal view. Click, drag, scroll or type while
+the screen is focused. Command-V transfers the Mac clipboard before pasting;
+Command-C and Command-X copy selected device text back to the Mac. Device
+controls include Home, lock, portrait and landscape, light/dark appearance,
+Settings and a full-resolution PNG export. The device menu exposes hinge
+postures for supported foldable iOS devices.
+
+Fit restores the normal interactive screen. Zoom and the expanded viewer help
+with larger devices; the cube toggles a draggable 3D preview. Preferences store
+pinned devices, a default and automatic following per repository and account.
+Newly booted devices can open this tab while that repository's chat is active.
+Hide, close and detach release the live display without shutting down the
+device. Shutdown requires the explicit device action.
+
+Install full Xcode and at least one iOS runtime, and select that installation
+with `xcode-select` or `DEVELOPER_DIR`. Runtime display and input capabilities
+are checked when attaching; an unsupported runtime reports an error and can
+be opened externally. Restart Tokenstat after switching Xcode installations.
+No SDKs are downloaded and no device data is erased by the inspector.
+
+Android support uses an existing SDK found through `ANDROID_SDK_ROOT`,
+`ANDROID_HOME` or the standard Mac SDK location. Install platform-tools, the
+emulator and an AVD through your normal Android tooling. Phone and tablet AVDs
+appear in the same picker. They boot without an extra window, stream their
+screen through native video decoding and support tap/swipe, keyboard,
+orientation, appearance, Settings, screenshots and explicit shutdown. Android
+text input follows ADB's supported characters; iOS clipboard transfer supports
+Unicode. The inspector is local to this Mac and is not exposed by phone or
+Windows clients or remote repositories.
+
+Mac agents receive the current `TOKENSTAT_WORKSPACE_ID` and simulator
+instructions. After building, installing and launching on a concrete device,
+an agent can run `open` with a quoted attachment URL, or include it as a link
+in its reply:
+
+```text
+tokenstat://simulator/attach?device=DEVICE_UUID&workspace=WORKSPACE_ID
+tokenstat://simulator/attach?device=android%3AAVD_NAME&workspace=WORKSPACE_ID
+```
+
+URL-encode both query values. Attachments select only a registered local
+repository in the current account and a concrete available device. Agents
+still capture screenshots and test with the native SDK tools; attaching the
+inspector does not itself prove the app works.
+
+Run `scripts/run-swift-tests.sh` for inventory, link validation, geometry,
+process cancellation and workbench regressions, and
+`python3 scripts/check-simulator.py` for the production native boundary,
+preferences, owner isolation and incremental video framing. These checks do
+not boot devices. Live acceptance additionally covers phone/tablet input,
+rotation, screenshots, hide/reopen, foldable panel switching and Android
+stream cleanup against installed runtimes.
+
 ## Chat inspector
 
 Mac sidebar detail cards refresh while open, including context counts and

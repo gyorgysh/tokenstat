@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with MarkdownLinks.swift using swiftc -parse-as-library.
+// Compile with MarkdownLinks.swift and SimulatorDevice.swift using swiftc -parse-as-library.
 import SwiftUI
 
 // The standalone helper test does not link the application's full palette.

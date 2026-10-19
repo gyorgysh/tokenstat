@@ -4,6 +4,15 @@ import SwiftUI
 enum MarkdownLinks {
     private static let schemes: Set<String> = ["http", "https", "mailto"]
 
+    private static func allows(_ url: URL) -> Bool {
+        if schemes.contains(url.scheme?.lowercased() ?? "") { return true }
+        #if os(macOS)
+        return SimulatorAttachRequest(url: url) != nil
+        #else
+        return false
+        #endif
+    }
+
     /// Styling and URL filtering share one pass: an unsafe URL becomes plain
     /// text, while a safe link keeps emphasis and gains a visible affordance.
     static func styled(_ attributed: AttributedString, color: Color) -> AttributedString {
@@ -11,7 +20,7 @@ enum MarkdownLinks {
         var result = attributed
         for run in attributed.runs {
             guard let url = run.link else { continue }
-            if !schemes.contains(url.scheme?.lowercased() ?? "") {
+            if !allows(url) {
                 result[run.range].link = nil
             } else {
                 // Explicit attributes survive an enclosing foreground style,
@@ -35,7 +44,7 @@ extension MarkdownLinks {
         guard attributed.runs.contains(where: { $0.link != nil }) else { return Text(attributed) }
         return attributed.runs.reduce(Text("")) { result, run in
             let piece = Text(AttributedString(attributed[run.range]))
-            guard let url = run.link, schemes.contains(url.scheme?.lowercased() ?? "") else { return result + piece }
+            guard let url = run.link, allows(url) else { return result + piece }
             return result + piece.customAttribute(MarkdownLinkAttribute(url: url))
         }
     }

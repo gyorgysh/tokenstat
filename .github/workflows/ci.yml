@@ -237,6 +237,9 @@ jobs:
       - name: Run the standalone client tests
         run: bash scripts/run-swift-tests.sh
 
+      - name: Native macOS simulator models and video framing
+        run: python3 scripts/check-simulator.py
+
       - name: Chat navigation and transcript continuity
         run: |
           python3 scripts/check-chat-navigation.py

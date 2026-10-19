@@ -17,7 +17,11 @@ struct DesktopWorkbenchStateTests {
             workspaces["local", default: DesktopWorkbenchState()].open(tool)
         }
         workspaces["local"]?.open(.browser)
-        precondition(workspaces["local"]?.tabs.count == 4, "Opening an existing tool selects its retained tab")
+        precondition(workspaces["local"]?.tabs.count == DesktopWorkbenchState.Tool.allCases.count, "Opening an existing tool selects its retained tab")
+        #if os(macOS)
+        workspaces["local"]?.close(.simulator)
+        precondition(workspaces["local"]?.selected == .browser, "Closing Simulator leaves the selected browser untouched")
+        #endif
         workspaces["remote", default: DesktopWorkbenchState()].open(.changes)
         precondition(workspaces["local"]?.selected == .browser && workspaces["remote"]?.tabs == [.inspector, .changes])
         workspaces["local"]?.hide()

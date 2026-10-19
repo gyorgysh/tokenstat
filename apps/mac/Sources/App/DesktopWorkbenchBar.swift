@@ -9,6 +9,7 @@ extension DesktopWorkbenchState.Tool {
         case .browser: L10n.text("common.browser")
         case .terminal: L10n.text("apple.chatterminalpane.terminal.e0926fda")
         case .inspector: L10n.text("apple.workbench.inspector")
+        case .simulator: L10n.text("apple.simulator.title")
         }
     }
 
@@ -18,6 +19,7 @@ extension DesktopWorkbenchState.Tool {
         case .browser: ActionIcon.browser.symbol
         case .terminal: "terminal"
         case .inspector: "sidebar.trailing"
+        case .simulator: "iphone"
         }
     }
 }

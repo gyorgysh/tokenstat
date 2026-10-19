@@ -86,6 +86,8 @@ struct RootView: View {
     @State private var pendingChatLink: PendingChatLink?
     @AppStorage("chat.browserPaneWidth") private var browserPaneWidth = 520.0
     @State private var workbenchResize = DesktopWorkbenchResizeState()
+    @State private var simulatorRequests: [String: SimulatorAttachmentIntent] = [:]
+    @State private var pendingSimulatorAttach: PendingSimulatorAttach?
     @State private var desktopWorkbench = DesktopWorkbenchSession()
     @State private var desktopTurnReviews: [String: ChatTurnReview] = [:]
     @State private var desktopCommitReviews: [String: String] = [:]
@@ -275,6 +277,7 @@ struct RootView: View {
                 desktopTurnReviews = desktopTurnReviews.filter { incoming.contains($0.key) }
                 desktopCommitReviews = desktopCommitReviews.filter { incoming.contains($0.key) }
                 workspaceBrowserURLs = workspaceBrowserURLs.filter { incoming.contains($0.key) }
+                simulatorRequests = simulatorRequests.filter { incoming.contains($0.key) }
                 knownSidebarProjects = incoming
                 guard let id = route.workspaceID, !ids.contains(id) else { return }
                 lastSection[id] = nil
@@ -354,6 +357,7 @@ struct RootView: View {
             .onChange(of: workspaces.folders.map(\.id)) { _, _ in
                 openEcosystemDestination()
                 openPendingNotification()
+                resolvePendingSimulatorAttach()
             }
             .onChange(of: terminals.sessions.map(\.id)) { _, _ in
                 openPendingNotification()
@@ -378,11 +382,48 @@ struct RootView: View {
 
     private var ecosystemSession: some View {
         liveSession
-            .onOpenURL { ecosystemNavigation.receive($0) }
+            .task(id: SimulatorWatchIdentity(route: route,
+                owner: route.workspaceID.flatMap { WorkViewedChange.owner(folderID: $0) })) {
+                await followStartedSimulators()
+            }
+            .onOpenURL { url in
+                if let request = SimulatorAttachRequest(url: url) { openSimulator(request) }
+                else { ecosystemNavigation.receive(url) }
+            }
             .onChange(of: ecosystemNavigation.pending, initial: true) { _, _ in openEcosystemDestination() }
             .onChange(of: placeSettled) { _, _ in openEcosystemDestination() }
-            .onChange(of: workspaces.isLoading) { _, _ in openEcosystemDestination() }
-            .onChange(of: WorkSessionContext.shared.scope) { _, _ in openEcosystemDestination() }
+            .onChange(of: workspaces.isLoading) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach() }
+            .onChange(of: WorkSessionContext.shared.scope) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach() }
+            .onChange(of: route) { _, _ in resolvePendingSimulatorAttach() }
+    }
+
+    private struct SimulatorWatchIdentity: Hashable {
+        let route: Route
+        let owner: WorkReference?
+    }
+
+    private func followStartedSimulators() async {
+        guard route.workspaceSection == .chat, let id = route.workspaceID,
+              WorkDestinationResolver.route(folderID: id).peer == nil else { return }
+        guard let owner = WorkViewedChange.owner(folderID: id) else { return }
+        let preferenceKey = "simulator." + (BrowserHistory.key(for: owner) ?? id)
+        let key = preferenceKey + ".follow"
+        var tracker = SimulatorBootTracker()
+        while !Task.isCancelled {
+            if NSApp.isActive {
+                do {
+                    let devices = try await SimulatorInventory.shared.load()
+                    guard !Task.isCancelled, WorkViewedChange.owner(folderID: id) == owner else { return }
+                    let allowedAfter = UserDefaults.standard.double(forKey: preferenceKey + ".followAfter")
+                    let follows = (UserDefaults.standard.object(forKey: key) as? Bool ?? true) && Date().timeIntervalSince1970 >= allowedAfter
+                    if let device = tracker.observe(devices, follows: follows) {
+                        simulatorRequests[id] = SimulatorAttachmentIntent(deviceID: device)
+                        openWorkbench(.simulator, in: id)
+                    }
+                } catch { /* A missing Xcode must not interrupt a conversation. */ }
+            }
+            do { try await Task.sleep(for: .seconds(4)) } catch { return }
+        }
     }
 
     #if DEBUG
@@ -544,12 +585,14 @@ struct RootView: View {
         }
         .task(id: WorkSessionContext.shared.scope) {
             workspaceBrowserURLs = [:]
+            simulatorRequests = [:]
             desktopWorkbench = DesktopWorkbenchSession()
             desktopTurnReviews = [:]
             desktopCommitReviews = [:]
             pendingChatLink = nil
             worktreeProject = nil
             await BridgeLaunch.wait()
+            resolvePendingSimulatorAttach()
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
         }
         .sheet(item: $worktreeProject) { folder in
@@ -647,7 +690,7 @@ struct RootView: View {
             // load is older than the stale window (see HomeModel.refreshIfStale).
             .onChange(of: route) { _, next in
                 DiagnosticsLog.note("screen \(next.diagnosticName)")
-                if case let .workspace(id, .chat) = next { desktopWorkbench.activate(in: id) }
+                if case let .workspace(id: id, section: .chat) = next { desktopWorkbench.activate(in: id) }
                 // A float belongs to the screen it was opened over. Carrying one
                 // across a navigation is how somebody who clicked a workspace ends
                 // up with a pane over it that they never asked for.
@@ -868,6 +911,10 @@ struct RootView: View {
         .toolbar(removing: .sidebarToggle)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .environment(\.openURL, OpenURLAction { url in
+            if let request = SimulatorAttachRequest(url: url) {
+                openSimulator(request)
+                return .handled
+            }
             guard route.workspaceSection == .chat,
                   ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
                   let id = route.workspaceID else { return .systemAction }
@@ -893,6 +940,32 @@ struct RootView: View {
     private func openChatBrowser(_ url: URL, workspaceID: String) {
         workspaceBrowserURLs[workspaceID] = url.absoluteString
         openWorkbench(.browser, in: workspaceID)
+    }
+
+    private func openSimulator(_ request: SimulatorAttachRequest) {
+        pendingSimulatorAttach = PendingSimulatorAttach(request: request, scope: WorkSessionContext.shared.scope)
+        resolvePendingSimulatorAttach()
+    }
+
+    private struct PendingSimulatorAttach {
+        let request: SimulatorAttachRequest
+        let scope: WorkReference.Scope?
+    }
+
+    private func resolvePendingSimulatorAttach() {
+        guard let pending = pendingSimulatorAttach else { return }
+        if let scope = pending.scope, scope != WorkSessionContext.shared.scope {
+            pendingSimulatorAttach = nil
+            return
+        }
+        guard let id = pending.request.workspaceID ?? route.workspaceID,
+              workspaces.folders.contains(where: { $0.id == id }),
+              WorkViewedChange.owner(folderID: id) != nil,
+              WorkDestinationResolver.route(folderID: id).peer == nil else { return }
+        pendingSimulatorAttach = nil
+        simulatorRequests[id] = SimulatorAttachmentIntent(deviceID: pending.request.deviceID)
+        if route.workspaceID != id { navigate(to: .workspace(id: id, section: .chat)) }
+        openWorkbench(.simulator, in: id)
     }
 
     /// The rail and the sidebar, on one surface.
@@ -1784,6 +1857,7 @@ struct RootView: View {
             desktopCommitReviews[workspaceID] = nil
         }
         if tool == .browser { workspaceBrowserURLs[workspaceID] = nil }
+        if tool == .simulator { simulatorRequests[workspaceID] = nil }
     }
 
     @ViewBuilder private var workspaceCompanionPane: some View {
@@ -1826,6 +1900,8 @@ struct RootView: View {
             ProjectBrowserView(workspaceID: folder.id, initialURL: workspaceBrowserURLs[folder.id] ?? "", allowsExternalNavigation: true, isSurfaceVisible: active) {
                 workspaceBrowserURLs[folder.id] = $0
             }
+        case .simulator:
+            SimulatorInspector(workspaceID: folder.id, isActive: active, request: simulatorRequests[folder.id])
         case .terminal:
             ChatTerminalPane(folder: folder, terminals: terminals, workspaces: workspaces,
                              ssh: ssh, sshSessions: sshSessions,
@@ -2807,7 +2883,7 @@ struct RootView: View {
     /// The route wins while Chat is in front, so this pane can never be the
     /// wrong folder's, and the remembered one keeps it alive after leaving.
     private var chatFolder: String? {
-        if case let .workspace(id, .chat) = route { return id }
+        if case let .workspace(id: id, section: .chat) = route { return id }
         return mountedChatFolder
     }
 
@@ -2932,7 +3008,7 @@ struct RootView: View {
             // History is an inspector tab on Mac. iPhone and iPad draw it
             // as a folder section in the client root, not here.
             EmptyView()
-        case let .workspace(id, .chat):
+        case let .workspace(id: id, section: .chat):
             #if os(macOS)
             // Drawn by the mounted pane above, which outlives this switch.
             EmptyView()
@@ -3919,7 +3995,7 @@ struct RootView: View {
             // The chat pane is mounted for the life of the window once a
             // folder's chat has been opened, so claim the folder here rather
             // than letting the view claim it as it appears.
-            if case let .workspace(id, .chat) = next { mountedChatFolder = id }
+            if case let .workspace(id: id, section: .chat) = next { mountedChatFolder = id }
             if case let .workspace(id, .pulls) = next { mountedPullsFolder = id }
             #endif
             applyScope(from: next)

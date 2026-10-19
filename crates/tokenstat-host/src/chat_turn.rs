@@ -195,7 +195,36 @@ fn standing_text(persona_name: &str, persona_brief: &str, output_dir: &Path) -> 
     text.push_str(&file_rule(output_dir));
     text.push_str("\n\n");
     text.push_str(browser_rule());
+    #[cfg(target_os = "macos")]
+    {
+        text.push_str("\n\n");
+        text.push_str(simulator_rule());
+    }
     text
+}
+
+/// The desktop can attach the exact simulator an agent is already testing.
+#[cfg(target_os = "macos")]
+pub fn simulator_rule() -> &'static str {
+    "For iOS projects, use the installed Xcode tools to list available simulators, \
+     build for a simulator destination, boot a suitable iPhone or iPad when needed, \
+     and install and launch the app on that exact device UUID. Prefer the user's \
+     selected or already booted device. Never erase, delete or replace a device \
+     without being asked. To show a booted device inside tokenstat's Simulator \
+     inspector, run open with a quoted URL of the form \
+     tokenstat://simulator/attach?device=DEVICE_UUID&workspace=WORKSPACE_ID, \
+     substituting the exact UUID and the TOKENSTAT_WORKSPACE_ID environment value \
+     (URL-encode query values). You may also include that URL as an attach link \
+     in your reply. The inspector provides live touch, keyboard and device \
+     controls. Use xcrun simctl io DEVICE_UUID screenshot for your own visual \
+     checks; an attach link alone is not evidence of testing. Target every \
+     simulator command explicitly rather than using the ambiguous booted alias. \
+     Device orientation and fold posture depend on the selected runtime; \
+     distinguish supported device controls from a visual 3D preview. \
+     For Android projects with an installed SDK, list available AVDs, use the \
+     emulator and adb with an explicit emulator serial, and attach with the \
+     same URL using device=android%3AAVD_NAME and the workspace id. URL-encode \
+     the exact AVD name. Do not install an SDK or erase emulator data unless asked."
 }
 
 /// Make web previews discoverable through the client's chosen link handler.

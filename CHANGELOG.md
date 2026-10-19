@@ -9,6 +9,14 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.7.4]
+
+### Added
+
+- The Mac chat workbench has a Simulator tab for local iPhone and iPad development. Choose a device and runtime, boot or attach it, and interact with its live screen beside the conversation. Touch, dragging, scrolling, keyboard input, clipboard transfer, Home, lock, orientation, appearance, Settings and full-resolution screenshots are available from the inspector.
+- Simulator preferences remember a default device, pinned devices and whether to follow devices started by agents. Agents receive instructions for building, installing, testing and opening the exact simulator in the current repository's inspector. Hiding or detaching the screen leaves the device running; shutdown is explicit.
+- Fit, zoom, an expanded viewer and a draggable 3D device preview make phones and tablets comfortable to inspect. Compatible foldable iOS runtimes also expose open, halfway and closed postures. Installed Android SDKs add local phone and tablet emulators with live screens, touch, keyboard and device controls.
+
 ## [1.7.3] - 2026-10-19
 
 ### Improved

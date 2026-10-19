@@ -41,6 +41,7 @@ everything that runs on your machine.
 - **Local first.** Counters stay on your machine. Conversation text never reaches the archive
 - **CLI first.** Fast local reports, JSON output, setup, scheduling, updates, and an interactive terminal UI on macOS, Linux, and Windows
 - **macOS desktop.** A signed and notarized disk image with Home, Insights, Devices, workspaces, tasks, notes, workflows, and automations
+- **Simulator beside your chat.** On Mac, attach local iPhone, iPad or Android emulators in the editor, interact with the live screen and follow devices started by your agent
 - **Clients in development.** Preview Windows desktop and Android builds exercise the shared host and archive while those platforms mature
 - **Many sources.** Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, DeepSeek Harness, Muse, Devin CLI, plus Cursor fetch
 - **One schema.** Daily, weekly, monthly, and per-model views across every tool
@@ -374,7 +375,11 @@ The Mac app is generated from `apps/mac/project.yml`. The Windows app is
 README for the extra tooling that build needs.
 
 On macOS, `scripts/run-swift-tests.sh` runs the Apple client's standalone state
-tests. To measure the production local search index with 10,000 synthetic
+tests. `python3 scripts/check-simulator.py` also compiles the native simulator
+boundary and verifies session preferences, isolation and video framing without
+booting a device. The [Apple app guide](apps/mac/README.md#simulator-inspector-macos)
+describes local simulator setup and agent attachment.
+To measure the production local search index with 10,000 synthetic
 messages, run `scripts/benchmark-work-search.sh 10000 20 varied`. It prints
 release-mode timing JSON and peak process memory for a corpus near 100 MB.
 Use `1024` instead of `10000` for a corpus near 10 MB. These are local index
