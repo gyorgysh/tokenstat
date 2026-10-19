@@ -12,6 +12,7 @@ internal sealed class DesktopWorkbenchState
     public bool IsPresented { get; private set; }
     public void Open(DesktopWorkbenchTool tool)
     {
+        if (_tabs.Count == 0 && tool != DesktopWorkbenchTool.Inspector) _tabs.Add(DesktopWorkbenchTool.Inspector);
         if (!_tabs.Contains(tool)) _tabs.Add(tool);
         Selected = tool;
         IsPresented = true;

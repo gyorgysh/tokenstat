@@ -36,7 +36,7 @@ struct ChatInspector: View {
             Group {
                 if let chat = model.selected {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
                             identity(chat)
                             ChatContextCard(model: model)
                             ChatActivityCard(model: model)

@@ -657,6 +657,22 @@ Check(steeredChanges.Count(row => row.Kind == ChatPage.ItemKind.Changes) == 1
     && steeredChanges.Last().Changes![0].Added == 5, "steering preserves the current turn and its aggregate changes");
 Console.WriteLine("Windows chat detail: minimal, compact, standard and detailed folding, turn changes, pinned rows, open groups and counts pass.");
 
+var repeatedEdits = Enumerable.Range(0, 8000).Select(index =>
+{
+    var row = EditRow($"repeat-{index}", "same.cs", 1, 1);
+    row.Patch = $"-before-{index}\n+after-{index}";
+    return row;
+}).ToList();
+var beforeReviewAllocation = GC.GetAllocatedBytesForCurrentThread();
+var repeatedReview = ChatDetailFold.WithTurnChanges(repeatedEdits, repeatedEdits, running: false).Last().Changes![0];
+var reviewAllocation = GC.GetAllocatedBytesForCurrentThread() - beforeReviewAllocation;
+Check(repeatedReview.Added == 8000 && repeatedReview.Patches.Count == 8000
+    && repeatedReview.Patches[0] == repeatedEdits[0].Patch && repeatedReview.Patches[^1] == repeatedEdits[^1].Patch,
+    "a long turn preserves every repeated edit in order");
+Check(reviewAllocation < 32 * 1024 * 1024,
+    $"a long turn must not copy every prior patch on every edit: allocated {reviewAllocation} bytes");
+Console.WriteLine($"Windows recorded review: 8000 repeated edits use {reviewAllocation} bytes.");
+
 var loadedWork = new List<ChatPage.DisplayItem> { Ask("long-turn") };
 loadedWork.AddRange(Enumerable.Range(0, 300).Select(index => Tool($"step-{index}", "Read")));
 loadedWork.Add(Say("long-reply"));

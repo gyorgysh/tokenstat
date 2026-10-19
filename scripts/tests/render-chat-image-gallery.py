@@ -52,7 +52,7 @@ struct WorkReference: Hashable { let id = "synthetic-gallery"; let itemID: Strin
 struct ChatAttachment: Hashable, Sendable { let id: String; let name: String; let mediaType: String?; var size: UInt64? = nil }
 struct QAConversation { var backend = "claude"; var model: String? = "synthetic-model"; var runRevision: UInt64? = 1; var running = true }
 @MainActor enum GalleryQAState { static var expanded = false }
-@MainActor @Observable final class WorkSessionContext { static let shared = WorkSessionContext(); var scope: String? = "gallery-qa" }
+@MainActor @Observable final class WorkSessionContext { static let shared = WorkSessionContext(); var scope: String? = "gallery-qa"; var generation: UInt64 = 1 }
 enum WorkCacheAccess { static func canRead(_ reference: WorkReference) -> Bool { true } }
 @MainActor @Observable final class ChatModel {
     var currentReference: WorkReference? = WorkReference()
@@ -85,7 +85,7 @@ enum Bridge {
 ''']
 activity_path = 'apps/mac/Sources/Features/Workspaces/Chat/ChatActivityView.swift'
 pieces += [declaration(activity_path, marker) for marker in [
-    'struct ChatActivityOwner:', 'struct ChatActivityRead {', 'extension ChatModel {']]
+    'struct ChatActivityOwner:', 'struct ChatActivityRead {', '@MainActor final class ChatActivitySnapshots {', 'extension ChatModel {']]
 pieces += [(root / 'apps/mac/Sources/Bridge/SessionIdentities.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Bridge/ChatInspection.swift').read_text()]
 pieces += [(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatCostMeter.swift').read_text()]

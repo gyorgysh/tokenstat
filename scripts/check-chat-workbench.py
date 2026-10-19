@@ -104,6 +104,10 @@ native = '\n'.join([
     declaration((root / 'apps/mac/Sources/App/ShellChrome.swift').read_text(), 'final class ColumnResizeCursorView:'),
     (root / 'apps/mac/Sources/App/DesktopWorkbenchState.swift').read_text(),
     (root / 'apps/mac/Sources/App/DesktopWorkbenchResize.swift').read_text(),
+    (root / 'apps/mac/Sources/App/RetainedPaneLayout.swift').read_text(),
+    '''extension View {
+        func retainedPane(isActive: Bool) -> some View { RetainedPaneLayout(isActive: isActive) { self } }
+    }''',
 ]) + r'''
 @Observable private final class Probe { var visible = true }
 private struct Surface: View {
@@ -139,6 +143,47 @@ private struct ResizeSurface: View {
             }
         }
     }
+}
+@Observable private final class NavigationProbe {
+    var workspace = "first"
+    var workbench = DesktopWorkbenchSession()
+}
+private struct Folder: Identifiable { let id: String }
+private struct Folders { let folders = [Folder(id: "first"), Folder(id: "second")] }
+private struct DesktopWorkbenchBar: View {
+    let state: DesktopWorkbenchState
+    let open: (DesktopWorkbenchState.Tool) -> Void
+    let close: (DesktopWorkbenchState.Tool) -> Void
+    let hide: () -> Void
+    var body: some View { Color.clear.frame(height: 44) }
+}
+private final class PaneIdentities { var values: [String: UUID] = [:] }
+private struct IdentityProbe: View {
+    let tool: DesktopWorkbenchState.Tool
+    let workspace: String
+    let identities: PaneIdentities
+    @State private var identity = UUID()
+    var body: some View {
+        Text(workspace).onChange(of: workspace, initial: true) { _, workspace in
+            identities.values["\(tool.rawValue):\(workspace)"] = identity
+        }
+    }
+}
+private struct NavigationSurface: View {
+    let probe: NavigationProbe
+    let identities: PaneIdentities
+    let workspaces = Folders()
+    var chatFolder: String? { probe.workspace }
+    var desktopWorkbench: DesktopWorkbenchSession { probe.workbench }
+    var showsWorkspaceCompanion: Bool { probe.workbench.isPresented }
+    var body: some View { workspaceCompanionPane }
+    func openWorkbench(_ tool: DesktopWorkbenchState.Tool, in workspace: String) { probe.workbench.open(tool, in: workspace) }
+    func closeWorkbench(_ tool: DesktopWorkbenchState.Tool, in workspace: String) { probe.workbench.close(tool, in: workspace) }
+    func hideWorkbench() { probe.workbench.hide() }
+    func workbenchContent(_ tool: DesktopWorkbenchState.Tool, folder: Folder, active: Bool) -> some View {
+        IdentityProbe(tool: tool, workspace: folder.id, identities: identities)
+    }
+''' + declaration((root / 'apps/mac/Sources/App/RootView.swift').read_text(), '@ViewBuilder private var workspaceCompanionPane:') + r'''
 }
 @main struct NativeCheck {
     @MainActor static func wait(_ condition: () -> Bool) async {
@@ -189,6 +234,22 @@ private struct ResizeSurface: View {
         await wait { measurements.toolWidth == 520 }
         precondition(measurements.roots == rootRenders)
         print("PASS: actual resize leaves track both pane widths and clamps without rebuilding the chat shell")
+        let navigation = NavigationProbe(), identities = PaneIdentities()
+        navigation.workbench.open(.browser, in: "first")
+        navigation.workbench.open(.inspector, in: "first")
+        window.contentView = NSHostingView(rootView: NavigationSurface(probe: navigation, identities: identities))
+        await wait { identities.values["inspector:first"] != nil && identities.values["browser:first"] != nil }
+        let inspector = identities.values["inspector:first"]!, browser = identities.values["browser:first"]!
+        navigation.workbench.activate(in: "second")
+        navigation.workspace = "second"
+        await wait { identities.values["inspector:second"] != nil }
+        precondition(identities.values["inspector:second"] == inspector,
+                     "Repository navigation rebuilt the inspector shell instead of updating its owner")
+        navigation.workbench.open(.browser, in: "second")
+        await wait { identities.values["browser:second"] != nil }
+        precondition(identities.values["browser:second"] != browser,
+                     "A repository-specific native tool inherited another repository's state")
+        print("PASS: actual workbench keeps inspector identity across repositories while scoping native tools independently")
     }
 }
 '''

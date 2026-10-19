@@ -25,6 +25,7 @@ internal sealed class TabViewMount : IDisposable
     private void Unloaded(object sender, RoutedEventArgs args) { _revision++; _ready = false; }
     private void ScheduleReady()
     {
+        _ready = false;
         var revision = ++_revision;
         _view.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {

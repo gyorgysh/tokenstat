@@ -179,7 +179,9 @@ closes it. SSH connections explicitly choose a saved key, a password, or pasted
 private-key material.
 
 Chat's side workbench has Changes, Browser, Terminal and Inspector tabs. The add
-button opens or selects a tool, and hiding the pane retains browser tabs and
+button opens or selects a tool. New workbenches open Inspector first and activate
+the requested tool beside it; closing Inspector keeps it closed while other
+tools remain. Hiding the pane retains browser tabs and
 terminal sessions. Reviewing a changed-files card opens the recorded edits from
 that turn, including after a commit, with the pressed file first. Repeated edits
 remain in order, and a missing patch is identified. Working tree returns to the

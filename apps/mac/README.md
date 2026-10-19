@@ -193,10 +193,15 @@ window, Restore viewer size returns to the usual size, and Reset zoom only
 changes magnification. Escape closes the viewer.
 
 Desktop chats have a resizable side workbench with Changes, Browser, Terminal
-and Inspector tabs. The add menu opens or selects a tool. Hiding the workbench
+and Inspector tabs. A new workbench opens Inspector first, followed by the
+requested tool, which becomes active. Closing Inspector keeps it closed while
+other tools remain. The add menu opens or selects a tool. Hiding the workbench
 retains its tabs, browser page and terminal sessions.
 The open or hidden choice and selected tool follow chat navigation across projects,
-while each project keeps its own content. Divider dragging updates only the pane
+while each project keeps its own content. The inspector shell stays mounted
+across repository switches. Up to eight recent reports stay available for thirty
+seconds while a fresh read runs; cached reports never claim live status and do
+not cross login, account, backend, model or run changes. Divider dragging updates only the pane
 layout and saves the width on release. A changed-files card opens that turn's
 recorded patches, with the pressed file first and repeated edits in
 order. Committing or editing again does not replace those patches. Missing

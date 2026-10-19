@@ -9,14 +9,19 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.7.3]
+## [1.7.3] - 2026-10-19
 
 ### Improved
 
-- Mac and Windows chats have a side workbench with tabs for Changes, Browser, Terminal and Inspector. Review code and commits while the conversation stays visible, switch tools without starting over, and hide the pane while terminal sessions keep running. On Mac, the pane follows chat navigation across projects and its divider resizes without rebuilding the chat shell.
-- Review on a chat's changed-files card opens the edits recorded for that turn, including after a commit or later edits. Repeated edits appear in order, with a separate Working tree view for current changes and commit actions. An edit without a recorded patch is identified clearly.
+- Mac and Windows chats have a side workbench with tabs for Changes, Browser, Terminal and Inspector. Opening a tool keeps Inspector first and activates the chosen tool beside it. Review code and commits while the conversation stays visible, switch tools without starting over, and hide the pane while terminal sessions keep running. On Mac, the pane follows chat navigation across projects, keeps inherited tabs when hidden, and its divider resizes without rebuilding the chat shell.
+- Mac repository switching reuses the inspector shell, and recent chat reports appear immediately while refreshing. Only fresh reports establish live status. Settings below the visible part of the inspector load as you scroll.
+- Review on a chat's changed-files card opens the edits recorded for that turn, including after a commit or later edits. Repeated edits appear in order, with a separate Working tree view for current changes and commit actions. An edit without a recorded patch is identified clearly. Windows reviews use less memory for long sequences of edits, and delayed commit replies cannot replace a newer selection or cross an account change.
 - Desktop image viewers open larger and have separate controls for enlarging the viewer and resetting zoom. Enlarging keeps the image inside the app, with navigation, Open and Save still available.
 - The Mac download opens to a designed install window: the app and the Applications folder side by side with an arrow between them, the disk carries the tokenstat icon, and the art stays sharp on Retina displays and readable in light and dark mode.
+
+### Fixed
+
+- CLI updates briefly reporting another update was still running after it had finished, when another process was starting at the same time.
 
 ## [1.7.2] - 2026-10-18
 

@@ -212,6 +212,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Custom installer paths remain literal
         run: python3 scripts/tests/test_install_scripts.py
+      - name: Mac disk image failures preserve previous artifacts
+        run: python3 scripts/tests/test_mac_dmg.py
       - name: Failed replacements preserve the installed pair
         run: bash scripts/tests/install-release-pair.sh
       - name: Failed service stops preserve host binaries
@@ -292,7 +294,9 @@ jobs:
       - name: Run portable client state regressions
         run: bash scripts/run-windows-state-tests.sh
       - name: Check independent Windows chat loading
-        run: python3 scripts/check-windows-chat-loading.py
+        run: |
+          python3 scripts/check-windows-chat-loading.py
+          python3 scripts/check-windows-review-loading.py
       - name: Check lazy Windows chat inspector and projection
         run: |
           python3 scripts/check-windows-chat-inspector.py

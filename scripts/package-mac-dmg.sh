@@ -40,13 +40,19 @@ if [ ! -f "$VOLUME_ICON" ]; then
 fi
 
 VENV="$ROOT/target/dmgbuild-venv"
-if [ ! -x "$VENV/bin/dmgbuild" ]; then
+if [ ! -x "$VENV/bin/python" ] || [ ! -x "$VENV/bin/pip" ]; then
     python3 -m venv "$VENV"
+fi
+if [ ! -x "$VENV/bin/dmgbuild" ] || ! cmp -s "$INSTALLER/requirements.txt" "$VENV/installed-requirements.txt"; then
     "$VENV/bin/pip" install --quiet --disable-pip-version-check \
         --require-hashes --only-binary :all: -r "$INSTALLER/requirements.txt"
+    cp "$INSTALLER/requirements.txt" "$VENV/installed-requirements.txt"
 fi
 
-STAGE="$(mktemp -d)"
+# Keep the finished image on the destination filesystem so the final rename
+# replaces an earlier artifact atomically, including on external volumes.
+DMG_DIRECTORY="$(cd "$(dirname "$DMG")" && pwd)"
+STAGE="$(mktemp -d "$DMG_DIRECTORY/.tokenstat-dmg.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 
 # ditto rather than cp: a bundle carries symlinks and extended attributes, and
@@ -57,7 +63,6 @@ ditto "$APP" "$STAGE/$(basename "$APP")"
 tiffutil -cathidpicheck "$INSTALLER/background.png" "$INSTALLER/background@2x.png" \
     -out "$STAGE/background.tiff" > /dev/null 2>&1
 
-rm -f "$DMG"
 # hdiutil warns that each of its verbs is deprecated on every call. Drop those
 # lines and keep anything else, with dmgbuild's own exit status.
 set +e
@@ -66,12 +71,13 @@ set +e
     -D app="$STAGE/$(basename "$APP")" \
     -D background="$STAGE/background.tiff" \
     -D volume_icon="$VOLUME_ICON" \
-    "$VOLUME" "$DMG" 2>&1 | grep -v "is deprecated"
+    "$VOLUME" "$STAGE/package.dmg" 2>&1 | grep -v "is deprecated"
 status="${PIPESTATUS[0]}"
 set -e
-if [ "$status" -ne 0 ] || [ ! -f "$DMG" ]; then
+if [ "$status" -ne 0 ] || [ ! -f "$STAGE/package.dmg" ]; then
     echo "dmgbuild failed to write $DMG" >&2
     exit 1
 fi
+mv -f "$STAGE/package.dmg" "$DMG"
 
 echo "Wrote $DMG"

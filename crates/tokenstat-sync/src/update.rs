@@ -938,7 +938,18 @@ pub fn apply_update() -> Result<ApplyReport, UpdateError> {
 /// number and that `--help` says "tokenstat", which both binaries do. The next
 /// service restart then runs the CLI as the daemon. So the path is a
 /// parameter, and the one shape it is allowed to have is checked below.
-fn update_lock(dest: &Path) -> Result<fs::File, UpdateError> {
+struct UpdateLock(fs::File);
+
+impl Drop for UpdateLock {
+    fn drop(&mut self) {
+        // A concurrent process spawn can briefly inherit the file before
+        // close-on-exec runs. Closing only our handle leaves its lock held
+        // until that child execs; end the transaction explicitly instead.
+        let _ = self.0.unlock();
+    }
+}
+
+fn update_lock(dest: &Path) -> Result<UpdateLock, UpdateError> {
     let file = fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -946,7 +957,7 @@ fn update_lock(dest: &Path) -> Result<fs::File, UpdateError> {
         .truncate(false)
         .open(dest.with_extension("update.lock"))?;
     match file.try_lock() {
-        Ok(()) => Ok(file),
+        Ok(()) => Ok(UpdateLock(file)),
         Err(std::fs::TryLockError::WouldBlock) => Err(UpdateError::Message(
             "another update is already running for this installation".into(),
         )),
@@ -3035,6 +3046,25 @@ mod tests {
         let held = update_lock(&dest).unwrap();
         assert!(update_lock(&dest).is_err());
         drop(held);
+        assert!(update_lock(&dest).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn completed_update_releases_lock_even_with_an_inherited_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("tokenstat");
+        let held = update_lock(&dest).unwrap();
+        // A duplicate shares the open file description, as fork does during
+        // another thread's Command::spawn before the child reaches exec.
+        let inherited = held.0.try_clone().unwrap();
+        assert!(update_lock(&dest).is_err());
+        drop(held);
+        let next = update_lock(&dest).unwrap();
+        assert!(update_lock(&dest).is_err());
+        drop(inherited);
+        assert!(update_lock(&dest).is_err());
+        drop(next);
         assert!(update_lock(&dest).is_ok());
     }
 

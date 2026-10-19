@@ -22,6 +22,14 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal static class WorkspaceDiff
 {
+    internal static OperationEpoch.Operation BeginReviewRequest(UIElement owner)
+    {
+        var account = AppServices.AccountGeneration;
+        return WorkspaceTabsPage.Find(owner)?.BeginReviewRequest(owner)
+            ?? new OperationEpoch().Capture(() => account != AppServices.AccountGeneration
+                || owner is FrameworkElement { IsLoaded: false });
+    }
+
     public const int ReviewMaxFiles = 20;
     public const int ReviewLinesPerFile = 60;
     private const int MaxLines = 2000;

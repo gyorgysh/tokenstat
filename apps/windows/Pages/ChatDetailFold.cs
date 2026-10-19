@@ -129,14 +129,17 @@ internal static class ChatDetailFold
         var turn = 0;
         var id = "";
         var files = new List<ChangedFile>();
+        var patches = new List<List<string>>();
         var index = new Dictionary<string, int>();
         void Close()
         {
             if (files.Count > 0)
             {
-                changes[turn] = new ChatPage.DisplayItem { Id = id, Kind = ChatPage.ItemKind.Changes, Changes = [.. files] };
+                changes[turn] = new ChatPage.DisplayItem { Id = id, Kind = ChatPage.ItemKind.Changes,
+                    Changes = files.Select((file, at) => file with { Patches = patches[at].ToArray() }).ToArray() };
             }
             files.Clear();
+            patches.Clear();
             index.Clear();
         }
         foreach (var item in raw)
@@ -152,13 +155,14 @@ internal static class ChatDetailFold
                 if (index.TryGetValue(item.Path, out var at))
                 {
                     var prior = files[at];
-                    files[at] = prior with { Added = prior.Added + item.Added, Removed = prior.Removed + item.Removed,
-                        Patches = [.. prior.Patches, item.Patch] };
+                    files[at] = prior with { Added = prior.Added + item.Added, Removed = prior.Removed + item.Removed };
+                    patches[at].Add(item.Patch);
                 }
                 else
                 {
                     index[item.Path] = files.Count;
-                    files.Add(new ChangedFile(item.Path, item.Added, item.Removed) { Patches = [item.Patch] });
+                    files.Add(new ChangedFile(item.Path, item.Added, item.Removed));
+                    patches.Add([item.Patch]);
                 }
             }
         }

@@ -23,6 +23,7 @@ pieces = [r'''import Foundation
 struct WorkReference: Hashable { var scope = "account"; var itemID: String? = "chat" }
 struct Conversation { var backend = "codex"; var model: String? = "model"; var runRevision: UInt64? = 1; var running = true }
 enum BridgeError: Error { case core(String, String) }
+@MainActor final class WorkSessionContext { static let shared = WorkSessionContext(); var generation: UInt64 = 1 }
 @MainActor enum WorkCacheAccess {
     static var readable = true
     static func canRead(_ reference: WorkReference) -> Bool { readable && reference.scope == "account" }
@@ -47,7 +48,7 @@ enum BridgeError: Error { case core(String, String) }
 ''']
 pieces += [declaration(signature) for signature in [
     'enum ChatActivitySection:', 'struct ChatActivityDisclosureState {',
-    'struct ChatActivityOwner:', 'struct ChatActivityRead {', 'extension ChatModel {']]
+    'struct ChatActivityOwner:', 'struct ChatActivityRead {', '@MainActor final class ChatActivitySnapshots {', 'extension ChatModel {']]
 pieces += [r'''
 @main enum Tests {
     @MainActor static func settle() async { for _ in 0..<100 { await Task.yield() } }
@@ -73,13 +74,14 @@ pieces += [r'''
                      "Explicit commands focus only their requested section")
         let wire = Data(#"{"backend":"codex","model":"model","tools":null,"usedTools":[],"mcpServers":[],"mcpReported":false,"currentRun":true,"activity":{"goal":null,"plan":[],"agents":[{"id":"worker","status":"running","source":"agent"}],"goalReported":false,"planReported":false,"agentsReported":true,"partial":false,"live":true}}"#.utf8)
         let report = try JSONDecoder().decode(ChatInspection.self, from: wire)
-        for change in ["chat", "account", "backend", "model", "run", "selection", "running", "saved", "access"] {
+        for change in ["chat", "account", "session", "backend", "model", "run", "selection", "running", "saved", "access"] {
             let model = ChatModel()
             let task = Task { await model.watchActivity() }
             let next = await request()
             switch change {
             case "chat": model.currentReference?.itemID = "other"
             case "account": model.currentReference?.scope = "other"
+            case "session": WorkSessionContext.shared.generation += 1
             case "backend": model.selected?.backend = "claude"
             case "model": model.selected?.model = "different"
             case "run": model.selected?.runRevision = 2
@@ -133,6 +135,49 @@ pieces += [r'''
         model.activityRead?.failed = true
         precondition(!model.activityIsLive && !model.inspectionIsLive && model.currentActivityRead?.inspection != nil,
                      "A disconnected report stays readable without claiming live agents")
+        model.selectionGeneration += 1
+        precondition(model.currentActivityRead?.inspection != nil && !model.inspectionIsLive,
+                     "Returning to a recent chat paints its cached inspector immediately, as historical data")
+        let revisited = Task { await model.watchActivity() }
+        let revisitReply = await request()
+        precondition(model.currentActivityRead?.inspection != nil && !model.inspectionIsLive,
+                     "Starting the fresh read must not blank a cached inspector or mark it live")
+        revisitReply.resume(returning: report)
+        await settle()
+        precondition(model.inspectionIsLive, "Only a fresh matching reply can restore live status")
+        revisited.cancel(); await revisited.value
+        WorkSessionContext.shared.generation += 1
+        precondition(model.currentActivityRead == nil,
+                     "Neither a current report nor a cached report may cross a replacement login")
+        let snapshots = ChatActivitySnapshots()
+        var owner = model.activityOwner
+        snapshots.store(report, for: owner, now: 100)
+        owner.selection += 1
+        precondition(snapshots.inspection(for: owner, now: 129.9) != nil,
+                     "Selection changes alone do not discard an otherwise matching recent snapshot")
+        precondition(snapshots.inspection(for: owner, now: 130) == nil
+            && snapshots.inspection(for: owner, now: 99) == nil, "Expired or clock-reversed snapshots are not restored")
+        for change in ["session", "model", "run", "running", "backend", "account", "saved"] {
+            var changed = owner
+            switch change {
+            case "session": changed.session += 1
+            case "model": changed.model = "different"
+            case "run": changed.revision = 200
+            case "running": changed.running = false
+            case "backend": changed.backend = "claude"
+            case "account": changed.reference?.scope = "other"
+            default: changed.saved = true
+            }
+            precondition(snapshots.inspection(for: changed, now: 101) == nil,
+                         "Inspector snapshot crossed its \(change) boundary")
+        }
+        let firstOwner = owner
+        for index in 0..<9 {
+            owner.reference?.itemID = "cached-\(index)"
+            snapshots.store(report, for: owner, now: 101)
+        }
+        precondition(snapshots.inspection(for: firstOwner, now: 102) == nil
+            && snapshots.inspection(for: owner, now: 102) != nil, "Only eight recent inspector snapshots are retained")
         let saved = ChatModel(); saved.savedCopy = true
         let before = Bridge.calls
         await saved.watchActivity()

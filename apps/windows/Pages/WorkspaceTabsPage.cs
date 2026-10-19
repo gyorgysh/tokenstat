@@ -70,7 +70,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         _inspector.Children.Add(_editor.FileTree);
         _inspector.Children.Add(_details);
         Loaded += async (_, _) => await _editor.InitializeAsync();
-        _tabs.SelectionChanged += (_, _) => RefreshChrome();
+        _tabs.SelectionChanged += (_, _) => { _reviewEpoch.Advance(); RefreshChrome(); };
         _tabStrip.CloseRequested = item =>
         {
             if (!item.IsClosable) return;

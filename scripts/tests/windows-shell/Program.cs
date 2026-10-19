@@ -9,6 +9,14 @@ var directory = Path.Combine(Path.GetTempPath(), "tokenstat-shell-test-" + Guid.
 Directory.CreateDirectory(directory);
 try
 {
+    var fresh = new DesktopWorkbenchState();
+    fresh.Open(DesktopWorkbenchTool.Browser);
+    Check(fresh.Tabs.SequenceEqual(new[] { DesktopWorkbenchTool.Inspector, DesktopWorkbenchTool.Browser })
+        && fresh.Selected == DesktopWorkbenchTool.Browser, "A fresh Browser request must expose Inspector first and activate Browser");
+    fresh.Close(DesktopWorkbenchTool.Inspector);
+    fresh.Open(DesktopWorkbenchTool.Terminal);
+    Check(fresh.Tabs.SequenceEqual(new[] { DesktopWorkbenchTool.Browser, DesktopWorkbenchTool.Terminal }),
+        "An explicitly closed Inspector reopened while other tools remained");
     var bench = new DesktopWorkbenchState();
     foreach (var tool in Enum.GetValues<DesktopWorkbenchTool>()) bench.Open(tool);
     bench.Open(DesktopWorkbenchTool.Browser);
@@ -25,7 +33,7 @@ try
     Check(!bench.IsPresented && bench.Selected is null, "Closing the last tool did not hide the pane");
     bench.Close(DesktopWorkbenchTool.Inspector);
     bench.Open(DesktopWorkbenchTool.Terminal);
-    Check(bench.IsPresented && bench.Tabs.SequenceEqual(new[] { DesktopWorkbenchTool.Terminal }), "Closed pane did not reopen cleanly");
+    Check(bench.IsPresented && bench.Tabs.SequenceEqual(new[] { DesktopWorkbenchTool.Inspector, DesktopWorkbenchTool.Terminal }), "Closed pane did not reopen cleanly");
     Check(new DesktopWorkbenchState().Tabs.Count == 0, "Another workspace inherited tool state");
     var request = new System.Text.Json.Nodes.JsonObject { ["workspaceId"] = "remote:peer:folder", ["branch"] = "feature" };
     var forwarded = RemoteWorkspaceParameters.Forward(request, "remote:peer:folder", "folder");

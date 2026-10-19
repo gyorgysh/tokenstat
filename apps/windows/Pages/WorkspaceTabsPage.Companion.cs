@@ -23,9 +23,20 @@ internal sealed partial class WorkspaceTabsPage
     private WorkspaceLiveReviewPage? _liveReview;
     private bool _showsLiveReview;
     private string? _lastChangesStatus;
+    private readonly OperationEpoch _reviewEpoch = new();
+
+    internal OperationEpoch.Operation BeginReviewRequest(UIElement owner)
+    {
+        _reviewEpoch.Advance();
+        var account = AppServices.AccountGeneration;
+        var source = ActivePage;
+        return _reviewEpoch.Capture(() => account != AppServices.AccountGeneration
+            || ActivePage != source || !IsLoaded || owner is FrameworkElement { IsLoaded: false });
+    }
 
     internal void ResetReviewScope()
     {
+        _reviewEpoch.Advance();
         _companionReview = null;
         _companionChanges = null;
         _liveReview = null;
@@ -90,6 +101,7 @@ internal sealed partial class WorkspaceTabsPage
         tabs.SelectionChanged += (_, _) =>
         {
             if (_refreshingTools || (tabs.SelectedItem as TabViewItem)?.Tag is not DesktopWorkbenchTool tool) return;
+            _reviewEpoch.Advance();
             _workbench.Open(tool);
             RefreshChrome();
         };
@@ -107,6 +119,7 @@ internal sealed partial class WorkspaceTabsPage
         var close = Buttons.ToolbarIcon(ActionIcon.Sidebar,
             L10n.Text("windows.workspacetabspage_companion.close_companion_pane.319641bf"), (_, _) =>
             {
+                _reviewEpoch.Advance();
                 _workbench.Hide();
                 DetailsDismissRequested?.Invoke();
             });
@@ -115,6 +128,7 @@ internal sealed partial class WorkspaceTabsPage
     }
     private void ShowCompanion(DesktopWorkbenchTool tool)
     {
+        _reviewEpoch.Advance();
         _workbench.Open(tool);
         RefreshChrome();
         DetailsRequested?.Invoke();
@@ -122,6 +136,7 @@ internal sealed partial class WorkspaceTabsPage
 
     private void CloseCompanion(DesktopWorkbenchTool tool)
     {
+        _reviewEpoch.Advance();
         _workbench.Close(tool);
         if (tool == DesktopWorkbenchTool.Browser)
         {

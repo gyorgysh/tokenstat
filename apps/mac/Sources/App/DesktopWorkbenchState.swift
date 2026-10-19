@@ -12,6 +12,7 @@ struct DesktopWorkbenchState: Equatable {
     private(set) var isPresented = false
 
     mutating func open(_ tool: Tool) {
+        if tabs.isEmpty, tool != .inspector { tabs.append(.inspector) }
         if !tabs.contains(tool) { tabs.append(tool) }
         selected = tool
         isPresented = true
@@ -40,6 +41,13 @@ struct DesktopWorkbenchSession {
         if isPresented { state.open(preferredTool) }
         else { state.hide() }
         return state
+    }
+
+    /// Persist the tool inherited on navigation before a hide or another
+    /// selection can remove it from the retained pane hierarchy.
+    mutating func activate(in workspace: String) {
+        let state = state(in: workspace)
+        if workspaces[workspace] != state { workspaces[workspace] = state }
     }
 
     mutating func open(_ tool: DesktopWorkbenchState.Tool, in workspace: String) {

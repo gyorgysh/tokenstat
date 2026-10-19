@@ -149,6 +149,8 @@ internal static class WorkspaceRemoteHistory
     private static async Task ShowDetailAsync(
         UIElement owner, string remoteId, string commitId)
     {
+        var request = WorkspaceDiff.BeginReviewRequest(owner);
+        if (!request.IsCurrent) return;
         JsonNode detail;
         try
         {
@@ -159,6 +161,7 @@ internal static class WorkspaceRemoteHistory
         }
         catch (Exception ex)
         {
+            if (!request.IsCurrent) return;
             var failed = new ContentDialog
             {
                 Title = WorkspaceGit.ShortId(commitId),
@@ -169,7 +172,7 @@ internal static class WorkspaceRemoteHistory
             await Chrome.ShowDialog(owner, failed);
             return;
         }
-        await WorkspaceDiff.ShowCommitAsync(owner, detail);
+        if (request.IsCurrent) await WorkspaceDiff.ShowCommitAsync(owner, detail);
     }
 
     private static string RelativeTime(long unixSeconds)

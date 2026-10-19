@@ -647,6 +647,7 @@ struct RootView: View {
             // load is older than the stale window (see HomeModel.refreshIfStale).
             .onChange(of: route) { _, next in
                 DiagnosticsLog.note("screen \(next.diagnosticName)")
+                if case let .workspace(id, .chat) = next { desktopWorkbench.activate(in: id) }
                 // A float belongs to the screen it was opened over. Carrying one
                 // across a navigation is how somebody who clicked a workspace ends
                 // up with a pane over it that they never asked for.
@@ -1798,6 +1799,9 @@ struct RootView: View {
                     ForEach(state.tabs) { tool in
                         let active = showsWorkspaceCompanion && state.selected == tool
                         workbenchContent(tool, folder: folder, active: active)
+                            // The inspector already scopes its settings to the
+                            // selected chat. Keep its shell across repositories.
+                            .id(tool == .inspector ? nil : id)
                             .retainedPane(isActive: active)
                             .opacity(active ? 1 : 0)
                             .allowsHitTesting(active)
@@ -1806,7 +1810,6 @@ struct RootView: View {
                     }
                 }
             }
-            .id(id)
         }
     }
 

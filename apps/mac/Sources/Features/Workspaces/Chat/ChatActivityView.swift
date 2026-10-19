@@ -24,6 +24,7 @@ struct ChatActivityOwner: Hashable {
     var model: String?
     var revision: UInt64?
     var selection: UInt64
+    var session: UInt64
     var running: Bool
     var saved: Bool
 }
@@ -36,17 +37,56 @@ struct ChatActivityRead {
     var lease = UUID()
 }
 
+/// Recent inspector reports can paint immediately while a fresh read runs.
+/// They never establish live status, and never cross a login or run boundary.
+@MainActor final class ChatActivitySnapshots {
+    static let shared = ChatActivitySnapshots()
+    private struct Entry {
+        let owner: ChatActivityOwner
+        let inspection: ChatInspection
+        let storedAt: TimeInterval
+    }
+    private var entries: [Entry] = []
+
+    private func key(_ owner: ChatActivityOwner) -> ChatActivityOwner {
+        var key = owner
+        key.selection = 0
+        return key
+    }
+
+    func inspection(for owner: ChatActivityOwner,
+                    now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> ChatInspection? {
+        guard !owner.saved, owner.reference != nil else { return nil }
+        return entries.last(where: {
+            $0.owner == key(owner)
+                && now >= $0.storedAt && now - $0.storedAt < 30
+        })?.inspection
+    }
+
+    func store(_ inspection: ChatInspection, for owner: ChatActivityOwner,
+               now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        guard !owner.saved, owner.reference != nil, inspection.backend == owner.backend else { return }
+        let owner = key(owner)
+        entries.removeAll { $0.owner.session != owner.session || $0.owner == owner || now - $0.storedAt >= 30 }
+        entries.append(Entry(owner: owner, inspection: inspection, storedAt: now))
+        if entries.count > 8 { entries.removeFirst(entries.count - 8) }
+    }
+}
+
 extension ChatModel {
     var activityOwner: ChatActivityOwner {
         ChatActivityOwner(reference: currentReference, backend: selected?.backend, model: selected?.model,
                           revision: selected?.runRevision, selection: selectionGeneration,
+                          session: WorkSessionContext.shared.generation,
                           running: selected?.running == true, saved: savedCopy != nil)
     }
 
     var currentActivityRead: ChatActivityRead? {
-        guard let read = activityRead, read.owner == activityOwner,
-              let reference = currentReference, WorkCacheAccess.canRead(reference) else { return nil }
-        return read
+        guard let reference = currentReference, WorkCacheAccess.canRead(reference) else { return nil }
+        let owner = activityOwner
+        if let read = activityRead, read.owner == owner { return read }
+        guard let inspection = ChatActivitySnapshots.shared.inspection(for: owner) else { return nil }
+        return ChatActivityRead(owner: owner, inspection: inspection, failed: true, loaded: true)
     }
 
     var inspectionIsLive: Bool {
@@ -68,7 +108,9 @@ extension ChatModel {
     func watchActivity() async {
         let requested = activityOwner
         let lease = UUID()
-        activityRead = ChatActivityRead(owner: requested, lease: lease)
+        let cached = currentActivityRead?.inspection
+        activityRead = ChatActivityRead(owner: requested, inspection: cached, failed: cached != nil,
+                                        loaded: cached != nil, lease: lease)
         defer {
             if activityRead?.lease == lease { activityRead?.failed = true }
         }
@@ -83,6 +125,7 @@ extension ChatModel {
                 let result = try await Bridge.chatInspection(id: id, peer: peer)
                 guard !Task.isCancelled, activityOwner == requested, activityRead?.lease == lease, WorkCacheAccess.canRead(reference),
                       result.backend == requested.backend else { return }
+                ChatActivitySnapshots.shared.store(result, for: requested)
                 activityRead = ChatActivityRead(owner: requested, inspection: result, loaded: true, lease: lease)
             } catch {
                 guard !Task.isCancelled, activityOwner == requested, activityRead?.lease == lease else { return }
