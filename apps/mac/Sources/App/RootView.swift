@@ -1901,7 +1901,8 @@ struct RootView: View {
                 workspaceBrowserURLs[folder.id] = $0
             }
         case .simulator:
-            SimulatorInspector(workspaceID: folder.id, isActive: active, request: simulatorRequests[folder.id])
+            SimulatorInspector(workspaceID: folder.id, isActive: active,
+                request: Binding(get: { simulatorRequests[folder.id] }, set: { simulatorRequests[folder.id] = $0 }))
         case .terminal:
             ChatTerminalPane(folder: folder, terminals: terminals, workspaces: workspaces,
                              ssh: ssh, sshSessions: sshSessions,

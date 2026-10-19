@@ -2,8 +2,36 @@
 // Built by check-simulator.py with the actual native simulator sources.
 import AppKit
 
+private actor SimulatorDiscoveryFixture {
+    enum Failure: Error { case temporarilyUnavailable }
+    var appleDevices: [SimulatorDevice]
+    var androidDevices: [SimulatorDevice]
+    var failApple = false
+    var failAndroid = false
+    init(apple: [SimulatorDevice], android: [SimulatorDevice]) { appleDevices = apple; androidDevices = android }
+    func setFailures(apple: Bool, android: Bool) { failApple = apple; failAndroid = android }
+    func removeAndroid() { androidDevices = [] }
+    func apple() throws -> [SimulatorDevice] { if failApple { throw Failure.temporarilyUnavailable }; return appleDevices }
+    func android() throws -> [SimulatorDevice] { if failAndroid { throw Failure.temporarilyUnavailable }; return androidDevices }
+}
+
+private actor SimulatorSnapshotFixture {
+    var devices: [SimulatorDevice] = []
+    var started = false
+    private var blocked: CheckedContinuation<Void, Never>?
+    func discover() async -> [SimulatorDevice] {
+        let snapshot = devices
+        if !started {
+            started = true
+            await withCheckedContinuation { blocked = $0 }
+        }
+        return snapshot
+    }
+    func replace(with devices: [SimulatorDevice]) { self.devices = devices; blocked?.resume(); blocked = nil }
+}
+
 @main struct SimulatorNativeCheck {
-    @MainActor static func main() throws {
+    @MainActor static func main() async throws {
         let domain = "ai.tokenstat.simulator-tests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: domain)!
         defer { defaults.removePersistentDomain(forName: domain) }
@@ -26,6 +54,47 @@ import AppKit
         precondition(!first.busy && first.attachedID == nil, "Missing devices must never start a command")
         first.detach(); first.setActive(false)
         precondition(first.attachedID == nil && !first.busy && !first.hasFrame)
+
+        let android = SimulatorDevice(id: "android:qa", name: "Android", runtime: "Android", platform: .android, deviceType: "phone", isBooted: true, serial: "emulator-5554", transportID: 7)
+        let discovery = SimulatorDiscoveryFixture(apple: [tablet], android: [android])
+        let inventory = SimulatorInventory(apple: { try await discovery.apple() }, android: { try await discovery.android() })
+        let initial = try await inventory.load(force: true)
+        let live = SimulatorSession(preferenceKey: "live-discovery", defaults: defaults, inventory: inventory)
+        live.attachedID = tablet.id
+        var boots = SimulatorBootTracker()
+        precondition(boots.observe(initial, follows: true) == nil)
+        for failures in [(true, false), (false, false), (false, true), (false, false)] {
+            await discovery.setFailures(apple: failures.0, android: failures.1)
+            let devices = try await inventory.load(force: true)
+            precondition(devices == initial, "Transient discovery failure removed a live device")
+            await live.refresh(force: true)
+            precondition(live.attachedID == tablet.id, "Discovery failure detached a live session")
+            precondition(boots.observe(devices, follows: true) == nil, "Discovery recovery was mistaken for an agent boot")
+        }
+        await discovery.removeAndroid()
+        let removed = try await inventory.load(force: true)
+        precondition(removed == [tablet], "A successful empty inventory must still remove stopped devices")
+        let recoveringSource = SimulatorDiscoveryFixture(apple: [phone], android: [])
+        await recoveringSource.setFailures(apple: true, android: false)
+        let recoveringInventory = SimulatorInventory(apple: { try await recoveringSource.apple() }, android: { [] })
+        let recovering = SimulatorSession(preferenceKey: "recovering-discovery", defaults: defaults, inventory: recoveringInventory)
+        await recovering.refresh(force: true)
+        precondition(recovering.devices.isEmpty && recovering.error != nil)
+        await recoveringSource.setFailures(apple: false, android: false)
+        await recovering.refresh(force: true)
+        precondition(recovering.devices == [phone] && recovering.error == nil, "Successful discovery left its unavailable-tools error visible")
+        recovering.error = "An unrelated device control failed"
+        await recovering.refresh(force: true)
+        precondition(recovering.error != nil, "Discovery must not clear unrelated device errors")
+        let snapshot = SimulatorSnapshotFixture()
+        let freshInventory = SimulatorInventory(apple: { await snapshot.discover() }, android: { [] })
+        let oldFlight = Task { try await freshInventory.load() }
+        while !(await snapshot.started) { await Task.yield() }
+        let force = Task { try await freshInventory.load(force: true) }
+        try await Task.sleep(for: .milliseconds(30))
+        await snapshot.replace(with: [phone])
+        let oldSnapshot = try await oldFlight.value, freshSnapshot = try await force.value
+        precondition(oldSnapshot.isEmpty && freshSnapshot == [phone], "An explicit attach reused a discovery started before its device existed")
 
         _ = NSApplication.shared
         let screen = SimulatorScreenNSView(frame: .zero)

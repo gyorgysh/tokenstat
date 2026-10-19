@@ -40,32 +40,6 @@ struct SimulatorAnnexBReader {
     }
 }
 
-/// Serializes pipe chunks and a short quiet-boundary flush. A revision fence
-/// discards obsolete timers; delivery stays ordered even when a timer races a
-/// new read. No capture subprocess or periodic screenshot is involved.
-private final class SimulatorVideoFramer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var reader = SimulatorAnnexBReader()
-    private var revision: UInt64 = 0
-    var deliver: @Sendable ([Data], Bool) -> Void
-    init(deliver: @escaping @Sendable ([Data], Bool) -> Void) { self.deliver = deliver }
-    func append(_ data: Data) {
-        lock.lock()
-        revision &+= 1
-        let lease = revision
-        let units = reader.append(data)
-        if !units.isEmpty { deliver(units, false) }
-        lock.unlock()
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.12) { [weak self] in
-            guard let self else { return }
-            self.lock.lock(); defer { self.lock.unlock() }
-            guard self.revision == lease else { return }
-            let units = self.reader.drain()
-            if !units.isEmpty { self.deliver(units, true) }
-        }
-    }
-}
-
 @MainActor
 final class SimulatorVideoDecoder {
     private var sps: Data?
@@ -191,7 +165,7 @@ final class AndroidSimulatorStream {
     private var receivedFrame = false
     var onFrame: ((CVPixelBuffer) -> Void)?
     var onError: ((String) -> Void)?
-    func start(tools: AndroidSimulatorTools, serial: String, pixels: CGSize) {
+    func start(tools: AndroidSimulatorTools, serial: String, pixels: CGSize, transportID: UInt64? = nil) {
         stop()
         let lease = UUID(); self.lease = lease
         receivedFrame = false
@@ -207,20 +181,20 @@ final class AndroidSimulatorStream {
         // Shell v2 without a PTY keeps binary stdout intact and terminates
         // the remote recording when the client disconnects. exec-out can
         // leave a still recording running until its time limit.
-        process.arguments = ["-s", serial, "shell", "-T", "screenrecord", "--output-format=h264", "--bit-rate", "6000000", "--size", "\(width)x\(height)", "--time-limit", "180", "-"]
+        process.arguments = AndroidSimulatorTools.targetArguments(serial, transportID: transportID) + ["shell", "-T", "screenrecord", "--output-format=h264", "--bit-rate", "6000000", "--size", "\(width)x\(height)", "--time-limit", "180", "-"]
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
         process.terminationHandler = { [weak self] finished in
             Task { @MainActor in
                 guard let self, self.lease == lease else { return }
-                if finished.terminationStatus == 0 { self.start(tools: tools, serial: serial, pixels: pixels) }
+                if finished.terminationStatus == 0 { self.start(tools: tools, serial: serial, pixels: pixels, transportID: transportID) }
                 else { self.onError?(L10n.text("apple.simulator.android_stream_error")) }
             }
         }
         do { try process.run() } catch { onError?(error.localizedDescription); return }
         self.process = process; self.pipe = pipe
         let deliveryCapacity = deliveryCapacity
-        let framer = SimulatorVideoFramer { [weak self] units, finishedPicture in
+        let deliver: @Sendable ([Data], Bool) -> Void = { [weak self] units, finishedPicture in
             deliveryCapacity.wait()
             DispatchQueue.main.async { [weak self] in
                 defer { deliveryCapacity.signal() }
@@ -236,11 +210,25 @@ final class AndroidSimulatorStream {
             let descriptor = pipe.fileHandleForReading.fileDescriptor
             defer { try? pipe.fileHandleForReading.close() }
             var bytes = [UInt8](repeating: 0, count: 65536)
+            var reader = SimulatorAnnexBReader()
+            var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
             while true {
+                // Flush a still frame only after the reader has caught up.
+                // A timer on another queue can cut a NAL while unread bytes
+                // remain in the pipe during decoder backpressure.
+                let ready = Darwin.poll(&readiness, 1, 120)
+                if ready < 0 && errno == EINTR { continue }
+                guard ready >= 0 else { break }
+                if ready == 0 {
+                    let units = reader.drain()
+                    if !units.isEmpty { deliver(units, true) }
+                    continue
+                }
                 let count = Darwin.read(descriptor, &bytes, bytes.count)
                 if count < 0 && errno == EINTR { continue }
                 guard count > 0 else { break }
-                framer.append(Data(bytes.prefix(count)))
+                let units = reader.append(Data(bytes.prefix(count)))
+                if !units.isEmpty { deliver(units, false) }
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in

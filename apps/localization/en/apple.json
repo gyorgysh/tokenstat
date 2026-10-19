@@ -5716,6 +5716,7 @@
   "apple.workbench.patch_unavailable": "The agent did not record a patch for this edit.",
   "apple.workbench.resize": "Drag to resize the side workbench. Double-click to reset.",
   "apple.simulator.title": "Simulator",
+  "apple.simulator.android_tools_update": "Update Android platform-tools to attach emulators safely.",
   "apple.simulator.timeout": "The simulator command took too long. Retry after checking Xcode.",
   "apple.simulator.output_limit": "The simulator returned more data than can be displayed.",
   "apple.simulator.stopped": "The device shut down. Attach it to start again.",

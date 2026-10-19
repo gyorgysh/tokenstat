@@ -29,6 +29,7 @@ final class SimulatorSession {
     @ObservationIgnored private var androidStream: AndroidSimulatorStream?
     @ObservationIgnored private var androidTools: AndroidSimulatorTools?
     @ObservationIgnored private var androidSerial: String?
+    @ObservationIgnored private var androidTransportID: UInt64?
     @ObservationIgnored private var androidPixels = CGSize(width: 1080, height: 1920)
     @ObservationIgnored private var androidNaturalLandscape = false
     @ObservationIgnored private var androidWindowRotation = false
@@ -39,14 +40,16 @@ final class SimulatorSession {
     @ObservationIgnored private var inputEpoch = UUID()
     @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var active = false
-    @ObservationIgnored private var refreshing = false
     @ObservationIgnored private var developerDirectory: String?
+    @ObservationIgnored private var discoveryError: String?
     private let defaults: UserDefaults
     private let key: String
+    private let inventory: SimulatorInventory
 
-    init(preferenceKey: String, defaults: UserDefaults = .standard) {
+    init(preferenceKey: String, defaults: UserDefaults = .standard, inventory: SimulatorInventory = .shared) {
         key = "simulator." + preferenceKey
         self.defaults = defaults
+        self.inventory = inventory
         let savedDefault = defaults.string(forKey: key + ".default")
         defaultID = savedDefault
         selectedID = savedDefault ?? defaults.string(forKey: key + ".selected")
@@ -69,20 +72,24 @@ final class SimulatorSession {
         }
     }
 
-    func refresh() async {
-        guard !refreshing else { return }
-        refreshing = true
-        defer { refreshing = false }
+    func refresh(force: Bool = false) async {
         do {
-            let found = try await SimulatorInventory.shared.load()
+            let found = try await inventory.load(force: force)
             try Task.checkCancellation()
+            if error == discoveryError { error = nil }
+            discoveryError = nil
             devices = found
             if selected == nil { selectedID = SimulatorDevice.preferred(in: found, saved: defaultID ?? selectedID, favorites: favorites)?.id }
             let booted = Set(found.filter(\.isRunning).map(\.id))
             if let id = attachedID, !booted.contains(id), !busy { detach(suppressFollow: false); error = nil; message = L10n.text("apple.simulator.stopped") }
-            else if let id = attachedID, active, !busy, connection?.needsReconnect == true { attach(id) }
+            else if let id = attachedID, active, !busy, connection?.needsReconnect == true { attach(id, bootIfNeeded: false) }
+            else if let id = attachedID, active, !busy, attached?.platform == .android,
+                    let device = found.first(where: { $0.id == id }),
+                    androidSerial == nil || device.serial != androidSerial || device.transportID != androidTransportID { attach(id, bootIfNeeded: false) }
         } catch is CancellationError { }
-        catch { if devices.isEmpty { self.error = error.localizedDescription } }
+        catch {
+            if devices.isEmpty { discoveryError = error.localizedDescription; self.error = discoveryError }
+        }
     }
 
     func setActive(_ value: Bool) {
@@ -96,7 +103,7 @@ final class SimulatorSession {
         else if androidSerial != nil { startAndroidDisplay() }
     }
 
-    func attach(_ id: String? = nil) {
+    func attach(_ id: String? = nil, bootIfNeeded: Bool = true) {
         guard let id = id ?? selectedID, let device = devices.first(where: { $0.id == id }) else { return }
         if busy, selectedID == id { return }
         operation?.cancel()
@@ -104,7 +111,7 @@ final class SimulatorSession {
         inputEpoch = UUID()
         let lease = generation
         connection?.stop(); connection = nil; surface = nil; hasFrame = false
-        androidStream?.stop(); androidStream = nil; androidSerial = nil; videoBacking = nil
+        androidStream?.stop(); androidStream = nil; androidSerial = nil; androidTransportID = nil; videoBacking = nil
         attachedID = nil; selectedID = id; busy = true; error = nil; message = nil
         displays.allObjects.forEach { $0.clear() }
         operation = Task { [weak self] in
@@ -112,10 +119,11 @@ final class SimulatorSession {
             defer { if self.generation == lease { self.busy = false } }
             do {
                 if device.platform == .android {
-                    try await self.attachAndroid(device, lease: lease)
+                    try await self.attachAndroid(device, lease: lease, bootIfNeeded: bootIfNeeded)
                     return
                 }
                 if !device.isRunning {
+                    guard bootIfNeeded else { throw SimulatorCommand.Failure(message: L10n.text("apple.simulator.stopped")) }
                     do { _ = try await SimulatorCommand.simctl(["boot", id], timeout: 30) }
                     catch {
                         // An agent can boot the device after our last inventory.
@@ -172,36 +180,48 @@ final class SimulatorSession {
         }
     }
 
-    private func attachAndroid(_ device: SimulatorDevice, lease: UUID) async throws {
+    private func attachAndroid(_ device: SimulatorDevice, lease: UUID, bootIfNeeded: Bool) async throws {
         guard let tools = AndroidSimulatorTools.installed() else { throw SimulatorCommand.Failure(message: L10n.text("apple.simulator.android_missing")) }
         androidTools = tools
-        if !device.isBooted { try await AndroidSimulatorLauncher.shared.boot(String(device.id.dropFirst(8)), tools: tools) }
+        // Resolve again at attachment time: the cached emulator port may now
+        // belong to another AVD, even when that device is already fully booted.
+        let current = try await tools.inventory().first { $0.id == device.id }
+        try Task.checkCancellation()
+        guard generation == lease else { return }
+        if current?.isBooted != true {
+            guard bootIfNeeded else { throw SimulatorCommand.Failure(message: L10n.text("apple.simulator.stopped")) }
+            try await AndroidSimulatorLauncher.shared.boot(String(device.id.dropFirst(8)), tools: tools)
+        }
         let deadline = Date().addingTimeInterval(180)
-        var serial = device.serial
+        var target = current
         while Date() < deadline {
             try Task.checkCancellation()
             guard generation == lease else { return }
-            if serial == nil { serial = try await tools.inventory().first(where: { $0.id == device.id })?.serial }
-            if let serial, let value = try? await tools.command(serial, ["shell", "getprop", "sys.boot_completed"], timeout: 4),
+            if let target, let serial = target.serial,
+               let value = try? await tools.command(serial, ["shell", "getprop", "sys.boot_completed"], timeout: 4, transportID: target.transportID),
                String(decoding: value, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == "1" { break }
             try await Task.sleep(for: .seconds(1))
+            target = try await tools.inventory().first { $0.id == device.id }
         }
-        guard let serial, Date() < deadline else { throw SimulatorCommand.Failure(message: L10n.text("apple.simulator.timeout")) }
-        let image = try await tools.command(serial, ["exec-out", "screencap", "-p"])
+        try Task.checkCancellation()
+        guard generation == lease else { return }
+        guard let target, let serial = target.serial, Date() < deadline else { throw SimulatorCommand.Failure(message: L10n.text("apple.simulator.timeout")) }
+        let transportID = target.transportID
+        let image = try await tools.command(serial, ["exec-out", "screencap", "-p"], transportID: transportID)
         try Task.checkCancellation()
         guard generation == lease else { return }
         if let bitmap = NSBitmapImageRep(data: image) { androidPixels = CGSize(width: bitmap.pixelsWide, height: bitmap.pixelsHigh) }
-        let dimensions = try await tools.command(serial, ["shell", "wm", "size"])
+        let dimensions = try await tools.command(serial, ["shell", "wm", "size"], transportID: transportID)
         try Task.checkCancellation()
         guard generation == lease else { return }
         androidNaturalLandscape = AndroidSimulatorTools.naturalLandscape(String(decoding: dimensions, as: UTF8.self)) ?? (androidPixels.width > androidPixels.height)
-        let windowHelp = (try? await tools.command(serial, ["shell", "wm", "help"])) ?? Data()
+        let windowHelp = (try? await tools.command(serial, ["shell", "wm", "help"], transportID: transportID)) ?? Data()
         try Task.checkCancellation()
         guard generation == lease else { return }
         let capabilities = String(decoding: windowHelp, as: UTF8.self)
         androidWindowRotation = capabilities.contains("user-rotation")
         androidFixedRotation = capabilities.contains("fixed-to-user-rotation")
-        pixels = androidPixels; orientation = 1; androidSerial = serial; attachedID = device.id
+        pixels = androidPixels; orientation = 1; androidSerial = serial; androidTransportID = transportID; attachedID = device.id
         if active { startAndroidDisplay() }
         await refresh()
     }
@@ -210,8 +230,8 @@ final class SimulatorSession {
         guard let androidTools, let androidSerial else { return }
         let stream = AndroidSimulatorStream()
         let lease = generation
-        stream.onFrame = { [weak self] buffer in
-            guard let self, self.generation == lease, self.active,
+        stream.onFrame = { [weak self, weak stream] buffer in
+            guard let self, let stream, self.androidStream === stream, self.generation == lease, self.active,
                   let surface = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue() else { return }
             self.videoBacking = buffer; self.surface = surface
             let pixels = CGSize(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer))
@@ -219,9 +239,17 @@ final class SimulatorSession {
             if !self.hasFrame { self.hasFrame = true }
             for view in self.displays.allObjects { view.present(surface, pixels: pixels, orientation: 1, backing: buffer) }
         }
-        stream.onError = { [weak self] text in if self?.generation == lease { self?.error = text } }
+        stream.onError = { [weak self, weak stream] text in
+            guard let self, let stream, self.androidStream === stream, self.generation == lease else { return }
+            self.inputEpoch = UUID(); self.androidTouch = nil
+            self.androidInputFlight?.cancel(); self.androidInputFlight = nil
+            stream.stop(); self.androidStream = nil; self.androidSerial = nil; self.androidTransportID = nil
+            self.surface = nil; self.videoBacking = nil; self.hasFrame = false
+            self.displays.allObjects.forEach { $0.clear() }
+            self.error = text
+        }
         androidStream?.stop(); androidStream = stream
-        stream.start(tools: androidTools, serial: androidSerial, pixels: androidPixels)
+        stream.start(tools: androidTools, serial: androidSerial, pixels: androidPixels, transportID: androidTransportID)
     }
 
     private func startDisplay(_ connection: NativeSimulatorConnection) throws {
@@ -247,22 +275,31 @@ final class SimulatorSession {
         inputEpoch = UUID()
         androidInputFlight?.cancel(); androidInputFlight = nil; androidTouch = nil
         connection?.stop(); connection = nil; attachedID = nil; busy = false
-        androidStream?.stop(); androidStream = nil; androidSerial = nil; videoBacking = nil
+        androidStream?.stop(); androidStream = nil; androidSerial = nil; androidTransportID = nil; videoBacking = nil
         surface = nil; hasFrame = false
         displays.allObjects.forEach { $0.clear() }
     }
 
     func shutdown() {
         guard let id = attachedID ?? selectedID, !busy else { return }
-        let serial = androidSerial
+        let serial = androidSerial, transportID = androidTransportID
         detach(); busy = true; error = nil
         let lease = generation
         operation = Task { [weak self] in
             guard let self else { return }
             defer { if self.generation == lease { self.busy = false } }
             do {
-                if id.hasPrefix("android:"), let serial, let tools = self.androidTools { _ = try await tools.command(serial, ["emu", "kill"]) }
-                else { _ = try await SimulatorCommand.simctl(["shutdown", id]) }
+                if id.hasPrefix("android:") {
+                    guard let tools = self.androidTools ?? AndroidSimulatorTools.installed() else {
+                        throw SimulatorCommand.Failure(message: L10n.text("apple.simulator.android_missing"))
+                    }
+                    // A stream can disconnect while the device menu is open.
+                    // Resolve the exact AVD if that input lease was cleared.
+                    let target = serial == nil ? try await tools.inventory().first(where: { $0.id == id }) : nil
+                    if let serial = serial ?? target?.serial {
+                        _ = try await tools.command(serial, ["emu", "kill"], transportID: transportID ?? target?.transportID)
+                    }
+                } else { _ = try await SimulatorCommand.simctl(["shutdown", id]) }
                 await self.refresh()
             }
             catch is CancellationError { }
@@ -312,7 +349,7 @@ final class SimulatorSession {
     }
     func screenshot() {
         guard let id = attachedID else { return }
-        let tools = androidTools, serial = androidSerial
+        let tools = androidTools, serial = androidSerial, transportID = androidTransportID
         let displayID = connection?.displayID ?? 1
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
@@ -322,7 +359,7 @@ final class SimulatorSession {
             Task { @MainActor in
                 do {
                     let pixels: Data
-                    if let tools, let serial { pixels = try await tools.command(serial, ["exec-out", "screencap", "-p"]) }
+                    if let tools, let serial { pixels = try await tools.command(serial, ["exec-out", "screencap", "-p"], transportID: transportID) }
                     else { pixels = try await SimulatorCommand.screenshot(deviceID: id, displayID: displayID) }
                     try pixels.write(to: url, options: .atomic)
                     self?.message = L10n.text("apple.simulator.screenshot_saved")
@@ -373,11 +410,7 @@ final class SimulatorSession {
         androidTouch = nil
         let from = CGPoint(x: start.x * androidPixels.width, y: start.y * androidPixels.height)
         let to = CGPoint(x: point.x * androidPixels.width, y: point.y * androidPixels.height)
-        if hypot(from.x - to.x, from.y - to.y) < 8 {
-            androidCommand(["shell", "input", "tap", String(Int(to.x)), String(Int(to.y))])
-        } else {
-            androidCommand(["shell", "input", "swipe", String(Int(from.x)), String(Int(from.y)), String(Int(to.x)), String(Int(to.y)), String(min(1500, max(50, Int(Date().timeIntervalSince(began) * 1000))))])
-        }
+        androidCommand(AndroidSimulatorTools.gestureArguments(from: from, to: to, duration: Date().timeIntervalSince(began)))
         return true
     }
     func key(_ event: NSEvent, pressed: Bool) -> Bool {
@@ -393,16 +426,16 @@ final class SimulatorSession {
     @ObservationIgnored private var androidInputFlight: Task<Void, Never>?
     private func androidCommand(_ arguments: [String], refreshDisplay: Bool = false, expectedLandscape: Bool? = nil) {
         guard let tools = androidTools, let serial = androidSerial else { return }
-        let lease = generation, input = inputEpoch, previous = androidInputFlight
+        let lease = generation, input = inputEpoch, previous = androidInputFlight, transportID = androidTransportID
         androidInputFlight = Task { [weak self] in
             await previous?.value
             guard let self, self.generation == lease, self.inputEpoch == input, self.active else { return }
             do {
-                _ = try await tools.command(serial, arguments)
+                _ = try await tools.command(serial, arguments, transportID: transportID)
                 if refreshDisplay {
                     try await Task.sleep(for: .milliseconds(400))
                     for attempt in 0..<5 {
-                        let image = try await tools.command(serial, ["exec-out", "screencap", "-p"])
+                        let image = try await tools.command(serial, ["exec-out", "screencap", "-p"], transportID: transportID)
                         guard self.generation == lease, self.inputEpoch == input else { return }
                         guard let bitmap = NSBitmapImageRep(data: image) else { throw SimulatorCommand.Failure(message: L10n.text("apple.simulator.control_unavailable")) }
                         self.androidPixels = CGSize(width: bitmap.pixelsWide, height: bitmap.pixelsHigh)

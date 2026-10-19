@@ -26,3 +26,7 @@ with tempfile.TemporaryDirectory(prefix="tokenstat-simulator-") as temporary:
                     str(root / "apps/mac/Sources/Design/L10n.swift"), str(native),
                     "-framework", "AppKit", "-framework", "IOSurface", "-o", str(work / "check")], check=True)
     subprocess.run([str(work / "check")], check=True)
+    subprocess.run(["xcrun", "clang", "-target", target, "-fobjc-arc", "-fmodules", "-Wall", "-Wextra", "-Werror",
+                    str(root / "scripts/tests/SimulatorNativeOwnershipCheck.m"), str(native), "-framework", "AppKit",
+                    "-framework", "IOSurface", "-o", str(work / "ownership")], check=True)
+    subprocess.run([str(work / "ownership")], check=True)

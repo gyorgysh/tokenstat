@@ -13,9 +13,10 @@ struct SimulatorDevice: Identifiable, Equatable, Sendable {
     let isBooted: Bool
     let isBooting: Bool
     let serial: String?
-    init(id: String, name: String, runtime: String, platform: Platform, deviceType: String, isBooted: Bool, isBooting: Bool = false, serial: String? = nil) {
+    let transportID: UInt64?
+    init(id: String, name: String, runtime: String, platform: Platform, deviceType: String, isBooted: Bool, isBooting: Bool = false, serial: String? = nil, transportID: UInt64? = nil) {
         self.id = id; self.name = name; self.runtime = runtime; self.platform = platform
-        self.deviceType = deviceType; self.isBooted = isBooted; self.isBooting = isBooting; self.serial = serial
+        self.deviceType = deviceType; self.isBooted = isBooted; self.isBooting = isBooting; self.serial = serial; self.transportID = transportID
     }
     var isRunning: Bool { isBooted || isBooting }
     var isTablet: Bool { deviceType.localizedCaseInsensitiveContains("ipad") || deviceType.localizedCaseInsensitiveContains("tablet") }

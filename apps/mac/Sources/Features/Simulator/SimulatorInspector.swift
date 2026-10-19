@@ -8,14 +8,14 @@ import Observation
 struct SimulatorInspector: View {
     let workspaceID: String
     let isActive: Bool
-    var request: SimulatorAttachmentIntent?
+    @Binding var request: SimulatorAttachmentIntent?
 
     var body: some View {
         let owner = WorkViewedChange.owner(folderID: workspaceID)
         let local = WorkDestinationResolver.route(folderID: workspaceID).peer == nil
         if local {
             SimulatorInspectorContent(preferenceKey: BrowserHistory.key(for: owner) ?? workspaceID,
-                isActive: isActive, request: request)
+                isActive: isActive, request: $request)
                 .id(owner)
         } else {
             ContentUnavailableView(L10n.text("apple.simulator.title"), systemImage: "iphone",
@@ -27,14 +27,14 @@ struct SimulatorInspector: View {
 @MainActor
 private struct SimulatorInspectorContent: View {
     let isActive: Bool
-    let request: SimulatorAttachmentIntent?
+    @Binding var request: SimulatorAttachmentIntent?
     @State private var session: SimulatorSession
     @State private var settings = false
     @State private var viewer: SimulatorViewerWindow?
     @Environment(\.colorScheme) private var colorScheme
 
-    init(preferenceKey: String, isActive: Bool, request: SimulatorAttachmentIntent?) {
-        self.isActive = isActive; self.request = request
+    init(preferenceKey: String, isActive: Bool, request: Binding<SimulatorAttachmentIntent?>) {
+        self.isActive = isActive; _request = request
         _session = State(initialValue: SimulatorSession(preferenceKey: preferenceKey))
     }
 
@@ -49,15 +49,22 @@ private struct SimulatorInspectorContent: View {
         .task(id: surfaceIsActive) {
             session.setActive(surfaceIsActive)
             guard surfaceIsActive else { return }
-            await session.refresh()
+            await session.refresh(force: request != nil)
             applyRequest()
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(4))
                 guard !Task.isCancelled else { break }
                 await session.refresh()
+                applyRequest()
             }
         }
-        .onChange(of: request) { _, _ in applyRequest() }
+        .task(id: request?.id) {
+            guard surfaceIsActive, request != nil else { return }
+            applyRequest(reportMissing: false)
+            guard request != nil else { return }
+            await session.refresh(force: true)
+            applyRequest()
+        }
         .onChange(of: colorScheme) { _, value in viewer?.updateAppearance(value) }
         .onDisappear { viewer?.close(); viewer = nil; session.detach(); session.setActive(false) }
     }
@@ -69,10 +76,18 @@ private struct SimulatorInspectorContent: View {
         viewer?.show()
     }
 
-    private func applyRequest() {
-        guard surfaceIsActive, let id = request?.deviceID, session.attachedID != id else { return }
-        if session.devices.contains(where: { $0.id == id }) { session.attach(id) }
-        else if !session.devices.isEmpty { session.error = L10n.text("apple.simulator.device_missing") }
+    private func applyRequest(reportMissing: Bool = true) {
+        guard !Task.isCancelled, surfaceIsActive, let id = request?.deviceID else { return }
+        if session.attachedID == id { request = nil; return }
+        if session.devices.contains(where: { $0.id == id }) {
+            // A link or external boot is a one-time action. Clearing the
+            // owner's request also prevents replay after navigating away.
+            request = nil
+            session.attach(id)
+        } else if reportMissing, !session.devices.isEmpty {
+            request = nil
+            session.error = L10n.text("apple.simulator.device_missing")
+        }
     }
 
     private var header: some View {
@@ -98,7 +113,7 @@ private struct SimulatorInspectorContent: View {
             Text(session.selected?.runtime ?? L10n.text("apple.simulator.ios_subtitle"))
                 .font(Theme.font(11)).foregroundStyle(Theme.controlGlyph).padding(.leading, 24)
             }.frame(maxWidth: .infinity, alignment: .leading)
-            ToolbarIconButton(systemImage: ActionIcon.refresh.symbol, help: L10n.text("apple.simulator.refresh")) { Task { await session.refresh() } }
+            ToolbarIconButton(systemImage: ActionIcon.refresh.symbol, help: L10n.text("apple.simulator.refresh")) { Task { await session.refresh(force: true) } }
             ToolbarIconButton(systemImage: ActionIcon.settings.symbol, help: L10n.text("apple.simulator.preferences")) { settings.toggle() }
                 .popover(isPresented: $settings) { preferences.padding(18).frame(width: 300) }
         }.padding(12).background(Theme.sidebar).overlay(alignment: .bottom) { ThemeRule() }
@@ -285,7 +300,7 @@ private struct SimulatorControls: View {
                 } label: { Image(systemName: ActionIcon.more.symbol).frame(width: 28, height: 28) }
                     .menuStyle(.borderlessButton).fixedSize().help(L10n.text("apple.simulator.more"))
                     .accessibilityLabel(L10n.text("apple.simulator.more"))
-            }.disabled(session.attachedID == nil || session.busy)
+            }.disabled(session.attachedID == nil || session.busy || !session.hasFrame)
             HStack(spacing: 4) {
                 ToolbarIconButton(systemImage: "minus.magnifyingglass", help: L10n.text("apple.simulator.zoom_out")) { session.zoom = max(0.5, session.zoom - 0.25) }
                 Button(L10n.text("apple.simulator.fit"), .preview) { session.zoom = 1; session.yaw = 0; session.pitch = 0; session.perspective = false }

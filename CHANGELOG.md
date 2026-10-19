@@ -17,6 +17,11 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Simulator preferences remember a default device, pinned devices and whether to follow devices started by agents. Agents receive instructions for building, installing, testing and opening the exact simulator in the current repository's inspector. Hiding or detaching the screen leaves the device running; shutdown is explicit.
 - Fit, zoom, an expanded viewer and a draggable 3D device preview make phones and tablets comfortable to inspect. Compatible foldable iOS runtimes also expose open, halfway and closed postures. Installed Android SDKs add local phone and tablet emulators with live screens, touch, keyboard and device controls.
 
+### Fixed
+
+- Simulator attach requests are consumed once, so changing tabs or reopening a project respects detach and shutdown. Refresh preserves running devices through temporary SDK discovery failures and clears recovered discovery errors.
+- Simulator commands respect cancellation and deadlines even when a child keeps their pipes open. Native input releases modifiers correctly across clicks and window changes, and repeated attachments release their connection resources. Android controls stay bound to the correct emulator connection across restarts, support long presses and reconnect without restarting devices that were shut down.
+
 ## [1.7.3] - 2026-10-19
 
 ### Improved

@@ -124,7 +124,9 @@ emulator and an AVD through your normal Android tooling. Phone and tablet AVDs
 appear in the same picker. They boot without an extra window, stream their
 screen through native video decoding and support tap/swipe, keyboard,
 orientation, appearance, Settings, screenshots and explicit shutdown. Android
-text input follows ADB's supported characters; iOS clipboard transfer supports
+text input follows ADB's supported characters; holding the screen sends a long
+press. Keep Android platform-tools current; connections are pinned so a reused
+emulator port cannot redirect controls to another device. iOS clipboard transfer supports
 Unicode. The inspector is local to this Mac and is not exposed by phone or
 Windows clients or remote repositories.
 

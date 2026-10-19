@@ -17,6 +17,16 @@ import Foundation
         emulator-5560 device product:generic
         """
         precondition(AndroidSimulatorTools.emulatorSerials(output) == ["emulator-5554", "emulator-5560"])
+        let targets = AndroidSimulatorTools.emulatorTargets("emulator-5554 device transport_id:7\nemulator-5556 device transport_id:8\nemulator-5558 device transport_id:invalid")
+        precondition(targets.count == 2 && targets[0].serial == "emulator-5554" && targets[0].transportID == 7)
+        precondition(AndroidSimulatorTools.targetArguments("emulator-5554", transportID: 7) == ["-t", "7"])
+        precondition(AndroidSimulatorTools.targetArguments("emulator-5554", transportID: 8) == ["-t", "8"],
+                     "A reused emulator serial must not reuse the old connection")
+        precondition(AndroidSimulatorTools.targetArguments("emulator-5554", transportID: nil) == ["-s", "emulator-5554"])
+        let point = CGPoint(x: 20, y: 40)
+        precondition(AndroidSimulatorTools.gestureArguments(from: point, to: point, duration: 0.1) == ["shell", "input", "tap", "20", "40"])
+        precondition(AndroidSimulatorTools.gestureArguments(from: point, to: point, duration: 0.8) == ["shell", "input", "swipe", "20", "40", "20", "40", "800"],
+                     "Holding the screen must deliver a long press instead of a tap")
         precondition(AndroidSimulatorTools.naturalLandscape("Physical size: 1080x2424\n") == false)
         precondition(AndroidSimulatorTools.naturalLandscape("Physical size: 2560x1600\n") == true)
         precondition(AndroidSimulatorTools.naturalLandscape("Physical size: 2560x1600\nOverride size: 800x1280\n") == false)

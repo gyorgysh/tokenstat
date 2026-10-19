@@ -77,6 +77,14 @@ static NSError *TSStartingError(NSString *message, NSInteger code) {
     return [NSError errorWithDomain:@"ai.tokenstat.simulator" code:code userInfo:@{NSLocalizedDescriptionKey:message}];
 }
 
+// dlsym erases the create rule. Without this annotation ARC adds a retain
+// to an already-owned endpoint, leaking it and its Mach send right on attach.
+__attribute__((visibility("hidden"))) xpc_endpoint_t TSCreateSimulatorEndpoint(mach_port_t port) {
+    typedef xpc_endpoint_t (*Endpoint)(mach_port_t,uint64_t,uint64_t) __attribute__((ns_returns_retained));
+    Endpoint create = (Endpoint)dlsym(RTLD_DEFAULT,"xpc_endpoint_create_mach_port_4sim");
+    return create ? create(port,0,0) : nil;
+}
+
 @implementation NativeSimulatorConnection {
     id<TSRuntime> _device;
     id<TSRuntime> _io;
@@ -123,16 +131,14 @@ static xpc_object_t TSXPCValue(id object) {
 }
 
 - (xpc_connection_t)channel:(NSString *)service {
-    typedef xpc_endpoint_t (*Endpoint)(mach_port_t,uint64_t,uint64_t);
     typedef void (*SimulatorPeer)(xpc_connection_t);
-    Endpoint endpoint = (Endpoint)dlsym(RTLD_DEFAULT,"xpc_endpoint_create_mach_port_4sim");
     SimulatorPeer mark = (SimulatorPeer)dlsym(RTLD_DEFAULT,"xpc_connection_enable_sim2host_4sim");
-    if (!endpoint || !mark) return nil;
+    if (!mark) return nil;
     if (![_device respondsToSelector:@selector(lookup:error:)]) return nil;
     mach_port_t port;
     @try { port = [_device lookup:service error:nil]; } @catch (NSException *exception) { return nil; }
     if (!port) return nil;
-    xpc_endpoint_t address = endpoint(port,0,0);
+    xpc_endpoint_t address = TSCreateSimulatorEndpoint(port);
     if (!address) { mach_port_deallocate(mach_task_self(),port); return nil; }
     xpc_connection_t channel = xpc_connection_create_from_endpoint(address);
     if (!channel) return nil;

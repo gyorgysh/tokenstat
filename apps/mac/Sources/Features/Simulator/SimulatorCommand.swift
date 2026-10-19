@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #if os(macOS)
 import Foundation
+import Darwin
 
 /// A bounded, binary-safe tool invocation. Each stream drains independently.
 enum SimulatorCommand {
@@ -54,6 +55,7 @@ enum SimulatorCommand {
         let lock = NSLock()
         var cancelled = false
         var timedOut = false
+        var finished = false
         init(_ executable: String, _ arguments: [String], timeout: TimeInterval, input: Data?) {
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = arguments
@@ -68,16 +70,17 @@ enum SimulatorCommand {
             }
         }
         func run() throws -> Result {
-            let out = Reader(), err = Reader(), stdin = Pipe()
+            let out = PipeIO(), err = PipeIO(), stdin = PipeIO()
             process.standardOutput = out.pipe; process.standardError = err.pipe
-            process.standardInput = input == nil ? FileHandle.nullDevice : stdin
+            process.standardInput = input == nil ? FileHandle.nullDevice : stdin.pipe
             lock.lock()
             if cancelled { lock.unlock(); throw CancellationError() }
             do { try process.run() } catch { lock.unlock(); throw error }
             lock.unlock()
             let deadline = DispatchWorkItem { [self] in
                 lock.lock()
-                if process.isRunning { timedOut = true; process.terminate() }
+                if !finished { timedOut = true }
+                if process.isRunning { process.terminate() }
                 lock.unlock()
                 DispatchQueue.global().asyncAfter(deadline: .now() + 1) { [self] in
                     lock.lock(); if process.isRunning { kill(process.processIdentifier, SIGKILL) }; lock.unlock()
@@ -85,29 +88,83 @@ enum SimulatorCommand {
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
             DispatchQueue.concurrentPerform(iterations: 3) { index in
-                if index == 0 { out.read() }
-                else if index == 1 { err.read() }
-                else {
-                    if let input { try? stdin.fileHandleForWriting.write(contentsOf: input) }
-                    try? stdin.fileHandleForWriting.close()
-                }
+                if index == 0 { out.read(until: isStopped) }
+                else if index == 1 { err.read(until: isStopped) }
+                else { stdin.write(input, until: isStopped) }
             }
             process.waitUntilExit(); deadline.cancel()
-            lock.lock(); let expired = timedOut, stopped = cancelled; lock.unlock()
+            lock.lock(); finished = true; let expired = timedOut, stopped = cancelled; lock.unlock()
             if stopped { throw CancellationError() }
             if expired { throw Failure(message: L10n.text("apple.simulator.timeout")) }
+            if let error = out.error ?? err.error ?? stdin.error { throw error }
             guard !out.overflow else { throw Failure(message: L10n.text("apple.simulator.output_limit")) }
             return Result(data: out.data, errors: String(decoding: err.data, as: UTF8.self), status: process.terminationStatus)
         }
+        private func isStopped() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return cancelled || timedOut
+        }
     }
-    private final class Reader: @unchecked Sendable {
+    /// A descendant may keep a pipe open after its parent exits. Poll all
+    /// three streams so the job's deadline also bounds draining and stdin.
+    private final class PipeIO: @unchecked Sendable {
         let pipe = Pipe()
         var data = Data()
         var overflow = false
-        func read() {
-            while let chunk = try? pipe.fileHandleForReading.read(upToCount: 65536), !chunk.isEmpty {
-                if data.count + chunk.count <= 64 * 1024 * 1024 { data.append(chunk) }
+        var error: Error?
+        private func nonblocking(_ fd: Int32) -> Bool {
+            let flags = fcntl(fd, F_GETFL)
+            guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) >= 0 else {
+                error = NSError(domain: NSPOSIXErrorDomain, code: Int(errno)); return false
+            }
+            return true
+        }
+        private func ready(_ fd: Int32, event: Int16, until stopped: () -> Bool) -> Bool {
+            var descriptor = pollfd(fd: fd, events: event, revents: 0)
+            while !stopped() {
+                let result = poll(&descriptor, 1, 100)
+                if result > 0 { return true }
+                if result < 0 && errno != EINTR {
+                    error = NSError(domain: NSPOSIXErrorDomain, code: Int(errno)); return false
+                }
+            }
+            return false
+        }
+        func read(until stopped: () -> Bool) {
+            let handle = pipe.fileHandleForReading, fd = handle.fileDescriptor
+            defer { try? handle.close() }
+            guard nonblocking(fd) else { return }
+            var bytes = [UInt8](repeating: 0, count: 65536)
+            while ready(fd, event: Int16(POLLIN), until: stopped) {
+                let count = Darwin.read(fd, &bytes, bytes.count)
+                if count < 0 && [EAGAIN, EINTR].contains(errno) { continue }
+                guard count > 0 else {
+                    if count < 0 { error = NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+                    return
+                }
+                if data.count + count <= 64 * 1024 * 1024 { data.append(contentsOf: bytes.prefix(count)) }
                 else { overflow = true }
+            }
+        }
+        func write(_ input: Data?, until stopped: () -> Bool) {
+            let handle = pipe.fileHandleForWriting, fd = handle.fileDescriptor
+            defer { try? handle.close() }
+            guard let input, nonblocking(fd) else { return }
+            guard fcntl(fd, F_SETNOSIGPIPE, 1) >= 0 else {
+                error = NSError(domain: NSPOSIXErrorDomain, code: Int(errno)); return
+            }
+            input.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                var offset = 0
+                while offset < bytes.count && ready(fd, event: Int16(POLLOUT), until: stopped) {
+                    let count = Darwin.write(fd, base.advanced(by: offset), min(65536, bytes.count - offset))
+                    if count < 0 && [EAGAIN, EINTR].contains(errno) { continue }
+                    guard count > 0 else {
+                        if count < 0 && errno != EPIPE { error = NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+                        return
+                    }
+                    offset += count
+                }
             }
         }
     }

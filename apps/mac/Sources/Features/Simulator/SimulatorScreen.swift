@@ -77,7 +77,7 @@ final class SimulatorScreenNSView: NSView {
         windowObserver = nil
         if let window {
             windowObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.cancelGestures(); self?.session?.connection?.releaseInputs() }
+                MainActor.assumeIsolated { self?.cancelGestures(); self?.session?.connection?.releaseInputs() }
             }
         }
         // A cached frame may arrive before the view has a window or drawable.
@@ -97,7 +97,7 @@ final class SimulatorScreenNSView: NSView {
         if let wheelPoint { _ = session?.touch(SimulatorGeometry.devicePoint(wheelPoint, orientation: orientation), phase: 2) }
         self.wheelPoint = nil
         if down { _ = session?.touch(lastPoint, phase: 2); down = false }
-        modifiers = []
+        updateModifiers([])
     }
     private func point(_ event: NSEvent) -> CGPoint? {
         guard let point = SimulatorGeometry.normalized(point: convert(event.locationInWindow, from: nil), bounds: bounds.size,
@@ -108,6 +108,7 @@ final class SimulatorScreenNSView: NSView {
         guard interactive, let point = point(event), let session else { return }
         cancelGestures()
         window?.makeFirstResponder(self)
+        updateModifiers(event.modifierFlags)
         lastPoint = point
         down = session.touch(point, phase: 0)
         if !down { session.error = L10n.text("apple.simulator.control_unavailable") }
