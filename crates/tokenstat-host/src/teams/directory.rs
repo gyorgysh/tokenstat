@@ -8,7 +8,8 @@ use tokenstat_sync::teams::*;
 
 pub(super) enum Request {
     Capabilities,
-    PrepareAuthorization,
+    AuthorizationPreview,
+    PrepareAuthorization { expected_device_key: String },
     Directory(Operation),
 }
 pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError> {
@@ -24,15 +25,25 @@ pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError
     object.remove("_accountSession");
     match method {
         "teams.capabilities" if object.is_empty() => Ok(Request::Capabilities),
+        "teams.authorizationPreview" if object.is_empty() => Ok(Request::AuthorizationPreview),
         "teams.prepareAuthorization"
-            if object.len() == 1 && object.get("confirmMetadata") == Some(&Value::Bool(true)) =>
+            if object.len() == 2 && object.get("confirmMetadata") == Some(&Value::Bool(true)) =>
         {
-            Ok(Request::PrepareAuthorization)
+            let key = object
+                .get("expectedDeviceKey")
+                .and_then(Value::as_str)
+                .filter(|key| key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()))
+                .ok_or_else(invalid)?;
+            Ok(Request::PrepareAuthorization {
+                expected_device_key: key.to_owned(),
+            })
         }
         "teams.directory" => serde_json::from_value(body)
             .map(Request::Directory)
             .map_err(|_| invalid()),
-        "teams.capabilities" | "teams.prepareAuthorization" => Err(invalid()),
+        "teams.capabilities" | "teams.authorizationPreview" | "teams.prepareAuthorization" => {
+            Err(invalid())
+        }
         _ => Err(DispatchError::new(
             "unknown_method",
             "This Team method is not available.",
@@ -85,7 +96,12 @@ pub(super) enum Operation {
     #[serde(rename = "ownership.accept")]
     AcceptOwnership {
         organization: String,
-        input: Revision,
+        input: OwnershipApproval,
+    },
+    #[serde(rename = "ownership.cancel")]
+    CancelOwnership {
+        organization: String,
+        input: OwnershipApproval,
     },
     #[serde(rename = "repositories.list")]
     Repositories {
@@ -216,6 +232,10 @@ pub(super) fn perform(client: &TeamClient, operation: Operation) -> Result<Value
             organization,
             input,
         } => api!(client.accept_ownership(&organization, input)),
+        Operation::CancelOwnership {
+            organization,
+            input,
+        } => api!(client.cancel_ownership(&organization, input)),
         Operation::Repositories { organization, page } => {
             api!(client.repositories(&organization, page))
         }
@@ -334,7 +354,15 @@ mod tests {
             )
             .is_err()
         );
-        assert!(parse("teams.prepareAuthorization", r#"{"confirmMetadata":true}"#).is_ok());
+        assert!(
+            parse(
+                "teams.prepareAuthorization",
+                &json!({"confirmMetadata":true,"expectedDeviceKey":"ab".repeat(32)}).to_string()
+            )
+            .is_ok()
+        );
+        assert!(parse("teams.prepareAuthorization", r#"{"confirmMetadata":true}"#).is_err());
+        assert!(parse("teams.authorizationPreview", "{}").is_ok());
         assert!(parse("teams.directory", r#"{"operation":"organizations.list","_accountSession":"fixture","_accountScope":{"kind":"account"}}"#).is_ok());
     }
     #[test]
@@ -342,6 +370,7 @@ mod tests {
         crate::request_context::with_remote_peer("fixture-peer", || {
             for method in [
                 "teams.capabilities",
+                "teams.authorizationPreview",
                 "teams.prepareAuthorization",
                 "teams.directory",
                 "teams.unknown",
@@ -355,7 +384,11 @@ mod tests {
     fn local_requests_need_the_current_account_receipt_before_loading_credentials() {
         for (method, params) in [
             ("teams.capabilities", "{}"),
-            ("teams.prepareAuthorization", r#"{"confirmMetadata":true}"#),
+            ("teams.authorizationPreview", "{}"),
+            (
+                "teams.prepareAuthorization",
+                r#"{"confirmMetadata":true,"expectedDeviceKey":"abababababababababababababababababababababababababababababababab"}"#,
+            ),
             ("teams.directory", r#"{"operation":"organizations.list"}"#),
         ] {
             let error = super::super::call(method, params).unwrap().unwrap_err();

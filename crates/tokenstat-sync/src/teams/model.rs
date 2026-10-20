@@ -49,11 +49,13 @@ pub struct Organization {
     pub epoch: u64,
     pub state: OrganizationState,
     pub eligible: bool,
+    pub membership_revision: u64,
     pub created_at: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OwnershipRequest {
+    pub request_id: Option<String>,
     pub from_user_id: String,
     pub to_user_id: String,
     pub expires_at: String,
@@ -74,6 +76,7 @@ pub struct Member {
     pub role: OrganizationRole,
     pub revision: u64,
     pub eligible: bool,
+    pub ownership_eligible: Option<bool>,
     pub joined_at: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,6 +217,7 @@ paged!(Activity, events, ActivityEvent);
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     pub enabled: bool,
+    pub actor_id: Option<String>,
     #[serde(default)]
     pub version: u32,
     #[serde(default)]
@@ -301,6 +305,12 @@ pub struct TransferOwnership {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OwnershipApproval {
+    pub request_id: String,
+    pub expected_revision: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SetExecutionGrant {
     pub user_id: String,
     pub device_key: String,
@@ -350,6 +360,7 @@ pub struct ExecutionReply {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferPending {
+    pub request_id: String,
     pub pending: bool,
     pub user_id: String,
     pub expires_at: String,

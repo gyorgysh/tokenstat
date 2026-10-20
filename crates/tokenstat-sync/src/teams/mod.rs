@@ -317,11 +317,23 @@ impl TeamClient {
     pub fn accept_ownership(
         &self,
         org: &str,
-        input: Revision,
+        input: OwnershipApproval,
     ) -> Result<OrganizationDetails, TeamError> {
         self.request(
             Method::POST,
             &["organizations", org, "ownership", "accept"],
+            Some(value(&input)?),
+            None,
+        )
+    }
+    pub fn cancel_ownership(
+        &self,
+        org: &str,
+        input: OwnershipApproval,
+    ) -> Result<Value, TeamError> {
+        self.request(
+            Method::DELETE,
+            &["organizations", org, "ownership"],
             Some(value(&input)?),
             None,
         )
@@ -686,6 +698,7 @@ fn refusal(status: u16, bytes: &[u8]) -> TeamError {
 impl Capabilities {
     pub fn ready(&self) -> bool {
         self.enabled
+            && self.actor_id.as_ref().is_some_and(|id| !id.is_empty())
             && self.version == 1
             && !self.authorization_required
             && ["teams:read", "teams:manage", "teams:connect"]

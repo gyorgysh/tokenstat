@@ -34,7 +34,10 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         let client = client(&owner)?;
         let result = match parsed {
             directory::Request::Capabilities => capabilities(&client),
-            directory::Request::PrepareAuthorization => prepare_authorization(&owner, &client),
+            directory::Request::AuthorizationPreview => authorization_preview(),
+            directory::Request::PrepareAuthorization {
+                expected_device_key,
+            } => prepare_authorization(&owner, &client, &expected_device_key),
             directory::Request::Directory(operation) => directory::perform(&client, operation),
         };
         owner.ensure_current().map_err(changed)?;
@@ -70,9 +73,21 @@ fn capabilities(client: &TeamClient) -> Result<Value, DispatchError> {
         Err(error) => Err(api_error(error)),
     }
 }
+fn authorization_preview() -> Result<Value, DispatchError> {
+    let identity = tokenstat_identity::MachineIdentity::load_or_create().map_err(|_| {
+        DispatchError::new(
+            "identity_unavailable",
+            "This device's connection key is unavailable.",
+        )
+    })?;
+    Ok(
+        json!({"deviceKey":identity.public_key_hex(),"deviceName":tokenstat_identity::machine_label()}),
+    )
+}
 fn prepare_authorization(
     owner: &AccountSnapshot,
     client: &TeamClient,
+    expected_device_key: &str,
 ) -> Result<Value, DispatchError> {
     let status = capabilities(client)?;
     if status["enabled"] != true {
@@ -88,6 +103,12 @@ fn prepare_authorization(
             "This device's connection key is unavailable.",
         )
     })?;
+    if identity.public_key_hex() != expected_device_key {
+        return Err(DispatchError::new(
+            "device_changed",
+            "This device's connection key changed. Review the device again.",
+        ));
+    }
     let machine = tokenstat_sync::config::ensure_machine_id().map_err(|_| {
         DispatchError::new(
             "identity_unavailable",

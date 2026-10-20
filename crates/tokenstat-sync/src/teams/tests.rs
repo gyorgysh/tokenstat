@@ -60,7 +60,7 @@ fn response(body: Value) -> Reply {
     Ok((200, serde_json::to_vec(&body).unwrap()))
 }
 fn capabilities() -> Value {
-    json!({"enabled":true,"version":1,"scopes":["teams:read","teams:manage","teams:connect"],"authorizationRequired":false,"authorizationPath":"/settings/teams/devices/abcdef0123","deviceKey":"a".repeat(64),"ticketLifetimeSeconds":60})
+    json!({"enabled":true,"version":1,"actorId":"fixture-member","scopes":["teams:read","teams:manage","teams:connect"],"authorizationRequired":false,"authorizationPath":"/settings/teams/devices/abcdef0123","deviceKey":"a".repeat(64),"ticketLifetimeSeconds":60})
 }
 
 #[test]
