@@ -278,11 +278,14 @@ try {
                                 .getInstanceByDom(
                                     document.getElementById("plot"),
                                 )
-                                .on(
-                                    "click",
-                                    (event) =>
-                                        (window.clickedChartName = event.name),
-                                );
+                                .on("click", (event) => {
+                                    window.clickedChartName = event.name;
+                                    window.clickedChartEvent = {
+                                        name: event.name,
+                                        seriesIndex: event.seriesIndex,
+                                        dataIndex: event.dataIndex,
+                                    };
+                                });
                             return [
                                 ...document.querySelectorAll("#plot svg path"),
                             ]
@@ -343,6 +346,20 @@ try {
                                 ).includes(clicked),
                                 type + " selection matches clicked category",
                             );
+                            const tooltip = await page.evaluate(() =>
+                                TokenstatChartEngine.echarts
+                                    .getInstanceByDom(
+                                        document.getElementById("plot"),
+                                    )
+                                    .getOption()
+                                    .tooltip[0].formatter(
+                                        window.clickedChartEvent,
+                                    ),
+                            );
+                            assert.ok(
+                                tooltip.includes(clicked),
+                                type + " tooltip matches the hovered category",
+                            );
                         }
                     }
                     const long = structuredClone(examples[0]);
@@ -400,6 +417,16 @@ try {
                     );
                     assert.ok(csv.includes("'=1+1"));
                     assert.ok(csv.includes('"-4"'));
+                    const fractionalTick = await page.evaluate(() =>
+                        TokenstatChartEngine.echarts
+                            .getInstanceByDom(document.getElementById("plot"))
+                            .getOption()
+                            .yAxis[0].axisLabel.formatter(0.0001),
+                    );
+                    assert.ok(
+                        fractionalTick.includes("0.0001"),
+                        "small nonzero axis ticks remain nonzero",
+                    );
                     const hostile = structuredClone(examples[0]);
                     hostile.title =
                         '<img src="https://invalid.example/x" onerror="window.pwned=1">';
@@ -438,6 +465,33 @@ try {
                     assert.equal(
                         await page.locator("#error").isVisible(),
                         true,
+                    );
+                    assert.equal(
+                        await page.locator("#description").isVisible(),
+                        false,
+                    );
+                    assert.equal(await page.locator("#source").innerText(), "");
+                    assert.equal(await page.title(), "Chart unavailable");
+                    await page.evaluate(
+                        (spec) =>
+                            window.TokenstatChart.render(spec, {
+                                reducedMotion: true,
+                            }),
+                        examples[0],
+                    );
+                    const exportCount = await page.evaluate(
+                        () => window.exports.length,
+                    );
+                    await page.evaluate(async () => {
+                        const exporting =
+                            window.TokenstatChart.exportChart("png");
+                        window.TokenstatChart.dispose();
+                        await exporting;
+                    });
+                    assert.equal(
+                        await page.evaluate(() => window.exports.length),
+                        exportCount,
+                        "disposing cancels an in-flight export",
                     );
                     assert.deepEqual(errors, [], name + " browser errors");
                 } catch (error) {

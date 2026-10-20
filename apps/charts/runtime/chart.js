@@ -111,6 +111,7 @@
         );
     }
     function compact(value) {
+        if (value !== 0 && Math.abs(value) < 1) return localized(value, 8);
         try {
             return new Intl.NumberFormat(locale, {
                 notation: "compact",
@@ -224,6 +225,17 @@
             )
             .join("\n");
     }
+    function rowForEvent(event) {
+        if (spec.type === "radar")
+            return rows.find((row) => row.si === event.dataIndex);
+        if (["pie", "donut", "funnel", "treemap"].includes(spec.type)) {
+            const category = spec.categories.indexOf(event.name);
+            return rows.find((row) => row.di === category);
+        }
+        return rows.find(
+            (row) => row.si === event.seriesIndex && row.di === event.dataIndex,
+        );
+    }
     function select(si, di) {
         const row = rows.find((row) => row.si === si && row.di === di);
         if (!row) return;
@@ -289,10 +301,7 @@
                     fontSize: 12,
                 },
                 formatter: (p) => {
-                    const row = rows.find(
-                        (row) =>
-                            row.si === p.seriesIndex && row.di === p.dataIndex,
-                    );
+                    const row = rowForEvent(p);
                     return row ? selectedText(row) : "";
                 },
             },
@@ -414,17 +423,6 @@
                     })),
                 },
             ];
-            base.tooltip.formatter = (p) =>
-                spec.series[p.dataIndex].name +
-                "\n" +
-                spec.categories
-                    .map(
-                        (c, i) =>
-                            c +
-                            ": " +
-                            numeric(spec.series[p.dataIndex].data[i]),
-                    )
-                    .join("\n");
         } else {
             const xy = ["scatter", "bubble"].includes(type),
                 heat = type === "heatmap";
@@ -793,6 +791,7 @@
                 element.remove();
             }
         }
+        if (disposed) return;
         if (
             new TextEncoder().encode(content).length >
             (base64 ? Math.ceil((8 * 1024 * 1024 * 4) / 3) : 8 * 1024 * 1024)
@@ -915,13 +914,9 @@
                         matchMedia("(prefers-reduced-motion:reduce)").matches,
                 ),
             );
-            chart.on("click", (p) => {
-                if (spec.type === "radar") select(p.dataIndex, 0);
-                else if (
-                    ["pie", "donut", "funnel", "treemap"].includes(spec.type)
-                )
-                    select(0, spec.categories.indexOf(p.name));
-                else select(p.seriesIndex, p.dataIndex);
+            chart.on("click", (event) => {
+                const row = rowForEvent(event);
+                if (row) select(row.si, row.di);
             });
             table();
             $("root").setAttribute("aria-busy", "false");
@@ -939,6 +934,13 @@
             $("selection").hidden = true;
             document.querySelector(".toolbar").hidden = true;
             $("title").textContent = t("unavailable");
+            document.title = t("unavailable");
+            for (const key of ["subtitle", "description"]) {
+                $(key).hidden = true;
+                $(key).textContent = "";
+            }
+            $("source").textContent = "";
+            $("status").textContent = "";
             $("error").textContent = error.message;
             $("error").hidden = false;
             $("plot").hidden = true;
@@ -1061,12 +1063,10 @@
                 legend: chart?.getOption().legend?.[0]?.selected || {},
                 expanded,
                 zoom:
-                    chart
-                        ?.getOption()
-                        .dataZoom?.map((item) => ({
-                            start: item.start,
-                            end: item.end,
-                        })) || [],
+                    chart?.getOption().dataZoom?.map((item) => ({
+                        start: item.start,
+                        end: item.end,
+                    })) || [],
             };
         },
     });
