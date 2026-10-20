@@ -6,10 +6,10 @@ private func check(_ value: @autoclosure () -> Bool, _ message: String) { precon
 private func owner(_ name: String) -> TeamAccountOwner {
     TeamAccountOwner(scope: .account(origin: "https://accounts.example.test", handle: name)!, generation: 1, session: "fixture-\(name)")
 }
-private func organization(_ id: String, _ account: String = "alpha", eligible: Bool = true) -> JSONValue {
+private func organization(_ id: String, _ account: String = "alpha", eligible: Bool = true, ownerRecovery: Bool = false) -> JSONValue {
     .object(["id":.string(id), "slug":.string(id), "name":.string("Example \(id)"), "ownerId":.string("fixture-owner"),
-        "role":.string(eligible ? "owner" : "member"), "revision":.int(1), "epoch":.int(1), "membershipRevision":.int(2),
-        "state":.string("active"), "eligible":.bool(eligible), "createdAt":.string("2026-01-01T00:00:00.000Z")])
+        "role":.string(eligible || ownerRecovery ? "owner" : "member"), "revision":.int(1), "epoch":.int(1), "membershipRevision":.int(2),
+        "state":.string(ownerRecovery ? "paused" : "active"), "eligible":.bool(eligible), "createdAt":.string("2026-01-01T00:00:00.000Z")])
 }
 private actor Fixture {
     var calls: [(String, String)] = []
@@ -18,6 +18,7 @@ private actor Fixture {
     var enabled = true
     var authorized = true
     var eligible = true
+    var ownerRecovery = false
     var paginate = false
     var failures: [String: String] = [:]
     func api() -> TeamAPI { TeamAPI { method, params, owner in try await self.send(method, params, owner) } }
@@ -27,6 +28,7 @@ private actor Fixture {
     func reject(_ key: String) { waiting.removeValue(forKey: key)?.resume(throwing: TeamRequestFailure(code: "fixture_error", message: "Previous organization failure")) }
     func revoke() { authorized = false }
     func downgrade() { eligible = false }
+    func recoverOwner() { eligible = false; ownerRecovery = true }
     func usePages() { paginate = true }
     func fail(_ operation: String, code: String) { failures[operation] = code }
     func send(_ method: TeamHostMethod, _ params: JSONValue, _ owner: TeamAccountOwner) async throws -> JSONValue {
@@ -42,11 +44,11 @@ private actor Fixture {
         case "organizations.list":
             let page = fields["page"]
             if case let .object(values) = page, values["offset"] == .int(100) {
-                return .object(["organizations":.array([organization("org_a", eligible: eligible), organization("org_c", eligible: eligible)]), "nextOffset":.null])
+                return .object(["organizations":.array([organization("org_a", eligible: eligible, ownerRecovery: ownerRecovery), organization("org_c", eligible: eligible, ownerRecovery: ownerRecovery)]), "nextOffset":.null])
             }
-            return .object(["organizations":.array(owner.scope.identity == "alpha" ? [organization("org_a", eligible: eligible), organization("org_b", eligible: eligible)] : [organization("org_z", "beta")]), "nextOffset":paginate ? .int(100) : .null])
+            return .object(["organizations":.array(owner.scope.identity == "alpha" ? [organization("org_a", eligible: eligible, ownerRecovery: ownerRecovery), organization("org_b", eligible: eligible, ownerRecovery: ownerRecovery)] : [organization("org_z", "beta")]), "nextOffset":paginate ? .int(100) : .null])
         case "inbox.list", "invitations.list": return .object(["invitations":.array([]), "nextOffset":.null])
-        case "organizations.get": return .object(["organization":organization(org, eligible: eligible), "ownershipRequest":.null])
+        case "organizations.get": return .object(["organization":organization(org, eligible: eligible, ownerRecovery: ownerRecovery), "ownershipRequest":.null])
         case "members.list": return members(org)
         case "repositories.list": return .object(["repositories":.array([]), "nextOffset":.null])
         case "members.remove": return .object(["removed":.bool(true)])
@@ -76,6 +78,7 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         try await lateError()
         await revokedConsent()
         await lowerTierRecovery()
+        await ownerInvitationRecovery()
         await paginatedDirectory()
         try await selectionOutsideFirstPage()
         try await authorizationRevokedDuringWrite()
@@ -169,6 +172,15 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         let store = TeamStore(api: await fixture.api()); await store.bind(to: owner("alpha")); await store.loadMoreOrganizations()
         check(store.organizations.map(\.id) == ["org_a", "org_b", "org_c"], "Directory pagination duplicated or lost organizations")
         check(store.organizationsNextOffset == nil, "Directory kept a completed cursor")
+    }
+    @MainActor static func ownerInvitationRecovery() async {
+        let fixture = Fixture(); await fixture.recoverOwner()
+        let store = TeamStore(api: await fixture.api()); await store.bind(to: owner("alpha"))
+        store.select(store.organizations[0]); await store.refreshSelected()
+        let operations = await fixture.calls.map(\.0)
+        check(operations.contains("members.list") && operations.contains("invitations.list"), "A downgraded owner lost recovery access to pending invitations")
+        check(!operations.contains("repositories.list"), "A paused organization queried repository content")
+        check(store.directory != nil && store.error == nil, "Owner recovery could not load its directory")
     }
     @MainActor static func selectionOutsideFirstPage() async throws {
         let fixture = Fixture(), store = TeamStore(api: await fixture.api())

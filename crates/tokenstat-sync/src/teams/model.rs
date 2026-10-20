@@ -132,9 +132,20 @@ pub struct InvitationCreated {
     pub secret: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvitationRepositoryAccess {
+    pub repository_id: String,
+    pub name: String,
+    pub role: RepositoryRole,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InvitationPreview {
     pub invitation: Invitation,
     pub eligible: bool,
+    pub available: bool,
+    pub unavailable_reason: Option<String>,
+    pub repository_access: Vec<InvitationRepositoryAccess>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

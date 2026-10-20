@@ -168,6 +168,7 @@ enum TeamSheet: Identifiable {
     case accept(TeamMutationContext, TeamInvitation)
     case invitationAction(TeamMutationContext, TeamInvitation, renewing: Bool)
     case repository(TeamMutationContext)
+    case renameRepository(TeamMutationContext, TeamRepository)
     case access(TeamMutationContext, TeamRepository)
     case rename(TeamMutationContext)
     case transfer(TeamMutationContext)
@@ -184,6 +185,7 @@ enum TeamSheet: Identifiable {
         case let .accept(_, invitation): "accept:\(invitation.id)"
         case let .invitationAction(_, invitation, renewing): "invitation:\(invitation.id):\(renewing)"
         case .repository: "repository"
+        case let .renameRepository(_, repository): "rename-repository:\(repository.id)"
         case let .access(_, repository): "access:\(repository.id)"
         case .rename: "rename"
         case .transfer: "transfer"

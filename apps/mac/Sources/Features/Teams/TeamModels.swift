@@ -127,7 +127,14 @@ struct TeamInvitation: Codable, Identifiable, Hashable, Sendable {
     let organizationSlug: String?
 }
 struct TeamInvitationCreated: Decodable, Sendable { let invitation: TeamInvitation; let invitationURL: String }
-struct TeamInvitationPreview: Decodable, Sendable { let invitation: TeamInvitation; let eligible: Bool }
+struct TeamInvitationRepositoryAccess: Codable, Sendable { let repositoryId: String; let name: String; let role: TeamRepositoryRole }
+struct TeamInvitationPreview: Decodable, Sendable {
+    let invitation: TeamInvitation
+    let eligible: Bool
+    let available: Bool
+    let unavailableReason: String?
+    let repositoryAccess: [TeamInvitationRepositoryAccess]
+}
 struct TeamCheckout: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let organizationId: String

@@ -15,7 +15,8 @@ Use `--open` to open the fixture. The toolbar offers light and dark appearance,
 three window widths, and individual forms. Its bundle identifier is
 `ai.tokenstat.qa.teams`. Launch arguments `--fixture-state empty`,
 `authorization`, `unavailable`, `failure`, `paused`, or `member` select recovery
-and permission states. The default is `ready`.
+and permission states. `invitation` and `expiredInvitation` show recipient
+review states on iOS. The default is `ready`.
 
 Build the same views for the iOS simulator with:
 
@@ -42,5 +43,5 @@ refuses writes.
 The scheme also has native iOS UI tests. Pass the separate device’s identifier
 with `-destination 'platform=iOS Simulator,id=YOUR_QA_DEVICE_ID'` and run `test`
 with `-parallel-testing-enabled NO`. Tests check default repository access,
-write refusal, device consent, larger text and recovery states. Screenshots are
+write refusal, device consent, exact invitation access, expiry, larger text and recovery states. Screenshots are
 stored as XCTest attachments in the result bundle.

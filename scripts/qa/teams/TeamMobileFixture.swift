@@ -38,7 +38,9 @@ import SwiftUI
         }
         .task {
             let owner = TeamAccountOwner(scope: .account(origin: "https://accounts.example.test", handle: "example-owner")!, generation: 1, session: "fixture")
-            await store.bind(to: owner); store.select(store.organizations.first); await store.refreshSelected()
+            await store.bind(to: owner)
+            if TeamFixtureData.state != .invitation && TeamFixtureData.state != .expiredInvitation { store.select(store.organizations.first) }
+            await store.refreshSelected()
         }
         .task(id: store.selectionKey) { await store.refreshSelected() }
     }

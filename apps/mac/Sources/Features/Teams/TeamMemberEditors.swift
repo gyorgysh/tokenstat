@@ -183,16 +183,30 @@ struct TeamInvitationEditor: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         TeamEditorFrame(title: L10n.text("common.teams.join_organization"), subtitle: preview?.invitation.organizationName ?? invitation.organizationName ?? "", icon: .invite,
-            submitTitle: L10n.text("common.teams.join_organization"), submitIcon: .approve, valid: preview?.eligible == true && preview?.invitation.state == "pending", saving: saving || store.isMutating, error: error, submit: accept) {
+            submitTitle: L10n.text("common.teams.join_organization"), submitIcon: .approve, valid: preview?.eligible == true && preview?.available == true && preview?.invitation.state == "pending", saving: saving || store.isMutating, error: error, submit: accept) {
             if let preview {
                 LabeledContent(L10n.text("common.teams.your_role"), value: preview.invitation.role.label)
-                Text(L10n.text("common.teams.invitation_assignments", String(preview.invitation.assignments.count))).font(Theme.body)
+                if preview.available {
+                    Text(L10n.text("common.teams.repository_access")).font(Theme.body.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    if preview.repositoryAccess.isEmpty {
+                        Text(L10n.text("common.teams.join_no_repository_access")).font(Theme.body).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(preview.repositoryAccess, id: \.repositoryId) { repository in
+                            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                                Text(repository.name).font(Theme.body.weight(.medium))
+                                Text(repository.role.label).font(Theme.callout).foregroundStyle(TeamColors.action)
+                                Text(repository.role.detail).font(Theme.callout).foregroundStyle(.secondary)
+                            }.fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    TeamNotice(message: L10n.text("common.teams.execution_separate"))
+                }
                 TeamNotice(message: L10n.text("common.teams.join_content_detail"))
                 if !preview.eligible {
                     TeamNotice(message: L10n.text("common.teams.patron_invitation"), warning: true)
                     Button(L10n.text("common.teams.view_plan"), .plans) { dismiss(); onAccount() }.buttonStyle(TeamButtonStyle())
                 }
-                if preview.invitation.state != "pending" { TeamNotice(message: L10n.text("common.teams.invitation_unavailable"), warning: true) }
+                if !preview.available { TeamNotice(message: preview.unavailableReason == "organization_paused" ? L10n.text("common.teams.organization_paused") : L10n.text("common.teams.invitation_unavailable"), warning: true) }
             } else if error != nil {
                 Button(L10n.text("common.retry"), .refresh) { Task { await loadPreview() } }.buttonStyle(TeamButtonStyle())
             } else { ProgressView().controlSize(.small) }

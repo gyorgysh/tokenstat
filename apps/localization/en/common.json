@@ -419,7 +419,6 @@
   "common.teams.invalid_link": "The account server returned an invalid link. Refresh and try again.",
   "common.teams.invitation_admin": "Invitations are managed by admins",
   "common.teams.invitation_admin_detail": "Ask your organization’s owner or an admin to invite someone.",
-  "common.teams.invitation_assignments": "Assigned repositories: {0}",
   "common.teams.invitation_expiry": "This link expires in 7 days and can only be used by the invited account. You can revoke it from Invitations.",
   "common.teams.invitation_list_detail": "Create links for specific accounts and review pending invitations.",
   "common.teams.invitation_ready": "Invitation ready",
@@ -509,7 +508,10 @@
   "common.teams.personal": "Personal",
   "common.teams.scope": "Account scope",
   "common.teams.manage_teams": "Manage teams",
-  "common.teams.invitation_unavailable": "This invitation was accepted, revoked or has expired. Ask an admin for a new invitation.",
+  "common.teams.invitation_unavailable": "This invitation is no longer available. Ask the owner or an admin for a new invitation.",
   "common.teams.renew_invitation_detail": "Creating a new link immediately stops the previous link from working. Only the invited account can use the new link.",
-  "common.teams.revoke_invitation_detail": "The invited account will no longer be able to join with this invitation. You can create a new invitation later."
+  "common.teams.revoke_invitation_detail": "The invited account will no longer be able to join with this invitation. You can create a new invitation later.",
+  "common.teams.rename_repository": "Rename repository",
+  "common.teams.repository_rename_detail": "Change the shared project name. Local folder names, branches and files stay on each computer.",
+  "common.teams.join_no_repository_access": "No repository access is assigned. An owner, admin or maintainer can assign access after you join."
 }

@@ -123,7 +123,7 @@ final class TeamStore {
             async let repositories: TeamRepositories = organization.isActive
                 ? api.request(.directory, ["operation": .string("repositories.list"), "organization": .string(org), "page": Self.page()], owner: owner)
                 : TeamRepositories(repositories: [], nextOffset: nil)
-            async let invitations: TeamInvitations = organization.role.canManage && organization.eligible
+            async let invitations: TeamInvitations = organization.role.canManage && (organization.eligible || organization.role == .owner)
                 ? api.request(.directory, ["operation": .string("invitations.list"), "organization": .string(org), "page": Self.page()], owner: owner)
                 : TeamInvitations(invitations: [], nextOffset: nil)
             let (roster, projects, pending) = try await (members, repositories, invitations)

@@ -46,6 +46,26 @@ final class TeamFixtureUITests: XCTestCase {
         consent.tap()
         XCTAssertTrue(submit.isEnabled)
     }
+    func testInvitationReviewShowsExactAccessAndRefusesExpiredInvitations() {
+        let app = launch("invitation")
+        XCTAssertTrue(app.buttons["Review invitation"].waitForExistence(timeout: 15))
+        app.buttons["Review invitation"].tap()
+        XCTAssertTrue(app.staticTexts["Partner website"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Viewer"].exists)
+        let submit = app.buttons["team.editor.submit"]
+        XCTAssertTrue(submit.isEnabled)
+        capture(app, "Invitation repository access")
+        app.terminate()
+        app.launchArguments = ["--fixture-state", "expiredInvitation"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Review invitation"].waitForExistence(timeout: 15))
+        app.buttons["Review invitation"].tap()
+        XCTAssertTrue(submit.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This invitation is no longer available")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Partner website"].exists)
+        XCTAssertFalse(submit.isEnabled)
+        capture(app, "Expired invitation")
+    }
     func testEmptyDirectoryAndUnavailableRecovery() {
         let app = launch("empty")
         XCTAssertTrue(app.staticTexts["No organizations yet"].waitForExistence(timeout: 15))

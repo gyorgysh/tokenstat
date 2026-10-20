@@ -303,6 +303,7 @@ struct TeamManagementView: View {
                                 }
                                 if organization.role.canManage || repository.role == .maintainer {
                                     Button(L10n.text("common.teams.manage_access"), .permissions) { if let context = store.mutationContext { sheet = .access(context, repository) } }.buttonStyle(TeamButtonStyle())
+                                    Button(L10n.text("common.teams.rename_repository"), .edit) { if let context = store.mutationContext { sheet = .renameRepository(context, repository) } }.buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)
                                 }
                             }.padding(Theme.Space.l).frame(maxWidth: .infinity, alignment: .leading).background(Theme.panel)
                             ThemeRule()
