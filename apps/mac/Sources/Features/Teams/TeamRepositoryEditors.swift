@@ -52,7 +52,7 @@ struct TeamRepositoryAccessEditor: View {
             if loading && members.isEmpty { ProgressView().controlSize(.small) }
             else {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Picker(L10n.text("common.teams.member"), selection: $selectedId) {
+                    TeamPickerField(title: L10n.text("common.teams.member"), selection: $selectedId) {
                         Text(L10n.text("common.teams.choose_member")).tag(Optional<String>.none)
                         ForEach(filtered) { member in
                             Text(member.handle.map { "\(member.name) (@\($0))" } ?? member.name).tag(Optional(member.id))
@@ -64,7 +64,7 @@ struct TeamRepositoryAccessEditor: View {
                 }
                 if let member = selected {
                     TeamPersonLabel(id: member.id, name: member.name, handle: member.handle, avatar: member.avatar, owner: context.owner)
-                    Picker(L10n.text("common.teams.access_level"), selection: $role) {
+                    TeamPickerField(title: L10n.text("common.teams.access_level"), selection: $role) {
                         Text(L10n.text("common.teams.no_access")).tag(Optional<TeamRepositoryRole>.none)
                         ForEach(TeamRepositoryRole.allCases) { value in Text(value.label).tag(Optional(value)) }
                     }.disabled(saving)

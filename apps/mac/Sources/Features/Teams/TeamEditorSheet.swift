@@ -57,11 +57,11 @@ struct TeamEditorFrame<Content: View>: View {
                 content()
             }
         } actions: {
-            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }.buttonStyle(TeamButtonStyle()).keyboardShortcut(.cancelAction)
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }.buttonStyle(TeamButtonStyle()).keyboardShortcut(.cancelAction).accessibilityIdentifier("team.editor.cancel")
             Spacer(minLength: Theme.Space.s)
             if saving { ProgressView().controlSize(.small) }
             Button(submitTitle, submitIcon, role: destructive ? .destructive : nil, action: submit)
-                .buttonStyle(TeamButtonStyle(primary: true)).disabled(!valid || saving).keyboardShortcut(.defaultAction)
+                .buttonStyle(TeamButtonStyle(primary: true)).disabled(!valid || saving).keyboardShortcut(.defaultAction).accessibilityIdentifier("team.editor.submit")
         }
     }
 }
@@ -84,7 +84,7 @@ struct TeamAuthorizationEditor: View {
                         Text(L10n.text("common.teams.check_device_key")).font(Theme.callout).foregroundStyle(.secondary)
                         Text(preview.deviceKey).font(Theme.mono(12)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
-                    Toggle(L10n.text("common.teams.metadata_confirm"), isOn: $confirmed).toggleStyle(.checkboxForTeam)
+                    Toggle(L10n.text("common.teams.metadata_confirm"), isOn: $confirmed).toggleStyle(.checkboxForTeam).accessibilityIdentifier("team.authorization.confirm")
                 }
             } else if error != nil {
                 Button(L10n.text("common.retry"), .refresh) { Task { await loadPreview() } }.buttonStyle(TeamButtonStyle())

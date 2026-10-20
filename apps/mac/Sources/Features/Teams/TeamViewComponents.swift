@@ -193,3 +193,18 @@ enum TeamSheet: Identifiable {
         }
     }
 }
+
+/// Menu picker titles are not visible outside Form on iOS. Keep the field name
+/// separate so every repository and permission level can be identified.
+struct TeamPickerField<Selection: Hashable, Options: View>: View {
+    let title: String
+    @Binding var selection: Selection
+    @ViewBuilder var options: () -> Options
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text(title).font(Theme.headline).accessibilityHidden(true)
+            Picker(title, selection: $selection, content: options)
+                .pickerStyle(.menu).labelsHidden()
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

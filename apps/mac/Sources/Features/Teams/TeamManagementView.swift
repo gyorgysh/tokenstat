@@ -75,18 +75,22 @@ struct TeamManagementView: View {
     }
     private func organizationNavigation(_ organization: TeamOrganization) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
+            #if os(macOS)
             HStack(spacing: Theme.Space.s) {
                 Text(organization.name).font(Theme.headline).lineLimit(2)
                 TeamRoleBadge(text: organization.role.label)
                 Spacer(minLength: 0)
             }
-            #if os(macOS)
             ViewThatFits(in: .horizontal) {
                 sectionPicker.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
                 sectionPicker.pickerStyle(.menu)
             }
             #else
-            sectionPicker.pickerStyle(.menu)
+            HStack(spacing: Theme.Space.m) {
+                TeamRoleBadge(text: organization.role.label)
+                Spacer(minLength: 0)
+                sectionPicker.pickerStyle(.menu)
+            }
             #endif
             if !organization.eligible {
                 TeamNotice(message: organization.role == .owner ? L10n.text("common.teams.owner_plan_recovery") : L10n.text("common.teams.member_plan_recovery"), warning: true)

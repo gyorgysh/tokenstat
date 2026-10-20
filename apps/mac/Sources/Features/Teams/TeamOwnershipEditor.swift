@@ -15,7 +15,7 @@ struct TeamOwnershipEditor: View {
         TeamEditorFrame(title: L10n.text("common.teams.transfer_ownership"), subtitle: organization?.name ?? "", submitTitle: L10n.text("common.teams.send_ownership_request"), submitIcon: .move,
             valid: confirmed && successor != nil && organization?.role == .owner, saving: saving || store.isMutating, error: error, submit: save) {
             Text(L10n.text("common.teams.transfer_detail")).font(Theme.body).foregroundStyle(.secondary)
-            Picker(L10n.text("common.teams.next_owner"), selection: $successor) {
+            TeamPickerField(title: L10n.text("common.teams.next_owner"), selection: $successor) {
                 Text(L10n.text("common.teams.choose_member")).tag(Optional<String>.none)
                 ForEach(candidates) { member in Text(member.name).tag(Optional(member.id)) }
             }

@@ -19,9 +19,11 @@ targets:
   TeamUIFixture:
     type: application
     supportedDestinations: [macOS, iOS]
+    scheme:
+      testTargets: [TeamFixtureUITests]
     sources:
       - path: .
-        excludes: [project.yml, "*.xcodeproj"]
+        excludes: [project.yml, "*.xcodeproj", UITests]
       - path: ../../../apps/mac/Sources/Client/ClientKeyboardDismissButton.swift
       - path: ../../../apps/mac/Sources/Features/Teams
       - path: ../../../apps/mac/Sources/Features/Work/WorkReference.swift
@@ -44,3 +46,13 @@ targets:
         buildPhase: resources
       - path: ../../../apps/mac/Resources/Fonts
         buildPhase: resources
+  TeamFixtureUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: TeamUIFixture
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.tokenstat.qa.teams.uitests
+        TEST_TARGET_NAME: TeamUIFixture

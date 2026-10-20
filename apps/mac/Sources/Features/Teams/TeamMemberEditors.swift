@@ -38,10 +38,10 @@ struct TeamInviteEditor: View {
                 submitTitle: L10n.text("common.teams.create_invitation"), submitIcon: .invite, valid: valid, saving: saving || store.isMutating, error: error, submit: save) {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     Text(L10n.text("common.teams.tokenstat_handle")).font(Theme.headline)
-                    TextField(L10n.text("common.teams.handle_placeholder"), text: $handle).textFieldStyle(ThemedFieldStyle()).teamIdentifierInput()
+                    TextField(L10n.text("common.teams.handle_placeholder"), text: $handle).accessibilityIdentifier("team.invitation.handle").textFieldStyle(ThemedFieldStyle()).teamIdentifierInput()
                     Text(L10n.text("common.teams.handle_detail")).font(Theme.callout).foregroundStyle(.secondary)
                 }
-                Picker(L10n.text("common.teams.organization_role"), selection: $role) {
+                TeamPickerField(title: L10n.text("common.teams.organization_role"), selection: $role) {
                     Text(TeamOrganizationRole.member.label).tag(TeamOrganizationRole.member)
                     if organization?.role == .owner { Text(TeamOrganizationRole.admin.label).tag(TeamOrganizationRole.admin) }
                 }
@@ -50,7 +50,7 @@ struct TeamInviteEditor: View {
                     Text(L10n.text("common.teams.repository_access")).font(Theme.headline)
                     Text(L10n.text("common.teams.invite_repository_detail")).font(Theme.callout).foregroundStyle(.secondary)
                     ForEach(repositories) { repository in
-                        Picker(repository.name, selection: Binding<TeamRepositoryRole?>(get: { assignments[repository.id] }, set: { assignments[repository.id] = $0 })) {
+                        TeamPickerField(title: repository.name, selection: Binding<TeamRepositoryRole?>(get: { assignments[repository.id] }, set: { assignments[repository.id] = $0 })) {
                             Text(L10n.text("common.teams.no_access")).tag(Optional<TeamRepositoryRole>.none)
                             ForEach(TeamRepositoryRole.allCases) { access in Text(access.label).tag(Optional(access)) }
                         }.disabled(assignments.count >= 50 && assignments[repository.id] == nil)
@@ -103,7 +103,7 @@ struct TeamMemberRoleEditor: View {
         TeamEditorFrame(title: L10n.text("common.teams.change_role"), subtitle: member.name,
             submitTitle: L10n.text("common.save"), valid: role != member.role && member.role != .owner, saving: saving || store.isMutating, error: error, submit: save) {
             TeamPersonLabel(id: member.id, name: member.name, handle: member.handle, avatar: member.avatar, owner: context.owner)
-            Picker(L10n.text("common.teams.organization_role"), selection: $role) {
+            TeamPickerField(title: L10n.text("common.teams.organization_role"), selection: $role) {
                 Text(TeamOrganizationRole.member.label).tag(TeamOrganizationRole.member)
                 Text(TeamOrganizationRole.admin.label).tag(TeamOrganizationRole.admin)
             }

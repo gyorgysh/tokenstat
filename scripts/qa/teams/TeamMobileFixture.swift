@@ -28,6 +28,7 @@ import SwiftUI
                 }
         }
         .tint(Theme.accent)
+        .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("--fixture-large-text") ? .accessibility3 : .large)
         .preferredColorScheme(dark ? .dark : .light)
         .environment(\.teamCopy, { _ in })
         .environment(\.openURL, OpenURLAction { _ in .handled })

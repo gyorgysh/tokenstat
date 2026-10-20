@@ -38,3 +38,9 @@ repository roles, ownership and deletion confirmations. Test narrow windows,
 both appearances, larger text, keyboard navigation and VoiceOver. These fixtures
 supplement the account and transport integration tests; their API deliberately
 refuses writes.
+
+The scheme also has native iOS UI tests. Pass the separate device’s identifier
+with `-destination 'platform=iOS Simulator,id=YOUR_QA_DEVICE_ID'` and run `test`
+with `-parallel-testing-enabled NO`. Tests check default repository access,
+write refusal, device consent, larger text and recovery states. Screenshots are
+stored as XCTest attachments in the result bundle.
