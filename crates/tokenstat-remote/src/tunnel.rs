@@ -27,6 +27,9 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{HandshakeError, Message, WebSocket};
 
 use crate::{RemoteError, Transport};
+mod team;
+pub use team::TeamChannelHandle;
+use tokenstat_identity::teams::TeamTicket;
 
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
@@ -228,6 +231,7 @@ pub struct TunnelStatus {
 /// only ever hands a state back to `ChannelTransport::from_inbound`.
 pub struct ChannelState {
     id: u32,
+    team: Option<team::TeamChannel>,
     inner: Mutex<ChannelInner>,
     cond: Condvar,
 }
@@ -243,6 +247,7 @@ impl ChannelState {
     fn new(id: u32) -> Self {
         Self {
             id,
+            team: None,
             inner: Mutex::new(ChannelInner {
                 buffer: Vec::new(),
                 opened: false,
@@ -352,9 +357,37 @@ impl TunnelSession {
         peer: PublicKey,
         purpose: ChannelPurpose,
     ) -> Result<ChannelTransport, RemoteError> {
+        self.open(peer, purpose, None)
+    }
+
+    /// Separate admission for a scoped Teams connection. A ticket is still
+    /// unverified here: both relay and host must validate its signature,
+    /// current grants and the keys authenticated by Noise.
+    pub fn open_team_channel(
+        self: &Arc<Self>,
+        peer: PublicKey,
+        ticket: &TeamTicket,
+    ) -> Result<ChannelTransport, RemoteError> {
+        self.open(peer, ChannelPurpose::Chat, Some(ticket))
+    }
+
+    fn open(
+        self: &Arc<Self>,
+        peer: PublicKey,
+        purpose: ChannelPurpose,
+        ticket: Option<&TeamTicket>,
+    ) -> Result<ChannelTransport, RemoteError> {
         if self.stopped.load(Ordering::Relaxed) {
             return Err(RemoteError::Tunnel("tunnel is stopped".into()));
         }
+        let (op, open_payload) = if let Some(ticket) = ticket {
+            (team::CH_TEAM_OPEN, team::open_payload(&peer, ticket)?)
+        } else {
+            (
+                CH_OPEN,
+                format!("{}:{}", hex(&peer), purpose.as_str()).into_bytes(),
+            )
+        };
         let sequence = self
             .next_channel
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
@@ -363,7 +396,9 @@ impl TunnelSession {
             })
             .map_err(|_| RemoteError::Tunnel("channel identifiers exhausted".into()))?;
         let id = DIAL_ID_BASE + sequence;
-        let state = Arc::new(ChannelState::new(id));
+        let mut state = ChannelState::new(id);
+        state.team = ticket.map(|ticket| team::TeamChannel::new(ticket.clone(), Some(peer)));
+        let state = Arc::new(state);
         {
             let mut channels = self.channels.lock().unwrap_or_else(|e| e.into_inner());
             ensure_running(self)?;
@@ -372,8 +407,7 @@ impl TunnelSession {
             }
             channels.insert(id, Arc::clone(&state));
         }
-        let open_payload = format!("{}:{}", hex(&peer), purpose.as_str());
-        if let Err(error) = self.send_channel_frame(CH_OPEN, id, open_payload.as_bytes()) {
+        if let Err(error) = self.send_channel_frame(op, id, &open_payload) {
             self.forget_channel(&state);
             return Err(error);
         }
@@ -626,6 +660,15 @@ impl ChannelTransport {
     pub fn channel_id(&self) -> u32 {
         self.state.id
     }
+
+    /// Teams identity is connection-scoped and never enters the personal
+    /// peer allowlist. Keep this handle when handing the transport to Noise.
+    pub fn team_authorization(&self) -> Option<TeamChannelHandle> {
+        self.state
+            .team
+            .as_ref()
+            .map(|_| TeamChannelHandle::new(Arc::clone(&self.session), Arc::clone(&self.state)))
+    }
 }
 
 impl Read for ChannelTransport {
@@ -636,6 +679,15 @@ impl Read for ChannelTransport {
         let timeout = *self.read_timeout.lock().unwrap_or_else(|e| e.into_inner());
         let mut inner = self.state.inner.lock().unwrap_or_else(|e| e.into_inner());
         loop {
+            // Revocation ends a Team stream before queued content is drained.
+            // Preserve the original tail-draining behavior for personal peers.
+            if self.state.team.is_some() && (inner.eof || inner.error.is_some()) {
+                inner.buffer.clear();
+                return match &inner.error {
+                    Some(error) => Err(io::Error::other(error.clone())),
+                    None => Ok(0),
+                };
+            }
             if !inner.buffer.is_empty() {
                 let count = output.len().min(inner.buffer.len());
                 output[..count].copy_from_slice(&inner.buffer[..count]);
@@ -1180,54 +1232,12 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
     let payload = &frame[5..];
     let channels = &session.channels;
 
+    if team::dispatch(session, op, id, payload) {
+        return;
+    }
+
     match op {
-        CH_OPENED => {
-            // Our own dial: mark it open. An id we do not know, or one that
-            // already died on the last socket, is the relay dialling us.
-            // Relay inbound ids restart at 1 on every new socket. Leaving a
-            // dead entry in the map would swallow that OPENED as a late ack
-            // of our own dial, and the host would never handshake.
-            let mut map = channels.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(state) = map.get(&id) {
-                let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
-                if inner.error.is_none() && !inner.eof {
-                    inner.opened = true;
-                    state.cond.notify_all();
-                    return;
-                }
-            }
-            // Refuse rather than queue past the bound: a flood of opens must
-            // not grow the map or the host's backlog without limit. A live
-            // channel already holding this id must not be overwritten either:
-            // the duplicate is refused, not merged into the existing channel.
-            // A dead entry (errored on the last socket) is still replaced, so
-            // a reconnect reuses the id. The map guard is dropped before the
-            // refusal frame so a slow outbound queue cannot pin every other
-            // channel's routing.
-            let state = Arc::new(ChannelState::new(id));
-            let mut queued = false;
-            if !session.stopped.load(Ordering::Relaxed)
-                && id < DIAL_ID_BASE
-                && map.len() < MAX_CHANNELS
-                && !live_duplicate(&map, id)
-            {
-                map.insert(id, Arc::clone(&state));
-                queued = session
-                    .inbound_tx
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .as_ref()
-                    .and_then(|tx| tx.try_send(state).ok())
-                    .is_some();
-                if !queued {
-                    map.remove(&id);
-                }
-            }
-            drop(map);
-            if !queued {
-                let _ = session.queue_channel_frame(CH_CLOSE, id, &[], false);
-            }
-        }
+        CH_OPENED => opened(session, id, None),
         CH_DATA | CH_CLOSE | CH_ERROR => {
             let state = {
                 let map = channels.lock().unwrap_or_else(|e| e.into_inner());
@@ -1237,7 +1247,12 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
                 let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
                 match op {
                     CH_DATA => {
-                        if inner.buffer.len().saturating_add(payload.len()) > MAX_CHANNEL_BUFFER {
+                        let limit = if state.team.is_some() {
+                            team::MAX_BUFFER
+                        } else {
+                            MAX_CHANNEL_BUFFER
+                        };
+                        if inner.buffer.len().saturating_add(payload.len()) > limit {
                             inner.error = Some(String::from("channel buffer overflow"));
                         } else {
                             inner.buffer.extend_from_slice(payload);
@@ -1253,6 +1268,68 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
             }
         }
         _ => {}
+    }
+}
+
+fn opened(session: &Arc<TunnelSession>, id: u32, ticket: Option<TeamTicket>) {
+    let channels = &session.channels;
+    // Our own dial: mark it open. An id we do not know, or one that
+    // already died on the last socket, is the relay dialling us.
+    // Relay inbound ids restart at 1 on every new socket. Leaving a
+    // dead entry in the map would swallow that OPENED as a late ack
+    // of our own dial, and the host would never handshake.
+    let mut map = channels.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(state) = map.get(&id) {
+        let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if inner.error.is_none() && !inner.eof {
+            if !team::matches_open(state, ticket.as_ref()) {
+                // A Teams acknowledgement cannot upgrade a personal
+                // channel, and a legacy acknowledgement cannot strip
+                // a Team channel's scope.
+                if state.team.is_some() {
+                    inner.error = Some("team admission changed".into());
+                    inner.buffer.clear();
+                    state.cond.notify_all();
+                }
+                return;
+            }
+            inner.opened = true;
+            state.cond.notify_all();
+            return;
+        }
+    }
+    // Refuse rather than queue past the bound: a flood of opens must
+    // not grow the map or the host's backlog without limit. A live
+    // channel already holding this id must not be overwritten either:
+    // the duplicate is refused, not merged into the existing channel.
+    // A dead entry (errored on the last socket) is still replaced, so
+    // a reconnect reuses the id. The map guard is dropped before the
+    // refusal frame so a slow outbound queue cannot pin every other
+    // channel's routing.
+    let mut state = ChannelState::new(id);
+    state.team = ticket.map(|ticket| team::TeamChannel::new(ticket, None));
+    let state = Arc::new(state);
+    let mut queued = false;
+    if !session.stopped.load(Ordering::Relaxed)
+        && id < DIAL_ID_BASE
+        && map.len() < MAX_CHANNELS
+        && !live_duplicate(&map, id)
+    {
+        map.insert(id, Arc::clone(&state));
+        queued = session
+            .inbound_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .and_then(|tx| tx.try_send(state).ok())
+            .is_some();
+        if !queued {
+            map.remove(&id);
+        }
+    }
+    drop(map);
+    if !queued {
+        let _ = session.queue_channel_frame(CH_CLOSE, id, &[], false);
     }
 }
 
@@ -1356,6 +1433,154 @@ fn tunnel_error(error: tungstenite::Error) -> RemoteError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn team_ticket(marker: &str) -> TeamTicket {
+        TeamTicket::try_from(format!("ts-team-v1.{marker}")).unwrap()
+    }
+    fn team_frame(op: u8, id: u32, ticket: &TeamTicket) -> Vec<u8> {
+        let mut frame = vec![op];
+        frame.extend_from_slice(&id.to_be_bytes());
+        frame.extend_from_slice(
+            &serde_json::to_vec(&serde_json::json!({"v":1,"ticket":ticket.wire_value()})).unwrap(),
+        );
+        frame
+    }
+
+    #[test]
+    fn team_open_and_renew_use_separate_bounded_frames_and_preserve_personal_channels() {
+        let session = inert_session();
+        let (tx, rx) = mpsc::sync_channel(16);
+        *session.writer.lock().unwrap() = Some(Writer {
+            sender: tx,
+            bytes: Arc::new(AtomicUsize::new(0)),
+        });
+        let dial = Arc::clone(&session);
+        let initial = team_ticket("initial");
+        let sent = initial.clone();
+        let opening = std::thread::spawn(move || dial.open_team_channel([0xbb; 32], &sent));
+        let frame = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(frame[0], 6);
+        assert!(frame.len() <= 4613);
+        let body: serde_json::Value = serde_json::from_slice(&frame[5..]).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"v":1,"hostKey":"bb".repeat(32),"ticket":initial.wire_value()})
+        );
+        let id = u32::from_be_bytes(frame[1..5].try_into().unwrap());
+        dispatch_frame(&session, &team_frame(7, id, &initial));
+        let mut transport = opening.join().unwrap().unwrap();
+        let handle = transport.team_authorization().unwrap();
+        let next = team_ticket("renewed");
+        let renewing = {
+            let handle = handle.clone();
+            let next = next.clone();
+            std::thread::spawn(move || handle.renew(&next))
+        };
+        let frame = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(frame[0], 8);
+        assert_eq!(&frame[1..5], &id.to_be_bytes());
+        let body: serde_json::Value = serde_json::from_slice(&frame[5..]).unwrap();
+        assert_eq!(body["hostKey"], "bb".repeat(32));
+        assert_eq!(body["ticket"], next.wire_value());
+        dispatch_frame(&session, &team_frame(9, id, &next));
+        renewing.join().unwrap().unwrap();
+        assert_eq!(handle.ticket().unwrap().wire_value(), next.wire_value());
+        assert!(!format!("{handle:?}").contains(next.wire_value()));
+
+        let personal = Arc::new(ChannelState::new(7));
+        session
+            .channels
+            .lock()
+            .unwrap()
+            .insert(7, Arc::clone(&personal));
+        let mut personal = ChannelTransport::new(Arc::clone(&session), personal);
+        // A Team control cannot upgrade a personal channel.
+        dispatch_frame(&session, &team_frame(7, 7, &next));
+        assert!(personal.team_authorization().is_none());
+        let mut data = vec![CH_DATA];
+        data.extend_from_slice(&id.to_be_bytes());
+        data.extend_from_slice(b"queued team content");
+        dispatch_frame(&session, &data);
+        let mut refusal = vec![CH_ERROR];
+        refusal.extend_from_slice(&id.to_be_bytes());
+        refusal.extend_from_slice(b"team_access_changed");
+        dispatch_frame(&session, &refusal);
+        assert!(handle.ticket().is_err());
+        assert!(
+            transport.read(&mut [0; 64]).is_err(),
+            "revocation must discard already buffered Team bytes"
+        );
+        let mut data = vec![CH_DATA];
+        data.extend_from_slice(&7u32.to_be_bytes());
+        data.extend_from_slice(b"personal");
+        dispatch_frame(&session, &data);
+        let mut output = [0; 8];
+        assert_eq!(personal.read(&mut output).unwrap(), 8);
+        assert_eq!(&output, b"personal");
+        assert!(session.channels.lock().unwrap().contains_key(&7));
+    }
+
+    #[test]
+    fn malformed_team_controls_and_legacy_downgrades_cannot_enter_the_inbound_queue() {
+        let ticket = team_ticket("fixture");
+        for payload in [
+            br#"{"v":2,"ticket":"ts-team-v1.fixture"}"#.to_vec(),
+            br#"{"v":1,"ticket":"ts-team-v1.fixture","actorId":"forged"}"#.to_vec(),
+            br#"{"v":1,"v":1,"ticket":"ts-team-v1.fixture"}"#.to_vec(),
+            br#"{"v":1}"#.to_vec(),
+            vec![b'x'; 4609],
+        ] {
+            let session = inert_session();
+            let inbound = session.take_inbound().unwrap();
+            let mut frame = vec![7];
+            frame.extend_from_slice(&1u32.to_be_bytes());
+            frame.extend_from_slice(&payload);
+            dispatch_frame(&session, &frame);
+            assert!(inbound.try_recv().is_err());
+            assert!(session.channels.lock().unwrap().is_empty());
+        }
+        let session = inert_session();
+        let state = Arc::new(ChannelState {
+            team: Some(team::TeamChannel::new(ticket.clone(), Some([0xbb; 32]))),
+            ..ChannelState::new(DIAL_ID_BASE + 1)
+        });
+        session
+            .channels
+            .lock()
+            .unwrap()
+            .insert(state.id, Arc::clone(&state));
+        dispatch_frame(&session, &opened_frame(state.id));
+        assert!(
+            state.inner.lock().unwrap().error.is_some(),
+            "legacy OPENED cannot strip a Team scope"
+        );
+        assert!(!state.inner.lock().unwrap().opened);
+        let inbound = session.take_inbound().unwrap();
+        dispatch_frame(&session, &team_frame(7, 2, &ticket));
+        let state = inbound.try_recv().unwrap();
+        let transport = ChannelTransport::from_inbound(Arc::clone(&session), state);
+        let authorization = transport.team_authorization().unwrap();
+        assert!(
+            authorization.renew(&ticket).is_err(),
+            "a host cannot renew as the actor"
+        );
+        dispatch_frame(
+            &session,
+            &team_frame(9, transport.channel_id(), &team_ticket("new")),
+        );
+        assert_eq!(
+            authorization.ticket().unwrap().wire_value(),
+            "ts-team-v1.new"
+        );
+        let mut oversized = vec![CH_DATA];
+        oversized.extend_from_slice(&transport.channel_id().to_be_bytes());
+        oversized.resize(5 + team::MAX_BUFFER + 1, b'x');
+        dispatch_frame(&session, &oversized);
+        assert!(
+            authorization.ticket().is_err(),
+            "Team unread data must stay within its smaller bound"
+        );
+    }
 
     #[test]
     fn dropping_an_old_transport_does_not_close_a_reused_channel_id() {
