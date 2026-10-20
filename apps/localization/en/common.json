@@ -358,5 +358,6 @@
   "common.chart.svg": "SVG image",
   "common.chart.too_large": "This chart exceeds the 256 KiB size limit. Ask the agent to aggregate the data.",
   "common.chart.unavailable": "Chart unavailable",
-  "common.chart.value": "Value"
+  "common.chart.value": "Value",
+  "common.teams.chats": "Team chats"
 }

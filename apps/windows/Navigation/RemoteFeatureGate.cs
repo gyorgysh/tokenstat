@@ -11,6 +11,8 @@ namespace Tokenstat.Navigation;
 /// </summary>
 internal static class RemoteFeatureGate
 {
+    public const int TeamsMinProtocol = 38;
+    public static bool SupportsTeams(long? protocol) => protocol is not null && protocol >= TeamsMinProtocol;
     public const int WorktreesMinProtocol = 24;
     public const int ChatMinProtocol = 4;
     public const int ChatForkMinProtocol = 26;
