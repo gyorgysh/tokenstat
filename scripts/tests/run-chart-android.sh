@@ -7,17 +7,35 @@ chart_port=5584
 chart_serial="emulator-$chart_port"
 chart_avd="tokenstat-chart-ci"
 chart_sdk="$ANDROID_HOME/cmdline-tools/latest/bin"
+# Keep old and current SDK tools on the same disposable configuration directory.
+chart_state="$PWD/target/chart-android-ci-state"
+export ANDROID_SDK_HOME="$chart_state"
+export ANDROID_USER_HOME="$chart_state/.android"
+export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+mkdir -p "$ANDROID_AVD_HOME" target/chart-android-ci
 if "$ANDROID_HOME/platform-tools/adb" devices | rg -q "^${chart_serial}[[:space:]]"; then
   echo "Refusing to reuse an existing chart test device" >&2
   exit 1
 fi
 "$chart_sdk/sdkmanager" 'emulator' 'system-images;android-36;google_apis;x86_64'
-printf 'no\n' | "$chart_sdk/avdmanager" create avd -n "$chart_avd" -k 'system-images;android-36;google_apis;x86_64' --device pixel_7
-mkdir -p target/chart-android-ci
+if [ -e "$ANDROID_AVD_HOME/$chart_avd.ini" ]; then
+  echo "Refusing to replace an existing chart test AVD" >&2
+  exit 1
+fi
+printf 'no\n' | "$chart_sdk/avdmanager" create avd -n "$chart_avd" -k 'system-images;android-36;google_apis;x86_64' --device pixel_7 -p "$ANDROID_AVD_HOME/$chart_avd.avd"
+chart_pid=""
+cleanup() {
+  if [ -n "$chart_pid" ]; then
+    kill "$chart_pid" 2>/dev/null || true
+    wait "$chart_pid" 2>/dev/null || true
+  fi
+  "$chart_sdk/avdmanager" delete avd -n "$chart_avd" > target/chart-android-ci/cleanup.log 2>&1 || true
+}
+trap cleanup EXIT
+"$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx "$chart_avd"
 "$ANDROID_HOME/emulator/emulator" -avd "$chart_avd" -port "$chart_port" -no-window -no-audio -no-snapshot -gpu swiftshader > target/chart-android-ci/emulator.log 2>&1 &
 chart_pid=$!
-cleanup() { kill "$chart_pid" 2>/dev/null || true; wait "$chart_pid" 2>/dev/null || true; }
-trap cleanup EXIT
 for chart_attempt in $(seq 1 120); do
   kill -0 "$chart_pid" || { cat target/chart-android-ci/emulator.log; exit 1; }
   if [ "$("$ANDROID_HOME/platform-tools/adb" -s "$chart_serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
