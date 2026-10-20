@@ -75,13 +75,18 @@ internal sealed class ChatChartView : Grid
             core.Settings.AreDefaultContextMenusEnabled = false;
             core.Settings.IsStatusBarEnabled = false;
             core.Settings.AreBrowserAcceleratorKeysEnabled = false;
-            core.NavigationStarting += (_, e) => e.Cancel = e.Uri != PageUri;
+            ulong pageNavigation = 0;
+            core.NavigationStarting += (_, e) =>
+            {
+                e.Cancel = e.Uri != PageUri;
+                if (!e.Cancel) pageNavigation = e.NavigationId;
+            };
             core.NewWindowRequested += (_, e) => e.Handled = true;
             core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
             core.DownloadStarting += (_, e) => e.Cancel = true;
             core.NavigationCompleted += async (_, e) =>
             {
-                if (epoch != _epoch) return;
+                if (epoch != _epoch || e.NavigationId != pageNavigation) return;
                 if (!e.IsSuccess) { ShowError(L10n.Text("common.chart.resources_missing")); return; }
                 _loaded = true;
                 await RenderAsync(epoch);
