@@ -127,7 +127,7 @@ select:focus-visible,
 button[aria-expanded="true"],
 button[aria-pressed="true"] {
     background: var(--accent);
-    color: white;
+    color: var(--bg);
     border-color: var(--accent);
 }
 button:disabled {
@@ -256,4 +256,16 @@ h2 {
 #selection {
     max-height: 180px;
     overflow: auto;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }

@@ -115,6 +115,47 @@ try {
                             assert.ok(
                                 (await page.locator("#rows tr").count()) > 0,
                             );
+                            const activeContrast = await page
+                                .locator("#table-toggle")
+                                .evaluate((element) => {
+                                    const style = getComputedStyle(element);
+                                    const luminance = (color) =>
+                                        color
+                                            .match(/[\d.]+/g)
+                                            .slice(0, 3)
+                                            .map(Number)
+                                            .map((v) => {
+                                                v /= 255;
+                                                return v <= 0.04045
+                                                    ? v / 12.92
+                                                    : ((v + 0.055) / 1.055) **
+                                                          2.4;
+                                            })
+                                            .reduce(
+                                                (sum, v, i) =>
+                                                    sum +
+                                                    v *
+                                                        [
+                                                            0.2126, 0.7152,
+                                                            0.0722,
+                                                        ][i],
+                                                0,
+                                            );
+                                    const foreground = luminance(style.color),
+                                        background = luminance(
+                                            style.backgroundColor,
+                                        );
+                                    return (
+                                        (Math.max(foreground, background) +
+                                            0.05) /
+                                        (Math.min(foreground, background) +
+                                            0.05)
+                                    );
+                                });
+                            assert.ok(
+                                activeContrast >= 4.5,
+                                "active chart controls retain readable contrast in both themes",
+                            );
                             await page.locator("#table-toggle").click();
                             if (
                                 width === 320 &&
@@ -137,6 +178,40 @@ try {
                             }),
                         examples[0],
                     );
+                    assert.equal(
+                        await page
+                            .locator("#plot")
+                            .getAttribute("aria-describedby"),
+                        "instructions",
+                    );
+                    assert.ok(
+                        (
+                            await page.locator("#instructions").textContent()
+                        ).includes("arrow keys"),
+                    );
+                    assert.equal(
+                        await page
+                            .locator("#table-toggle span")
+                            .getAttribute("aria-hidden"),
+                        "true",
+                    );
+                    await page.locator("#plot").focus();
+                    await page.keyboard.press("ArrowLeft");
+                    const backwards = await page
+                        .locator("#selection")
+                        .innerText();
+                    assert.ok(
+                        backwards.includes(examples[0].series.at(-1).name),
+                    );
+                    assert.ok(
+                        backwards.includes(examples[0].categories.at(-1)),
+                    );
+                    await page.keyboard.press("Enter");
+                    assert.equal(
+                        await page.locator("#selection").innerText(),
+                        backwards,
+                    );
+                    await page.keyboard.press("Escape");
                     const before = await page.locator("#plot").boundingBox();
                     await page.locator("#expand").click();
                     const after = await page.locator("#plot").boundingBox();

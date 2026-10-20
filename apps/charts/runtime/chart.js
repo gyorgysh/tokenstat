@@ -827,8 +827,12 @@
             expand: ["⛶", expanded ? "collapse" : "expand"],
             copy: ["⧉", "copy"],
         };
-        for (const [id, [icon, key]] of Object.entries(buttons))
-            $(id).textContent = icon + " " + t(key);
+        for (const [id, [icon, key]] of Object.entries(buttons)) {
+            const glyph = document.createElement("span");
+            glyph.textContent = icon;
+            glyph.setAttribute("aria-hidden", "true");
+            $(id).replaceChildren(glyph, document.createTextNode(" " + t(key)));
+        }
         $("previous").textContent = "← " + t("previous");
         $("next").textContent = t("next") + " →";
         const select = $("export");
@@ -837,6 +841,11 @@
             option.textContent = t(option.value || "choose");
         select.parentNode.firstChild.textContent = t("export") + " ";
         $("plot").setAttribute("aria-label", t("inspect"));
+        $("instructions").textContent = t("inspect");
+        document
+            .querySelector(".toolbar")
+            .setAttribute("aria-label", t("chart"));
+        $("pagination").setAttribute("aria-label", t("data") + " " + t("page"));
         $("data-panel").setAttribute("aria-label", t("data"));
     }
     function render(input, settings = {}) {
@@ -1032,11 +1041,17 @@
             $("selection").hidden = true;
             $("copy").hidden = true;
             measure();
-        } else if (["ArrowRight", "ArrowDown", "Enter"].includes(event.key)) {
+        } else if (event.key === "Enter") {
+            index = Math.max(0, index);
+            select(rows[index].si, rows[index].di);
+        } else if (["ArrowRight", "ArrowDown"].includes(event.key)) {
             index = (index + 1) % rows.length;
             select(rows[index].si, rows[index].di);
         } else if (["ArrowLeft", "ArrowUp"].includes(event.key)) {
-            index = (index - 1 + rows.length) % rows.length;
+            index =
+                index < 0
+                    ? rows.length - 1
+                    : (index - 1 + rows.length) % rows.length;
             select(rows[index].si, rows[index].di);
         }
     };
