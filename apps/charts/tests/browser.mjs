@@ -65,6 +65,17 @@ try {
                     await page.goto(address);
                     await page.waitForFunction(() => !!window.TokenstatChart);
                     await page.evaluate(() => document.fonts.ready);
+                    await page.evaluate(() => {
+                        window.exports = [];
+                        window.chrome = {
+                            webview: {
+                                postMessage: (message) => {
+                                    if (message.type === "export")
+                                        window.exports.push(message);
+                                },
+                            },
+                        };
+                    });
                     for (const dark of [false, true]) {
                         for (const spec of examples) {
                             await page.evaluate(
@@ -168,6 +179,102 @@ try {
                                     ),
                                     fullPage: true,
                                 });
+                            if (width === 320 && !dark) {
+                                for (const format of ["svg", "png"]) {
+                                    await page.evaluate(
+                                        (format) =>
+                                            window.TokenstatChart.exportChart(
+                                                format,
+                                            ),
+                                        format,
+                                    );
+                                    const exported = await page.evaluate(() =>
+                                        window.exports.at(-1),
+                                    );
+                                    assert.equal(exported.format, format);
+                                    if (format === "svg")
+                                        assert.ok(
+                                            exported.content.includes(
+                                                spec.title,
+                                            ),
+                                        );
+                                    else {
+                                        assert.ok(
+                                            exported.content.startsWith(
+                                                "iVBOR",
+                                            ),
+                                        );
+                                        writeFileSync(
+                                            resolve(
+                                                output,
+                                                `${name}-${spec.type}-export.png`,
+                                            ),
+                                            Buffer.from(
+                                                exported.content,
+                                                "base64",
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                            if (["funnel", "treemap"].includes(spec.type)) {
+                                const minimumContrast = await page.evaluate(
+                                    () => {
+                                        const option =
+                                            TokenstatChartEngine.echarts
+                                                .getInstanceByDom(
+                                                    document.getElementById(
+                                                        "plot",
+                                                    ),
+                                                )
+                                                .getOption();
+                                        const luminance = (hex) =>
+                                            [1, 3, 5]
+                                                .map(
+                                                    (i) =>
+                                                        parseInt(
+                                                            hex.slice(i, i + 2),
+                                                            16,
+                                                        ) / 255,
+                                                )
+                                                .map((v) =>
+                                                    v <= 0.04045
+                                                        ? v / 12.92
+                                                        : ((v + 0.055) /
+                                                              1.055) **
+                                                          2.4,
+                                                )
+                                                .reduce(
+                                                    (sum, v, i) =>
+                                                        sum +
+                                                        v *
+                                                            [
+                                                                0.2126, 0.7152,
+                                                                0.0722,
+                                                            ][i],
+                                                    0,
+                                                );
+                                        const text = luminance(
+                                            option.series[0].label.color,
+                                        );
+                                        return Math.min(
+                                            ...option.color.map((hex) => {
+                                                const fill = luminance(hex);
+                                                return (
+                                                    (Math.max(text, fill) +
+                                                        0.05) /
+                                                    (Math.min(text, fill) +
+                                                        0.05)
+                                                );
+                                            }),
+                                        );
+                                    },
+                                );
+                                assert.ok(
+                                    minimumContrast >= 4.5,
+                                    "labels inside chart marks retain readable contrast",
+                                );
+                            }
                             cases++;
                         }
                     }
@@ -334,6 +441,59 @@ try {
                         100,
                     );
                     await page.locator("#table-toggle").click();
+                    await page.evaluate(
+                        (spec) =>
+                            window.TokenstatChart.render(
+                                { ...spec, horizontal: true },
+                                { reducedMotion: true },
+                            ),
+                        large,
+                    );
+                    assert.equal(
+                        await page.evaluate(
+                            () =>
+                                TokenstatChartEngine.echarts
+                                    .getInstanceByDom(
+                                        document.getElementById("plot"),
+                                    )
+                                    .getOption().dataZoom[0].orient,
+                        ),
+                        "horizontal",
+                    );
+                    const heatZoom = {
+                        version: 1,
+                        type: "heatmap",
+                        title: "Large heatmap",
+                        categories: large.categories,
+                        yCategories: ["A"],
+                        xAxis: { label: "Category" },
+                        series: [
+                            {
+                                name: "Observed",
+                                data: large.categories.map((_, i) => [i, 0, i]),
+                            },
+                        ],
+                    };
+                    await page.evaluate(
+                        (spec) =>
+                            window.TokenstatChart.render(spec, {
+                                reducedMotion: true,
+                            }),
+                        heatZoom,
+                    );
+                    assert.ok(
+                        await page.evaluate(() => {
+                            const option = TokenstatChartEngine.echarts
+                                .getInstanceByDom(
+                                    document.getElementById("plot"),
+                                )
+                                .getOption();
+                            return (
+                                option.visualMap[0].bottom >= 30 &&
+                                option.grid[0].bottom >= 110
+                            );
+                        }),
+                    );
                     // Select actual SVG geometry with a pointer/touch, including the treemap's virtual root.
                     for (const type of ["bar", "pie", "treemap", "radar"]) {
                         const spec = examples.find(

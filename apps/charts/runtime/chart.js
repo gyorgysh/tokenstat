@@ -136,7 +136,7 @@
             : [
                   "#7853b5",
                   "#187f78",
-                  "#a36b12",
+                  "#9d640d",
                   "#b53b60",
                   "#326ca9",
                   "#9654a4",
@@ -371,6 +371,7 @@
                         label: {
                             show: true,
                             position: "inside",
+                            color: dark ? "#1b1a25" : "#ffffff",
                             formatter: "{b}",
                             fontSize: 12,
                         },
@@ -389,7 +390,12 @@
                         roam: false,
                         nodeClick: false,
                         breadcrumb: { show: false },
-                        label: { show: true, formatter: "{b}", fontSize: 12 },
+                        label: {
+                            show: true,
+                            formatter: "{b}",
+                            fontSize: 12,
+                            color: dark ? "#1b1a25" : "#ffffff",
+                        },
                         itemStyle: { gapWidth: 3, borderWidth: 0 },
                     },
                 ];
@@ -504,7 +510,7 @@
                             : ["#eee6fa", "#9670c3", "#523076"],
                     },
                 };
-                base.grid.bottom = 62;
+                base.grid.bottom = spec.xAxis.label ? 80 : 62;
             } else if (spec.horizontal) {
                 base.xAxis = { ...val, nameLocation: "middle", nameGap: 30 };
                 base.yAxis = {
@@ -553,6 +559,7 @@
                 base.dataZoom = [
                     {
                         type: "slider",
+                        orient: "horizontal",
                         [axis]: 0,
                         bottom: 2,
                         height: 18,
@@ -577,6 +584,10 @@
                         preventDefaultMouseMove: false,
                     },
                 ];
+                if (heat) {
+                    base.visualMap.bottom = 30;
+                    base.grid.bottom = 110;
+                }
             }
         }
         base.legend.data = ["pie", "donut", "funnel", "treemap"].includes(type)
@@ -733,6 +744,7 @@
                         bottom: 12,
                         style: {
                             text: source,
+                            fontFamily: "Manrope, sans-serif",
                             lineHeight: 17,
                             fill: dark ? "#c1b9d0" : "#67606f",
                             fontSize: 12,
@@ -757,7 +769,11 @@
                         top: heading + 40,
                         bottom: footer,
                     };
-                if (option.visualMap) option.visualMap.bottom = footer;
+                if (option.visualMap) {
+                    const zoomed = !!option.dataZoom?.length;
+                    option.visualMap.bottom = footer + (zoomed ? 30 : 0);
+                    option.grid.bottom = footer + (zoomed ? 120 : 90);
+                }
                 const zoom = chart.getOption().dataZoom || [];
                 option.dataZoom = (option.dataZoom || []).map((item, i) => ({
                     ...item,
