@@ -9,6 +9,14 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.8.0]
+
+### Added
+
+- Interactive charts in agent replies on Mac, Windows, iPhone, iPad and Android. Twelve chart families cover comparisons, trends, distributions, proportions and relationships, with the same offline renderer on every client.
+- Pointer, touch and keyboard inspection, selectable legends, chart zoom, expansion, accessible paginated data tables and native PNG, SVG, CSV and JSON exports. Charts follow light and dark themes, number locales and reduced motion settings.
+- A versioned data-only chart format, MCP creation, validation, schema and example tools, a `tokenstat chart` command, and JavaScript and Python helpers. Chart data stays in the conversation and works across agents, reopened chats and connected devices.
+
 ## [1.7.5] - 2026-10-21
 
 ### Fixed

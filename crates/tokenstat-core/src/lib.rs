@@ -28,6 +28,7 @@ pub mod activity;
 pub mod backup;
 pub mod budget;
 pub mod catalog;
+pub mod chart;
 pub mod engine;
 pub mod error;
 pub mod host_rpc;

@@ -1,0 +1,525 @@
+[
+  {
+    "version": 1,
+    "type": "bar",
+    "title": "Quarterly revenue",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [
+      "Q1",
+      "Q2",
+      "Q3",
+      "Q4"
+    ],
+    "series": [
+      {
+        "name": "Revenue",
+        "data": [
+          12500,
+          18400,
+          16200,
+          24700
+        ]
+      },
+      {
+        "name": "Previous year",
+        "data": [
+          10600,
+          15100,
+          14700,
+          19200
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Revenue (USD)",
+      "format": {
+        "prefix": "$",
+        "decimals": 0
+      }
+    },
+    "xAxis": {
+      "label": "Quarter"
+    }
+  },
+  {
+    "version": 1,
+    "type": "line",
+    "title": "Quarterly revenue",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [
+      "Q1",
+      "Q2",
+      "Q3",
+      "Q4"
+    ],
+    "series": [
+      {
+        "name": "Revenue",
+        "data": [
+          12500,
+          18400,
+          16200,
+          24700
+        ]
+      },
+      {
+        "name": "Previous year",
+        "data": [
+          10600,
+          15100,
+          14700,
+          19200
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Revenue (USD)",
+      "format": {
+        "prefix": "$",
+        "decimals": 0
+      }
+    },
+    "xAxis": {
+      "label": "Quarter"
+    }
+  },
+  {
+    "version": 1,
+    "type": "area",
+    "title": "Quarterly revenue",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [
+      "Q1",
+      "Q2",
+      "Q3",
+      "Q4"
+    ],
+    "series": [
+      {
+        "name": "Revenue",
+        "data": [
+          12500,
+          18400,
+          16200,
+          24700
+        ]
+      },
+      {
+        "name": "Previous year",
+        "data": [
+          10600,
+          15100,
+          14700,
+          19200
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Revenue (USD)",
+      "format": {
+        "prefix": "$",
+        "decimals": 0
+      }
+    },
+    "xAxis": {
+      "label": "Quarter"
+    }
+  },
+  {
+    "version": 1,
+    "type": "pie",
+    "title": "Quarterly revenue",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [
+      "Q1",
+      "Q2",
+      "Q3",
+      "Q4"
+    ],
+    "series": [
+      {
+        "name": "Revenue",
+        "data": [
+          12500,
+          18400,
+          16200,
+          24700
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Revenue (USD)",
+      "format": {
+        "prefix": "$",
+        "decimals": 0
+      }
+    },
+    "xAxis": {
+      "label": "Quarter"
+    }
+  },
+  {
+    "version": 1,
+    "type": "donut",
+    "title": "Quarterly revenue",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [
+      "Q1",
+      "Q2",
+      "Q3",
+      "Q4"
+    ],
+    "series": [
+      {
+        "name": "Revenue",
+        "data": [
+          12500,
+          18400,
+          16200,
+          24700
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Revenue (USD)",
+      "format": {
+        "prefix": "$",
+        "decimals": 0
+      }
+    },
+    "xAxis": {
+      "label": "Quarter"
+    }
+  },
+  {
+    "version": 1,
+    "type": "scatter",
+    "title": "Price and demand",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [],
+    "series": [
+      {
+        "name": "Observations",
+        "data": [
+          [
+            10,
+            20
+          ],
+          [
+            15,
+            31
+          ],
+          [
+            18,
+            28
+          ],
+          [
+            23,
+            46
+          ],
+          [
+            29,
+            42
+          ]
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Demand (units)"
+    },
+    "xAxis": {
+      "label": "Price (USD)",
+      "format": {
+        "prefix": "$"
+      }
+    }
+  },
+  {
+    "version": 1,
+    "type": "bubble",
+    "title": "Market segments",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [],
+    "series": [
+      {
+        "name": "Segments",
+        "data": [
+          [
+            12,
+            24,
+            80
+          ],
+          [
+            21,
+            36,
+            160
+          ],
+          [
+            35,
+            29,
+            240
+          ],
+          [
+            42,
+            49,
+            110
+          ]
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Retention (%)",
+      "format": {
+        "suffix": "%"
+      }
+    },
+    "xAxis": {
+      "label": "Acquisition cost (USD)"
+    }
+  },
+  {
+    "version": 1,
+    "type": "heatmap",
+    "title": "Orders by day and time",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [
+      "Morning",
+      "Afternoon",
+      "Evening"
+    ],
+    "series": [
+      {
+        "name": "Orders",
+        "data": [
+          [
+            0,
+            0,
+            12
+          ],
+          [
+            1,
+            0,
+            23
+          ],
+          [
+            2,
+            0,
+            8
+          ],
+          [
+            0,
+            1,
+            18
+          ],
+          [
+            1,
+            1,
+            31
+          ],
+          [
+            2,
+            1,
+            16
+          ],
+          [
+            0,
+            2,
+            11
+          ],
+          [
+            1,
+            2,
+            19
+          ],
+          [
+            2,
+            2,
+            14
+          ]
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Day"
+    },
+    "xAxis": {
+      "label": "Time of day"
+    },
+    "yCategories": [
+      "Mon",
+      "Tue",
+      "Wed"
+    ]
+  },
+  {
+    "version": 1,
+    "type": "radar",
+    "title": "Service indicators",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [
+      "Availability",
+      "Responsiveness",
+      "Accuracy",
+      "Coverage",
+      "Satisfaction"
+    ],
+    "series": [
+      {
+        "name": "Current",
+        "data": [
+          97,
+          82,
+          91,
+          78,
+          89
+        ]
+      },
+      {
+        "name": "Target",
+        "data": [
+          99,
+          90,
+          95,
+          90,
+          95
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Score (%)",
+      "format": {
+        "suffix": "%"
+      }
+    },
+    "xAxis": {
+      "label": "Indicator"
+    }
+  },
+  {
+    "version": 1,
+    "type": "funnel",
+    "title": "Quarterly revenue",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [
+      "Visits",
+      "Sign ups",
+      "Trials",
+      "Customers"
+    ],
+    "series": [
+      {
+        "name": "People",
+        "data": [
+          2400,
+          1100,
+          560,
+          210
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "People"
+    },
+    "xAxis": {
+      "label": "Quarter"
+    }
+  },
+  {
+    "version": 1,
+    "type": "treemap",
+    "title": "Quarterly revenue",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [
+      "Hardware",
+      "Software",
+      "Services",
+      "Other"
+    ],
+    "series": [
+      {
+        "name": "Revenue",
+        "data": [
+          12500,
+          18400,
+          16200,
+          4700
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Revenue (USD)",
+      "format": {
+        "prefix": "$",
+        "decimals": 0
+      }
+    },
+    "xAxis": {
+      "label": "Quarter"
+    }
+  },
+  {
+    "version": 1,
+    "type": "boxplot",
+    "title": "Delivery time distribution",
+    "description": "Synthetic example data for demonstrating interactive charts.",
+    "source": "Example data",
+    "categories": [
+      "Q1",
+      "Q2",
+      "Q3",
+      "Q4"
+    ],
+    "series": [
+      {
+        "name": "Delivery",
+        "data": [
+          [
+            1,
+            2,
+            3,
+            4,
+            7
+          ],
+          [
+            1,
+            2,
+            2.5,
+            3.5,
+            6
+          ],
+          [
+            1,
+            1.5,
+            2,
+            3,
+            5
+          ],
+          [
+            0.5,
+            1,
+            1.5,
+            2,
+            4
+          ]
+        ]
+      }
+    ],
+    "yAxis": {
+      "label": "Delivery time (days)"
+    },
+    "xAxis": {
+      "label": "Quarter"
+    }
+  }
+]

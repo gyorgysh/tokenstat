@@ -1,0 +1,14 @@
+{
+  "name": "tokenstat-charts",
+  "version": "1.8.0",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "echarts": "6.1.0",
+    "esbuild": "0.28.2",
+    "playwright": "1.64.1"
+  }
+}

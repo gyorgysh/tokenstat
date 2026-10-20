@@ -59,6 +59,17 @@ everything that runs on your machine.
   <em>One archive, one core. The terminal, the Mac, the phone and the tablet all read it.</em>
 </p>
 
+## Charts in agent replies
+
+Agents can present interactive charts directly in chat on Mac, Windows, iPhone,
+iPad and Android. Inspect values with a pointer, touch or keyboard, toggle
+series, zoom, open the data table and export an image or dataset. Rendering
+works offline with the same bundled engine on every client.
+
+The MCP tools `chart_create`, `chart_validate`, `chart_schema` and `chart_examples`,
+plus `tokenstat chart` and small JavaScript/Python helpers, share a versioned,
+data-only format. See the [chart API and examples](apps/charts/README.md).
+
 ## Supported sources
 
 | Kind | Tools |

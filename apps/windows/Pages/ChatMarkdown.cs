@@ -87,6 +87,9 @@ internal static class ChatMarkdown
                 case Table table:
                     panel.Children.Add(TableGrid(table, codeBlock));
                     break;
+                case FencedCodeBlock chart when chart.Info == "tokenstat-chart":
+                    panel.Children.Add(new ChatChartView(chart.Lines.ToString(), chart.ClosingFencedCharCount < chart.OpeningFencedCharCount));
+                    break;
                 case CodeBlock code:
                     panel.Children.Add(codeBlock(code.Lines.ToString().TrimEnd()));
                     break;

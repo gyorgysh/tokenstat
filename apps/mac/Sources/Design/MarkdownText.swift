@@ -872,7 +872,9 @@ private struct MarkdownCodeBlock: View {
 
     var body: some View {
         Group {
-            if isDiff {
+            if language == "tokenstat-chart" || language == "tokenstat-chart-pending" {
+                ChatChartView(source: source, pending: language == "tokenstat-chart-pending")
+            } else if isDiff {
                 MarkdownSideways {
                     // Parsed by the cache rather than here: this ran on every
                     // evaluation, and a fence is evaluated on every measuring
@@ -1164,15 +1166,17 @@ private struct MarkdownParser {
         guard let opening = fence(in: lines[index]) else { return nil }
         index += 1
         var body: [String] = []
+        var closed = false
         while index < lines.count {
             if closesFence(lines[index], opening: opening) {
+                closed = true
                 index += 1
                 break
             }
             body.append(lines[index])
             index += 1
         }
-        let language = opening.language.isEmpty ? nil : opening.language
+        let language = opening.language == "tokenstat-chart" && !closed ? "tokenstat-chart-pending" : (opening.language.isEmpty ? nil : opening.language)
         let text = body.joined(separator: "\n")
         return make(.code(
             language: language,

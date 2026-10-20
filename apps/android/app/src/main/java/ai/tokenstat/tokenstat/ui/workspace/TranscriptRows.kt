@@ -901,7 +901,9 @@ internal fun MarkdownText(
         blocks.forEach { block ->
             when (block) {
                 is MdBlock.Code -> {
-                    Text(
+                    if (block.chart) {
+                        ChatChartView(block.code, pending = block.pending)
+                    } else Text(
                         block.code.trimEnd(),
                         style = TsType.mono(12),
                         color = color,
@@ -973,7 +975,7 @@ internal fun MarkdownText(
 }
 
 internal sealed interface MdBlock {
-    data class Code(val code: String) : MdBlock
+    data class Code(val code: String, val chart: Boolean = false, val pending: Boolean = false) : MdBlock
     data class Table(val table: MarkdownTable) : MdBlock
     data class Header(val level: Int, val text: String) : MdBlock
     data class Bullet(val text: String) : MdBlock
@@ -987,6 +989,9 @@ internal fun parseMarkdown(text: String): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
     val paragraph = StringBuilder()
     var fence: StringBuilder? = null
+    var chartFence = false
+    var fenceChar = '`'
+    var fenceLength = 3
     var number = 0
 
     fun flushParagraph() {
@@ -1009,21 +1014,24 @@ internal fun parseMarkdown(text: String): List<MdBlock> {
     for ((index, raw) in lines.withIndex()) {
         if (index < skipUntil) continue
         val line = raw.trimEnd()
-        if (line.trimStart().startsWith("```")) {
-            val open = fence
-            if (open == null) {
-                flushParagraph()
-                breakList()
-                fence = StringBuilder()
-            } else {
-                blocks.add(MdBlock.Code(open.toString()))
+        val fenceLine = line.trimStart()
+        val marker = fenceLine.firstOrNull()
+        val marks = if (marker == '`' || marker == '~') fenceLine.takeWhile { it == marker }.length else 0
+        val open = fence
+        if (open != null) {
+            if (marker == fenceChar && marks >= fenceLength && fenceLine.drop(marks).isBlank()) {
+                blocks.add(MdBlock.Code(open.toString(), chart = chartFence))
                 fence = null
-            }
+            } else open.append(raw).append("\n")
             continue
         }
-        val active = fence
-        if (active != null) {
-            active.append(raw).append("\n")
+        if (marks >= 3 && (marker != '`' || !fenceLine.drop(marks).contains('`'))) {
+            flushParagraph()
+            breakList()
+            fence = StringBuilder()
+            fenceChar = marker!!
+            fenceLength = marks
+            chartFence = fenceLine.drop(marks).trim() == "tokenstat-chart"
             continue
         }
         val stripped = line.trimStart()
@@ -1073,7 +1081,7 @@ internal fun parseMarkdown(text: String): List<MdBlock> {
     }
     val open = fence
     if (open != null) {
-        blocks.add(MdBlock.Code(open.toString()))
+        blocks.add(MdBlock.Code(open.toString(), chart = chartFence, pending = chartFence))
     } else {
         flushParagraph()
     }

@@ -189,6 +189,18 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         out: Option<std::path::PathBuf>,
     },
+    /// Validate and emit an interactive chart for a chat reply, without reading the archive
+    Chart {
+        /// Chart JSON file, or - for standard input
+        #[arg(conflicts_with_all = ["schema", "examples"])]
+        input: Option<std::path::PathBuf>,
+        /// Print the versioned chart JSON schema
+        #[arg(long, conflicts_with = "examples")]
+        schema: bool,
+        /// Print synthetic examples of every chart family
+        #[arg(long)]
+        examples: bool,
+    },
     /// MCP server over stdio (local archive only)
     Mcp,
     /// Discover or store a vendor token for Cursor / Antigravity fetches
@@ -404,6 +416,41 @@ impl Window {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(Command::Chart {
+        input,
+        schema,
+        examples,
+    }) = &cli.command
+    {
+        use std::io::Read;
+        let value = if *schema {
+            tokenstat_core::chart::schema()
+        } else if *examples {
+            tokenstat_core::chart::examples()
+        } else {
+            let mut source = String::new();
+            let input = input
+                .as_deref()
+                .context("Pass a chart JSON file, - for stdin, --schema or --examples")?;
+            let reader: Box<dyn Read> = if input == std::path::Path::new("-") {
+                Box::new(std::io::stdin())
+            } else {
+                Box::new(std::fs::File::open(input).context("opening chart JSON")?)
+            };
+            reader
+                .take((tokenstat_core::chart::MAX_BYTES + 1) as u64)
+                .read_to_string(&mut source)
+                .context("reading chart JSON")?;
+            let chart = tokenstat_core::chart::Chart::parse(&source).map_err(anyhow::Error::msg)?;
+            if !cli.json {
+                println!("{}", chart.fence().map_err(anyhow::Error::msg)?);
+                return Ok(());
+            }
+            serde_json::to_value(chart)?
+        };
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
     let tz = tokenstat_core::timezone(cli.tz.as_deref())?;
     let db_path = match &cli.db {
         Some(p) => p.clone(),
@@ -694,6 +741,7 @@ fn main() -> Result<()> {
         | Command::Logout { .. }
         | Command::Device { .. }
         | Command::Sync { .. }
+        | Command::Chart { .. }
         | Command::Mcp => unreachable!("handled above"),
         Command::Daily(w) => {
             render::grouped(&store, GroupBy::Day, &w.to_query(&tz)?, "Date", cli.json)?

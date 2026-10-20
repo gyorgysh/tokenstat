@@ -154,3 +154,6 @@ __pycache__/
 /apps/mac/Generated/
 /apps/mac/WidgetQA.xcodeproj/
 /xcode-skills
+
+# Pinned tooling for the shared chart renderer.
+/apps/charts/node_modules/

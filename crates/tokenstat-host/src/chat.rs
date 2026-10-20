@@ -2822,6 +2822,8 @@ impl Store {
         added.push_str(&crate::chat_turn::file_rule(&self.response_output_dir(id)));
         added.push_str("\n\n");
         added.push_str(crate::chat_turn::browser_rule());
+        added.push_str("\n\n");
+        added.push_str(crate::chat_turn::chart_rule());
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         {
             added.push_str("\n\n");

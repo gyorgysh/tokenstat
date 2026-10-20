@@ -33,6 +33,10 @@
     <Compile Include="../../../apps/windows/Pages/WorkspaceTabStrip.cs" Link="WorkspaceTabStrip.cs" />
     <Compile Include="../../../apps/windows/Pages/TabViewMount.cs" Link="TabViewMount.cs" />
     <Compile Include="../../../apps/windows/Pages/SharedTerminalTree.cs" Link="SharedTerminalTree.cs" />
+    <Compile Include="../../../apps/windows/Pages/ChatChartView.cs" Link="ChatChartView.cs" />
+    <Compile Include="../../../apps/windows/Pages/ChartWords.cs" Link="ChartWords.cs" />
+    <Content Include="../../../apps/charts/runtime/*" Link="Assets/Charts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../apps/charts/examples.json" Link="chart-examples.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../../../apps/windows/Pages/NotePreview.cs" Link="NotePreview.cs" />
     <Compile Include="../../../apps/windows/Pages/NoteMarkdown.cs" Link="NoteMarkdown.cs" />
     <Compile Include="../../../apps/windows/Pages/EditorTree.cs" Link="EditorTree.cs" />

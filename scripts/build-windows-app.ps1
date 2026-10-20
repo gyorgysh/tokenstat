@@ -82,6 +82,7 @@ Copy-Item (Join-Path $Root "README.md") (Join-Path $PublishDir "README.md") -For
 $notices = Join-Path $PublishDir "THIRD-PARTY-NOTICES.md"
 cargo run --release --locked -p xtask -- notices $notices tokenstat-host
 if ($LASTEXITCODE -ne 0) { throw "Third-party notice generation failed (exit $LASTEXITCODE)" }
+Get-Content (Join-Path $Root "apps/charts/runtime/ENGINE-LICENSE.txt") | Add-Content -Path $notices
 Add-Content -Path $notices -Value @"
 
 ## Windows App SDK and .NET

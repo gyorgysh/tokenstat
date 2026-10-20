@@ -1,0 +1,203 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+import SwiftUI
+import WebKit
+import UniformTypeIdentifiers
+
+/// A chart is an offline document, with no access to a browser profile or host methods.
+struct ChatChartView: View {
+    let source: String
+    var pending = false
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var height: CGFloat = 430
+    @State private var exportData = Data()
+    @State private var exportType = UTType.json
+    @State private var exportName = "chart.json"
+    @State private var exporting = false
+    @State private var failure: String?
+
+    var body: some View {
+        Group {
+            if pending {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text(L10n.text("common.chart.loading")).font(Theme.callout)
+                }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            } else if source.utf8.count > 256 * 1024 {
+                Text(L10n.text("common.chart.too_large")).font(Theme.callout).padding(16)
+            } else {
+                ChartWebView(source: source, dark: colorScheme == .dark, reduceMotion: reduceMotion,
+                             height: $height, onExport: export, onError: { failure = $0 })
+                    .frame(height: height)
+                    .accessibilityIdentifier("chat.chart")
+            }
+        }
+        .fileExporter(isPresented: $exporting, document: ChartExportDocument(data: exportData),
+                      contentType: exportType, defaultFilename: exportName) { result in
+            if case let .failure(error) = result { failure = error.localizedDescription }
+            exportData = Data()
+        }
+        .alert(L10n.text("common.chart.unavailable"), isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+            Button(L10n.text("common.close")) { failure = nil }
+        } message: { Text(failure ?? "") }
+    }
+
+    private func export(_ format: String, _ data: Data) {
+        guard !exporting else { return }
+        let types: [String: UTType] = ["png": .png, "svg": .svg, "csv": .commaSeparatedText, "json": .json]
+        guard let type = types[format] else { return }
+        exportType = type; exportName = "chart.\(format)"; exportData = data; exporting = true
+    }
+}
+
+private struct ChartExportDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.data] }
+    var data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
+}
+
+#if os(macOS)
+private typealias ChartRepresentable = NSViewRepresentable
+#else
+private typealias ChartRepresentable = UIViewRepresentable
+#endif
+
+private struct ChartWebView: ChartRepresentable {
+    let source: String
+    let dark: Bool
+    let reduceMotion: Bool
+    @Binding var height: CGFloat
+    let onExport: (String, Data) -> Void
+    let onError: (String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    #if os(macOS)
+    func makeNSView(context: Context) -> WKWebView { makeView(context.coordinator) }
+    func updateNSView(_ view: WKWebView, context: Context) { context.coordinator.update(self) }
+    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) { coordinator.dispose() }
+    #else
+    func makeUIView(context: Context) -> WKWebView { makeView(context.coordinator) }
+    func updateUIView(_ view: WKWebView, context: Context) { context.coordinator.update(self) }
+    static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) { coordinator.dispose() }
+    #endif
+
+    private func makeView(_ coordinator: Coordinator) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        configuration.userContentController.add(coordinator, name: "chart")
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.navigationDelegate = coordinator
+        #if os(iOS)
+        view.isOpaque = false
+        view.backgroundColor = .clear
+        view.scrollView.isScrollEnabled = false
+        #endif
+        coordinator.webView = view
+        guard let directory = Bundle.main.url(forResource: "runtime", withExtension: nil),
+              FileManager.default.fileExists(atPath: directory.appendingPathComponent("index.html").path) else {
+            DispatchQueue.main.async { onError(L10n.text("common.chart.resources_missing")) }
+            return view
+        }
+        coordinator.pageURL = directory.appendingPathComponent("index.html")
+        view.loadFileURL(directory.appendingPathComponent("index.html"), allowingReadAccessTo: directory)
+        return view
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        var owner: ChartWebView
+        weak var webView: WKWebView?
+        var pageURL: URL?
+        private var loaded = false
+        private var rendered = ""
+        private var stopped = false
+        init(_ owner: ChartWebView) { self.owner = owner }
+        func update(_ owner: ChartWebView) { self.owner = owner; render() }
+        func dispose() {
+            stopped = true; loaded = false
+            webView?.stopLoading()
+            webView?.configuration.userContentController.removeScriptMessageHandler(forName: "chart")
+            webView?.navigationDelegate = nil
+        }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded = true; render() }
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            decisionHandler(navigationAction.targetFrame?.isMainFrame == true && navigationAction.request.url == pageURL ? .allow : .cancel)
+        }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            if !stopped { owner.onError(error.localizedDescription) }
+        }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            if !stopped { owner.onError(error.localizedDescription) }
+        }
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            if !stopped { owner.onError(L10n.text("common.chart.unavailable")) }
+        }
+        private func render() {
+            guard loaded, !stopped, let webView, owner.source.utf8.count <= 256 * 1024 else { return }
+            let settings: [String: Any] = ["dark": owner.dark, "reducedMotion": owner.reduceMotion,
+                                          "locale": Locale.current.identifier.replacingOccurrences(of: "_", with: "-"), "strings": ChartWords.all]
+            guard let json = try? JSONSerialization.data(withJSONObject: settings, options: [.sortedKeys]),
+                  let settingsText = String(data: json, encoding: .utf8) else { return }
+            let payload = Data(owner.source.utf8).base64EncodedString()
+            let revision = payload + settingsText
+            guard revision != rendered else { return }
+            rendered = revision
+            let script = "window.TokenstatChart.render(new TextDecoder().decode(Uint8Array.from(atob('\(payload)'), c => c.charCodeAt(0))), \(settingsText));"
+            webView.evaluateJavaScript(script) { [weak self] _, error in
+                if let error, self?.stopped == false { self?.owner.onError(error.localizedDescription) }
+            }
+        }
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard !stopped, message.frameInfo.isMainFrame, message.webView === webView,
+                  message.frameInfo.request.url == pageURL, let body = message.body as? [String: Any],
+                  let type = body["type"] as? String else { return }
+            switch type {
+            case "height":
+                if let value = body["height"] as? Double, value.isFinite, (180...2200).contains(value) {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, !self.stopped else { return }; self.owner.height = CGFloat(value)
+                    }
+                }
+            case "copy":
+                if let text = body["text"] as? String, text.utf8.count <= 64 * 1024 {
+                    #if os(macOS)
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+                    #else
+                    UIPasteboard.general.string = text
+                    #endif
+                }
+            case "export":
+                guard let format = body["format"] as? String, ["png", "svg", "csv", "json"].contains(format),
+                      (body["base64"] as? Bool == true) == (format == "png"),
+                      let content = body["content"] as? String, content.utf8.count <= 12 * 1024 * 1024 else { return }
+                let data = body["base64"] as? Bool == true ? Data(base64Encoded: content) : Data(content.utf8)
+                if let data, data.count <= 8 * 1024 * 1024 { owner.onExport(format, data) }
+            default: break
+            }
+        }
+    }
+}
+
+private enum ChartWords {
+    static var all: [String: String] { [
+        "chart": L10n.text("common.chart.chart"), "data": L10n.text("common.chart.data"),
+        "reset": L10n.text("common.chart.reset"), "expand": L10n.text("common.chart.expand"),
+        "collapse": L10n.text("common.chart.collapse"), "copy": L10n.text("common.chart.copy"),
+        "export": L10n.text("common.chart.export"), "choose": L10n.text("common.chart.choose"),
+        "png": L10n.text("common.chart.png"), "svg": L10n.text("common.chart.svg"),
+        "csv": L10n.text("common.chart.csv"), "json": L10n.text("common.chart.json"),
+        "previous": L10n.text("common.chart.previous"), "next": L10n.text("common.chart.next"),
+        "series": L10n.text("common.chart.series"), "category": L10n.text("common.chart.category"),
+        "value": L10n.text("common.chart.value"), "missing": L10n.text("common.chart.missing"),
+        "minimum": L10n.text("common.chart.minimum"), "q1": L10n.text("common.chart.q1"),
+        "median": L10n.text("common.chart.median"), "q3": L10n.text("common.chart.q3"),
+        "maximum": L10n.text("common.chart.maximum"), "size": L10n.text("common.chart.size"),
+        "source": L10n.text("common.chart.source"), "page": L10n.text("common.chart.page"),
+        "of": L10n.text("common.chart.of"), "copied": L10n.text("common.chart.copied"),
+        "exported": L10n.text("common.chart.exported"), "unavailable": L10n.text("common.chart.unavailable"),
+        "inspect": L10n.text("common.chart.inspect"), "loading": L10n.text("common.chart.loading")
+    ] }
+}

@@ -113,6 +113,26 @@ fn handle(engine: &mut Engine, msg: Value) -> Value {
 fn tools() -> Vec<Value> {
     let mut catalog = vec![
         tool(
+            "chart_create",
+            "Validate a data-only chart for the chat. Include the returned tokenstat-chart block verbatim in your assistant reply. Supports bar, line, area, pie, donut, scatter, bubble, heatmap, radar, funnel, treemap and boxplot. No scripts, HTML or external data URLs.",
+            json!({"type":"object","properties":{"chart":tokenstat_core::chart::schema()},"required":["chart"],"additionalProperties":false}),
+        ),
+        tool(
+            "chart_validate",
+            "Check a chart before presenting it. Errors explain invalid data, unsupported options and limits.",
+            json!({"type":"object","properties":{"chart":tokenstat_core::chart::schema()},"required":["chart"],"additionalProperties":false}),
+        ),
+        tool(
+            "chart_schema",
+            "Read the versioned chart JSON schema and supported chart families.",
+            json!({"type":"object","properties":{},"additionalProperties":false}),
+        ),
+        tool(
+            "chart_examples",
+            "Read one complete chart example for each supported chart family. Examples use synthetic data.",
+            json!({"type":"object","properties":{},"additionalProperties":false}),
+        ),
+        tool(
             "totals",
             "Headline token counters for the local archive (optional since/until/model/project filters).",
             json!({
@@ -494,7 +514,7 @@ fn tools() -> Vec<Value> {
     catalog
 }
 
-const GUIDE: &str = "tokenstat manages local usage, registered project folders (workspaces), tasks, notes, scheduled agent jobs and workflow graphs. Start with workspace_list to discover exact IDs, names and paths; projects is historical usage, NOT the workspace registry. workspace_add registers an existing absolute folder path and returns its ID. Never invent an ID or put a path in workspaceId. workspace_context returns a memo of workspaces and their tasks/notes; omit id for all or pass an exact workspace ID. task_list/note_list omit workspaceId for all workspaces, use an empty string for unassigned/global cards. task_create/note_create omit workspaceId for unassigned cards; pass an ID to bind to a folder. Notes are cards with kind=note, body in notes, and cannot be delegated. Creation does not execute work. To execute a task, choose backend/model/effort from backend_list, bind a workspace, then task_delegate explicitly. Execution may edit files and use network services through the backend. task_stop stops a delegated task. automation_runs and automation_transcript inspect execution. Archive tools work without the app; management tools need tokenstat or tokenstat-hostd running on this Unix machine. Connect by launching tokenstat mcp or tokenstat-mcp over stdio; stdout is reserved for MCP. Read tokenstat://guide for this reference. Installer defaults: macOS and Linux use ~/.local/bin/tokenstat; Windows uses %LOCALAPPDATA%/tokenstat/tokenstat.exe (archive tools only; host management needs Unix). Resolve and verify the actual absolute path for this user; do not assume a shell expands home/environment variables in MCP JSON. The macOS app bundles the host helper, not the CLI MCP executable. Reuse an existing configured connection before locating another executable. When the user asks to remember tokenstat, save the preference, verified machine-specific command, args, transport, platform limits and this guide URI in the client-supported global memory or user-level instructions. Preserve existing instructions; never guess memory paths or copy credentials, note bodies or transcripts into global memory. Recheck paths and workspace IDs on another machine. If persistence is unavailable, explain that and return a memory note rather than claiming it was saved.";
+const GUIDE: &str = "For data visualization, use chart_schema and chart_examples to discover the portable chart format. chart_create validates a chart and returns a tokenstat-chart fenced block to include verbatim in your response. Charts render interactively in chat on every client, with offline data, labels, legends, selection, zoom and export. Use real observed data, explain missing values, label quantities and units, and choose a suitable chart. Do not invent numbers or embed scripts, HTML, callbacks, data URLs or external resources. tokenstat manages local usage, registered project folders (workspaces), tasks, notes, scheduled agent jobs and workflow graphs. Start with workspace_list to discover exact IDs, names and paths; projects is historical usage, NOT the workspace registry. workspace_add registers an existing absolute folder path and returns its ID. Never invent an ID or put a path in workspaceId. workspace_context returns a memo of workspaces and their tasks/notes; omit id for all or pass an exact workspace ID. task_list/note_list omit workspaceId for all workspaces, use an empty string for unassigned/global cards. task_create/note_create omit workspaceId for unassigned cards; pass an ID to bind to a folder. Notes are cards with kind=note, body in notes, and cannot be delegated. Creation does not execute work. To execute a task, choose backend/model/effort from backend_list, bind a workspace, then task_delegate explicitly. Execution may edit files and use network services through the backend. task_stop stops a delegated task. automation_runs and automation_transcript inspect execution. Archive tools work without the app; management tools need tokenstat or tokenstat-hostd running on this Unix machine. Connect by launching tokenstat mcp or tokenstat-mcp over stdio; stdout is reserved for MCP. Read tokenstat://guide for this reference. Installer defaults: macOS and Linux use ~/.local/bin/tokenstat; Windows uses %LOCALAPPDATA%/tokenstat/tokenstat.exe (archive tools only; host management needs Unix). Resolve and verify the actual absolute path for this user; do not assume a shell expands home/environment variables in MCP JSON. The macOS app bundles the host helper, not the CLI MCP executable. Reuse an existing configured connection before locating another executable. When the user asks to remember tokenstat, save the preference, verified machine-specific command, args, transport, platform limits and this guide URI in the client-supported global memory or user-level instructions. Preserve existing instructions; never guess memory paths or copy credentials, note bodies or transcripts into global memory. Recheck paths and workspace IDs on another machine. If persistence is unavailable, explain that and return a memory note rather than claiming it was saved.";
 
 fn workspace_id_schema() -> Value {
     json!({"type":"string", "description":"Exact ID returned by workspace_list/workspace_add, not a name or path. Empty string means unassigned/global."})
@@ -648,6 +668,23 @@ fn call_tool(engine: &mut Engine, params: Option<&Value>) -> Result<Value, Strin
     {
         host_call(engine, "workspace.status", json!({"id":id}))
                 .map_err(|error| format!("Invalid or unavailable workspaceId: {error}. Use workspace_list or workspace_add first."))?;
+    }
+    if name == "chart_create" || name == "chart_validate" {
+        let chart = tokenstat_core::chart::Chart::parse(&args["chart"].to_string())?;
+        let fence = chart.fence()?;
+        return Ok(
+            json!({"content":[{"type":"text","text":fence}],"structuredContent":{"chart":chart,"markdown":fence,"valid":true}}),
+        );
+    }
+    if name == "chart_schema" || name == "chart_examples" {
+        let data = if name == "chart_schema" {
+            tokenstat_core::chart::schema()
+        } else {
+            tokenstat_core::chart::examples()
+        };
+        return Ok(
+            json!({"content":[{"type":"text","text":data.to_string()}],"structuredContent":{"data":data}}),
+        );
     }
     let q = query_from_args(&args);
 
@@ -991,6 +1028,40 @@ fn validate_arguments(args: &Value, schema: &Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chart_tools_validate_and_return_a_durable_reply_without_a_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut engine = Engine::open(Some(&dir.path().join("test.db")), Some("UTC")).unwrap();
+        for chart in tokenstat_core::chart::examples().as_array().unwrap() {
+            let response = call_tool(
+                &mut engine,
+                Some(&json!({"name":"chart_create", "arguments":{"chart":chart}})),
+            )
+            .unwrap();
+            assert_eq!(response["structuredContent"]["valid"], true);
+            let markdown = response["content"][0]["text"].as_str().unwrap();
+            let body = markdown
+                .strip_prefix("```tokenstat-chart\n")
+                .unwrap()
+                .strip_suffix("\n```")
+                .unwrap();
+            let parsed = tokenstat_core::chart::Chart::parse(body).unwrap();
+            assert_eq!(parsed.kind, chart["type"].as_str().unwrap());
+        }
+        let invalid = json!({"name":"chart_create","arguments":{"chart":{"version":1,"type":"pie","title":"Invalid","categories":["A"],"series":[{"name":"Amount","data":[-1]}]}}});
+        assert!(call_tool(&mut engine, Some(&invalid)).is_err());
+        let schema = call_tool(
+            &mut engine,
+            Some(&json!({"name":"chart_schema","arguments":{}})),
+        )
+        .unwrap();
+        assert_eq!(
+            schema["structuredContent"]["data"]["properties"]["version"]["const"],
+            1
+        );
+        assert!(!dir.path().join("host.sock").exists());
+    }
 
     #[test]
     fn stdio_roundtrip_multiple_messages_and_notifications() {

@@ -50,8 +50,8 @@ android {
         applicationId = "ai.tokenstat.tokenstat"
         minSdk = 28
         targetSdk = 36
-        versionCode = 169
-        versionName = "1.7.5"
+        versionCode = 170
+        versionName = "1.8.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
@@ -117,8 +117,30 @@ val generateNotices = tasks.register<GenerateAndroidFiles>("generateNotices") {
     commandLine("scripts/notices-android.sh",
         outputDirectory.file("THIRD_PARTY_NOTICES.md").get().asFile)
 }
+abstract class GenerateChartAssets : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sourceDirectory: DirectoryProperty
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+    @get:Inject
+    abstract val files: FileSystemOperations
+    @TaskAction
+    fun generate() {
+        files.sync {
+            from(sourceDirectory) { into("charts") }
+            into(outputDirectory)
+        }
+    }
+}
+val chartAssets = tasks.register<GenerateChartAssets>("chartAssets") {
+    sourceDirectory.set(rootProject.layout.projectDirectory.dir("../charts/runtime"))
+    outputDirectory.set(layout.buildDirectory.dir("generated-assets/chart-runtime"))
+}
+
 androidComponents {
     onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(chartAssets, GenerateChartAssets::outputDirectory)
         variant.sources.resources?.addGeneratedSourceDirectory(languageResources, GenerateLanguageResources::outputDirectory)
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildRust, GenerateAndroidFiles::outputDirectory)
         variant.sources.assets?.addGeneratedSourceDirectory(generatePriceBook, GenerateAndroidFiles::outputDirectory)

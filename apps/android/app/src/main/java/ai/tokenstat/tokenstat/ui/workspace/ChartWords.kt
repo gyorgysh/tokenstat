@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+package ai.tokenstat.tokenstat.ui.workspace
+import ai.tokenstat.tokenstat.ui.localization.L10n
+internal object ChartWords {
+    fun all(): Map<String, String> = mapOf(
+        "category" to L10n.text("common.chart.category"),
+        "chart" to L10n.text("common.chart.chart"),
+        "choose" to L10n.text("common.chart.choose"),
+        "collapse" to L10n.text("common.chart.collapse"),
+        "copied" to L10n.text("common.chart.copied"),
+        "copy" to L10n.text("common.chart.copy"),
+        "csv" to L10n.text("common.chart.csv"),
+        "data" to L10n.text("common.chart.data"),
+        "expand" to L10n.text("common.chart.expand"),
+        "export" to L10n.text("common.chart.export"),
+        "exported" to L10n.text("common.chart.exported"),
+        "inspect" to L10n.text("common.chart.inspect"),
+        "json" to L10n.text("common.chart.json"),
+        "loading" to L10n.text("common.chart.loading"),
+        "maximum" to L10n.text("common.chart.maximum"),
+        "median" to L10n.text("common.chart.median"),
+        "minimum" to L10n.text("common.chart.minimum"),
+        "missing" to L10n.text("common.chart.missing"),
+        "next" to L10n.text("common.chart.next"),
+        "of" to L10n.text("common.chart.of"),
+        "page" to L10n.text("common.chart.page"),
+        "png" to L10n.text("common.chart.png"),
+        "previous" to L10n.text("common.chart.previous"),
+        "q1" to L10n.text("common.chart.q1"),
+        "q3" to L10n.text("common.chart.q3"),
+        "reset" to L10n.text("common.chart.reset"),
+        "resources_missing" to L10n.text("common.chart.resources_missing"),
+        "series" to L10n.text("common.chart.series"),
+        "size" to L10n.text("common.chart.size"),
+        "source" to L10n.text("common.chart.source"),
+        "svg" to L10n.text("common.chart.svg"),
+        "too_large" to L10n.text("common.chart.too_large"),
+        "unavailable" to L10n.text("common.chart.unavailable"),
+        "value" to L10n.text("common.chart.value"),
+    )
+}

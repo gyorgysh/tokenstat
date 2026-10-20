@@ -195,6 +195,8 @@ fn standing_text(persona_name: &str, persona_brief: &str, output_dir: &Path) -> 
     text.push_str(&file_rule(output_dir));
     text.push_str("\n\n");
     text.push_str(browser_rule());
+    text.push_str("\n\n");
+    text.push_str(chart_rule());
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         text.push_str("\n\n");
@@ -206,6 +208,25 @@ fn standing_text(persona_name: &str, persona_brief: &str, output_dir: &Path) -> 
         text.push_str(simulator_rule());
     }
     text
+}
+
+/// Charts travel in the reply, so every backend and encrypted remote client shares the capability.
+pub fn chart_rule() -> &'static str {
+    "When data is clearer as a chart, present an interactive chart in a fenced tokenstat-chart block. \
+     Use JSON only: {\"version\":1,\"type\":\"bar\",\"title\":\"Descriptive title\",\"categories\":[\"A\",\"B\"],\"series\":[{\"name\":\"Quantity\",\"data\":[10,20]}],\"yAxis\":{\"label\":\"Quantity (units)\"}}. \
+     Supported types: bar, line, area, pie, donut, scatter, bubble, heatmap, radar, funnel, treemap, boxplot. \
+     Use categories and equal-length numeric data arrays for categorical charts, null for missing bar/line/area values. \
+     Scatter uses [x,y] points, bubble [x,y,size], heatmap [xIndex,yIndex,value] with categories and yCategories, \
+     boxplot [min,Q1,median,Q3,max]. Pie/donut/funnel/treemap/heatmap need one series. \
+     Optional subtitle, description, source, stacked (bar/line/area), horizontal (bar), showLabels, \
+     xAxis and yAxis with label and format:{prefix,suffix,decimals:0..8}. Radar has 3..12 categories. \
+     Limits: 256 KiB, 16 series, 512 categories per axis, 10000 points, finite numbers within +/-1e15. \
+     Label units, use actual observed data and cite its source in prose. Do not invent values. \
+     If chart_create/chart_schema/chart_examples tools are available, use them to validate and discover examples, \
+     then include the returned fenced chart in your reply. Otherwise emit the same JSON fence directly. \
+     An installed tokenstat CLI also offers chart --schema, chart --examples and chart FILE.json for validation. \
+     Never include HTML, scripts, ECharts options, callbacks or external URLs as chart configuration. \
+     Surround the chart with the useful explanation, without narrating this format."
 }
 
 /// Desktop actions target a project explicitly and carry navigation only.

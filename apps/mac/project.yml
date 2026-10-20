@@ -43,7 +43,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/Tokenstat-Bridging-Header.h
-    MARKETING_VERSION: "1.7.5"
+    MARKETING_VERSION: "1.8.0"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -271,10 +271,10 @@ settings:
     # 165 updates iOS login hint placement and makes the demo shortcut a toggle.
     # 166 prepares 1.7.3 with the redesigned Mac installer disk image.
     # 167 prepares 1.7.4 with the macOS simulator inspector.
-    # 168 is the same 1.7.4. The login screen says to tap the logo 10 times to enable developer mode.
-    # It went up to TestFlight.
-    # 169 is 1.7.5: the login hint, and certificate checks that reject distrusted emSign intermediates.
-    CURRENT_PROJECT_VERSION: "169"
+    # 168 went up to TestFlight as 1.7.4. The login screen says to tap the logo 10 times to enable developer mode.
+    # 169 went up to TestFlight as 1.7.5, with the certificate trust fix.
+    # 170 continues 1.8.0. 168 and 169 are spent.
+    CURRENT_PROJECT_VERSION: "170"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
@@ -317,6 +317,7 @@ targets:
           cd "$SRCROOT/../.."
           cargo run -q -p xtask -- notices "apps/mac/Resources/THIRD_PARTY_NOTICES.md" tokenstat-host
           cat "apps/mac/Resources/SwiftTerm-LICENSE.txt" >> "apps/mac/Resources/THIRD_PARTY_NOTICES.md"
+          cat "apps/charts/runtime/ENGINE-LICENSE.txt" >> "apps/mac/Resources/THIRD_PARTY_NOTICES.md"
           {
             printf '\n\n## Manrope\n\nBundled as the interface typeface.\n\n'
             cat "apps/mac/Resources/Fonts/Manrope-OFL.txt"
@@ -369,6 +370,9 @@ targets:
     sources:
       - path: Sources
       - path: ../localization
+        type: folder
+        buildPhase: resources
+      - path: ../charts/runtime
         type: folder
         buildPhase: resources
       - path: BrandResources

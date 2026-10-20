@@ -117,6 +117,7 @@ public sealed partial class SmokeApp : Application
         terminal.Failed += message => Program.Log("Terminal failure: " + message);
         var body = new StackPanel { Children = { editor, video, terminal } };
         _window = new Window { Content = body };
+        Tokenstat.App.CurrentWindow = _window;
         body.Loaded += async (_, _) =>
         {
             if (_testsStarted) return;
@@ -126,6 +127,7 @@ public sealed partial class SmokeApp : Application
             try
             {
                 PersonaSceneSmoke.Run();
+                await ChatChartSmoke.Run(body);
                 await HeatmapResizeSmoke.Run(body);
                 await ShellChromeSmoke.Run(body);
                 await HarnessConfigSmoke.Run(body);

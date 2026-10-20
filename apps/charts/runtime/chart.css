@@ -1,0 +1,259 @@
+/* SPDX-License-Identifier: LicenseRef-tokenstat-source-available */
+@font-face {
+    font-family: Manrope;
+    src: url("Manrope.ttf") format("truetype");
+    font-weight: 200 800;
+    font-style: normal;
+    font-display: block;
+}
+:root {
+    color-scheme: light dark;
+    --bg: #fff;
+    --fg: #20212b;
+    --muted: #666879;
+    --line: #e2e3eb;
+    --soft: #f4f4f9;
+    --accent: #7853b5;
+    --focus: #7853b5;
+}
+* {
+    box-sizing: border-box;
+}
+body {
+    margin: 0;
+    background: transparent;
+    color: var(--fg);
+    font:
+        13px/1.45 Manrope,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        sans-serif;
+}
+main {
+    padding: 16px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+}
+header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+.heading {
+    min-width: 0;
+    flex: 1;
+}
+h2 {
+    font-size: 16px;
+    line-height: 1.35;
+    font-weight: 600;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+p {
+    margin: 6px 0 0;
+    overflow-wrap: anywhere;
+}
+#subtitle,
+#description,
+footer,
+#kind {
+    color: var(--muted);
+}
+#kind {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding-top: 3px;
+}
+#description {
+    font-size: 12px;
+    max-height: 100px;
+    overflow: auto;
+}
+#plot {
+    height: 312px;
+    width: 100%;
+    touch-action: pan-y;
+    margin: 8px 0;
+}
+.expanded #plot {
+    height: 550px;
+}
+#selection {
+    min-height: 36px;
+    white-space: pre-wrap;
+    border-left: 3px solid var(--accent);
+    padding: 7px 11px;
+    background: var(--soft);
+    margin-bottom: 10px;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+.toolbar {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+button,
+select {
+    font: inherit;
+    color: var(--fg);
+    background: var(--soft);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    min-height: 36px;
+    padding: 6px 10px;
+    cursor: pointer;
+}
+button:hover,
+select:hover {
+    border-color: var(--accent);
+}
+button:focus-visible,
+select:focus-visible,
+#plot:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+button[aria-expanded="true"],
+button[aria-pressed="true"] {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+.export {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.export select {
+    max-width: 145px;
+}
+#data-panel {
+    margin-top: 12px;
+}
+.table-scroll {
+    overflow: auto;
+    max-height: 300px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+}
+table {
+    border-collapse: collapse;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+}
+caption {
+    text-align: left;
+    padding: 8px 10px;
+    color: var(--muted);
+}
+th,
+td {
+    padding: 8px 10px;
+    border-top: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+    max-width: 240px;
+    overflow-wrap: anywhere;
+}
+th {
+    font-weight: 600;
+    background: var(--soft);
+    position: sticky;
+    top: 0;
+}
+td.numeric {
+    text-align: right;
+    white-space: nowrap;
+}
+#pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+}
+footer {
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin-top: 10px;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+#error {
+    padding: 12px;
+    background: var(--soft);
+    border-left: 3px solid #b74258;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+[hidden] {
+    display: none !important;
+}
+@media (max-width: 400px) {
+    main {
+        padding: 12px;
+    }
+    #plot {
+        height: 300px;
+    }
+    h2 {
+        font-size: 15px;
+    }
+    .export {
+        margin-left: 0;
+    }
+    button,
+    select {
+        min-height: 42px;
+    }
+    .toolbar {
+        gap: 5px;
+    }
+    #kind {
+        display: none;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    * {
+        scroll-behavior: auto !important;
+        animation: none !important;
+        transition: none !important;
+    }
+}
+
+/* Long annotations stay readable without allowing an unbounded transcript row. */
+h2 {
+    max-height: 130px;
+    overflow: auto;
+}
+#subtitle {
+    max-height: 90px;
+    overflow: auto;
+}
+#source {
+    max-height: 90px;
+    overflow: auto;
+    min-width: 0;
+}
+#selection {
+    max-height: 180px;
+    overflow: auto;
+}
