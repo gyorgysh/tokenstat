@@ -821,20 +821,22 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                 Ok(state) => state,
                 Err(_) => break,
             };
-            let mut transport = tokenstat_remote::tunnel::ChannelTransport::from_inbound(
+            let transport = tokenstat_remote::tunnel::ChannelTransport::from_inbound(
                 Arc::clone(&tunnel),
                 state,
             );
-            // Team channels must enter the scoped Team dispatcher. Never
-            // auto-approve one through the broad personal-device path, even
-            // when the same physical device also has a personal pairing.
-            // Keep admission closed until the scoped dispatcher is installed.
-            if transport.team_authorization().is_some() {
-                tokenstat_remote::Transport::close(&mut transport);
-                continue;
-            }
+            let team = transport.team_authorization();
             match tokenstat_remote::handshake_responder(Box::new(transport), &identity) {
                 Ok(connection) => {
+                    if let Some(team) = team {
+                        let peer_session = Arc::clone(&session);
+                        let team_owner = owner.clone();
+                        let host = identity.public_key();
+                        std::thread::spawn(move || {
+                            crate::teams::serve(connection, team, team_owner, host, &peer_session)
+                        });
+                        continue;
+                    }
                     set_tunnel_state(|state| {
                         state.connected = true;
                         state.error = None;

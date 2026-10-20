@@ -264,5 +264,6 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 35 adds the opt-in work overview across chats and terminals.
 /// Version 36 adds Git LFS preflight and explicitly consented repository setup.
 /// Version 37 adds explicit agent reinstallation through `launcher.reinstall`.
-/// Version 38 adds opt-in organization management and scoped team collaboration.
-pub const PROTOCOL_VERSION: &str = "38";
+/// Version 38 adds opt-in organization management.
+/// Version 39 adds key-bound Team principals and their closed dispatch boundary.
+pub const PROTOCOL_VERSION: &str = "39";

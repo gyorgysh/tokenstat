@@ -7,24 +7,65 @@
 //! one dispatch call, so authorization code never trusts a peer id from JSON.
 
 use std::cell::RefCell;
+use std::sync::Arc;
 
 thread_local! {
     static RELAY: RefCell<bool> = const { RefCell::new(false) };
     static REMOTE_PEER: RefCell<Option<String>> = const { RefCell::new(None) };
+    static TEAM_PRINCIPAL: RefCell<Option<Arc<crate::teams::AuthorizedTeamPrincipal>>> = const { RefCell::new(None) };
+}
+
+/// Transport-derived authority. A Team member remains scoped even if the
+/// same physical device also has an ordinary personal pairing.
+pub(crate) enum RequestPrincipal {
+    LocalOwner,
+    PersonalDevice { key: String },
+    TeamMember(Arc<crate::teams::AuthorizedTeamPrincipal>),
+}
+pub(crate) fn principal() -> RequestPrincipal {
+    if let Some(member) = team_principal() {
+        return RequestPrincipal::TeamMember(member);
+    }
+    match REMOTE_PEER.with(|peer| peer.borrow().clone()) {
+        Some(key) => RequestPrincipal::PersonalDevice { key },
+        None => RequestPrincipal::LocalOwner,
+    }
+}
+
+pub(crate) fn team_principal() -> Option<Arc<crate::teams::AuthorizedTeamPrincipal>> {
+    TEAM_PRINCIPAL.with(|slot| slot.borrow().clone())
+}
+pub(crate) fn with_team_principal<T>(
+    principal: crate::teams::AuthorizedTeamPrincipal,
+    work: impl FnOnce() -> T,
+) -> T {
+    struct Restore(Option<Arc<crate::teams::AuthorizedTeamPrincipal>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEAM_PRINCIPAL.with(|slot| *slot.borrow_mut() = self.0.take());
+        }
+    }
+    let peer = principal.value().device_key.clone();
+    let previous = TEAM_PRINCIPAL.with(|slot| slot.replace(Some(Arc::new(principal))));
+    let _restore = Restore(previous);
+    with_remote_peer(&peer, work)
 }
 
 pub(crate) fn remote_peer() -> Option<String> {
-    REMOTE_PEER.with(|peer| peer.borrow().clone())
+    match principal() {
+        RequestPrincipal::LocalOwner => None,
+        RequestPrincipal::PersonalDevice { key } => Some(key),
+        RequestPrincipal::TeamMember(member) => Some(member.value().device_key.clone()),
+    }
 }
 
 /// Methods that decrypt vault material, open SSH sessions, or change this
 /// machine's serving policy belong to the local owner. An approved peer is
 /// not that owner.
 pub(crate) fn refuse_remote(what: &str) -> Result<(), String> {
-    if remote_peer().is_some() {
-        Err(format!("{what} are local-only"))
-    } else {
-        Ok(())
+    match principal() {
+        RequestPrincipal::LocalOwner => Ok(()),
+        _ => Err(format!("{what} are local-only")),
     }
 }
 

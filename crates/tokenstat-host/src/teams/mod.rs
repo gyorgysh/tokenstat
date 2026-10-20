@@ -4,11 +4,51 @@
 //! Teammate chat requests use their own scoped entry point; they never borrow
 //! this machine's account credential or its personal workspace policy.
 
+mod authorization;
 mod directory;
+mod scoped;
 use crate::account_session::AccountSnapshot;
 use crate::error::DispatchError;
+pub(crate) use authorization::AuthorizedTeamPrincipal;
 use serde_json::{Value, json};
 use tokenstat_sync::teams::{TeamClient, TeamError};
+
+pub(crate) fn scoped_call(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
+    scoped::call(method, params)
+}
+
+pub(crate) fn serve(
+    mut connection: tokenstat_remote::Connection,
+    channel: tokenstat_remote::tunnel::TeamChannelHandle,
+    owner: AccountSnapshot,
+    host: tokenstat_identity::PublicKey,
+    session: &std::sync::Mutex<crate::Session>,
+) {
+    let Ok(mut authorization) =
+        authorization::Authorization::capture(&owner, connection.peer_key(), host, channel)
+    else {
+        connection.close();
+        return;
+    };
+    while let Ok(bytes) = connection.receive_within(16 * 1024, std::time::Duration::from_secs(60)) {
+        let Ok(line) = std::str::from_utf8(&bytes) else {
+            break;
+        };
+        let Ok(principal) = authorization.authorize() else {
+            break;
+        };
+        let response = crate::request_context::with_team_principal(principal, || {
+            crate::server::respond(line, session)
+        });
+        if authorization.ensure_live().is_err() {
+            break;
+        }
+        if connection.send(response.as_bytes()).is_err() {
+            break;
+        }
+    }
+    connection.close();
+}
 
 pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
     if !method.starts_with("teams.") {

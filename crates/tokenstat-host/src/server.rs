@@ -407,6 +407,15 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
         other => other.to_string(),
     };
 
+    // Dispatch Team requests before archive-specific fast paths such as scan.
+    // Their closed method table always returns an answer without taking the
+    // personal session lock or opening a personal database.
+    if crate::request_context::team_principal().is_some() {
+        let envelope = crate::dispatch::call_sessionless(&request.method, &params)
+            .unwrap_or_else(|| json!({"ok":false,"error":{"code":"team_method_required","message":"This action is not available through a Team connection."}}).to_string());
+        return with_id(envelope, request.id);
+    }
+
     // Answered without the lock where the method allows it. Connections share
     // one session, so a terminal polling for output would otherwise serialize
     // against every other client's archive and git work.

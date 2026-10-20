@@ -1290,6 +1290,9 @@ fn owner_only_method(method: &str) -> bool {
 }
 
 fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, DispatchError> {
+    if let Some(result) = crate::teams::scoped_call(method, params) {
+        return result;
+    }
     if owner_only_method(method) {
         crate::request_context::refuse_remote("account and update methods")?;
     }
@@ -4907,10 +4910,12 @@ fn highlight(params: &str) -> Result<Value, String> {
 /// Transports call this **before** taking whatever lock guards their session.
 /// See [`sessionless`] for why that matters.
 pub fn call_sessionless(method: &str, params: &str) -> Option<String> {
-    sessionless(method, params).map(|result| match result {
-        Ok(v) => ok(v),
-        Err(e) => err(&e.code, e.message),
-    })
+    crate::teams::scoped_call(method, params)
+        .or_else(|| sessionless(method, params))
+        .map(|result| match result {
+            Ok(v) => ok(v),
+            Err(e) => err(&e.code, e.message),
+        })
 }
 
 #[cfg(test)]
