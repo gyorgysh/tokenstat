@@ -34,7 +34,7 @@ final class ClientTabCustomization {
     /// SSH as an opt-in; the iPad sidebar has room, so SSH joins it there
     /// from the start.
     private static var defaultHidden: Set<ClientTab> {
-        UIDevice.current.userInterfaceIdiom == .pad ? [] : [.ssh]
+        UIDevice.current.userInterfaceIdiom == .pad ? [] : [.ssh, .team]
     }
 
     /// What the tab bar, the sidebar and the shortcuts all draw. Never empty.
@@ -68,9 +68,10 @@ final class ClientTabCustomization {
                     .compactMap(ClientTab.init(rawValue:))
             ).intersection(resolvedOrder)
         }
+        self.defaults = defaults
         self.order = resolvedOrder
         self.hidden = resolvedHidden
-        self.defaults = defaults
+        if UIDevice.current.userInterfaceIdiom != .pad, storedOrder != nil, !known.contains(.team) { self.hidden.insert(.team) }
     }
 
     @ObservationIgnored private let defaults: UserDefaults

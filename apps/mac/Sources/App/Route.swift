@@ -101,9 +101,9 @@ enum Route: Hashable {
     /// task one list over had a whole pane for the same thing.
     var hasInspector: Bool {
         #if os(macOS)
-        globalSection != .account && globalSection != .newChat && globalSection != .notes && workspaceSection != .notes
+        globalSection != .team && globalSection != .account && globalSection != .newChat && globalSection != .notes && workspaceSection != .notes
         #else
-        globalSection != .account && globalSection != .newChat
+        globalSection != .team && globalSection != .account && globalSection != .newChat
         #endif
     }
 }
@@ -111,6 +111,7 @@ enum Route: Hashable {
 /// The machine-wide screens.
 enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
     case home
+    case team
     case newChat
     case insights
     case machines
@@ -142,6 +143,7 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
         case .workflows: return L10n.text("common.workflows")
         case .machines: return L10n.text("common.devices")
         case .insights: return L10n.text("common.insights")
+        case .team: return L10n.text("common.teams.title")
         case .account: return L10n.text("common.account")
         }
     }
@@ -156,6 +158,7 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
         case .workflows: return "point.3.connected.trianglepath.dotted"
         case .machines: return "laptopcomputer"
         case .insights: return "chart.bar.xaxis"
+        case .team: return "person.2"
         case .account: return "person.crop.circle"
         }
     }

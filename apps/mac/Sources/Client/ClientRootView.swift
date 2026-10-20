@@ -39,6 +39,7 @@ struct ClientRootView: View {
     /// edits it, and every screen that needs a tier or a machine list reads the
     /// same copy rather than starting a second sign-in state.
     @State private var account = AccountModel()
+    @State private var teams = TeamStore(api: .live)
     @State private var webAuth = ClientWebAuth()
     /// Whether this phone can reach the internet. Every screen in the client is
     /// account plane, which means every screen depends on the network, so the
@@ -334,6 +335,13 @@ struct ClientRootView: View {
                 if navigation.restoredRoute != route { navigation.restoredRoute = route }
             }
         }
+        .task(id: teamAccountOwner) {
+            await BridgeLaunch.wait()
+            guard !Task.isCancelled else { return }
+            await teams.bind(to: teamAccountOwner)
+            await teams.refreshSelected()
+        }
+        .task(id: teams.selectionKey) { await teams.refreshSelected() }
         .task(id: WorkSessionContext.shared.generation) {
             let retained = sessionModels.models(for: WorkSessionContext.shared.scope).ssh
             retained.setForeground(scenePhase == .active)
@@ -384,7 +392,15 @@ struct ClientRootView: View {
             if phase != .active { navigation.saveRoute() }
             guard phase == .active, account.signedIn else { return }
             Task { await Bridge.nudgeTunnelOnForeground() }
+            if navigation.destination == .team || teams.phase == .authorization { Task { await teams.reloadAfterChange() } }
         }
+    }
+
+    private var teamAccountOwner: TeamAccountOwner? {
+        let context = WorkSessionContext.shared
+        guard account.signedIn, let scope = context.scope, scope.kind == .account,
+              let session = context.accountSession, !session.isEmpty else { return nil }
+        return TeamAccountOwner(scope: scope, generation: context.generation, session: session)
     }
 
     private var rootPresentations: some View {
@@ -481,6 +497,7 @@ struct ClientRootView: View {
         // a chat notification. Injecting here covers whatever is presented
         // next as well.
         .environment(account)
+        .environment(teams)
         .environment(connectivity)
         .environment(connection)
         .environment(store)
@@ -630,6 +647,7 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
     /// and on from the start on the iPad: the phone bar stays the familiar
     /// four until it is switched on in the tab editor.
     case ssh
+    case team
 
     var id: String { rawValue }
 
@@ -639,6 +657,7 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
         case .workspaces: return L10n.text("common.projects")
         case .insights: return L10n.text("common.insights")
         case .machines: return L10n.text("common.devices")
+        case .team: return L10n.text("common.teams.title")
         case .ssh: return L10n.text("apple.clientrootview.ssh.01c4d3c2")
         }
     }
@@ -649,6 +668,7 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
         case .workspaces: return "folder.fill"
         case .insights: return "chart.bar.xaxis"
         case .machines: return "laptopcomputer"
+        case .team: return "person.2"
         case .ssh: return "terminal"
         }
     }
@@ -660,6 +680,7 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
         case .workspaces: return L10n.text("apple.clientrootview.folders_and_sessions_on_your_machines.4b93afd1")
         case .insights: return L10n.text("apple.clientrootview.breakdowns_by_model_and_project.9846e926")
         case .machines: return L10n.text("apple.clientrootview.computers_on_your_account.232226fe")
+        case .team: return L10n.text("common.teams.directory_detail")
         case .ssh: return L10n.text("apple.clientrootview.saved_servers_and_keys.47db8e47")
         }
     }
@@ -674,6 +695,7 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
         case .workspaces: ClientWorkspacesView(model: workspaces, handlesNotifications: true)
         case .insights: ClientInsightsView()
         case .machines: ClientDevicesView()
+        case .team: ClientTeamView()
         case .ssh: ClientSSHTab()
         }
     }

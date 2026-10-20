@@ -23,6 +23,9 @@ enum ActionIcon {
     case account
     case settings
     case security
+    case team
+    case invite
+    case permissions
     case edit
 
     // Money
@@ -126,6 +129,9 @@ enum ActionIcon {
         case .account, .profile: return "person.crop.circle"
         case .settings: return "gearshape"
         case .security: return "lock.shield"
+        case .team: return "person.2"
+        case .invite: return "person.badge.plus"
+        case .permissions: return "lock.shield"
         case .edit: return "pencil"
 
         case .plans: return "crown"

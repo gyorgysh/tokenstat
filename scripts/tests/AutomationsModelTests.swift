@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with AutomationsModel.swift Models.swift JSONValue.swift FileDiff.swift WorkflowLayering.swift SessionIdentities.swift.
+// Compile with AutomationsModel.swift Models.swift JSONValue.swift FileDiff.swift WorkflowLayering.swift SessionIdentities.swift. SyntaxKind.swift.
 // AutoCommitJob.swift AutomationTemplates.swift HostScheduleClock.swift.
 // WorkflowsModel.swift WorkflowGraphDocument.swift WorkflowGraphValidation.swift.
 import Foundation

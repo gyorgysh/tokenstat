@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with Models.swift JSONValue.swift FileDiff.swift WorkflowLayering.swift. SessionIdentities.swift.
+// Compile with Models.swift JSONValue.swift FileDiff.swift WorkflowLayering.swift. SessionIdentities.swift. SyntaxKind.swift.
 import Foundation
 import SwiftUI
 

@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+name: TeamUIFixture
+options:
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGNING_ALLOWED: NO
+    GENERATE_INFOPLIST_FILE: YES
+    PRODUCT_BUNDLE_IDENTIFIER: ai.tokenstat.qa.teams
+    INFOPLIST_KEY_CFBundleDisplayName: Teams UI fixture
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+targets:
+  TeamUIFixture:
+    type: application
+    supportedDestinations: [macOS, iOS]
+    sources:
+      - path: .
+        excludes: [project.yml, "*.xcodeproj"]
+      - path: ../../../apps/mac/Sources/Client/ClientKeyboardDismissButton.swift
+      - path: ../../../apps/mac/Sources/Features/Teams
+      - path: ../../../apps/mac/Sources/Features/Work/WorkReference.swift
+      - path: ../../../apps/mac/Sources/Bridge/JSONValue.swift
+      - path: ../../../apps/mac/Sources/App/SidebarContextClick.swift
+      - path: ../../../apps/mac/Sources/Design/Theme.swift
+      - path: ../../../apps/mac/Sources/Design/AppFonts.swift
+      - path: ../../../apps/mac/Sources/Design/FlowLayout.swift
+      - path: ../../../apps/mac/Sources/Design/FeatureMark.swift
+      - path: ../../../apps/mac/Sources/Design/SyntaxKind.swift
+      - path: ../../../apps/mac/Sources/Design/Avatar.swift
+      - path: ../../../apps/mac/Sources/Design/AvatarImageDecode.swift
+      - path: ../../../apps/mac/Sources/Design/ActionIcon.swift
+      - path: ../../../apps/mac/Sources/Design/ThemedSheet.swift
+      - path: ../../../apps/mac/Sources/Design/SearchablePicker.swift
+      - path: ../../../apps/mac/Sources/Design/L10n.swift
+      - path: ../../../apps/mac/Sources/Design/NativeMenuTrigger.swift
+      - path: ../../../apps/localization
+        type: folder
+        buildPhase: resources
+      - path: ../../../apps/mac/Resources/Fonts
+        buildPhase: resources

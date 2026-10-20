@@ -52,6 +52,7 @@ struct RootView: View {
     @State private var model = InsightsModel()
     @State private var home = HomeModel()
     @State private var account = AccountModel()
+    @State private var teams = TeamStore(api: .live)
     @State private var workspaces = WorkspacesModel()
     @State private var pullCounts = PullCountStore.shared
     @State private var machines = MachinesModel()
@@ -505,6 +506,16 @@ struct RootView: View {
             }
         }
         .environment(\.hostReady, launch.hostReady)
+        .task(id: teamAccountOwner) {
+            await BridgeLaunch.wait()
+            guard !Task.isCancelled else { return }
+            await teams.bind(to: teamAccountOwner)
+            await teams.refreshSelected()
+        }
+        .task(id: teams.selectionKey) { await teams.refreshSelected() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if route.isGlobal(.team) || teams.phase == .authorization { Task { await teams.reloadAfterChange() } }
+        }
         .task {
             await launch.prepare()
             // Sidebar pins need the local identity even when launch restores Home.
@@ -1162,6 +1173,7 @@ struct RootView: View {
             if !route.isGlobal(.workflows) { navigate(to: .global(.automations)) }
         case .insights: navigate(to: .global(.insights))
         case .devices: navigate(to: .global(.machines))
+        case .team: navigate(to: .global(.team))
         case .ssh:
             #if os(macOS)
             openSSH(lastSSHSection)
@@ -1229,6 +1241,13 @@ struct RootView: View {
         .help(railAccountLabel)
     }
 
+    private var teamAccountOwner: TeamAccountOwner? {
+        let context = WorkSessionContext.shared
+        guard account.signedIn, let scope = context.scope, scope.kind == .account,
+              let session = context.accountSession, !session.isEmpty else { return nil }
+        return TeamAccountOwner(scope: scope, generation: context.generation, session: session)
+    }
+
     private var railAccountTier: String? {
         guard account.signedIn,
               let tier = account.account?.tier?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1240,7 +1259,7 @@ struct RootView: View {
         guard account.signedIn else { return L10n.text("apple.rootview.account_sign_in_to_tokenstat.7888d723") }
         let name = account.account?.title ?? L10n.text("apple.rootview.signed_in.ca566c89")
         guard let tier = railAccountTier else { return L10n.text("apple.rootview.account_0.1342b321", "\(name)") }
-        return L10n.text("apple.rootview.account_0_1_plan.75429042", "\(name)", "\(tier.capitalized)")
+        return L10n.text("apple.rootview.account_0_1_plan.75429042", "\(name)", "\(tier.capitalized)") + ", " + (teams.selectedOrganization?.name ?? L10n.text("common.teams.personal"))
     }
 
     /// Leading toggles injected into every destination's chrome bar.
@@ -1744,7 +1763,7 @@ struct RootView: View {
                 #endif
             case .global(.insights):
                 ScopedInsightsInspector(model: model) { closeInspector() }
-            case .global(.account), .global(.newChat):
+            case .global(.account), .global(.newChat), .global(.team):
                 EmptyView()
             case .workspacesOverview:
                 WorkspacesOverviewPlaceholder(onClose: { closeInspector() })
@@ -2317,6 +2336,9 @@ struct RootView: View {
                         ForEach(sidebarSectionOrder, id: \.self) { section in
                             if section == "projects" { projectsSection }
                             else if section == "servers" { liveServersSection }
+                        }
+                        TeamSidebarLinks(store: teams, isTeamSelected: route.isGlobal(.team)) { section in
+                            teams.show(section); navigate(to: .global(.team))
                         }
                     }
                     .padding(.bottom, Theme.Space.m)
@@ -2897,7 +2919,7 @@ struct RootView: View {
     private var sidebarAccountBar: some View {
         SidebarAccountBar(
             name: account.signedIn ? (account.account?.title ?? L10n.text("common.account")) : L10n.text("common.sign_in"),
-            detail: account.signedIn ? (railAccountTier?.capitalized ?? account.account?.handle.map { "@\($0)" }) : nil,
+            detail: account.signedIn ? [railAccountTier?.capitalized, teams.selectedOrganization?.name ?? L10n.text("common.teams.personal")].compactMap { $0 }.joined(separator: " · ") : nil,
             accessibilityLabel: railAccountLabel,
             menuItems: { accountMenuItems },
             settings: { navigate(to: .global(.account)) }
@@ -2926,7 +2948,7 @@ struct RootView: View {
                 checkUpdates,
             ]
         }
-        return [
+        return TeamScopeMenuItems.make(store: teams) { navigate(to: .global(.team)) } + [
             NativeMenuItem(
                 L10n.text("common.sync_now"),
                 isEnabled: !account.isSyncing && account.syncCooldownUntil == nil
@@ -3185,6 +3207,8 @@ struct RootView: View {
                 handle(.global(.account))
                 account.signIn()
             })
+        case .global(.team):
+            TeamManagementView(store: teams, canCreateOrganization: railAccountTier == "legend", onAccount: { navigate(to: .global(.account)) })
         case .global(.account):
             AccountView(model: account)
         case .workspacesOverview:
@@ -4401,179 +4425,7 @@ private struct CloseSSHSessionsConfirm: View {
     }
 }
 
-/// One entry in a menu popped by `NativeMenuTrigger`.
-struct NativeMenuItem {
-    enum Kind {
-        case action
-        case separator
-    }
 
-    let kind: Kind
-    let title: String
-    let isEnabled: Bool
-    let symbol: String?
-    let destructive: Bool
-    let action: () -> Void
-
-    init(_ title: String, icon: ActionIcon? = nil, isEnabled: Bool = true,
-         destructive: Bool = false, action: @escaping () -> Void) {
-        self.kind = .action
-        self.title = title
-        self.isEnabled = isEnabled
-        self.symbol = icon?.symbol
-        self.destructive = destructive
-        self.action = action
-    }
-
-    private init() {
-        kind = .separator
-        title = ""
-        isEnabled = false
-        symbol = nil
-        destructive = false
-        action = {}
-    }
-
-    static let separator = NativeMenuItem()
-}
-
-/// Pops a real `NSMenu` under whatever it is laid over.
-///
-/// For rows that must look exactly as designed. SwiftUI's `Menu` rebuilds a
-/// custom label rather than hosting it (see `RootView.railAccount`), so a row
-/// with a picture, a badge and a trailing chevron in it cannot survive being
-/// that label. Here the row is drawn as an ordinary view and this sits on top
-/// of it as the control: the menu is the system's own, with its keyboard
-/// handling and its placement, and the row is untouched.
-struct NativeMenuTrigger: NSViewRepresentable {
-    /// Read at press time, not at build time, so item titles and enablement
-    /// describe the moment the menu opens.
-    var items: () -> [NativeMenuItem]
-    var accessibilityLabel: String? = nil
-    var rightClickOnly = false
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        context.coordinator.items = items
-        let view = TriggerView()
-        view.coordinator = context.coordinator
-        view.rightClickOnly = rightClickOnly
-        if let accessibilityLabel {
-            view.setAccessibilityElement(true)
-            view.setAccessibilityRole(.popUpButton)
-            view.setAccessibilityLabel(accessibilityLabel)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.items = items
-        (nsView as? TriggerView)?.coordinator = context.coordinator
-        (nsView as? TriggerView)?.rightClickOnly = rightClickOnly
-        if let accessibilityLabel {
-            nsView.setAccessibilityLabel(accessibilityLabel)
-        }
-    }
-
-    /// Builds the menu and runs the chosen item.
-    ///
-    /// The target lives here rather than on the view because `NSMenuItem.target`
-    /// is a **weak** reference: an owner AppKit does not retain can be gone by
-    /// the time the menu closes, and then choosing an item does nothing at all.
-    /// SwiftUI holds the coordinator for as long as the representable exists,
-    /// which is exactly as long as the menu can be opened.
-    final class Coordinator: NSObject {
-        var items: (() -> [NativeMenuItem])?
-        /// The set the open menu was built from. Items dispatch by index into
-        /// this, so a closure never has to survive inside an AppKit object.
-        private var current: [NativeMenuItem] = []
-
-        func menu() -> NSMenu? {
-            current = items?() ?? []
-            guard !current.isEmpty else { return nil }
-
-            let menu = NSMenu()
-            // Our own enablement. Left on, AppKit asks a validator this app
-            // does not have and greys every item out.
-            menu.autoenablesItems = false
-            for (index, entry) in current.enumerated() {
-                switch entry.kind {
-                case .separator:
-                    menu.addItem(.separator())
-                case .action:
-                    let item = NSMenuItem(
-                        title: entry.title,
-                        action: #selector(run(_:)),
-                        keyEquivalent: ""
-                    )
-                    item.target = self
-                    item.tag = index
-                    item.isEnabled = entry.isEnabled
-                    if let symbol = entry.symbol {
-                        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: entry.title)
-                        item.image?.size = NSSize(width: 16, height: 16)
-                        // macOS 27 hides menu images automatically. Older SDKs
-                        // keep their existing image behavior.
-                        #if compiler(>=6.4)
-                        if #available(macOS 27.0, *) {
-                            item.preferredImageVisibility = .visible
-                        }
-                        #endif
-                    }
-                    menu.addItem(item)
-                }
-            }
-            return menu
-        }
-
-        @objc private func run(_ sender: NSMenuItem) {
-            guard current.indices.contains(sender.tag) else { return }
-            current[sender.tag].action()
-        }
-    }
-
-    final class TriggerView: NSView {
-        weak var coordinator: Coordinator?
-        var rightClickOnly = false
-
-        override func hitTest(_ point: NSPoint) -> NSView? {
-            if rightClickOnly && !SidebarContextClick.accepts(NSApp.currentEvent) { return nil }
-            return super.hitTest(point)
-        }
-
-        /// Menus drop from the bottom of the row, which is where a pop-up
-        /// button puts them, and flipped coordinates make that `maxY`.
-        override var isFlipped: Bool { true }
-
-        /// Open on the click that also brings the window forward. Without
-        /// this, pressing the row in a background window only activates it and
-        /// the press has to be repeated.
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-        override func mouseDown(with event: NSEvent) {
-            if event.modifierFlags.contains(.control) { rightMouseDown(with: event) }
-            else { openMenu() }
-        }
-
-        override func rightMouseDown(with event: NSEvent) {
-            guard let menu = coordinator?.menu() else { return }
-            NSMenu.popUpContextMenu(menu, with: event, for: self)
-        }
-
-        override func accessibilityPerformPress() -> Bool {
-            openMenu()
-            return true
-        }
-
-        private func openMenu() {
-            guard let menu = coordinator?.menu() else { return }
-            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY), in: self)
-        }
-    }
-}
 #endif
 
 /// One row in the sidebar.

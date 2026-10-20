@@ -173,6 +173,7 @@ enum ClientAppPlaces {
         case .workspaces: return .reveal
         case .insights: return .benchmarks
         case .machines: return .device
+        case .team: return .team
         case .ssh: return .source
         }
     }
@@ -183,6 +184,7 @@ enum ClientAppPlaces {
         case .workspaces: return ["folders", "projects", "chat", "sessions", "repos", "git", "terminal"]
         case .insights: return ["breakdown", "models", "projects", "reports", "charts", "cost"]
         case .machines: return ["computers", "laptop", "mac", "linked", "pair", "remote"]
+        case .team: return ["team", "organization", "members", "invitations", "permissions"]
         case .ssh: return ["servers", "terminal", "keys", "vault", "shell"]
         }
     }

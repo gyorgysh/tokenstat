@@ -22,6 +22,7 @@ struct ClientSidebarRoot: View {
     @Binding var showAccount: Bool
 
     @Environment(AccountModel.self) private var account
+    @Environment(TeamStore.self) private var teams
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(ClientTabCustomization.self) private var tabCustomization
     /// A pointer means a person aiming, not a thumb landing. Rows tighten and
@@ -275,7 +276,7 @@ struct ClientSidebarRoot: View {
                         .font(Theme.font(15)).frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain)
-                ForEach(tabCustomization.visibleTabs) { tab in
+                ForEach(tabCustomization.visibleTabs.filter { $0 != .team }) { tab in
                     Button {
                         navigation.chooseNavigation()
                         navigation.restoredRoute = nil
@@ -352,6 +353,12 @@ struct ClientSidebarRoot: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
+            }
+            Section {
+                TeamSidebarLinks(store: teams, isTeamSelected: navigation.destination == .team) { section in
+                    teams.show(section); navigation.chooseNavigation(); navigation.restoredRoute = nil
+                    navigation.destination = .team; navigation.folderID = nil
+                }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
             }
         }
         .listStyle(.sidebar)
@@ -682,6 +689,7 @@ struct ClientSidebarRoot: View {
             case .insights: ClientInsightsView()
             case .machines: ClientDevicesView()
             case .workspaces: ClientWorkspacesView(model: workspaces, handlesNotifications: false)
+            case .team: ClientTeamView()
             case .ssh: ClientSSHTab()
             }
         }

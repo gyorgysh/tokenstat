@@ -184,6 +184,7 @@ private struct ClientAccountContent: View {
     private var accountPane: some View {
         if model.signedIn, let account = model.account {
             identity(account)
+            ClientTeamAccountScope()
             planCard(account)
             RelayUsageCard(usage: account.relayUsage) { await model.load() }
             lastSync(account)

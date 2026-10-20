@@ -268,6 +268,7 @@ enum RailPlace: String, CaseIterable, Identifiable, Hashable {
     case insights
     case devices
     case ssh
+    case team
 
     var id: String { rawValue }
 
@@ -280,6 +281,7 @@ enum RailPlace: String, CaseIterable, Identifiable, Hashable {
         case .automations: return L10n.text("common.automations")
         case .insights: return L10n.text("common.insights")
         case .devices: return L10n.text("common.devices")
+        case .team: return L10n.text("common.teams.title")
         case .ssh: return L10n.text("apple.shellchrome.ssh.01c4d3c2")
         }
     }
@@ -293,6 +295,7 @@ enum RailPlace: String, CaseIterable, Identifiable, Hashable {
         case .automations: return "bolt"
         case .insights: return "chart.bar.xaxis"
         case .devices: return "laptopcomputer"
+        case .team: return "person.2"
         case .ssh: return "terminal"
         }
     }
@@ -310,6 +313,7 @@ enum RailPlace: String, CaseIterable, Identifiable, Hashable {
             case .todo: return .tasks
             case .notes: return .notes
             case .workflows, .automations: return .automations
+            case .team: return .team
             case .account, .newChat: return nil
             }
         case .workspace, .workspacesOverview: return .projects

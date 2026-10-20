@@ -4072,6 +4072,37 @@ extension Bridge {
 }
 
 private struct Changed: Codable, Sendable { let changed: Bool }
+
+extension Bridge {
+    /// Teams uses this device's account transport. Choosing a directory scope
+    /// never redirects this call to a repository host or changes login ownership.
+    static func teamRequest(_ method: TeamHostMethod, parameters: JSONValue, owner: TeamAccountOwner) async throws -> JSONValue {
+        try Task.checkCancellation()
+        guard await MainActor.run(body: { teamOwnerIsCurrent(owner) }),
+              case let .object(fields) = parameters else { throw CancellationError() }
+        let encoded = try JSONEncoder().encode(JSONValue.object(fields))
+        guard var arguments = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else { throw CancellationError() }
+        arguments["_accountScope"] = ["kind": owner.scope.kind.rawValue, "origin": owner.scope.origin, "identity": owner.scope.identity]
+        arguments["_accountSession"] = owner.session
+        let result: Result<JSONValue, Error>
+        do { result = .success(try await background(method.rawValue, arguments, as: JSONValue.self)) }
+        catch { result = .failure(error) }
+        try Task.checkCancellation()
+        guard await MainActor.run(body: { teamOwnerIsCurrent(owner) }) else { throw CancellationError() }
+        do { return try result.get() }
+        catch let BridgeError.core(code, message) { throw TeamRequestFailure(code: code, message: message) }
+    }
+    @MainActor private static func teamOwnerIsCurrent(_ owner: TeamAccountOwner) -> Bool {
+        owner.scope.kind == .account && WorkSessionContext.shared.scope == owner.scope
+            && WorkSessionContext.shared.generation == owner.generation && WorkSessionContext.shared.accountSession == owner.session
+    }
+}
+extension TeamAPI {
+    static let live = TeamAPI { method, parameters, owner in
+        try await Bridge.teamRequest(method, parameters: parameters, owner: owner)
+    }
+}
+
 private struct Forgotten: Codable, Sendable { let forgotten: Bool }
 private struct Nudged: Codable, Sendable { let nudged: Bool }
 
