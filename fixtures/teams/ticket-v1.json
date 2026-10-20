@@ -1,0 +1,16 @@
+{
+  "description": "Public synthetic interoperability vector. The signing seed is 32 bytes of 0x07 and has no real authority.",
+  "now": 1767225601,
+  "keys": {
+    "version": 1,
+    "issuer": "https://accounts.example.test",
+    "audience": "tokenstat-teams-host-v1",
+    "keys": [
+      {
+        "kid": "fe812c12f3ab4ce6ac5db69a",
+        "key": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+      }
+    ]
+  },
+  "ticket": "ts-team-v1.fe812c12f3ab4ce6ac5db69a.eyJ2IjoxLCJpc3MiOiJodHRwczovL2FjY291bnRzLmV4YW1wbGUudGVzdCIsImF1ZCI6InRva2Vuc3RhdC10ZWFtcy1ob3N0LXYxIiwic3ViIjoiZml4dHVyZS1tZW1iZXIiLCJkZXZpY2UiOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwidG9rZW4iOiJmaXh0dXJlLXRva2VuIiwiY29uc2VudCI6MSwib3JnIjoib3JnX2ZpeHR1cmUiLCJyZXBvc2l0b3J5IjoicmVwb19maXh0dXJlIiwiY2hlY2tvdXQiOiJjaGVja291dF9maXh0dXJlIiwiaG9zdCI6ImJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmIiLCJwdWJsaXNoZXIiOiJmaXh0dXJlLW93bmVyIiwiZXBvY2giOjMsInJldmlzaW9uIjoyLCJzaGFyZSI6bnVsbCwic2hhcmVSZXZpc2lvbiI6bnVsbCwiY2FwIjpbInJlYWQiLCJjb21tZW50Il0sImlhdCI6MTc2NzIyNTYwMCwiZXhwIjoxNzY3MjI1NjYwLCJub25jZSI6ImNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjIn0.Bin8GNHOA-5PB2nxR9JSz8ZJVtVBr9tZdA7Czi2DhIThpxi__B4u91EMxN6dlWyuSGpNhZEw2nXo9jvL4IhuDw"
+}

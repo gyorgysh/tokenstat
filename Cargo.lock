@@ -3682,9 +3682,11 @@ dependencies = [
 name = "tokenstat-identity"
 version = "1.8.0"
 dependencies = [
+ "base64 0.23.1",
  "blake3",
  "directories",
  "getrandom 0.4.3",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",

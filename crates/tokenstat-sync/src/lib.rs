@@ -46,6 +46,7 @@ pub mod profile;
 pub mod push;
 pub mod schema;
 pub mod snapshot;
+pub mod teams;
 pub mod update;
 pub mod vault;
 

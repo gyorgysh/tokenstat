@@ -30,6 +30,7 @@ use thiserror::Error;
 use x25519_dalek::{PublicKey as X25519Public, StaticSecret};
 
 pub mod peers;
+pub mod teams;
 
 pub use peers::{Peer, PeerStore, Trust};
 

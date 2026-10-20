@@ -1,0 +1,326 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+
+use super::*;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokenstat_identity::teams::{TeamTicket, TeamTicketBinding};
+
+type Reply = Result<(u16, Vec<u8>), TeamError>;
+type RecordedRequest = (Method, String, Option<Value>, bool);
+struct MockWire {
+    reply: Mutex<Option<Reply>>,
+    requests: Mutex<Vec<RecordedRequest>>,
+    retire: Option<Arc<AtomicBool>>,
+}
+impl TeamWire for MockWire {
+    fn send(&self, request: WireRequest) -> Reply {
+        self.requests.lock().unwrap().push((
+            request.method,
+            request.url.to_string(),
+            request.body.map(|b| serde_json::from_slice(&b).unwrap()),
+            request.authorization.is_sensitive(),
+        ));
+        if let Some(retired) = &self.retire {
+            retired.store(true, Ordering::Release);
+        }
+        self.reply
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or(Err(TeamError::Network))
+    }
+}
+fn fixture(reply: Reply, retire_on_send: bool) -> (TeamClient, Arc<MockWire>) {
+    let captured = Authentication {
+        origin: "https://accounts.example.test".into(),
+        bearer: Zeroizing::new("public-fixture-bearer".into()),
+    };
+    let current_auth = captured.clone();
+    let retired = Arc::new(AtomicBool::new(false));
+    let flag = retired.clone();
+    let wire = Arc::new(MockWire {
+        reply: Mutex::new(Some(reply)),
+        requests: Mutex::new(Vec::new()),
+        retire: retire_on_send.then_some(retired),
+    });
+    let client = TeamClient {
+        authentication: Arc::new(captured),
+        wire: wire.clone(),
+        current: Arc::new(move || {
+            if flag.load(Ordering::Acquire) {
+                Err(TeamError::AccountChanged)
+            } else {
+                Ok(current_auth.clone())
+            }
+        }),
+    };
+    (client, wire)
+}
+fn response(body: Value) -> Reply {
+    Ok((200, serde_json::to_vec(&body).unwrap()))
+}
+fn capabilities() -> Value {
+    json!({"enabled":true,"version":1,"scopes":["teams:read","teams:manage","teams:connect"],"authorizationRequired":false,"authorizationPath":"/settings/teams/devices/abcdef0123","deviceKey":"a".repeat(64),"ticketLifetimeSeconds":60})
+}
+
+#[test]
+fn captures_the_origin_uses_sensitive_headers_and_bounds_pages_and_identifiers() {
+    let (client, wire) = fixture(
+        response(json!({"organizations":[],"nextOffset":null})),
+        false,
+    );
+    assert!(
+        client
+            .organizations(Page {
+                limit: 0,
+                offset: 0
+            })
+            .is_err()
+    );
+    assert!(
+        client
+            .organizations(Page {
+                limit: 101,
+                offset: 0
+            })
+            .is_err()
+    );
+    assert!(
+        client
+            .organizations(Page {
+                limit: 20,
+                offset: 10001
+            })
+            .is_err()
+    );
+    for id in [
+        "..",
+        ".",
+        "../billing",
+        "a/b",
+        "a?scope=owner",
+        "%2e%2e",
+        "\n",
+        "",
+    ] {
+        assert!(client.organization(id).is_err());
+    }
+    assert_eq!(wire.requests.lock().unwrap().len(), 0);
+    assert!(
+        client
+            .organizations(Page {
+                limit: 25,
+                offset: 50
+            })
+            .unwrap()
+            .organizations
+            .is_empty()
+    );
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(requests[0].0, Method::GET);
+    assert_eq!(
+        requests[0].1,
+        "https://accounts.example.test/api/v1/organizations?limit=25&offset=50"
+    );
+    assert!(requests[0].2.is_none());
+    assert!(requests[0].3);
+}
+#[test]
+fn retires_late_success_refusal_and_transport_failure_after_an_account_change() {
+    for reply in [
+        response(capabilities()),
+        Ok((
+            403,
+            serde_json::to_vec(&json!({"error":"forbidden","message":"Fixture refusal"})).unwrap(),
+        )),
+        Err(TeamError::Network),
+    ] {
+        let (client, wire) = fixture(reply, true);
+        assert_eq!(
+            client.capabilities().unwrap_err(),
+            TeamError::AccountChanged
+        );
+        assert_eq!(wire.requests.lock().unwrap().len(), 1);
+    }
+    let (client, wire) = fixture(response(capabilities()), false);
+    let client = client.with_retirement_guard(|| Err(TeamError::AccountChanged));
+    assert_eq!(
+        client.capabilities().unwrap_err(),
+        TeamError::AccountChanged
+    );
+    assert!(wire.requests.lock().unwrap().is_empty());
+}
+#[test]
+fn rejects_unbounded_bodies_and_responses_without_logging_response_content() {
+    let (client, wire) = fixture(response(json!({})), false);
+    let input = CreateOrganization {
+        name: "x".repeat(REQUEST_LIMIT + 1),
+        slug: "fixture".into(),
+    };
+    assert_eq!(
+        client.create_organization(&input).unwrap_err(),
+        TeamError::InvalidRequest
+    );
+    assert!(wire.requests.lock().unwrap().is_empty());
+    for body in [
+        vec![b'x'; RESPONSE_LIMIT + 1],
+        b"<html>private server error</html>".to_vec(),
+    ] {
+        let (client, _) = fixture(Ok((500, body)), false);
+        let error = client.capabilities().unwrap_err();
+        assert_eq!(error, TeamError::InvalidResponse);
+        assert!(!format!("{error:?}").contains("private server"));
+    }
+}
+#[test]
+fn keeps_server_refusals_structured_and_hides_malformed_error_text() {
+    let (client, _) = fixture(Ok((402, serde_json::to_vec(&json!({"error":"legend_required","message":"Creating an organization requires Legend."})).unwrap())), false);
+    assert!(
+        matches!(client.capabilities(), Err(TeamError::Rejected { status: 402, code, .. }) if code == "legend_required")
+    );
+    let (client, _) = fixture(
+        Ok((
+            403,
+            serde_json::to_vec(&json!({"error":"forbidden","message":"unsafe\nfixture"})).unwrap(),
+        )),
+        false,
+    );
+    assert!(
+        !client
+            .capabilities()
+            .unwrap_err()
+            .to_string()
+            .contains("unsafe")
+    );
+    let (client, _) = fixture(Ok((404, b"not implemented".to_vec())), false);
+    assert_eq!(client.capabilities().unwrap_err(), TeamError::Unsupported);
+}
+#[test]
+fn enables_the_interface_only_for_the_complete_authorized_contract() {
+    let (client, _) = fixture(response(capabilities()), false);
+    let ready = client.capabilities().unwrap();
+    assert!(ready.ready());
+    assert_eq!(
+        client.authorization_url(&ready).unwrap(),
+        "https://accounts.example.test/settings/teams/devices/abcdef0123"
+    );
+    for path in [
+        "https://another.example.test/consent",
+        "//another.example.test",
+        "/settings/teams/devices/../billing",
+        "/settings/teams/devices/abc?next=other",
+    ] {
+        let mut changed = ready.clone();
+        changed.authorization_path = Some(path.into());
+        assert!(client.authorization_url(&changed).is_err());
+    }
+    let (client, _) = fixture(response(json!({"enabled":false})), false);
+    assert!(!client.capabilities().unwrap().ready());
+    let (client, _) = fixture(response(json!({"enabled":true,"version":1})), false);
+    assert!(!client.capabilities().unwrap().ready());
+    let mut changed = ready;
+    changed.scopes.retain(|s| s != "teams:connect");
+    assert!(!changed.ready());
+}
+#[test]
+fn mutation_types_serialize_only_approved_metadata_and_preserve_null_for_revocation() {
+    let input = ChangeRepositoryAccess {
+        role: None,
+        expected_revision: 3,
+    };
+    let (client, wire) = fixture(response(json!({"role":null,"revision":4})), false);
+    assert!(
+        client
+            .repository_access("org_fixture", "repo_fixture", "fixture_member", &input)
+            .unwrap()
+            .role
+            .is_none()
+    );
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(requests[0].0, Method::PUT);
+    assert_eq!(
+        requests[0].2,
+        Some(json!({"role":null,"expectedRevision":3}))
+    );
+    assert!(
+        serde_json::from_value::<CreateOrganization>(
+            json!({"name":"Example","slug":"example","path":"private"})
+        )
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<ChangeMemberRole>(json!({"role":"owner","expectedRevision":1}))
+            .is_err()
+    );
+}
+fn verified_ticket() -> VerifiedTeamTicket {
+    let vector: Value =
+        serde_json::from_str(include_str!("../../../../fixtures/teams/ticket-v1.json")).unwrap();
+    let keys = TrustedTeamKeys::from_response(
+        serde_json::from_value(vector["keys"].clone()).unwrap(),
+        "https://accounts.example.test",
+    )
+    .unwrap();
+    let ticket: TeamTicket = serde_json::from_value(vector["ticket"].clone()).unwrap();
+    keys.verify(
+        &ticket,
+        &TeamTicketBinding {
+            device_key: &[0xaa; 32],
+            host_key: &[0xbb; 32],
+            publisher_id: "fixture-owner",
+            actor_id: Some("fixture-member"),
+        },
+        1767225601,
+    )
+    .unwrap()
+}
+fn principal() -> Value {
+    json!({"principal":{"id":"fixture-member","name":"Example member","handle":"example-member","avatar":null,
+    "deviceKey":"a".repeat(64),"organizationId":"org_fixture","repositoryId":"repo_fixture","checkoutId":"checkout_fixture",
+    "hostKey":"b".repeat(64),"publisherId":"fixture-owner","shareId":null,"epoch":3,"capabilities":["read","comment"],"role":"contributor","expiresAt":"2026-01-01T00:01:00.000Z"}})
+}
+#[test]
+fn checks_the_online_principal_against_every_signed_resource_and_peer_binding() {
+    let ticket = verified_ticket();
+    let (client, wire) = fixture(response(principal()), false);
+    assert_eq!(
+        client.validate_connection(&ticket).unwrap().person.id,
+        "fixture-member"
+    );
+    let requests = wire.requests.lock().unwrap();
+    let request = requests[0].2.as_ref().unwrap();
+    assert_eq!(request["actorId"], "fixture-member");
+    assert_eq!(request["ticket"], ticket.ticket().wire_value());
+    for field in [
+        "id",
+        "deviceKey",
+        "organizationId",
+        "repositoryId",
+        "checkoutId",
+        "hostKey",
+        "publisherId",
+        "shareId",
+        "expiresAt",
+    ] {
+        let mut changed = principal();
+        changed["principal"][field] = json!("another-fixture");
+        let (client, _) = fixture(response(changed), false);
+        assert_eq!(
+            client.validate_connection(&ticket).unwrap_err(),
+            TeamError::InvalidResponse
+        );
+    }
+    for (field, changed) in [
+        ("epoch", json!(4)),
+        ("role", json!("viewer")),
+        ("capabilities", json!(["read", "run"])),
+    ] {
+        let mut body = principal();
+        body["principal"][field] = changed;
+        let (client, _) = fixture(response(body), false);
+        assert_eq!(
+            client.validate_connection(&ticket).unwrap_err(),
+            TeamError::InvalidResponse
+        );
+    }
+}

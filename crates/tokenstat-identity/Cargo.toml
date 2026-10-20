@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 license-file.workspace = true
 publish.workspace = true
-description = "This machine's signing identity, and the peers it has agreed to trust"
+description = "Machine connection identity and explicitly approved peers"
 
 [dependencies]
 serde.workspace = true
@@ -19,6 +19,8 @@ tokenstat-paths.workspace = true
 blake3.workspace = true
 getrandom.workspace = true
 x25519-dalek = { workspace = true }
+base64 = "0.23"
+ring = "0.17.14"
 
 [dev-dependencies]
 tempfile.workspace = true
