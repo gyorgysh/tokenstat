@@ -21,9 +21,15 @@ enum TeamFixtureData {
         switch method {
         case .capabilities:
             if state == .failure { throw TeamRequestFailure(code: "teams_unreachable", message: "The fictional account server is unavailable.") }
-            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1)])
+            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canPublishCheckouts":.bool(true)])
         case .authorizationPreview: return .object(["deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .prepareAuthorization: return .object(["authorizationURL":.string("https://accounts.example.test/settings/teams/devices/fixture"),"deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
+        case .checkoutOptions: return .object(["deviceName":.string("Example Mac"),"workspaces":.array([try json(TeamLocalWorkspace(id: "/example/Website", name: "Website", path: "/example/Website")),try json(TeamLocalWorkspace(id: "/example/Feature checkout", name: "Website feature", path: "/example/Feature checkout"))]),"nextOffset":.null])
+        case .checkoutPreview:
+            guard case let .object(fields) = params, case let .string(workspace)? = fields["workspace"] else { throw CancellationError() }
+            return .object(["repository":try json(repository),"workspaceId":.string(workspace),"workspaceName":.string("Website"),"preview":.string(String(repeating:"ab",count:32)),"sharesExistingChats":.bool(false),"allowsAgentRuns":.bool(false)])
+        case .checkoutList: return .object(["publications":.array([try json(TeamLocalPublication(id: "checkout_" + String(repeating:"a",count:32), organizationId: organization.id, repositoryId: repository.id, workspaceId: "/example/Website", phase: "active", revision: 2, accountCleanupPending: false))]),"nextOffset":.null])
+        case .checkoutPublish, .checkoutWithdraw: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
         case .directory:
             guard case let .object(fields) = params, case let .string(operation)? = fields["operation"] else { throw TeamRequestFailure(code: "fixture_request", message: "Choose a fixture action.") }
             switch operation {
@@ -31,6 +37,9 @@ enum TeamFixtureData {
             case "organizations.get": return .object(["organization":try json(organization),"ownershipRequest":.null])
             case "members.list": return .object(["members":.array(try members.map { try json($0) }),"nextOffset":.null])
             case "repositories.list": return .object(["repositories":.array([try json(repository)]),"nextOffset":.null])
+            case "checkouts.list": return .object(["checkouts":.array([
+                try json(TeamCheckout(id: "checkout_" + String(repeating:"a",count:32), organizationId: organization.id, repositoryId: repository.id, publisherId: "fixture-owner", machineId: "fixture-mac", hostKey: String(repeating:"ab",count:32), deviceName: "Example Mac", publisher: TeamPerson(id: "fixture-owner", name: "Example owner", handle: "example-owner", avatar: nil), revision: 1, createdAt: timestamp)),
+                try json(TeamCheckout(id: "checkout_" + String(repeating:"b",count:32), organizationId: organization.id, repositoryId: repository.id, publisherId: member.id, machineId: "fixture-workstation", hostKey: String(repeating:"cd",count:32), deviceName: "Márta’s workstation", publisher: TeamPerson(id: member.id, name: member.name, handle: member.handle, avatar: nil), revision: 1, createdAt: timestamp))]),"nextOffset":.null])
             case "repositories.members": return .object(["members":.array(try members.map { try json(TeamRepositoryMember(id: $0.id, name: $0.name, handle: $0.handle, avatar: nil, role: $0.role == .owner ? .maintainer : nil, revision: 1, eligible: $0.eligible)) }),"nextOffset":.null])
             case "inbox.list": return .object(["invitations":.array(state == .invitation || state == .expiredInvitation ? [try json(invitation)] : []),"nextOffset":.null])
             case "invitations.list": return .object(["invitations":.array([]),"nextOffset":.null])

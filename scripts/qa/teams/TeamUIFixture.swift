@@ -58,6 +58,7 @@ import AppKit
                     Button("Invite") { sheet = .invite(context) }
                     Button("Add repository") { sheet = .repository(context) }
                     Button("Access") { sheet = .access(context, TeamFixtureData.repository) }
+                    Button("Checkouts") { sheet = .checkouts(context, TeamFixtureData.repository) }
                     Button("Member role") { sheet = .memberRole(context, TeamFixtureData.member) }
                     Button("Remove member") { sheet = .remove(context, TeamFixtureData.member) }
                     Button("Transfer ownership") { sheet = .transfer(context) }

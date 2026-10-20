@@ -67,6 +67,7 @@ struct ThemedSheet<Content: View, Actions: View>: View {
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: Theme.Space.s) { actions() }
                         VStack(alignment: .leading, spacing: Theme.Space.s) { actions() }
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(Theme.Space.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -77,7 +78,10 @@ struct ThemedSheet<Content: View, Actions: View>: View {
                     #else
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: Theme.Space.s) { actions() }
+                        // A horizontal Spacer becomes vertical in this
+                        // fallback. Keep it from consuming the sheet body.
                         VStack(alignment: .leading, spacing: Theme.Space.s) { actions() }
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal, Theme.Space.l)
                     .padding(.vertical, Theme.Space.m)

@@ -19,6 +19,7 @@ import SwiftUI
                                 Button("Create organization") { sheet = .create(context) }
                                 Button("Invite") { sheet = .invite(context) }
                                 Button("Repository access") { sheet = .access(context, TeamFixtureData.repository) }
+                                Button("Checkouts") { sheet = .checkouts(context, TeamFixtureData.repository) }
                                 Button("Transfer ownership") { sheet = .transfer(context) }
                                 Button("Delete organization") { sheet = .delete(context) }
                             }
@@ -34,6 +35,7 @@ import SwiftUI
         .environment(\.openURL, OpenURLAction { _ in .handled })
         .sheet(item: $sheet) { route in
             TeamEditorSheet(store: store, route: route, canCreateOrganization: true, onAccount: {})
+                .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("--fixture-large-text") ? .accessibility3 : .large)
                 .presentationDetents([.large]).presentationDragIndicator(.visible)
         }
         .task {

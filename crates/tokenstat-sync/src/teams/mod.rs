@@ -496,6 +496,18 @@ impl TeamClient {
             None,
         )
     }
+    pub fn checkout_publication(
+        &self,
+        org: &str,
+        checkout: &str,
+    ) -> Result<CheckoutReply, TeamError> {
+        self.request(
+            Method::GET,
+            &["organizations", org, "checkouts", checkout, "publication"],
+            None,
+            None,
+        )
+    }
     pub fn set_execution_grant(
         &self,
         org: &str,
@@ -639,7 +651,7 @@ impl Default for Page {
     }
 }
 impl Page {
-    fn validate(self) -> Result<(), TeamError> {
+    pub fn validate(self) -> Result<(), TeamError> {
         if self.limit == 0 || self.limit > 100 || self.offset > 10000 {
             Err(TeamError::InvalidRequest)
         } else {

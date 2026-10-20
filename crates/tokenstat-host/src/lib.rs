@@ -266,4 +266,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 37 adds explicit agent reinstallation through `launcher.reinstall`.
 /// Version 38 adds opt-in organization management.
 /// Version 39 adds key-bound Team principals and their closed dispatch boundary.
-pub const PROTOCOL_VERSION: &str = "39";
+/// Version 40 adds host-private checkout publication and scoped availability.
+pub const PROTOCOL_VERSION: &str = "40";

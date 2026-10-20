@@ -31,6 +31,7 @@ struct TeamEditorSheet: View {
         case let .repository(context): TeamRepositoryNameEditor(store: store, context: context)
         case let .renameRepository(context, repository): TeamRepositoryNameEditor(store: store, context: context, repository: repository)
         case let .access(context, repository): TeamRepositoryAccessEditor(store: store, context: context, repository: repository)
+        case let .checkouts(context, repository): TeamCheckoutEditor(store: store, context: context, repository: repository)
         case let .ownershipDecision(context, request, cancelling): TeamOwnershipDecisionEditor(store: store, context: context, request: request, cancelling: cancelling)
         case let .transfer(context): TeamOwnershipEditor(store: store, context: context, organization: organization)
         case let .delete(context): TeamRemovalEditor(store: store, context: context, organization: organization, member: nil, deleting: true, leaving: false)

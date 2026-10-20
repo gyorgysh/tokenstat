@@ -36,6 +36,7 @@ final class TeamStore {
     private var inFlightSelection: TeamSelectionKey?
     private var mutationId: UUID?
     private var selectionSummary: TeamOrganization?
+    private var formLifetime: UInt64 = 0
 
     init(api: TeamAPI) { self.api = api }
     var selectionKey: TeamSelectionKey { .init(owner: owner, organizationId: selectedOrganizationId) }
@@ -43,7 +44,7 @@ final class TeamStore {
         if let directory, directory.details.organization.id == selectedOrganizationId { return directory.details.organization }
         return organizations.first { $0.id == selectedOrganizationId } ?? selectionSummary
     }
-    var mutationContext: TeamMutationContext? { owner.map { .init(owner: $0, organizationId: selectedOrganizationId) } }
+    var mutationContext: TeamMutationContext? { owner.map { .init(owner: $0, organizationId: selectedOrganizationId, lifetime: formLifetime) } }
 
     func bind(to next: TeamAccountOwner?, refresh: Bool = false) async {
         let changed = owner != next
@@ -51,6 +52,7 @@ final class TeamStore {
         loadRevision &+= 1
         let revision = loadRevision
         if changed {
+            formLifetime &+= 1
             owner = next; capabilities = nil; organizations = []; inbox = []
             organizationsNextOffset = nil; inboxNextOffset = nil
             selectedOrganizationId = nil; selectedRepositoryId = nil; selectionSummary = nil
@@ -94,6 +96,7 @@ final class TeamStore {
     func select(_ organization: TeamOrganization?) {
         selectionSummary = organization
         guard selectedOrganizationId != organization?.id else { return }
+        formLifetime &+= 1
         directoryRevision &+= 1; inFlightSelection = nil; isLoadingDirectory = false
         mutationId = nil; isMutating = false
         selectedOrganizationId = organization?.id; selectedRepositoryId = nil
@@ -161,22 +164,30 @@ final class TeamStore {
         return try result.get()
     }
     func perform<T: Decodable & Sendable>(_ operation: String, fields: [String: JSONValue], context: TeamMutationContext, as: T.Type = T.self) async throws -> T {
-        guard !isMutating, mutationContext == context else { throw CancellationError() }
+        var fields = fields; fields["operation"] = .string(operation)
+        return try await perform(.directory, fields: fields, context: context, as: T.self)
+    }
+    func perform<T: Decodable & Sendable>(_ method: TeamHostMethod, fields: [String: JSONValue], context: TeamMutationContext, as: T.Type = T.self) async throws -> T {
+        guard phase == .ready, !isMutating, mutationContext == context else { throw CancellationError() }
         let id = UUID(); mutationId = id; isMutating = true; error = nil
         defer { if mutationId == id { mutationId = nil; isMutating = false } }
         let result: Result<T, Error>
-        do { result = .success(try await directoryRequest(operation, fields: fields, owner: context.owner)) }
+        do { result = .success(try await api.request(method, fields, owner: context.owner)) }
         catch { result = .failure(error) }
-        guard mutationContext == context else { throw CancellationError() }
+        guard phase == .ready, mutationContext == context else { throw CancellationError() }
         if case let .failure(error) = result { _ = retireAuthorization(for: error) }
         return try result.get()
     }
     func read<T: Decodable & Sendable>(_ operation: String, fields: [String: JSONValue], context: TeamMutationContext, as: T.Type = T.self) async throws -> T {
-        guard mutationContext == context else { throw CancellationError() }
+        var fields = fields; fields["operation"] = .string(operation)
+        return try await read(.directory, fields: fields, context: context, as: T.self)
+    }
+    func read<T: Decodable & Sendable>(_ method: TeamHostMethod, fields: [String: JSONValue], context: TeamMutationContext, as: T.Type = T.self) async throws -> T {
+        guard phase == .ready, mutationContext == context else { throw CancellationError() }
         let result: Result<T, Error>
-        do { result = .success(try await directoryRequest(operation, fields: fields, owner: context.owner)) }
+        do { result = .success(try await api.request(method, fields, owner: context.owner)) }
         catch { result = .failure(error) }
-        guard mutationContext == context else { throw CancellationError() }
+        guard phase == .ready, mutationContext == context else { throw CancellationError() }
         if case let .failure(error) = result { _ = retireAuthorization(for: error) }
         return try result.get()
     }
@@ -244,15 +255,23 @@ final class TeamStore {
     private func isCurrent(_ owner: TeamAccountOwner, _ revision: UInt64) -> Bool { self.owner == owner && loadRevision == revision }
     @discardableResult private func retireAuthorization(for error: Error) -> Bool {
         guard let failure = error as? TeamRequestFailure else { return false }
+        let retired: Bool
         switch failure.code {
         case "teams_authorization_required", "device_required":
-            clearAuthorization(); capabilities = nil; phase = .authorization; return true
+            clearAuthorization(); capabilities = nil; phase = .authorization; retired = true
         case "auth", "unauthorized", "account_changed":
-            clearAuthorization(); capabilities = nil; phase = .failed; return true
-        default: return false
+            clearAuthorization(); capabilities = nil; phase = .failed; retired = true
+        case "forbidden", "not_found", "organization_paused", "patron_required":
+            clearAuthorization(); phase = .failed; retired = true
+        case "teams_unavailable":
+            clearAuthorization(); capabilities = nil; phase = .unavailable; retired = true
+        default: retired = false
         }
+        if retired { self.error = failure.message }
+        return retired
     }
     private func clearAuthorization() {
+        loadRevision &+= 1; formLifetime &+= 1; isRefreshing = false
         organizations = []; inbox = []; organizationsNextOffset = nil; inboxNextOffset = nil
         cachedDirectories = [:]; cacheOrder = []; directory = nil; selectedOrganizationId = nil; selectedRepositoryId = nil; selectionSummary = nil
         mutationId = nil; isMutating = false; section = .overview

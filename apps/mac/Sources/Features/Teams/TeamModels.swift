@@ -13,6 +13,11 @@ enum TeamHostMethod: String, Sendable {
     case authorizationPreview = "teams.authorizationPreview"
     case prepareAuthorization = "teams.prepareAuthorization"
     case directory = "teams.directory"
+    case checkoutOptions = "teams.checkout.options"
+    case checkoutPreview = "teams.checkout.preview"
+    case checkoutPublish = "teams.checkout.publish"
+    case checkoutList = "teams.checkout.list"
+    case checkoutWithdraw = "teams.checkout.withdraw"
 }
 struct TeamAPI: Sendable {
     let send: @Sendable (TeamHostMethod, JSONValue, TeamAccountOwner) async throws -> JSONValue
@@ -24,6 +29,7 @@ struct TeamAPI: Sendable {
     }
 }
 struct TeamCapabilities: Decodable, Sendable {
+    var canPublishCheckouts = false
     var actorId: String?
     var enabled: Bool
     var ready: Bool
@@ -36,10 +42,11 @@ struct TeamCapabilities: Decodable, Sendable {
         self.needsDeviceRegistration = needsDeviceRegistration
         self.authorizationRequired = authorizationRequired; self.version = version
     }
-    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId }
+    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         actorId = try c.decodeIfPresent(String.self, forKey: .actorId)
+        canPublishCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canPublishCheckouts) ?? false
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         ready = try c.decodeIfPresent(Bool.self, forKey: .ready) ?? false
         needsDeviceRegistration = try c.decodeIfPresent(Bool.self, forKey: .needsDeviceRegistration) ?? false
@@ -142,6 +149,8 @@ struct TeamCheckout: Codable, Identifiable, Hashable, Sendable {
     let publisherId: String
     let machineId: String
     let hostKey: String
+    var deviceName: String? = nil
+    var publisher: TeamPerson? = nil
     let revision: UInt64
     let createdAt: String
 }
@@ -154,6 +163,20 @@ struct TeamRepositories: Decodable, Sendable { var repositories: [TeamRepository
 struct TeamRepositoryMembers: Decodable, Sendable { var members: [TeamRepositoryMember]; let nextOffset: Int? }
 struct TeamInvitations: Decodable, Sendable { var invitations: [TeamInvitation]; let nextOffset: Int? }
 struct TeamCheckouts: Decodable, Sendable { var checkouts: [TeamCheckout]; let nextOffset: Int? }
+struct TeamLocalWorkspace: Codable, Identifiable, Hashable, Sendable { let id: String; let name: String; let path: String }
+struct TeamCheckoutOptions: Decodable, Sendable { let workspaces: [TeamLocalWorkspace]; let deviceName: String; let nextOffset: Int? }
+struct TeamCheckoutPreview: Decodable, Sendable {
+    let repository: TeamRepository; let workspaceId: String; let workspaceName: String
+    let preview: String; let sharesExistingChats: Bool; let allowsAgentRuns: Bool
+}
+struct TeamLocalPublication: Codable, Identifiable, Sendable {
+    let id: String; let organizationId: String; let repositoryId: String; let workspaceId: String
+    let phase: String; let revision: UInt64; let accountCleanupPending: Bool
+}
+struct TeamLocalPublications: Decodable, Sendable { let publications: [TeamLocalPublication]; let nextOffset: Int? }
+struct TeamCheckoutPublished: Decodable, Sendable { let publication: TeamLocalPublication }
+struct TeamCheckoutWithdrawn: Decodable, Sendable { let withdrawn: Bool; let accountCleanupPending: Bool?
+}
 struct TeamActivity: Decodable, Sendable { var events: [TeamActivityEvent]; let nextOffset: Int? }
 struct TeamAuthorizationPreview: Decodable, Sendable { let deviceKey: String; let deviceName: String }
 struct TeamAuthorization: Decodable, Sendable { let authorizationURL: String; let deviceKey: String; let deviceName: String }
@@ -163,7 +186,7 @@ enum TeamSection: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 }
 struct TeamSelectionKey: Hashable, Sendable { let owner: TeamAccountOwner?; let organizationId: String? }
-struct TeamMutationContext: Equatable, Sendable { let owner: TeamAccountOwner; let organizationId: String? }
+struct TeamMutationContext: Equatable, Sendable { let owner: TeamAccountOwner; let organizationId: String?; let lifetime: UInt64 }
 
 /// Only the hosted first-party avatar route may be fetched. A profile never
 /// chooses a network origin, path traversal, query or external image service.

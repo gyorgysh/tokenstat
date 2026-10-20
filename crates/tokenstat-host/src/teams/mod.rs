@@ -6,7 +6,11 @@
 
 mod authorization;
 mod directory;
+#[cfg(feature = "local-host")]
+mod publications;
 mod scoped;
+#[cfg(feature = "local-host")]
+mod sharing;
 use crate::account_session::AccountSnapshot;
 use crate::error::DispatchError;
 pub(crate) use authorization::AuthorizedTeamPrincipal;
@@ -79,6 +83,8 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                 expected_device_key,
             } => prepare_authorization(&owner, &client, &expected_device_key),
             directory::Request::Directory(operation) => directory::perform(&client, operation),
+            #[cfg(feature = "local-host")]
+            directory::Request::Sharing(request) => sharing::perform(&owner, &client, request),
         };
         owner.ensure_current().map_err(changed)?;
         client.ensure_current().map_err(api_error)?;
@@ -101,9 +107,15 @@ fn capabilities(client: &TeamClient) -> Result<Value, DispatchError> {
     match client.capabilities() {
         Ok(capabilities) => {
             let ready = capabilities.ready();
+            let can_publish = cfg!(feature = "local-host")
+                && capabilities
+                    .features
+                    .iter()
+                    .any(|feature| feature == "checkout-publication");
             let mut value = serialize(capabilities)?;
             value["ready"] = json!(ready);
             value["needsDeviceRegistration"] = json!(false);
+            value["canPublishCheckouts"] = json!(can_publish);
             Ok(value)
         }
         Err(TeamError::Rejected { code, .. }) if code == "device_required" => Ok(

@@ -30,6 +30,9 @@ SKIP_STARTERS = (
     "ToolbarItem",
     "CommandGroup",
     "CommandMenu",
+    # SwiftUI Menu actions are platform menu rows too. Their title and
+    # selection/destructive treatment are drawn by the operating system.
+    "Menu",
     # Never drawn. These are the rotor's entries for a row that can also be
     # dragged, and VoiceOver reads their titles: a glyph inside one would be
     # a symbol nobody sees.
@@ -39,6 +42,9 @@ SKIP_STARTERS = (
 # Buttons whose whole surface is the label (rows, tiles, chips, links).
 # Snippet must uniquely identify that one button, not every Button in the file.
 ALLOWED = [
+    # The shared Team editor receives an ActionIcon-typed parameter. Swift
+    # enforces the glyph even though it is not a case literal at this site.
+    ("Features/Teams/TeamEditorSheet.swift", "Button(submitTitle, submitIcon, role:"),
     ("Features/Work/WorkSearchSheet.swift", "model.selected = hit.reference"),
     # A place in the app, offered beside the work. Whole-surface rows like the
     # work results above them, and each one already leads with the glyph of the

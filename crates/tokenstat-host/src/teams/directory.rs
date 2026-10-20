@@ -9,8 +9,12 @@ use tokenstat_sync::teams::*;
 pub(super) enum Request {
     Capabilities,
     AuthorizationPreview,
-    PrepareAuthorization { expected_device_key: String },
+    PrepareAuthorization {
+        expected_device_key: String,
+    },
     Directory(Operation),
+    #[cfg(feature = "local-host")]
+    Sharing(super::sharing::Request),
 }
 pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError> {
     let invalid =
@@ -23,6 +27,10 @@ pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError
     // These are verified by AccountSnapshot before any network operation.
     object.remove("_accountScope");
     object.remove("_accountSession");
+    #[cfg(feature = "local-host")]
+    if let Some(request) = super::sharing::parse(method, Value::Object(object.clone())) {
+        return request.map(Request::Sharing);
+    }
     match method {
         "teams.capabilities" if object.is_empty() => Ok(Request::Capabilities),
         "teams.authorizationPreview" if object.is_empty() => Ok(Request::AuthorizationPreview),

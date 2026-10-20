@@ -14,8 +14,12 @@ use tokenstat_sync::teams::{TeamClient, TeamPrincipal};
 pub(crate) struct AuthorizedTeamPrincipal {
     value: TeamPrincipal,
     deadline: Instant,
+    issuer: String,
 }
 impl AuthorizedTeamPrincipal {
+    pub(super) fn issuer(&self) -> &str {
+        &self.issuer
+    }
     pub(crate) fn value(&self) -> &TeamPrincipal {
         &self.value
     }
@@ -160,11 +164,13 @@ impl Gate {
         if end.monotonic >= deadline || end.wall >= next.exp {
             return Err(expired());
         }
+        let issuer = next.iss.clone();
         self.previous = verified;
         self.deadline = deadline;
         Ok(AuthorizedTeamPrincipal {
             value: principal,
             deadline,
+            issuer,
         })
     }
 }

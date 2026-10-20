@@ -301,6 +301,9 @@ struct TeamManagementView: View {
                                     Spacer(minLength: Theme.Space.m)
                                     TeamRoleBadge(text: repository.role?.label ?? L10n.text("common.teams.unassigned"))
                                 }
+                                if repository.role != nil {
+                                    Button(L10n.text("common.teams.checkouts"), .checkout) { if let context = store.mutationContext { sheet = .checkouts(context, repository) } }.buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)
+                                }
                                 if organization.role.canManage || repository.role == .maintainer {
                                     Button(L10n.text("common.teams.manage_access"), .permissions) { if let context = store.mutationContext { sheet = .access(context, repository) } }.buttonStyle(TeamButtonStyle())
                                     Button(L10n.text("common.teams.rename_repository"), .edit) { if let context = store.mutationContext { sheet = .renameRepository(context, repository) } }.buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)

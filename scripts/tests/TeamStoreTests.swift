@@ -82,6 +82,7 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         await paginatedDirectory()
         try await selectionOutsideFirstPage()
         try await authorizationRevokedDuringWrite()
+        try await authorityLossRetiresPendingReadsAndOldForms()
         avatars()
         print("Team directory ownership, recovery, pagination and avatar tests passed")
     }
@@ -137,7 +138,9 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         let after = await fixture.calls.count
         check(after == before, "Stale form reached the account API")
         store.select(store.organizations[0]); await fixture.delay("alpha|members.remove|org_a")
-        let old = Task { () -> Bool in do { let _: JSONValue = try await store.perform("members.remove", fields: ["organization":.string("org_a")], context: first); return false } catch is CancellationError { return true } catch { return false } }
+        do { let _: JSONValue = try await store.perform("members.remove", fields: [:], context: first); preconditionFailure("Returning to an organization revived an old form") } catch is CancellationError {}
+        let returned = store.mutationContext!
+        let old = Task { () -> Bool in do { let _: JSONValue = try await store.perform("members.remove", fields: ["organization":.string("org_a")], context: returned); return false } catch is CancellationError { return true } catch { return false } }
         await waitFor("alpha|members.remove|org_a", fixture: fixture)
         store.select(store.organizations[1]); let second = store.mutationContext!
         await fixture.delay("alpha|members.remove|org_b")
@@ -200,6 +203,25 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         catch let error as TeamRequestFailure { check(error.code == "teams_authorization_required", "Wrong permission failure") }
         check(store.phase == .authorization && store.directory == nil && store.organizations.isEmpty, "A failed authorization left stale team data visible")
         check(store.owner == account && !store.isMutating, "Permission recovery changed login ownership or left a busy form")
+    }
+    @MainActor static func authorityLossRetiresPendingReadsAndOldForms() async throws {
+        let fixture = Fixture(), store = TeamStore(api: await fixture.api()), account = owner("alpha")
+        await store.bind(to: account); store.select(store.organizations[0]); await store.refreshSelected()
+        let context = store.mutationContext!
+        // A fresh directory response must not restore cache after a concurrent
+        // scoped request has proved that membership was removed.
+        await fixture.delay("alpha|organizations.list|")
+        let pending = Task { await store.bind(to: account, refresh: true) }
+        await waitFor("alpha|organizations.list|", fixture: fixture)
+        await fixture.fail("teams.checkout.options", code: "forbidden")
+        do { let _: JSONValue = try await store.read(.checkoutOptions, fields: [:], context: context); preconditionFailure("Removed membership read local sharing options") }
+        catch let error as TeamRequestFailure { check(error.code == "forbidden", "Wrong authority failure") }
+        check(store.directory == nil && store.organizations.isEmpty && store.phase == .failed, "Authority loss left cached organization data")
+        await fixture.release("alpha|organizations.list|", value: .object(["organizations":.array([organization("org_a")]),"nextOffset":.null]))
+        await pending.value
+        check(store.directory == nil && store.organizations.isEmpty && !store.isRefreshing, "A late refresh restored revoked cache")
+        let oldCapabilities = try JSONDecoder().decode(TeamCapabilities.self, from: JSONEncoder().encode(JSONValue.object(["enabled":.bool(true),"ready":.bool(true),"actorId":.string("fixture-owner"),"version":.int(1),"authorizationRequired":.bool(false)])))
+        check(oldCapabilities.ready && !oldCapabilities.canPublishCheckouts, "An older account server enabled unsupported checkout publication")
     }
     static func avatars() {
         let account = owner("alpha")

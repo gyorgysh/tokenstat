@@ -162,6 +162,10 @@ pub struct Checkout {
     pub publisher_id: String,
     pub machine_id: String,
     pub host_key: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+    #[serde(default)]
+    pub publisher: Option<Person>,
     pub revision: u64,
     pub created_at: String,
 }
@@ -233,6 +237,8 @@ pub struct Capabilities {
     pub version: u32,
     #[serde(default)]
     pub scopes: Vec<String>,
+    #[serde(default)]
+    pub features: Vec<String>,
     #[serde(default)]
     pub authorization_required: bool,
     pub authorization_path: Option<String>,

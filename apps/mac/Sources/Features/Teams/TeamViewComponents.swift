@@ -170,6 +170,7 @@ enum TeamSheet: Identifiable {
     case repository(TeamMutationContext)
     case renameRepository(TeamMutationContext, TeamRepository)
     case access(TeamMutationContext, TeamRepository)
+    case checkouts(TeamMutationContext, TeamRepository)
     case rename(TeamMutationContext)
     case transfer(TeamMutationContext)
     case ownershipDecision(TeamMutationContext, TeamOwnershipRequest, cancelling: Bool)
@@ -187,6 +188,7 @@ enum TeamSheet: Identifiable {
         case .repository: "repository"
         case let .renameRepository(_, repository): "rename-repository:\(repository.id)"
         case let .access(_, repository): "access:\(repository.id)"
+        case let .checkouts(_, repository): "checkouts:\(repository.id)"
         case .rename: "rename"
         case .transfer: "transfer"
         case let .ownershipDecision(_, request, cancelling): "ownership:\(request.requestId ?? "legacy"):\(cancelling)"
