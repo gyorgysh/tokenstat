@@ -15,7 +15,7 @@ def chart(spec, *, executable="tokenstat"):
         raise ValueError("A chart may contain at most 256 KiB of JSON")
     try:
         result = subprocess.run([executable, "chart", "-"], input=source,
-                                text=True, capture_output=True, timeout=15, check=False)
+                                text=True, encoding="utf-8", capture_output=True, timeout=15, check=False)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise ValueError("A tokenstat 1.8 or newer CLI is required for validation") from error
     if result.returncode:

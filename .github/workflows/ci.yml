@@ -358,6 +358,17 @@ jobs:
       - name: Build
         run: cargo build --workspace --all-features --locked
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Chart Python SDK across legacy text locales
+        env:
+          LC_ALL: C
+          PYTHONUTF8: '0'
+          PYTHONCOERCECLOCALE: '0'
+        run: python -X utf8=0 scripts/tests/chart-sdk.py
+
       - name: Stage the shipping Windows terminal transport
         if: runner.os == 'Windows'
         shell: pwsh
