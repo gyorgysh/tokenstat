@@ -432,6 +432,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet run --project scripts/tests/windows-host/WindowsHostTests.csproj -- --hostd "$PWD/target/debug/tokenstat-hostd.exe"
 
+  teams-ui:
+    name: teams native UI
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the fixture project generator
+        run: brew install xcodegen
+
+      - name: Test Teams forms on a disposable iPhone simulator
+        run: python3 scripts/run-team-ui-tests.py
+
+      - name: Keep fictional UI results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: teams-native-ui
+          path: |
+            target/teams-ui-ci/*/Tests.xcresult
+            target/teams-ui-ci/*/summary.json
+            target/teams-ui-ci/*/build.log
+          retention-days: 7
+          if-no-files-found: ignore
+
   mac-client:
     name: mac client
     runs-on: macos-latest

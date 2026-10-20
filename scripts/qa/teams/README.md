@@ -3,7 +3,7 @@
 This app renders the production Teams views with fictional account responses.
 Its build excludes Bridge, FFI, account login and credential storage. Copy and
 browser actions are intercepted, and the fixture avatars have no image URLs.
-Directory writes return an inline fixture error.
+Directory and checkout publication writes return an inline fixture error.
 
 Build the Mac fixture with:
 
@@ -34,9 +34,13 @@ resources resolve relative to that directory. Generated projects and binaries
 are ignored. Run the fixture on a separate Simulator device selected by its
 explicit identifier.
 
+CI runs `python3 scripts/run-team-ui-tests.py`. It creates a new compatible
+iPhone Simulator, verifies all six scenarios, and removes only that device.
+`--select-only` reports an installed runtime without changing any device.
+
 Check members, search, scope switching, empty states, invitation validation,
-repository roles, ownership and deletion confirmations. Test narrow windows,
-both appearances, larger text, keyboard navigation and VoiceOver. These fixtures
+repository roles, ownership, checkout publication and stop-sharing confirmations.
+Test narrow windows, both appearances, larger text, keyboard navigation and VoiceOver. These fixtures
 supplement the account and transport integration tests; their API deliberately
 refuses writes.
 
