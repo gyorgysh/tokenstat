@@ -385,6 +385,10 @@ The Mac app is generated from `apps/mac/project.yml`. The Windows app is
 `apps/windows/`. The Android app is `apps/android/`. Each tree has its own
 README for the extra tooling that build needs.
 
+Use `scripts/build-mac-quick.sh --build-only` for an isolated Mac compile in
+`target/xcode-build-only`. It leaves the running app and host in place. Add
+`--rust` to refresh the FFI framework as part of the build.
+
 On macOS, `scripts/run-swift-tests.sh` runs the Apple client's standalone state
 tests. `python3 scripts/check-simulator.py` also compiles the native simulator
 boundary and verifies session preferences, isolation and video framing without

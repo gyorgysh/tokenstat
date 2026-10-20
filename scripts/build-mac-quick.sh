@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
 # Fast local macOS build for testing the GUI with the host daemon.
+# Use --build-only to compile in a separate directory without changing or
+# launching the running app or host.
 #
 # Unlike build-mac-app.sh this keeps Xcode's derived data, builds one
 # architecture, skips release packaging, and launches the Debug app.
@@ -12,6 +14,7 @@
 # Usage:
 #   scripts/build-mac-quick.sh              # Swift/UI changes
 #   scripts/build-mac-quick.sh --rust       # refresh the FFI framework too
+#   scripts/build-mac-quick.sh --build-only # compile without installing or launching
 #
 # The --rust form is needed when tokenstat-ffi or another Rust crate exposed
 # through the FFI changes. Ordinary Swift changes do not need that rebuild.
@@ -40,17 +43,22 @@ esac
 PROJECT="$ROOT/apps/mac/Tokenstat.xcodeproj"
 FFI="$ROOT/apps/mac/Vendor/TokenstatFFI.xcframework"
 DERIVED="$ROOT/target/xcode-debug"
-APP="$DERIVED/Build/Products/Debug/Tokenstat.app"
-
 refresh_rust=0
-case "${1:-}" in
-    "") ;;
-    --rust) refresh_rust=1 ;;
-    *)
-        echo "usage: $0 [--rust]" >&2
-        exit 2
-        ;;
-esac
+build_only=0
+for option in "$@"; do
+    case "$option" in
+        --rust) refresh_rust=1 ;;
+        --build-only) build_only=1 ;;
+        *)
+            echo "usage: $0 [--rust] [--build-only]" >&2
+            exit 2
+            ;;
+    esac
+done
+if [ "$build_only" -eq 1 ]; then
+    DERIVED="$ROOT/target/xcode-build-only"
+fi
+APP="$DERIVED/Build/Products/Debug/Tokenstat.app"
 
 # A directory at this path is not enough. build-ffi-xcframework.sh replaces
 # the xcframework with only the platforms it was asked for, so an iOS or
@@ -133,6 +141,11 @@ cargo build --release --locked -p tokenstat-host --bin tokenstat-hostd
 cp "$ROOT/target/release/tokenstat-hostd" \
     "$APP/Contents/Resources/tokenstat-hostd"
 chmod 755 "$APP/Contents/Resources/tokenstat-hostd"
+
+if [ "$build_only" -eq 1 ]; then
+    echo "Built without installing or launching: $APP"
+    exit 0
+fi
 
 python3 "$ROOT/scripts/sign-mac-app.py" "$APP" --optional
 
