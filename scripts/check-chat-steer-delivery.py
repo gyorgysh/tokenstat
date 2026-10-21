@@ -108,6 +108,7 @@ enum WorkCacheAccess {
     var selected: ChatConversation? = ChatConversation()
     var chats: [ChatConversation] = [ChatConversation()]
     var savedCopy: Bool? = nil
+    var isSharedSource = false
     var peer: String? = "host"
     var selectionGeneration: UInt64 = 1
     var contextRevision: UInt64? = 7
@@ -160,6 +161,12 @@ MEMBERS
         defer { try? FileManager.default.removeItem(at: directory) }
         Bridge.reset()
         Bridge.failure = nil
+        let shared = try Model(directory: directory.appendingPathComponent("shared"))
+        shared.isSharedSource = true
+        let sharedAccepted = await shared.send()
+        let sharedRows = try shared.rows().count
+        assert(shared.queuePaused && !sharedAccepted && sharedRows == 1 && Bridge.sends.isEmpty,
+               "A shared chat cannot deliver a personal queued message")
         let active = try Model(directory: directory.appendingPathComponent("active"))
         let accepted = await active.send()
         let activeEmpty = try active.rows().isEmpty

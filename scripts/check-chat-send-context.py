@@ -33,6 +33,7 @@ struct Conversation { let id: String; let sendRevision: UInt64? }
     var landingDraft: Bool? = nil
     var landingModel: String?
     var savedCopy: Bool? = nil
+    var isSharedSource = false
     var selected: Conversation? = Conversation(id: "chat", sendRevision: 7)
     var selectionGeneration: UInt64 = 0
     var contextRevision: UInt64? = 7
@@ -64,6 +65,11 @@ tests = '''
         Bridge.reply = Conversation(id: "chat", sendRevision: 11)
         await model.update(model: "third-model")
         assert(model.contextRevision == 9, "Other accepted work requires review")
+        model.isSharedSource = true
+        let sharedUpdates = Bridge.updates
+        await model.update(model: "shared-model")
+        assert(model.contextRevision == 9 && Bridge.updates == sharedUpdates, "A shared chat cannot change its setup from this composer")
+        model.isSharedSource = false
         Bridge.beforeReply = { model.selected = Conversation(id: "other-chat", sendRevision: 20) }
         await model.update(model: "fourth-model")
         assert(model.contextRevision == 9 && model.selected?.id == "other-chat", "Late setup response cannot change another chat")

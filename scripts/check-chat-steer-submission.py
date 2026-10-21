@@ -68,6 +68,8 @@ enum RemoteHostFeature { case steer; var minimumProtocol: Int { 1 } }
     var attachments = [ChatAttachment(id: "image")]
     var stagingAttachments = 0
     var savedCopy: Bool? = nil
+    var isSharedSource = false
+    var restoredDraft: String?
     var remoteSteer: Bool? = false
     var peer: String? = nil
     var sending = false
@@ -109,6 +111,7 @@ enum RemoteHostFeature { case steer; var minimumProtocol: Int { 1 } }
     func hostMessage(_ error: Error) -> String { error.localizedDescription }
     static func steerFallsBack(_ message: String) -> Bool { false }
     func stop() async { if let selected { stopped.append(selected.id) } }
+    func restoreSubmission(_ submission: ChatDraftSubmission) { restoredDraft = submission.draftText }
 '''
 tests = '''
 }
@@ -236,6 +239,27 @@ tests = '''
         saved.attachments = []
         saved.draft = "/stop"
         assert(saved.consumeChatCommand() && saved.draft == "/stop" && saved.stopped.isEmpty)
+        let shared = Model()
+        shared.isSharedSource = true
+        guard case .refused = shared.holdForSignIn(shared.draft, backend: "claude") else {
+            fatalError("A shared chat cannot hold a personal sign-in send")
+        }
+        guard case .queue = shared.beginBusyNote(shared.draft) else { fatalError("A shared chat cannot steer") }
+        assert(shared.busyNoteSubmission == nil)
+        let reserved = Model()
+        guard case let .steering(token) = reserved.beginBusyNote(reserved.draft) else { fatalError() }
+        reserved.isSharedSource = true
+        await reserved.finishBusyNote(token)
+        assert(reserved.restoredDraft == "Add the highlighted detail" && Bridge.steerCalls == 0,
+               "Sharing before the note lands restores the draft and never steers")
+        let sharedLanding = Model()
+        sharedLanding.isSharedSource = true
+        sharedLanding.busy = false
+        sharedLanding.attachments = []
+        sharedLanding.needsAuthentication = false
+        await sharedLanding.sendInitialDraft()
+        assert(sharedLanding.initialSends == 0 && sharedLanding.reservedInitialText == nil,
+               "A shared chat cannot start a landing turn")
         print("Steering submission: payload limits, attachment capability changes, reservation and stop-command ownership passed")
     }
 }
