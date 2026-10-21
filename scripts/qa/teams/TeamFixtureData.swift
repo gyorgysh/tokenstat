@@ -31,6 +31,7 @@ enum TeamFixtureData {
             return .object(["repository":try json(repository),"workspaceId":.string(workspace),"workspaceName":.string("Website"),"preview":.string(String(repeating:"ab",count:32)),"sharesExistingChats":.bool(false),"allowsAgentRuns":.bool(false)])
         case .checkoutList: return .object(["publications":.array([try json(TeamLocalPublication(id: "checkout_" + String(repeating:"a",count:32), organizationId: organization.id, repositoryId: repository.id, workspaceId: "/example/Website", phase: "active", revision: 2, accountCleanupPending: false))]),"nextOffset":.null])
         case .connectionCall:
+            if await TeamFixtureComments.shared.accessRemoved { throw TeamRequestFailure(code: "forbidden", message: "Access to this fictional repository was removed.") }
             guard case let .object(fields) = params, case let .object(target)? = fields["target"], let checkout = target["checkout"], let organization = target["organization"], let repository = target["repository"] else { throw CancellationError() }
             if fields["method"] == .string("team.chat.catalog") {
                 guard target["share"] == nil else { throw CancellationError() }
@@ -51,6 +52,7 @@ enum TeamFixtureData {
             return try await TeamFixtureComments.shared.send(params, uncertain: state == .commentUncertain)
         case .checkoutPublish, .checkoutWithdraw: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
         case .directory:
+            if await TeamFixtureComments.shared.accessRemoved { throw TeamRequestFailure(code: "forbidden", message: "Access to this fictional repository was removed.") }
             guard case let .object(fields) = params, case let .string(operation)? = fields["operation"] else { throw TeamRequestFailure(code: "fixture_request", message: "Choose a fixture action.") }
             switch operation {
             case "organizations.list": return .object(["organizations":.array(state == .empty ? [] : [try json(organization)]),"nextOffset":.null])

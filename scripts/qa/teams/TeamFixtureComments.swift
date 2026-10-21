@@ -7,6 +7,8 @@ actor TeamFixtureComments {
     static let shared = TeamFixtureComments()
     private var rows: [JSONValue] = []
     private var receipts: [String: JSONValue] = [:]
+    private(set) var accessRemoved = false
+    func removeAccess() { accessRemoved = true }
     func events() -> [JSONValue] { rows }
     func send(_ params: JSONValue, uncertain: Bool) throws -> JSONValue {
         guard case let .object(body) = params, case let .object(target)? = body["target"],

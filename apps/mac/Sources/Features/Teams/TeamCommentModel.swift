@@ -16,11 +16,13 @@ import Observation
     private let store: TeamStore
     private let context: TeamMutationContext
     private let storage: TeamCommentDraftStore
+    private let location: TeamCommentLocation?
     @ObservationIgnored private var autosave: Task<Void, Never>?
     @ObservationIgnored private var saving: Task<Void, Error>?
 
-    init(target: TeamCommentTarget, store: TeamStore, context: TeamMutationContext, storage: TeamCommentDraftStore = .shared) {
+    init(target: TeamCommentTarget, store: TeamStore, context: TeamMutationContext, storage: TeamCommentDraftStore = .shared, location: TeamCommentLocation? = nil) {
         self.target = target; self.store = store; self.context = context; self.storage = storage
+        self.location = location
     }
     var current: Bool { store.mutationContext == context && store.phase == .ready && store.capabilities?.actorId == target.person && context.owner.scope.origin == target.origin && context.organizationId == target.organization }
     var pending: Bool { draft?.attempt != nil }
@@ -60,7 +62,7 @@ import Observation
         let operation = Task { @MainActor [self] in
             while draft?.text != text && !(draft == nil && text.isEmpty) {
                 let words = text, expected = draft
-                draft = try await storage.save(target, text: words, expected: expected)
+                draft = try await storage.save(target, text: words, expected: expected, location: location)
                 hasUnsavedWriting = false
             }
         }

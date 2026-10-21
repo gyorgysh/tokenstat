@@ -16,6 +16,9 @@ import SwiftUI
                             Button("Personal") { store.select(nil) }
                             Button("Example Studio") { store.select(store.organizations.first) }
                             Button("Team chats") { store.show(.chats) }
+                            if TeamFixtureData.state == .commentUncertain {
+                                Button("Remove repository access") { Task { await TeamFixtureComments.shared.removeAccess(); await store.refreshSelected() } }
+                            }
                             if let context = store.mutationContext {
                                 Button("Create organization") { sheet = .create(context) }
                                 Button("Invite") { sheet = .invite(context) }

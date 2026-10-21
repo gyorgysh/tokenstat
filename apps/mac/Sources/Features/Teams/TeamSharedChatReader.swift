@@ -85,7 +85,7 @@ struct TeamSharedChatReader: View {
                 }
                 if let summary, let person = store.capabilities?.actorId, isCurrent {
                     let target = TeamCommentTarget(origin: context.owner.scope.origin, person: person, organization: repository.organizationId, repository: repository.id, checkout: checkout.id, share: share.id, host: checkout.hostKey)
-                    TeamCommentComposer(store: store, context: context, target: target, allowsComments: summary.allowsComments == true, storage: commentStorage, presentationChanged: { focused, pending in
+                    TeamCommentComposer(store: store, context: context, target: target, allowsComments: summary.allowsComments == true, storage: commentStorage, location: TeamCommentLocation(organization: store.selectedOrganization?.name ?? "", repository: repository.name, chat: summary.title, computer: checkout.deviceName ?? ""), presentationChanged: { focused, pending in
                         #if os(iOS)
                         editingComment = focused
                         #endif

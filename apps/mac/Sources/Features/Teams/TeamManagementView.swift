@@ -10,6 +10,9 @@ struct TeamManagementView: View {
     @State private var query = ""
     @State private var selectedMemberId: String?
     @State private var readingSharedChat = false
+    @State private var showingDrafts = false
+    @Environment(\.teamCommentDraftStorage) private var commentStorage
+    @Environment(\.dynamicTypeSize) private var textSize
     private var compactReader: Bool {
         #if os(iOS)
         readingSharedChat
@@ -21,11 +24,12 @@ struct TeamManagementView: View {
     var body: some View {
         VStack(spacing: 0) {
             #if os(macOS)
-            if store.section != .chats {
-                DetailChromeBar {
+            DetailChromeBar {
+                if store.section != .chats {
                     Button(L10n.text("common.refresh"), .refresh) { refresh() }
                         .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing)
                 }
+                if store.localDraftPersonId != nil { draftsButton }
             }
             #endif
             if let error = store.error {
@@ -41,6 +45,7 @@ struct TeamManagementView: View {
         .tint(TeamColors.action)
         .navigationTitle(store.selectedOrganization?.name ?? L10n.text("common.teams.title"))
         .onPreferenceChange(TeamChatReadingKey.self) { readingSharedChat = $0 }
+        .onChange(of: store.owner) { showingDrafts = false }
         #if os(iOS)
         .navigationBarTitleDisplayMode(compactReader ? .inline : .large)
         #endif
@@ -53,6 +58,17 @@ struct TeamManagementView: View {
                 .presentationDragIndicator(.visible)
                 #endif
         }
+        .sheet(isPresented: $showingDrafts) {
+            if let owner = store.owner, let person = store.localDraftPersonId {
+                TeamCommentDraftsView(origin: owner.scope.origin, person: person, storage: commentStorage, isCurrent: { store.owner == owner && store.localDraftPersonId == person })
+                    .dynamicTypeSize(textSize)
+                    #if os(macOS)
+                    .frame(width: 640, height: 620)
+                    #else
+                    .presentationDetents([.large]).presentationDragIndicator(.visible)
+                    #endif
+            }
+        }
         .onChange(of: store.selectionKey) { query = ""; sheet = nil }
         .onChange(of: store.phase) {
             if store.phase == .ready { if case .authorize? = sheet { sheet = nil } }
@@ -60,9 +76,16 @@ struct TeamManagementView: View {
         }
         #if !os(macOS)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { if store.section != .chats { Button(L10n.text("common.refresh"), systemImage: "arrow.clockwise") { refresh() }.disabled(store.isRefreshing) } }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if store.section != .chats { Button(L10n.text("common.refresh"), systemImage: "arrow.clockwise") { refresh() }.disabled(store.isRefreshing) }
+                if store.localDraftPersonId != nil { draftsButton }
+            }
         }
         #endif
+    }
+    private var draftsButton: some View {
+        Button(L10n.text("common.teams.comment_drafts"), systemImage: "square.and.pencil") { showingDrafts = true }
+            .accessibilityIdentifier("team.drafts.open")
     }
     @ViewBuilder private var content: some View {
         switch store.phase {

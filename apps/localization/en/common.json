@@ -602,5 +602,13 @@
   "common.teams.comment_too_long": "Shorten this comment before posting it.",
   "common.teams.unsaved_comment_copy": "Unsaved text from another window",
   "common.teams.copy_unsaved_text": "Copy unsaved text",
-  "common.teams.write_comment": "Write a comment"
+  "common.teams.write_comment": "Write a comment",
+  "common.teams.comment_drafts": "Comment drafts",
+  "common.teams.comment_drafts_detail": "Recover saved writing even if you can no longer open its chat. Check delivery or continue writing in the original shared chat.",
+  "common.teams.comment_drafts_unreadable": "Some drafts couldn’t be read. Try again. Saved files have been kept.",
+  "common.teams.no_comment_drafts": "No comment drafts on this device.",
+  "common.teams.saved_comment_draft": "Saved draft",
+  "common.teams.remove_local_draft": "Remove local draft?",
+  "common.teams.remove_local_draft_detail": "This removes the saved text and delivery details from this device. A comment already sent may still appear in the chat. Removing this draft won’t cancel it.",
+  "common.teams.remove_draft": "Remove draft"
 }

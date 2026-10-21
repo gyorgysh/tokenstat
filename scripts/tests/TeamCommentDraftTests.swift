@@ -12,28 +12,46 @@ import Foundation
         defer { try? FileManager.default.removeItem(at: root) }
         let store = TeamCommentDraftStore(directory: root), key = target()
         expect(try await store.load(key) == nil)
-        let draft = try await store.save(key, text: "A fictional comment", expected: nil)!
+        let location = TeamCommentLocation(organization: "Example studio", repository: "Website", chat: "Quarterly totals", computer: "Example Mac")
+        let draft = try await store.save(key, text: "A fictional comment", expected: nil, location: location)!
         let reopened = TeamCommentDraftStore(directory: root)
         expect(try await reopened.load(key) == draft)
+        expect(draft.location == location)
         expect(try await reopened.load(target(person: "another_person")) == nil)
         expect(try await reopened.load(target(share: "another_share")) == nil)
         let changed = try await store.save(key, text: "A revised comment", expected: draft)!
         do { _ = try await reopened.save(key, text: "Stale window", expected: draft); preconditionFailure("Stale writing overwrote another window") } catch TeamCommentDraftFailure.changed {}
         let reserved = try await store.reserve(key, expected: changed)
         expect(reserved.attempt != nil && reserved.text == changed.text)
+        expect(reserved.location == location)
+        if case let .object(input) = reserved.input { expect(input.count == 3 && input["location"] == nil) }
+        else { preconditionFailure("Comment input missing") }
         expect(try await reopened.load(key) == reserved)
         expect(try await reopened.reserve(key, expected: reserved) == reserved)
         do { _ = try await store.save(key, text: "Changed uncertain attempt", expected: reserved); preconditionFailure("Uncertain text was retargeted") } catch TeamCommentDraftFailure.pending {}
         expect(try await store.resolve(key, expected: reserved, state: .unknown) == reserved)
         expect(try await store.resolve(key, expected: reserved, state: .pending) == reserved)
         let retry = try await store.resolve(key, expected: reserved, state: .notAccepted)!
-        expect(retry.text == reserved.text && retry.attempt == nil)
+        expect(retry.text == reserved.text && retry.attempt == nil && retry.location == location)
         let fresh = try await store.reserve(key, expected: retry)
         expect(fresh.attempt?.id != reserved.attempt?.id)
         expect(try await store.resolve(key, expected: fresh, state: .accepted) == nil)
         let later = try await reopened.save(key, text: "A later draft", expected: nil)!
         do { _ = try await store.resolve(key, expected: fresh, state: .accepted); preconditionFailure("Late acknowledgement removed newer writing") } catch TeamCommentDraftFailure.changed {}
         expect(try await store.load(key) == later)
+        let page = try await store.list(origin: key.origin, person: key.person)
+        expect(page.entries.count == 1 && page.entries[0].draft == later)
+        expect(page.entries[0].unsaved?.text == "Changed uncertain attempt")
+        expect(try await store.list(origin: key.origin, person: "other_person").entries.isEmpty)
+        expect(try await store.list(origin: "https://another.example.test", person: key.person).entries.isEmpty)
+        let originalEntry = page.entries[0]
+        let newer = try await store.save(key, text: "Keep newer writing", expected: later)!
+        do { try await store.discard(originalEntry); preconditionFailure("A stale recovery view erased newer writing") } catch TeamCommentDraftFailure.changed {}
+        expect(try await store.load(key) == newer)
+        let currentEntry = try await store.list(origin: key.origin, person: key.person).entries[0]
+        try await store.discard(currentEntry)
+        expect(try await store.load(key) == nil)
+        let restored = try await store.save(key, text: later.text, expected: nil)!
         let holder = Process(), ready = Pipe()
         holder.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         holder.arguments = ["-c", "import fcntl,sys,time\nf=open(sys.argv[1],'a')\nfcntl.lockf(f,fcntl.LOCK_EX)\nprint('ready',flush=True)\ntime.sleep(30)", root.appendingPathComponent("drafts.lock").path]
@@ -49,7 +67,7 @@ import Foundation
         do { _ = try await store.load(key); preconditionFailure("A busy file was waited on rather than reported") } catch TeamCommentDraftFailure.unavailable {}
         expect(holder.isRunning)
         holder.terminate(); holder.waitUntilExit()
-        expect(try await store.load(key) == later)
+        expect(try await store.load(key) == restored)
         let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         let file = files.first { $0.pathExtension == "json" }!
         let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
@@ -58,8 +76,13 @@ import Foundation
         try Data("{broken fixture".utf8).write(to: file)
         do { _ = try await reopened.save(key, text: "Do not overwrite damaged writing", expected: nil); preconditionFailure("Damaged storage became empty") } catch {}
         expect(try Data(contentsOf: file) == Data("{broken fixture".utf8))
+        let failedRecovery = try await reopened.list(origin: key.origin, person: key.person)
+        expect(failedRecovery.unreadable && failedRecovery.entries.count == 1)
+        expect(failedRecovery.entries[0].unsaved?.text == "Do not overwrite damaged writing")
+        do { try await reopened.discard(failedRecovery.entries[0]); preconditionFailure("Recovery discarded an unreadable file without reviewing its contents") } catch {}
+        expect(try Data(contentsOf: file) == Data("{broken fixture".utf8))
         try original.write(to: file)
-        let tooLong = try await store.save(key, text: String(repeating: "字", count: 4000), expected: later)!
+        let tooLong = try await store.save(key, text: String(repeating: "字", count: 4000), expected: restored)!
         expect(!tooLong.canSend)
         do { _ = try await store.reserve(key, expected: tooLong); preconditionFailure("Oversized comment was reserved") } catch TeamCommentDraftFailure.tooLong {}
         expect(try await store.load(key) == tooLong)
@@ -69,6 +92,29 @@ import Foundation
         try FileManager.default.createSymbolicLink(at: file, withDestinationURL: outside)
         do { _ = try await store.load(key); preconditionFailure("Linked draft was read") } catch TeamCommentDraftFailure.unavailable {}
         expect(try String(contentsOf: outside, encoding: .utf8) == "Keep this private fixture")
+        let damagedPage = try await store.list(origin: key.origin, person: key.person)
+        expect(damagedPage.unreadable && damagedPage.entries.isEmpty)
+        try FileManager.default.removeItem(at: file)
+        for index in 0..<45 { _ = try await store.save(target(share: "paged_\(index)"), text: "Draft \(index)", expected: nil) }
+        let first = try await store.list(origin: key.origin, person: key.person)
+        expect(first.entries.count == 40 && first.next != nil)
+        let last = try await store.list(origin: key.origin, person: key.person, after: first.next)
+        expect(last.entries.count == 5 && last.next == nil)
+        expect(Set((first.entries + last.entries).map(\.id)).count == 45)
+        _ = try await store.save(target(person: "another_person"), text: "Another person's private words", expected: nil)
+        let other = try await store.list(origin: key.origin, person: "another_person")
+        expect(other.entries.count == 1 && other.entries[0].draft?.text == "Another person's private words")
+        let own = try await store.list(origin: key.origin, person: key.person)
+        expect(own.entries.allSatisfy { $0.target.person == key.person })
+        let pendingTarget = target(share: "remove_pending")
+        let pendingDraft = try await store.save(pendingTarget, text: "Original uncertain writing", expected: nil)!
+        let pendingAttempt = try await store.reserve(pendingTarget, expected: pendingDraft)
+        let pendingPage = try await store.list(origin: key.origin, person: key.person)
+        var pendingEntry = pendingPage.entries.first { $0.target == pendingTarget }
+        if pendingEntry == nil { pendingEntry = try await store.list(origin: key.origin, person: key.person, after: pendingPage.next).entries.first { $0.target == pendingTarget } }
+        try await store.discard(pendingEntry!)
+        expect(try await store.load(pendingTarget) == nil)
+        expect(pendingAttempt.attempt != nil && pendingAttempt.text == pendingDraft.text)
         print("Team comment drafts preserve exact attempts, account/share isolation, concurrent edits and damaged files")
     }
 }

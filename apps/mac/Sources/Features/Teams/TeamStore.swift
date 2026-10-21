@@ -15,6 +15,9 @@ final class TeamStore {
     private(set) var owner: TeamAccountOwner?
     private(set) var phase: Phase = .signedOut
     private(set) var capabilities: TeamCapabilities?
+    /// Last verified person for local draft recovery in this login lifetime.
+    /// Losing organization access must not hide this person's own writing.
+    private(set) var localDraftPersonId: String?
     private(set) var organizations: [TeamOrganization] = []
     private(set) var organizationsNextOffset: Int?
     private(set) var inbox: [TeamInvitation] = []
@@ -53,7 +56,7 @@ final class TeamStore {
         let revision = loadRevision
         if changed {
             formLifetime &+= 1
-            owner = next; capabilities = nil; organizations = []; inbox = []
+            owner = next; capabilities = nil; localDraftPersonId = nil; organizations = []; inbox = []
             organizationsNextOffset = nil; inboxNextOffset = nil
             selectedOrganizationId = nil; selectedRepositoryId = nil; selectionSummary = nil
             directory = nil; cachedDirectories = [:]; cacheOrder = []; inFlightSelection = nil
@@ -69,6 +72,7 @@ final class TeamStore {
             let capabilities: TeamCapabilities = try await api.request(.capabilities, owner: next)
             guard isCurrent(next, revision) else { return }
             self.capabilities = capabilities
+            localDraftPersonId = capabilities.actorId
             guard capabilities.enabled else { clearAuthorization(); phase = .unavailable; return }
             guard capabilities.ready else { clearAuthorization(); phase = .authorization; return }
             let api = api

@@ -13,8 +13,8 @@ struct TeamCommentComposer: View {
     @State private var expandedEditor = false
     private var collapsed: Bool { allowsComments && textSize.isAccessibilitySize && !expandedEditor && !model.pending && model.text.isEmpty && !model.hasUnsavedWriting }
 
-    init(store: TeamStore, context: TeamMutationContext, target: TeamCommentTarget, allowsComments: Bool, storage: TeamCommentDraftStore, presentationChanged: @escaping (Bool, Bool) -> Void, didPost: @escaping () -> Void) {
-        _model = State(initialValue: TeamCommentModel(target: target, store: store, context: context, storage: storage))
+    init(store: TeamStore, context: TeamMutationContext, target: TeamCommentTarget, allowsComments: Bool, storage: TeamCommentDraftStore, location: TeamCommentLocation, presentationChanged: @escaping (Bool, Bool) -> Void, didPost: @escaping () -> Void) {
+        _model = State(initialValue: TeamCommentModel(target: target, store: store, context: context, storage: storage, location: location))
         self.allowsComments = allowsComments; self.didPost = didPost; self.presentationChanged = presentationChanged
     }
     var body: some View {

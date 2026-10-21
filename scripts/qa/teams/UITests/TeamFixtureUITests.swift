@@ -160,6 +160,33 @@ final class TeamFixtureUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "A fictional UI comment")).count, 1)
         capture(app, largeText ? "Accepted comment large text" : "Accepted comment")
     }
+    func testCommentDraftRecoveryAfterAccessIsRemovedWithLargeText() {
+        let app = launch("commentUncertain", largeText: true)
+        openSharedChat(app)
+        app.buttons["team.comment.expand"].tap()
+        let input = app.descendants(matching: .any)["team.comment.text"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.tap(); input.typeText("Keep my fictional comment")
+        app.buttons["team.comment.send"].tap()
+        XCTAssertTrue(app.buttons["team.comment.check"].waitForExistence(timeout: 5))
+        app.buttons["Fixture"].tap(); app.buttons["Remove repository access"].tap()
+        let drafts = app.buttons["team.drafts.open"]
+        XCTAssertTrue(drafts.waitForExistence(timeout: 5)); drafts.tap()
+        XCTAssertTrue(app.staticTexts["Keep my fictional comment"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Quarterly totals"].exists)
+        XCTAssertGreaterThan(app.staticTexts["Comment drafts"].frame.height, 24, "The recovery sheet did not inherit the accessibility text size")
+        XCTAssertTrue(app.staticTexts["Delivery isn’t confirmed."].exists)
+        XCTAssertFalse(app.buttons["team.comment.send"].exists)
+        capture(app, "Local comment recovery after access removal large text")
+        let remove = app.buttons["team.drafts.remove"]
+        reveal(remove, in: app); remove.tap()
+        XCTAssertTrue(app.alerts["Remove local draft?"].waitForExistence(timeout: 5))
+        capture(app, "Local draft removal disclosure large text")
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Keep my fictional comment"].exists)
+        remove.tap(); app.alerts.buttons["Remove draft"].tap()
+        XCTAssertTrue(app.staticTexts["team.drafts.empty"].waitForExistence(timeout: 5))
+    }
     private func sharedChatScenario(largeText: Bool) {
         let app = launch(largeText: largeText)
         XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))

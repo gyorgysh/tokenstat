@@ -213,6 +213,9 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         catch let error as TeamRequestFailure { check(error.code == "teams_authorization_required", "Wrong permission failure") }
         check(store.phase == .authorization && store.directory == nil && store.organizations.isEmpty, "A failed authorization left stale team data visible")
         check(store.owner == account && !store.isMutating, "Permission recovery changed login ownership or left a busy form")
+        check(store.localDraftPersonId == "fixture-owner", "Revoked device consent hid the person's own local drafts")
+        await store.bind(to: nil)
+        check(store.localDraftPersonId == nil, "Signing out retained another person's draft owner")
     }
     @MainActor static func authorityLossRetiresPendingReadsAndOldForms() async throws {
         let fixture = Fixture(), store = TeamStore(api: await fixture.api()), account = owner("alpha")
@@ -227,6 +230,7 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         do { let _: JSONValue = try await store.read(.checkoutOptions, fields: [:], context: context); preconditionFailure("Removed membership read local sharing options") }
         catch let error as TeamRequestFailure { check(error.code == "forbidden", "Wrong authority failure") }
         check(store.directory == nil && store.organizations.isEmpty && store.phase == .failed, "Authority loss left cached organization data")
+        check(store.localDraftPersonId == "fixture-owner", "Removed membership hid local draft recovery")
         await fixture.release("alpha|organizations.list|", value: .object(["organizations":.array([organization("org_a")]),"nextOffset":.null]))
         await pending.value
         check(store.directory == nil && store.organizations.isEmpty && !store.isRefreshing, "A late refresh restored revoked cache")

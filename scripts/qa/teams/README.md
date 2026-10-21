@@ -8,6 +8,10 @@ The `comment` and `commentUncertain` scenarios accept fictional comments in
 memory and keep their draft files in a separate temporary directory. The
 uncertain scenario interrupts the reply after acceptance so receipt recovery
 can be tested. `commentViewer` has no composer.
+On iOS, the uncertain scenario also offers “Remove repository access” in the
+fixture menu. Comment drafts must remain available afterward, with local chat
+labels, copy actions and an explicit removal review. Removing a local draft
+does not cancel the fictional accepted comment.
 
 Build the Mac fixture with:
 
@@ -39,7 +43,7 @@ are ignored. Run the fixture on a separate Simulator device selected by its
 explicit identifier.
 
 CI runs `python3 scripts/run-team-ui-tests.py`. It creates a new compatible
-iPhone Simulator, verifies all 13 scenarios, and removes only that device.
+iPhone Simulator, verifies all 14 scenarios, and removes only that device.
 `--select-only` reports an installed runtime without changing any device.
 Use `--only-test testCommentPostsWithVerifiedAuthor` for a focused local run.
 Omit that option for the complete CI check.
