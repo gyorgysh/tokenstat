@@ -41,6 +41,9 @@ use tokenstat_identity::{MachineIdentity, PeerStore, public_key_from_hex};
 use tokenstat_remote::{Refused, authorize_with};
 use tokenstat_sync::profile::ProfileError;
 
+mod tunnel_lifecycle;
+mod tunnel_runtime;
+
 use crate::session::Session;
 use tokenstat_remote::tunnel::ChannelPurpose;
 
@@ -104,11 +107,6 @@ fn save_settings(settings: &RemoteSettings) -> Result<(), String> {
     std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn tunnel_running() -> &'static AtomicBool {
-    static RUNNING: AtomicBool = AtomicBool::new(false);
-    &RUNNING
-}
-
 #[cfg(feature = "local-host")]
 fn direct_running() -> &'static AtomicBool {
     static RUNNING: AtomicBool = AtomicBool::new(false);
@@ -163,13 +161,6 @@ fn offered_direct_candidates() -> &'static Mutex<HashMap<String, Vec<DirectCandi
     CANDIDATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The one multiplexed tunnel session the daemon keeps, if remote reach is on.
-fn tunnel_session() -> &'static Mutex<Option<Arc<tokenstat_remote::tunnel::TunnelSession>>> {
-    static SESSION: OnceLock<Mutex<Option<Arc<tokenstat_remote::tunnel::TunnelSession>>>> =
-        OnceLock::new();
-    SESSION.get_or_init(|| Mutex::new(None))
-}
-
 /// What the tunnel is doing right now, for the screen that reports it.
 ///
 /// `remote.status` reports the user's *setting* and, separately, what is
@@ -187,17 +178,6 @@ pub struct TunnelState {
     /// what lets a same-account machine dial this one, so "on the tunnel but
     /// not in the directory" is a real state worth showing.
     pub registered: bool,
-}
-
-fn tunnel_state() -> &'static Mutex<TunnelState> {
-    static STATE: OnceLock<Mutex<TunnelState>> = OnceLock::new();
-    STATE.get_or_init(|| Mutex::new(TunnelState::default()))
-}
-
-fn set_tunnel_state(update: impl FnOnce(&mut TunnelState)) {
-    if let Ok(mut state) = tunnel_state().lock() {
-        update(&mut state);
-    }
 }
 
 /// The session a peer will be answered from.
@@ -469,7 +449,7 @@ fn credential_deadline_ms(token: &tokenstat_sync::profile::TunnelToken) -> i64 {
 /// ("register this machine", "remote reach is a paid feature") into a generic
 /// tunnel denial minutes later.
 ///
-/// Registration is mandatory on the first mint of a process and best-effort
+/// Registration is mandatory on the first mint for a login and key, and best-effort
 /// afterwards: a transient 5xx (or a captive-portal redirect) on the register
 /// route must not turn a renewal the account can already serve into "tunnel
 /// unavailable". The one refusal registration cannot fix is a mint answering
@@ -483,7 +463,12 @@ fn mint_hello_token() -> Result<(String, Option<u64>), String> {
         .ok_or("sign in to tokenstat.ai before enabling remote reach")?;
     let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    let first = !REGISTERED_THIS_PROCESS.swap(true, Ordering::AcqRel);
+    let registration = (owner.id.clone(), machine_id.clone(), identity.public_key());
+    let first = registered_identity()
+        .lock()
+        .map_err(|_| "Device registration state is unavailable.")?
+        .as_ref()
+        != Some(&registration);
     let result = mint_hello_token_impl(
         &machine_id,
         &identity,
@@ -501,16 +486,22 @@ fn mint_hello_token() -> Result<(String, Option<u64>), String> {
         |mid| client.mint_tunnel_token(mid),
     );
     owner.ensure_current()?;
+    if result.is_ok() {
+        *registered_identity()
+            .lock()
+            .map_err(|_| "Device registration state is unavailable.")? = Some(registration);
+    }
     result
 }
 
-/// Has this process already tried to register the machine with the account?
-///
-/// Not "is it registered": the flag stays set even when the first attempt
-/// failed, because the first attempt being mandatory is about not *skipping*
-/// the call, and the mint + re-register path below repairs a machine the
-/// account does not know.
-static REGISTERED_THIS_PROCESS: AtomicBool = AtomicBool::new(false);
+/// Registration belongs to the login receipt and actual machine key, rather
+/// than to the process. A key rotation or another account gets its own first
+/// registration, and a failed first attempt remains retryable.
+type RegisteredIdentity = (String, String, tokenstat_identity::PublicKey);
+fn registered_identity() -> &'static Mutex<Option<RegisteredIdentity>> {
+    static REGISTERED: OnceLock<Mutex<Option<RegisteredIdentity>>> = OnceLock::new();
+    REGISTERED.get_or_init(|| Mutex::new(None))
+}
 
 fn mint_hello_token_impl(
     machine_id: &str,
@@ -527,7 +518,6 @@ fn mint_hello_token_impl(
     let kind = "client";
     if first {
         register(machine_id, identity, kind)?;
-        set_tunnel_state(|state| state.registered = true);
     }
 
     let mut minted = mint(machine_id);
@@ -537,7 +527,6 @@ fn mint_hello_token_impl(
         // the key the mint binds to. More than one is the same answer to the
         // same question.
         register(machine_id, identity, kind)?;
-        set_tunnel_state(|state| state.registered = true);
         minted = mint(machine_id);
     }
 
@@ -546,7 +535,6 @@ fn mint_hello_token_impl(
             // A mint only succeeds for a registered machine, so a renewal that
             // skipped registration (best-effort after the first mint) still
             // means the machine is on the account directory.
-            set_tunnel_state(|state| state.registered = true);
             let deadline = credential_deadline_ms(&tok);
             hold_pinned_credential(&tok.token, Some(deadline))?;
             // The lifetime the caller schedules from is measured against the
@@ -609,11 +597,8 @@ fn clear_held_credential() {
 
 /// Serializes tunnel start so two callers cannot both create a session.
 ///
-/// Without it, a retry tick and a connectivity nudge arriving in the same
-/// window both pass the `tunnel_running` guard (one finds the flag set but no
-/// session yet, clears it, and re-arms) and both spawn an inbound thread; the
-/// second `take_inbound()` would panic and take the daemon down. A caller that
-/// waits here then re-checks and sees the finished session instead.
+/// A retry tick and a foreground nudge may both mint a credential. The caller
+/// that waits here rechecks the owned socket before doing network work.
 static STARTING: Mutex<()> = Mutex::new(());
 
 fn tunnel_paused() -> &'static AtomicBool {
@@ -649,214 +634,7 @@ pub(crate) fn resume_tunnel_if_enabled() {
 }
 
 fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettings) {
-    if !settings.tunnel || tunnel_paused().load(Ordering::Acquire) {
-        return;
-    }
-    // Hold the whole start, network mints included. A second caller blocks
-    // here and then re-checks, so at most one session is ever created.
-    let _starting = STARTING.lock().unwrap_or_else(|e| e.into_inner());
-    let Ok(owner) = crate::account_session::current_or_capture() else {
-        return;
-    };
-    // Already live: refresh HELLO and leave the supervisor alone.
-    if tunnel_running().load(Ordering::Acquire) {
-        if let Ok(guard) = tunnel_session().lock()
-            && guard.is_some()
-        {
-            // The held credential, minted again only when it is close to
-            // expiry. The live socket is already registered, so this is
-            // about what the next reconnect will carry.
-            if let Ok((hello_token, _)) =
-                crate::account_session::with_snapshot(Some(owner.clone()), || {
-                    tunnel_hello_token(false)
-                })
-            {
-                if let Some(existing) = guard.as_ref() {
-                    existing.set_token(&hello_token);
-                }
-                // A later successful mint must not leave a previous
-                // plan-refusal sitting in `tunnelError`. The panel
-                // reads that field even when the socket is up.
-                set_tunnel_state(|state| state.error = None);
-            }
-            return;
-        }
-        // Marked running but no session: fall through and rebuild.
-        tunnel_running().store(false, Ordering::Release);
-    }
-    if tunnel_running()
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return;
-    }
-    let endpoint = settings.tunnel_endpoint.clone();
-    // Confirm login before starting the supervisor. Mint happens below so the
-    // HELLO secret is tunnel-scoped when the server supports it.
-    if let Err(error) = account_token() {
-        eprintln!("remote: tunnel is enabled but unavailable: {error}");
-        set_tunnel_state(|state| {
-            state.connected = false;
-            state.error = Some(error.clone());
-        });
-        tunnel_running().store(false, Ordering::Release);
-        if !is_permanent_start_error(&error) {
-            retry_start_later(Arc::clone(&session));
-        }
-        return;
-    }
-    let identity = match MachineIdentity::load_or_create() {
-        Ok(identity) => identity,
-        Err(error) => {
-            eprintln!("remote: tunnel identity unavailable: {error}");
-            tunnel_running().store(false, Ordering::Release);
-            return;
-        }
-    };
-    let (hello_token, expires_in) =
-        match crate::account_session::with_snapshot(Some(owner.clone()), || {
-            tunnel_hello_token(false)
-        }) {
-            Ok(pair) => pair,
-            Err(error) => {
-                if owner.ensure_current().is_err() {
-                    return;
-                }
-                eprintln!("remote: tunnel is enabled but unavailable: {error}");
-                // The panel shows `error`, so a refusal the user can act on has to
-                // land there rather than only in the daemon's log.
-                set_tunnel_state(|state| {
-                    state.registered = false;
-                    state.connected = false;
-                    state.error = Some(error.clone());
-                });
-                tunnel_running().store(false, Ordering::Release);
-                // A daemon that starts before the network is up, or while the
-                // account host is having a minute, used to stay off until somebody
-                // opened Machines and toggled the switch. Remote reach is meant to
-                // be the state of the machine, not the state of the last attempt.
-                if !is_permanent_start_error(&error) {
-                    retry_start_later(session);
-                }
-                return;
-            }
-        };
-    // One persistent, multiplexed socket for the daemon's lifetime. It is
-    // created here and reused by every dial, and the supervisor inside it
-    // reconnects with backoff when the relay drops.
-    let tunnel = {
-        let mut guard = match tunnel_session().lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                eprintln!("remote: tunnel state unavailable: {e}");
-                tunnel_running().store(false, Ordering::Release);
-                return;
-            }
-        };
-        if owner.ensure_current().is_err() {
-            return;
-        }
-        match guard.as_ref() {
-            Some(existing) => {
-                // Already running: refresh the HELLO secret if we just minted.
-                existing.set_token(&hello_token);
-                existing.clone()
-            }
-            None => {
-                let session = tokenstat_remote::tunnel::TunnelSession::spawn(
-                    &endpoint,
-                    &identity,
-                    &hello_token,
-                );
-                // The repair for a refused credential, handed to the
-                // supervisor so it can fix itself between two reconnects
-                // instead of waiting for somebody to toggle a switch.
-                // The relay refused what we hold, so this one must mint.
-                let renewal_owner = owner.clone();
-                session.set_renew(Box::new(
-                    move || match crate::account_session::with_snapshot(
-                        Some(renewal_owner.clone()),
-                        || tunnel_hello_token(true),
-                    ) {
-                        Ok((token, _)) => {
-                            set_tunnel_state(|state| state.error = None);
-                            Ok(token)
-                        }
-                        Err(error) => {
-                            renewal_owner.ensure_current()?;
-                            set_tunnel_state(|state| state.error = Some(error.clone()));
-                            // Handed back as well as recorded: the supervisor puts
-                            // it into the refusal it reports, so the panel says
-                            // what the account actually answered instead of
-                            // restating the relay's symptom.
-                            Err(error)
-                        }
-                    },
-                ));
-                *guard = Some(session.clone());
-                session
-            }
-        }
-    };
-    // The mint is the plan gate. Once it succeeds the previous refusal is
-    // stale, even before the first inbound channel or READY lands.
-    set_tunnel_state(|state| state.error = None);
-    // Refresh the short-lived token at half-life so HELLO never races expiry.
-    if let Some(ttl) = expires_in {
-        let refresh_tunnel = Arc::clone(&tunnel);
-        let refresh_owner = owner.clone();
-        std::thread::spawn(move || tunnel_token_refresh_loop(refresh_tunnel, ttl, refresh_owner));
-    }
-    std::thread::spawn(move || {
-        // Inbound channels: the relay dialled us. Each is a fresh Noise
-        // handshake over the channel, answered exactly like a direct TCP
-        // connection, so the approval rule cannot tell the transports apart.
-        // `None` here means another loop already took the receiver; a start
-        // that lost a race must not spawn a second one (or panic).
-        let Some(inbound) = tunnel.take_inbound() else {
-            return;
-        };
-        while tunnel_running().load(Ordering::Acquire) {
-            let state = match inbound.recv() {
-                Ok(state) => state,
-                Err(_) => break,
-            };
-            let transport = tokenstat_remote::tunnel::ChannelTransport::from_inbound(
-                Arc::clone(&tunnel),
-                state,
-            );
-            let team = transport.team_authorization();
-            if let Some(team) = team {
-                crate::teams::accept_channel(
-                    transport,
-                    team,
-                    owner.clone(),
-                    MachineIdentity::from_secret(identity.secret_bytes()),
-                    Arc::clone(&session),
-                );
-                continue;
-            }
-            match tokenstat_remote::handshake_responder(Box::new(transport), &identity) {
-                Ok(connection) => {
-                    set_tunnel_state(|state| {
-                        state.connected = true;
-                        state.error = None;
-                    });
-                    match authorize_with(connection, "tunnel", Some(&account_peer_label)) {
-                        Ok(connection) => {
-                            let peer_session = Arc::clone(&session);
-                            std::thread::spawn(move || {
-                                serve_peer(connection, &peer_session, Route::Relay)
-                            });
-                        }
-                        Err(refused) => report(&refused),
-                    }
-                }
-                Err(error) => eprintln!("remote: inbound tunnel handshake failed: {error}"),
-            }
-        }
-        tunnel_running().store(false, Ordering::Release);
-    });
+    tunnel_lifecycle::start(session, settings);
 }
 
 /// Keep trying to bring remote reach up, in the background, until it is up or
@@ -900,11 +678,11 @@ fn retry_start_later(session: Arc<Mutex<Session>>) {
             if !settings.tunnel || tunnel_paused().load(Ordering::Acquire) {
                 break;
             }
-            if tunnel_running().load(Ordering::Acquire) {
+            if tunnel_lifecycle::running() {
                 break;
             }
             start_tunnel_if_enabled(Arc::clone(&session), &settings);
-            if tunnel_running().load(Ordering::Acquire) {
+            if tunnel_lifecycle::running() {
                 break;
             }
             delay = (delay * 2).min(Duration::from_secs(60));
@@ -921,81 +699,8 @@ fn next_retry(previous: Option<u64>) -> u64 {
     }
 }
 
-/// Re-mint the tunnel token before it expires and push it into the session.
-fn tunnel_token_refresh_loop(
-    tunnel: Arc<tokenstat_remote::tunnel::TunnelSession>,
-    initial_ttl_secs: u64,
-    owner: crate::account_session::AccountSnapshot,
-) {
-    let mut ttl = initial_ttl_secs.max(300);
-    // Set after a failed mint. Retrying at half-life again would put the next
-    // attempt exactly at expiry, so a single hiccup would drop remote reach
-    // until the daemon restarts. Back off from a minute to a quarter-hour.
-    let mut retry_secs: Option<u64> = None;
-    while tunnel_running().load(Ordering::Acquire) {
-        // Refresh at half-life, never sooner than 2 minutes (local testing TTLs).
-        let sleep_secs = retry_secs.unwrap_or((ttl / 2).max(120));
-        // Waited out against the calendar, not by counting one-second sleeps.
-        // Neither `thread::sleep` nor `Instant` advances while a Mac is
-        // asleep, so the old count reached its half-life after that many
-        // *awake* seconds while the relay had been expiring the credential the
-        // whole time. A laptop that sleeps every night got denied
-        // `token_expired` before anything here thought a refresh was due.
-        let wake_at_ms =
-            (jiff::Timestamp::now() + Duration::from_secs(sleep_secs)).as_millisecond();
-        while jiff::Timestamp::now().as_millisecond() < wake_at_ms
-            && tunnel_running().load(Ordering::Acquire)
-        {
-            std::thread::sleep(Duration::from_secs(1));
-        }
-        if !tunnel_running().load(Ordering::Acquire) || owner.ensure_current().is_err() {
-            return;
-        }
-        // Through the same door every other caller uses, so the held
-        // credential is the one the socket carries. A refresh that minted
-        // behind the cache would leave the next `remote.tunnel` request
-        // handing the relay a token this loop had already superseded.
-        match crate::account_session::with_snapshot(Some(owner.clone()), || {
-            tunnel_hello_token(true)
-        }) {
-            Ok((token, expires_in)) => {
-                tunnel.set_token(&token);
-                ttl = expires_in.unwrap_or(ttl).max(300);
-                retry_secs = None;
-                set_tunnel_state(|state| state.error = None);
-            }
-            Err(e) => {
-                if owner.ensure_current().is_err() {
-                    return;
-                }
-                eprintln!("remote: tunnel token refresh failed: {e}");
-                set_tunnel_state(|state| {
-                    state.error = Some(format!("tunnel credential renewal failed: {e}"));
-                });
-                retry_secs = Some(next_retry(retry_secs));
-            }
-        }
-    }
-}
-
 pub(crate) fn stop_tunnel() {
-    tunnel_running().store(false, Ordering::Release);
-    clear_held_credential();
-    // The next start may be a different account, and a directory from the last
-    // one would label its machines.
-    clear_account_directory();
-    if let Some(session) = tunnel_session()
-        .lock()
-        .ok()
-        .and_then(|mut guard| guard.take())
-    {
-        session.shutdown();
-    }
-    set_tunnel_state(|state| {
-        state.connected = false;
-        state.error = None;
-        state.registered = false;
-    });
+    tunnel_lifecycle::stop();
 }
 
 /// Put this machine's key and name on the account directory, when remote reach
@@ -1006,6 +711,7 @@ fn register_with_account(settings: &RemoteSettings) {
     if !settings.tunnel {
         return;
     }
+    let owned = tunnel_lifecycle::current().ok().flatten();
     let outcome = (|| -> Result<(), String> {
         let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
         let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
@@ -1023,9 +729,15 @@ fn register_with_account(settings: &RemoteSettings) {
         .map_err(|e| e.to_string())
     })();
     match outcome {
-        Ok(()) => set_tunnel_state(|state| state.registered = true),
+        Ok(()) => {
+            if let Some(owned) = &owned {
+                let _ = owned.update(|state| state.registered = true);
+            }
+        }
         Err(error) => {
-            set_tunnel_state(|state| state.registered = false);
+            if let Some(owned) = &owned {
+                let _ = owned.update(|state| state.registered = false);
+            }
             eprintln!("remote: could not register with the account directory: {error}");
         }
     }
@@ -1040,13 +752,22 @@ fn register_with_account(settings: &RemoteSettings) {
 /// from the moment it signed in, so a phone that skipped this would sit in
 /// everybody else's device list as "iPhone" for good.
 pub(crate) fn register_if_tunnel_enabled() {
+    let Ok(owner) = crate::account_session::current_or_capture() else {
+        return;
+    };
     let settings = load_settings();
-    if settings.tunnel {
-        std::thread::spawn(move || register_with_account(&settings));
-    } else {
-        #[cfg(not(feature = "local-host"))]
-        std::thread::spawn(register_client_identity);
-    }
+    std::thread::spawn(move || {
+        let _ = crate::account_session::with_snapshot(Some(owner), || {
+            if settings.tunnel {
+                register_with_account(&settings);
+            }
+            #[cfg(not(feature = "local-host"))]
+            if !settings.tunnel {
+                register_client_identity();
+            }
+            Ok(())
+        });
+    });
 }
 
 /// Publish this client's key and name to the account directory. A refresh of
@@ -1082,6 +803,7 @@ fn register_client_identity() {
 /// screen. The directory changes when somebody adds or renames a device, which
 /// is not something the handshake path has to see within the second.
 struct Directory {
+    owner: String,
     /// Wall clock, so a machine that slept does not treat an overnight cache
     /// as fresh. Same reason the tunnel credential is measured this way.
     fetched_at_ms: i64,
@@ -1100,37 +822,65 @@ const DIRECTORY_TTL_MS: i64 = 60_000;
 /// must not be able to make this machine call out.
 const DIRECTORY_MISS_REFETCH_MS: i64 = 10_000;
 
-fn last_directory_miss() -> &'static Mutex<i64> {
-    static AT: OnceLock<Mutex<i64>> = OnceLock::new();
-    AT.get_or_init(|| Mutex::new(0))
+fn last_directory_miss() -> &'static Mutex<Option<(String, i64)>> {
+    static AT: OnceLock<Mutex<Option<(String, i64)>>> = OnceLock::new();
+    AT.get_or_init(|| Mutex::new(None))
 }
 
 /// The machine list, from cache unless it is older than the TTL.
-fn account_machines(force: bool) -> Vec<Value> {
-    let now = jiff::Timestamp::now().as_millisecond();
-    if !force
-        && let Ok(guard) = account_directory().lock()
-        && let Some(held) = guard.as_ref()
-        && now - held.fetched_at_ms < DIRECTORY_TTL_MS
-    {
-        return held.machines.clone();
+impl Directory {
+    fn for_owner(&self, owner: &str, now: i64, fresh: bool) -> Option<Vec<Value>> {
+        let age = now.checked_sub(self.fetched_at_ms)?;
+        if self.owner != owner || (fresh && !(0..DIRECTORY_TTL_MS).contains(&age)) {
+            return None;
+        }
+        Some(self.machines.clone())
     }
-    let Ok(status) = tokenstat_sync::sync_status(None) else {
-        // Keep whatever is held: an account host having a minute must not turn
-        // every same-account device into an unknown one.
-        return account_directory()
-            .lock()
-            .ok()
-            .and_then(|guard| guard.as_ref().map(|held| held.machines.clone()))
-            .unwrap_or_default();
+}
+
+fn account_machines(force: bool) -> Vec<Value> {
+    let Ok(owner) = crate::account_session::current_or_capture() else {
+        return Vec::new();
     };
+    let now = jiff::Timestamp::now().as_millisecond();
+    let cached = |fresh| {
+        account_directory().lock().ok().and_then(|guard| {
+            guard
+                .as_ref()
+                .and_then(|held| held.for_owner(&owner.id, now, fresh))
+        })
+    };
+    if !force && let Some(machines) = cached(true) {
+        return if owner.ensure_current().is_ok() {
+            machines
+        } else {
+            Vec::new()
+        };
+    }
+    // Use the captured client's request, never a fresh global credential read.
+    // An old HTTP response cannot become the next account's directory.
+    let Ok(status) = owner.status(true) else {
+        return if owner.ensure_current().is_ok() {
+            cached(false).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+    };
+    if owner.ensure_current().is_err() {
+        return Vec::new();
+    }
     if let Ok(mut guard) = account_directory().lock() {
         *guard = Some(Directory {
+            owner: owner.id.clone(),
             fetched_at_ms: now,
             machines: status.machines.clone(),
         });
     }
-    status.machines
+    if owner.ensure_current().is_ok() {
+        status.machines
+    } else {
+        Vec::new()
+    }
 }
 
 /// Put a directory in place without a network round trip.
@@ -1140,8 +890,12 @@ fn account_machines(force: bool) -> Vec<Value> {
 /// stranger and the paths past that check are unreachable.
 #[cfg(test)]
 pub(crate) fn seed_account_directory(machines: Vec<Value>) {
+    let Ok(owner) = crate::account_session::current_or_capture() else {
+        return;
+    };
     if let Ok(mut guard) = account_directory().lock() {
         *guard = Some(Directory {
+            owner: owner.id,
             fetched_at_ms: jiff::Timestamp::now().as_millisecond(),
             machines,
         });
@@ -1176,18 +930,24 @@ pub(crate) fn account_peer_label_hex(want: &str) -> Option<String> {
     // Not in what we hold. A device that registered since the cache was
     // filled is the ordinary reason, so refetch once, rate limited. The
     // cached lookup above never fetches, so this is the single fetch.
+    let owner = crate::account_session::current_or_capture().ok()?;
     let now = jiff::Timestamp::now().as_millisecond();
     let may_refetch = last_directory_miss().lock().is_ok_and(|mut at| {
-        let due = now - *at > DIRECTORY_MISS_REFETCH_MS;
+        let due = at.as_ref().is_none_or(|(held, previous)| {
+            held != &owner.id || now.saturating_sub(*previous) > DIRECTORY_MISS_REFETCH_MS
+        });
         if due {
-            *at = now;
+            *at = Some((owner.id.clone(), now));
         }
         due
     });
     if !may_refetch {
         return None;
     }
-    label_for(&account_machines(true), want)
+    let _ = account_machines(true);
+    // Stale rows may keep the device list useful while offline, but must not
+    // silently approve a previously unknown peer after their proof expired.
+    account_peer_label_hex_cached(want)
 }
 
 /// Cache-only lookup: never touches the network.
@@ -1196,30 +956,15 @@ pub(crate) fn account_peer_label_hex(want: &str) -> Option<String> {
 /// blocking HTTP fetch would stall every other access call for the timeout
 /// duration. Best-effort: returns what the held directory knows.
 pub(crate) fn account_peer_label_hex_cached(want: &str) -> Option<String> {
-    let fetched_at = directory_fetched_at_ms();
+    let owner = crate::account_session::current_or_capture().ok()?;
+    let now = jiff::Timestamp::now().as_millisecond();
     let held = account_directory()
         .lock()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|held| held.machines.clone()));
-    let held = held?;
-    // Only trust a fresh cache here; a stale one would trigger a fetch in the
-    // full lookup, which is exactly what must not happen under lock.
-    let now = jiff::Timestamp::now().as_millisecond();
-    if now - fetched_at >= DIRECTORY_TTL_MS {
-        return None;
-    }
+        .ok()?
+        .as_ref()?
+        .for_owner(&owner.id, now, true)?;
+    owner.ensure_current().ok()?;
     label_for(&held, want)
-}
-
-/// When the held directory was last filled, or 0 when nothing is held. Used to
-/// tell a cache hit from a fetch without threading a flag out of
-/// [`account_machines`].
-fn directory_fetched_at_ms() -> i64 {
-    account_directory()
-        .lock()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|held| held.fetched_at_ms))
-        .unwrap_or(0)
 }
 
 /// This peer's display name, from a machine directory already in hand.
@@ -2933,11 +2678,7 @@ fn settings() -> RemoteSettings {
 /// Whether the multiplexed tunnel socket is up right now.
 #[cfg(feature = "local-host")]
 fn tunnel_is_connected() -> bool {
-    tunnel_session()
-        .lock()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|session| session.status().connected))
-        .unwrap_or(false)
+    tunnel_lifecycle::state().is_ok_and(|state| state.connected)
 }
 
 /// Peers this machine may dial right now: approved, with remote reach on. The
@@ -3023,21 +2764,13 @@ fn tunnel_dial(
     // Signed in is a precondition for the session's HELLO; the multiplexed
     // session itself was started when remote reach turned on.
     let _ = account_token()?;
-    if tunnel_session()
-        .lock()
-        .ok()
-        .is_some_and(|guard| guard.is_none())
-    {
+    if tunnel_lifecycle::current()?.is_none() {
         start_tunnel_if_enabled(session_for_serving()?, settings);
     }
-    let tunnel = tunnel_session()
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
-        .ok_or_else(|| {
-            tunnel_state().lock().ok().and_then(|state| state.error.clone())
-                .unwrap_or_else(|| "This device's remote connection is paused. Open tokenstat on this device or turn on Always-on host, then connect again.".into())
-        })?;
+    let tunnel = tunnel_lifecycle::current()?.ok_or_else(|| {
+        tunnel_lifecycle::state().ok().and_then(|state| state.error)
+            .unwrap_or_else(|| "This device's remote connection is paused. Open tokenstat on this device or turn on Always-on host, then connect again.".into())
+    })?;
     // The target's relay socket can be mid-reconnect (its daemon restarted),
     // which the relay answers with an ERROR channel, or the pairing can drop
     // before the answer arrives. All of those are transient, so a few short
@@ -3057,10 +2790,20 @@ fn tunnel_dial(
         if attempt > 0 && started.elapsed() >= DIAL_BUDGET {
             break;
         }
-        match tunnel.open_channel(peer, purpose).and_then(|channel| {
-            tokenstat_remote::handshake_initiator(Box::new(channel), identity, Some(peer), label)
-        }) {
+        tunnel.ensure_current()?;
+        match tunnel
+            .socket()?
+            .open_channel(peer, purpose)
+            .and_then(|channel| {
+                tokenstat_remote::handshake_initiator(
+                    Box::new(channel),
+                    identity,
+                    Some(peer),
+                    label,
+                )
+            }) {
             Ok(connection) => {
+                tunnel.ensure_current()?;
                 clear_unreachable(&peer_hex);
                 return Ok(connection);
             }
@@ -3385,20 +3128,21 @@ fn nudge(params: &str) -> Result<Value, String> {
     // A plan refusal is off the retry loop on purpose. Foreground, wake and
     // connectivity restore must still ask again: the account may have
     // become Patron since the last mint.
-    let last_was_plan = tunnel_state()
-        .lock()
+    let last_was_plan = tunnel_lifecycle::state()
         .ok()
-        .and_then(|state| state.error.clone())
+        .and_then(|state| state.error)
         .is_some_and(|error| is_plan_start_error(&error));
     if last_was_plan {
         return reconsider_plan();
     }
-    if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
+    if let Some(owned) = tunnel_lifecycle::current()? {
+        let socket = owned.socket()?;
         if p.reconnect {
-            session.reconnect_now();
+            socket.reconnect_now();
         } else {
-            session.nudge();
+            socket.nudge();
         }
+        owned.ensure_current()?;
         return Ok(json!({"nudged": true, "reconnect": p.reconnect}));
     }
     let settings = load_settings();
@@ -3425,38 +3169,23 @@ fn reconsider_plan() -> Result<Value, String> {
     // Already READY: drop a leftover plan refusal and leave the mint alone.
     // Every app launch used to remint here, which spent the hourly budget
     // replacing a credential that was working.
-    if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone())
-        && session.status().connected
+    if let Some(owned) = tunnel_lifecycle::current()?
+        && owned.socket()?.status().connected
     {
-        set_tunnel_state(|state| {
+        owned.update(|state| {
             state.connected = true;
             state.error = None;
-        });
+        })?;
         return Ok(json!({"reconsidered": true, "tunnel": true, "allowed": true}));
     }
-    match tunnel_hello_token(true) {
-        Ok((hello_token, _)) => {
-            set_tunnel_state(|state| state.error = None);
-            if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
-                session.set_token(&hello_token);
-                session.nudge();
-            } else if let Ok(session) = session_for_serving() {
-                start_tunnel_if_enabled(session, &settings);
-            }
-            Ok(json!({"reconsidered": true, "tunnel": true, "allowed": true}))
+    match tunnel_lifecycle::ensure(session_for_serving()?, &settings, true) {
+        Ok(Some(owned)) => {
+            owned.socket()?.nudge();
+            owned.ensure_current()?;
+            Ok(json!({"reconsidered":true,"tunnel":true,"allowed":true}))
         }
-        Err(error) => {
-            set_tunnel_state(|state| {
-                state.connected = false;
-                state.error = Some(error.clone());
-            });
-            Ok(json!({
-                "reconsidered": true,
-                "tunnel": true,
-                "allowed": false,
-                "error": error,
-            }))
-        }
+        Ok(None) => Ok(json!({"reconsidered":true,"tunnel":true,"allowed":false})),
+        Err(error) => Ok(json!({"reconsidered":true,"tunnel":true,"allowed":false,"error":error})),
     }
 }
 
@@ -3480,14 +3209,7 @@ fn merge_live_tunnel_status(
 fn status() -> Result<Value, String> {
     let settings = load_settings();
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    let mut tunnel_state = tunnel_state().lock().map_err(|e| e.to_string())?.clone();
-    // The session knows the truth about the socket: `tunnel_state` is only
-    // updated on inbound traffic, so a machine nobody has dialled yet would
-    // otherwise report "not connected" while its socket is up. Merge the
-    // live status over it.
-    if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
-        merge_live_tunnel_status(&mut tunnel_state, &session.status());
-    }
+    let tunnel_state = tunnel_lifecycle::state()?;
     let direct_candidates = direct_candidates();
     Ok(json!({
         // What the user chose, and what is actually true. They differ while
@@ -3635,6 +3357,40 @@ fn forwarded_result(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_account_directory_cannot_authorize_a_different_login_or_an_expired_cache() {
+        let directory = super::Directory {
+            owner: "original-login".into(),
+            fetched_at_ms: 100000,
+            machines: vec![
+                serde_json::json!({"public_identity":"fixture-key","label":"Original account device"}),
+            ],
+        };
+        assert!(
+            directory
+                .for_owner("original-login", 100001, true)
+                .is_some()
+        );
+        for fresh in [true, false] {
+            assert!(
+                directory
+                    .for_owner("replacement-login", 100001, fresh)
+                    .is_none()
+            );
+        }
+        assert!(
+            directory
+                .for_owner("original-login", 160000, true)
+                .is_none()
+        );
+        assert!(directory.for_owner("original-login", 99999, true).is_none());
+        assert!(
+            directory
+                .for_owner("original-login", 160000, false)
+                .is_some()
+        );
+    }
+
     struct RelayTestSocket(std::net::TcpStream);
     impl std::io::Read for RelayTestSocket {
         fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
