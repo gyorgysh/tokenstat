@@ -1021,6 +1021,9 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
 
     #[test]
     fn a_hanging_list_command_is_reaped() {
+        // Login-shell discovery has its own budget and is cached. Measure the
+        // probe's process timeout after that unrelated startup work finishes.
+        let _ = tokenstat_pty::login_env();
         let start = Instant::now();
         let (command, args): (&str, &[&str]) = if cfg!(windows) {
             (

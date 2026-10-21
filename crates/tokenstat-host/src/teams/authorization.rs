@@ -14,6 +14,7 @@ use tokenstat_sync::teams::{TeamClient, TeamPrincipal};
 pub(crate) struct AuthorizedTeamPrincipal {
     value: TeamPrincipal,
     deadline: Instant,
+    expires_at: u64,
     issuer: String,
     #[cfg(feature = "local-host")]
     client: Option<TeamClient>,
@@ -57,6 +58,7 @@ impl AuthorizedTeamPrincipal {
         Ok(Self {
             value,
             deadline,
+            expires_at: claims.exp,
             issuer: claims.iss.clone(),
             #[cfg(feature = "local-host")]
             client: Some(client.clone()),
@@ -76,7 +78,13 @@ impl AuthorizedTeamPrincipal {
         &self.value
     }
     pub(crate) fn ensure_live(&self) -> Result<(), DispatchError> {
-        if Instant::now() >= self.deadline {
+        self.ensure_live_at(Time::now())
+    }
+    fn ensure_live_at(&self, now: Time) -> Result<(), DispatchError> {
+        // Check both clocks immediately before effects. The monotonic cap
+        // protects clock rollback; signed wall expiry also covers suspension
+        // on platforms whose Instant does not advance while asleep.
+        if now.monotonic >= self.deadline || now.wall >= self.expires_at {
             return Err(expired());
         }
         Ok(())
@@ -100,6 +108,7 @@ impl AuthorizedTeamPrincipal {
         Self {
             value,
             deadline: Instant::now() + std::time::Duration::from_secs(60),
+            expires_at: Time::now().wall + 60,
             issuer: "https://accounts.example.test".into(),
             #[cfg(feature = "local-host")]
             client: None,
@@ -245,11 +254,13 @@ impl Gate {
             return Err(expired());
         }
         let issuer = next.iss.clone();
+        let expires_at = next.exp;
         self.previous = verified;
         self.deadline = deadline;
         Ok(AuthorizedTeamPrincipal {
             value: principal,
             deadline,
+            expires_at,
             issuer,
             #[cfg(feature = "local-host")]
             client: None,
@@ -351,6 +362,43 @@ mod tests {
             now,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn captured_principal_expires_on_either_clock_without_network_or_renewal() {
+        let wall = fixture()["now"].as_u64().unwrap();
+        let now = Time {
+            wall,
+            monotonic: Instant::now(),
+        };
+        let mut gate = gate(now);
+        let captured = gate
+            .authorize(
+                &ticket(&fixture()["ticket"]),
+                || now,
+                |verified| Ok(principal(verified)),
+            )
+            .unwrap();
+        assert!(captured.ensure_live_at(now).is_ok());
+        // Model a system waking after signed expiry with its monotonic clock
+        // unchanged. A previously captured writer must not perform effects.
+        assert!(
+            captured
+                .ensure_live_at(Time {
+                    wall: captured.expires_at,
+                    ..now
+                })
+                .is_err()
+        );
+        // Moving wall time backward cannot extend the monotonic budget.
+        assert!(
+            captured
+                .ensure_live_at(Time {
+                    wall: wall - 10,
+                    monotonic: captured.deadline
+                })
+                .is_err()
+        );
     }
 
     #[test]
@@ -569,13 +617,17 @@ mod tests {
             wall: f["now"].as_u64().unwrap(),
             monotonic: Instant::now(),
         };
-        let authorized = gate(now)
+        let mut authorized = gate(now)
             .authorize(
                 &ticket(&f["ticket"]),
                 || now,
                 |ticket| Ok(principal(ticket)),
             )
             .unwrap();
+        // This dispatch test uses a historical signed fixture. Only its
+        // identity/scope are under test; give the captured fixture a live
+        // local clock without weakening production ticket verification.
+        authorized.expires_at = Time::now().wall + 60;
         let session = Mutex::new(crate::Session::open_client(None).unwrap());
         let held = session.lock().unwrap();
         let (done, result) = std::sync::mpsc::channel();
