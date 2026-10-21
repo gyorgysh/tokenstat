@@ -194,8 +194,13 @@ struct TeamCheckoutPublished: Decodable, Sendable { let publication: TeamLocalPu
 struct TeamCheckoutWithdrawn: Decodable, Sendable { let withdrawn: Bool; let accountCleanupPending: Bool?
 }
 struct TeamActivity: Decodable, Sendable { var events: [TeamActivityEvent]; let nextOffset: Int? }
-struct TeamSharedChat: Codable, Identifiable, Hashable, Sendable { let id: String; let checkoutId: String; let revision: UInt64; let createdAt: String }
+struct TeamSharedChat: Codable, Identifiable, Hashable, Sendable {
+    let id: String; let checkoutId: String; let revision: UInt64; let createdAt: String
+    var title: String? = nil
+    var backend: String? = nil
+}
 struct TeamSharedChats: Decodable, Sendable { let shares: [TeamSharedChat]; let nextOffset: Int? }
+struct TeamChatCatalog: Decodable, Sendable { let shares: [TeamSharedChat]; let nextCursor: String? }
 struct TeamChatSummary: Codable, Identifiable, Sendable {
     let id: String; let checkoutId: String; let title: String; let backend: String
     let historyTrimmed: Bool; let allowsAgentRuns: Bool

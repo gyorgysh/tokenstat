@@ -138,8 +138,8 @@ struct Retirement {
     key: Key,
     lifetime: Arc<()>,
 }
-impl Drop for Retirement {
-    fn drop(&mut self) {
+impl Retirement {
+    fn retire(&self) {
         if let Some(pool) = self.pool.upgrade()
             && let Ok(mut slots) = pool.slots.lock()
             && slots
@@ -148,6 +148,11 @@ impl Drop for Retirement {
         {
             slots.remove(&self.key);
         }
+    }
+}
+impl Drop for Retirement {
+    fn drop(&mut self) {
+        self.retire();
     }
 }
 impl Pool {
@@ -195,12 +200,12 @@ impl Pool {
         if std::thread::Builder::new()
             .name("team-connection".into())
             .spawn(move || {
-                let _retirement = Retirement {
+                let retirement = Retirement {
                     pool,
                     key: worker_key,
                     lifetime: worker_lifetime,
                 };
-                work(receiver, connector);
+                work_with_retirement(receiver, connector, Some(&retirement));
             })
             .is_err()
         {
@@ -210,6 +215,7 @@ impl Pool {
         Ok(())
     }
 
+    #[cfg(test)]
     fn call(
         self: &Arc<Self>,
         key: Key,
@@ -217,7 +223,48 @@ impl Pool {
         method: TeamReadMethod,
         params: TeamReadParams,
     ) -> Result<Value, DispatchError> {
+        self.call_until(key, connector, method, params, Instant::now() + CALL_BUDGET)
+    }
+
+    /// Only the closed read enum belongs here. Mutations require explicit
+    /// receipts and must never inherit this bounded reconnect behavior.
+    fn read(
+        self: &Arc<Self>,
+        key: Key,
+        mut connector: impl FnMut() -> Connector,
+        method: TeamReadMethod,
+        params: TeamReadParams,
+    ) -> Result<Value, DispatchError> {
         let deadline = Instant::now() + CALL_BUDGET;
+        for attempt in 0..2 {
+            if Instant::now() >= deadline {
+                return Err(ended());
+            }
+            let result =
+                self.call_until(key.clone(), connector(), method, params.clone(), deadline);
+            if attempt == 0
+                && result.as_ref().is_err_and(|error| {
+                    matches!(
+                        error.code.as_str(),
+                        "team_connection_unavailable" | "team_access_expired" | "teams_unreachable"
+                    )
+                })
+            {
+                continue;
+            }
+            return result;
+        }
+        Err(ended())
+    }
+
+    fn call_until(
+        self: &Arc<Self>,
+        key: Key,
+        connector: Connector,
+        method: TeamReadMethod,
+        params: TeamReadParams,
+        deadline: Instant,
+    ) -> Result<Value, DispatchError> {
         let (reply, receive) = mpsc::sync_channel(1);
         self.enqueue(
             key,
@@ -235,17 +282,32 @@ impl Pool {
     }
 }
 
+#[cfg(test)]
 fn work(receiver: Receiver<Job>, connector: Connector) {
+    work_with_retirement(receiver, connector, None)
+}
+
+fn work_with_retirement(
+    receiver: Receiver<Job>,
+    connector: Connector,
+    retirement: Option<&Retirement>,
+) {
     let Ok(first) = receiver.recv() else {
         return;
     };
     if Instant::now() >= first.deadline {
+        if let Some(retirement) = retirement {
+            retirement.retire();
+        }
         let _ = first.reply.send(Err(ended()));
         return;
     }
     let mut connection = match connector() {
         Ok(connection) => connection,
         Err(error) => {
+            if let Some(retirement) = retirement {
+                retirement.retire();
+            }
             let _ = first.reply.send(Err(error));
             return;
         }
@@ -285,14 +347,22 @@ fn work(receiver: Receiver<Job>, connector: Connector) {
         }
         let result = connection.call(job.method, &job.params);
         let failed = result.is_err();
+        // Publish retirement before waking a retrying reader. The old worker
+        // cannot accept that retry or remove a replacement's lifetime later.
+        if failed && let Some(retirement) = retirement {
+            retirement.retire();
+        }
         let _ = job.reply.send(result);
         last_use = Instant::now();
         if failed {
             break;
         }
     }
-    // A failed connection has no transparent replay, including for requests
-    // accepted before retirement. A caller can explicitly refresh a read.
+    if let Some(retirement) = retirement {
+        retirement.retire();
+    }
+    // The failed worker never replays a job. Its read-only caller may make
+    // one new connection with the same immutable scope and original deadline.
     for job in receiver.try_iter() {
         let _ = job.reply.send(Err(ended()));
     }
@@ -319,23 +389,24 @@ pub(super) fn perform(
     };
     let owner = owner.clone();
     let target = request.target;
-    let ticket = RequestTicket {
-        organization_id: target.organization,
-        checkout_id: target.checkout,
-        capabilities: vec![TeamCapability::Read],
-        share_id: target.share,
+    let connector = || -> Connector {
+        let owner = owner.clone();
+        let client = Arc::new(client.clone());
+        let ticket = RequestTicket {
+            organization_id: target.organization.clone(),
+            checkout_id: target.checkout.clone(),
+            capabilities: vec![TeamCapability::Read],
+            share_id: target.share.clone(),
+        };
+        let repository = target.repository.clone();
+        Box::new(move || {
+            Ok(Box::new(TeamConnection::connect(
+                owner, client, ticket, repository, device,
+            )?))
+        })
     };
-    let connector: Connector = Box::new(move || {
-        Ok(Box::new(TeamConnection::connect(
-            owner,
-            Arc::new(client),
-            ticket,
-            target.repository,
-            device,
-        )?))
-    });
     static POOL: OnceLock<Arc<Pool>> = OnceLock::new();
-    POOL.get_or_init(|| Arc::new(Pool::default())).call(
+    POOL.get_or_init(|| Arc::new(Pool::default())).read(
         key,
         connector,
         request.method,

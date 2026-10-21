@@ -579,9 +579,10 @@
   "common.teams.recover_on_publisher": "Stop sharing on its publishing computer.",
   "common.teams.stop_sharing_chat": "Stop sharing this chat?",
   "common.teams.local_stop_explanation": "People with repository access will lose access from this computer. Copies they already saved may remain. Your chat history and private draft stay here.",
-  "common.teams.local_record_unavailable": "The local publication record is unavailable. You can still stop access from this computer. Its account reference may remain.",
+  "common.teams.local_record_unavailable": "This chat’s sharing details couldn’t be loaded. You can still stop access from this computer. Your organization may continue to list the chat.",
   "common.teams.local_recovery_retry": "Access has stopped. Refresh sharing and try again to restore private editing.",
   "common.teams.private_pending_paused": "Private pending messages — paused while shared",
   "common.teams.private_pending_explanation": "These messages stay on this device. You can copy, edit, or remove them.",
-  "common.teams.local_reference_remaining": "Sharing stopped on this computer. This chat is private here; the account may still list its old sharing reference."
+  "common.teams.local_reference_remaining": "Sharing stopped on this computer. This chat is private here. Your organization may still list it as shared.",
+  "common.teams.open_shared_chat": "Open shared chat"
 }

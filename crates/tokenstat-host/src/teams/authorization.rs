@@ -15,20 +15,28 @@ pub(crate) struct AuthorizedTeamPrincipal {
     value: TeamPrincipal,
     deadline: Instant,
     issuer: String,
+    #[cfg(feature = "local-host")]
+    client: Option<TeamClient>,
 }
 impl AuthorizedTeamPrincipal {
     pub(super) fn issuer(&self) -> &str {
         &self.issuer
+    }
+    #[cfg(feature = "local-host")]
+    pub(super) fn account_client(&self) -> Result<&TeamClient, DispatchError> {
+        self.ensure_live()?;
+        let client = self.client.as_ref().ok_or_else(expired)?;
+        client.ensure_current().map_err(api_error)?;
+        Ok(client)
     }
     pub(crate) fn value(&self) -> &TeamPrincipal {
         &self.value
     }
     pub(crate) fn ensure_live(&self) -> Result<(), DispatchError> {
         if Instant::now() >= self.deadline {
-            Err(expired())
-        } else {
-            Ok(())
+            return Err(expired());
         }
+        Ok(())
     }
 }
 
@@ -171,6 +179,8 @@ impl Gate {
             value: principal,
             deadline,
             issuer,
+            #[cfg(feature = "local-host")]
+            client: None,
         })
     }
 }
@@ -226,6 +236,11 @@ impl Authorization {
         // publish a late response into another account or connection.
         self.channel.ticket().map_err(|_| expired())?;
         self.client.ensure_current().map_err(api_error)?;
+        #[cfg(feature = "local-host")]
+        let principal = AuthorizedTeamPrincipal {
+            client: Some(self.client.clone()),
+            ..principal
+        };
         Ok(principal)
     }
 }

@@ -270,4 +270,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 41 adds the separate local scoped Team connection pool.
 /// Version 42 adds reviewed shared-chat publication and private-send fences.
 /// Version 43 adds local sharing inspection and recovery without an account.
-pub const PROTOCOL_VERSION: &str = "43";
+/// Version 44 adds a scoped catalog of host-approved shared-chat titles.
+pub const PROTOCOL_VERSION: &str = "44";

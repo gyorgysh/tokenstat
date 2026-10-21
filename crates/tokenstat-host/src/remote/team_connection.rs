@@ -25,6 +25,8 @@ pub(crate) enum ReadMethod {
     Protocol,
     #[serde(rename = "team.checkout.info")]
     CheckoutInfo,
+    #[serde(rename = "team.chat.catalog")]
+    ChatCatalog,
     #[serde(rename = "team.chat.details")]
     ChatDetails,
     #[serde(rename = "team.chat.events")]
@@ -35,6 +37,7 @@ impl ReadMethod {
         match self {
             Self::Protocol => "team.protocol",
             Self::CheckoutInfo => "team.checkout.info",
+            Self::ChatCatalog => "team.chat.catalog",
             Self::ChatDetails => "team.chat.details",
             Self::ChatEvents => "team.chat.events",
         }
@@ -63,6 +66,14 @@ impl ReadParams {
             ReadMethod::Protocol | ReadMethod::CheckoutInfo => {
                 self.cursor.is_none() && self.limit.is_none() && self.direction.is_none()
             }
+            ReadMethod::ChatCatalog => {
+                share.is_none()
+                    && self.direction.is_none()
+                    && self.limit.is_none_or(|limit| (1..=100).contains(&limit))
+                    && self.cursor.as_ref().is_none_or(|cursor| {
+                        cursor.len() <= 180 && cursor.starts_with("v1:catalog:")
+                    })
+            }
             ReadMethod::ChatDetails => {
                 share.is_some()
                     && self.cursor.is_none()
@@ -76,6 +87,23 @@ impl ReadParams {
             }
         }
     }
+    #[cfg(any(test, feature = "local-host"))]
+    pub(crate) fn catalog_offset(&self, checkout: &str) -> Result<u32, DispatchError> {
+        let Some(cursor) = self.cursor.as_deref() else {
+            return Ok(0);
+        };
+        cursor
+            .strip_prefix(&format!("v1:catalog:{checkout}:"))
+            .filter(|value| {
+                !value.is_empty()
+                    && value.len() <= 5
+                    && value.bytes().all(|byte| byte.is_ascii_digit())
+            })
+            .and_then(|value| value.parse::<u32>().ok())
+            .filter(|offset| *offset <= 10000)
+            .ok_or_else(|| api_error(TeamError::InvalidRequest))
+    }
+
     pub(crate) fn after(&self, share: &str) -> Result<Option<u64>, DispatchError> {
         self.cursor
             .as_deref()
@@ -351,6 +379,32 @@ fn reply(bytes: &[u8], expected_id: u64) -> Result<Value, DispatchError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn catalogs_require_a_broad_scope_and_their_cursors_cannot_select_another_checkout() {
+        let mut params = ReadParams::default();
+        assert!(params.validate(ReadMethod::ChatCatalog, None));
+        assert!(!params.validate(ReadMethod::ChatCatalog, Some("share_fixture")));
+        assert_eq!(params.catalog_offset("checkout_fixture").unwrap(), 0);
+        for cursor in [
+            "v1:share_fixture:5",
+            "v1:catalog:checkout_other:1",
+            "v1:catalog:checkout_fixture:10001",
+            "v1:catalog:checkout_fixture:-1",
+            "v1:catalog:checkout_fixture:NaN",
+            "v1:catalog:checkout_fixture:",
+        ] {
+            params.cursor = Some(cursor.into());
+            assert!(params.catalog_offset("checkout_fixture").is_err());
+        }
+        params.cursor = Some("v1:catalog:checkout_fixture:10".into());
+        assert_eq!(params.catalog_offset("checkout_fixture").unwrap(), 10);
+        assert!(!params.validate(ReadMethod::ChatEvents, Some("share_fixture")));
+        params.direction = Some(PageDirection::Older);
+        assert!(!params.validate(ReadMethod::ChatCatalog, None));
+        params.direction = None;
+        params.limit = Some(101);
+        assert!(!params.validate(ReadMethod::ChatCatalog, None));
+    }
     #[test]
     fn replies_cannot_cross_request_ids_or_inject_unbounded_server_messages() {
         assert_eq!(

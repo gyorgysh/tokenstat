@@ -121,7 +121,10 @@ final class TeamFixtureUITests: XCTestCase {
         XCTAssertTrue(repository.waitForExistence(timeout: 5))
         repository.tap(); app.buttons["Website"].firstMatch.tap()
         let shared = app.buttons["team.chats.open.share_" + String(repeating: "a", count: 32)]
-        XCTAssertTrue(shared.waitForExistence(timeout: 5)); reveal(shared, in: app); shared.tap()
+        XCTAssertTrue(shared.waitForExistence(timeout: 5)); reveal(shared, in: app)
+        XCTAssertTrue(shared.label.contains("Quarterly totals"))
+        capture(app, "Approved shared chat titles")
+        shared.tap()
         XCTAssertTrue(app.staticTexts["Quarterly totals"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Local user (before Teams)")).firstMatch.exists)
         XCTAssertFalse(app.textViews.firstMatch.exists)

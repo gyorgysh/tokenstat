@@ -623,3 +623,68 @@ fn a_projected_snapshot_cannot_survive_canonical_only_recovery_or_be_serialized_
         "chat_sharing_paused"
     );
 }
+
+#[test]
+fn catalog_metadata_is_approved_bounded_and_never_borrowed_from_a_later_private_rename() {
+    let (_root, store, chat) = fixture();
+    let share = "share_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let mut index: Index =
+        serde_json::from_slice(&fs::read(store.root.join("conversations.json")).unwrap()).unwrap();
+    index.conversations[0].title = "📊".repeat(600);
+    fs::write(
+        store.root.join("conversations.json"),
+        serde_json::to_vec(&index).unwrap(),
+    )
+    .unwrap();
+    let history = store.sharing_history(&chat.workspace_id, &chat.id).unwrap();
+    store
+        .freeze_sharing(&chat.workspace_id, &chat.id, share, &history.fingerprint)
+        .unwrap();
+    let candidates = vec![chat.id.clone()];
+    let initial = store
+        .sharing_bindings(&chat.workspace_id, &candidates)
+        .unwrap();
+    let approved = initial[&chat.id].approved.as_ref().unwrap();
+    assert!(approved.valid());
+    assert_eq!(approved.title.chars().count(), 512);
+    assert_eq!(approved.backend, "codex");
+    let mut index: Index =
+        serde_json::from_slice(&fs::read(store.root.join("conversations.json")).unwrap()).unwrap();
+    index.conversations[0].title = "PRIVATE_UNREVIEWED_TITLE".into();
+    fs::write(
+        store.root.join("conversations.json"),
+        serde_json::to_vec(&index).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        store
+            .sharing_bindings(&chat.workspace_id, &candidates)
+            .unwrap(),
+        initial
+    );
+    assert!(
+        store
+            .shared_history(&chat.workspace_id, &chat.id, share, &history.fingerprint)
+            .is_err()
+    );
+    assert!(
+        store
+            .sharing_bindings("other_workspace", &candidates)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .sharing_bindings(&chat.workspace_id, &vec![chat.id.clone(); 101])
+            .is_err()
+    );
+    store
+        .clear_sharing(&chat.workspace_id, &chat.id, share)
+        .unwrap();
+    assert!(
+        store
+            .sharing_bindings(&chat.workspace_id, &candidates)
+            .unwrap()
+            .is_empty()
+    );
+}

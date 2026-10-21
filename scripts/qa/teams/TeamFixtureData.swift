@@ -32,6 +32,10 @@ enum TeamFixtureData {
         case .checkoutList: return .object(["publications":.array([try json(TeamLocalPublication(id: "checkout_" + String(repeating:"a",count:32), organizationId: organization.id, repositoryId: repository.id, workspaceId: "/example/Website", phase: "active", revision: 2, accountCleanupPending: false))]),"nextOffset":.null])
         case .connectionCall:
             guard case let .object(fields) = params, case let .object(target)? = fields["target"], let checkout = target["checkout"], let organization = target["organization"], let repository = target["repository"] else { throw CancellationError() }
+            if fields["method"] == .string("team.chat.catalog") {
+                guard target["share"] == nil else { throw CancellationError() }
+                return .object(["shares":.array([.object(["id":.string("share_"+String(repeating:"a",count:32)),"checkoutId":checkout,"revision":.int(1),"createdAt":.string(timestamp),"title":.string("Quarterly totals"),"backend":.string("codex")])]),"nextCursor":.null])
+            }
             if case let .string(method)? = fields["method"], let share = target["share"] {
                 if method == "team.chat.details" { return .object(["chat":.object(["id":share,"checkoutId":checkout,"title":.string("Quarterly totals"),"backend":.string("codex"),"historyTrimmed":.bool(false),"allowsAgentRuns":.bool(false)])]) }
                 if method == "team.chat.events" { return .object(["shareId":share,"events":.array(chatEvents),"nextCursor":.null,"firstCursor":.null,"lastCursor":.null,"hasMore":.bool(false),"historyTrimmed":.bool(false),"asOfMs":.int(1792500000000)]) }

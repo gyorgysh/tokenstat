@@ -63,6 +63,9 @@ pub(super) fn call(
         &row.preview,
     )?;
     let marker = history.binding.clone().ok_or_else(changed)?;
+    if marker.source_revision != row.source_revision {
+        return Err(changed());
+    }
     let result = match method {
         TeamReadMethod::ChatDetails => {
             json!({"chat":{"id":row.id,"checkoutId":row.checkout_id,"title":history.title,

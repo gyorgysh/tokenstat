@@ -6,6 +6,8 @@
 
 mod authorization;
 #[cfg(feature = "local-host")]
+mod catalog;
+#[cfg(feature = "local-host")]
 mod chats;
 mod connections;
 mod directory;

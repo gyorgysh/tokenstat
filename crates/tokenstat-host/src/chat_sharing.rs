@@ -11,6 +11,18 @@ const HISTORY_LIMIT: u64 =
     PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ApprovedMetadata {
+    pub(crate) title: String,
+    pub(crate) backend: String,
+}
+impl ApprovedMetadata {
+    pub(crate) fn valid(&self) -> bool {
+        self.title.chars().count() <= 512 && self.backend.chars().count() <= 64
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Binding {
     pub(crate) id: String,
@@ -19,6 +31,8 @@ pub(crate) struct Binding {
     pub(crate) initial_fingerprint: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) source_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) approved: Option<ApprovedMetadata>,
 }
 
 #[derive(Serialize)]
@@ -126,6 +140,48 @@ impl Store {
         })
     }
 
+    /// A catalog reads canonical metadata once for its bounded candidate page.
+    /// There is no transcript read or per-row lifecycle/acceptance lock cycle.
+    pub(crate) fn sharing_bindings(
+        &self,
+        workspace: &str,
+        candidates: &[String],
+    ) -> Result<HashMap<String, Binding>, DispatchError> {
+        if candidates.len() > 100 {
+            return Err(invalid());
+        }
+        if candidates.is_empty() {
+            return Ok(HashMap::new());
+        }
+        for id in candidates {
+            validate_record_id(id).map_err(|_| invalid())?;
+        }
+        let wanted: std::collections::HashSet<_> = candidates.iter().map(String::as_str).collect();
+        let _lifecycle =
+            crate::work_handoff_store::lifecycle_lock(&self.root).map_err(|_| invalid())?;
+        let index: Index = serde_json::from_slice(&read_private(
+            &self.root.join("conversations.json"),
+            INDEX_LIMIT,
+            false,
+        )?)
+        .map_err(|_| invalid())?;
+        let mut result = HashMap::new();
+        let mut seen = std::collections::HashSet::new();
+        for chat in index
+            .conversations
+            .iter()
+            .filter(|chat| chat.workspace_id == workspace && wanted.contains(chat.id.as_str()))
+        {
+            if !seen.insert(&chat.id) {
+                return Err(invalid());
+            }
+            if let Some(binding) = &chat.team_share {
+                result.insert(chat.id.clone(), binding.clone());
+            }
+        }
+        Ok(result)
+    }
+
     pub(crate) fn sharing_history(
         &self,
         workspace: &str,
@@ -209,6 +265,10 @@ impl Store {
                 history_bytes: history.history_bytes,
                 initial_fingerprint: expected.into(),
                 source_revision: Some(source_revision),
+                approved: Some(ApprovedMetadata {
+                    title: history.title.chars().take(512).collect(),
+                    backend: history.backend.chars().take(64).collect(),
+                }),
             });
             chat.send_revision = next_send_revision(chat.send_revision).map_err(|_| invalid())?;
             chat.updated_at_ms = now_ms();

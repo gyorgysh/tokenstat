@@ -54,8 +54,9 @@ conversation = models[models.index('struct ChatSharingMarker:'):models.index('//
 shared_policy = source[source.index('    var isSharedSource:'):source.index('    private(set) var events:')]
 sign_in = source[source.index('    func holdForSignIn('):source.index('    /// Explicit Continue reuses')]
 queue_policy = source[source.index('    var queuePaused:'):source.index('    private var ownsQueue:')]
+recovery_policy = source[source.index('    func refreshSharingSource('):source.index('    /// Refresh the open list without drawing an unchanged one.', source.index('    func refreshSharingSource('))]
 shared_fixture = r'''import Foundation
-struct WorkReference { var itemID: String?; var workspaceID: String }
+struct WorkReference: Equatable { var itemID: String?; var workspaceID: String }
 struct BranchPull: Codable, Hashable, Sendable {}
 struct ChatRoutingState: Codable, Hashable, Sendable {}
 CONVERSATION
@@ -67,6 +68,17 @@ final class SharedSourcePolicy {
     var busy = false, nativeSteerAcceptsAttachments = false
     var attachments: [String] = [], signInQueuedMessage: String?, backendRefreshError: String?
     var draft = "Private unsent note", queued = 0
+    var currentReference: WorkReference? = .init(itemID: "chat-fixture", workspaceID: "workspace-fixture")
+    var selectionGeneration: UInt64 = 1, events = [1], changesSelection = false
+    var reads: [String] = []
+    func reloadOpenChats() async -> Bool {
+        reads.append("metadata")
+        if changesSelection { selectionGeneration += 1; sharingRecoveryNotice = nil }
+        selected?.teamShare = nil
+        return true
+    }
+    func openEvents(id: String, generation: UInt64, quiet: Bool) async -> Bool { reads.append("opening"); return true }
+    func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool) async -> Bool { reads.append("events"); return true }
     var queueHead: Pending? = Pending(), authorizedQueueItems: Set<String> = ["private-pending"]
     enum SignInHold { case notNeeded, held, refused }
     func needsSignIn(_ backend: String) -> Bool { true }
@@ -75,9 +87,10 @@ final class SharedSourcePolicy {
 POLICY
 SIGNIN
 QUEUE
+RECOVERY
 }
 @main struct SharedSourceTest {
-    static func main() throws {
+    static func main() async throws {
         var row: [String:Any] = ["id":"chat-fixture", "workspaceId":"workspace-fixture", "title":"Fixture", "backend":"codex"]
         func decode() throws -> ChatConversation { try JSONDecoder().decode(ChatConversation.self, from: JSONSerialization.data(withJSONObject: row)) }
         let model = SharedSourcePolicy()
@@ -95,10 +108,18 @@ QUEUE
         row["teamShare"] = NSNull(); model.selected = try decode()
         guard case .held = model.holdForSignIn(model.draft, backend: "codex") else { fatalError("private control did not queue") }
         precondition(model.queued == 1 && model.draft.isEmpty)
-        print("Shared source decoding, private draft retention and queue pause passed")
+        model.draft = "Private recovered note"
+        await model.refreshSharingSource(reference: model.currentReference!, generation: 1, notice: "Stopped")
+        precondition(model.reads == ["metadata", "events"] && model.draft == "Private recovered note")
+        precondition(model.sharingRecoveryNotice == "Stopped")
+        model.reads = []; model.changesSelection = true
+        await model.refreshSharingSource(reference: model.currentReference!, generation: 1, notice: "Stale notice")
+        precondition(model.reads == ["metadata"] && model.sharingRecoveryNotice == nil)
+        precondition(model.draft == "Private recovered note")
+        print("Shared source decoding, private draft retention, queue pause and read-only recovery passed")
     }
 }
-'''.replace('CONVERSATION', conversation).replace('POLICY', shared_policy).replace('SIGNIN', sign_in).replace('QUEUE', queue_policy)
+'''.replace('CONVERSATION', conversation).replace('POLICY', shared_policy).replace('SIGNIN', sign_in).replace('QUEUE', queue_policy).replace('RECOVERY', recovery_policy)
 with tempfile.TemporaryDirectory(prefix='tokenstat-shared-source-') as directory:
     path = Path(directory)
     (path / 'SharedSource.swift').write_text(shared_fixture)

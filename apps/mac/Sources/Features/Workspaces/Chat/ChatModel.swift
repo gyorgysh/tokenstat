@@ -3690,7 +3690,14 @@ final class ChatModel {
     /// Recovery never retargets a different reader or consumes its private draft.
     func refreshSharingSource(reference: WorkReference, generation: UInt64, notice: String? = nil) async {
         guard currentReference == reference, selectionGeneration == generation else { return }
-        _ = await reloadOpenChats()
+        let refreshed = await reloadOpenChats()
+        guard currentReference == reference, selectionGeneration == generation else { return }
+        // Read the recovered context before the next private manual send.
+        // refreshOpen also drains queued work; recovery must not do that.
+        if refreshed, !isSharedSource, let id = reference.itemID {
+            if events.isEmpty { _ = await openEvents(id: id, generation: generation, quiet: true) }
+            else { _ = await loadEvents(id: id, reset: false, generation: generation, quiet: true) }
+        }
         guard currentReference == reference, selectionGeneration == generation else { return }
         sharingRecoveryNotice = notice
     }

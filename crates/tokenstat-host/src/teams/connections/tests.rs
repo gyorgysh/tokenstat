@@ -74,6 +74,9 @@ fn scoped_requests_are_closed_and_reject_authority_or_personal_methods() {
         "remote.call",
         "chat.send",
         "team.run.start",
+        "team.chat.comment",
+        "team.chat.ask",
+        "team.run.stop",
         "team.checkout.info\n",
     ] {
         let mut value = valid.clone();
@@ -316,4 +319,122 @@ fn expired_queue_items_never_connect_and_failures_never_replay() {
         second_reply.recv().unwrap().unwrap_err().code,
         "team_connection_unavailable"
     );
+}
+
+#[test]
+fn a_read_can_reconnect_once_but_does_not_repeat_a_permanent_refusal() {
+    let pool = Arc::new(Pool::default());
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let connected = Arc::new(AtomicUsize::new(0));
+    let value = pool
+        .read(
+            key(),
+            || {
+                if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Box::new(|| Err(ended()))
+                } else {
+                    connect(&connected)
+                }
+            },
+            TeamReadMethod::CheckoutInfo,
+            TeamReadParams::default(),
+        )
+        .unwrap();
+    assert_eq!(value["connection"], 0);
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(connected.load(Ordering::SeqCst), 1);
+
+    for code in [
+        "team_connection_unavailable",
+        "checkout_withdrawn",
+        "forbidden",
+        "invalid_request",
+    ] {
+        let pool = Arc::new(Pool::default());
+        let attempts = AtomicUsize::new(0);
+        let error = pool
+            .read(
+                key(),
+                || {
+                    attempts.fetch_add(1, Ordering::SeqCst);
+                    Box::new(move || Err(DispatchError::new(code, "Fixture refusal")))
+                },
+                TeamReadMethod::Protocol,
+                TeamReadParams::default(),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, code);
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            if code == "team_connection_unavailable" {
+                2
+            } else {
+                1
+            }
+        );
+    }
+}
+
+#[test]
+fn failure_retires_before_reply_even_while_the_old_transport_is_still_dropping() {
+    use std::sync::Condvar;
+    struct Release(Arc<(Mutex<bool>, Condvar)>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let (lock, ready) = &*self.0;
+            *lock.lock().unwrap() = true;
+            ready.notify_all();
+        }
+    }
+    struct Dropping(Arc<(Mutex<bool>, Condvar)>);
+    impl Transport for Dropping {
+        fn call(&mut self, _: TeamReadMethod, _: &TeamReadParams) -> Result<Value, DispatchError> {
+            Err(ended())
+        }
+        fn renew(&mut self) -> Result<(), DispatchError> {
+            Ok(())
+        }
+        fn ensure_current(&self) -> Result<(), DispatchError> {
+            Ok(())
+        }
+    }
+    impl Drop for Dropping {
+        fn drop(&mut self) {
+            let (lock, ready) = &*self.0;
+            let guard = lock.lock().unwrap();
+            let _guard = ready
+                .wait_timeout_while(guard, Duration::from_secs(5), |released| !*released)
+                .unwrap();
+        }
+    }
+    let pool = Arc::new(Pool::default());
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let _release = Release(gate.clone());
+    let target = key();
+    assert_eq!(
+        pool.call(
+            target.clone(),
+            Box::new(move || Ok(Box::new(Dropping(gate)))),
+            TeamReadMethod::Protocol,
+            TeamReadParams::default()
+        )
+        .unwrap_err()
+        .code,
+        "team_connection_unavailable"
+    );
+    assert!(
+        !pool.slots.lock().unwrap().contains_key(&target),
+        "retirement must precede the error reply"
+    );
+    let connected = Arc::new(AtomicUsize::new(0));
+    assert!(
+        pool.call(
+            target.clone(),
+            connect(&connected),
+            TeamReadMethod::Protocol,
+            TeamReadParams::default()
+        )
+        .is_ok()
+    );
+    assert!(pool.slots.lock().unwrap().contains_key(&target));
 }

@@ -41,6 +41,15 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             ));
         }
         let scope = principal.value();
+        if operation == TeamReadMethod::ChatCatalog {
+            #[cfg(feature = "local-host")]
+            return super::catalog::call(&principal, &body);
+            #[cfg(not(feature = "local-host"))]
+            return Err(DispatchError::new(
+                "host_required",
+                "Open this checkout on its publishing computer.",
+            ));
+        }
         if matches!(
             operation,
             TeamReadMethod::ChatDetails | TeamReadMethod::ChatEvents
@@ -92,7 +101,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         }
         Ok(
             json!({"version":1,"protocolVersion":crate::PROTOCOL_VERSION,"issuer":principal.issuer(),"organizationId":scope.organization_id,"repositoryId":scope.repository_id,"checkoutId":scope.checkout_id,"checkoutInfo":cfg!(feature="local-host"),
-            "sharedChats":cfg!(feature="local-host"),"agentRuns":false}),
+            "sharedChats":cfg!(feature="local-host"),"chatCatalog":cfg!(feature="local-host"),"agentRuns":false}),
         )
     })())
 }
