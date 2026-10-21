@@ -20,6 +20,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Review and share individual repository checkouts from their publishing computer. Team members can check availability through a separate authorized connection while personal remote access remains off. Each checkout stays on its own computer and branch.
 - Review a private chat's visible history before sharing it with repository members. Shared chats show their approved titles, preserve charts and tool output, and label older messages as Local user (before Teams).
 - Stop a chat's local sharing from the publishing computer even when signed out. Private drafts stay in their original chat while sharing pauses personal sends and queued messages.
+- Post named comments in shared chats without starting an agent. If delivery cannot be confirmed, keep the original pending message and check its receipt before sending again.
+- Recover your saved Team comment drafts when a computer is offline or access changes. Drafts retain their chat and computer labels, with copy and reviewed removal actions that work at larger text sizes.
 
 ## [1.7.5] - 2026-10-21
 

@@ -42,10 +42,11 @@ pub(crate) fn loopback_read(
     proof: &tokenstat_sync::teams::TeamConnectionProof,
     device: &tokenstat_identity::PublicKey,
     deadline: std::time::Instant,
+    lease: crate::lease_clock::Deadline,
     method: crate::remote::TeamReadMethod,
     params: &crate::remote::TeamReadParams,
 ) -> Result<Value, DispatchError> {
-    let principal = AuthorizedTeamPrincipal::loopback(client, proof, device, deadline)?;
+    let principal = AuthorizedTeamPrincipal::loopback(client, proof, device, deadline, lease)?;
     let body = serde_json::to_string(params).map_err(|_| api_error(TeamError::InvalidRequest))?;
     let value = crate::request_context::with_team_principal(principal.clone(), || {
         scoped::call(method.wire(), &body).ok_or_else(|| api_error(TeamError::InvalidRequest))?
@@ -59,11 +60,12 @@ pub(crate) fn loopback_comment(
     proof: &tokenstat_sync::teams::TeamConnectionProof,
     device: &tokenstat_identity::PublicKey,
     deadline: std::time::Instant,
+    lease: crate::lease_clock::Deadline,
     input: &crate::remote::TeamCommentInput,
 ) -> Result<Value, DispatchError> {
     #[cfg(feature = "local-host")]
     {
-        let principal = AuthorizedTeamPrincipal::loopback(client, proof, device, deadline)?;
+        let principal = AuthorizedTeamPrincipal::loopback(client, proof, device, deadline, lease)?;
         let result = scoped_comments::send(&principal, input)?;
         principal.ensure_live()?;
         client.ensure_current().map_err(api_error)?;
@@ -71,7 +73,7 @@ pub(crate) fn loopback_comment(
     }
     #[cfg(not(feature = "local-host"))]
     {
-        let _ = (client, proof, device, deadline, input);
+        let _ = (client, proof, device, deadline, lease, input);
         Err(DispatchError::new(
             "host_required",
             "Open this chat on its publishing computer.",

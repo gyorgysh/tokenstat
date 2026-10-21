@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 use super::{api_error, client};
+use crate::lease_clock::{Deadline, Stamp};
 use crate::{account_session::AccountSnapshot, error::DispatchError};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokenstat_identity::{
@@ -14,6 +15,7 @@ use tokenstat_sync::teams::{TeamClient, TeamPrincipal};
 pub(crate) struct AuthorizedTeamPrincipal {
     value: TeamPrincipal,
     deadline: Instant,
+    continuous_deadline: Deadline,
     expires_at: u64,
     issuer: String,
     #[cfg(feature = "local-host")]
@@ -25,16 +27,27 @@ impl AuthorizedTeamPrincipal {
         proof: &tokenstat_sync::teams::TeamConnectionProof,
         device: &PublicKey,
         deadline: Instant,
+        original_lease: Deadline,
     ) -> Result<Self, DispatchError> {
         let claims = proof.ticket().claims();
         let start = Time::now();
         let deadline = local_deadline(proof.ticket(), deadline, start);
+        let continuous_deadline = original_lease.clipped(
+            Deadline::at(
+                start.stamp().ok_or_else(expired)?,
+                deadline.saturating_duration_since(start.monotonic),
+            )
+            .ok_or_else(expired)?,
+        );
         if proof.host_key() != device
             || claims.device != hex(device)
             || claims.host != hex(device)
             || claims.sub != claims.publisher
             || claims.iss != client.origin()
             || start.monotonic >= deadline
+            || continuous_deadline
+                .remaining_at(start.stamp().ok_or_else(expired)?)
+                .is_none()
         {
             return Err(expired());
         }
@@ -52,12 +65,19 @@ impl AuthorizedTeamPrincipal {
                 }
             })?;
         client.ensure_current().map_err(api_error)?;
-        if Instant::now() >= deadline || Time::now().wall >= claims.exp {
+        let end = Time::now();
+        if end.monotonic >= deadline
+            || end.wall >= claims.exp
+            || continuous_deadline
+                .remaining_at(end.stamp().ok_or_else(expired)?)
+                .is_none()
+        {
             return Err(expired());
         }
         Ok(Self {
             value,
             deadline,
+            continuous_deadline,
             expires_at: claims.exp,
             issuer: claims.iss.clone(),
             #[cfg(feature = "local-host")]
@@ -81,10 +101,15 @@ impl AuthorizedTeamPrincipal {
         self.ensure_live_at(Time::now())
     }
     fn ensure_live_at(&self, now: Time) -> Result<(), DispatchError> {
-        // Check both clocks immediately before effects. The monotonic cap
-        // protects clock rollback; signed wall expiry also covers suspension
-        // on platforms whose Instant does not advance while asleep.
-        if now.monotonic >= self.deadline || now.wall >= self.expires_at {
+        // Check signed expiry and both local clocks immediately before
+        // effects, including suspension combined with wall-clock rollback.
+        if now.monotonic >= self.deadline
+            || now.wall >= self.expires_at
+            || self
+                .continuous_deadline
+                .remaining_at(now.stamp().ok_or_else(expired)?)
+                .is_none()
+        {
             return Err(expired());
         }
         Ok(())
@@ -108,6 +133,8 @@ impl AuthorizedTeamPrincipal {
         Self {
             value,
             deadline: Instant::now() + std::time::Duration::from_secs(60),
+            continuous_deadline: Deadline::capture(std::time::Duration::from_secs(60))
+                .expect("supported platform clock"),
             expires_at: Time::now().wall + 60,
             issuer: "https://accounts.example.test".into(),
             #[cfg(feature = "local-host")]
@@ -124,15 +151,24 @@ fn local_deadline(ticket: &VerifiedTeamTicket, requested: Instant, now: Time) ->
 struct Time {
     wall: u64,
     monotonic: Instant,
+    boot: Option<std::time::Duration>,
 }
 impl Time {
     fn now() -> Self {
+        let stamp = Stamp::now();
         Self {
             wall: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |value| value.as_secs()),
-            monotonic: Instant::now(),
+            monotonic: stamp.map_or_else(Instant::now, |stamp| stamp.awake),
+            boot: stamp.map(|stamp| stamp.boot),
         }
+    }
+    fn stamp(self) -> Option<Stamp> {
+        self.boot.map(|boot| Stamp {
+            awake: self.monotonic,
+            boot,
+        })
     }
 }
 fn expired() -> DispatchError {
@@ -149,6 +185,7 @@ struct Gate {
     publisher: String,
     previous: VerifiedTeamTicket,
     deadline: Instant,
+    continuous_deadline: Deadline,
     retired: bool,
 }
 impl Gate {
@@ -174,6 +211,11 @@ impl Gate {
             .map_err(|_| expired())?;
         let deadline =
             now.monotonic + std::time::Duration::from_secs(previous.lease_seconds(now.wall));
+        let continuous_deadline = Deadline::at(
+            now.stamp().ok_or_else(expired)?,
+            deadline.saturating_duration_since(now.monotonic),
+        )
+        .ok_or_else(expired)?;
         Ok(Self {
             keys,
             device,
@@ -181,6 +223,7 @@ impl Gate {
             publisher,
             previous,
             deadline,
+            continuous_deadline,
             retired: false,
         })
     }
@@ -203,7 +246,14 @@ impl Gate {
         online: impl FnOnce(&VerifiedTeamTicket) -> Result<TeamPrincipal, DispatchError>,
     ) -> Result<AuthorizedTeamPrincipal, DispatchError> {
         let start = clock();
-        if self.retired || start.monotonic >= self.deadline {
+        if self.retired
+            || start.monotonic >= self.deadline
+            || start.wall >= self.previous.claims().exp
+            || self
+                .continuous_deadline
+                .remaining_at(start.stamp().ok_or_else(expired)?)
+                .is_none()
+        {
             return Err(expired());
         }
         let verified = self
@@ -248,18 +298,40 @@ impl Gate {
         } else {
             start.monotonic + std::time::Duration::from_secs(verified.lease_seconds(start.wall))
         };
+        let continuous_deadline = if ticket.wire_value() == self.previous.ticket().wire_value() {
+            self.continuous_deadline
+        } else {
+            Deadline::at(
+                start.stamp().ok_or_else(expired)?,
+                deadline.saturating_duration_since(start.monotonic),
+            )
+            .ok_or_else(expired)?
+        };
         let principal = online(&verified)?;
         let end = clock();
-        if end.monotonic >= deadline || end.wall >= next.exp {
+        if end.monotonic >= deadline
+            || end.monotonic >= self.deadline
+            || end.wall >= next.exp
+            || end.wall >= prior.exp
+            || self
+                .continuous_deadline
+                .remaining_at(end.stamp().ok_or_else(expired)?)
+                .is_none()
+            || continuous_deadline
+                .remaining_at(end.stamp().ok_or_else(expired)?)
+                .is_none()
+        {
             return Err(expired());
         }
         let issuer = next.iss.clone();
         let expires_at = next.exp;
         self.previous = verified;
         self.deadline = deadline;
+        self.continuous_deadline = continuous_deadline;
         Ok(AuthorizedTeamPrincipal {
             value: principal,
             deadline,
+            continuous_deadline,
             expires_at,
             issuer,
             #[cfg(feature = "local-host")]
@@ -281,6 +353,11 @@ impl Authorization {
         if self.gate.retired
             || now.monotonic >= self.gate.deadline
             || now.wall >= self.gate.previous.claims().exp
+            || self
+                .gate
+                .continuous_deadline
+                .remaining_at(now.stamp().ok_or_else(expired)?)
+                .is_none()
         {
             return Err(expired());
         }
@@ -370,6 +447,7 @@ mod tests {
         let now = Time {
             wall,
             monotonic: Instant::now(),
+            ..Time::now()
         };
         let mut gate = gate(now);
         let captured = gate
@@ -380,6 +458,23 @@ mod tests {
             )
             .unwrap();
         assert!(captured.ensure_live_at(now).is_ok());
+        let woke = Time {
+            wall: now.wall - 1000,
+            boot: now.boot.map(|boot| boot + Duration::from_secs(60)),
+            ..now
+        };
+        assert!(
+            captured.ensure_live_at(woke).is_err(),
+            "A captured writer survived sleep and wall rollback"
+        );
+        assert!(
+            gate.authorize(
+                &ticket(&fixture()["ticket"]),
+                || woke,
+                |_| panic!("expired sleep lease reached online renewal")
+            )
+            .is_err()
+        );
         // Model a system waking after signed expiry with its monotonic clock
         // unchanged. A previously captured writer must not perform effects.
         assert!(
@@ -395,7 +490,8 @@ mod tests {
             captured
                 .ensure_live_at(Time {
                     wall: wall - 10,
-                    monotonic: captured.deadline
+                    monotonic: captured.deadline,
+                    ..Time::now()
                 })
                 .is_err()
         );
@@ -407,6 +503,7 @@ mod tests {
         let now = Time {
             wall: f["now"].as_u64().unwrap(),
             monotonic: Instant::now(),
+            ..Time::now()
         };
         assert!(
             Gate::new(
@@ -469,10 +566,12 @@ mod tests {
         let start = Time {
             wall: f["now"].as_u64().unwrap(),
             monotonic: Instant::now(),
+            ..Time::now()
         };
         let later = Time {
             wall: start.wall + 20,
             monotonic: start.monotonic + Duration::from_secs(20),
+            ..Time::now()
         };
         for invalid in ["expanded", "otherCheckout"] {
             let mut gate = gate(start);
@@ -507,10 +606,12 @@ mod tests {
         let start = Time {
             wall: f["now"].as_u64().unwrap(),
             monotonic: Instant::now(),
+            ..Time::now()
         };
         let rollback = Time {
             wall: start.wall - 1000,
             monotonic: start.monotonic + Duration::from_secs(60),
+            ..Time::now()
         };
         assert!(
             gate(start)
@@ -529,6 +630,7 @@ mod tests {
                 *clock.lock().unwrap() = Time {
                     wall: start.wall + 60,
                     monotonic: start.monotonic + Duration::from_secs(60),
+                    ..Time::now()
                 };
                 Ok(principal(ticket))
             },
@@ -538,12 +640,135 @@ mod tests {
             "a validation finishing after expiry must not expose a principal"
         );
     }
+
+    #[test]
+    fn replacement_ticket_cannot_outlive_the_original_lease_during_validation() {
+        let f = fixture();
+        let start = Time {
+            wall: f["now"].as_u64().unwrap(),
+            ..Time::now()
+        };
+        let validating = Time {
+            wall: start.wall + 20,
+            monotonic: start.monotonic + Duration::from_secs(20),
+            boot: start.boot.map(|boot| boot + Duration::from_secs(20)),
+        };
+        for end in [
+            Time {
+                monotonic: start.monotonic + Duration::from_secs(60),
+                ..validating
+            },
+            Time {
+                wall: start.wall - 1000,
+                boot: start.boot.map(|boot| boot + Duration::from_secs(60)),
+                ..validating
+            },
+            Time {
+                wall: start.wall + 60,
+                ..validating
+            },
+        ] {
+            let mut gate = gate(start);
+            let clock = Cell::new(validating);
+            assert!(
+                gate.authorize(
+                    &ticket(&f["variants"]["renewed"]),
+                    || clock.get(),
+                    |ticket| {
+                        clock.set(end);
+                        Ok(principal(ticket))
+                    },
+                )
+                .is_err(),
+                "replacement authority revived a connection after its original lease expired"
+            );
+            assert!(gate.retired);
+        }
+    }
+
+    #[test]
+    fn failed_platform_clock_retires_authority_before_any_online_validation() {
+        let f = fixture();
+        let start = Time {
+            wall: f["now"].as_u64().unwrap(),
+            ..Time::now()
+        };
+        let failed = Time {
+            boot: None,
+            ..start
+        };
+        assert!(
+            Gate::new(
+                keys(),
+                [0xaa; 32],
+                [0xbb; 32],
+                "fixture-owner".into(),
+                &ticket(&f["ticket"]),
+                failed,
+            )
+            .is_err()
+        );
+        let mut gate = gate(start);
+        let captured = gate
+            .authorize(
+                &ticket(&f["ticket"]),
+                || start,
+                |ticket| Ok(principal(ticket)),
+            )
+            .unwrap();
+        assert!(captured.ensure_live_at(failed).is_err());
+        assert!(
+            gate.authorize(
+                &ticket(&f["ticket"]),
+                || failed,
+                |_| panic!("failed clock reached online validation"),
+            )
+            .is_err()
+        );
+        assert!(
+            gate.authorize(
+                &ticket(&f["ticket"]),
+                || start,
+                |_| panic!("retired connection survived a later successful clock read"),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn revalidating_the_same_ticket_preserves_its_original_sleep_budget() {
+        let f = fixture();
+        let start = Time {
+            wall: f["now"].as_u64().unwrap(),
+            ..Time::now()
+        };
+        let mut gate = gate(start);
+        let later = Time {
+            boot: start.boot.map(|boot| boot + Duration::from_secs(20)),
+            ..start
+        };
+        let captured = gate
+            .authorize(
+                &ticket(&f["ticket"]),
+                || later,
+                |ticket| Ok(principal(ticket)),
+            )
+            .unwrap();
+        assert_eq!(
+            captured
+                .continuous_deadline
+                .remaining_at(later.stamp().unwrap()),
+            Some(Duration::from_secs(39)),
+        );
+    }
+
     #[test]
     fn loopback_reads_cannot_extend_the_signed_lease_or_the_original_deadline() {
         let f = fixture();
         let start = Time {
             wall: f["now"].as_u64().unwrap(),
             monotonic: Instant::now(),
+            ..Time::now()
         };
         let proof = gate(start).previous;
         let long = start.monotonic + Duration::from_secs(300);
@@ -554,11 +779,13 @@ mod tests {
         let rollback = Time {
             wall: start.wall - 1000,
             monotonic: start.monotonic + Duration::from_secs(50),
+            ..Time::now()
         };
         assert_eq!(local_deadline(&proof, original, rollback), original);
         let expired = Time {
             wall: start.wall + 60,
             monotonic: start.monotonic + Duration::from_secs(60),
+            ..Time::now()
         };
         assert_eq!(local_deadline(&proof, long, expired), expired.monotonic);
     }
@@ -568,6 +795,7 @@ mod tests {
         let start = Time {
             wall: f["now"].as_u64().unwrap(),
             monotonic: Instant::now(),
+            ..Time::now()
         };
         let mut gate = Gate::new(
             keys(),
@@ -592,6 +820,7 @@ mod tests {
         let later = Time {
             wall: start.wall + 20,
             monotonic: start.monotonic + Duration::from_secs(20),
+            ..Time::now()
         };
         assert!(
             gate.authorize(
@@ -616,6 +845,7 @@ mod tests {
         let now = Time {
             wall: f["now"].as_u64().unwrap(),
             monotonic: Instant::now(),
+            ..Time::now()
         };
         let mut authorized = gate(now)
             .authorize(

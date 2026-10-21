@@ -87,6 +87,26 @@
 	</array>
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>
+		<!-- Validate the type and size of app-owned draft files before
+		     reading them from the app's support directory. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<!-- Local elapsed-time budgets, including Team authority expiry
+		     across sleep. Boot-clock readings stay on this device. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
 		<!-- UserDefaults. The app stores its own settings and the place the
 		     person was last working in, nothing about anyone else. CA92.1 is
 		     the reason for reading and writing your own app's defaults. -->

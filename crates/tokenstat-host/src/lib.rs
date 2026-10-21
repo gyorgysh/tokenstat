@@ -148,6 +148,7 @@ pub(crate) mod workspace_clone;
 pub mod workspace_policy;
 
 pub(crate) mod account_session;
+pub(crate) mod lease_clock;
 #[cfg(feature = "local-host")]
 pub(crate) mod provider_limit;
 pub(crate) mod teams;

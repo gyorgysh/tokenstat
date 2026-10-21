@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 use super::{current_team_scope, load_settings, session_for_serving, team_reach, tunnel_lifecycle};
+use crate::lease_clock::Deadline;
 use crate::{account_session::AccountSnapshot, error::DispatchError, teams::api_error};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -226,6 +227,7 @@ pub(crate) struct Link {
     identity: MachineIdentity,
     proof: TeamConnectionProof,
     deadline: Instant,
+    continuous_deadline: Deadline,
     next_id: u64,
 }
 impl Link {
@@ -287,10 +289,15 @@ impl Link {
         if identity.public_key() != expected_key {
             return Err(api_error(TeamError::AccountChanged));
         }
+        let admission = Deadline::capture(Duration::from_secs(60)).ok_or_else(unavailable)?;
         let proof = client
             .connection_proof(&request, &repository, &identity.public_key())
             .map_err(api_error)?;
         let deadline = deadline(&proof)?;
+        let continuous_deadline = admission.clipped(
+            Deadline::capture(deadline.saturating_duration_since(Instant::now()))
+                .ok_or_else(unavailable)?,
+        );
         if proof.ticket().claims().iss != client.origin() {
             return Err(invalid());
         }
@@ -314,7 +321,7 @@ impl Link {
             let socket = tunnel.socket().map_err(|_| unavailable())?;
             while !socket.status().connected {
                 tunnel.ensure_current().map_err(|_| unavailable())?;
-                if Instant::now() >= ready_deadline {
+                if Instant::now() >= ready_deadline || continuous_deadline.remaining().is_none() {
                     return Err(unavailable());
                 }
                 std::thread::sleep(Duration::from_millis(50));
@@ -342,6 +349,7 @@ impl Link {
             identity,
             proof,
             deadline,
+            continuous_deadline,
             next_id: 1,
         };
         link.ensure_current()?;
@@ -370,7 +378,10 @@ impl Link {
         if let Transport::Relay(relay) = &self.transport {
             relay.tunnel.ensure_current().map_err(|_| unavailable())?;
         }
-        if Instant::now() >= self.deadline || self.proof.ticket().claims().exp <= wall() {
+        if Instant::now() >= self.deadline
+            || self.proof.ticket().claims().exp <= wall()
+            || self.continuous_deadline.remaining().is_none()
+        {
             return Err(unavailable());
         }
         Ok(())
@@ -391,6 +402,7 @@ impl Link {
                 &self.proof,
                 &self.identity.public_key(),
                 self.deadline,
+                self.continuous_deadline,
                 method,
                 params,
             );
@@ -405,7 +417,13 @@ impl Link {
         let request = serde_json::to_vec(&json!({"id":id,"method":method.wire(),"params":params}))
             .map_err(|_| invalid())?;
         relay.connection.send(&request).map_err(|_| unavailable())?;
-        let time = RESPONSE_TIME.min(self.deadline.saturating_duration_since(Instant::now()));
+        let time = RESPONSE_TIME
+            .min(self.deadline.saturating_duration_since(Instant::now()))
+            .min(
+                self.continuous_deadline
+                    .remaining()
+                    .ok_or_else(unavailable)?,
+            );
         let bytes = relay
             .connection
             .receive_bounded(RESPONSE_LIMIT, time)
@@ -416,6 +434,7 @@ impl Link {
 
     pub(crate) fn renew(&mut self) -> Result<(), DispatchError> {
         self.ensure_current()?;
+        let admission = Deadline::capture(Duration::from_secs(60)).ok_or_else(unavailable)?;
         let next = self
             .client
             .connection_proof(&self.request, &self.repository, &self.identity.public_key())
@@ -443,6 +462,13 @@ impl Link {
             return Err(api_error(TeamError::AccountChanged));
         }
         let next_deadline = deadline(&next)?;
+        let next_continuous_deadline = admission.clipped(
+            Deadline::capture(next_deadline.saturating_duration_since(Instant::now()))
+                .ok_or_else(unavailable)?,
+        );
+        // A slow validation or suspended host cannot revive an already
+        // expired connection. Closed reads may establish a fresh connection.
+        self.ensure_current()?;
         if let Transport::Relay(relay) = &self.transport {
             relay
                 .channel
@@ -450,8 +476,10 @@ impl Link {
                 .map_err(|_| unavailable())?;
             relay.tunnel.ensure_current().map_err(|_| unavailable())?;
         }
+        self.ensure_current()?;
         self.proof = next;
         self.deadline = next_deadline;
+        self.continuous_deadline = next_continuous_deadline;
         // A relay ACK updates the host's channel ticket. Local and remote
         // reads both validate the replacement through the scoped boundary.
         let protocol = self.call(ReadMethod::Protocol, &ReadParams::default())?;
@@ -473,6 +501,7 @@ impl Link {
                 &self.proof,
                 &self.identity.public_key(),
                 self.deadline,
+                self.continuous_deadline,
                 input,
             );
             self.ensure_current()?;
@@ -495,7 +524,13 @@ impl Link {
             )
         };
         relay.connection.send(&bytes).map_err(|_| unknown())?;
-        let time = RESPONSE_TIME.min(self.deadline.saturating_duration_since(Instant::now()));
+        let time = RESPONSE_TIME
+            .min(self.deadline.saturating_duration_since(Instant::now()))
+            .min(
+                self.continuous_deadline
+                    .remaining()
+                    .ok_or_else(unavailable)?,
+            );
         let response = relay
             .connection
             .receive_bounded(RESPONSE_LIMIT, time)
