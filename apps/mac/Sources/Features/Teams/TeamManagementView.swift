@@ -327,8 +327,8 @@ struct TeamManagementView: View {
         let organization = directory.details.organization
         return VStack(spacing: 0) {
             TeamSectionHeader(title: L10n.text("common.teams.repositories"), subtitle: L10n.text("common.teams.repository_list_detail")) {
-                if organization.role.canManage {
-                    Button(L10n.text("common.teams.add_repository"), .create) { if let context = store.mutationContext { sheet = .repository(context) } }
+                if store.capabilities?.canPublishCheckouts == true && (organization.role.canManage || directory.repositories.repositories.contains { $0.role == .contributor || $0.role == .maintainer }) {
+                    Button(L10n.text("common.teams.share_project"), .connect) { if let context = store.mutationContext { sheet = .repository(context) } }
                         .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
                 }
             }

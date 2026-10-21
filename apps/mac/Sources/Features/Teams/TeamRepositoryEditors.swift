@@ -4,20 +4,19 @@ import SwiftUI
 struct TeamRepositoryNameEditor: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext
-    let repository: TeamRepository?
+    let repository: TeamRepository
     @State private var name = ""
     @State private var saving = false
     @State private var error: String?
     @Environment(\.dismiss) private var dismiss
-    init(store: TeamStore, context: TeamMutationContext, repository: TeamRepository? = nil) {
+    init(store: TeamStore, context: TeamMutationContext, repository: TeamRepository) {
         self.store = store; self.context = context; self.repository = repository
-        _name = State(initialValue: repository?.name ?? "")
+        _name = State(initialValue: repository.name)
     }
     var body: some View {
-        TeamEditorFrame(title: repository == nil ? L10n.text("common.teams.add_repository") : L10n.text("common.teams.rename_repository"), subtitle: repository == nil ? L10n.text("common.teams.repository_create_detail") : L10n.text("common.teams.repository_rename_detail"), icon: repository == nil ? .create : .edit,
-            submitTitle: repository == nil ? L10n.text("common.teams.add_repository") : L10n.text("common.save"), submitIcon: repository == nil ? .create : .save, valid: !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && name.utf16.count <= 80 && name.trimmingCharacters(in: .whitespacesAndNewlines) != repository?.name, saving: saving || store.isMutating, error: error, submit: save) {
+        TeamEditorFrame(title: L10n.text("common.teams.rename_repository"), subtitle: L10n.text("common.teams.repository_rename_detail"), icon: .edit,
+            submitTitle: L10n.text("common.save"), submitIcon: .save, valid: !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && name.utf16.count <= 80 && name.trimmingCharacters(in: .whitespacesAndNewlines) != repository.name, saving: saving || store.isMutating, error: error, submit: save) {
             TextField(L10n.text("common.teams.repository_name"), text: $name).textFieldStyle(ThemedFieldStyle())
-            if repository == nil { TeamNotice(message: L10n.text("common.teams.repository_create_access")) }
             Text(L10n.text("common.teams.checkout_separate_detail")).font(Theme.body).foregroundStyle(.secondary)
         }
     }
@@ -27,11 +26,7 @@ struct TeamRepositoryNameEditor: View {
         Task {
             defer { saving = false }
             do {
-                if let repository {
-                    let _: JSONValue = try await store.perform("repositories.rename", fields: ["organization":.string(org),"repository":.string(repository.id),"input":.object(["name":.string(name),"expectedRevision":.uint(repository.revision)])], context: context)
-                } else {
-                    let _: JSONValue = try await store.perform("repositories.create", fields: ["organization":.string(org),"name":.string(name)], context: context)
-                }
+                let _: JSONValue = try await store.perform("repositories.rename", fields: ["organization":.string(org),"repository":.string(repository.id),"input":.object(["name":.string(name),"expectedRevision":.uint(repository.revision)])], context: context)
                 dismiss(); await store.reloadAfterChange()
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }

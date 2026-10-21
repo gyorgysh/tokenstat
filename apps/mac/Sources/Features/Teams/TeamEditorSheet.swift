@@ -28,7 +28,7 @@ struct TeamEditorSheet: View {
         case let .remove(context, member): TeamRemovalEditor(store: store, context: context, organization: organization, member: member, deleting: false, leaving: false)
         case let .invitationAction(context, invitation, renewing): TeamInvitationActionEditor(store: store, context: context, invitation: invitation, renewing: renewing)
         case let .accept(context, invitation): TeamInvitationEditor(store: store, context: context, invitation: invitation, onAccount: onAccount)
-        case let .repository(context): TeamRepositoryNameEditor(store: store, context: context)
+        case let .repository(context): TeamProjectShareEditor(store: store, context: context, organization: organization, repositories: repositories)
         case let .renameRepository(context, repository): TeamRepositoryNameEditor(store: store, context: context, repository: repository)
         case let .access(context, repository): TeamRepositoryAccessEditor(store: store, context: context, repository: repository)
         case let .checkouts(context, repository): TeamCheckoutEditor(store: store, context: context, repository: repository)
