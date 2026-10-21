@@ -21,7 +21,7 @@ enum TeamFixtureData {
         switch method {
         case .capabilities:
             if state == .failure { throw TeamRequestFailure(code: "teams_unreachable", message: "The fictional account server is unavailable.") }
-            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canPublishCheckouts":.bool(true)])
+            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canPublishCheckouts":.bool(true),"canConnectCheckouts":.bool(true)])
         case .authorizationPreview: return .object(["deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .prepareAuthorization: return .object(["authorizationURL":.string("https://accounts.example.test/settings/teams/devices/fixture"),"deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .checkoutOptions: return .object(["deviceName":.string("Example Mac"),"workspaces":.array([try json(TeamLocalWorkspace(id: "/example/Website", name: "Website", path: "/example/Website")),try json(TeamLocalWorkspace(id: "/example/Feature checkout", name: "Website feature", path: "/example/Feature checkout"))]),"nextOffset":.null])
@@ -29,6 +29,9 @@ enum TeamFixtureData {
             guard case let .object(fields) = params, case let .string(workspace)? = fields["workspace"] else { throw CancellationError() }
             return .object(["repository":try json(repository),"workspaceId":.string(workspace),"workspaceName":.string("Website"),"preview":.string(String(repeating:"ab",count:32)),"sharesExistingChats":.bool(false),"allowsAgentRuns":.bool(false)])
         case .checkoutList: return .object(["publications":.array([try json(TeamLocalPublication(id: "checkout_" + String(repeating:"a",count:32), organizationId: organization.id, repositoryId: repository.id, workspaceId: "/example/Website", phase: "active", revision: 2, accountCleanupPending: false))]),"nextOffset":.null])
+        case .connectionCall:
+            guard case let .object(fields) = params, case let .object(target)? = fields["target"], let checkout = target["checkout"], let organization = target["organization"], let repository = target["repository"] else { throw CancellationError() }
+            return .object(["checkoutId":checkout,"organizationId":organization,"repositoryId":repository,"state":.string("available")])
         case .checkoutPublish, .checkoutWithdraw: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
         case .directory:
             guard case let .object(fields) = params, case let .string(operation)? = fields["operation"] else { throw TeamRequestFailure(code: "fixture_request", message: "Choose a fixture action.") }

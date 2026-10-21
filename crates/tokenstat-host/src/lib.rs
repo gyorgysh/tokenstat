@@ -267,4 +267,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 38 adds opt-in organization management.
 /// Version 39 adds key-bound Team principals and their closed dispatch boundary.
 /// Version 40 adds host-private checkout publication and scoped availability.
-pub const PROTOCOL_VERSION: &str = "40";
+/// Version 41 adds the separate local scoped Team connection pool.
+pub const PROTOCOL_VERSION: &str = "41";

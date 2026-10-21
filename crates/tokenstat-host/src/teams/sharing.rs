@@ -165,6 +165,46 @@ fn local_binding(owner: &AccountSnapshot, client: &TeamClient) -> Result<Owner, 
         host_key: identity.public_key_hex(),
     })
 }
+
+pub(super) fn restore_remote_reach(
+    owner: &AccountSnapshot,
+    identity: &tokenstat_identity::MachineIdentity,
+) -> Result<(), DispatchError> {
+    let key = identity.public_key_hex();
+    let store = Store::capture()?;
+    if !store.has_active_key(&key)? {
+        return Ok(());
+    }
+    crate::remote::team_reach_restoring(owner, true).map_err(super::changed)?;
+    let result = (|| {
+        let client = super::client(owner)?;
+        let binding = binding(&client)?;
+        let active = binding.host_key == key && store.has_active(&binding)?;
+        owner.ensure_current().map_err(super::changed)?;
+        crate::remote::team_hosting(owner, &key, active).map_err(super::changed)
+    })();
+    let retry = result.as_ref().is_err_and(|error: &DispatchError| {
+        matches!(
+            error.code.as_str(),
+            "teams_unreachable" | "teams_busy" | "teams_unconfigured" | "teams_request_failed"
+        )
+    });
+    crate::remote::team_reach_restoring(owner, retry).map_err(super::changed)?;
+    if retry { result } else { Ok(()) }
+}
+
+fn update_remote_reach(
+    owner: &AccountSnapshot,
+    store: &Store,
+    binding: &Owner,
+) -> Result<(), DispatchError> {
+    let active = store.has_active(binding)?;
+    crate::remote::team_hosting(owner, &binding.host_key, active).map_err(super::changed)?;
+    if active {
+        crate::remote::start_team_reach(owner.clone());
+    }
+    Ok(())
+}
 fn repository(
     client: &TeamClient,
     organization: &str,
@@ -305,6 +345,7 @@ pub(super) fn perform(
                 {
                     return Err(api_error(TeamError::InvalidResponse));
                 }
+                update_remote_reach(owner, &store, &binding)?;
                 return Ok(json!({"publication":local_dto(&prepared)}));
             }
             let reply = client
@@ -325,6 +366,7 @@ pub(super) fn perform(
                 let _ = store.withdraw(&binding, &active.id, active.revision);
                 return Err(super::changed(error));
             }
+            update_remote_reach(owner, &store, &binding)?;
             Ok(json!({"publication":local_dto(&active)}))
         }
         Request::List {
@@ -363,6 +405,7 @@ pub(super) fn perform(
             // Stop local reads first. An unknown cloud outcome remains a
             // withdrawn local publication and can be retried safely.
             let retired = store.withdraw(&binding, &input.checkout, input.expected_revision)?;
+            update_remote_reach(owner, &store, &binding)?;
             if retired.cloud_withdrawn {
                 return Ok(json!({"withdrawn":true}));
             }

@@ -6,7 +6,7 @@ use super::TunnelState;
 use std::sync::Arc;
 use tokenstat_identity::PublicKey;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) struct Scope {
     pub owner: String,
     pub key: PublicKey,
@@ -56,6 +56,9 @@ impl<T> Default for Runtime<T> {
     }
 }
 impl<T> Runtime<T> {
+    pub fn scope(&self) -> Option<&Scope> {
+        self.attempt.as_ref().map(|attempt| &attempt.scope)
+    }
     pub fn begin(&mut self, scope: Scope) -> (Attempt, Option<Arc<T>>) {
         let retired = self.stop();
         let attempt = Attempt {

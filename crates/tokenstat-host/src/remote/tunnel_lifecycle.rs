@@ -24,8 +24,64 @@ fn scope(owner: &AccountSnapshot, identity: &MachineIdentity, settings: &RemoteS
     }
 }
 
-fn available(settings: &RemoteSettings) -> bool {
-    settings.tunnel && !tunnel_paused().load(Ordering::Acquire)
+fn available(settings: &RemoteSettings, scope: &Scope) -> bool {
+    !tunnel_paused().load(Ordering::Acquire)
+        && settings.tunnel_endpoint == scope.endpoint
+        && (settings.tunnel || super::team_reach::active(scope))
+}
+
+pub(super) fn wanted() -> bool {
+    if tunnel_paused().load(Ordering::Acquire) {
+        return false;
+    }
+    let settings = load_settings();
+    if settings.tunnel {
+        return true;
+    }
+    let Ok(owner) = current_or_capture() else {
+        return false;
+    };
+    let Ok(Some(identity)) = MachineIdentity::load() else {
+        return false;
+    };
+    super::team_reach::wanted(&scope(&owner, &identity, &settings))
+}
+
+pub(super) fn retire_if_unused(scope: &Scope) {
+    let retired = runtime().lock().ok().and_then(|mut held| {
+        if available(&load_settings(), scope) {
+            return None;
+        }
+        let live = held.active(scope)?;
+        held.finish(&live)
+    });
+    if let Some(socket) = retired {
+        socket.shutdown();
+    }
+}
+
+pub(super) fn personal_disabled() {
+    let (live, retired) = match runtime().lock() {
+        Ok(mut held) => {
+            let Some(scope) = held.scope().cloned() else {
+                return;
+            };
+            let live = held.active(&scope);
+            let retired = if available(&load_settings(), &scope) {
+                None
+            } else {
+                held.stop()
+            };
+            (live, retired)
+        }
+        Err(_) => return,
+    };
+    if let Some(live) = live {
+        live.socket.close_personal_channels();
+    }
+    if let Some(socket) = retired {
+        socket.shutdown();
+    }
 }
 
 struct Pending(Attempt);
@@ -44,7 +100,7 @@ impl OwnedTunnel {
         let identity = MachineIdentity::load()
             .map_err(|_| "This device's connection key is unavailable.")?
             .ok_or("This device's connection key changed. Connect again.")?;
-        if !available(&settings)
+        if !available(&settings, &self.live.attempt.scope)
             || self.live.attempt.scope != scope(&self.owner, &identity, &settings)
         {
             return Err("This device's remote connection changed. Connect again.".into());
@@ -102,7 +158,7 @@ pub(super) fn current() -> Result<Option<OwnedTunnel>, String> {
     let identity = MachineIdentity::load_or_create()
         .map_err(|_| "This device's connection key is unavailable.")?;
     let settings = load_settings();
-    if !available(&settings) {
+    if !available(&settings, &scope(&owner, &identity, &settings)) {
         return Ok(None);
     }
     let live = runtime()
@@ -145,6 +201,7 @@ pub(super) fn running() -> bool {
 }
 
 pub(super) fn stop() {
+    super::team_reach::clear();
     let retired = runtime().lock().ok().and_then(|mut held| held.stop());
     if let Some(socket) = retired {
         socket.shutdown();
@@ -156,7 +213,7 @@ pub(super) fn stop() {
 pub(super) fn start(session: Arc<Mutex<Session>>, settings: &RemoteSettings) {
     if let Err(error) = ensure(Arc::clone(&session), settings, false) {
         eprintln!("remote: tunnel is enabled but unavailable: {error}");
-        if available(&load_settings()) && !is_permanent_start_error(&error) {
+        if wanted() && !is_permanent_start_error(&error) {
             retry_start_later(session);
         }
     }
@@ -167,18 +224,31 @@ pub(super) fn ensure(
     settings: &RemoteSettings,
     force: bool,
 ) -> Result<Option<OwnedTunnel>, String> {
-    if !available(settings) {
+    if tunnel_paused().load(Ordering::Acquire) {
         return Ok(None);
     }
     let _starting = STARTING.lock().unwrap_or_else(|e| e.into_inner());
     let latest = load_settings();
-    if !available(&latest) || latest.tunnel_endpoint != settings.tunnel_endpoint {
+    if tunnel_paused().load(Ordering::Acquire) || latest.tunnel_endpoint != settings.tunnel_endpoint
+    {
         return Ok(None);
     }
     let owner = current_or_capture()?;
-    let identity = MachineIdentity::load_or_create()
-        .map_err(|_| "This device's connection key is unavailable.")?;
+    let identity = match MachineIdentity::load()
+        .map_err(|_| "This device's connection key is unavailable.")?
+    {
+        Some(identity) => identity,
+        None if !latest.tunnel => return Ok(None),
+        None => MachineIdentity::load_or_create()
+            .map_err(|_| "This device's connection key is unavailable.")?,
+    };
     let wanted = scope(&owner, &identity, settings);
+    if !available(&latest, &wanted) {
+        crate::teams::restore_remote_reach(&owner, &identity).map_err(|error| error.to_string())?;
+        if !available(&load_settings(), &wanted) {
+            return Ok(None);
+        }
+    }
     let existing = runtime()
         .lock()
         .map_err(|_| "Remote connection state is unavailable.")?
@@ -214,7 +284,7 @@ pub(super) fn ensure(
     let latest = load_settings();
     let latest_identity =
         MachineIdentity::load().map_err(|_| "This device's connection key is unavailable.")?;
-    if !available(&latest)
+    if !available(&latest, &attempt.scope)
         || latest_identity
             .as_ref()
             .is_none_or(|key| scope(&owner, key, &latest) != attempt.scope)
@@ -304,18 +374,27 @@ pub(super) fn ensure(
                 );
                 continue;
             }
+            if !load_settings().tunnel {
+                drop(transport);
+                continue;
+            }
             let accepted = with_snapshot(Some(owner.clone()), || {
                 let connection =
                     tokenstat_remote::handshake_responder(Box::new(transport), &identity)
                         .map_err(|error| error.to_string())?;
                 inbound_owned.ensure_current()?;
+                if !load_settings().tunnel {
+                    return Err("Personal remote reach is off.".into());
+                }
                 authorize_with(connection, "tunnel", Some(&account_peer_label)).map_err(|refused| {
                     report(&refused);
                     "This machine has not approved the connection.".into()
                 })
             });
             match accepted {
-                Ok(connection) if inbound_owned.ensure_current().is_ok() => {
+                Ok(connection)
+                    if load_settings().tunnel && inbound_owned.ensure_current().is_ok() =>
+                {
                     let _ = inbound_owned.update(|state| {
                         state.connected = true;
                         state.error = None;

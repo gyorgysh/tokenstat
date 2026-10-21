@@ -70,6 +70,9 @@ impl StreamAccess {
         if matches!(self, Self::Unchecked) {
             return true;
         }
+        if !crate::remote::personal_reach_allowed() {
+            return false;
+        }
         let Ok(key) = tokenstat_identity::public_key_from_hex(peer) else {
             return false;
         };
@@ -949,6 +952,68 @@ pub(crate) fn invalidate_all_pty_lists() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn personal_stream_authority_ends_when_personal_reach_is_disabled() {
+        const CHILD: &str = "TOKENSTAT_PERSONAL_STREAM_GUARD_TEST";
+        if std::env::var(CHILD).as_deref() != Ok("1") {
+            let root = tempfile::tempdir().unwrap();
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "remote_stream::tests::personal_stream_authority_ends_when_personal_reach_is_disabled"])
+                .env(CHILD, "1")
+                .env("TOKENSTAT_DATA_DIR", root.path().join("data"))
+                .env("TOKENSTAT_IDENTITY_DIR", root.path().join("identity"))
+                .output().unwrap();
+            assert!(
+                result.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        }
+        let identity = tokenstat_identity::MachineIdentity::load_or_create().unwrap();
+        let peer = tokenstat_identity::MachineIdentity::from_secret([56; 32]);
+        tokenstat_identity::PeerStore::update(|store| {
+            store.seen(
+                &peer.public_key(),
+                "Fixture device",
+                None,
+                "2026-01-01T00:00:00Z",
+            );
+            assert!(store.approve(&peer.public_key()));
+            ((), true)
+        })
+        .unwrap();
+        crate::workspace_policy::set_allowed_by_with_label(
+            &peer.public_key_hex(),
+            true,
+            crate::access_audit::Authority::Console,
+            None,
+        )
+        .unwrap();
+        let policy =
+            crate::dispatch::call_sessionless("host.setPolicy", r#"{"alwaysOn":true}"#).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&policy).unwrap()["ok"],
+            true
+        );
+        let settings = tokenstat_identity::identity_dir()
+            .unwrap()
+            .join("remote.json");
+        std::fs::write(&settings, r#"{"tunnel":true}"#).unwrap();
+        let access = super::StreamAccess::Workspace;
+        assert!(access.allowed(&peer.public_key_hex()));
+        std::fs::write(&settings, r#"{"tunnel":false}"#).unwrap();
+        assert!(!access.allowed(&peer.public_key_hex()));
+        // Switch changes do not revoke the pairing; the live stream guard is
+        // what ends access, including direct connections off the relay.
+        assert!(
+            tokenstat_identity::PeerStore::cached()
+                .unwrap()
+                .is_approved(&peer.public_key())
+        );
+        assert!(identity.public_key() != peer.public_key());
+    }
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::Duration;

@@ -257,6 +257,38 @@ impl Store {
                 .collect())
         })
     }
+    pub(super) fn has_active_key(&self, key: &str) -> Result<bool, DispatchError> {
+        if !self
+            .root
+            .join("index.json")
+            .try_exists()
+            .map_err(|_| storage())?
+        {
+            return Ok(false);
+        }
+        self.read(|index| {
+            Ok(index
+                .checkouts
+                .iter()
+                .any(|row| row.phase == Phase::Active && row.owner.host_key == key))
+        })
+    }
+    pub(super) fn has_active(&self, owner: &Owner) -> Result<bool, DispatchError> {
+        if !self
+            .root
+            .join("index.json")
+            .try_exists()
+            .map_err(|_| storage())?
+        {
+            return Ok(false);
+        }
+        self.read(|index| {
+            Ok(index
+                .checkouts
+                .iter()
+                .any(|row| row.phase == Phase::Active && &row.owner == owner))
+        })
+    }
     pub(super) fn confirm_cloud_withdrawal(
         &self,
         owner: &Owner,

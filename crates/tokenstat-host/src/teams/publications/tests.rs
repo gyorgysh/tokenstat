@@ -36,6 +36,43 @@ fn active(store: &Store, folder: &Folder) -> Checkout {
         .unwrap()
 }
 #[test]
+fn only_an_active_publication_for_the_same_owner_and_key_can_restore_reach() {
+    let (_root, store, folder) = setup();
+    assert!(!store.has_active_key(&owner().host_key).unwrap());
+    assert!(
+        !store.root.exists(),
+        "An unused Team feature must not create sharing files."
+    );
+    let pending = prepare(&store, &folder, "request-one");
+    assert!(!store.has_active(&owner()).unwrap());
+    let active = store
+        .activate(&owner(), &pending.id, pending.revision, 1)
+        .unwrap();
+    assert!(store.has_active(&owner()).unwrap());
+    assert!(store.has_active_key(&owner().host_key).unwrap());
+    for other in [
+        Owner {
+            publisher_id: "another-account".into(),
+            ..owner()
+        },
+        Owner {
+            issuer: "https://another.example.test".into(),
+            ..owner()
+        },
+        Owner {
+            host_key: "aa".repeat(32),
+            ..owner()
+        },
+    ] {
+        assert!(!store.has_active(&other).unwrap());
+    }
+    store
+        .withdraw(&owner(), &active.id, active.revision)
+        .unwrap();
+    assert!(!store.has_active(&owner()).unwrap());
+    assert!(!store.has_active_key(&owner().host_key).unwrap());
+}
+#[test]
 fn a_pending_or_withdrawn_publication_cannot_read_even_after_retries() {
     let (_root, store, folder) = setup();
     let pending = prepare(&store, &folder, "request-one");

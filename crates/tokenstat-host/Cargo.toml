@@ -25,6 +25,11 @@ name = "tokenstat-hostd"
 path = "src/bin/tokenstat-hostd.rs"
 required-features = ["local-host"]
 
+[[example]]
+name = "team-transport-probe"
+path = "../../scripts/qa/teams/transport_probe.rs"
+required-features = ["local-host"]
+
 # `local-host`: this build can act as the host for its own machine.
 #
 # On by default, and off for the iOS and iPadOS slices of the xcframework.

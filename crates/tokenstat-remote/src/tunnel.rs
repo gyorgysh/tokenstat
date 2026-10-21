@@ -471,6 +471,30 @@ impl TunnelSession {
         }
     }
 
+    /// Disable personal reach without interrupting separately authorized Team
+    /// channels on the same socket. Pending opens and streams are included.
+    pub fn close_personal_channels(&self) {
+        let personal: Vec<_> = self
+            .channels
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .values()
+            .filter(|state| state.team.is_none())
+            .cloned()
+            .collect();
+        for state in personal {
+            if self.forget_channel(&state) {
+                let _ = self.queue_channel_frame(CH_CLOSE, state.id, &[], false);
+            }
+            if let Ok(mut inner) = state.inner.lock() {
+                inner.buffer.clear();
+                inner.error = Some("personal remote reach is off".into());
+                inner.eof = true;
+            }
+            state.cond.notify_all();
+        }
+    }
+
     /// Wake the supervisor and reset its reconnect backoff.
     ///
     /// Called when the network comes back or the machine wakes from sleep, so a
@@ -1471,6 +1495,44 @@ fn tunnel_error(error: tungstenite::Error) -> RemoteError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn personal_reach_can_stop_without_closing_team_channels_or_the_shared_socket() {
+        let session = inert_session();
+        let personal = Arc::new(ChannelState::new(1));
+        let team = Arc::new(ChannelState {
+            team: Some(team::TeamChannel::new(team_ticket("scoped"), Some([3; 32]))),
+            ..ChannelState::new(2)
+        });
+        session.channels.lock().unwrap().insert(1, personal.clone());
+        session.channels.lock().unwrap().insert(2, team.clone());
+        personal
+            .inner
+            .lock()
+            .unwrap()
+            .buffer
+            .extend(b"private data");
+        let mut personal_transport = ChannelTransport::new(session.clone(), personal);
+        let mut team_transport = ChannelTransport::new(session.clone(), team.clone());
+        let handle = team_transport.team_authorization().unwrap();
+        session.close_personal_channels();
+        assert!(matches!(
+            personal_transport.read(&mut [0; 64]),
+            Ok(0) | Err(_)
+        ));
+        assert!(
+            personal_transport
+                .write_all(b"no more private data")
+                .is_err()
+        );
+        assert!(handle.ticket().is_ok());
+        assert!(!session.stopped.load(Ordering::Acquire));
+        assert!(session.channels.lock().unwrap().contains_key(&2));
+        team.inner.lock().unwrap().buffer.extend(b"team data");
+        let mut bytes = [0; 9];
+        assert_eq!(team_transport.read(&mut bytes).unwrap(), 9);
+        assert_eq!(&bytes, b"team data");
+    }
 
     fn team_ticket(marker: &str) -> TeamTicket {
         TeamTicket::try_from(format!("ts-team-v1.{marker}")).unwrap()

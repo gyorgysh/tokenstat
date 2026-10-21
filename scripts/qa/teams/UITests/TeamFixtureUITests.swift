@@ -83,6 +83,18 @@ final class TeamFixtureUITests: XCTestCase {
     func testCheckoutPublicationWithLargeText() {
         checkoutScenario(largeText: true)
     }
+    func testCheckoutAvailabilityUsesTheScopedRead() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))
+        app.buttons["Fixture"].tap()
+        app.buttons["Checkouts"].tap()
+        let check = app.buttons["Check availability"].firstMatch
+        XCTAssertTrue(check.waitForExistence(timeout: 5))
+        reveal(check, in: app)
+        check.tap()
+        XCTAssertTrue(app.staticTexts["Available at last check"].waitForExistence(timeout: 5))
+        capture(app, "Scoped checkout availability")
+    }
     private func checkoutScenario(largeText: Bool) {
         let app = launch(largeText: largeText)
         XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))

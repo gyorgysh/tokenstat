@@ -18,6 +18,7 @@ enum TeamHostMethod: String, Sendable {
     case checkoutPublish = "teams.checkout.publish"
     case checkoutList = "teams.checkout.list"
     case checkoutWithdraw = "teams.checkout.withdraw"
+    case connectionCall = "teams.connection.call"
 }
 struct TeamAPI: Sendable {
     let send: @Sendable (TeamHostMethod, JSONValue, TeamAccountOwner) async throws -> JSONValue
@@ -30,6 +31,7 @@ struct TeamAPI: Sendable {
 }
 struct TeamCapabilities: Decodable, Sendable {
     var canPublishCheckouts = false
+    var canConnectCheckouts = false
     var actorId: String?
     var enabled: Bool
     var ready: Bool
@@ -42,11 +44,12 @@ struct TeamCapabilities: Decodable, Sendable {
         self.needsDeviceRegistration = needsDeviceRegistration
         self.authorizationRequired = authorizationRequired; self.version = version
     }
-    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts }
+    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         actorId = try c.decodeIfPresent(String.self, forKey: .actorId)
         canPublishCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canPublishCheckouts) ?? false
+        canConnectCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canConnectCheckouts) ?? false
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         ready = try c.decodeIfPresent(Bool.self, forKey: .ready) ?? false
         needsDeviceRegistration = try c.decodeIfPresent(Bool.self, forKey: .needsDeviceRegistration) ?? false
@@ -163,6 +166,12 @@ struct TeamRepositories: Decodable, Sendable { var repositories: [TeamRepository
 struct TeamRepositoryMembers: Decodable, Sendable { var members: [TeamRepositoryMember]; let nextOffset: Int? }
 struct TeamInvitations: Decodable, Sendable { var invitations: [TeamInvitation]; let nextOffset: Int? }
 struct TeamCheckouts: Decodable, Sendable { var checkouts: [TeamCheckout]; let nextOffset: Int? }
+struct TeamCheckoutAvailability: Decodable, Sendable {
+    let checkoutId: String
+    let organizationId: String
+    let repositoryId: String
+    let state: String
+}
 struct TeamLocalWorkspace: Codable, Identifiable, Hashable, Sendable { let id: String; let name: String; let path: String }
 struct TeamCheckoutOptions: Decodable, Sendable { let workspaces: [TeamLocalWorkspace]; let deviceName: String; let nextOffset: Int? }
 struct TeamCheckoutPreview: Decodable, Sendable {

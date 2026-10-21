@@ -5,6 +5,7 @@
 //! this machine's account credential or its personal workspace policy.
 
 mod authorization;
+mod connections;
 mod directory;
 mod ingress;
 #[cfg(feature = "local-host")]
@@ -21,6 +22,21 @@ use tokenstat_sync::teams::{TeamClient, TeamError};
 
 pub(crate) fn scoped_call(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
     scoped::call(method, params)
+}
+
+pub(crate) fn restore_remote_reach(
+    owner: &AccountSnapshot,
+    identity: &tokenstat_identity::MachineIdentity,
+) -> Result<(), DispatchError> {
+    #[cfg(feature = "local-host")]
+    {
+        sharing::restore_remote_reach(owner, identity)
+    }
+    #[cfg(not(feature = "local-host"))]
+    {
+        let _ = (owner, identity);
+        Ok(())
+    }
 }
 
 pub(crate) fn serve(
@@ -86,6 +102,9 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                 expected_device_key,
             } => prepare_authorization(&owner, &client, &expected_device_key),
             directory::Request::Directory(operation) => directory::perform(&client, operation),
+            directory::Request::Connection(request) => {
+                connections::perform(&owner, client.clone(), request)
+            }
             #[cfg(feature = "local-host")]
             directory::Request::Sharing(request) => sharing::perform(&owner, &client, request),
         };
@@ -115,10 +134,16 @@ fn capabilities(client: &TeamClient) -> Result<Value, DispatchError> {
                     .features
                     .iter()
                     .any(|feature| feature == "checkout-publication");
+            let can_connect = ready
+                && capabilities
+                    .features
+                    .iter()
+                    .any(|feature| feature == "scoped-connections");
             let mut value = serialize(capabilities)?;
             value["ready"] = json!(ready);
             value["needsDeviceRegistration"] = json!(false);
             value["canPublishCheckouts"] = json!(can_publish);
+            value["canConnectCheckouts"] = json!(can_connect);
             Ok(value)
         }
         Err(TeamError::Rejected { code, .. }) if code == "device_required" => Ok(
@@ -209,7 +234,7 @@ fn serialize<T: serde::Serialize>(value: T) -> Result<Value, DispatchError> {
 fn changed(_message: String) -> DispatchError {
     api_error(TeamError::AccountChanged)
 }
-fn api_error(error: TeamError) -> DispatchError {
+pub(crate) fn api_error(error: TeamError) -> DispatchError {
     let code = match &error {
         TeamError::Rejected { code, .. } => code.as_str(),
         TeamError::NotSignedIn => "auth",

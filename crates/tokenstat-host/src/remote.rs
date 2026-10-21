@@ -41,6 +41,9 @@ use tokenstat_identity::{MachineIdentity, PeerStore, public_key_from_hex};
 use tokenstat_remote::{Refused, authorize_with};
 use tokenstat_sync::profile::ProfileError;
 
+mod team_connection;
+mod team_reach;
+pub(crate) use team_connection::{Link as TeamConnection, ReadMethod as TeamReadMethod};
 mod tunnel_lifecycle;
 mod tunnel_runtime;
 
@@ -232,12 +235,69 @@ fn session_for_serving() -> Result<Arc<Mutex<Session>>, String> {
     }
 }
 
+fn current_team_scope(
+    owner: &crate::account_session::AccountSnapshot,
+) -> Result<tunnel_runtime::Scope, String> {
+    owner.ensure_current()?;
+    let identity = MachineIdentity::load_or_create()
+        .map_err(|_| "This device's connection key is unavailable.")?;
+    let settings = load_settings();
+    Ok(tunnel_runtime::Scope {
+        owner: owner.id.clone(),
+        key: identity.public_key(),
+        endpoint: settings.tunnel_endpoint,
+    })
+}
+
+#[cfg(feature = "local-host")]
+pub(crate) fn team_reach_restoring(
+    owner: &crate::account_session::AccountSnapshot,
+    restoring: bool,
+) -> Result<(), String> {
+    let scope = current_team_scope(owner)?;
+    team_reach::restoring(&scope, restoring);
+    owner.ensure_current()
+}
+
+#[cfg(feature = "local-host")]
+pub(crate) fn team_hosting(
+    owner: &crate::account_session::AccountSnapshot,
+    expected_key: &str,
+    active: bool,
+) -> Result<(), String> {
+    let scope = current_team_scope(owner)?;
+    if tokenstat_identity::hex(&scope.key) != expected_key {
+        return Err("This device's connection key changed.".into());
+    }
+    team_reach::hosting(&scope, active)?;
+    if !active {
+        tunnel_lifecycle::retire_if_unused(&scope);
+    }
+    owner.ensure_current()
+}
+
+#[cfg(feature = "local-host")]
+pub(crate) fn start_team_reach(owner: crate::account_session::AccountSnapshot) {
+    let Some(session) = registered_session()
+        .lock()
+        .ok()
+        .and_then(|held| held.clone())
+    else {
+        return;
+    };
+    thread::spawn(move || {
+        let _ = crate::account_session::with_snapshot(Some(owner), || {
+            start_tunnel_if_enabled(session, &load_settings());
+            Ok(())
+        });
+    });
+}
+
 /// Start serving, if the user turned it on. Called once at daemon start.
 pub fn start_if_enabled(session: Arc<Mutex<Session>>) {
     register_session(Arc::clone(&session));
     let settings = load_settings();
-    // Remote reach is one switch and one transport: the tunnel. Everything
-    // between machines rides it, so there is nothing to bind or advertise.
+    // Personal reach and explicitly shared Team checkouts reuse one socket.
     start_tunnel_if_enabled(session, &settings);
     #[cfg(feature = "local-host")]
     start_direct_if_enabled();
@@ -606,6 +666,11 @@ fn tunnel_paused() -> &'static AtomicBool {
     &PAUSED
 }
 
+#[cfg(feature = "local-host")]
+pub(crate) fn personal_reach_allowed() -> bool {
+    !tunnel_paused().load(Ordering::Acquire) && load_settings().tunnel
+}
+
 /// Drop the tunnel socket without writing the user's switch off.
 ///
 /// Used when hosting is paused (lid closed, app gone). `remote.json` stays
@@ -623,9 +688,6 @@ pub(crate) fn pause_tunnel() {
 pub(crate) fn resume_tunnel_if_enabled() {
     tunnel_paused().store(false, Ordering::Release);
     let settings = load_settings();
-    if !settings.tunnel {
-        return;
-    }
     if let Ok(session) = session_for_serving() {
         start_tunnel_if_enabled(session, &settings);
     }
@@ -675,7 +737,7 @@ fn retry_start_later(session: Arc<Mutex<Session>>) {
         loop {
             std::thread::sleep(delay);
             let settings = load_settings();
-            if !settings.tunnel || tunnel_paused().load(Ordering::Acquire) {
+            if !tunnel_lifecycle::wanted() {
                 break;
             }
             if tunnel_lifecycle::running() {
@@ -1073,6 +1135,10 @@ fn serve_peer(
     // build so Account can say how a peer reached this machine.
     route: Route,
 ) {
+    if !load_settings().tunnel || tunnel_paused().load(Ordering::Acquire) {
+        connection.close();
+        return;
+    }
     let peer = connection.peer_key();
     remember_route(&tokenstat_identity::hex(&peer), route);
     // A machine cannot serve itself. A self-dial through the tunnel, or a
@@ -1094,6 +1160,10 @@ fn serve_peer(
     // Only a build that can own a terminal can hand one over. Without
     // `local-host` there are no reservations, so a stream claim is just an
     // unrecognized first message and the connection carries on as a request.
+    if !load_settings().tunnel || tunnel_paused().load(Ordering::Acquire) {
+        connection.close();
+        return;
+    }
     #[cfg(feature = "local-host")]
     if let Some(token) = crate::remote_stream::parse_handshake(&String::from_utf8_lossy(&first)) {
         // `accept` hands the connection to the pump, or closes it when the
@@ -1107,7 +1177,10 @@ fn serve_peer(
     // request after it. Connections are held open and reused, so a peer
     // revoked while connected would otherwise keep being answered until it
     // chose to hang up. Revocation has to mean the next request.
-    if !PeerStore::cached().is_ok_and(|store| store.is_approved(&peer)) {
+    if !load_settings().tunnel
+        || tunnel_paused().load(Ordering::Acquire)
+        || !PeerStore::cached().is_ok_and(|store| store.is_approved(&peer))
+    {
         let _ = connection.send(
             br#"{"ok":false,"error":{"code":"not_approved","message":"That machine has withdrawn access."}}"#,
         );
@@ -1124,7 +1197,10 @@ fn serve_peer(
             Ok(bytes) => bytes,
             Err(_) => return,
         };
-        if !PeerStore::cached().is_ok_and(|store| store.is_approved(&peer)) {
+        if !load_settings().tunnel
+            || tunnel_paused().load(Ordering::Acquire)
+            || !PeerStore::cached().is_ok_and(|store| store.is_approved(&peer))
+        {
             let _ = connection.send(
                 br#"{"ok":false,"error":{"code":"not_approved","message":"That machine has withdrawn access."}}"#,
             );
@@ -3146,9 +3222,7 @@ fn nudge(params: &str) -> Result<Value, String> {
         return Ok(json!({"nudged": true, "reconnect": p.reconnect}));
     }
     let settings = load_settings();
-    if settings.tunnel
-        && let Ok(session) = session_for_serving()
-    {
+    if let Ok(session) = session_for_serving() {
         start_tunnel_if_enabled(session, &settings);
     }
     Ok(json!({"nudged": true, "reconnect": p.reconnect}))
@@ -3220,8 +3294,9 @@ fn status() -> Result<Value, String> {
         // daemon is being refused (plan gate, revoked token, endpoint down),
         // and a screen that cannot tell the difference will offer a Connect
         // that can never work.
-        "tunnelOnline": tunnel_state.connected,
-        "tunnelRegistered": tunnel_state.registered,
+        "tunnelOnline": settings.tunnel && tunnel_state.connected,
+        "tunnelRegistered": settings.tunnel && tunnel_state.registered,
+        "teamTunnelOnline": tunnel_state.connected && current_team_scope(&crate::account_session::current_or_capture()?).is_ok_and(|scope| team_reach::active(&scope)),
         "tunnelError": tunnel_state.error,
         "key": identity.public_key_hex(),
         "fingerprint": identity.fingerprint(),
@@ -3277,7 +3352,7 @@ fn serve(params: &str) -> Result<Value, String> {
     }
     save_settings(&settings)?;
     if p.tunnel == Some(false) {
-        stop_tunnel();
+        tunnel_lifecycle::personal_disabled();
         #[cfg(feature = "local-host")]
         stop_direct();
     }
@@ -3652,6 +3727,13 @@ mod tests {
         let worker = std::thread::spawn(move || {
             let connection = server.accept().unwrap().unwrap();
             let session = Mutex::new(Session::open_client(None).unwrap());
+            // This fixture opts in only after setup. Its loopback listener is
+            // the transport; it never starts a relay or LAN listener.
+            save_settings(&RemoteSettings {
+                tunnel: true,
+                ..RemoteSettings::default()
+            })
+            .unwrap();
             serve_peer(connection, &session, Route::Direct);
         });
         let mut connection = tokenstat_remote::dial_with_timeout(

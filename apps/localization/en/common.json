@@ -515,6 +515,8 @@
   "common.teams.repository_rename_detail": "Change the shared project name. Local folder names, branches and files stay on each computer.",
   "common.teams.join_no_repository_access": "No repository access is assigned. An owner, admin or maintainer can assign access after you join.",
   "common.teams.checkouts": "Checkouts",
+  "common.teams.check_availability": "Check availability",
+  "common.teams.checkout_available": "Available at last check",
   "common.teams.this_computer": "From this computer",
   "common.teams.published_computers": "Published checkouts",
   "common.teams.computer": "Computer",

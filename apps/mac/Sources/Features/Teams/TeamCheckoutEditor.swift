@@ -25,6 +25,8 @@ struct TeamCheckoutEditor: View {
     @State private var error: String?
     @State private var notice: String?
     @State private var requestId = UUID().uuidString
+    @State private var checkingCheckout: String?
+    @State private var availableCheckouts: Set<String> = []
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
     private var isCurrent: Bool { store.mutationContext == context && store.phase == .ready }
@@ -100,6 +102,18 @@ struct TeamCheckoutEditor: View {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     if let publisher = checkout.publisher {
                         TeamPersonLabel(id: publisher.id, name: publisher.name, handle: publisher.handle, avatar: publisher.avatar, owner: context.owner)
+                    }
+                    if store.capabilities?.canConnectCheckouts == true {
+                        if availableCheckouts.contains(checkout.id) {
+                            Label(L10n.text("common.teams.checkout_available"), systemImage: ActionIcon.approve.symbol)
+                                .font(Theme.callout).foregroundStyle(.secondary)
+                        }
+                        Button(L10n.text("common.teams.check_availability"), .refresh) {
+                            Task { await checkAvailability(checkout) }
+                        }.buttonStyle(TeamButtonStyle()).disabled(checkingCheckout != nil || saving || loading)
+                        if checkingCheckout == checkout.id {
+                            ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading"))
+                        }
                     }
                     DisclosureGroup(L10n.text("common.teams.connection_details")) {
                         Text(checkout.id).font(Theme.mono(11)).textSelection(.enabled)
@@ -247,5 +261,19 @@ struct TeamCheckoutEditor: View {
     }
     private func target(_ workspace: String) -> [String: JSONValue] {
         ["organization":.string(repository.organizationId),"repository":.string(repository.id),"workspace":.string(workspace)]
+    }
+    private func checkAvailability(_ checkout: TeamCheckout) async {
+        guard isCurrent, checkingCheckout == nil, !saving, !loading else { return }
+        checkingCheckout = checkout.id; availableCheckouts.remove(checkout.id); error = nil
+        defer { checkingCheckout = nil }
+        do {
+            let result: TeamCheckoutAvailability = try await store.read(.connectionCall, fields: [
+                "target": .object(["organization": .string(repository.organizationId), "repository": .string(repository.id), "checkout": .string(checkout.id)]),
+                "method": .string("team.checkout.info"),
+            ], context: context)
+            guard isCurrent, result.checkoutId == checkout.id, result.organizationId == repository.organizationId,
+                result.repositoryId == repository.id, result.state == "available" else { throw CancellationError() }
+            availableCheckouts.insert(checkout.id)
+        } catch is CancellationError {} catch { if isCurrent { self.error = error.localizedDescription } }
     }
 }

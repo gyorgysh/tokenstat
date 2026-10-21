@@ -16,6 +16,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Interactive charts in agent replies on Mac, Windows, iPhone, iPad and Android. Twelve chart families cover comparisons, trends, distributions, proportions and relationships, with the same offline renderer on every client.
 - Pointer, touch and keyboard inspection, selectable legends, chart zoom, expansion, accessible paginated data tables and native PNG, SVG, CSV and JSON exports. Charts follow light and dark themes, number locales and reduced motion settings.
 - A versioned data-only chart format, MCP creation, validation, schema and example tools, a `tokenstat chart` command, and JavaScript and Python helpers. Chart data stays in the conversation and works across agents, reopened chats and connected devices.
+- Teams account management on Mac, iPhone and iPad, with organization selection in the account menu, invitations, member roles, repository access and ownership recovery. Creating an organization requires Legend; members need Patron or Legend.
+- Review and share individual repository checkouts from their publishing computer. Team members can check availability through a separate authorized connection while personal remote access remains off. Each checkout stays on its own computer and branch.
 
 ## [1.7.5] - 2026-10-21
 

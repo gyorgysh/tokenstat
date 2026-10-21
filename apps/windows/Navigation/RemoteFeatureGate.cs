@@ -14,6 +14,7 @@ internal static class RemoteFeatureGate
     public const int TeamsMinProtocol = 38;
     public const int TeamSessionsMinProtocol = 39;
     public const int TeamCheckoutsMinProtocol = 40;
+    public const int TeamConnectionsMinProtocol = 41;
     public static bool SupportsTeams(long? protocol) => protocol is not null && protocol >= TeamsMinProtocol;
     public const int WorktreesMinProtocol = 24;
     public const int ChatMinProtocol = 4;

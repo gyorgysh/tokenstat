@@ -44,6 +44,21 @@ Test narrow windows, both appearances, larger text, keyboard navigation and Voic
 supplement the account and transport integration tests; their API deliberately
 refuses writes.
 
+The cross-repository transport check uses the real website account handlers,
+Team relay, Noise handshake and host dispatch with disposable local accounts:
+
+```sh
+cargo build -p tokenstat-host --example team-transport-probe
+task_probe="$(pwd)/target/debug/examples/team-transport-probe"
+cd ../www
+bun scripts/test-teams-transport.js "$task_probe"
+```
+
+Pass an absolute probe path when running from another directory. The runner
+binds random loopback ports and uses an in-memory database and temporary host
+directories. It checks scoped reads, renewal, denied personal methods, outsider
+access and live repository revocation, then removes its processes and files.
+
 The scheme also has native iOS UI tests. Pass the separate device’s identifier
 with `-destination 'platform=iOS Simulator,id=YOUR_QA_DEVICE_ID'` and run `test`
 with `-parallel-testing-enabled NO`. Tests check default repository access,

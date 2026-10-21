@@ -13,6 +13,7 @@ pub(super) enum Request {
         expected_device_key: String,
     },
     Directory(Operation),
+    Connection(super::connections::Request),
     #[cfg(feature = "local-host")]
     Sharing(super::sharing::Request),
 }
@@ -49,6 +50,10 @@ pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError
         "teams.directory" => serde_json::from_value(body)
             .map(Request::Directory)
             .map_err(|_| invalid()),
+        "teams.connection.call" => serde_json::from_value::<super::connections::Request>(body)
+            .map_err(|_| invalid())?
+            .validate()
+            .map(Request::Connection),
         "teams.capabilities" | "teams.authorizationPreview" | "teams.prepareAuthorization" => {
             Err(invalid())
         }
