@@ -19,6 +19,37 @@ use tokenstat_sync::teams::{
 const RESPONSE_LIMIT: usize = 8 * 1024 * 1024;
 const RESPONSE_TIME: Duration = Duration::from_secs(15);
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CommentInput {
+    pub text: String,
+    pub client_message_id: String,
+    pub client_message_created_at_ms: i64,
+}
+impl CommentInput {
+    pub(crate) fn valid_id(id: &str) -> bool {
+        !id.is_empty()
+            && id.len() <= 128
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
+    }
+    pub(crate) fn validate(&self) -> Result<(), DispatchError> {
+        if self.text.trim().is_empty()
+            || self.text.len() > 8192
+            || !Self::valid_id(&self.client_message_id)
+            || self.client_message_created_at_ms <= 0
+            || !serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= 14 * 1024)
+        {
+            return Err(DispatchError::new(
+                "invalid_comment",
+                "Enter a shorter comment and try again.",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) enum ReadMethod {
     #[serde(rename = "team.protocol")]
@@ -31,6 +62,8 @@ pub(crate) enum ReadMethod {
     ChatDetails,
     #[serde(rename = "team.chat.events")]
     ChatEvents,
+    #[serde(rename = "team.chat.receipt")]
+    ChatReceipt,
 }
 impl ReadMethod {
     pub(crate) fn wire(self) -> &'static str {
@@ -40,6 +73,7 @@ impl ReadMethod {
             Self::ChatCatalog => "team.chat.catalog",
             Self::ChatDetails => "team.chat.details",
             Self::ChatEvents => "team.chat.events",
+            Self::ChatReceipt => "team.chat.receipt",
         }
     }
 }
@@ -53,6 +87,8 @@ pub(crate) struct ReadParams {
     pub(crate) limit: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) direction: Option<PageDirection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) client_message_id: Option<String>,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -62,6 +98,9 @@ pub(crate) enum PageDirection {
 }
 impl ReadParams {
     pub(crate) fn validate(&self, method: ReadMethod, share: Option<&str>) -> bool {
+        if method != ReadMethod::ChatReceipt && self.client_message_id.is_some() {
+            return false;
+        }
         match method {
             ReadMethod::Protocol | ReadMethod::CheckoutInfo => {
                 self.cursor.is_none() && self.limit.is_none() && self.direction.is_none()
@@ -84,6 +123,16 @@ impl ReadParams {
                 share.is_some()
                     && self.limit.is_none_or(|limit| (1..=100).contains(&limit))
                     && self.after(share.unwrap_or_default()).is_ok()
+            }
+            ReadMethod::ChatReceipt => {
+                share.is_some()
+                    && self.cursor.is_none()
+                    && self.limit.is_none()
+                    && self.direction.is_none()
+                    && self
+                        .client_message_id
+                        .as_deref()
+                        .is_some_and(CommentInput::valid_id)
             }
         }
     }
@@ -154,6 +203,11 @@ enum Transport {
     Local,
     Relay(Box<Relay>),
 }
+#[derive(Clone, Copy)]
+enum Purpose {
+    Read,
+    Comment,
+}
 struct Relay {
     connection: Connection,
     channel: TeamChannelHandle,
@@ -182,10 +236,49 @@ impl Link {
         repository: String,
         expected_key: tokenstat_identity::PublicKey,
     ) -> Result<Self, DispatchError> {
+        Self::connect_for(
+            owner,
+            client,
+            request,
+            repository,
+            expected_key,
+            Purpose::Read,
+        )
+    }
+    pub(crate) fn connect_comment(
+        owner: AccountSnapshot,
+        client: Arc<TeamClient>,
+        request: RequestTicket,
+        repository: String,
+        expected_key: tokenstat_identity::PublicKey,
+    ) -> Result<Self, DispatchError> {
+        Self::connect_for(
+            owner,
+            client,
+            request,
+            repository,
+            expected_key,
+            Purpose::Comment,
+        )
+    }
+    fn connect_for(
+        owner: AccountSnapshot,
+        client: Arc<TeamClient>,
+        request: RequestTicket,
+        repository: String,
+        expected_key: tokenstat_identity::PublicKey,
+        purpose: Purpose,
+    ) -> Result<Self, DispatchError> {
         owner
             .ensure_current()
             .map_err(|_| api_error(TeamError::AccountChanged))?;
-        if request.capabilities != [TeamCapability::Read] {
+        let expected = match purpose {
+            Purpose::Read => vec![TeamCapability::Read],
+            Purpose::Comment => vec![TeamCapability::Read, TeamCapability::Comment],
+        };
+        if request.capabilities != expected
+            || matches!(purpose, Purpose::Comment) && request.share_id.is_none()
+        {
             return Err(api_error(TeamError::InvalidRequest));
         }
         let identity = MachineIdentity::load()
@@ -254,6 +347,18 @@ impl Link {
         link.ensure_current()?;
         let protocol = link.call(ReadMethod::Protocol, &ReadParams::default())?;
         link.verify_protocol(&protocol)?;
+        if matches!(purpose, Purpose::Comment)
+            && (protocol["comments"] != true
+                || protocol["protocolVersion"]
+                    .as_str()
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .is_none_or(|v| v < 46))
+        {
+            return Err(DispatchError::new(
+                "team_host_update_required",
+                "Update tokenstat on the publishing computer to comment.",
+            ));
+        }
         Ok(link)
     }
 
@@ -351,6 +456,52 @@ impl Link {
         // reads both validate the replacement through the scoped boundary.
         let protocol = self.call(ReadMethod::Protocol, &ReadParams::default())?;
         self.verify_protocol(&protocol)
+    }
+    /// One attempt only. After bytes might have reached the host, a missing
+    /// response means delivery is unknown; callers check their own receipt.
+    pub(crate) fn comment(&mut self, input: &CommentInput) -> Result<Value, DispatchError> {
+        input.validate()?;
+        self.ensure_current()?;
+        if self.request.capabilities != [TeamCapability::Read, TeamCapability::Comment]
+            || self.request.share_id.is_none()
+        {
+            return Err(api_error(TeamError::InvalidRequest));
+        }
+        if matches!(&self.transport, Transport::Local) {
+            let result = crate::teams::loopback_comment(
+                &self.client,
+                &self.proof,
+                &self.identity.public_key(),
+                self.deadline,
+                input,
+            );
+            self.ensure_current()?;
+            return result;
+        }
+        let Transport::Relay(relay) = &mut self.transport else {
+            return Err(invalid());
+        };
+        let id = self.next_id;
+        self.next_id = self.next_id.checked_add(1).ok_or_else(invalid)?;
+        let bytes =
+            serde_json::to_vec(&json!({"id":id,"method":"team.chat.comment","params":input}))
+                .map_err(|_| invalid())?;
+        if bytes.len() > 16 * 1024 {
+            return Err(api_error(TeamError::InvalidRequest));
+        }
+        let unknown = || {
+            DispatchError::delivery_unknown(
+                "Comment delivery could not be verified. Keep your draft and check the chat before sending again.",
+            )
+        };
+        relay.connection.send(&bytes).map_err(|_| unknown())?;
+        let time = RESPONSE_TIME.min(self.deadline.saturating_duration_since(Instant::now()));
+        let response = relay
+            .connection
+            .receive_bounded(RESPONSE_LIMIT, time)
+            .map_err(|_| unknown())?;
+        self.ensure_current()?;
+        reply(&response, id)
     }
 
     fn verify_protocol(&self, value: &Value) -> Result<(), DispatchError> {

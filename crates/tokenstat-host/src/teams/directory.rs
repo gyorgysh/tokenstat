@@ -14,6 +14,7 @@ pub(super) enum Request {
     },
     Directory(Operation),
     Connection(super::connections::Request),
+    Comment(super::connections::CommentRequest),
     #[cfg(feature = "local-host")]
     Sharing(super::sharing::Request),
     #[cfg(feature = "local-host")]
@@ -60,6 +61,10 @@ pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError
             .map_err(|_| invalid())?
             .validate()
             .map(Request::Connection),
+        "teams.comment.send" => serde_json::from_value::<super::connections::CommentRequest>(body)
+            .map_err(|_| invalid())?
+            .validate()
+            .map(Request::Comment),
         "teams.capabilities" | "teams.authorizationPreview" | "teams.prepareAuthorization" => {
             Err(invalid())
         }

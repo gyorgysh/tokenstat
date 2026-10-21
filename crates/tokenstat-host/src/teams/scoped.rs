@@ -19,6 +19,28 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             )
         })?;
         principal.ensure_live()?;
+        if method == "team.chat.comment" {
+            if params.len() > 16 * 1024 {
+                return Err(DispatchError::new(
+                    "invalid_comment",
+                    "Enter a shorter comment and try again.",
+                ));
+            }
+            let input: crate::remote::TeamCommentInput =
+                serde_json::from_str(params).map_err(|_| {
+                    DispatchError::new("invalid_comment", "Check the comment and try again.")
+                })?;
+            #[cfg(feature = "local-host")]
+            return super::scoped_comments::send(&principal, &input);
+            #[cfg(not(feature = "local-host"))]
+            {
+                let _ = input;
+                return Err(DispatchError::new(
+                    "host_required",
+                    "Open this chat on its publishing computer.",
+                ));
+            }
+        }
         let operation = serde_json::from_value::<TeamReadMethod>(json!(method)).map_err(|_| {
             DispatchError::new(
                 "team_method_required",
@@ -41,6 +63,18 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             ));
         }
         let scope = principal.value();
+        if operation == TeamReadMethod::ChatReceipt {
+            #[cfg(feature = "local-host")]
+            return super::scoped_comments::status(
+                &principal,
+                body.client_message_id.as_deref().unwrap_or_default(),
+            );
+            #[cfg(not(feature = "local-host"))]
+            return Err(DispatchError::new(
+                "host_required",
+                "Open this chat on its publishing computer.",
+            ));
+        }
         if operation == TeamReadMethod::ChatCatalog {
             #[cfg(feature = "local-host")]
             return super::catalog::call(&principal, &body);
@@ -101,7 +135,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         }
         Ok(
             json!({"version":1,"protocolVersion":crate::PROTOCOL_VERSION,"issuer":principal.issuer(),"organizationId":scope.organization_id,"repositoryId":scope.repository_id,"checkoutId":scope.checkout_id,"checkoutInfo":cfg!(feature="local-host"),
-            "sharedChats":cfg!(feature="local-host"),"chatCatalog":cfg!(feature="local-host"),"agentRuns":false}),
+            "sharedChats":cfg!(feature="local-host"),"chatCatalog":cfg!(feature="local-host"),"comments":cfg!(feature="local-host"),"agentRuns":false}),
         )
     })())
 }

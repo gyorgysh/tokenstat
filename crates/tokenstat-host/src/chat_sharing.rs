@@ -6,6 +6,14 @@
 use super::*;
 use sha2::{Digest, Sha256};
 
+#[path = "chat_sharing/journal.rs"]
+mod journal;
+#[path = "chat_sharing/writer.rs"]
+mod writer;
+pub(crate) use crate::remote::TeamCommentInput as CommentInput;
+pub(crate) use writer::SharedSource;
+pub(super) use writer::fork_journal;
+
 const INDEX_LIMIT: u64 = 16 * 1024 * 1024;
 const HISTORY_LIMIT: u64 =
     PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64;
@@ -306,6 +314,7 @@ impl Store {
             crate::chat_receipts::Operation::conversation(&self.root, id).map_err(|_| invalid())?;
         let lifecycle =
             crate::work_handoff_store::lifecycle_lock(&self.root).map_err(|_| invalid())?;
+        let _transcript = self.transcript_guard().map_err(|_| invalid())?;
         self.edit_index_locked(&lifecycle, false, |_, current| {
             let chat = current
                 .iter_mut()
@@ -333,6 +342,9 @@ impl Store {
             }
             if expected.is_some_and(|revision| revision != chat.send_revision) {
                 return Err("This chat changed. Refresh sharing before stopping it.".into());
+            }
+            if let Ok(directory) = safe_join(&self.root, id) {
+                writer::stop_journal(&directory, chat);
             }
             chat.team_share = None;
             chat.send_revision = next_send_revision(chat.send_revision)?;
@@ -363,25 +375,9 @@ impl Store {
         expected: &str,
     ) -> Result<History, DispatchError> {
         self.source_locked(workspace, id, false, |_, chat, bytes| {
-            let marker = chat.team_share.as_ref().ok_or_else(paused)?;
-            if marker.id != share || marker.initial_fingerprint != expected {
-                return Err(paused());
-            }
-            let boundary = usize::try_from(marker.history_bytes).map_err(|_| paused())?;
-            // Until an authenticated Team writer is installed, any appended
-            // record is unapproved. An older client cannot silently publish a
-            // private prompt, even if it ignores the conversion marker.
-            if boundary != bytes.len() {
-                return Err(paused());
-            }
-            let mut history = project(chat, bytes)?;
-            if history.fingerprint != marker.initial_fingerprint
-                || history.history_through != marker.history_through
-            {
-                return Err(paused());
-            }
-            history.binding = Some(marker.clone());
-            Ok(history)
+            let directory = safe_join(&self.root, id).map_err(|_| invalid())?;
+            let journal = writer::load(&directory, chat, bytes)?;
+            shared_project(chat, bytes, share, expected, journal.as_ref())
         })
     }
 
@@ -392,7 +388,19 @@ impl Store {
         operation: impl FnOnce(Index, History) -> Result<T, DispatchError>,
     ) -> Result<T, DispatchError> {
         self.source_locked(workspace, id, true, |index, chat, bytes| {
-            let history = project(chat, bytes)?;
+            let directory = safe_join(&self.root, id).map_err(|_| invalid())?;
+            let journal = writer::load(&directory, chat, bytes)?;
+            let history = if let Some(marker) = &chat.team_share {
+                shared_project(
+                    chat,
+                    bytes,
+                    &marker.id,
+                    &marker.initial_fingerprint,
+                    journal.as_ref(),
+                )?
+            } else {
+                project_with_journal(chat, bytes, journal.as_ref())?
+            };
             operation(index, history)
         })
     }
@@ -478,7 +486,66 @@ pub(super) fn require_personal_send(chat: &Conversation) -> Result<(), DispatchE
     Ok(())
 }
 
+#[cfg(test)]
 fn project(chat: &Conversation, bytes: &[u8]) -> Result<History, DispatchError> {
+    project_with_journal(chat, bytes, None)
+}
+
+fn shared_project(
+    chat: &Conversation,
+    bytes: &[u8],
+    share: &str,
+    expected: &str,
+    journal: Option<&journal::Journal>,
+) -> Result<History, DispatchError> {
+    let marker = chat.team_share.as_ref().ok_or_else(paused)?;
+    if marker.id != share || marker.initial_fingerprint != expected {
+        return Err(paused());
+    }
+    let boundary = usize::try_from(marker.history_bytes).map_err(|_| paused())?;
+    let prefix = bytes.get(..boundary).ok_or_else(paused)?;
+    let initial = project_with_journal(chat, prefix, journal)?;
+    if initial.fingerprint != marker.initial_fingerprint
+        || initial.history_through != marker.history_through
+    {
+        return Err(paused());
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut position = boundary;
+    for line in bytes[boundary..].split_inclusive(|b| *b == b'\n') {
+        let raw: Value = serde_json::from_slice(line).map_err(|_| paused())?;
+        let seq = crate::work_transcript_identity::sequence(
+            raw.as_object().ok_or_else(paused)?,
+            position as u64,
+        )
+        .map_err(|_| paused())?;
+        position += line.len();
+        let proof = journal
+            .ok_or_else(paused)?
+            .author(&raw, seq)
+            .map_err(|_| paused())?
+            .ok_or_else(paused)?;
+        if proof.scope.share != share {
+            return Err(paused());
+        }
+        seen.insert(proof.key);
+    }
+    if let Some(journal) = journal {
+        journal
+            .require_complete(share, &seen)
+            .map_err(|_| paused())?;
+    }
+    let mut history = project_with_journal(chat, bytes, journal)?;
+    history.fingerprint = initial.fingerprint;
+    history.binding = Some(marker.clone());
+    Ok(history)
+}
+
+fn project_with_journal(
+    chat: &Conversation,
+    bytes: &[u8],
+    journal: Option<&journal::Journal>,
+) -> Result<History, DispatchError> {
     let mut events = Vec::new();
     let mut offset = 0;
     let mut history_through = None;
@@ -501,6 +568,11 @@ fn project(chat: &Conversation, bytes: &[u8]) -> Result<History, DispatchError> 
         if raw["kind"] == "retainedUsage" {
             continue;
         }
+        let author = journal
+            .map(|journal| journal.author(&raw, sequence))
+            .transpose()
+            .map_err(|_| paused())?
+            .flatten();
         stored_aliases(raw.as_object_mut().ok_or_else(invalid)?);
         if let Some(Value::Object(agent)) = raw.get_mut("event") {
             stored_aliases(agent);
@@ -518,6 +590,10 @@ fn project(chat: &Conversation, bytes: &[u8]) -> Result<History, DispatchError> 
             continue;
         }
         let mut value = visible(event)?;
+        if let Some(author) = author {
+            value["author"] = author.person;
+            value["mode"] = json!("comment");
+        }
         value["seq"] = json!(sequence);
         events.push(value);
     }

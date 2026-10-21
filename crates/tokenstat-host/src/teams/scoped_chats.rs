@@ -12,7 +12,7 @@ use crate::{
     remote::{TeamPageDirection, TeamReadMethod, TeamReadParams},
 };
 use serde_json::{Value, json};
-use tokenstat_sync::teams::TeamCapability;
+use tokenstat_sync::teams::{RepositoryRole, TeamCapability};
 
 const PAGE_TARGET: usize = 512 * 1024;
 
@@ -69,7 +69,8 @@ pub(super) fn call(
     let result = match method {
         TeamReadMethod::ChatDetails => {
             json!({"chat":{"id":row.id,"checkoutId":row.checkout_id,"title":history.title,
-            "backend":history.backend,"historyTrimmed":history.history_trimmed,"allowsAgentRuns":false}})
+            "backend":history.backend,"historyTrimmed":history.history_trimmed,"allowsAgentRuns":false,
+            "allowsComments":row.source_revision.is_some() && matches!(scope.role,RepositoryRole::Contributor | RepositoryRole::Maintainer)}})
         }
         TeamReadMethod::ChatEvents => page(share, history.events, history.history_trimmed, params)?,
         _ => return Err(changed()),
@@ -186,6 +187,7 @@ mod tests {
             cursor: Some(first["nextCursor"].as_str().unwrap().into()),
             limit: Some(1),
             direction: None,
+            client_message_id: None,
         };
         assert!(page("share_other", events.clone(), false, &params).is_err());
         let last = page("share_one", events.clone(), false, &params).unwrap();
@@ -199,7 +201,8 @@ mod tests {
                 &TeamReadParams {
                     cursor: Some("v1:share_one:2".into()),
                     limit: None,
-                    direction: None
+                    direction: None,
+                    client_message_id: None,
                 }
             )
             .is_err()
@@ -215,6 +218,7 @@ mod tests {
             &TeamReadParams {
                 limit: Some(2),
                 direction: Some(TeamPageDirection::Older),
+                client_message_id: None,
                 cursor: None,
             },
         )
@@ -228,6 +232,7 @@ mod tests {
             &TeamReadParams {
                 limit: Some(2),
                 direction: Some(TeamPageDirection::Older),
+                client_message_id: None,
                 cursor: Some(first["nextCursor"].as_str().unwrap().into()),
             },
         )

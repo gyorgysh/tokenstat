@@ -111,6 +111,10 @@ pub struct Conversation {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) team_share: Option<sharing::Binding>,
+    /// Authorship receipts must survive a return to private use. A missing
+    /// initialized journal is damage, never an empty delivery history.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) team_journal_initialized: bool,
     pub backend: String,
     #[serde(default)]
     pub persona_id: Option<String>,
@@ -2296,6 +2300,7 @@ impl Store {
         let now = now_ms();
         let chat = Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id,
             workspace_id: input.workspace_id,
             title: input
@@ -2378,6 +2383,7 @@ impl Store {
             _ => {}
         }
         let source_usage = self.conversation_usage(&fork, &source.join("events.ndjson"))?;
+        let original = fork.clone();
         let stored_usage = usage_totals(&source.join("events.ndjson"))?;
         crate::chat_sessions::remember(&source, &fork)?;
         fork.id = mint_record_id("chat");
@@ -2435,6 +2441,8 @@ impl Store {
                 copied.extend(crate::work_transcript_identity::encoded(record, seq)?);
             }
             replace_chat_file(&destination.join("events.ndjson"), &copied)?;
+            fork.team_journal_initialized =
+                sharing::fork_journal(&source, &original, &destination, &fork, &bytes)?;
             crate::chat_sessions::inherit(&source, &destination)?;
             copy_fork_files(&source.join("files"), &destination.join("files"))?;
             self.edit_index_locked(&lifecycle, false, |_, current| {
@@ -7605,6 +7613,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -9635,6 +9644,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         let sample = |id: &str, workspace: &str| Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: id.into(),
             workspace_id: workspace.into(),
             title: "New chat".into(),
@@ -9814,6 +9824,7 @@ mod tests {
         // Unit test the durable mechanics without requiring a registered folder.
         let chat = Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -9939,6 +9950,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -9999,6 +10011,7 @@ mod tests {
     fn conversation_for_receipts(store: &Store, id: &str) {
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: id.into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13275,6 +13288,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         let mut chat = Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-handoff".into(),
             workspace_id: "ws".into(),
             title: "Handoff".into(),
@@ -13395,6 +13409,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         let chat = Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-rebrief".into(),
             workspace_id: "ws".into(),
             title: "Rebrief".into(),
@@ -13540,6 +13555,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         let mut chat = Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-standing".into(),
             workspace_id: "ws".into(),
             title: "Standing".into(),
@@ -13647,6 +13663,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13764,6 +13781,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13819,6 +13837,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13901,6 +13920,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -14192,6 +14212,7 @@ mod tests {
             .expect("a workspace with no choice recorded gets a starter");
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
+            team_journal_initialized: false,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),

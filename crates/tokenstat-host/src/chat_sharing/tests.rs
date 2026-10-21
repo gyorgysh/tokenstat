@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn fixture() -> (tempfile::TempDir, Store, Conversation) {
+pub(super) fn fixture() -> (tempfile::TempDir, Store, Conversation) {
     let root = tempfile::tempdir().unwrap();
     fs::create_dir_all(root.path().join("chat")).unwrap();
     let store = Store::load_at(root.path().join("chat"));

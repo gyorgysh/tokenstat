@@ -20,6 +20,10 @@ mod scoped;
 #[cfg(feature = "local-host")]
 mod scoped_chats;
 #[cfg(feature = "local-host")]
+mod scoped_comments;
+#[cfg(feature = "local-host")]
+mod scoped_source;
+#[cfg(feature = "local-host")]
 mod sharing;
 use crate::account_session::AccountSnapshot;
 use crate::error::DispatchError;
@@ -49,6 +53,30 @@ pub(crate) fn loopback_read(
     principal.ensure_live()?;
     client.ensure_current().map_err(api_error)?;
     Ok(value)
+}
+pub(crate) fn loopback_comment(
+    client: &TeamClient,
+    proof: &tokenstat_sync::teams::TeamConnectionProof,
+    device: &tokenstat_identity::PublicKey,
+    deadline: std::time::Instant,
+    input: &crate::remote::TeamCommentInput,
+) -> Result<Value, DispatchError> {
+    #[cfg(feature = "local-host")]
+    {
+        let principal = AuthorizedTeamPrincipal::loopback(client, proof, device, deadline)?;
+        let result = scoped_comments::send(&principal, input)?;
+        principal.ensure_live()?;
+        client.ensure_current().map_err(api_error)?;
+        Ok(result)
+    }
+    #[cfg(not(feature = "local-host"))]
+    {
+        let _ = (client, proof, device, deadline, input);
+        Err(DispatchError::new(
+            "host_required",
+            "Open this chat on its publishing computer.",
+        ))
+    }
 }
 pub(crate) fn local_sharing_call(
     method: &str,
@@ -145,6 +173,9 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             directory::Request::Directory(operation) => directory::perform(&client, operation),
             directory::Request::Connection(request) => {
                 connections::perform(&owner, client.clone(), request)
+            }
+            directory::Request::Comment(request) => {
+                connections::comment(&owner, client.clone(), request)
             }
             #[cfg(feature = "local-host")]
             directory::Request::Sharing(request) => sharing::perform(&owner, &client, request),

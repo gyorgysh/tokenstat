@@ -62,7 +62,7 @@ impl AuthorizedTeamPrincipal {
             client: Some(client.clone()),
         })
     }
-    pub(super) fn issuer(&self) -> &str {
+    pub(crate) fn issuer(&self) -> &str {
         &self.issuer
     }
     #[cfg(feature = "local-host")]
@@ -80,6 +80,30 @@ impl AuthorizedTeamPrincipal {
             return Err(expired());
         }
         Ok(())
+    }
+    #[cfg(feature = "local-host")]
+    pub(crate) fn ensure_account_current(&self) -> Result<(), DispatchError> {
+        self.ensure_live()?;
+        #[cfg(feature = "local-host")]
+        if let Some(client) = &self.client {
+            return client.ensure_current().map_err(api_error);
+        }
+        // Storage unit fixtures have no account client. Incoming production
+        // principals are created only by online authorization or loopback.
+        #[cfg(test)]
+        return Ok(());
+        #[cfg(not(test))]
+        Err(expired())
+    }
+    #[cfg(all(test, feature = "local-host"))]
+    pub(crate) fn storage_fixture(value: TeamPrincipal) -> Self {
+        Self {
+            value,
+            deadline: Instant::now() + std::time::Duration::from_secs(60),
+            issuer: "https://accounts.example.test".into(),
+            #[cfg(feature = "local-host")]
+            client: None,
+        }
     }
 }
 

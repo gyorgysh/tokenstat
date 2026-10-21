@@ -7,7 +7,7 @@ use super::api_error;
 use crate::{
     account_session::AccountSnapshot,
     error::DispatchError,
-    remote::{TeamConnection, TeamReadMethod, TeamReadParams},
+    remote::{TeamCommentInput, TeamConnection, TeamReadMethod, TeamReadParams},
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -71,6 +71,55 @@ impl Request {
         }
         Ok(self)
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CommentRequest {
+    target: Target,
+    input: TeamCommentInput,
+}
+impl CommentRequest {
+    pub(super) fn validate(self) -> Result<Self, DispatchError> {
+        Request {
+            target: self.target.clone(),
+            method: TeamReadMethod::ChatDetails,
+            params: TeamReadParams::default(),
+        }
+        .validate()?;
+        self.input.validate()?;
+        Ok(self)
+    }
+}
+
+/// Writes use a fresh exact Comment proof and one request. They cannot enter
+/// the read pool, inherit its retry policy or borrow a personal connection.
+pub(super) fn comment(
+    owner: &AccountSnapshot,
+    client: TeamClient,
+    request: CommentRequest,
+) -> Result<Value, DispatchError> {
+    let request = request.validate()?;
+    owner
+        .ensure_current()
+        .map_err(|_| api_error(TeamError::AccountChanged))?;
+    let identity = tokenstat_identity::MachineIdentity::load()
+        .map_err(|_| ended())?
+        .ok_or_else(ended)?;
+    let ticket = RequestTicket {
+        organization_id: request.target.organization,
+        checkout_id: request.target.checkout,
+        capabilities: vec![TeamCapability::Read, TeamCapability::Comment],
+        share_id: request.target.share,
+    };
+    TeamConnection::connect_comment(
+        owner.clone(),
+        Arc::new(client),
+        ticket,
+        request.target.repository,
+        identity.public_key(),
+    )?
+    .comment(&request.input)
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
