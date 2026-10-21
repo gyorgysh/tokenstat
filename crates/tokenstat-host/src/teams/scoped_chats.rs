@@ -55,12 +55,14 @@ pub(super) fn call(
     if Folder::capture(&workspace.path)? != checkout.folder {
         return Err(changed());
     }
-    let history = crate::chat::shared().shared_history(
+    let chats = crate::chat::shared();
+    let history = chats.shared_history(
         &checkout.workspace_id,
         &row.conversation_id,
         &row.id,
         &row.preview,
     )?;
+    let marker = history.binding.clone().ok_or_else(changed)?;
     let result = match method {
         TeamReadMethod::ChatDetails => {
             json!({"chat":{"id":row.id,"checkoutId":row.checkout_id,"title":history.title,
@@ -82,6 +84,9 @@ pub(super) fn call(
     {
         return Err(changed());
     }
+    // Canonical-only recovery can leave a damaged or restored map intact.
+    // Recheck the exact source marker, not just its private map reference.
+    chats.ensure_sharing_snapshot(&checkout.workspace_id, &row.conversation_id, &marker)?;
     principal.ensure_live()?;
     Ok(result)
 }

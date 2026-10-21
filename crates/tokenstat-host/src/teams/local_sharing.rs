@@ -78,7 +78,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             "chat.sharing.stopLocal" => {
                 let input: Stop = serde_json::from_str(params).map_err(|_| invalid())?;
                 if !input.confirm_stop
-                    || input.expected_revision == 0
+                    || (!input.source_only && input.expected_revision == 0)
                     || input.expected_revision > 9_007_199_254_740_991
                     || !crate::chat_receipts::valid_id(&input.id)
                     || input.workspace_id.is_empty()

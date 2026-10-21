@@ -528,3 +528,98 @@ fn canonical_recovery_requires_the_exact_source_revision_and_invalidates_old_con
             .is_none()
     );
 }
+
+#[test]
+fn canonical_stop_before_freeze_fences_old_consent_without_a_publication_journal() {
+    let (_root, store, chat) = fixture();
+    let share = "share_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let history = store.sharing_history(&chat.workspace_id, &chat.id).unwrap();
+    assert_eq!(history.source_revision, 0);
+    assert!(
+        store
+            .clear_sharing_at_revision(&chat.workspace_id, &chat.id, share, Some(1))
+            .is_err()
+    );
+    store
+        .clear_sharing_at_revision(&chat.workspace_id, &chat.id, share, Some(0))
+        .unwrap();
+    let (_, revision) = store.sharing_state(&chat.workspace_id, &chat.id).unwrap();
+    assert_eq!(revision, 1);
+    store
+        .clear_sharing_at_revision(&chat.workspace_id, &chat.id, share, Some(0))
+        .unwrap();
+    assert_eq!(
+        store.sharing_state(&chat.workspace_id, &chat.id).unwrap().1,
+        revision
+    );
+    assert!(
+        store
+            .freeze_sharing_if_current(
+                &chat.workspace_id,
+                &chat.id,
+                share,
+                &history.fingerprint,
+                0,
+                || Ok(())
+            )
+            .is_err()
+    );
+    let fresh = store.sharing_history(&chat.workspace_id, &chat.id).unwrap();
+    store
+        .freeze_sharing_if_current(
+            &chat.workspace_id,
+            &chat.id,
+            share,
+            &fresh.fingerprint,
+            fresh.source_revision,
+            || Ok(()),
+        )
+        .unwrap();
+    assert!(
+        store
+            .clear_sharing_at_revision(
+                &chat.workspace_id,
+                &chat.id,
+                "share_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                Some(0)
+            )
+            .is_err()
+    );
+    assert!(
+        store
+            .sharing_binding(&chat.workspace_id, &chat.id)
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn a_projected_snapshot_cannot_survive_canonical_only_recovery_or_be_serialized_as_authority() {
+    let (_root, store, chat) = fixture();
+    let share = "share_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let history = store.sharing_history(&chat.workspace_id, &chat.id).unwrap();
+    store
+        .freeze_sharing(&chat.workspace_id, &chat.id, share, &history.fingerprint)
+        .unwrap();
+    let snapshot = store
+        .shared_history(&chat.workspace_id, &chat.id, share, &history.fingerprint)
+        .unwrap();
+    let marker = snapshot.binding.as_ref().unwrap();
+    store
+        .ensure_sharing_snapshot(&chat.workspace_id, &chat.id, marker)
+        .unwrap();
+    let payload = serde_json::to_string(&snapshot).unwrap();
+    assert!(!payload.contains(share));
+    assert!(!payload.contains("initialFingerprint"));
+    let (_, revision) = store.sharing_state(&chat.workspace_id, &chat.id).unwrap();
+    store
+        .clear_sharing_at_revision(&chat.workspace_id, &chat.id, share, Some(revision))
+        .unwrap();
+    assert_eq!(
+        store
+            .ensure_sharing_snapshot(&chat.workspace_id, &chat.id, marker)
+            .unwrap_err()
+            .code,
+        "chat_sharing_paused"
+    );
+}

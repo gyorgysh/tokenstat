@@ -7882,11 +7882,17 @@ mod tests {
                                 assert_eq!(&id[12..13], "4");
                                 assert!(matches!(&id[16..17], "8" | "9" | "a" | "b"));
                                 if let Some(accepted) = outcome {
+                                    // Match the adapter's atomic publication. A
+                                    // direct write briefly exposes an empty
+                                    // response and can mean delivery_unknown.
+                                    let reply = response_dir.join(format!("response-{id}.json"));
+                                    let temporary = reply.with_extension("tmp");
                                     fs::write(
-                                        response_dir.join(format!("response-{id}.json")),
+                                        &temporary,
                                         json!({"ok":accepted,"error":"refused"}).to_string(),
                                     )
                                     .unwrap();
+                                    fs::rename(temporary, reply).unwrap();
                                 } else {
                                     tokenstat_pty::manager().kill(&process_id).unwrap();
                                 }

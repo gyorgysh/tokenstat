@@ -36,6 +36,8 @@ pub(crate) struct History {
     pub(crate) history_bytes: u64,
     #[serde(skip_serializing)]
     pub(crate) source_revision: u64,
+    #[serde(skip_serializing)]
+    pub(crate) binding: Option<Binding>,
 }
 
 fn invalid() -> DispatchError {
@@ -107,6 +109,20 @@ impl Store {
     ) -> Result<(Option<Binding>, u64), DispatchError> {
         self.index_locked(workspace, id, |_, chat| {
             Ok((chat.team_share.clone(), chat.send_revision))
+        })
+    }
+
+    pub(crate) fn ensure_sharing_snapshot(
+        &self,
+        workspace: &str,
+        id: &str,
+        expected: &Binding,
+    ) -> Result<(), DispatchError> {
+        self.index_locked(workspace, id, |_, chat| {
+            if chat.team_share.as_ref() != Some(expected) {
+                return Err(paused());
+            }
+            Ok(())
         })
     }
 
@@ -236,7 +252,17 @@ impl Store {
                 .find(|chat| chat.id == id && chat.workspace_id == workspace)
                 .ok_or("This chat is no longer in that checkout.")?;
             match chat.team_share.as_ref() {
-                None => return Ok(()),
+                None => match expected {
+                    None => return Ok(()),
+                    // An earlier stop or another accepted local change already
+                    // fenced the old consent. Retrying must not fence a newer
+                    // source revision or overwrite a new sharing marker.
+                    Some(revision) if revision < chat.send_revision => return Ok(()),
+                    Some(revision) if revision == chat.send_revision => {}
+                    Some(_) => {
+                        return Err("This chat changed. Refresh sharing before stopping it.".into());
+                    }
+                },
                 Some(current) if current.id == share => {}
                 Some(_) => {
                     return Err(
@@ -288,12 +314,13 @@ impl Store {
             if boundary != bytes.len() {
                 return Err(paused());
             }
-            let history = project(chat, bytes)?;
+            let mut history = project(chat, bytes)?;
             if history.fingerprint != marker.initial_fingerprint
                 || history.history_through != marker.history_through
             {
                 return Err(paused());
             }
+            history.binding = Some(marker.clone());
             Ok(history)
         })
     }
@@ -450,6 +477,7 @@ fn project(chat: &Conversation, bytes: &[u8]) -> Result<History, DispatchError> 
         fingerprint,
         history_through,
         history_bytes: bytes.len() as u64,
+        binding: None,
         source_revision: chat
             .team_share
             .as_ref()
