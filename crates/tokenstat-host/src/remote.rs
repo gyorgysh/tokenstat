@@ -826,17 +826,18 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                 state,
             );
             let team = transport.team_authorization();
+            if let Some(team) = team {
+                crate::teams::accept_channel(
+                    transport,
+                    team,
+                    owner.clone(),
+                    MachineIdentity::from_secret(identity.secret_bytes()),
+                    Arc::clone(&session),
+                );
+                continue;
+            }
             match tokenstat_remote::handshake_responder(Box::new(transport), &identity) {
                 Ok(connection) => {
-                    if let Some(team) = team {
-                        let peer_session = Arc::clone(&session);
-                        let team_owner = owner.clone();
-                        let host = identity.public_key();
-                        std::thread::spawn(move || {
-                            crate::teams::serve(connection, team, team_owner, host, &peer_session)
-                        });
-                        continue;
-                    }
                     set_tunnel_state(|state| {
                         state.connected = true;
                         state.error = None;

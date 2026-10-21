@@ -45,6 +45,7 @@ use thiserror::Error;
 use tokenstat_identity::{MachineIdentity, PeerStore, PublicKey, Trust, fingerprint};
 
 mod deadline;
+pub use deadline::{handshake_initiator_bounded, handshake_responder_bounded};
 pub mod tunnel;
 
 /// The Noise pattern. XX rather than KK because the server does not know the
@@ -1238,6 +1239,13 @@ mod tests {
     /// being assumed.
     #[test]
     fn a_split_connection_echoes_both_ways() {
+        split_echo(false);
+    }
+    #[test]
+    fn a_bounded_handshake_establishes_a_normal_split_connection() {
+        split_echo(true);
+    }
+    fn split_echo(bounded: bool) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a listener");
         let address = listener.local_addr().expect("its address");
         let responder_ident = MachineIdentity::from_secret([1u8; 32]);
@@ -1246,8 +1254,12 @@ mod tests {
 
         let echo = std::thread::spawn(move || {
             let (stream, _) = listener.accept().expect("a connection");
-            let connection =
-                handshake_responder(Box::new(stream), &responder_ident).expect("handshake");
+            let connection = if bounded {
+                handshake_responder_bounded(Box::new(stream), &responder_ident)
+            } else {
+                handshake_responder(Box::new(stream), &responder_ident)
+            }
+            .expect("handshake");
             let (reader, writer) = connection.split();
             loop {
                 match reader.read(1 << 20) {
@@ -1261,12 +1273,16 @@ mod tests {
         });
 
         let stream = TcpStream::connect(address).expect("connect");
-        let connection = handshake_initiator(
-            Box::new(stream),
-            &initiator_ident,
-            Some(responder_key),
-            "test",
-        )
+        let connection = if bounded {
+            handshake_initiator_bounded(Box::new(stream), &initiator_ident, responder_key)
+        } else {
+            handshake_initiator(
+                Box::new(stream),
+                &initiator_ident,
+                Some(responder_key),
+                "test",
+            )
+        }
         .expect("handshake");
         let (reader, writer) = connection.split();
         writer.write(b"first").expect("write one");

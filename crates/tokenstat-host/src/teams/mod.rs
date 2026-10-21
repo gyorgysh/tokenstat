@@ -6,6 +6,7 @@
 
 mod authorization;
 mod directory;
+mod ingress;
 #[cfg(feature = "local-host")]
 mod publications;
 mod scoped;
@@ -14,6 +15,7 @@ mod sharing;
 use crate::account_session::AccountSnapshot;
 use crate::error::DispatchError;
 pub(crate) use authorization::AuthorizedTeamPrincipal;
+pub(crate) use ingress::accept as accept_channel;
 use serde_json::{Value, json};
 use tokenstat_sync::teams::{TeamClient, TeamError};
 

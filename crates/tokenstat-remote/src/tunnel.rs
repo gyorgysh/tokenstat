@@ -558,6 +558,18 @@ impl TunnelSession {
         payload: &[u8],
         wait: bool,
     ) -> Result<(), RemoteError> {
+        self.queue_channel_frame_with_timeout(op, ch, payload, wait, SEND_TIMEOUT)
+    }
+
+    fn queue_channel_frame_with_timeout(
+        &self,
+        op: u8,
+        ch: u32,
+        payload: &[u8],
+        wait: bool,
+        timeout: Duration,
+    ) -> Result<(), RemoteError> {
+        let deadline = Instant::now() + timeout.min(SEND_TIMEOUT);
         ensure_running(self)?;
         if payload.len() > MAX_OUTBOUND_QUEUE {
             return Err(RemoteError::Tunnel("channel frame is too large".into()));
@@ -595,17 +607,27 @@ impl TunnelSession {
         // unstable, so retry `try_send` until the deadline. A full queue means
         // the relay is slow, not gone; a disconnected one means the IO loop
         // died and the next call will reconnect.
-        let deadline = Instant::now() + SEND_TIMEOUT;
         loop {
+            if wait && Instant::now() >= deadline {
+                writer.bytes.fetch_sub(size, Ordering::AcqRel);
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "The channel write time budget expired.",
+                )
+                .into());
+            }
             match writer.sender.try_send(frame) {
                 Ok(()) => return Ok(()),
                 Err(mpsc::TrySendError::Full(returned)) => {
-                    if !wait || self.stopped.load(Ordering::Relaxed) || Instant::now() >= deadline {
+                    if !wait || self.stopped.load(Ordering::Relaxed) {
                         writer.bytes.fetch_sub(size, Ordering::AcqRel);
                         return Err(RemoteError::Tunnel("tunnel outbound queue is full".into()));
                     }
                     frame = returned;
-                    std::thread::sleep(Duration::from_millis(5));
+                    std::thread::sleep(
+                        Duration::from_millis(5)
+                            .min(deadline.saturating_duration_since(Instant::now())),
+                    );
                 }
                 Err(mpsc::TrySendError::Disconnected(_)) => {
                     writer.bytes.fetch_sub(size, Ordering::AcqRel);
@@ -638,6 +660,7 @@ pub struct ChannelTransport {
     session: Arc<TunnelSession>,
     state: Arc<ChannelState>,
     read_timeout: Mutex<Option<Duration>>,
+    write_timeout: Mutex<Option<Duration>>,
     closed: AtomicBool,
 }
 
@@ -647,6 +670,7 @@ impl ChannelTransport {
             session,
             state,
             read_timeout: Mutex::new(None),
+            write_timeout: Mutex::new(None),
             closed: AtomicBool::new(false),
         }
     }
@@ -677,6 +701,7 @@ impl Read for ChannelTransport {
             return Ok(0);
         }
         let timeout = *self.read_timeout.lock().unwrap_or_else(|e| e.into_inner());
+        let started = Instant::now();
         let mut inner = self.state.inner.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             // Revocation ends a Team stream before queued content is drained.
@@ -702,6 +727,10 @@ impl Read for ChannelTransport {
             }
             match timeout {
                 Some(limit) => {
+                    let limit = limit.saturating_sub(started.elapsed());
+                    if limit.is_zero() {
+                        return Err(io::Error::new(io::ErrorKind::TimedOut, "no channel data"));
+                    }
                     let (guard, result) = self
                         .state
                         .cond
@@ -735,9 +764,17 @@ impl Write for ChannelTransport {
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"));
             }
         }
+        let timeout = self
+            .write_timeout
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or(SEND_TIMEOUT);
         self.session
-            .send_channel_frame(CH_DATA, self.state.id, input)
-            .map_err(io::Error::other)?;
+            .queue_channel_frame_with_timeout(CH_DATA, self.state.id, input, true, timeout)
+            .map_err(|error| match error {
+                RemoteError::Io(error) => error,
+                error => io::Error::other(error),
+            })?;
         Ok(input.len())
     }
 
@@ -771,6 +808,7 @@ impl Transport for ChannelTransport {
     }
 
     fn set_deadline(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        *self.write_timeout.lock().unwrap_or_else(|e| e.into_inner()) = timeout;
         self.set_read_timeout(timeout)
     }
 
@@ -1657,6 +1695,42 @@ mod tests {
         dispatch_frame(&session, &opened_frame(DIAL_ID_BASE + 1));
         assert!(start.elapsed() < Duration::from_secs(1));
         assert_eq!(bytes.load(Ordering::Relaxed), before);
+    }
+
+    #[test]
+    fn a_channel_handshake_budget_bounds_backpressure_without_stopping_other_channels() {
+        let session = inert_session();
+        let (tx, rx) = mpsc::sync_channel(1);
+        let bytes = Arc::new(AtomicUsize::new(0));
+        *session.writer.lock().unwrap() = Some(Writer {
+            sender: tx,
+            bytes: Arc::clone(&bytes),
+        });
+        session.send_channel_frame(CH_DATA, 1, b"queued").unwrap();
+        let before = bytes.load(Ordering::Relaxed);
+        let mut transport =
+            ChannelTransport::new(Arc::clone(&session), Arc::new(ChannelState::new(2)));
+        transport
+            .set_deadline(Some(Duration::from_millis(20)))
+            .unwrap();
+        let start = Instant::now();
+        let error = transport.write(b"handshake").unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert_eq!(bytes.load(Ordering::Relaxed), before);
+        assert!(!session.stopped.load(Ordering::Relaxed));
+        drop(transport);
+        let queued = rx.try_recv().unwrap();
+        bytes.fetch_sub(queued.len(), Ordering::AcqRel);
+        let mut other = ChannelTransport::new(Arc::clone(&session), Arc::new(ChannelState::new(3)));
+        other.set_deadline(Some(Duration::ZERO)).unwrap();
+        assert_eq!(
+            other.write(b"expired").unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+        other.set_deadline(None).unwrap();
+        other.write_all(b"personal work").unwrap();
+        assert_eq!(&rx.try_recv().unwrap()[5..], b"personal work");
     }
 
     #[test]
