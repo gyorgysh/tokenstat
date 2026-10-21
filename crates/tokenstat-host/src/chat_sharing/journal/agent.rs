@@ -35,6 +35,38 @@ pub(crate) fn batch_key(scope: &Scope, run: &str, batch: u32) -> Result<String, 
         .map_err(|_| "Output identity is invalid")
 }
 impl AgentRecord {
+    pub(super) fn sequence(&self) -> u64 {
+        self.seq
+    }
+    pub(super) fn batch(&self) -> u32 {
+        self.origin.batch
+    }
+    pub(super) fn index(&self) -> u16 {
+        self.origin.index
+    }
+    pub(super) fn scope(&self) -> &Scope {
+        &self.origin.scope
+    }
+    pub(super) fn run_id(&self) -> &str {
+        &self.origin.run_id
+    }
+    pub(super) fn backend(&self) -> &str {
+        &self.backend
+    }
+    pub(super) fn projected(&self) -> Result<Value, &'static str> {
+        self.encoded()?;
+        let mut value = super::super::visible(crate::chat::StoredEvent::Agent {
+            event: self.event.clone(),
+            at_ms: self.at_ms,
+            backend: self.backend.clone(),
+        })
+        .map_err(|_| "Invalid output")?;
+        let actor = &self.origin.actor;
+        value["seq"] = json!(self.seq);
+        value["mode"] = json!("agent");
+        value["author"] = json!({"kind":"agent","backend":self.backend,"runId":self.origin.run_id,"initiatedBy":{"kind":"person","id":actor.id,"name":actor.name,"handle":actor.handle,"avatar":actor.avatar}});
+        Ok(value)
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         seq: u64,
@@ -108,7 +140,7 @@ pub(super) struct PendingAgent {
     before_bytes: u64,
     before_digest: String,
 }
-fn encoded(rows: &[AgentRecord]) -> Result<Vec<u8>, &'static str> {
+pub(super) fn batch_bytes(rows: &[AgentRecord]) -> Result<Vec<u8>, &'static str> {
     if rows.is_empty() || rows.len() > BATCH_ROWS {
         return Err("Output batch size is invalid");
     }
@@ -148,32 +180,6 @@ impl Journal {
         }
         Ok(false)
     }
-    pub fn reserve_agent(
-        &mut self,
-        rows: Vec<AgentRecord>,
-        request_digest: String,
-        before: &[u8],
-    ) -> Result<Vec<u8>, &'static str> {
-        let bytes = encoded(&rows)?;
-        if self.pending.is_some()
-            || self.pending_ask.is_some()
-            || self.pending_agent.is_some()
-            || self.agent.len() >= CAPACITY
-            || before.len() as u64 > super::super::HISTORY_LIMIT
-            || !lower_hex(&request_digest, 64)
-            || self.agent.contains_key(&rows[0].key()?)
-        {
-            return Err("Output needs recovery or proof storage is full");
-        }
-        self.pending_agent = Some(PendingAgent {
-            rows,
-            request_digest,
-            before_bytes: before.len() as u64,
-            before_digest: digest(before),
-        });
-        self.encoded()?;
-        Ok(bytes)
-    }
     pub(super) fn validate_agent(&self) -> Result<(), &'static str> {
         let pending_count = usize::from(self.pending.is_some())
             + usize::from(self.pending_ask.is_some())
@@ -200,7 +206,7 @@ impl Journal {
             }
         }
         if let Some(pending) = &self.pending_agent {
-            encoded(&pending.rows)?;
+            batch_bytes(&pending.rows)?;
             if !lower_hex(&pending.before_digest, 64)
                 || !lower_hex(&pending.request_digest, 64)
                 || pending.before_bytes > super::super::HISTORY_LIMIT
@@ -221,7 +227,7 @@ impl Journal {
         if canonical.len() == before && digest(canonical) == pending.before_digest {
             return Ok(false);
         }
-        let bytes = encoded(&pending.rows)?;
+        let bytes = batch_bytes(&pending.rows)?;
         let end = before
             .checked_add(bytes.len())
             .ok_or("Invalid output position")?;

@@ -14,6 +14,16 @@ mod journal;
 mod writer;
 pub(crate) use crate::remote::TeamCommentInput as CommentInput;
 pub(crate) use asks::{AskInput, AskPreparation};
+pub(crate) use journal::{PageRequest, chain_usage};
+
+#[cfg(test)]
+pub(crate) fn select_inline_page(
+    events: &[serde_json::Value],
+    request: &PageRequest,
+) -> Result<(Vec<serde_json::Value>, bool), DispatchError> {
+    let page = journal::select_page(std::path::Path::new("."), &[], None, events, request)?;
+    Ok((page.events, page.has_more))
+}
 pub(crate) use writer::SharedSource;
 pub(super) use writer::fork_journal;
 
@@ -44,6 +54,13 @@ pub(crate) struct Binding {
     pub(crate) source_revision: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) approved: Option<ApprovedMetadata>,
+}
+
+pub(crate) struct EventPage {
+    pub events: Vec<Value>,
+    pub has_more: bool,
+    pub history_trimmed: bool,
+    pub binding: Binding,
 }
 
 #[derive(Serialize)]
@@ -391,7 +408,52 @@ impl Store {
         self.source_locked(workspace, id, false, |_, chat, bytes| {
             let directory = safe_join(&self.root, id).map_err(|_| invalid())?;
             let journal = writer::load(&directory, chat, bytes)?;
-            shared_project(chat, bytes, share, expected, journal.as_ref())
+            shared_project(
+                chat,
+                bytes,
+                share,
+                expected,
+                journal.as_ref(),
+                &directory,
+                true,
+            )
+        })
+    }
+
+    /// One shared-history page. Payload files outside the page stay unread.
+    pub(crate) fn shared_event_page(
+        &self,
+        workspace: &str,
+        id: &str,
+        share: &str,
+        expected: &str,
+        request: &PageRequest,
+    ) -> Result<EventPage, DispatchError> {
+        self.source_locked(workspace, id, false, |_, chat, bytes| {
+            let directory = safe_join(&self.root, id).map_err(|_| invalid())?;
+            let journal = writer::load(&directory, chat, bytes)?;
+            let history = shared_project(
+                chat,
+                bytes,
+                share,
+                expected,
+                journal.as_ref(),
+                &directory,
+                false,
+            )?;
+            let page = journal::select_page(
+                &directory,
+                &journal::read_chain(&directory)?,
+                journal.as_ref(),
+                &history.events,
+                request,
+            )?;
+            Ok(EventPage {
+                events: page.events,
+                has_more: page.has_more,
+                history_trimmed: history.history_trimmed,
+                binding: history.binding.ok_or_else(paused)?,
+            })
         })
     }
 
@@ -411,6 +473,8 @@ impl Store {
                     &marker.id,
                     &marker.initial_fingerprint,
                     journal.as_ref(),
+                    &directory,
+                    true,
                 )?
             } else {
                 project_with_journal(chat, bytes, journal.as_ref())?
@@ -514,12 +578,28 @@ fn project(chat: &Conversation, bytes: &[u8]) -> Result<History, DispatchError> 
     project_with_journal(chat, bytes, None)
 }
 
+fn merge_events(mut events: Vec<Value>, extra: Vec<Value>) -> Result<Vec<Value>, DispatchError> {
+    events.extend(extra);
+    events.sort_by_key(|event| event["seq"].as_u64().unwrap_or(u64::MAX));
+    let mut previous = None;
+    for event in &events {
+        let seq = event["seq"].as_u64().ok_or_else(paused)?;
+        if previous.is_some_and(|seen| seq <= seen) {
+            return Err(paused());
+        }
+        previous = Some(seq);
+    }
+    Ok(events)
+}
+
 fn shared_project(
     chat: &Conversation,
     bytes: &[u8],
     share: &str,
     expected: &str,
     journal: Option<&journal::Journal>,
+    directory: &Path,
+    expand: bool,
 ) -> Result<History, DispatchError> {
     let marker = chat.team_share.as_ref().ok_or_else(paused)?;
     if marker.id != share || marker.initial_fingerprint != expected {
@@ -559,6 +639,25 @@ fn shared_project(
             .map_err(|_| paused())?;
     }
     let mut history = project_with_journal(chat, bytes, journal)?;
+    let chain = journal::read_chain(directory)?;
+    match journal {
+        Some(journal) if expand => {
+            history.events = merge_events(
+                history.events,
+                journal::project_chain(directory, &chain, journal)?,
+            )?;
+        }
+        Some(journal) => journal::accept_chain(&chain, journal)?,
+        None if !chain.is_empty() => return Err(paused()),
+        None => {}
+    }
+    if let Some(seq) = history
+        .events
+        .last()
+        .and_then(|event| event["seq"].as_u64())
+    {
+        history.history_through = Some(seq);
+    }
     history.fingerprint = initial.fingerprint;
     history.binding = Some(marker.clone());
     Ok(history)

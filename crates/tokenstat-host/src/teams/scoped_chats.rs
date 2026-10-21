@@ -56,23 +56,52 @@ pub(super) fn call(
         return Err(changed());
     }
     let chats = crate::chat::shared();
-    let history = chats.shared_history(
-        &checkout.workspace_id,
-        &row.conversation_id,
-        &row.id,
-        &row.preview,
-    )?;
-    let marker = history.binding.clone().ok_or_else(changed)?;
-    if marker.source_revision != row.source_revision {
-        return Err(changed());
-    }
-    let result = match method {
+    let (marker, result) = match method {
         TeamReadMethod::ChatDetails => {
-            json!({"chat":{"id":row.id,"checkoutId":row.checkout_id,"title":history.title,
+            let history = chats.shared_history(
+                &checkout.workspace_id,
+                &row.conversation_id,
+                &row.id,
+                &row.preview,
+            )?;
+            let marker = history.binding.clone().ok_or_else(changed)?;
+            if marker.source_revision != row.source_revision {
+                return Err(changed());
+            }
+            (
+                marker,
+                json!({"chat":{"id":row.id,"checkoutId":row.checkout_id,"title":history.title,
             "backend":history.backend,"historyTrimmed":history.history_trimmed,"allowsAgentRuns":false,
-            "allowsComments":row.source_revision.is_some() && matches!(scope.role,RepositoryRole::Contributor | RepositoryRole::Maintainer)}})
+            "allowsComments":row.source_revision.is_some() && matches!(scope.role,RepositoryRole::Contributor | RepositoryRole::Maintainer)}}),
+            )
         }
-        TeamReadMethod::ChatEvents => page(share, history.events, history.history_trimmed, params)?,
+        TeamReadMethod::ChatEvents => {
+            let older = params.direction == Some(TeamPageDirection::Older);
+            let viewed = chats.shared_event_page(
+                &checkout.workspace_id,
+                &row.conversation_id,
+                &row.id,
+                &row.preview,
+                &crate::chat::sharing::PageRequest {
+                    after: params.after(share)?,
+                    older,
+                    limit: params.limit.unwrap_or(100) as usize,
+                    budget: PAGE_TARGET,
+                },
+            )?;
+            if viewed.binding.source_revision != row.source_revision {
+                return Err(changed());
+            }
+            let body = page_body(
+                share,
+                viewed.events,
+                viewed.has_more,
+                viewed.history_trimmed,
+                older,
+                params.after(share)?,
+            );
+            (viewed.binding, body)
+        }
         _ => return Err(changed()),
     };
     // A local withdrawal or folder replacement that raced the bounded read
@@ -102,6 +131,7 @@ fn changed() -> DispatchError {
     )
 }
 
+#[cfg(test)]
 fn page(
     share: &str,
     events: Vec<Value>,
@@ -109,40 +139,34 @@ fn page(
     params: &TeamReadParams,
 ) -> Result<Value, DispatchError> {
     let after = params.after(share)?;
-    let latest = events.last().and_then(|event| event["seq"].as_u64());
-    if after.is_some_and(|position| latest.is_none_or(|last| position > last)) {
-        return Err(DispatchError::new(
-            "chat_cursor_invalid",
-            "Refresh this shared chat's history.",
-        ));
-    }
-    let limit = params.limit.unwrap_or(100) as usize;
     let older = params.direction == Some(TeamPageDirection::Older);
-    let mut selected = Vec::new();
-    let mut size = 0;
-    let mut more = false;
-    let mut events = events;
-    if older {
-        events.reverse();
-    }
-    for event in events.into_iter().filter(|event| {
-        after.is_none_or(|after| {
-            event["seq"]
-                .as_u64()
-                .is_some_and(|seq| if older { seq < after } else { seq > after })
-        })
-    }) {
-        let bytes = serde_json::to_vec(&event).map_err(|_| changed())?.len();
-        if selected.len() == limit || !selected.is_empty() && size + bytes > PAGE_TARGET {
-            more = true;
-            break;
-        }
-        size += bytes;
-        selected.push(event);
-    }
-    if older {
-        selected.reverse();
-    }
+    let (events, has_more) = crate::chat::sharing::select_inline_page(
+        &events,
+        &crate::chat::sharing::PageRequest {
+            after,
+            older,
+            limit: params.limit.unwrap_or(100) as usize,
+            budget: PAGE_TARGET,
+        },
+    )?;
+    Ok(page_body(
+        share,
+        events,
+        has_more,
+        history_trimmed,
+        older,
+        after,
+    ))
+}
+
+fn page_body(
+    share: &str,
+    selected: Vec<Value>,
+    more: bool,
+    history_trimmed: bool,
+    older: bool,
+    after: Option<u64>,
+) -> Value {
     let cursor = |position| format!("v1:{share}:{position}");
     let first = selected
         .first()
@@ -160,9 +184,7 @@ fn page(
     .and_then(|event| event["seq"].as_u64())
     .or(after)
     .map(cursor);
-    Ok(
-        json!({"shareId":share,"events":selected,"nextCursor":next,"firstCursor":first,"lastCursor":last,"hasMore":more,"historyTrimmed":history_trimmed,"asOfMs":crate::chat::now_ms()}),
-    )
+    json!({"shareId":share,"events":selected,"nextCursor":next,"firstCursor":first,"lastCursor":last,"hasMore":more,"historyTrimmed":history_trimmed,"asOfMs":crate::chat::now_ms()})
 }
 
 #[cfg(test)]

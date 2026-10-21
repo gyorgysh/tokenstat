@@ -111,15 +111,32 @@ impl Store {
                 {
                     return Err(unavailable());
                 }
-                shared_project(chat, bytes, &scope.share, target.preview, Some(&journal))?;
+                shared_project(
+                    chat,
+                    bytes,
+                    &scope.share,
+                    target.preview,
+                    Some(&journal),
+                    &directory,
+                    false,
+                )?;
+                let chain = journal::read_chain(&directory)?;
                 if journal
                     .agent_recorded(&key, &request_digest)
+                    .map_err(|_| unavailable())?
+                    || journal::recorded(
+                        &chain,
+                        &scope,
+                        prepared.binding.fence.run_id(),
+                        batch,
+                        &request_digest,
+                        events.len() as u32,
+                    )
                     .map_err(|_| unavailable())?
                 {
                     return Ok(());
                 }
-                let start = crate::work_transcript_identity::next_sequence(bytes, 0)
-                    .map_err(|_| unavailable())?;
+                let start = journal::next_shared(bytes, &chain).map_err(|_| unavailable())?;
                 let at_ms = now_ms();
                 let rows = events
                     .into_iter()
@@ -138,25 +155,22 @@ impl Store {
                         ))
                     })
                     .collect::<Result<Vec<_>, DispatchError>>()?;
-                let encoded = journal
-                    .reserve_agent(rows, request_digest, bytes)
+                let prepared_output =
+                    journal::prepare(&directory, &journal, &chain, &rows, &request_digest)?;
+                journal
+                    .reserve_segments(prepared_output.pending)
                     .map_err(|_| unavailable())?;
-                if bytes.len() as u64 + encoded.len() as u64 > HISTORY_LIMIT {
-                    return Err(DispatchError::new(
-                        "team_history_limit",
-                        "This shared chat is full. Start another chat to continue.",
-                    ));
-                }
                 writer::save(&directory.join(writer::JOURNAL), &journal)?;
                 checkpoint(Step::Reserved)?;
                 current()?;
                 prepared.ensure_writer_current()?;
-                let mut canonical = bytes.to_vec();
-                canonical.extend(encoded);
-                replace_chat_file(&directory.join("events.ndjson"), &canonical)
+                let chain_path = directory.join("team-output").join("chain.ndjson");
+                replace_chat_file(&chain_path, &prepared_output.canonical)
                     .map_err(|_| unavailable())?;
                 checkpoint(Step::Canonical)?;
-                journal.observe(&canonical).map_err(|_| unavailable())?;
+                journal
+                    .observe_chain(&prepared_output.canonical)
+                    .map_err(|_| unavailable())?;
                 writer::save(&directory.join(writer::JOURNAL), &journal)?;
                 checkpoint(Step::Proven)?;
                 self.record_comment_time(&mut index, target.id, at_ms)

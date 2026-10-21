@@ -124,9 +124,7 @@ impl Journal {
         row.encoded()?;
         let a = &row.ask.attribution;
         self.require_unused_comment_id(&a.scope, &a.actor.id, &a.client_message_id)?;
-        if self.pending.is_some()
-            || self.pending_ask.is_some()
-            || self.pending_agent.is_some()
+        if self.busy()
             || self.asks.len() >= CAPACITY
             || before.len() as u64 > super::super::HISTORY_LIMIT
         {

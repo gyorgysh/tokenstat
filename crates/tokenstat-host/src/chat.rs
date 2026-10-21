@@ -6819,6 +6819,9 @@ fn usage_totals(path: &Path) -> Result<Value, String> {
             &record,
         )?)?;
     }
+    if let Some(directory) = path.parent() {
+        totals.add(&sharing::chain_usage(directory)?)?;
+    }
     Ok(totals.value())
 }
 

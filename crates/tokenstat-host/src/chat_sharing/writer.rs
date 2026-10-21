@@ -94,7 +94,10 @@ pub(super) fn load(
         &source(chat),
     )
     .map_err(|_| unavailable())?;
-    if journal.observe(bytes).map_err(|_| unavailable())? {
+    let chain = read_chain(directory)?;
+    let events_changed = journal.observe(bytes).map_err(|_| unavailable())?;
+    let chain_changed = journal.observe_chain(&chain).map_err(|_| unavailable())?;
+    if events_changed || chain_changed {
         save(&path, &journal)?;
     }
     Ok(Some(journal))
@@ -131,6 +134,7 @@ pub(crate) fn fork_journal(
     fork: &Conversation,
     bytes: &[u8],
 ) -> Result<bool, String> {
+    copy_tree(source_dir, destination)?;
     if let Some(journal) = load(source_dir, original, bytes).map_err(|error| error.to_string())? {
         save(&destination.join(JOURNAL), &journal.forked(source(fork)))
             .map_err(|error| error.to_string())?;
@@ -238,9 +242,9 @@ impl Store {
             if source_revision.is_none() || marker.source_revision != source_revision || marker.id != scope.share || marker.initial_fingerprint != preview { return Err(paused()); }
             let directory = safe_join(&self.root, id).map_err(|_| unavailable())?;
             let loaded = load(&directory, chat, bytes)?;
-            shared_project(chat, bytes, &scope.share, preview, loaded.as_ref())?;
+            shared_project(chat, bytes, &scope.share, preview, loaded.as_ref(), &directory, false)?;
             let mut journal = loaded.unwrap_or_else(|| Journal::new(source(chat)));
-            let seq = crate::work_transcript_identity::next_sequence(bytes, 0).map_err(|_| unavailable())?;
+            let seq = next_shared(bytes, &read_chain(&directory)?).map_err(|_| unavailable())?;
             let proposed = Record::new(seq, input.text.clone(), now_ms(), Attribution { scope: scope.clone(), actor: actor.clone(), client_message_id: input.client_message_id.clone(), client_message_created_at_ms: input.client_message_created_at_ms });
             proposed.encoded().map_err(|_| unavailable())?;
             if let Some(known) = journal.receipt(&proposed).map_err(|_| DispatchError::new("team_comment_conflict", "This comment changed after its first attempt. Check the chat before sending again."))? {
@@ -305,7 +309,15 @@ impl Store {
         self.source_locked(workspace, id, false, |mut index, chat, bytes| {
             let directory = safe_join(&self.root, id).map_err(|_| unavailable())?;
             let journal = load(&directory, chat, bytes)?;
-            shared_project(chat, bytes, &scope.share, preview, journal.as_ref())?;
+            shared_project(
+                chat,
+                bytes,
+                &scope.share,
+                preview,
+                journal.as_ref(),
+                &directory,
+                false,
+            )?;
             principal.ensure_account_current()?;
             let status = journal
                 .as_ref()

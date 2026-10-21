@@ -64,6 +64,12 @@ impl UsageTotals {
                     .ok_or("conversation usage summary is missing")?,
             )
             .map_err(|_| "conversation usage summary could not be verified")?
+        } else if record.get("kind").and_then(Value::as_str) == Some("teamAgentSegment") {
+            match record.get("usage") {
+                Some(usage) => serde_json::from_value(usage.clone())
+                    .map_err(|_| "conversation usage summary could not be verified")?,
+                None => Self::default(),
+            }
         } else if let Some(event) = record
             .get("event")
             .filter(|event| event.get("kind").and_then(Value::as_str) == Some("usage"))

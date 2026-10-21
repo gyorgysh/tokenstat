@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 //! Local proof of attributed canonical rows. The journal holds hashes and
-//! receipts, plus at most one temporary write intent; settled text lives only
-//! in events.ndjson. Callers hold source acceptance and transcript locks.
+//! receipts, plus at most one temporary write intent. Settled comments stay in
+//! events.ndjson. Settled agent text stays in content-addressed payloads.
+//! Callers hold source acceptance and transcript locks.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -10,7 +11,14 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 #[path = "journal/asks.rs"]
 mod asks;
+#[path = "segments.rs"]
+mod segments;
 pub(super) use asks::AskRecord;
+pub(in crate::chat::sharing) use segments::select_page;
+pub(crate) use segments::{
+    PageRequest, accept_chain, chain_usage, copy_tree, next_shared, prepare, project_chain,
+    read_chain, recorded,
+};
 #[path = "journal/agent.rs"]
 mod agent;
 pub(super) use agent::{AgentRecord, batch_key as agent_batch_key};
@@ -252,6 +260,10 @@ pub(super) struct Journal {
     agent: BTreeMap<String, agent::AgentProof>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pending_agent: Option<agent::PendingAgent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    segment_head: Option<segments::Head>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_segments: Option<segments::Pending>,
 }
 
 impl Journal {
@@ -266,7 +278,18 @@ impl Journal {
             pending_ask: None,
             agent: BTreeMap::new(),
             pending_agent: None,
+            segment_head: None,
+            pending_segments: None,
         }
+    }
+    fn busy(&self) -> bool {
+        self.pending_count() > 0
+    }
+    fn pending_count(&self) -> usize {
+        usize::from(self.pending.is_some())
+            + usize::from(self.pending_ask.is_some())
+            + usize::from(self.pending_agent.is_some())
+            + usize::from(self.pending_segments.is_some())
     }
     pub fn decode(bytes: &[u8], source: &Source) -> Result<Self, &'static str> {
         if bytes.len() as u64 > MAX_JOURNAL_BYTES {
@@ -284,6 +307,10 @@ impl Journal {
         journal.validate_runs()?;
         journal.validate_asks()?;
         journal.validate_agent()?;
+        journal.validate_chain()?;
+        if journal.pending_count() > 1 {
+            return Err("an earlier write needs recovery");
+        }
         if journal.receipts.iter().any(|(key, receipt)| {
             !lower_hex(key, 64)
                 || !lower_hex(receipt.request_digest(), 64)
@@ -307,6 +334,10 @@ impl Journal {
         self.validate_runs()?;
         self.validate_asks()?;
         self.validate_agent()?;
+        self.validate_chain()?;
+        if self.pending_count() > 1 {
+            return Err("an earlier write needs recovery");
+        }
         let bytes = serde_json::to_vec(self).map_err(|_| "comment journal could not be encoded")?;
         if bytes.len() as u64 > MAX_JOURNAL_BYTES {
             return Err("comment journal is full");
@@ -380,7 +411,7 @@ impl Journal {
         if before.len() as u64 > super::HISTORY_LIMIT {
             return Err("comment history is too large");
         }
-        if self.pending.is_some() || self.pending_ask.is_some() || self.pending_agent.is_some() {
+        if self.busy() {
             return Err("an earlier comment needs reconciliation");
         }
         if self.receipt(&record)?.is_some() {
@@ -459,7 +490,10 @@ impl Journal {
     /// the entire previous canonical prefix is still exact. Its original id
     /// receives a permanent negative receipt, never a fresh acceptance.
     pub fn retire_unwritten(&mut self, bytes: &[u8]) -> Result<bool, &'static str> {
-        if self.pending_ask.is_some() || self.pending_agent.is_some() {
+        if self.pending_ask.is_some()
+            || self.pending_agent.is_some()
+            || self.pending_segments.is_some()
+        {
             return Err("an earlier Ask needs recovery on the publishing computer");
         }
         let Some(pending) = &self.pending else {
@@ -545,6 +579,7 @@ impl Journal {
         self.pending = None;
         self.pending_ask = None;
         self.pending_agent = None;
+        self.pending_segments = None;
         // These are process/admission identities for the original source.
         // A copied conversation cannot inherit its authority or recovery.
         self.runs = None;

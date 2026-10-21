@@ -257,6 +257,8 @@ impl Store {
                 &prepared.request.scope.share,
                 target.preview,
                 Some(&journal),
+                &directory,
+                false,
             )?;
             prepared.ensure_writer_current()
         })
@@ -275,8 +277,15 @@ impl Store {
             require_marker(chat, &target, &scope)?;
             let directory = safe_join(&self.root, target.id).map_err(|_| unavailable())?;
             let journal = writer::load(&directory, chat, bytes)?;
-            let history =
-                shared_project(chat, bytes, &scope.share, target.preview, journal.as_ref())?;
+            let history = shared_project(
+                chat,
+                bytes,
+                &scope.share,
+                target.preview,
+                journal.as_ref(),
+                &directory,
+                true,
+            )?;
             review(&history, &scope, checkout)
         })
     }
@@ -381,7 +390,7 @@ impl Store {
                     .map_err(|_| unavailable())?
                     .ok_or_else(busy)?;
                 let history =
-                    shared_project(chat, bytes, &scope.share, target.preview, Some(&journal))?;
+                    shared_project(chat, bytes, &scope.share, target.preview, Some(&journal), &directory, true)?;
                 if review(&history, &scope, checkout)? != input.review {
                     return Err(changed());
                 }
@@ -419,7 +428,7 @@ impl Store {
                 let at_ms = now_ms();
                 let row = AskRecord::new(
                     Record::new(
-                        crate::work_transcript_identity::next_sequence(bytes, 0)
+                        journal::next_shared(bytes, &journal::read_chain(&directory)?)
                             .map_err(|_| unavailable())?,
                         input.text.clone(),
                         at_ms,
