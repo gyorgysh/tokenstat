@@ -3686,6 +3686,7 @@ dependencies = [
  "blake3",
  "directories",
  "getrandom 0.4.3",
+ "jiff",
  "ring",
  "serde",
  "serde_json",
@@ -3693,6 +3694,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokenstat-paths",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]

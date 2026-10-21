@@ -21,6 +21,8 @@ getrandom.workspace = true
 x25519-dalek = { workspace = true }
 base64 = "0.23"
 ring = "0.17.14"
+jiff.workspace = true
+zeroize = "1.9"
 
 [dev-dependencies]
 tempfile.workspace = true

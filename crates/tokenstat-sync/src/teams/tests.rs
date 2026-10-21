@@ -36,7 +36,7 @@ fn fixture(reply: Reply, retire_on_send: bool) -> (TeamClient, Arc<MockWire>) {
 fn fixture_replies(replies: Vec<Reply>, retire_on_send: bool) -> (TeamClient, Arc<MockWire>) {
     let captured = Authentication {
         origin: "https://accounts.example.test".into(),
-        bearer: Zeroizing::new("public-fixture-bearer".into()),
+        bearer: Zeroizing::new("tsk_abcdef0123456789abcdef01_publicfixturesecret".into()),
     };
     let current_auth = captured.clone();
     let retired = Arc::new(AtomicBool::new(false));
@@ -64,6 +64,127 @@ fn response(body: Value) -> Reply {
 }
 fn capabilities() -> Value {
     json!({"enabled":true,"version":1,"actorId":"fixture-member","scopes":["teams:read","teams:manage","teams:connect"],"authorizationRequired":false,"authorizationPath":"/settings/teams/devices/abcdef0123","deviceKey":"a".repeat(64),"ticketLifetimeSeconds":60})
+}
+
+#[test]
+fn host_execution_proves_the_actual_identity_for_one_exact_reviewed_write() {
+    let v: Value = serde_json::from_str(include_str!(
+        "../../../../fixtures/teams/host-proof-v1.json"
+    ))
+    .unwrap();
+    let identity = tokenstat_identity::MachineIdentity::from_secret([7; 32]);
+    let mut caps = capabilities();
+    caps["actorId"] = json!("fixture-owner");
+    caps["deviceKey"] = json!(identity.public_key_hex());
+    caps["features"] = json!(["host-execution-proof-v1"]);
+    caps["authorizationPath"] = json!("/settings/teams/devices/abcdef0123456789abcdef01");
+    let input: SetExecutionGrant = serde_json::from_value(v["operation"].clone()).unwrap();
+    let org = v["binding"]["organization"].as_str().unwrap();
+    let checkout = v["binding"]["checkout"].as_str().unwrap();
+    let (client, wire) = fixture_replies(
+        vec![
+            response(caps.clone()),
+            response(v["challenge"].clone()),
+            response(json!({"allowed":true,"revision":2})),
+        ],
+        false,
+    );
+    let result = super::host_execution::grant_for_identity(
+        &client,
+        org,
+        checkout,
+        &input,
+        &identity,
+        "fixture-host",
+        || v["nowMs"].as_i64().unwrap(),
+    )
+    .unwrap();
+    assert!(result.allowed);
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[1].1.ends_with("/execution/challenge"));
+    assert_eq!(requests[1].2.as_ref().unwrap(), &v["operation"]);
+    assert_eq!(requests[2].0, Method::PUT);
+    assert_eq!(requests[2].2.as_ref().unwrap()["hostProof"], v["proof"]);
+    assert!(requests.iter().all(|request| request.3));
+    drop(requests);
+
+    let mut altered_input = input.clone();
+    altered_input.user_id = "fixture-other".into();
+    let (client, wire) = fixture_replies(
+        vec![response(caps.clone()), response(v["challenge"].clone())],
+        false,
+    );
+    assert_eq!(
+        super::host_execution::grant_for_identity(
+            &client,
+            org,
+            checkout,
+            &altered_input,
+            &identity,
+            "fixture-host",
+            || v["nowMs"].as_i64().unwrap()
+        )
+        .unwrap_err(),
+        TeamError::InvalidResponse
+    );
+    assert_eq!(
+        wire.requests.lock().unwrap().len(),
+        2,
+        "a substituted operation never sends a permission write"
+    );
+
+    let (client, wire) = fixture(response(caps.clone()), true);
+    assert_eq!(
+        super::host_execution::grant_for_identity(
+            &client,
+            org,
+            checkout,
+            &input,
+            &identity,
+            "fixture-host",
+            || v["nowMs"].as_i64().unwrap()
+        )
+        .unwrap_err(),
+        TeamError::AccountChanged
+    );
+    assert_eq!(wire.requests.lock().unwrap().len(), 1);
+
+    caps["features"] = json!([]);
+    let (client, wire) = fixture(response(caps), false);
+    assert_eq!(
+        super::host_execution::grant_for_identity(
+            &client,
+            org,
+            checkout,
+            &input,
+            &identity,
+            "fixture-host",
+            || v["nowMs"].as_i64().unwrap()
+        )
+        .unwrap_err(),
+        TeamError::Unsupported
+    );
+    assert_eq!(wire.requests.lock().unwrap().len(), 1);
+
+    let (client, wire) = fixture(response(json!({"allowed":false,"revision":2})), false);
+    let mut revoke = input;
+    revoke.allow = false;
+    revoke.machine_id = None;
+    revoke.acknowledge_host_access = None;
+    assert!(
+        !client
+            .set_execution_grant(org, checkout, &revoke)
+            .unwrap()
+            .allowed
+    );
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "revocation does not need a challenge or consent lookup"
+    );
+    assert!(requests[0].2.as_ref().unwrap().get("hostProof").is_none());
 }
 
 #[test]

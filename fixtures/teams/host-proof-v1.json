@@ -1,0 +1,30 @@
+{
+  "testOnly": "Synthetic public interoperability vector. Never use these fixed keys outside tests.",
+  "hostSecret": "0707070707070707070707070707070707070707070707070707070707070707",
+  "nowMs": 1767225601000,
+  "binding": {
+    "issuer": "https://accounts.example.test",
+    "actor": "fixture-owner",
+    "token": "abcdef0123456789abcdef01",
+    "machine": "fixture-host",
+    "organization": "org_11111111111111111111111111111111",
+    "checkout": "checkout_22222222222222222222222222222222",
+    "operationHash": "d3a78a51b1283b0eb860961f5cfe2ed6d67c468c4c8d9c2c53ba55cb43cf5e96"
+  },
+  "operation": {
+    "userId": "fixture-member",
+    "machineId": "fixture-phone",
+    "deviceKey": "abababababababababababababababababababababababababababababababab",
+    "allow": true,
+    "expectedRevision": 1,
+    "acknowledgeHostAccess": true
+  },
+  "challenge": {
+    "version": 1,
+    "context": "WyJ0b2tlbnN0YXQvdGVhbXMvaG9zdC1wcm9vZi92MSIsImh0dHBzOi8vYWNjb3VudHMuZXhhbXBsZS50ZXN0IiwiZml4dHVyZS1vd25lciIsImFiY2RlZjAxMjM0NTY3ODlhYmNkZWYwMSIsImZpeHR1cmUtaG9zdCIsIjEzYmU0ZmVhZWFmMjA0YzdmZDMzNThmYzljMDA3MjE4ODFkMTc0Mjc4MTI4MjI3ZWM2NzRmMzdmN2ZlOTdiNmQiLCJvcmdfMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJjaGVja291dF8yMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMiIsImQzYTc4YTUxYjEyODNiMGViODYwOTYxZjVjZmUyZWQ2ZDY3YzQ2OGM0YzhkOWMyYzUzYmE1NWNiNDNjZjVlOTYiLCIzOjIiLCJob3N0cHJvb2ZfNDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQiLCI1N2RiNGIzNTlmMjNhZTVlMTQ2ZTRlMjUxMjA1NjcwNDcyMjUwNjM0OGMxNTBjMTQ3NTNkMGM5MzNkMDRkNDIxIiwiMDUwNTA1MDUwNTA1MDUwNTA1MDUwNTA1MDUwNTA1MDUwNTA1MDUwNTA1MDUwNTA1MDUwNTA1MDUwNTA1MDUwNSIsIjIwMjYtMDEtMDFUMDA6MDA6MDAuMDAwWiIsIjIwMjYtMDEtMDFUMDA6MDE6MDAuMDAwWiJd"
+  },
+  "proof": {
+    "id": "hostproof_44444444444444444444444444444444",
+    "mac": "915c0ee22df114c11191bab7e122849d6548405b311ddd0bf0b784e55eabce1d"
+  }
+}

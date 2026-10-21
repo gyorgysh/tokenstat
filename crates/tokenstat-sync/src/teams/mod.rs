@@ -5,6 +5,7 @@
 //! paths, branch state and chat content have no place in these API requests.
 
 mod connection;
+mod host_execution;
 mod model;
 pub use connection::TeamConnectionProof;
 pub use model::*;
@@ -524,6 +525,9 @@ impl TeamClient {
         checkout: &str,
         input: &SetExecutionGrant,
     ) -> Result<ExecutionReply, TeamError> {
+        if input.allow {
+            return host_execution::grant(self, org, checkout, input);
+        }
         self.request(
             Method::PUT,
             &["organizations", org, "checkouts", checkout, "execution"],
