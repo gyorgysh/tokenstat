@@ -203,10 +203,10 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     let launch = match init.program {
         Some(program) => Ok((None, program)),
         None => (|| {
-            let backend = super::provider::Backend::parse(prepared.backend())?;
-            let credential = super::provider::Credential::current(backend)?;
-            let program = super::provider::program(backend, &source.checkout.folder.canonical)?;
-            Ok((Some((backend, credential)), program))
+            super::provider::supported(prepared.backend())?;
+            let token = super::provider::access_token()?;
+            let program = super::provider::program(&source.checkout.folder.canonical)?;
+            Ok((Some(token), program))
         })(),
     };
     let (provider, mut program) = match launch {
@@ -284,9 +284,8 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     program.folder.clone_from(&run_home.cwd);
     program.env.clone_from(&run_home.env);
     sdk.configure(&mut program);
-    if let Some((backend, credential)) = provider
-        && let Err(error) =
-            super::provider::configure(backend, &run_home, &mut program, &helper, credential)
+    if let Some(token) = provider
+        && let Err(error) = super::provider::configure(&run_home, &mut program, &helper, token)
     {
         let _ = authority.retire();
         let _ = chats.refuse_prepared_ask(source.target(), *prepared);

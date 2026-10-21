@@ -352,7 +352,7 @@ fn ensure_symlink(source: &Path, target: &Path) -> Result<(), String> {
 /// machines do not grant, so there a hard link is next (same bytes, no
 /// privilege needed) and a copy is last, rewritten every turn so it cannot
 /// age past the turn that made it.
-pub(crate) fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), String> {
+fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), String> {
     // Not `$HOME`: a headless daemon started by a scheduler has none, and the
     // credential to link sits under the real home whether or not the
     // service's environment names it.

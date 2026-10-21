@@ -2,15 +2,19 @@
 
 //! The agent command for one Team run.
 //!
-//! The first version answers an Ask and changes nothing: Claude gets only its
-//! read tools, Codex runs in its read-only sandbox. The frozen conversation
-//! reaches the agent through the scoped `team_context` tool, never through
-//! stdin, so a long shared chat pages instead of filling the prompt.
+//! A teammate's Ask drives this process with the publisher's OS account, and
+//! whatever it can read can end up in the shared chat. So the first version
+//! gives it nothing to read but the Team tools: Claude starts with no
+//! built-in tools, no settings sources and only the scoped MCP bridge. The
+//! frozen conversation pages through `team_context`, never stdin.
 //!
-//! The run home stays empty of personal state. Claude gets a current access
-//! token in its environment and nothing that could renew it. Codex gets its
-//! login file linked in, the way a private chat does. The scoped SDK token is
-//! never written to disk: both config files name the variable, not its value.
+//! Claude gets a current access token in its environment and nothing that
+//! could renew it. No file in the run home is a credential or a link to one.
+//! The scoped SDK token is named by variable in the config, never written.
+//!
+//! Codex is refused: its login is a file holding a refresh token, and there
+//! is no way yet to hand it only a short-lived token. Reading the checkout is
+//! also not offered until reads can be confined to it.
 
 use super::run_home::RunHome;
 use crate::{error::DispatchError, team_process::Program};
@@ -24,62 +28,34 @@ use std::{
 /// The MCP server name the agent sees. Tool names derive from it.
 const SERVER: &str = "tokenstat_team";
 const SDK_VARS: [&str; 2] = ["TOKENSTAT_TEAM_SDK_ADDRESS", "TOKENSTAT_TEAM_SDK_TOKEN"];
-const PROMPT: &str = "You are answering an Ask in a shared Team chat. Call the team_context tool first. When its result includes nextCursor, call it again with that cursor until you have read every page. The original Ask is on every page. Answer that Ask for the people in this chat. You may read files in this checkout. This run is read-only: do not try to modify files or run commands that change state.";
+const PROMPT: &str = "You are answering an Ask in a shared Team chat. Call the team_context tool first. When its result includes nextCursor, call it again with that cursor until you have read every page. The original Ask is on every page. Answer that Ask for the people in this chat from that conversation. You have no file or shell access in this run.";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Backend {
-    Claude,
-    Codex,
-}
-
-impl Backend {
-    pub fn parse(name: &str) -> Result<Self, DispatchError> {
-        match name {
-            "claude" => Ok(Self::Claude),
-            "codex" => Ok(Self::Codex),
-            _ => Err(DispatchError::new(
-                "team_agent_backend_unsupported",
-                "Shared chats can ask Claude Code or Codex. Fork this chat to use another agent.",
-            )),
-        }
+/// Only Claude Code can answer an Ask for now.
+pub(super) fn supported(backend: &str) -> Result<(), DispatchError> {
+    if backend == "claude" {
+        return Ok(());
     }
-    fn command(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-        }
-    }
+    Err(DispatchError::new(
+        "team_agent_backend_unsupported",
+        "Shared chats can ask Claude Code for now. Fork this chat to use another agent.",
+    ))
 }
 
-/// How the agent signs in. Claude's token is the access token alone.
-pub(super) enum Credential {
-    ClaudeToken(String),
-    CodexLogin,
-}
-
-impl Credential {
-    pub fn current(backend: Backend) -> Result<Self, DispatchError> {
-        match backend {
-            Backend::Claude => tokenstat_sync::claude_limits::access_token()
-                .map(Self::ClaudeToken)
-                .map_err(|_| signed_out()),
-            Backend::Codex => Ok(Self::CodexLogin),
-        }
-    }
-}
-
-fn signed_out() -> DispatchError {
-    DispatchError::new(
-        "team_agent_signed_out",
-        "The agent is not signed in on the publishing computer.",
-    )
+/// The access token alone, renewed first when it is close to expiry.
+pub(super) fn access_token() -> Result<String, DispatchError> {
+    tokenstat_sync::claude_limits::access_token().map_err(|_| {
+        DispatchError::new(
+            "team_agent_signed_out",
+            "Claude Code is not signed in on the publishing computer.",
+        )
+    })
 }
 
 /// The program before its home exists. `run_home::prepare` checks the folder
 /// and keeps only `PATH` from this environment.
-pub(super) fn program(backend: Backend, checkout: &Path) -> Result<Program, DispatchError> {
+pub(super) fn program(checkout: &Path) -> Result<Program, DispatchError> {
     let path = search_path().ok_or_else(missing)?;
-    let executable = resolve(backend.command(), &path).ok_or_else(missing)?;
+    let executable = resolve("claude", &path).ok_or_else(missing)?;
     Ok(Program {
         executable,
         args: Vec::new(),
@@ -94,7 +70,7 @@ pub(super) fn program(backend: Backend, checkout: &Path) -> Result<Program, Disp
 fn missing() -> DispatchError {
     DispatchError::new(
         "team_agent_missing",
-        "The agent is not installed on the publishing computer.",
+        "Claude Code is not installed on the publishing computer.",
     )
 }
 
@@ -139,39 +115,22 @@ fn executable(path: &Path) -> bool {
 }
 
 /// Finish the program inside its prepared home: IO files, arguments, the MCP
-/// bridge and the credential. Call after `sdk.configure`, which adds the
-/// bridge's address and token to the environment.
+/// bridge and the token. Call after `sdk.configure`, which adds the bridge's
+/// address and token to the environment.
 pub(super) fn configure(
-    backend: Backend,
     home: &RunHome,
     program: &mut Program,
     helper: &Path,
-    credential: Credential,
+    token: String,
 ) -> io::Result<()> {
     program.input = home.file("input");
     program.output = home.file("output");
     program.errors = home.file("errors");
     write_new(&program.input, PROMPT.as_bytes())?;
-    match (backend, credential) {
-        (Backend::Claude, Credential::ClaudeToken(token)) => {
-            let config = home.file("mcp.json");
-            write_new(&config, claude_mcp(helper).to_string().as_bytes())?;
-            program.args = claude_args(&config);
-            program.env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token);
-        }
-        (Backend::Codex, Credential::CodexLogin) => {
-            let codex = home
-                .env
-                .get("CODEX_HOME")
-                .map(PathBuf::from)
-                .ok_or_else(|| io::Error::other("The Team run home has no Codex home."))?;
-            write_new(&codex.join("config.toml"), codex_config(helper).as_bytes())?;
-            crate::chat_gate::link_credential(&codex, ".codex", "auth.json")
-                .map_err(io::Error::other)?;
-            program.args = codex_args();
-        }
-        _ => return Err(io::Error::other("The Team run credential does not match.")),
-    }
+    let config = home.file("mcp.json");
+    write_new(&config, claude_mcp(helper).to_string().as_bytes())?;
+    program.args = claude_args(&config);
+    program.env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token);
     Ok(())
 }
 
@@ -212,8 +171,10 @@ fn claude_args(config: &Path) -> Vec<String> {
         "--setting-sources",
         "",
         "--disable-slash-commands",
+        // No built-in tools. Read, Grep and Glob accept paths outside the
+        // checkout, and Bash reads anything.
         "--tools",
-        "Read,Grep,Glob",
+        "",
         "--allowedTools",
         "mcp__tokenstat_team",
         "--strict-mcp-config",
@@ -225,30 +186,6 @@ fn claude_args(config: &Path) -> Vec<String> {
     args
 }
 
-fn codex_config(helper: &Path) -> String {
-    // TOML basic strings take the same escapes as JSON for a path.
-    let command = serde_json::to_string(&helper.to_string_lossy()).unwrap_or_default();
-    let vars = serde_json::to_string(&SDK_VARS).unwrap_or_default();
-    format!(
-        "[mcp_servers.{SERVER}]\ncommand = {command}\nargs = [\"team-run-sdk\"]\nenv_vars = {vars}\n"
-    )
-}
-
-fn codex_args() -> Vec<String> {
-    [
-        "exec",
-        "--json",
-        "--skip-git-repo-check",
-        "--ephemeral",
-        "--ignore-rules",
-        "--sandbox",
-        "read-only",
-        "-",
-    ]
-    .map(str::to_string)
-    .into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,11 +193,11 @@ mod tests {
     const SDK_TOKEN: &str = "5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d";
     const ACCESS: &str = "sk-ant-oat01-fixture-access";
 
-    fn prepared(backend: Backend) -> (tempfile::TempDir, tempfile::TempDir, RunHome, Program) {
+    fn prepared() -> (tempfile::TempDir, tempfile::TempDir, RunHome, Program) {
         let scratch = tempfile::tempdir().unwrap();
         let checkout = tempfile::tempdir().unwrap();
         let program = Program {
-            executable: checkout.path().join(backend.command()),
+            executable: checkout.path().join("claude"),
             args: Vec::new(),
             env: BTreeMap::from([("PATH".into(), "/usr/bin:/bin".into())]),
             folder: checkout.path().into(),
@@ -277,6 +214,8 @@ mod tests {
         (scratch, checkout, home, program)
     }
 
+    /// Every entry under the run root. A link of any kind fails the test:
+    /// nothing in a Team run may point back into a personal home.
     fn home_files(root: &Path) -> Vec<(PathBuf, String)> {
         let mut found = Vec::new();
         let mut stack = vec![root.to_path_buf()];
@@ -284,9 +223,10 @@ mod tests {
             for entry in fs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
                 let kind = fs::symlink_metadata(&path).unwrap().file_type();
+                assert!(!kind.is_symlink(), "{path:?} is a link");
                 if kind.is_dir() {
                     stack.push(path);
-                } else if kind.is_file() {
+                } else {
                     let text = fs::read_to_string(&path).unwrap_or_default();
                     found.push((path, text));
                 }
@@ -296,33 +236,28 @@ mod tests {
     }
 
     #[test]
-    fn only_claude_and_codex_can_answer() {
-        assert_eq!(Backend::parse("claude").unwrap(), Backend::Claude);
-        assert_eq!(Backend::parse("codex").unwrap(), Backend::Codex);
-        assert_eq!(
-            Backend::parse("grok").unwrap_err().code,
-            "team_agent_backend_unsupported"
-        );
+    fn only_claude_can_answer_for_now() {
+        assert!(supported("claude").is_ok());
+        for backend in ["codex", "grok", "cursor", ""] {
+            assert_eq!(
+                supported(backend).unwrap_err().code,
+                "team_agent_backend_unsupported"
+            );
+        }
     }
 
     #[test]
-    fn claude_reads_only_and_keeps_its_token_off_disk() {
-        let (_scratch, _checkout, home, mut program) = prepared(Backend::Claude);
+    fn claude_has_only_team_tools_and_no_credential_on_disk() {
+        let (_scratch, _checkout, home, mut program) = prepared();
         let helper = Path::new("/opt/tokenstat/tokenstat-hostd");
-        configure(
-            Backend::Claude,
-            &home,
-            &mut program,
-            helper,
-            Credential::ClaudeToken(ACCESS.into()),
-        )
-        .unwrap();
+        configure(&home, &mut program, helper, ACCESS.into()).unwrap();
         assert_eq!(program.env["CLAUDE_CODE_OAUTH_TOKEN"], ACCESS);
         assert!(!program.args.iter().any(|a| a.contains("skip-permissions")));
         let at = |flag: &str| program.args.iter().position(|a| a == flag).unwrap() + 1;
-        assert_eq!(program.args[at("--tools")], "Read,Grep,Glob");
+        assert_eq!(program.args[at("--tools")], "");
         assert_eq!(program.args[at("--setting-sources")], "");
         assert_eq!(program.args[at("--allowedTools")], "mcp__tokenstat_team");
+        assert!(program.args.iter().any(|a| a == "--strict-mcp-config"));
         let config = PathBuf::from(&program.args[at("--mcp-config")]);
         assert!(config.starts_with(home.file("")));
         let mcp: serde_json::Value =
@@ -335,54 +270,23 @@ mod tests {
             "${TOKENSTAT_TEAM_SDK_TOKEN}"
         );
         assert_eq!(fs::read_to_string(&program.input).unwrap(), PROMPT);
-        for (path, text) in home_files(&home.file("")) {
+        let files = home_files(&home.file(""));
+        for (path, text) in &files {
             assert!(!text.contains(SDK_TOKEN), "{path:?}");
             assert!(!text.contains(ACCESS), "{path:?}");
             assert!(!text.contains("refresh"), "{path:?}");
+            let name = path.file_name().unwrap().to_string_lossy();
+            assert!(
+                ![".credentials.json", "auth.json"].contains(&name.as_ref()),
+                "{path:?}"
+            );
         }
-    }
-
-    #[test]
-    fn codex_runs_read_only_with_the_bridge_named_by_variable() {
-        let (_scratch, _checkout, home, mut program) = prepared(Backend::Codex);
-        let helper = Path::new("/opt/tokenstat/tokenstat-hostd");
-        configure(
-            Backend::Codex,
-            &home,
-            &mut program,
-            helper,
-            Credential::CodexLogin,
-        )
-        .unwrap();
-        assert_eq!(program.args, codex_args());
-        assert!(!program.args.iter().any(|a| a.contains("bypass")));
-        assert!(!program.env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
-        let codex = PathBuf::from(&home.env["CODEX_HOME"]);
-        let config = fs::read_to_string(codex.join("config.toml")).unwrap();
-        assert!(config.contains("command = \"/opt/tokenstat/tokenstat-hostd\""));
-        assert!(
-            config.contains(
-                "env_vars = [\"TOKENSTAT_TEAM_SDK_ADDRESS\",\"TOKENSTAT_TEAM_SDK_TOKEN\"]"
-            )
-        );
-        for (path, text) in home_files(&home.file("")) {
-            assert!(!text.contains(SDK_TOKEN), "{path:?}");
-        }
-    }
-
-    #[test]
-    fn a_mismatched_credential_is_refused() {
-        let (_scratch, _checkout, home, mut program) = prepared(Backend::Codex);
-        assert!(
-            configure(
-                Backend::Codex,
-                &home,
-                &mut program,
-                Path::new("/opt/hostd"),
-                Credential::ClaudeToken(ACCESS.into()),
-            )
-            .is_err()
-        );
+        let mut names: Vec<_> = files
+            .iter()
+            .map(|(p, _)| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["input", "mcp.json"]);
     }
 
     #[cfg(unix)]
