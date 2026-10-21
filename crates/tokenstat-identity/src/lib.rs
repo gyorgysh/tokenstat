@@ -29,6 +29,8 @@ use std::path::PathBuf;
 use thiserror::Error;
 use x25519_dalek::{PublicKey as X25519Public, StaticSecret};
 
+/// Local suspension-inclusive authority clocks; never send or persist stamps.
+pub mod lease_clock;
 pub mod peers;
 pub mod team_host_proof;
 pub mod teams;

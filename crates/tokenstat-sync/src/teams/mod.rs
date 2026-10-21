@@ -6,8 +6,10 @@
 
 mod connection;
 mod host_execution;
+mod host_runs;
 mod model;
 pub use connection::TeamConnectionProof;
+pub use host_runs::HostRunAuthority;
 pub use model::*;
 
 use std::io::Read;

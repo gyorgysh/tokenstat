@@ -5,10 +5,74 @@
 
 use serde_json::{Value, json};
 use std::{
+    collections::HashMap,
     io::{self, BufRead, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
 };
+use tokenstat_sync::teams::{HostRunAuthority, TeamClient, TeamError};
+
+// Test-only, private stdin, marker-guarded loopback process. Production Team
+// RPC never accepts arbitrary initiator tickets or exposes host control.
+fn run_fixture(
+    method: &str,
+    params: &Value,
+    runs: &mut HashMap<String, HostRunAuthority>,
+) -> Result<Value, TeamError> {
+    let text = |key: &str| params[key].as_str().ok_or(TeamError::InvalidRequest);
+    let id = text("id")?;
+    if method == "fixture.run.admit" {
+        if runs.contains_key(id) || runs.len() >= 16 {
+            return Err(TeamError::InvalidRequest);
+        }
+        let client = TeamClient::capture()?;
+        let keys = client.verification_keys()?;
+        let ticket: tokenstat_identity::teams::TeamTicket =
+            serde_json::from_value(params["ticket"].clone())
+                .map_err(|_| TeamError::InvalidRequest)?;
+        let device = tokenstat_identity::public_key_from_hex(text("deviceKey")?)
+            .map_err(|_| TeamError::InvalidRequest)?;
+        let host = tokenstat_identity::MachineIdentity::load_or_create()
+            .map_err(|_| TeamError::InvalidRequest)?
+            .public_key();
+        let actor = keys
+            .verify(
+                &ticket,
+                &tokenstat_identity::teams::TeamTicketBinding {
+                    device_key: &device,
+                    host_key: &host,
+                    publisher_id: text("publisher")?,
+                    actor_id: Some(text("actor")?),
+                },
+                jiff::Timestamp::now()
+                    .as_second()
+                    .try_into()
+                    .map_err(|_| TeamError::InvalidRequest)?,
+            )
+            .map_err(|_| TeamError::InvalidRequest)?;
+        let authority = client.admit_host_run_authority(id, &actor)?;
+        runs.insert(id.to_owned(), authority);
+    } else {
+        let authority = runs.get_mut(id).ok_or(TeamError::InvalidRequest)?;
+        match method {
+            "fixture.run.renew" => authority.renew()?,
+            "fixture.run.ensure" => authority.ensure_live()?,
+            "fixture.run.retire" => {
+                authority.retire()?;
+                return Ok(json!({"retired":true}));
+            }
+            _ => return Err(TeamError::InvalidRequest),
+        }
+    }
+    let claims = runs
+        .get(id)
+        .ok_or(TeamError::InvalidResponse)?
+        .lease()
+        .claims();
+    Ok(
+        json!({"id":claims.run,"revision":claims.revision,"actor":claims.sub,"device":claims.device,"grant":claims.grant}),
+    )
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = PathBuf::from(std::env::var("TOKENSTAT_DATA_DIR")?);
@@ -44,10 +108,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokenstat_host::remote::register_session(session.clone());
     println!("{}", json!({"ready":true,"key":key,"machine":machine}));
     io::stdout().flush()?;
+    let mut runs = HashMap::new();
     for line in io::stdin().lock().lines() {
         let line = line?;
         let input: Value = serde_json::from_str(&line)?;
-        if input["method"] == "fixture.login" {
+        if input["method"]
+            .as_str()
+            .is_some_and(|method| method.starts_with("fixture.run."))
+        {
+            let result = run_fixture(
+                input["method"].as_str().unwrap_or_default(),
+                &input["params"],
+                &mut runs,
+            );
+            let reply = match result {
+                Ok(value) => json!({"id":input["id"],"ok":true,"result":value}),
+                Err(error) => {
+                    let code = match error {
+                        TeamError::Rejected { code, .. } => code,
+                        TeamError::AccountChanged => "account_changed".into(),
+                        TeamError::Network => "network".into(),
+                        _ => "fixture_run_refused".into(),
+                    };
+                    json!({"id":input["id"],"ok":false,"error":{"code":code}})
+                }
+            };
+            println!("{reply}");
+        } else if input["method"] == "fixture.login" {
             let bearer = input["params"]["bearer"]
                 .as_str()
                 .ok_or("Missing fixture credential")?;

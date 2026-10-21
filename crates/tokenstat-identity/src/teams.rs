@@ -13,6 +13,7 @@ use ring::{digest, signature};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{PublicKey, hex};
+pub mod runs;
 
 pub const TICKET_PREFIX: &str = "ts-team-v1";
 pub const TICKET_AUDIENCE: &str = "tokenstat-teams-host-v1";
@@ -139,36 +140,7 @@ impl TrustedTeamKeys {
         binding: &TeamTicketBinding<'_>,
         now: u64,
     ) -> Result<VerifiedTeamTicket, TeamTicketError> {
-        let parts: Vec<_> = ticket.0.split('.').collect();
-        if parts.len() != 4
-            || parts[0] != TICKET_PREFIX
-            || !lower_hex(parts[1], 24)
-            || parts[3].len() != 86
-        {
-            return Err(TeamTicketError::Invalid);
-        }
-        let key = self.keys.get(parts[1]).ok_or(TeamTicketError::Invalid)?;
-        let signed_len = ticket
-            .0
-            .len()
-            .checked_sub(parts[3].len() + 1)
-            .ok_or(TeamTicketError::Invalid)?;
-        let signature = URL_SAFE_NO_PAD
-            .decode(parts[3])
-            .map_err(|_| TeamTicketError::Invalid)?;
-        signature::UnparsedPublicKey::new(&signature::ED25519, key)
-            .verify(
-                ticket
-                    .0
-                    .as_bytes()
-                    .get(..signed_len)
-                    .ok_or(TeamTicketError::Invalid)?,
-                &signature,
-            )
-            .map_err(|_| TeamTicketError::Invalid)?;
-        let payload = URL_SAFE_NO_PAD
-            .decode(parts[2])
-            .map_err(|_| TeamTicketError::Invalid)?;
+        let payload = self.verified_payload(ticket.wire_value(), TICKET_PREFIX)?;
         let claims: TeamTicketClaims =
             serde_json::from_slice(&payload).map_err(|_| TeamTicketError::Invalid)?;
         claims.validate(&self.issuer, now)?;
@@ -183,6 +155,38 @@ impl TrustedTeamKeys {
             ticket: ticket.clone(),
             claims,
         })
+    }
+    fn verified_payload(&self, wire: &str, prefix: &str) -> Result<Vec<u8>, TeamTicketError> {
+        if wire.len() > MAX_TICKET_BYTES {
+            return Err(TeamTicketError::Invalid);
+        }
+        let parts: Vec<_> = wire.split('.').collect();
+        if parts.len() != 4
+            || parts[0] != prefix
+            || !lower_hex(parts[1], 24)
+            || parts[3].len() != 86
+        {
+            return Err(TeamTicketError::Invalid);
+        }
+        let key = self.keys.get(parts[1]).ok_or(TeamTicketError::Invalid)?;
+        let signed_len = wire
+            .len()
+            .checked_sub(parts[3].len() + 1)
+            .ok_or(TeamTicketError::Invalid)?;
+        let signature = URL_SAFE_NO_PAD
+            .decode(parts[3])
+            .map_err(|_| TeamTicketError::Invalid)?;
+        signature::UnparsedPublicKey::new(&signature::ED25519, key)
+            .verify(
+                wire.as_bytes()
+                    .get(..signed_len)
+                    .ok_or(TeamTicketError::Invalid)?,
+                &signature,
+            )
+            .map_err(|_| TeamTicketError::Invalid)?;
+        URL_SAFE_NO_PAD
+            .decode(parts[2])
+            .map_err(|_| TeamTicketError::Invalid)
     }
 }
 

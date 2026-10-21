@@ -24,5 +24,8 @@ ring = "0.17.14"
 jiff.workspace = true
 zeroize = "1.9"
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true

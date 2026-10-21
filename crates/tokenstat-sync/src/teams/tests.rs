@@ -7,9 +7,9 @@ use tokenstat_identity::teams::{TeamTicket, TeamTicketBinding};
 
 type Reply = Result<(u16, Vec<u8>), TeamError>;
 type RecordedRequest = (Method, String, Option<Value>, bool);
-struct MockWire {
-    reply: Mutex<std::collections::VecDeque<Reply>>,
-    requests: Mutex<Vec<RecordedRequest>>,
+pub(super) struct MockWire {
+    pub(super) reply: Mutex<std::collections::VecDeque<Reply>>,
+    pub(super) requests: Mutex<Vec<RecordedRequest>>,
     retire: Option<Arc<AtomicBool>>,
 }
 impl TeamWire for MockWire {
@@ -33,7 +33,10 @@ impl TeamWire for MockWire {
 fn fixture(reply: Reply, retire_on_send: bool) -> (TeamClient, Arc<MockWire>) {
     fixture_replies(vec![reply], retire_on_send)
 }
-fn fixture_replies(replies: Vec<Reply>, retire_on_send: bool) -> (TeamClient, Arc<MockWire>) {
+pub(super) fn fixture_replies(
+    replies: Vec<Reply>,
+    retire_on_send: bool,
+) -> (TeamClient, Arc<MockWire>) {
     let captured = Authentication {
         origin: "https://accounts.example.test".into(),
         bearer: Zeroizing::new("tsk_abcdef0123456789abcdef01_publicfixturesecret".into()),
@@ -59,7 +62,7 @@ fn fixture_replies(replies: Vec<Reply>, retire_on_send: bool) -> (TeamClient, Ar
     };
     (client, wire)
 }
-fn response(body: Value) -> Reply {
+pub(super) fn response(body: Value) -> Reply {
     Ok((200, serde_json::to_vec(&body).unwrap()))
 }
 fn capabilities() -> Value {

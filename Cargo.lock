@@ -3687,6 +3687,7 @@ dependencies = [
  "directories",
  "getrandom 0.4.3",
  "jiff",
+ "libc",
  "ring",
  "serde",
  "serde_json",
