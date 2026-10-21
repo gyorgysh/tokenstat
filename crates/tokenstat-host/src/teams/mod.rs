@@ -18,6 +18,8 @@ mod ingress;
 mod local_sharing;
 #[cfg(feature = "local-host")]
 mod publications;
+#[cfg(feature = "local-host")]
+mod run_home;
 mod scoped;
 #[cfg(feature = "local-host")]
 mod scoped_chats;

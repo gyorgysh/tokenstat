@@ -243,6 +243,22 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             return Err(error);
         }
     };
+    let run_home = match super::run_home::prepare(
+        &tokenstat_paths::data_dir()
+            .ok_or_else(unavailable)?
+            .join("team-run-homes"),
+        &source.checkout.folder.canonical,
+        &program,
+    ) {
+        Ok(home) => home,
+        Err(error) => {
+            let _ = authority.retire();
+            let _ = chats.refuse_prepared_ask(source.target(), *prepared);
+            return Err(map_io(error));
+        }
+    };
+    program.folder.clone_from(&run_home.cwd);
+    program.env.clone_from(&run_home.env);
     sdk.configure(&mut program);
     let mut output = output::Output::new(&program.output, prepared.backend());
     prepared.claim_writer()?;
