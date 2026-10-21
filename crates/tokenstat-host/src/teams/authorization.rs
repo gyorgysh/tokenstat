@@ -154,6 +154,7 @@ impl Gate {
             || next.publisher != prior.publisher
             || next.share != prior.share
             || next.share_revision != prior.share_revision
+            || next.grant != prior.grant
             || next.cap != prior.cap
             || next.iat < prior.iat
             || next.exp < prior.exp
@@ -266,7 +267,7 @@ mod tests {
         let c = ticket.claims();
         serde_json::from_value(json!({"id":c.sub,"name":"Example member","handle":"example-member","avatar":null,
             "deviceKey":c.device,"organizationId":c.org,"repositoryId":c.repository,"checkoutId":c.checkout,"hostKey":c.host,
-            "publisherId":c.publisher,"shareId":c.share,"epoch":c.epoch,"capabilities":c.cap,"role":"contributor",
+            "publisherId":c.publisher,"shareId":c.share,"grantId":c.grant,"epoch":c.epoch,"capabilities":c.cap,"role":"contributor",
             "expiresAt":jiff::Timestamp::from_second(c.exp as i64).unwrap().to_string()})).unwrap()
     }
     fn gate(now: Time) -> Gate {
@@ -416,6 +417,54 @@ mod tests {
         assert!(
             result.is_err(),
             "a validation finishing after expiry must not expose a principal"
+        );
+    }
+    #[test]
+    fn a_new_valid_execution_grant_cannot_revive_an_admitted_connection() {
+        let f = fixture();
+        let start = Time {
+            wall: f["now"].as_u64().unwrap(),
+            monotonic: Instant::now(),
+        };
+        let mut gate = Gate::new(
+            keys(),
+            [0xaa; 32],
+            [0xbb; 32],
+            "fixture-owner".into(),
+            &ticket(&f["variants"]["run"]),
+            start,
+        )
+        .unwrap();
+        let authorized = gate
+            .authorize(
+                &ticket(&f["variants"]["run"]),
+                || start,
+                |ticket| Ok(principal(ticket)),
+            )
+            .unwrap();
+        assert_eq!(
+            authorized.value().grant_id.as_deref(),
+            Some(format!("grant_{}", "e".repeat(32)).as_str())
+        );
+        let later = Time {
+            wall: start.wall + 20,
+            monotonic: start.monotonic + Duration::from_secs(20),
+        };
+        assert!(
+            gate.authorize(
+                &ticket(&f["variants"]["regranted"]),
+                || later,
+                |_| panic!("replacement grant reached online validation on an old connection")
+            )
+            .is_err()
+        );
+        assert!(
+            gate.authorize(
+                &ticket(&f["variants"]["run"]),
+                || start,
+                |_| panic!("retired connection accepted its old grant")
+            )
+            .is_err()
         );
     }
     #[test]

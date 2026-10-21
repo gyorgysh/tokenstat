@@ -674,6 +674,7 @@ impl TeamClient {
             || p.host_key != c.host
             || p.publisher_id != c.publisher
             || p.share_id != c.share
+            || p.grant_id != c.grant
             || p.epoch != c.epoch
             || p.capabilities != c.cap
             || expires.as_second() != c.exp as i64

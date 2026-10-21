@@ -292,6 +292,8 @@ impl Link {
             || current.repository != previous.repository
             || current.checkout != previous.checkout
             || current.share != previous.share
+            || current.share_revision != previous.share_revision
+            || current.grant != previous.grant
             || current.cap != previous.cap
             || current.epoch < previous.epoch
             || current.revision < previous.revision

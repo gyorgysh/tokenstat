@@ -401,7 +401,7 @@ fn verified_ticket() -> VerifiedTeamTicket {
 fn principal() -> Value {
     json!({"principal":{"id":"fixture-member","name":"Example member","handle":"example-member","avatar":null,
     "deviceKey":"a".repeat(64),"organizationId":"org_fixture","repositoryId":"repo_fixture","checkoutId":"checkout_fixture",
-    "hostKey":"b".repeat(64),"publisherId":"fixture-owner","shareId":null,"epoch":3,"capabilities":["read","comment"],"role":"contributor","expiresAt":"2026-01-01T00:01:00.000Z"}})
+    "hostKey":"b".repeat(64),"publisherId":"fixture-owner","shareId":null,"grantId":null,"epoch":3,"capabilities":["read","comment"],"role":"contributor","expiresAt":"2026-01-01T00:01:00.000Z"}})
 }
 #[test]
 fn checks_the_online_principal_against_every_signed_resource_and_peer_binding() {
@@ -424,6 +424,7 @@ fn checks_the_online_principal_against_every_signed_resource_and_peer_binding() 
         "hostKey",
         "publisherId",
         "shareId",
+        "grantId",
         "expiresAt",
     ] {
         let mut changed = principal();

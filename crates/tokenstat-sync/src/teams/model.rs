@@ -183,6 +183,8 @@ pub struct ExecutionGrant {
     pub user_id: String,
     pub device_key: String,
     pub created_at: String,
+    /// None marks a legacy grant requiring renewed physical-host approval.
+    pub grant_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionGrants {
@@ -266,6 +268,7 @@ pub struct TeamPrincipal {
     pub host_key: String,
     pub publisher_id: String,
     pub share_id: Option<String>,
+    pub grant_id: Option<String>,
     pub epoch: u64,
     pub capabilities: Vec<TeamCapability>,
     pub role: RepositoryRole,
@@ -370,9 +373,11 @@ pub struct RepositoryAccessReply {
     pub revision: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecutionReply {
     pub allowed: bool,
     pub revision: u64,
+    pub grant_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -218,6 +218,10 @@ pub struct TeamTicketClaims {
     pub share: Option<String>,
     #[serde(rename = "shareRevision", deserialize_with = "required_option")]
     pub share_revision: Option<u64>,
+    /// Identity of the exact host-approved execution grant. Revocation and a
+    /// later approval must never revive a previous connection or run lease.
+    #[serde(deserialize_with = "required_option")]
+    pub grant: Option<String>,
     pub cap: Vec<TeamCapability>,
     pub iat: u64,
     pub exp: u64,
@@ -268,6 +272,12 @@ impl TeamTicketClaims {
             || self.cap.is_empty()
             || self.cap.len() > 3
             || !self.cap.contains(&TeamCapability::Read)
+            || self.cap.contains(&TeamCapability::Run) != self.grant.is_some()
+            || self.grant.as_ref().is_some_and(|grant| {
+                !grant
+                    .strip_prefix("grant_")
+                    .is_some_and(|id| lower_hex(id, 32))
+            })
             || self
                 .cap
                 .iter()
@@ -461,6 +471,38 @@ mod tests {
             }),
         ] {
             assert!(keys().verify(&value, &binding(), 1767225601).is_err());
+        }
+    }
+    #[test]
+    fn run_authority_requires_one_exact_grant_and_read_authority_has_none() {
+        let valid = signed(|c| {
+            c["cap"] = json!(["read", "run"]);
+            c["grant"] = json!("grant_".to_owned() + &"e".repeat(32));
+        });
+        assert_eq!(
+            keys()
+                .verify(&valid, &binding(), 1767225601)
+                .unwrap()
+                .claims()
+                .grant,
+            Some("grant_".to_owned() + &"e".repeat(32))
+        );
+        for invalid in [
+            signed(|c| {
+                c.as_object_mut().unwrap().remove("grant");
+            }),
+            signed(|c| {
+                c["cap"] = json!(["read", "run"]);
+            }),
+            signed(|c| {
+                c["cap"] = json!(["read", "run"]);
+                c["grant"] = json!("grant_bad");
+            }),
+            signed(|c| {
+                c["grant"] = json!("grant_".to_owned() + &"e".repeat(32));
+            }),
+        ] {
+            assert!(keys().verify(&invalid, &binding(), 1767225601).is_err());
         }
     }
     #[test]
