@@ -21,12 +21,16 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         principal.ensure_live()?;
         if matches!(
             method,
-            "team.chat.ask" | "team.chat.ask.review" | "team.chat.ask.stop"
+            "team.chat.ask"
+                | "team.chat.ask.review"
+                | "team.chat.ask.stop"
+                | "team.chat.ask.status"
         ) {
             #[cfg(feature = "local-host")]
             return match method {
                 "team.chat.ask.review" => super::scoped_runs::review(&principal, params),
                 "team.chat.ask.stop" => super::runs::stop(&principal, params),
+                "team.chat.ask.status" => super::runs::status(&principal, params),
                 _ => super::scoped_runs::send(&principal, params),
             };
             #[cfg(not(feature = "local-host"))]

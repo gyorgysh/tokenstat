@@ -93,6 +93,11 @@ struct TeamSharedChatReader: View {
                     }) {
                         if loading { reloadAfterRead = true } else { Task { await load(earlier: false) } }
                     }.id(target)
+                    if summary.allowsAgentRuns {
+                        TeamAskBar(store: store, context: context, target: ["target": fields("team.chat.details")["target"] ?? .null], computer: checkout.deviceName ?? L10n.text("common.teams.computer")) {
+                            if loading { reloadAfterRead = true } else { Task { await load(earlier: false) } }
+                        }.id(share.id)
+                    }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(Theme.Space.m).background(Theme.panel)
         }

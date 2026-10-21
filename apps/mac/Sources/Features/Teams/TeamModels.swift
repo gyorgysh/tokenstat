@@ -27,6 +27,7 @@ enum TeamHostMethod: String, Sendable {
     case checkoutWithdraw = "teams.checkout.withdraw"
     case connectionCall = "teams.connection.call"
     case commentSend = "teams.comment.send"
+    case ask = "teams.ask"
     case chatOptions = "teams.chat.options"
     case chatPreview = "teams.chat.preview"
     case chatPublish = "teams.chat.publish"

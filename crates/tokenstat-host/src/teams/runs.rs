@@ -133,19 +133,41 @@ fn may_stop(principal: &AuthorizedTeamPrincipal, scope: &Scope, initiator: &str)
             || value.role == RepositoryRole::Maintainer)
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Input {
+    fence: Fence,
+}
+fn input(params: &str) -> Result<Input, DispatchError> {
+    if params.len() > 1024 {
+        return Err(invalid());
+    }
+    serde_json::from_str(params).map_err(|_| invalid())
+}
+
+/// Whether a run is still going here. Anyone in the run's scope may ask,
+/// since everyone reading the chat sees that it is running.
+pub(super) fn status(
+    principal: &AuthorizedTeamPrincipal,
+    params: &str,
+) -> Result<Value, DispatchError> {
+    let input = input(params)?;
+    let scope = Scope::of(principal);
+    let running = runs().as_ref().is_some_and(|table| {
+        table
+            .get(input.fence.run_id())
+            .is_some_and(|run| run.fence == input.fence && run.scope == scope)
+    });
+    Ok(json!({"running":running}))
+}
+
 pub(super) fn stop(
     principal: &AuthorizedTeamPrincipal,
     params: &str,
 ) -> Result<Value, DispatchError> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Input {
-        fence: Fence,
-    }
-    if params.len() > 1024 {
-        return Err(invalid());
-    }
-    let input: Input = serde_json::from_str(params).map_err(|_| invalid())?;
+    // Stop needs the same verified Run proof as Review and Send.
+    principal.run_ticket()?;
+    let input = input(params)?;
     let mut guard = runs();
     let Some(run) = guard
         .as_mut()
@@ -236,15 +258,23 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_run_is_not_stopping() {
+    fn stop_needs_a_run_proof_and_status_reports_unknown_runs() {
         let share = format!("share_{}", "a".repeat(32));
         let fence = json!({"runId":format!("run_{}", "c".repeat(32)),"incarnation":"d".repeat(64)});
-        let result = stop(
+        // Without a verified Run proof, Stop is refused before any lookup.
+        assert!(
+            stop(
+                &principal("asker", "viewer", &share),
+                &json!({"fence":fence}).to_string(),
+            )
+            .is_err()
+        );
+        let report = status(
             &principal("asker", "viewer", &share),
             &json!({"fence":fence}).to_string(),
         )
         .unwrap();
-        assert_eq!(result["stopping"], false);
-        assert!(stop(&principal("asker", "viewer", &share), "{\"fence\":1}").is_err());
+        assert_eq!(report["running"], false);
+        assert!(status(&principal("asker", "viewer", &share), "{\"fence\":1}").is_err());
     }
 }
