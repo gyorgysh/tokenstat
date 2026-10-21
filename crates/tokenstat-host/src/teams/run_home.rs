@@ -21,6 +21,13 @@ pub(super) struct RunHome {
     pub env: BTreeMap<String, String>,
 }
 
+impl RunHome {
+    /// A file in the run's private root, beside its home and config.
+    pub fn file(&self, name: &str) -> PathBuf {
+        self.root.join(name)
+    }
+}
+
 impl Drop for RunHome {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);

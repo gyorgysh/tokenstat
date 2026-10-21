@@ -17,6 +17,8 @@ mod ingress;
 #[cfg(feature = "local-host")]
 mod local_sharing;
 #[cfg(feature = "local-host")]
+mod provider;
+#[cfg(feature = "local-host")]
 mod publications;
 #[cfg(feature = "local-host")]
 mod run_home;

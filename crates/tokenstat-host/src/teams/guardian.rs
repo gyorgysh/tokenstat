@@ -197,12 +197,33 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             return Err(error);
         }
     };
-    let Some(mut program) = init.program else {
-        // Production agent adapters remain disabled until scoped SDK, full
-        // context/state review and physical grant UI are ready.
-        let _ = authority.retire();
-        let result = chats.refuse_prepared_ask(source.target(), *prepared)?;
-        return event(json!({"event":"finished","result":result}));
+    let fixture = init.program.is_some();
+    // A real agent reads the frozen context through the scoped SDK and needs
+    // its own sign-in. Both are settled before anything is written.
+    let launch = match init.program {
+        Some(program) => Ok((None, program)),
+        None => (|| {
+            let backend = super::provider::Backend::parse(prepared.backend())?;
+            let credential = super::provider::Credential::current(backend)?;
+            let program = super::provider::program(backend, &source.checkout.folder.canonical)?;
+            Ok((Some((backend, credential)), program))
+        })(),
+    };
+    let (provider, mut program) = match launch {
+        Ok(launch) => launch,
+        Err(error) => {
+            let _ = authority.retire();
+            let _ = chats.refuse_prepared_ask(source.target(), *prepared);
+            return Err(error);
+        }
+    };
+    let helper = match std::env::current_exe() {
+        Ok(helper) => helper,
+        Err(error) => {
+            let _ = authority.retire();
+            let _ = chats.refuse_prepared_ask(source.target(), *prepared);
+            return Err(map_io(error));
+        }
     };
     let mut raw = std::fs::OpenOptions::new();
     raw.write(true).create_new(true);
@@ -212,6 +233,9 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         raw.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
     let context_written = (|| {
+        if !fixture {
+            return Ok(());
+        }
         use std::io::Write;
         let mut file = raw.open(&program.input).map_err(map_io)?;
         file.write_all(&serde_json::to_vec(prepared.context()).map_err(|_| unavailable())?)
@@ -260,10 +284,17 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     program.folder.clone_from(&run_home.cwd);
     program.env.clone_from(&run_home.env);
     sdk.configure(&mut program);
+    if let Some((backend, credential)) = provider
+        && let Err(error) =
+            super::provider::configure(backend, &run_home, &mut program, &helper, credential)
+    {
+        let _ = authority.retire();
+        let _ = chats.refuse_prepared_ask(source.target(), *prepared);
+        return Err(map_io(error));
+    }
     let mut output = output::Output::new(&program.output, prepared.backend());
     prepared.claim_writer()?;
     chats.transition_owned_run(source.target(), &prepared, State::Launching)?;
-    let helper = std::env::current_exe().map_err(map_io)?;
     let process = Owned::start(&helper, program, || {
         source
             .ensure_current()
@@ -477,9 +508,15 @@ pub(super) fn run(
             .take()
             .ok_or_else(unavailable)?,
     );
-    // The production adapter is disabled and can only finish NotStarted.
-    // Enabling real adapters requires a retained host registry/control owner.
-    let response: Value = team_process::receive(&mut output).map_err(map_io)?;
+    // Control stays open until the run finishes: its EOF stops the guardian.
+    // A retained host registry for public Stop is still required before
+    // execution is enabled.
+    let response = loop {
+        let response: Value = team_process::receive(&mut output).map_err(map_io)?;
+        if response["event"] != "running" {
+            break response;
+        }
+    };
     drop(parent.input.take());
     if response["event"] != "finished" {
         return Err(unavailable());

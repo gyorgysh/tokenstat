@@ -141,6 +141,37 @@ pub fn fetch_with_force(force: bool) -> ProviderLimits {
     result
 }
 
+/// A current access token for one Team run on this machine.
+///
+/// Only the access token leaves this function. A run's home is empty, and
+/// the refresh token stays in Claude Code's own store: a copy that rotated it
+/// would sign the person out of Claude Code. A token close to expiry is
+/// renewed first, through the same path as the limits panel, so the run does
+/// not lose its login partway through.
+pub fn access_token() -> Result<String, String> {
+    let stored = stored_credentials().ok_or("Not signed in to Claude Code on this machine.")?;
+    let token = stored
+        .token()
+        .ok_or("Claude Code on this machine has no stored login.")?;
+    if token
+        .expires_at
+        .is_none_or(|ms| ms > now_ms().saturating_add(RUN_TOKEN_MARGIN_MS))
+        && !token.access_token.is_empty()
+    {
+        return Ok(token.access_token);
+    }
+    let client = crate::http::client_builder()
+        .timeout(Duration::from_secs(15))
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?;
+    refresh(&client, &stored, &token)
+}
+
+/// How long a Team run's token must still be valid when it is handed over.
+const RUN_TOKEN_MARGIN_MS: i64 = 15 * 60 * 1000;
+
 fn credential_owner(access_token: &str) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     Sha256::digest(access_token.as_bytes()).into()
