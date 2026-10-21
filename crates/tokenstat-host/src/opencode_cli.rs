@@ -692,6 +692,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn leased_probe_bounds_startup_and_retires_a_stalled_process_group() {
+        // Login-shell discovery is shared lazy setup, not the fake service's
+        // readiness behavior. Do it before measuring either leased process.
+        let _ = tokenstat_pty::login_env();
         for response in ["echo '{}'", "true"] {
             let root = tempfile::tempdir().unwrap();
             let binary = fake_cli(
@@ -700,7 +703,9 @@ mod tests {
             );
             let start = Instant::now();
             assert!(
-                probe::Server::start(&binary, root.path(), Duration::from_millis(150)).is_none()
+                // Leave scheduling time for the fixture to record its PID on
+                // a loaded worker; an ignored deadline still hits the 5s bound.
+                probe::Server::start(&binary, root.path(), Duration::from_secs(1)).is_none()
             );
             assert!(start.elapsed() < Duration::from_secs(5));
             let pid: i32 = std::fs::read_to_string(format!("{binary}.pid"))
