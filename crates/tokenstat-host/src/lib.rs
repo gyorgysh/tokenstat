@@ -139,6 +139,8 @@ pub mod ssh_records;
 pub(crate) mod ssh_suggest;
 #[cfg(feature = "local-host")]
 mod sync_scheduler;
+#[cfg(feature = "local-host")]
+pub mod team_process;
 #[cfg(test)]
 pub(crate) mod test_identity;
 #[cfg(all(windows, feature = "local-host"))]

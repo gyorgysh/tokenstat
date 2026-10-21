@@ -24,6 +24,30 @@ pub(crate) struct AuthorizedTeamPrincipal {
     client: Option<TeamClient>,
 }
 impl AuthorizedTeamPrincipal {
+    #[cfg(feature = "local-host")]
+    pub(super) fn guardian(
+        client: &TeamClient,
+        ticket: &TeamTicket,
+        device: PublicKey,
+        publisher: String,
+    ) -> Result<Self, DispatchError> {
+        let host = tokenstat_identity::MachineIdentity::load()
+            .map_err(|_| expired())?
+            .ok_or_else(expired)?
+            .public_key();
+        let keys = client.verification_keys().map_err(api_error)?;
+        let mut gate = Gate::new(keys, device, host, publisher, ticket, Time::now())?;
+        let principal = gate.authorize(ticket, Time::now, |proof| {
+            client.validate_connection(proof).map_err(api_error)
+        })?;
+        client.ensure_current().map_err(api_error)?;
+        let principal = Self {
+            client: Some(client.clone()),
+            ..principal
+        };
+        principal.run_ticket()?;
+        Ok(principal)
+    }
     pub(super) fn loopback(
         client: &TeamClient,
         proof: &tokenstat_sync::teams::TeamConnectionProof,

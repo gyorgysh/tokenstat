@@ -38,7 +38,16 @@ fn main() -> ExitCode {
     #[cfg(windows)]
     let daemon_mode = !matches!(
         std::env::args().nth(1).as_deref(),
-        Some("hook" | "chat-live" | "--help" | "-h" | "--version" | "-V")
+        Some(
+            "hook"
+                | "chat-live"
+                | "team-run-anchor"
+                | "team-run-guardian"
+                | "--help"
+                | "-h"
+                | "--version"
+                | "-V"
+        )
     );
     #[cfg(windows)]
     if daemon_mode {
@@ -113,6 +122,19 @@ fn run() -> Result<(), String> {
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "team-run-guardian" => {
+                if args.next().is_some() {
+                    return Err("Unexpected guardian arguments.".into());
+                }
+                return tokenstat_host::team_process::guardian_main();
+            }
+            "team-run-anchor" => {
+                if args.next().is_some() {
+                    return Err("Unexpected process anchor arguments.".into());
+                }
+                return tokenstat_host::team_process::anchor_main()
+                    .map_err(|_| "Team process anchor failed.".into());
+            }
             "chat-live" => {
                 let path = args.next().ok_or("chat-live needs a configuration path")?;
                 return tokenstat_host::chat_live::run(std::path::Path::new(&path));

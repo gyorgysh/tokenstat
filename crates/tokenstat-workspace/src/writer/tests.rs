@@ -3,6 +3,102 @@
 use super::*;
 use std::process::{Child, Command};
 
+#[test]
+fn an_abandoned_claim_blocks_managed_writers_and_an_owned_completion_clears_only_its_exact_id() {
+    let temp = tempfile::tempdir().unwrap();
+    let folder = temp.path().join("checkout");
+    std::fs::create_dir(&folder).unwrap();
+    let root = temp.path().join("locks");
+    let mut lease = Lease::at(&folder, &root).unwrap();
+    let id = "ab".repeat(32);
+    lease.claim_run(&id).unwrap();
+    lease.ensure_current().unwrap();
+    assert_eq!(
+        lease.clear_completed_run(&"cd".repeat(32)),
+        Err(Error::Changed)
+    );
+    lease.ensure_current().unwrap();
+    lease.clear_completed_run(&id).unwrap();
+    drop(lease);
+    let mut next = Lease::at(&folder, &root).unwrap();
+    next.claim_run(&id).unwrap();
+    drop(next);
+    assert!(matches!(
+        Lease::at(&folder, &root),
+        Err(Error::RecoveryRequired)
+    ));
+    assert!(matches!(
+        Lease::at(temp.path(), &root),
+        Err(Error::Busy) | Err(Error::RecoveryRequired)
+    ));
+    let other = temp.path().join("independent");
+    std::fs::create_dir(&other).unwrap();
+    Lease::at(&other, &root).unwrap().ensure_current().unwrap();
+}
+
+#[test]
+fn an_abandoned_common_git_claim_blocks_linked_checkouts_and_aliases() {
+    let temp = tempfile::tempdir().unwrap();
+    let main = temp.path().join("primary");
+    repo(&main);
+    let linked = temp.path().join("linked");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-qb",
+            "linked-fixture",
+            linked.to_str().unwrap(),
+        ],
+    );
+    let root = temp.path().join("locks");
+    let mut lease = Lease::at(&main, &root).unwrap();
+    lease.claim_run(&"ab".repeat(32)).unwrap();
+    drop(lease);
+    assert!(matches!(
+        Lease::at(&linked, &root),
+        Err(Error::RecoveryRequired)
+    ));
+    #[cfg(unix)]
+    {
+        let alias = temp.path().join("alias");
+        std::os::unix::fs::symlink(&main, &alias).unwrap();
+        assert!(matches!(
+            Lease::at(&alias, &root),
+            Err(Error::RecoveryRequired)
+        ));
+    }
+}
+
+#[test]
+fn a_torn_or_missing_initialized_claim_registry_never_becomes_an_empty_registry() {
+    for damage in ["empty", "missing", "checksum"] {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("checkout");
+        std::fs::create_dir(&folder).unwrap();
+        let root = temp.path().join("locks");
+        let mut lease = Lease::at(&folder, &root).unwrap();
+        lease.claim_run(&"ab".repeat(32)).unwrap();
+        drop(lease);
+        let path = root.join("claims.lock");
+        match damage {
+            "empty" => std::fs::write(&path, b"").unwrap(),
+            "missing" => std::fs::remove_file(&path).unwrap(),
+            _ => {
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                value["payload"]["claims"] = serde_json::json!({});
+                std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+        }
+        assert!(
+            matches!(Lease::at(&folder, &root), Err(Error::RecoveryRequired)),
+            "{damage}"
+        );
+    }
+}
+
 fn git(dir: &Path, args: &[&str]) {
     let output = crate::gitwrite::git_command(dir)
         .args([

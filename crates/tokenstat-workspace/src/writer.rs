@@ -3,6 +3,7 @@
 //! Process-owned coordination for managed workspace writers. These locks do
 //! not confine an agent or prevent edits by other programs.
 
+mod claim;
 mod file;
 #[cfg(test)]
 mod tests;
@@ -23,6 +24,10 @@ pub enum Error {
     Unavailable,
     #[error("This checkout changed while it was being prepared. Review it and try again.")]
     Changed,
+    #[error(
+        "This checkout has an unresolved Team run. Recover it on the publishing computer before making changes."
+    )]
+    RecoveryRequired,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -135,6 +140,7 @@ pub struct Lease {
     root: Folder,
     locks: Vec<(PathBuf, File)>,
     retired: AtomicBool,
+    claim: Option<String>,
 }
 impl Lease {
     pub fn folder(&self) -> &Path {
@@ -200,6 +206,7 @@ impl Lease {
             root,
             locks,
             retired: AtomicBool::new(false),
+            claim: None,
         };
         lease.ensure_current()?;
         Ok(lease)
@@ -236,7 +243,7 @@ impl Lease {
                 return Err(Error::Changed);
             }
         }
-        Ok(())
+        claim::check(self)
     }
 }
 

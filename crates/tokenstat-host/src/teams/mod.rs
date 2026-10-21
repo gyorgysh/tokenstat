@@ -11,6 +11,8 @@ mod catalog;
 mod chats;
 mod connections;
 mod directory;
+#[cfg(feature = "local-host")]
+mod guardian;
 mod ingress;
 #[cfg(feature = "local-host")]
 mod local_sharing;
@@ -23,6 +25,8 @@ mod scoped_chats;
 mod scoped_comments;
 #[cfg(feature = "local-host")]
 mod scoped_runs;
+#[cfg(feature = "local-host")]
+pub(crate) use guardian::main as guardian_main;
 #[cfg(feature = "local-host")]
 mod scoped_source;
 #[cfg(feature = "local-host")]

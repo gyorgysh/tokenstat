@@ -338,6 +338,33 @@ impl HostRunAuthority {
     pub fn lease(&self) -> &VerifiedTeamRunLease {
         &self.lease
     }
+    /// A local launch may pass a shorter one-shot birth window to its trusted
+    /// anchor. Never derive that window from signed wall expiry alone: a
+    /// suspend or rollback must not extend the original local lease budget.
+    pub fn remaining(&self) -> Result<Duration, TeamError> {
+        self.ensure_live()?;
+        let result = (|| {
+            let now = self.time()?;
+            let wall = u64::try_from(now.wall_ms).map_err(|_| expired())?;
+            let end = self
+                .lease
+                .claims()
+                .exp
+                .checked_mul(1000)
+                .ok_or_else(expired)?;
+            let wall = Duration::from_millis(
+                end.checked_sub(wall)
+                    .filter(|n| *n > 0)
+                    .ok_or_else(expired)?,
+            );
+            let local = self.deadline.remaining_at(now.stamp).ok_or_else(expired)?;
+            Ok(local.min(wall))
+        })();
+        if result.is_err() {
+            self.retired.store(true, Ordering::Release);
+        }
+        result
+    }
     /// Recheck before every run effect. An expired or retired instance cannot
     /// be revived by a new connection, delayed HTTP reply or wall rollback.
     pub fn ensure_live(&self) -> Result<(), TeamError> {

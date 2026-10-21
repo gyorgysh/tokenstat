@@ -134,6 +134,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
             println!("{reply}");
+        } else if input["method"] == "fixture.guardian.authentication" {
+            let client = tokenstat_sync::vault::VaultClient::capture()?;
+            println!(
+                "{}",
+                json!({"id":input["id"],"ok":true,"result":{"hostAuthentication":client.authentication_id()}})
+            );
         } else if input["method"] == "fixture.login" {
             let bearer = input["params"]["bearer"]
                 .as_str()

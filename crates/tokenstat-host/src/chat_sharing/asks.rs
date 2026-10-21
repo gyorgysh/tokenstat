@@ -168,6 +168,7 @@ pub(crate) struct PreparedAsk {
     context: AskContext,
     _runner: RunnerLease,
     writer: tokenstat_workspace::writer::Lease,
+    claimed: bool,
 }
 impl PreparedAsk {
     pub fn binding(&self) -> &runs::Binding {
@@ -178,6 +179,12 @@ impl PreparedAsk {
     }
     pub fn ensure_writer_current(&self) -> Result<(), DispatchError> {
         self.writer.ensure_current().map_err(|_| changed())
+    }
+    pub fn claim_writer(&mut self) -> Result<(), DispatchError> {
+        self.claimed = true;
+        self.writer
+            .claim_run(self.binding.fence.incarnation())
+            .map_err(|_| unavailable())
     }
 }
 
@@ -194,6 +201,23 @@ impl Store {
         &self,
         target: SharedSource<'_>,
         prepared: &PreparedAsk,
+        current: impl FnMut() -> Result<(), DispatchError>,
+    ) -> Result<(), DispatchError> {
+        self.ensure_ask_state(target, prepared, runs::State::Reserved, current)
+    }
+    pub(crate) fn ensure_launching_ask(
+        &self,
+        target: SharedSource<'_>,
+        prepared: &PreparedAsk,
+        current: impl FnMut() -> Result<(), DispatchError>,
+    ) -> Result<(), DispatchError> {
+        self.ensure_ask_state(target, prepared, runs::State::Launching, current)
+    }
+    fn ensure_ask_state(
+        &self,
+        target: SharedSource<'_>,
+        prepared: &PreparedAsk,
+        expected: runs::State,
         mut current: impl FnMut() -> Result<(), DispatchError>,
     ) -> Result<(), DispatchError> {
         prepared.ensure_writer_current()?;
@@ -216,7 +240,7 @@ impl Store {
                 || marker.initial_fingerprint != target.preview
                 || record.request() != &prepared.request
                 || record.binding() != &prepared.binding
-                || record.state() != runs::State::Reserved
+                || record.state() != expected
                 || record.canonical().is_none()
                 || chat.team_run_fence.as_ref() != Some(&prepared.binding.fence)
             {
@@ -317,7 +341,13 @@ impl Store {
             return Ok(AskPreparation::Existing(value));
         }
         // No canonical/index lock spans filesystem writer acquisition or HTTP.
-        let writer = tokenstat_workspace::writer::Lease::acquire(folder).map_err(|_| busy())?;
+        let writer = tokenstat_workspace::writer::Lease::acquire(folder).map_err(|e| {
+            if e == tokenstat_workspace::writer::Error::RecoveryRequired {
+                super::run_recovery_required()
+            } else {
+                busy()
+            }
+        })?;
         self.source_locked(
             target.workspace,
             target.id,
@@ -463,6 +493,7 @@ impl Store {
                     },
                     _runner: runner,
                     writer,
+                    claimed:false,
                 })))
             },
         )
@@ -473,7 +504,7 @@ impl Store {
     pub(crate) fn refuse_prepared_ask(
         &self,
         target: SharedSource<'_>,
-        prepared: PreparedAsk,
+        mut prepared: PreparedAsk,
     ) -> Result<Value, DispatchError> {
         self.source_locked(
             target.workspace,
@@ -508,6 +539,14 @@ impl Store {
                     )
                     .map_err(|_| unavailable())?;
                 writer::save(&directory.join(writer::JOURNAL), &journal)?;
+                if prepared.claimed {
+                    // No backend birth is possible while still Reserved.
+                    // Durable NotStarted is written before releasing claims.
+                    prepared
+                        .writer
+                        .clear_completed_run(prepared.binding.fence.incarnation())
+                        .map_err(|_| unavailable())?;
+                }
                 index
                     .conversations
                     .iter_mut()
@@ -525,6 +564,140 @@ impl Store {
                         .map_err(|_| unavailable())?
                         .ok_or_else(unavailable)?,
                 ))
+            },
+        )
+    }
+
+    pub(crate) fn transition_owned_run(
+        &self,
+        target: SharedSource<'_>,
+        prepared: &PreparedAsk,
+        next: runs::State,
+    ) -> Result<Value, DispatchError> {
+        if next.terminal() {
+            return Err(unavailable());
+        }
+        self.record_owned_run_state(target, prepared, next)
+    }
+    fn record_owned_run_state(
+        &self,
+        target: SharedSource<'_>,
+        prepared: &PreparedAsk,
+        next: runs::State,
+    ) -> Result<Value, DispatchError> {
+        self.source_locked(
+            target.workspace,
+            target.id,
+            false,
+            |mut index, chat, bytes| {
+                let directory = safe_join(&self.root, target.id).map_err(|_| unavailable())?;
+                let mut journal = writer::load(&directory, chat, bytes)?.ok_or_else(unavailable)?;
+                let record = journal
+                    .run_status(
+                        &prepared.request.scope,
+                        &prepared.request.actor.person,
+                        &prepared.request.client_message_id,
+                    )
+                    .map_err(|_| unavailable())?
+                    .ok_or_else(unavailable)?;
+                if writer::source(chat) != prepared.source
+                    || record.request() != &prepared.request
+                    || record.binding() != &prepared.binding
+                    || record.canonical().is_none()
+                    || chat.team_run_fence.as_ref() != Some(&prepared.binding.fence)
+                {
+                    return Err(unavailable());
+                }
+                journal
+                    .transition_run(&prepared.request, &prepared.binding.fence, next, now_ms())
+                    .map_err(|_| unavailable())?;
+                writer::save(&directory.join(writer::JOURNAL), &journal)?;
+                let source = index
+                    .conversations
+                    .iter_mut()
+                    .find(|c| c.id == target.id)
+                    .ok_or_else(unavailable)?;
+                source.running = matches!(
+                    next,
+                    runs::State::Launching | runs::State::Running | runs::State::Stopping
+                );
+                self.write_team_index(&index)?;
+                Ok(result(
+                    journal
+                        .run_status(
+                            &prepared.request.scope,
+                            &prepared.request.actor.person,
+                            &prepared.request.client_message_id,
+                        )
+                        .map_err(|_| unavailable())?
+                        .ok_or_else(unavailable)?,
+                ))
+            },
+        )
+    }
+    pub(crate) fn complete_owned_run(
+        &self,
+        target: SharedSource<'_>,
+        mut prepared: PreparedAsk,
+        _proof: crate::team_process::Completion,
+        next: runs::State,
+    ) -> Result<Value, DispatchError> {
+        if !matches!(
+            next,
+            runs::State::Succeeded
+                | runs::State::Failed
+                | runs::State::Stopped
+                | runs::State::NotStarted
+        ) {
+            return Err(unavailable());
+        }
+        let result = self.record_owned_run_state(
+            SharedSource {
+                workspace: target.workspace,
+                id: target.id,
+                preview: target.preview,
+                revision: target.revision,
+            },
+            &prepared,
+            next,
+        )?;
+        if prepared.claimed {
+            prepared
+                .writer
+                .clear_completed_run(prepared.binding.fence.incarnation())
+                .map_err(|_| unavailable())?;
+        }
+        self.source_locked(
+            target.workspace,
+            target.id,
+            false,
+            |mut index, chat, bytes| {
+                let directory = safe_join(&self.root, target.id).map_err(|_| unavailable())?;
+                let journal = writer::load(&directory, chat, bytes)?.ok_or_else(unavailable)?;
+                let record = journal
+                    .run_status(
+                        &prepared.request.scope,
+                        &prepared.request.actor.person,
+                        &prepared.request.client_message_id,
+                    )
+                    .map_err(|_| unavailable())?
+                    .ok_or_else(unavailable)?;
+                if record.state() != next
+                    || record.request() != &prepared.request
+                    || record.binding() != &prepared.binding
+                    || writer::source(chat) != prepared.source
+                    || chat.team_run_fence.as_ref() != Some(&prepared.binding.fence)
+                {
+                    return Err(unavailable());
+                }
+                index
+                    .conversations
+                    .iter_mut()
+                    .find(|c| c.id == target.id)
+                    .ok_or_else(unavailable)?
+                    .team_run_fence = None;
+                self.write_team_index(&index)?;
+                Ok(result)
             },
         )
     }

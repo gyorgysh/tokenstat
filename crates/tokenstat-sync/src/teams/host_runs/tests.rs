@@ -85,6 +85,28 @@ fn fixture() -> (HostRunAuthority, Arc<MockWire>, Arc<Mutex<Time>>) {
     .unwrap();
     (authority, wire, now)
 }
+
+#[test]
+fn birth_budget_uses_the_original_continuous_deadline_and_never_revives_after_sleep() {
+    let (authority, _, now) = fixture();
+    let before = authority.remaining().unwrap();
+    assert!(before > Duration::from_secs(2) && before <= Duration::from_secs(30));
+    {
+        let mut time = now.lock().unwrap();
+        time.wall_ms -= 1000;
+        time.stamp.boot += Duration::from_secs(4);
+    }
+    assert!(authority.remaining().unwrap() <= before - Duration::from_secs(4));
+    let saved = *now.lock().unwrap();
+    {
+        let mut time = now.lock().unwrap();
+        time.wall_ms -= 60000;
+        time.stamp.boot += Duration::from_secs(30);
+    }
+    assert!(authority.remaining().is_err());
+    *now.lock().unwrap() = saved;
+    assert!(authority.remaining().is_err());
+}
 fn pending(authority: &mut HostRunAuthority, now: &Arc<Mutex<Time>>) {
     authority.pending = Some(Pending {
         expected_revision: 1,

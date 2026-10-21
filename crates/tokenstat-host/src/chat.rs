@@ -91,6 +91,7 @@ fn workspace_writer_error(error: tokenstat_workspace::writer::Error) -> Dispatch
         Error::Busy => "checkout_busy",
         Error::Unavailable => "checkout_unavailable",
         Error::Changed => "checkout_changed",
+        Error::RecoveryRequired => "team_run_recovery_required",
     };
     DispatchError::new(code, error.to_string())
 }
