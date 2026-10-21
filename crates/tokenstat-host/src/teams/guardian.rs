@@ -180,6 +180,26 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         }
         AskPreparation::New(prepared) => prepared,
     };
+    let fixture = init.program.is_some();
+    // A real agent reads the frozen context through the scoped SDK and needs
+    // its own sign-in. Both are settled before the run's authority is
+    // admitted: a keychain prompt or a login shell must not spend its lease.
+    let launch = match init.program {
+        Some(program) => Ok((None, program)),
+        None => (|| {
+            super::provider::supported(prepared.backend())?;
+            let token = super::provider::access_token()?;
+            let program = super::provider::program(&source.checkout.folder.canonical)?;
+            Ok((Some(token), program))
+        })(),
+    };
+    let (provider, mut program) = match launch {
+        Ok(launch) => launch,
+        Err(error) => {
+            let _ = chats.refuse_prepared_ask(source.target(), *prepared);
+            return Err(error);
+        }
+    };
     // No canonical/index/transcript lock is held across account HTTP.
     let admission = (|| {
         principal.ensure_account_current()?;
@@ -193,26 +213,6 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     let mut authority = match admission {
         Ok(authority) => authority,
         Err(error) => {
-            let _ = chats.refuse_prepared_ask(source.target(), *prepared);
-            return Err(error);
-        }
-    };
-    let fixture = init.program.is_some();
-    // A real agent reads the frozen context through the scoped SDK and needs
-    // its own sign-in. Both are settled before anything is written.
-    let launch = match init.program {
-        Some(program) => Ok((None, program)),
-        None => (|| {
-            super::provider::supported(prepared.backend())?;
-            let token = super::provider::access_token()?;
-            let program = super::provider::program(&source.checkout.folder.canonical)?;
-            Ok((Some(token), program))
-        })(),
-    };
-    let (provider, mut program) = match launch {
-        Ok(launch) => launch,
-        Err(error) => {
-            let _ = authority.retire();
             let _ = chats.refuse_prepared_ask(source.target(), *prepared);
             return Err(error);
         }
