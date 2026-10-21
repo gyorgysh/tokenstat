@@ -15,6 +15,21 @@ final class TeamFixtureUITests: XCTestCase {
         image.name = name; image.lifetime = .keepAlways
         add(image)
     }
+    func testSharedSourceKeepsPrivateDraftAtLargeText() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture-shared-source", "--fixture-large-text"]
+        app.launch()
+        XCTAssertTrue(app.otherElements["chat.sharing.notice"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Stop sharing on its publishing computer."].exists)
+        XCTAssertFalse(app.buttons["chat.sharing.manage"].exists)
+        XCTAssertFalse(app.buttons["Send"].exists)
+        let draft = app.textViews["fixture.source.draft"]
+        XCTAssertTrue(draft.exists)
+        XCTAssertEqual(draft.value as? String, "Private unsent note — keep this on my device.")
+        if !draft.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(draft.isHittable)
+        capture(app, "Shared source private draft large text")
+    }
     func testInvitationStartsWithoutAccessAndRefusesRealWrites() {
         let app = launch()
         XCTAssertTrue(app.buttons["Invite member"].waitForExistence(timeout: 15))

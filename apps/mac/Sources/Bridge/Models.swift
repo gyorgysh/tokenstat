@@ -2658,11 +2658,18 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
 
 // MARK: - Chat
 
+/// The personal reader only needs to know that its source is shared. The
+/// publication journal and consent fingerprint stay on the publishing host.
+struct ChatSharingMarker: Codable, Sendable, Hashable {
+    var id: String
+}
+
 struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var workspaceID: String
     var title: String
     var backend: String
+    var teamShare: ChatSharingMarker? = nil
     var personaID: String?
     var model: String?
     var effort: String?
@@ -2719,7 +2726,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id
         case workspaceID = "workspaceId"
-        case title, backend
+        case title, backend, teamShare
         case personaID = "personaId"
         case model, effort, fastMode, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
@@ -2736,6 +2743,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         workspaceID = try c.decode(String.self, forKey: .workspaceID)
         title = try c.decode(String.self, forKey: .title)
         backend = try c.decode(String.self, forKey: .backend)
+        teamShare = try c.decodeIfPresent(ChatSharingMarker.self, forKey: .teamShare)
         personaID = try c.decodeIfPresent(String.self, forKey: .personaID)
         model = try c.decodeIfPresent(String.self, forKey: .model)
         effort = try c.decodeIfPresent(String.self, forKey: .effort)
@@ -2771,6 +2779,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         try c.encode(workspaceID, forKey: .workspaceID)
         try c.encode(title, forKey: .title)
         try c.encode(backend, forKey: .backend)
+        try c.encodeIfPresent(teamShare, forKey: .teamShare)
         try c.encodeIfPresent(personaID, forKey: .personaID)
         try c.encodeIfPresent(model, forKey: .model)
         try c.encodeIfPresent(effort, forKey: .effort)

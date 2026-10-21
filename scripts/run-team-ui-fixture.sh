@@ -16,7 +16,7 @@ sources=("$root/scripts/qa/teams/"*.swift "$source_root/Features/Teams/"*.swift)
 for name in Theme AppFonts FlowLayout FeatureMark SyntaxKind Avatar AvatarImageDecode ActionIcon ThemedSheet SearchablePicker L10n NativeMenuTrigger; do
     sources+=("$source_root/Design/$name.swift")
 done
-sources+=("$source_root/App/SidebarContextClick.swift" "$source_root/Features/Work/WorkReference.swift" "$source_root/Bridge/JSONValue.swift")
+sources+=("$source_root/Bridge/ChatSharing.swift" "$source_root/Features/Workspaces/Chat/ChatSharingNotice.swift" "$source_root/App/SidebarContextClick.swift" "$source_root/Features/Work/WorkReference.swift" "$source_root/Bridge/JSONValue.swift")
 swiftc -parse-as-library -swift-version 5 -module-cache-path "$root/target/teams-ui-fixture/ModuleCache" \
     -o "$app/Contents/MacOS/TeamUIFixture" "${sources[@]}"
 cp -R "$root/apps/localization/." "$app/Contents/Resources/localization/"

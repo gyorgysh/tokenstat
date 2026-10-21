@@ -28,6 +28,8 @@ targets:
       - path: ../../../apps/mac/Sources/Features/Teams
       - path: ../../../apps/mac/Sources/Features/Work/WorkReference.swift
       - path: ../../../apps/mac/Sources/Bridge/JSONValue.swift
+      - path: ../../../apps/mac/Sources/Bridge/ChatSharing.swift
+      - path: ../../../apps/mac/Sources/Features/Workspaces/Chat/ChatSharingNotice.swift
       - path: ../../../apps/mac/Sources/App/SidebarContextClick.swift
       - path: ../../../apps/mac/Sources/Design/Theme.swift
       - path: ../../../apps/mac/Sources/Design/AppFonts.swift

@@ -146,11 +146,17 @@ final class ChatModel {
     var selected: ChatConversation? {
         didSet {
             noteRunningChats()
+            if selected?.teamShare != nil { authorizedQueueItems.removeAll(); sharingRecoveryNotice = nil }
             if oldValue?.backend != selected?.backend || oldValue?.running != selected?.running {
                 refreshDisplayMetadata()
             }
         }
     }
+    /// Personal drafts and pending writing remain device-local after sharing.
+    /// This state never authorizes a Team send or moves those words into it.
+    var isSharedSource: Bool { selected?.teamShare != nil }
+    private(set) var sharingRecoveryNotice: String?
+
     private(set) var events: [ChatTimelineEvent] = [] {
         didSet {
             eventsRevision &+= 1
@@ -274,6 +280,7 @@ final class ChatModel {
         return item
     }
     var signInGateRowID: String? {
+        guard !isSharedSource else { return nil }
         if let item = signInQueuedMessage { return "signin-gate-\(item.id)" }
         return signInRecovery?.failureID
     }
@@ -297,6 +304,7 @@ final class ChatModel {
     /// Only one message waits: a second is refused and its words stay in the
     /// draft, which is cleared only once the first is safely queued.
     func holdForSignIn(_ text: String, backend backendID: String) -> SignInHold {
+        guard !isSharedSource else { return .refused }
         if busy && selected?.nativeSteer == true && ChatCommandRules.canSteer(text,
             attachments: !attachments.isEmpty, acceptsAttachments: nativeSteerAcceptsAttachments) { return .notNeeded }
         guard needsSignIn(backendID) else { return .notNeeded }
@@ -671,7 +679,7 @@ final class ChatModel {
     /// Nothing is lost if the app stops between the two.
     @discardableResult
     func holdDraftForSending(_ text: String) -> Bool {
-        guard !selectedBackendMissing, savedCopy == nil, let selected, !sending, stagingAttachments == 0, heldSubmission == nil else { return false }
+        guard !isSharedSource, !selectedBackendMissing, savedCopy == nil, let selected, !sending, stagingAttachments == 0, heldSubmission == nil else { return false }
         saveDraftNow()
         if let pending = queued.first(where: { $0.id == draftMessageID && $0.needsReceipt }) {
             unconfirmedSend = .init(conversationID: selected.id, messageID: pending.id, checking: false)
@@ -831,7 +839,7 @@ final class ChatModel {
     /// same command, sign-in and durable-send reservation as its composer.
     func sendInitialDraft() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachments.isEmpty, let selected, !busy, !sending else { return }
+        guard !isSharedSource, !text.isEmpty || !attachments.isEmpty, let selected, !busy, !sending else { return }
         if consumeChatCommand() { return }
         switch holdForSignIn(text, backend: selected.backend) {
         case .notNeeded: break
@@ -882,6 +890,7 @@ final class ChatModel {
             restoreSubmission(submission)
             return
         }
+        guard !isSharedSource else { restoreSubmission(submission); return }
         do {
             var candidate = ChatQueuedMessage(id: messageID, text: submission.text, attachments: submission.attachments)
             candidate.sourceDraftText = submission.draftText
@@ -2124,7 +2133,7 @@ final class ChatModel {
     }
 
     func routing(policy: ChatRoutingPolicy? = nil, action: String? = nil) async -> Bool {
-        guard savedCopy == nil, let selected, let revision = selected.sendRevision else { return false }
+        guard !isSharedSource, savedCopy == nil, let selected, let revision = selected.sendRevision else { return false }
         let generation = selectionGeneration
         do {
             let state = try await Bridge.chatRouting(id: selected.id, revision: revision, policy: policy, action: action, peer: peer)
@@ -2156,7 +2165,7 @@ final class ChatModel {
             updateLanding(backend: backend, model: model, effort: effort, fastMode: fastMode, mode: mode, autonomy: autonomy)
             return
         }
-        guard savedCopy == nil, let selected else { return }
+        guard !isSharedSource, savedCopy == nil, let selected else { return }
         let generation = selectionGeneration
         do {
             let updated = try await Bridge.updateChat(
@@ -2361,21 +2370,28 @@ final class ChatModel {
             WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host, workspaceID: owner.workspace)
         }
         let context = loadGeneration
+        var remaining = sidebarChats(in: folderID).filter { $0.teamShare != nil }
         do {
             // `folderID` may encode a different remote peer than the chat
             // currently loaded in this model. Let the bridge route the folder
             // itself instead of borrowing the current conversation's peer.
             _ = try await Bridge.removeAllChats(workspaceID: folderID, peer: peer)
             guard context == loadGeneration, scope == WorkSessionContext.shared.scope else { return }
+            // The host preserves shared sources. Keep them visible and use
+            // its current list when a conversion raced this action.
+            if let current = try? await Bridge.chats(workspaceID: folderID, peer: peer) { remaining = current }
+            guard context == loadGeneration, scope == WorkSessionContext.shared.scope else { return }
             previewCacheEpoch &+= 1
-            if let cachePrefix { recentMessages.retain([], in: cachePrefix) }
+            if let cachePrefix { recentMessages.retain(Set(remaining.map { cachePrefix + WorkReferenceKey.encode($0.id) }), in: cachePrefix) }
             if self.folderID == folderID { clearRecentMessagePreview() }
             error = nil
-            storeChatListCache([], folderID: folderID)
-            forgetLastSelected(folderID: folderID)
+            storeChatListCache(remaining, folderID: folderID)
+            if !remaining.contains(where: { $0.id == rememberedChat(in: folderID) }) { forgetLastSelected(folderID: folderID) }
             if self.folderID == folderID || workspaceID == folderID {
-                chats = []
-                await select(nil)
+                chats = remaining
+                if let selected, let kept = remaining.first(where: { $0.id == selected.id }) {
+                    self.selected = kept
+                } else { await select(remaining.first) }
             }
         } catch {
             if context == loadGeneration, scope == WorkSessionContext.shared.scope { self.error = error.localizedDescription }
@@ -2438,6 +2454,7 @@ final class ChatModel {
     }
 
     var queuePaused: Bool {
+        if isSharedSource { return true }
         guard let first = queueHead else { return false }
         return first.signInBackend != nil || !authorizedQueueItems.contains(first.id) || first.delivery != .waiting
     }
@@ -2449,7 +2466,7 @@ final class ChatModel {
 
     @discardableResult
     func enqueue(_ text: String, atFront: Bool = false, whenConnected: Bool = false, awaitingSignIn: Bool = false) -> ChatQueuedMessage? {
-        guard stagingAttachments == 0, (savedCopy == nil || whenConnected), ownsQueue, let reference = queuedReference else { return nil }
+        guard !isSharedSource, stagingAttachments == 0, (savedCopy == nil || whenConnected), ownsQueue, let reference = queuedReference else { return nil }
         var item = ChatQueuedMessage(id: draftMessageID ?? UUID().uuidString, text: text, attachments: attachments)
         item.whenConnected = whenConnected
         item.signInBackend = awaitingSignIn ? selected?.backend : nil
@@ -2610,7 +2627,7 @@ final class ChatModel {
     /// Acceptance updates the captured owner's disk record even if navigation
     /// changes. Nothing leaves the outbox before the host's acknowledgement.
     private func deliverQueued(_ candidate: ChatQueuedMessage, stopCurrent: Bool, reserved: Bool = false, steerCurrent: Bool = false, retryUnavailableSteer: Bool = true) async -> Bool {
-        guard candidate.signInBackend == nil, savedCopy == nil, ownsQueue, (!sending || reserved), let reference = queuedReference,
+        guard !isSharedSource, candidate.signInBackend == nil, savedCopy == nil, ownsQueue, (!sending || reserved), let reference = queuedReference,
               WorkCacheAccess.canSave(reference), let conversationID = reference.itemID,
               ChatOutboxStore.shared.beginDelivery(reference) else { return false }
         let token = noteSendStarted()
@@ -2619,7 +2636,7 @@ final class ChatModel {
         let generation = selectionGeneration
         @MainActor func current() -> Bool {
             !Task.isCancelled && selectionMatches(id: conversationID, generation: generation)
-                && currentReference == reference && WorkCacheAccess.canSave(reference) && savedCopy == nil
+                && currentReference == reference && WorkCacheAccess.canSave(reference) && savedCopy == nil && !isSharedSource
         }
         func publish(_ items: [ChatQueuedMessage]) {
             if currentReference == reference { queued = items }
@@ -2867,7 +2884,7 @@ final class ChatModel {
     }
 
     func prepareHandoffDraft(_ expected: WorkSharedDraft) async throws -> WorkSharedDraft {
-        guard let reference = currentReference, handoffDraft == expected, !sending, stagingAttachments == 0 else { throw CancellationError() }
+        guard !isSharedSource, let reference = currentReference, handoffDraft == expected, !sending, stagingAttachments == 0 else { throw CancellationError() }
         let files = try await resolveDraftAttachments(attachments, reference: reference, peer: peer)
         guard currentReference == reference, handoffDraft == expected else { throw CancellationError() }
         return WorkSharedDraft(text: expected.text, attachmentIDs: files.map(\.id))
@@ -3045,7 +3062,7 @@ final class ChatModel {
     /// deadline can already have been answered on another device. Until the
     /// list answers, and while viewing a saved copy, rows stay read-only.
     func approvalIsPending(_ approval: ChatApproval) -> Bool {
-        guard savedCopy == nil, !approval.readOnly, approval.decision == nil else { return false }
+        guard !isSharedSource, savedCopy == nil, !approval.readOnly, approval.decision == nil else { return false }
         guard approvalsLoaded else { return false }
         return approvals.contains { $0.id == approval.id }
     }
@@ -3167,7 +3184,7 @@ final class ChatModel {
     /// host and reaches every device from there, so nothing is kept here.
     func answerQuestion(_ question: ChatQuestion, answer: String) async {
         let answer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !answer.isEmpty, savedCopy == nil, let id = selected?.id,
+        guard !isSharedSource, !answer.isEmpty, savedCopy == nil, let id = selected?.id,
               !answeringQuestions.contains(question.id) else { return }
         let reference = currentReference
         let asked = peer
@@ -3332,7 +3349,7 @@ final class ChatModel {
     /// enqueue the same words.
     func beginBusyNote(_ text: String) -> BusyNoteStart {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if (trimmed.isEmpty && attachments.isEmpty) || (!attachments.isEmpty && !nativeSteerAcceptsAttachments) || savedCopy != nil
+        if isSharedSource || (trimmed.isEmpty && attachments.isEmpty) || (!attachments.isEmpty && !nativeSteerAcceptsAttachments) || savedCopy != nil
             || stagingAttachments > 0 || sending
             || !steerAutonomy || !steerBackend
             || (remoteSteer == false && selected?.nativeSteer != true) {
@@ -3366,6 +3383,7 @@ final class ChatModel {
             noteSendFinished(token)
         }
         guard let submission = busyNoteSubmission, let reference = submission.reference else { return }
+        if isSharedSource { restoreSubmission(submission); return }
         let context = ChatSteerContext(reference: reference,
             generation: submission.generation, peer: submission.peer)
         @MainActor func current() -> Bool {
@@ -3572,7 +3590,7 @@ final class ChatModel {
 
     /// Claim before any await. While the flag is set, the queue stays put.
     private func claimSteerDelivery() -> ChatSteerContext? {
-        if deliveringSteer != nil || clearingSteer != nil || sending || sendingNow || savedCopy != nil || busy { return nil }
+        if isSharedSource || deliveringSteer != nil || clearingSteer != nil || sending || sendingNow || savedCopy != nil || busy { return nil }
         let note = selected?.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !note.isEmpty, let reference = currentReference,
               reference.scope == WorkSessionContext.shared.scope else { return nil }
@@ -3667,6 +3685,14 @@ final class ChatModel {
         _ = await reloadOpenChats()
         guard current() else { return }
         if !busy { await drainQueue() }
+    }
+
+    /// Recovery never retargets a different reader or consumes its private draft.
+    func refreshSharingSource(reference: WorkReference, generation: UInt64, notice: String? = nil) async {
+        guard currentReference == reference, selectionGeneration == generation else { return }
+        _ = await reloadOpenChats()
+        guard currentReference == reference, selectionGeneration == generation else { return }
+        sharingRecoveryNotice = notice
     }
 
     /// Refresh the open list without drawing an unchanged one. False when the
@@ -4709,6 +4735,7 @@ final class ChatModel {
     }
 
     private func advanceSelection(_ reason: String) {
+        sharingRecoveryNotice = nil
         #if DEBUG
         if ProcessInfo.processInfo.environment["TOKENSTAT_VIEWPORT_TRACE"] == "1" {
             print("chat-selection model=\(ObjectIdentifier(self)) cause=\(reason) chat=\(selected?.id ?? "none") workspace=\(workspaceID ?? "none") generation=\(selectionGeneration)->\(selectionGeneration &+ 1) events=\(events.count)")

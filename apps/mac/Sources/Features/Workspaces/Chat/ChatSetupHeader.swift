@@ -378,7 +378,7 @@ struct ChatComposerControls<Chrome: View>: View {
 
     @ViewBuilder
     private var layout: some View {
-        if model.savedCopy != nil {
+        if model.savedCopy != nil || model.isSharedSource {
             if compact {
                 HStack(spacing: Theme.Space.s) {
                     savedCopyLabel

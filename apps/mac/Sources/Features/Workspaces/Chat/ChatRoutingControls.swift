@@ -41,7 +41,7 @@ struct ChatRoutingControls: View {
             else if prominent { action.buttonStyle(AccentButtonStyle()) }
             else { action.buttonStyle(SecondaryButtonStyle(small: true)) }
         }
-            .disabled(model.savedCopy != nil)
+            .disabled(model.savedCopy != nil || model.isSharedSource)
             .sheet(isPresented: $showing) { ChatRoutingSheet(model: model, chat: chat) }
     }
     private var action: some View {

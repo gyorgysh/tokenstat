@@ -298,10 +298,20 @@ struct ChatView: View {
             ZStack {
             VStack(spacing: 0) {
             if let chat = model.selected {
-                if isActive, model.savedCopy == nil {
+                if isActive, model.savedCopy == nil, !model.isSharedSource {
                     WorkHandoffOffer(chat: model) { showingHandoff = true }
                 }
                 transcript(chat)
+                if let notice = model.sharingRecoveryNotice {
+                    TeamNotice(message: notice).padding(.horizontal, Theme.Space.m)
+                }
+                if model.isSharedSource {
+                    ChatSharingNotice(model: model)
+                        .frame(maxWidth: ReadingRoom.laneWidth)
+                        .padding(.horizontal, Theme.Space.l)
+                        .padding(.vertical, Theme.Space.s)
+                        .frame(maxWidth: .infinity)
+                }
                 // A saved copy explains itself above the composer: what the
                 // rows are, when they were kept, and the way back to live.
                 if let copy = model.savedCopy {
@@ -318,7 +328,7 @@ struct ChatView: View {
                 // agent is parked, and removing the field is the plainest way
                 // to say what the conversation is actually waiting for.
                 if model.approvals.isEmpty {
-                    if let note = chat.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+                    if !model.isSharedSource, let note = chat.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
                         ChatSteerNoteBanner(note: note) { model.clearSteer() }
                             .frame(maxWidth: ReadingRoom.laneWidth)
                             .padding(.horizontal, Theme.Space.l)
@@ -335,7 +345,8 @@ struct ChatView: View {
                             items: model.pendingQueue,
                             owner: queueOwner,
                             paused: model.queuePaused,
-                            offline: model.savedCopy != nil,
+                            offline: model.savedCopy != nil || model.isSharedSource,
+                            privateOnly: model.isSharedSource,
                             canSteer: queueCanSteer,
                             canSteerAttachments: queueCanSteerAttachments,
                             onChange: { item, text in model.updateQueued(item, text: text, owner: queueOwner) },
@@ -355,7 +366,7 @@ struct ChatView: View {
                         .padding(.bottom, Theme.Space.s)
                         .frame(maxWidth: .infinity)
                     }
-                    if let backend = model.backend(for: chat.backend), model.savedCopy == nil, model.signInGateRowID == nil {
+                    if let backend = model.backend(for: chat.backend), !model.isSharedSource, model.savedCopy == nil, model.signInGateRowID == nil {
                         ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
                                            recoveryFailureID: model.signInFailureID)
                             .frame(maxWidth: ReadingRoom.laneWidth)
@@ -380,7 +391,7 @@ struct ChatView: View {
                         previews: model.attachmentPreviews,
                         running: model.busy,
                         sendsAsNote: model.sendsAsNote,
-                        placeholder: model.sendsAsNote
+                        placeholder: model.isSharedSource ? L10n.text("common.teams.private_draft_placeholder") : model.sendsAsNote
                             ? (model.selected?.nativeSteer == true ? L10n.text("common.chat.steer_placeholder") : L10n.text("apple.chatview.add_a_note_for_the_next_step.4778177a"))
                             : (model.busy
                                 ? L10n.text("apple.chatview.send_after_this_turn.012fc8c3")
@@ -938,7 +949,7 @@ struct ChatView: View {
                         Task { await model.answerQuestion(question, answer: text) }
                     },
                     answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
-                    canAnswerQuestions: model.savedCopy == nil && !model.isShowingCachedTranscript,
+                    canAnswerQuestions: !model.isSharedSource && model.savedCopy == nil && !model.isShowingCachedTranscript,
                     reviewChanges: model.savedCopy == nil ? onReviewChanges : nil,
                     reviewTurnChanges: onReviewTurnChanges
                 )
@@ -1271,7 +1282,7 @@ struct ChatView: View {
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
-        guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
+        guard !model.isSharedSource, !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
         if model.consumeChatCommand() { return }
         switch model.holdForSignIn(text, backend: chat.backend) {
         case .notNeeded: break

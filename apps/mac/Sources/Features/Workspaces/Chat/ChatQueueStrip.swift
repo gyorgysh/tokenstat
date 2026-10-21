@@ -21,6 +21,7 @@ struct ChatQueueStrip: View {
     var owner: WorkReference?
     var paused = false
     var offline = false
+    var privateOnly = false
     var canSteer = false
     var canSteerAttachments = false
     var onChange: (ChatQueuedMessage, String) -> Void
@@ -49,6 +50,7 @@ struct ChatQueueStrip: View {
                     item: next,
                     compact: true,
                     offline: offline,
+                    privateOnly: privateOnly,
                     canSteer: canSteer,
                     canSteerAttachments: canSteerAttachments,
                     onChange: { onChange(next, $0) },
@@ -71,6 +73,7 @@ struct ChatQueueStrip: View {
             ChatPendingMessagesSheet(
                 items: items,
                 offline: offline,
+                    privateOnly: privateOnly,
                 canSteer: canSteer,
                 canSteerAttachments: canSteerAttachments,
                 onChange: onChange,
@@ -89,6 +92,7 @@ struct ChatQueueStrip: View {
     }
 
     private var title: String {
+        if privateOnly { return L10n.text("common.teams.private_pending_paused") }
         if offline, items.first?.needsReceipt == true { return L10n.text("apple.chatqueuestrip.delivery_needs_checking_reconnect_to_revie.c2182f4e") }
         if offline { return items.first?.whenConnected == true ? L10n.text("apple.chatqueuestrip.waiting_for_connection_cancel_by_removing.e4b6b3d3") : L10n.text("apple.chatqueuestrip.paused_reconnect_to_review_delivery.1f9b08dc") }
         if items.first?.needsReceipt == true { return L10n.text("apple.chatqueuestrip.delivery_needs_checking.62805e9a") }
@@ -143,6 +147,7 @@ struct ChatSteerNoteBanner: View {
 private struct ChatPendingMessagesSheet: View {
     let items: [ChatQueuedMessage]
     var offline = false
+    var privateOnly = false
     var canSteer = false
     var canSteerAttachments = false
     var onChange: (ChatQueuedMessage, String) -> Void
@@ -201,6 +206,7 @@ private struct ChatPendingMessagesSheet: View {
                     ChatQueueRow(
                         item: item,
                         offline: offline,
+                    privateOnly: privateOnly,
                         canSteer: canSteer,
                         canSteerAttachments: canSteerAttachments,
                         onChange: { onChange(item, $0) },
@@ -284,6 +290,7 @@ private struct ChatPendingMessagesSheet: View {
             ChatQueueRow(
                 item: item,
                 offline: offline,
+                    privateOnly: privateOnly,
                 canSteer: canSteer,
                 canSteerAttachments: canSteerAttachments,
                 onChange: { onChange(item, $0) },
@@ -348,6 +355,7 @@ private struct ChatQueueRow: View {
     let item: ChatQueuedMessage
     var compact = false
     var offline = false
+    var privateOnly = false
     var canSteer = false
     var canSteerAttachments = false
     var onChange: (String) -> Void
@@ -375,8 +383,10 @@ private struct ChatQueueRow: View {
                     .padding(.leading, compact ? 24 : 0)
             }
             if offline {
-                Text(L10n.text("apple.chatqueuestrip.reconnect_to_send_or_check_delivery_you_ca.418c13de"))
-                    .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+                Group {
+                    if privateOnly { Text(L10n.text("common.teams.private_pending_explanation")) }
+                    else { Text(L10n.text("apple.chatqueuestrip.reconnect_to_send_or_check_delivery_you_ca.418c13de")) }
+                }.font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             }
             if item.needsReceipt {
                 Text(L10n.text("apple.chatqueuestrip.that_computer_has_not_confirmed_this_messa.143c63eb"))

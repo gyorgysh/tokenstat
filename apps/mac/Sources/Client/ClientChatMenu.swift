@@ -30,7 +30,7 @@ struct ClientChatMenu: View {
     var body: some View {
         Menu {
             Button(L10n.text("apple.clientchatmenu.rename_chat.26076241"), .edit) { rename = true }
-                .disabled(conversation.running || !ownsProject)
+                .disabled(conversation.teamShare != nil || conversation.running || !ownsProject)
             if supportsFork {
                 Button(L10n.text("apple.clientchatmenu.fork_chat.dfbcbb35"), .copy) {
                     let ticket = navigation.chatActionTicket()
@@ -50,15 +50,17 @@ struct ClientChatMenu: View {
                             if isCurrent() { model.error = error.localizedDescription }
                         }
                     }
-                }.disabled(copying || !ownsProject)
+                }.disabled(conversation.teamShare != nil || copying || !ownsProject)
             }
             if onSetup != nil || onHandoff != nil {
                 Divider()
                 if let onSetup {
                     Button(L10n.text("apple.clientchatview.setup.7013af4c"), .settings, action: onSetup)
+                        .disabled(conversation.teamShare != nil)
                 }
                 if let onHandoff {
                     Button(L10n.text("apple.clientchatview.continue_on_another_device.b5836f9a"), .device, action: onHandoff)
+                        .disabled(conversation.teamShare != nil)
                 }
             }
             Section {
@@ -75,7 +77,7 @@ struct ClientChatMenu: View {
                 Divider()
                 Button(L10n.text("apple.clientchatview.delete_chat.93291d9c"), .delete, role: .destructive) {
                     pendingDelete = conversation
-                }.disabled(!ownsProject)
+                }.disabled(conversation.teamShare != nil || !ownsProject)
             }
         } label: {
             Label(L10n.text("apple.clientchatmenu.chat_actions.8ba35bb8"), systemImage: "ellipsis")

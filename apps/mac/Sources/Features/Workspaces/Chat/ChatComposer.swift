@@ -154,7 +154,7 @@ struct ChatComposer: View {
     private var well: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             ChatFileProgressNotice(model: model)
-            if model.savedCopy != nil {
+            if model.savedCopy != nil && !model.isSharedSource {
                 Button(L10n.text("apple.chatcomposer.send_when_connected.c2aae57a"), .scheduled) { model.queueDraftWhenConnected() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .disabled(model.stagingAttachments > 0 || model.unconfirmedSend != nil || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
@@ -172,7 +172,7 @@ struct ChatComposer: View {
             if !attachments.isEmpty {
                 strip
             }
-            ChatSlashMenu(model: model)
+            if !model.isSharedSource { ChatSlashMenu(model: model) }
             field
             ComposerUtilityLayout(spacing: Theme.Space.s, controlsGap: Theme.Space.m) {
                 HStack(spacing: Theme.Space.s) {
@@ -372,7 +372,7 @@ struct ChatComposer: View {
             .font(Theme.body)
             .lineLimit(1...8)
             .padding(.vertical, 6)
-            .submitLabel(.send)
+            .submitLabel(model.isSharedSource ? .return : .send)
             .onSubmit { if !cannotSend { onSend() } }
         #endif
     }
@@ -388,7 +388,7 @@ struct ChatComposer: View {
         return running ? L10n.text("apple.chatcomposer.send_after_this_turn.012fc8c3") : L10n.text("apple.chatcomposer.send.f6f4688f")
     }
 
-    private var setupLocked: Bool { running || (model.landingDraft != nil && !model.landingCanSubmit) }
+    private var setupLocked: Bool { model.isSharedSource || running || (model.landingDraft != nil && !model.landingCanSubmit) }
 
     /// On the landing page Send stays on screen while it cannot be pressed,
     /// so the disabled control can name the piece that is missing. A reader
@@ -412,6 +412,7 @@ struct ChatComposer: View {
     }
 
     private var cannotSend: Bool {
+        if model.isSharedSource { return true }
         if let landing = model.landingDraft { return !model.landingCanSubmit || landing.isSubmitting || landing.stagingAttachments > 0 }
         // A saved copy is read and drafted in, never sent from: the banner
         // above says why, and the field stays editable for those drafts.

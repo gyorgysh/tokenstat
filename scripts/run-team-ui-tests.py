@@ -80,7 +80,7 @@ def main():
             return result.returncode
         summary = json.loads(output("xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(bundle), "--compact"))
         (result_root / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-        if summary.get("result") != "Passed" or summary.get("passedTests", 0) < 9 or summary.get("skippedTests", 0):
+        if summary.get("result") != "Passed" or summary.get("passedTests", 0) < 10 or summary.get("skippedTests", 0):
             raise RuntimeError("Teams UI checks did not run and pass every required scenario.")
         print(f"Teams UI: {summary['passedTests']} passed. Results: {bundle}")
         return 0

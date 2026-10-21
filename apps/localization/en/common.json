@@ -572,5 +572,16 @@
   "common.teams.stop_chat_sharing_confirm": "Stop sharing this chat with repository members.",
   "common.teams.local_before_teams": "Local user (before Teams)",
   "common.teams.history_cannot_display": "This history could not be displayed. Refresh the chat and try again.",
-  "common.teams.shared_history_window": "Showing an earlier part of the chat. Refresh to return to the latest messages."
+  "common.teams.shared_history_window": "Showing an earlier part of the chat. Refresh to return to the latest messages.",
+  "common.teams.private_source_notice": "Drafts here stay private. Open Team chats to continue.",
+  "common.teams.private_draft_placeholder": "Private draft — kept on this device",
+  "common.teams.manage_sharing": "Manage sharing",
+  "common.teams.recover_on_publisher": "Stop sharing on its publishing computer.",
+  "common.teams.stop_sharing_chat": "Stop sharing this chat?",
+  "common.teams.local_stop_explanation": "People with repository access will lose access from this computer. Copies they already saved may remain. Your chat history and private draft stay here.",
+  "common.teams.local_record_unavailable": "The local publication record is unavailable. You can still stop access from this computer. Its account reference may remain.",
+  "common.teams.local_recovery_retry": "Access has stopped. Refresh sharing and try again to restore private editing.",
+  "common.teams.private_pending_paused": "Private pending messages — paused while shared",
+  "common.teams.private_pending_explanation": "These messages stay on this device. You can copy, edit, or remove them.",
+  "common.teams.local_reference_remaining": "Sharing stopped on this computer. This chat is private here; the account may still list its old sharing reference."
 }

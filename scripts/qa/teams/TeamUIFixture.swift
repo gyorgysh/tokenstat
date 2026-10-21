@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Standalone preview of the production Team views. No Bridge, host, login,
+// Standalone preview of the production Team views. No production Bridge, host, login,
 // keychain or clipboard writes. All Teams responses are fictional and avatars
 // have no image URLs. Browser actions are intercepted inside the fixture.
 import SwiftUI
@@ -11,9 +11,15 @@ import AppKit
     init() { AppFonts.register() }
     var body: some Scene {
         #if os(macOS)
-        WindowGroup("Teams UI fixture") { TeamFixtureRoot() }.defaultSize(width: 1150, height: 760)
+        WindowGroup("Teams UI fixture") {
+            if ProcessInfo.processInfo.arguments.contains("--fixture-shared-source") { TeamSourceFixture() }
+            else { TeamFixtureRoot() }
+        }.defaultSize(width: 1150, height: 760)
         #else
-        WindowGroup("Teams UI fixture") { TeamMobileFixtureRoot() }
+        WindowGroup("Teams UI fixture") {
+            if ProcessInfo.processInfo.arguments.contains("--fixture-shared-source") { TeamSourceFixture() }
+            else { TeamMobileFixtureRoot() }
+        }
         #endif
     }
 }
@@ -22,6 +28,7 @@ import AppKit
     @State private var store = TeamStore(api: TeamFixtureData.api)
     @State private var sheet: TeamSheet?
     @State private var dark = true
+    @State private var showingSource = false
     private let owner = TeamAccountOwner(scope: .account(origin: "https://accounts.example.test", handle: "example-owner")!, generation: 1, session: "fixture")
     var body: some View {
         HStack(spacing: 0) {
@@ -47,6 +54,7 @@ import AppKit
         .environment(\.openURL, OpenURLAction { _ in .handled })
         .toolbar {
             Toggle("Dark", isOn: $dark)
+            Button("Shared source") { showingSource = true }
             Menu("Fixture size") {
                 Button("Wide (1150)") { NSApp.keyWindow?.setContentSize(NSSize(width: 1150, height: 760)) }
                 Button("Narrow (950)") { NSApp.keyWindow?.setContentSize(NSSize(width: 950, height: 700)) }
@@ -67,6 +75,7 @@ import AppKit
                 Button("Authorize") { sheet = .authorize }
             }
         }
+        .sheet(isPresented: $showingSource) { TeamSourceFixture().frame(width: 650, height: 600) }
         .sheet(item: $sheet) { route in
             TeamEditorSheet(store: store, route: route, canCreateOrganization: true, onAccount: {}).frame(width: 560, height: 600)
         }

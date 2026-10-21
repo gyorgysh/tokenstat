@@ -5033,7 +5033,7 @@ private struct ChatSidebarConversationRow: View {
             // the title nor its status moves when the actions appear.
             HStack(spacing: 4) {
                 SidebarRowActions(name: conversation.title, visible: isHovering,
-                                  canDelete: !conversation.running && !copying,
+                                  canDelete: conversation.teamShare == nil && !conversation.running && !copying,
                                   deleteTitle: L10n.text("apple.rootview.delete_chat.93291d9c"), delete: { confirmsRemoval = true },
                                   hover: { _ in }, actions: { menu })
                 SidebarChatDetailButton(conversation: conversation, folder: folder, isPresented: $showingDetails)
@@ -5083,9 +5083,9 @@ private struct ChatSidebarConversationRow: View {
         }
     }
     private var menu: [NativeMenuItem] {
-        var items = [NativeMenuItem(L10n.text("apple.rootview.rename.6fa62b3d"), icon: .edit) { renaming = true }]
+        var items = [NativeMenuItem(L10n.text("apple.rootview.rename.6fa62b3d"), icon: .edit, isEnabled: conversation.teamShare == nil) { renaming = true }]
         items += SidebarPinAction.items(reference: draft, name: conversation.title, folderName: folder.name)
-        items.append(.init(copying ? L10n.text("apple.rootview.forking.b24686d8") : L10n.text("apple.rootview.fork_chat.dfbcbb35"), icon: .copy, isEnabled: !conversation.running && !copying) {
+        items.append(.init(copying ? L10n.text("apple.rootview.forking.b24686d8") : L10n.text("apple.rootview.fork_chat.dfbcbb35"), icon: .copy, isEnabled: conversation.teamShare == nil && !conversation.running && !copying) {
             guard !copying else { return }
             copying = true
             Task {
@@ -5095,7 +5095,7 @@ private struct ChatSidebarConversationRow: View {
             }
         })
         items.append(.separator)
-        items.append(.init(L10n.text("apple.rootview.delete_chat.f618c627"), icon: .delete, isEnabled: !conversation.running && !copying,
+        items.append(.init(L10n.text("apple.rootview.delete_chat.f618c627"), icon: .delete, isEnabled: conversation.teamShare == nil && !conversation.running && !copying,
                            destructive: true) { confirmsRemoval = true })
         return items
     }

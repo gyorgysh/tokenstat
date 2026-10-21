@@ -51,9 +51,9 @@ struct ClientChatComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ChatSlashMenu(model: model)
+            if !model.isSharedSource { ChatSlashMenu(model: model) }
             ChatFileProgressNotice(model: model)
-            if model.savedCopy != nil {
+            if model.savedCopy != nil && !model.isSharedSource {
                 Button(L10n.text("apple.clientchatcomposer.send_when_connected.c2aae57a"), .scheduled) { model.queueDraftWhenConnected() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .disabled(model.stagingAttachments > 0 || model.unconfirmedSend != nil || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
@@ -238,7 +238,7 @@ struct ClientChatComposer: View {
             .focused($focused)
             .disabled(model.landingDraft?.isSubmitting == true)
             .padding(.vertical, 8)
-            .submitLabel(.send)
+            .submitLabel(model.isSharedSource ? .return : .send)
             .onSubmit { if canSend { sendTapped() } }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 expanded = false
@@ -299,9 +299,10 @@ struct ClientChatComposer: View {
         .scale(scale: 0.6).combined(with: .opacity)
     }
 
-    private var setupLocked: Bool { running || (model.landingDraft != nil && !model.landingCanSubmit) }
+    private var setupLocked: Bool { model.isSharedSource || running || (model.landingDraft != nil && !model.landingCanSubmit) }
 
     private var cannotSend: Bool {
+        if model.isSharedSource { return true }
         if let landing = model.landingDraft { return !model.landingCanSubmit || landing.isSubmitting || landing.stagingAttachments > 0 }
         // A saved copy is read and drafted in, never sent from: the banner
         // above says why, and the field stays editable for those drafts.

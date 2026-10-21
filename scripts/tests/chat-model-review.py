@@ -47,6 +47,63 @@ with tempfile.TemporaryDirectory(prefix='tokenstat-team-approval-') as directory
     subprocess.run([str(path / 'test')], check=True)
 
 source = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatModel.swift').read_text()
+
+# Exercise the real conversation decoder and sign-in/queue policies. A shared
+# source must preserve private writing before any queue or sign-in side effect.
+conversation = models[models.index('struct ChatSharingMarker:'):models.index('/// Answer from `chat.steerDeliver`.')]
+shared_policy = source[source.index('    var isSharedSource:'):source.index('    private(set) var events:')]
+sign_in = source[source.index('    func holdForSignIn('):source.index('    /// Explicit Continue reuses')]
+queue_policy = source[source.index('    var queuePaused:'):source.index('    private var ownsQueue:')]
+shared_fixture = r'''import Foundation
+struct WorkReference { var itemID: String?; var workspaceID: String }
+struct BranchPull: Codable, Hashable, Sendable {}
+struct ChatRoutingState: Codable, Hashable, Sendable {}
+CONVERSATION
+struct ChatCommandRules { static func canSteer(_ text: String, attachments: Bool, acceptsAttachments: Bool) -> Bool { false } }
+enum L10n { static func text(_ key: String) -> String { key } }
+struct Pending { enum Delivery { case waiting }; var id = "private-pending"; var signInBackend: String?; var delivery: Delivery = .waiting }
+final class SharedSourcePolicy {
+    var selected: ChatConversation?
+    var busy = false, nativeSteerAcceptsAttachments = false
+    var attachments: [String] = [], signInQueuedMessage: String?, backendRefreshError: String?
+    var draft = "Private unsent note", queued = 0
+    var queueHead: Pending? = Pending(), authorizedQueueItems: Set<String> = ["private-pending"]
+    enum SignInHold { case notNeeded, held, refused }
+    func needsSignIn(_ backend: String) -> Bool { true }
+    func enqueue(_ text: String, awaitingSignIn: Bool) -> String? { queued += 1; return text }
+    func clearDraft() { draft = "" }
+POLICY
+SIGNIN
+QUEUE
+}
+@main struct SharedSourceTest {
+    static func main() throws {
+        var row: [String:Any] = ["id":"chat-fixture", "workspaceId":"workspace-fixture", "title":"Fixture", "backend":"codex"]
+        func decode() throws -> ChatConversation { try JSONDecoder().decode(ChatConversation.self, from: JSONSerialization.data(withJSONObject: row)) }
+        let model = SharedSourcePolicy()
+        model.selected = try decode()
+        precondition(!model.isSharedSource && !model.queuePaused)
+        row["teamShare"] = ["id":"share-fixture", "initialFingerprint":"PRIVATE_HOST_FINGERPRINT", "historyBytes":10]
+        model.selected = try decode()
+        precondition(model.isSharedSource && model.queuePaused)
+        guard case .refused = model.holdForSignIn(model.draft, backend: "codex") else { fatalError("shared source queued private writing") }
+        precondition(model.draft == "Private unsent note" && model.queued == 0)
+        let cached = String(data: try JSONEncoder().encode(model.selected), encoding: .utf8)!
+        precondition(cached.contains("share-fixture") && !cached.contains("PRIVATE_HOST_FINGERPRINT"))
+        model.selected = try JSONDecoder().decode(ChatConversation.self, from: Data(cached.utf8))
+        precondition(model.isSharedSource && model.queuePaused)
+        row["teamShare"] = NSNull(); model.selected = try decode()
+        guard case .held = model.holdForSignIn(model.draft, backend: "codex") else { fatalError("private control did not queue") }
+        precondition(model.queued == 1 && model.draft.isEmpty)
+        print("Shared source decoding, private draft retention and queue pause passed")
+    }
+}
+'''.replace('CONVERSATION', conversation).replace('POLICY', shared_policy).replace('SIGNIN', sign_in).replace('QUEUE', queue_policy)
+with tempfile.TemporaryDirectory(prefix='tokenstat-shared-source-') as directory:
+    path = Path(directory)
+    (path / 'SharedSource.swift').write_text(shared_fixture)
+    subprocess.run(['swiftc', '-parse-as-library', str(path / 'SharedSource.swift'), '-o', str(path / 'test')], check=True)
+    subprocess.run([str(path / 'test')], check=True)
 creation = source[source.index('    private var createSingleflight'):source.index('    private func performCreate')]
 usage = source[source.index('    var turnUsage:'):source.index('    var hasStarted:')].replace('@ObservationIgnored ', '')
 approval = source[source.index('    func approvalIsPending'):source.index('    /// Workspace ownership does not require')]
@@ -70,6 +127,7 @@ COST
     var eventsEpoch: UInt64 = 0, usageThrough: UInt64?
     var conversationUsage: ChatUsageTotals?
     var savedCopy: Bool?, approvalsLoaded = false, approvals: [ChatApproval] = []
+    var isSharedSource = false
 CREATION
     func performCreate(expectedGeneration: UInt64) async -> ChatConversation? {
         guard expectedGeneration == loadGeneration else { return nil }
@@ -97,6 +155,9 @@ APPROVAL
         assert(model.approvalIsPending(approval))
         var historical = approval; historical.readOnly = true
         assert(!model.approvalIsPending(historical), "shared history cannot revive live approval controls")
+        model.isSharedSource = true
+        assert(!model.approvalIsPending(approval), "personal shared sources cannot resolve live approvals")
+        model.isSharedSource = false
         model.approvals = []
         assert(!model.approvalIsPending(approval), "resolved live approvals do not wait for old expiry")
         let old = Task { await model.create() }
