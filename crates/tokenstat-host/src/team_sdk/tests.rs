@@ -302,3 +302,80 @@ fn stop_does_not_wait_for_a_slow_account_or_publication_check() {
     release.send(()).unwrap();
     assert!(worker.join().unwrap().is_err());
 }
+
+fn bind_context(context: Value) -> io::Result<Service> {
+    Service::bind(
+        Budget {
+            deadline: Deadline::capture(Duration::from_secs(10)).unwrap(),
+            wall_end: wall_ms().unwrap() + 10000,
+        },
+        context,
+        "run_fixture".into(),
+        Box::new(|| true),
+    )
+}
+
+#[test]
+fn context_above_four_mib_is_paged_and_keeps_the_original_ask() {
+    let events: Vec<_> = (0..60)
+        .map(|n| json!({"n": n, "text": "a".repeat(80_000)}))
+        .collect();
+    let sdk = bind_context(json!({
+        "title": "Long",
+        "backend": "fixture",
+        "historyTrimmed": true,
+        "message": {"text": "Original Ask"},
+        "events": events,
+    }))
+    .unwrap();
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..80 {
+        let args = match &cursor {
+            None => json!({}),
+            Some(cursor) => json!({"cursor": cursor}),
+        };
+        let data = call(&sdk, "team_context", args)["result"]["structuredContent"]["data"].clone();
+        assert_eq!(data["message"]["text"], "Original Ask");
+        assert_eq!(data["title"], "Long");
+        assert_eq!(data["historyTrimmed"], true);
+        assert_eq!(data["eventCount"], 60);
+        let page = data["events"].as_array().unwrap();
+        assert!(!page.is_empty());
+        seen.extend(page.clone());
+        match data.get("nextCursor").and_then(Value::as_str) {
+            Some(next) => cursor = Some(next.to_string()),
+            None => {
+                assert!(data["nextCursor"].is_null());
+                cursor = None;
+                break;
+            }
+        }
+    }
+    assert!(cursor.is_none());
+    assert_eq!(seen, events);
+    assert_eq!(
+        call(&sdk, "team_context", json!({"cursor": "01"}))["result"]["isError"],
+        true
+    );
+    assert_eq!(
+        call(&sdk, "team_context", json!({"cursor": "61"}))["result"]["isError"],
+        true
+    );
+}
+
+#[test]
+fn an_unpageable_or_oversized_snapshot_is_refused() {
+    assert!(bind_context(json!({"message": {"text": "a".repeat(CONTEXT + 1)}})).is_err());
+    let huge = "b".repeat(SNAPSHOT);
+    assert!(bind_context(json!({"message": {"text": "Ask"}, "events": [{"text": huge}]})).is_err());
+    let sdk = bind_context(json!({
+        "message": {"text": "Ask"},
+        "events": [{"text": "c".repeat(PAGE)}],
+    }))
+    .unwrap();
+    assert_eq!(
+        call(&sdk, "team_context", json!({"cursor": "0"}))["result"]["content"][0]["text"],
+        "This context page is too large."
+    );
+}

@@ -22,11 +22,15 @@ const REQUEST: usize = 512 * 1024;
 // MCP text plus structuredContent can encode the same frozen JSON twice;
 // escaping the text copy needs additional headroom. The source stays bounded.
 const CONTEXT: usize = 4 * 1024 * 1024;
+// Ask review still materialises at most 32 MiB. A larger frozen snapshot is
+// served in pages so one MCP response stays inside the existing budget.
+const SNAPSHOT: usize = 32 * 1024 * 1024;
+const PAGE: usize = 256 * 1024;
 const RESPONSE: usize = 16 * 1024 * 1024;
 const IO_BUDGET: Duration = Duration::from_secs(2);
 const ADDRESS: &str = "TOKENSTAT_TEAM_SDK_ADDRESS";
 const TOKEN: &str = "TOKENSTAT_TEAM_SDK_TOKEN";
-const GUIDE: &str = "This connection belongs to one Team run. team_context returns the frozen shared conversation and original Ask approved for this run. Later discussion does not change it. team_run_status describes this run only. Use chart_schema and chart_examples to choose a portable chart, then chart_create to validate it and return the tokenstat-chart block verbatim in your reply. Use observed data and label quantities and units. Personal archives, other chats, workspace management and launching agents are unavailable here.";
+const GUIDE: &str = "This connection belongs to one Team run. team_context returns the frozen shared conversation and original Ask approved for this run. When the result includes nextCursor, call team_context again with that cursor to read the next page. The original Ask is on every page. Later discussion does not change the snapshot. team_run_status describes this run only. Use chart_schema and chart_examples to choose a portable chart, then chart_create to validate it and return the tokenstat-chart block verbatim in your reply. Use observed data and label quantities and units. Personal archives, other chats, workspace management and launching agents are unavailable here.";
 
 fn unavailable() -> io::Error {
     io::Error::other("The Team run SDK is unavailable.")
@@ -136,10 +140,10 @@ impl Service {
         run: String,
         current: Box<dyn Fn() -> bool + Send + Sync>,
     ) -> io::Result<Self> {
-        if serde_json::to_vec(&context)
-            .map_err(|_| unavailable())?
-            .len()
-            > CONTEXT
+        let encoded = serde_json::to_vec(&context).map_err(|_| unavailable())?;
+        if encoded.len() > SNAPSHOT
+            || (encoded.len() > CONTEXT
+                && context.get("events").and_then(Value::as_array).is_none())
         {
             return Err(unavailable());
         }
@@ -374,11 +378,7 @@ fn tool(name: &str, description: &str, chart: bool) -> Value {
 }
 fn tools() -> Vec<Value> {
     vec![
-        tool(
-            "team_context",
-            "Read the accepted shared context and original Ask for this run.",
-            false,
-        ),
+        json!({"name":"team_context","description":"Read one page of the accepted shared context and the original Ask. Pass the previous nextCursor to continue. Omit it for the first page.","inputSchema":{"type":"object","properties":{"cursor":{"type":"string","pattern":"^(0|[1-9][0-9]{0,9})$"}},"additionalProperties":false}}),
         tool("team_run_status", "Read this run's status.", false),
         tool("chart_schema", "Read the portable chart schema.", false),
         tool(
@@ -393,6 +393,89 @@ fn tools() -> Vec<Value> {
         ),
         tool("chart_validate", "Validate a portable chart.", true),
     ]
+}
+fn context_cursor(args: &Value) -> Result<usize, &'static str> {
+    if empty(args) {
+        return Ok(0);
+    }
+    if !keys(args, &["cursor"]) {
+        return Err("This tool accepts no target or arguments.");
+    }
+    let text = args["cursor"]
+        .as_str()
+        .filter(|text| {
+            !text.is_empty()
+                && text.len() <= 10
+                && text.bytes().all(|b| b.is_ascii_digit())
+                && !(text.starts_with('0') && *text != "0")
+        })
+        .ok_or("Provide a context cursor.")?;
+    text.parse().map_err(|_| "Provide a context cursor.")
+}
+fn context_page(source: &Value, events: &[Value], total: usize, next: Option<String>) -> Value {
+    let mut object = serde_json::Map::new();
+    if let Some(fields) = source.as_object() {
+        for (key, value) in fields {
+            if key != "events" && key != "nextCursor" && key != "eventCount" {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    object.insert("events".into(), json!(events));
+    object.insert("eventCount".into(), json!(total));
+    object.insert(
+        "nextCursor".into(),
+        next.map(Value::String).unwrap_or(Value::Null),
+    );
+    Value::Object(object)
+}
+fn page_context(shared: &Shared, args: &Value) -> Result<Value, &'static str> {
+    let cursor = context_cursor(args)?;
+    let encoded = serde_json::to_vec(&shared.context).map_err(|_| "The run is unavailable.")?;
+    if cursor == 0
+        && encoded.len() <= CONTEXT
+        && !args
+            .as_object()
+            .is_some_and(|object| object.contains_key("cursor"))
+    {
+        return Ok(shared.context.clone());
+    }
+    let events = shared
+        .context
+        .get("events")
+        .and_then(Value::as_array)
+        .ok_or("This context cannot be paged.")?;
+    if cursor > events.len() {
+        return Err("That context page is unavailable.");
+    }
+    // Measure each event once. Rendering the growing page on every event would
+    // copy the whole page again, which gets expensive near the 32 MiB cap.
+    let mut bytes = serde_json::to_vec(&context_page(&shared.context, &[], events.len(), None))
+        .map_err(|_| "The run is unavailable.")?
+        .len();
+    let mut chosen = Vec::new();
+    let mut next = cursor;
+    while next < events.len() {
+        let event = serde_json::to_vec(&events[next]).map_err(|_| "The run is unavailable.")?;
+        let separator = usize::from(!chosen.is_empty());
+        // Leave room for the nextCursor string, which is absent from the base.
+        if bytes + separator + event.len() + 32 > PAGE {
+            if chosen.is_empty() {
+                return Err("This context page is too large.");
+            }
+            break;
+        }
+        bytes += separator + event.len();
+        chosen.push(events[next].clone());
+        next += 1;
+    }
+    let next_cursor = (next < events.len()).then(|| next.to_string());
+    Ok(context_page(
+        &shared.context,
+        &chosen,
+        events.len(),
+        next_cursor,
+    ))
 }
 fn content(data: Value) -> Value {
     json!({"content":[{"type":"text","text":data.to_string()}],"structuredContent":{"data":data}})
@@ -415,11 +498,13 @@ fn call(shared: &Shared, params: &Value) -> Result<Value, &'static str> {
             json!({"content":[{"type":"text","text":fence}],"structuredContent":{"chart":chart,"markdown":fence,"valid":true}}),
         );
     }
+    if name == "team_context" {
+        return Ok(content(page_context(shared, args)?));
+    }
     if !empty(args) {
         return Err("This tool accepts no target or arguments.");
     }
     Ok(content(match name {
-        "team_context" => shared.context.clone(),
         "team_run_status" => {
             let gate = shared.gate.lock().map_err(|_| "The run is unavailable.")?;
             json!({"runId":shared.run,"state":gate.state})
