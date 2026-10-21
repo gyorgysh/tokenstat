@@ -4,7 +4,9 @@
 //! credential; late responses from a previous sign-in are retired. Repository
 //! paths, branch state and chat content have no place in these API requests.
 
+mod connection;
 mod model;
+pub use connection::TeamConnectionProof;
 pub use model::*;
 
 use std::io::Read;
@@ -456,6 +458,14 @@ impl TeamClient {
             &["organizations", org, "repositories", repo, "checkouts"],
             None,
             Some(page),
+        )
+    }
+    pub fn checkout(&self, org: &str, checkout: &str) -> Result<CheckoutReply, TeamError> {
+        self.request(
+            Method::GET,
+            &["organizations", org, "checkouts", checkout],
+            None,
+            None,
         )
     }
     pub fn publish_checkout(

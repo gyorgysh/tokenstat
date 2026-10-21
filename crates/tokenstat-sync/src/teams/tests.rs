@@ -8,7 +8,7 @@ use tokenstat_identity::teams::{TeamTicket, TeamTicketBinding};
 type Reply = Result<(u16, Vec<u8>), TeamError>;
 type RecordedRequest = (Method, String, Option<Value>, bool);
 struct MockWire {
-    reply: Mutex<Option<Reply>>,
+    reply: Mutex<std::collections::VecDeque<Reply>>,
     requests: Mutex<Vec<RecordedRequest>>,
     retire: Option<Arc<AtomicBool>>,
 }
@@ -26,11 +26,14 @@ impl TeamWire for MockWire {
         self.reply
             .lock()
             .unwrap()
-            .take()
+            .pop_front()
             .unwrap_or(Err(TeamError::Network))
     }
 }
 fn fixture(reply: Reply, retire_on_send: bool) -> (TeamClient, Arc<MockWire>) {
+    fixture_replies(vec![reply], retire_on_send)
+}
+fn fixture_replies(replies: Vec<Reply>, retire_on_send: bool) -> (TeamClient, Arc<MockWire>) {
     let captured = Authentication {
         origin: "https://accounts.example.test".into(),
         bearer: Zeroizing::new("public-fixture-bearer".into()),
@@ -39,7 +42,7 @@ fn fixture(reply: Reply, retire_on_send: bool) -> (TeamClient, Arc<MockWire>) {
     let retired = Arc::new(AtomicBool::new(false));
     let flag = retired.clone();
     let wire = Arc::new(MockWire {
-        reply: Mutex::new(Some(reply)),
+        reply: Mutex::new(replies.into()),
         requests: Mutex::new(Vec::new()),
         retire: retire_on_send.then_some(retired),
     });
@@ -323,4 +326,122 @@ fn checks_the_online_principal_against_every_signed_resource_and_peer_binding() 
             TeamError::InvalidResponse
         );
     }
+}
+
+#[test]
+fn connects_only_the_requested_checkout_actor_device_and_capabilities() {
+    fn replies() -> Vec<Reply> {
+        let vector: Value =
+            serde_json::from_str(include_str!("../../../../fixtures/teams/ticket-v1.json"))
+                .unwrap();
+        let mut caps = capabilities();
+        caps["features"] = json!(["scoped-connections"]);
+        vec![
+            response(caps),
+            response(json!({"checkout":{
+                "id":"checkout_fixture","organizationId":"org_fixture","repositoryId":"repo_fixture","publisherId":"fixture-owner",
+                "machineId":"fixture-machine","hostKey":"bb".repeat(32),"revision":2,"createdAt":"2026-01-01T00:00:00Z"
+            }})),
+            response(vector["keys"].clone()),
+            response(
+                json!({"ticket":vector["ticket"],"expiresAt":"2026-01-01T00:01:00Z","hostKey":"bb".repeat(32),"capabilities":["read","comment"]}),
+            ),
+        ]
+    }
+    let input = RequestTicket {
+        organization_id: "org_fixture".into(),
+        checkout_id: "checkout_fixture".into(),
+        capabilities: vec![TeamCapability::Read, TeamCapability::Comment],
+        share_id: None,
+    };
+    let (client, wire) = fixture_replies(replies(), false);
+    let proof = client
+        .connection_proof_at(&input, "repo_fixture", &[0xaa; 32], || 1767225601)
+        .unwrap();
+    assert_eq!(proof.host_key(), &[0xbb; 32]);
+    assert_eq!(proof.ticket().claims().sub, "fixture-member");
+    assert_eq!(proof.checkout().id, "checkout_fixture");
+    assert!(!format!("{proof:?}").contains("fixture-member"));
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(requests.len(), 4);
+    assert!(requests.iter().all(|request| request.3));
+    assert!(
+        requests[1]
+            .1
+            .ends_with("/organizations/org_fixture/checkouts/checkout_fixture")
+    );
+    assert_eq!(
+        requests[3].2.as_ref().unwrap()["capabilities"],
+        json!(["read", "comment"])
+    );
+    drop(requests);
+    for index in 0..11 {
+        let mut values = replies();
+        let position = if index < 2 {
+            0
+        } else if index < 5 {
+            1
+        } else {
+            3
+        };
+        let (status, body) = values[position].as_mut().unwrap();
+        assert_eq!(*status, 200);
+        let mut value: Value = serde_json::from_slice(body).unwrap();
+        match index {
+            0 => value["actorId"] = json!("another-account"),
+            1 => value["deviceKey"] = json!("cc".repeat(32)),
+            2 => value["checkout"]["repositoryId"] = json!("repo_other"),
+            3 => value["checkout"]["publisherId"] = json!("another-publisher"),
+            4 => value["checkout"]["revision"] = json!(3),
+            5 => value["hostKey"] = json!("cc".repeat(32)),
+            6 => value["capabilities"] = json!(["read", "comment", "run"]),
+            7 => value["expiresAt"] = json!("2026-01-01T00:02:00Z"),
+            8 => {
+                let vector: Value =
+                    serde_json::from_str(include_str!("../../../../fixtures/teams/ticket-v1.json"))
+                        .unwrap();
+                value["ticket"] = vector["variants"]["otherCheckout"].clone();
+            }
+            9 => value["ticket"] = json!("ts-team-v1.invalid.signature"),
+            _ => {
+                let vector: Value =
+                    serde_json::from_str(include_str!("../../../../fixtures/teams/ticket-v1.json"))
+                        .unwrap();
+                value["ticket"] = vector["variants"]["expanded"].clone();
+            }
+        }
+        *body = serde_json::to_vec(&value).unwrap();
+        let (client, _) = fixture_replies(values, false);
+        assert_eq!(
+            client
+                .connection_proof_at(&input, "repo_fixture", &[0xaa; 32], || 1767225601)
+                .unwrap_err(),
+            TeamError::InvalidResponse,
+            "case {index}"
+        );
+    }
+    let (client, _) = fixture_replies(replies(), false);
+    assert_eq!(
+        client
+            .connection_proof_at(&input, "repo_fixture", &[0xaa; 32], || 1767225660)
+            .unwrap_err(),
+        TeamError::InvalidResponse
+    );
+    let mut shared = input.clone();
+    shared.share_id = Some(format!("share_{}", "a".repeat(32)));
+    let (client, _) = fixture_replies(replies(), false);
+    assert_eq!(
+        client
+            .connection_proof_at(&shared, "repo_fixture", &[0xaa; 32], || 1767225601)
+            .unwrap_err(),
+        TeamError::InvalidResponse
+    );
+    let (client, wire) = fixture(response(capabilities()), false);
+    assert_eq!(
+        client
+            .connection_proof_at(&input, "repo_fixture", &[0xaa; 32], || 1767225601)
+            .unwrap_err(),
+        TeamError::Unsupported
+    );
+    assert_eq!(wire.requests.lock().unwrap().len(), 1);
 }
