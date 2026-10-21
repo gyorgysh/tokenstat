@@ -5,6 +5,7 @@ struct TeamManagementView: View {
     @Bindable var store: TeamStore
     var canCreateOrganization: Bool
     var onAccount: () -> Void
+    var transcript: (TeamChatHistory) -> AnyView
     @State private var sheet: TeamSheet?
     @State private var query = ""
     @State private var selectedMemberId: String?
@@ -12,9 +13,11 @@ struct TeamManagementView: View {
     var body: some View {
         VStack(spacing: 0) {
             #if os(macOS)
-            DetailChromeBar {
-                Button(L10n.text("common.refresh"), .refresh) { refresh() }
-                    .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing)
+            if store.section != .chats {
+                DetailChromeBar {
+                    Button(L10n.text("common.refresh"), .refresh) { refresh() }
+                        .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing)
+                }
             }
             #endif
             if let error = store.error {
@@ -45,7 +48,7 @@ struct TeamManagementView: View {
         }
         #if !os(macOS)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { Button(L10n.text("common.refresh"), systemImage: "arrow.clockwise") { refresh() }.disabled(store.isRefreshing) }
+            ToolbarItem(placement: .topBarTrailing) { if store.section != .chats { Button(L10n.text("common.refresh"), systemImage: "arrow.clockwise") { refresh() }.disabled(store.isRefreshing) } }
         }
         #endif
     }
@@ -117,6 +120,11 @@ struct TeamManagementView: View {
         } else if store.directory == nil && store.isLoadingDirectory { TeamLoadingView() }
         else if let directory = store.directory {
             switch store.section {
+            case .chats:
+                if let context = store.mutationContext {
+                    TeamSharedChatsView(store: store, context: context, repositories: directory.repositories.repositories, transcript: transcript)
+                        .id(store.selectionKey)
+                }
             case .members, .overview: membersContent(directory)
             case .invitations: invitationsContent(directory)
             case .repositories: repositoriesContent(directory)
@@ -303,6 +311,7 @@ struct TeamManagementView: View {
                                     TeamRoleBadge(text: repository.role?.label ?? L10n.text("common.teams.unassigned"))
                                 }
                                 if repository.role != nil {
+                                    Button(L10n.text("common.teams.chats"), .comment) { store.selectedRepositoryId = repository.id; store.show(.chats) }.buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)
                                     Button(L10n.text("common.teams.checkouts"), .checkout) { if let context = store.mutationContext { sheet = .checkouts(context, repository) } }.buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)
                                 }
                                 if organization.role.canManage || repository.role == .maintainer {

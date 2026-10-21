@@ -7,7 +7,7 @@ struct ClientTeamView: View {
     @Environment(AccountModel.self) private var account
     @Environment(\.openClientAccount) private var openAccount
     var body: some View {
-        TeamManagementView(store: teams, canCreateOrganization: account.account?.tier?.lowercased() == "legend", onAccount: openAccount)
+        TeamManagementView(store: teams, canCreateOrganization: account.account?.tier?.lowercased() == "legend", onAccount: openAccount, transcript: TeamTranscriptContent.render)
     }
 }
 

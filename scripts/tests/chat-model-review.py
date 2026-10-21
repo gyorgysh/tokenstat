@@ -6,6 +6,46 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
+
+# Decode the production approval DTO rather than a permissive fixture. Shared
+# history deliberately omits the physical conversation and shell grant.
+models = (root / 'apps/mac/Sources/Bridge/Models.swift').read_text()
+start = models.index('struct ChatApproval:')
+end = models.index('/// An agent CLI', start)
+approval_model = models[start:end]
+approval_fixture = r'''import Foundation
+MODEL
+@main struct ApprovalProjectionTest {
+    static func decode(_ value: [String: Any]) throws -> ChatApproval {
+        try JSONDecoder().decode(ChatApproval.self, from: JSONSerialization.data(withJSONObject: value))
+    }
+    static func main() throws {
+        var row: [String: Any] = ["id":"approval_fixture", "verb":"Read", "preview":"Example file", "createdAtMs":1, "expiresAtMs":2]
+        do { _ = try decode(row); preconditionFailure("a live approval requires its conversation") } catch {}
+        row["readOnly"] = true
+        let historical = try decode(row)
+        precondition(historical.readOnly && historical.conversationID.isEmpty)
+        row["conversationId"] = "PRIVATE_CONVERSATION"
+        let untrusted = try decode(row)
+        precondition(untrusted.conversationID.isEmpty)
+        let encoded = try JSONEncoder().encode(untrusted)
+        precondition(!String(data: encoded, encoding: .utf8)!.contains("PRIVATE_CONVERSATION"))
+        row["readOnly"] = false
+        let live = try decode(row)
+        precondition(!live.readOnly && live.conversationID == "PRIVATE_CONVERSATION")
+        row.removeValue(forKey: "readOnly")
+        let legacy = try decode(row)
+        precondition(legacy.readOnly == false)
+        print("Shared approvals remain read-only without private conversation bindings")
+    }
+}
+'''.replace('MODEL', approval_model)
+with tempfile.TemporaryDirectory(prefix='tokenstat-team-approval-') as directory:
+    path = Path(directory)
+    (path / 'Approval.swift').write_text(approval_fixture)
+    subprocess.run(['swiftc', '-parse-as-library', str(path / 'Approval.swift'), '-o', str(path / 'test')], check=True)
+    subprocess.run([str(path / 'test')], check=True)
+
 source = (root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatModel.swift').read_text()
 creation = source[source.index('    private var createSingleflight'):source.index('    private func performCreate')]
 usage = source[source.index('    var turnUsage:'):source.index('    var hasStarted:')].replace('@ObservationIgnored ', '')
@@ -15,7 +55,7 @@ cost = cost[cost.index('struct ChatUsageTotals:'):cost.index('struct ChatCostMet
 fixture = r'''
 import Foundation
 struct ChatConversation: Sendable { var workspace: UInt64 }
-struct ChatApproval { var id: String; var decision: String?; var expiresAtMs: Int64 = Int64.max }
+struct ChatApproval { var id: String; var decision: String?; var readOnly = false; var expiresAtMs: Int64 = Int64.max }
 struct Event {
     var kind = "usage"; var input: UInt64?; var output: UInt64?
     var cacheRead: UInt64?; var cacheWrite: UInt64?; var costUsd: Double?
@@ -55,6 +95,8 @@ APPROVAL
         assert(!model.approvalIsPending(approval))
         model.approvalsLoaded = true; model.approvals = [approval]
         assert(model.approvalIsPending(approval))
+        var historical = approval; historical.readOnly = true
+        assert(!model.approvalIsPending(historical), "shared history cannot revive live approval controls")
         model.approvals = []
         assert(!model.approvalIsPending(approval), "resolved live approvals do not wait for old expiry")
         let old = Task { await model.create() }

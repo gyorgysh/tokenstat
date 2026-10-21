@@ -3208,7 +3208,7 @@ struct RootView: View {
                 account.signIn()
             })
         case .global(.team):
-            TeamManagementView(store: teams, canCreateOrganization: railAccountTier == "legend", onAccount: { navigate(to: .global(.account)) })
+            TeamManagementView(store: teams, canCreateOrganization: railAccountTier == "legend", onAccount: { navigate(to: .global(.account)) }, transcript: TeamTranscriptContent.render)
         case .global(.account):
             AccountView(model: account)
         case .workspacesOverview:

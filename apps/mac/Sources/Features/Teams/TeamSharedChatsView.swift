@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+import SwiftUI
+
+/// Team navigation has its own reader. It never selects a private ChatModel,
+/// changes WorkSessionContext, or loads another person's personal archive.
+struct TeamSharedChatsView: View {
+    @Bindable var store: TeamStore
+    let context: TeamMutationContext
+    let repositories: [TeamRepository]
+    let transcript: (TeamChatHistory) -> AnyView
+    @State private var checkouts: [TeamCheckout] = []
+    @State private var checkoutId: String?
+    @State private var checkoutsNext: Int?
+    @State private var shares: [TeamSharedChat] = []
+    @State private var sharesNext: Int?
+    @State private var selected: TeamSharedChat?
+    @State private var loadingCheckouts = false
+    @State private var loadingShares = false
+    @State private var checkoutLoad = UUID()
+    @State private var shareLoad = UUID()
+    private var loading: Bool { loadingCheckouts || loadingShares }
+    @State private var error: String?
+    @State private var shareSheet = false
+    @State private var localCheckoutIds: Set<String> = []
+    private var isCurrent: Bool { store.mutationContext == context && store.phase == .ready }
+    private var availableRepositories: [TeamRepository] { repositories.filter { $0.role != nil } }
+    private var repository: TeamRepository? { availableRepositories.first { $0.id == store.selectedRepositoryId } }
+    private var checkout: TeamCheckout? { checkouts.first { $0.id == checkoutId } }
+
+    var body: some View {
+        Group {
+            if let selected, let repository, let checkout {
+                TeamSharedChatReader(store: store, context: context, repository: repository, checkout: checkout, share: selected, transcript: transcript) { self.selected = nil }
+                    .id(selected.id)
+            } else {
+                directory
+            }
+        }
+        .task(id: store.selectedRepositoryId) { await loadCheckouts() }
+        .task(id: checkoutId) { await loadShares(more: false) }
+        .sheet(isPresented: $shareSheet) {
+            if let repository, let checkout {
+                TeamChatShareEditor(store: store, context: context, repository: repository, checkout: checkout, transcript: transcript)
+                    #if os(macOS)
+                    .frame(width: 760, height: 700)
+                    #else
+                    .presentationDetents([.large]).presentationDragIndicator(.visible)
+                    #endif
+            }
+        }
+        .onChange(of: shareSheet) { if !shareSheet { Task { await loadShares(more: false) } } }
+    }
+    private var directory: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                TeamSectionHeader(title: L10n.text("common.teams.chats"), subtitle: L10n.text("common.teams.shared_chats_detail")) {
+                    Button(L10n.text("common.refresh"), .refresh) { Task { await loadShares(more: false) } }.buttonStyle(TeamButtonStyle()).disabled(loading || checkout == nil)
+                }
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let error { TeamNotice(message: error, warning: true) }
+                    if availableRepositories.isEmpty {
+                        TeamNotice(message: L10n.text("common.teams.no_repositories_member"))
+                    } else {
+                        TeamPickerField(title: L10n.text("common.teams.repository_name"), selection: $store.selectedRepositoryId) {
+                            Text(L10n.text("common.teams.choose_repository")).tag(Optional<String>.none)
+                            ForEach(availableRepositories) { Text($0.name).tag(Optional($0.id)) }
+                        }.accessibilityIdentifier("team.chats.repository")
+                        if repository != nil {
+                            TeamPickerField(title: L10n.text("common.teams.computer"), selection: $checkoutId) {
+                                Text(L10n.text("common.teams.choose_computer")).tag(Optional<String>.none)
+                                ForEach(checkouts) { row in Text(computerName(row)).tag(Optional(row.id)) }
+                            }.accessibilityIdentifier("team.chats.checkout")
+                            if checkoutsNext != nil {
+                                Button(L10n.text("common.teams.load_more"), .more) { Task { await loadCheckouts(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
+                            }
+                            if checkouts.isEmpty && !loading { TeamNotice(message: L10n.text("common.teams.no_checkouts")) }
+                        }
+                    }
+                    if loading { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
+                    if let checkout {
+                        if let publisher = checkout.publisher {
+                            TeamPersonLabel(id: publisher.id, name: publisher.name, handle: publisher.handle, avatar: publisher.avatar, owner: context.owner)
+                        }
+                        if shares.isEmpty && !loading { TeamNotice(message: L10n.text("common.teams.no_shared_chats")) }
+                        ForEach(shares) { share in
+                            Button {
+                                selected = share
+                            } label: {
+                                HStack(spacing: Theme.Space.m) {
+                                    Image(systemName: ActionIcon.comment.symbol).foregroundStyle(TeamColors.action)
+                                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                                        Text(L10n.text("common.teams.shared_chat")).font(Theme.body.weight(.medium))
+                                        if let date = TeamDate.parse(share.createdAt) {
+                                            Text(date, format: .dateTime.month().day().hour().minute()).font(Theme.caption).foregroundStyle(.secondary)
+                                        }
+                                        Text(L10n.text("common.teams.connect_to_read")).font(Theme.callout).foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                }.padding(Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading).background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain).accessibilityIdentifier("team.chats.open.\(share.id)")
+                        }
+                        if sharesNext != nil { Button(L10n.text("common.teams.load_more"), .more) { Task { await loadShares(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading) }
+                        if store.capabilities?.canPublishChats == true, localCheckoutIds.contains(checkout.id) {
+                            Button(L10n.text("common.teams.share_chat"), .connect) { shareSheet = true }.buttonStyle(TeamButtonStyle(primary: true)).accessibilityIdentifier("team.chats.share")
+                        }
+                    }
+                }.padding(.horizontal, Theme.Space.l)
+            }
+            .frame(maxWidth: 860, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, Theme.Space.l)
+        }
+    }
+    private func computerName(_ row: TeamCheckout) -> String {
+        [row.deviceName ?? L10n.text("common.teams.computer"), row.publisher?.name].compactMap { $0 }.joined(separator: " · ")
+    }
+    private func loadCheckouts(more: Bool = false) async {
+        let load = UUID(); checkoutLoad = load
+        if !more { checkouts = []; checkoutId = nil; shares = []; selected = nil; shareSheet = false; localCheckoutIds = []; error = nil }
+        guard isCurrent, let repository else { loadingCheckouts = false; return }
+        loadingCheckouts = true
+        defer { if checkoutLoad == load { loadingCheckouts = false } }
+        do {
+            let result: TeamCheckouts = try await store.read("checkouts.list", fields: ["organization":.string(repository.organizationId),"repository":.string(repository.id),"page":TeamStore.page(offset: more ? checkoutsNext ?? 0 : 0)], context: context)
+            guard isCurrent, checkoutLoad == load, self.repository?.id == repository.id else { return }
+            checkouts = more ? checkouts + result.checkouts.filter { next in !checkouts.contains { $0.id == next.id } } : result.checkouts
+            checkoutsNext = result.nextOffset
+            if store.capabilities?.canPublishChats == true {
+                let local: TeamLocalPublications = try await store.read(.checkoutList, fields: ["organization":.string(repository.organizationId),"repository":.string(repository.id),"page":TeamStore.page()], context: context)
+                guard isCurrent, checkoutLoad == load, self.repository?.id == repository.id else { return }
+                localCheckoutIds = Set(local.publications.filter { $0.phase == "active" }.map(\.id))
+            }
+            if checkoutId == nil { checkoutId = checkouts.first?.id }
+        } catch is CancellationError {} catch { if isCurrent, checkoutLoad == load, self.repository?.id == repository.id { self.error = error.localizedDescription } }
+    }
+    private func loadShares(more: Bool) async {
+        let load = UUID(); shareLoad = load
+        if !more { shares = []; sharesNext = nil; selected = nil; error = nil }
+        guard isCurrent, let repository, let checkoutId else { loadingShares = false; return }
+        loadingShares = true
+        defer { if shareLoad == load { loadingShares = false } }
+        do {
+            let result: TeamSharedChats = try await store.read("chats.list", fields: ["organization":.string(repository.organizationId),"checkout":.string(checkoutId),"page":TeamStore.page(offset: more ? sharesNext ?? 0 : 0)], context: context)
+            guard isCurrent, shareLoad == load, self.checkoutId == checkoutId, self.repository?.id == repository.id, result.shares.allSatisfy({ $0.checkoutId == checkoutId }) else { return }
+            shares = more ? shares + result.shares.filter { next in !shares.contains { $0.id == next.id } } : result.shares
+            sharesNext = result.nextOffset
+        } catch is CancellationError {} catch { if isCurrent, shareLoad == load, self.checkoutId == checkoutId { self.error = error.localizedDescription } }
+    }
+}

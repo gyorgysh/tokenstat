@@ -14,6 +14,7 @@ struct TeamSidebarLinks: View {
                 .lineLimit(2).padding(.horizontal, Theme.Space.m).padding(.top, Theme.Space.l)
                 .accessibilityAddTraits(.isHeader)
             if store.selectedOrganization != nil && store.phase == .ready {
+                row(.chats)
                 row(.members)
                 if store.selectedOrganization?.role.canManage == true { row(.invitations) }
                 row(.settings)

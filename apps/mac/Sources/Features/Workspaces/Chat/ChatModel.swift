@@ -3045,7 +3045,7 @@ final class ChatModel {
     /// deadline can already have been answered on another device. Until the
     /// list answers, and while viewing a saved copy, rows stay read-only.
     func approvalIsPending(_ approval: ChatApproval) -> Bool {
-        guard savedCopy == nil, approval.decision == nil else { return false }
+        guard savedCopy == nil, !approval.readOnly, approval.decision == nil else { return false }
         guard approvalsLoaded else { return false }
         return approvals.contains { $0.id == approval.id }
     }

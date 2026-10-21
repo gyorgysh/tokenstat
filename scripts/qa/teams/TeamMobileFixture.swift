@@ -8,13 +8,14 @@ import SwiftUI
     @State private var dark = true
     var body: some View {
         NavigationStack {
-            TeamManagementView(store: store, canCreateOrganization: true, onAccount: {})
+            TeamManagementView(store: store, canCreateOrganization: true, onAccount: {}, transcript: TeamFixtureTranscript.render)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu("Fixture") {
                             Toggle("Dark", isOn: $dark)
                             Button("Personal") { store.select(nil) }
                             Button("Example Studio") { store.select(store.organizations.first) }
+                            Button("Team chats") { store.show(.chats) }
                             if let context = store.mutationContext {
                                 Button("Create organization") { sheet = .create(context) }
                                 Button("Invite") { sheet = .invite(context) }

@@ -35,7 +35,7 @@ are ignored. Run the fixture on a separate Simulator device selected by its
 explicit identifier.
 
 CI runs `python3 scripts/run-team-ui-tests.py`. It creates a new compatible
-iPhone Simulator, verifies all six scenarios, and removes only that device.
+iPhone Simulator, verifies all nine scenarios, and removes only that device.
 `--select-only` reports an installed runtime without changing any device.
 
 Check members, search, scope switching, empty states, invitation validation,
@@ -51,7 +51,7 @@ Team relay, Noise handshake and host dispatch with disposable local accounts:
 cargo build -p tokenstat-host --example team-transport-probe
 task_probe="$(pwd)/target/debug/examples/team-transport-probe"
 cd ../www
-bun scripts/test-teams-transport.js "$task_probe"
+bun scripts/teams-transport-e2e.js "$task_probe"
 ```
 
 Pass an absolute probe path when running from another directory. The runner

@@ -37,6 +37,7 @@ extension TeamSection {
     var label: String {
         switch self {
         case .overview: L10n.text("common.teams.title")
+        case .chats: L10n.text("common.teams.chats")
         case .members: L10n.text("common.teams.members")
         case .invitations: L10n.text("common.teams.invitations")
         case .repositories: L10n.text("common.teams.repositories")
@@ -46,6 +47,7 @@ extension TeamSection {
     var symbol: String {
         switch self {
         case .overview, .members: "person.2"
+        case .chats: "bubble.left.and.bubble.right"
         case .invitations: "person.badge.plus"
         case .repositories: "folder"
         case .settings: "gearshape"

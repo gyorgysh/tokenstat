@@ -95,6 +95,38 @@ final class TeamFixtureUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Available at last check"].waitForExistence(timeout: 5))
         capture(app, "Scoped checkout availability")
     }
+    func testSharedHistoryAndExplicitChatConsent() { sharedChatScenario(largeText: false) }
+    func testSharedHistoryWithLargeText() { sharedChatScenario(largeText: true) }
+    private func sharedChatScenario(largeText: Bool) {
+        let app = launch(largeText: largeText)
+        XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))
+        app.buttons["Fixture"].tap()
+        app.buttons["Team chats"].tap()
+        let repository = app.buttons["team.chats.repository"]
+        XCTAssertTrue(repository.waitForExistence(timeout: 5))
+        repository.tap(); app.buttons["Website"].firstMatch.tap()
+        let shared = app.buttons["team.chats.open.share_" + String(repeating: "a", count: 32)]
+        XCTAssertTrue(shared.waitForExistence(timeout: 5)); reveal(shared, in: app); shared.tap()
+        XCTAssertTrue(app.staticTexts["Quarterly totals"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Local user (before Teams)")).firstMatch.exists)
+        XCTAssertFalse(app.textViews.firstMatch.exists)
+        capture(app, "Shared history reader")
+        app.buttons["team.chat.back"].tap()
+        let share = app.buttons["team.chats.share"]
+        XCTAssertTrue(share.waitForExistence(timeout: 5)); reveal(share, in: app); share.tap()
+        let review = app.buttons["team.chat.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5)); XCTAssertFalse(review.isEnabled)
+        app.buttons["team.chat.picker"].tap(); app.buttons["Quarterly totals"].firstMatch.tap()
+        XCTAssertTrue(review.isEnabled); review.tap()
+        let publish = app.buttons["team.chat.publish"]
+        XCTAssertTrue(publish.waitForExistence(timeout: 5)); XCTAssertFalse(publish.isEnabled)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Everyone with access to Website")).firstMatch.exists)
+        capture(app, "Chat sharing consent")
+        let confirm = app.switches["team.chat.confirm"]
+        reveal(confirm, in: app); confirm.tap(); XCTAssertTrue(publish.isEnabled)
+        publish.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
+    }
     private func checkoutScenario(largeText: Bool) {
         let app = launch(largeText: largeText)
         XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))

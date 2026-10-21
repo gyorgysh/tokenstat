@@ -19,6 +19,11 @@ enum TeamHostMethod: String, Sendable {
     case checkoutList = "teams.checkout.list"
     case checkoutWithdraw = "teams.checkout.withdraw"
     case connectionCall = "teams.connection.call"
+    case chatOptions = "teams.chat.options"
+    case chatPreview = "teams.chat.preview"
+    case chatPublish = "teams.chat.publish"
+    case chatList = "teams.chat.list"
+    case chatWithdraw = "teams.chat.withdraw"
 }
 struct TeamAPI: Sendable {
     let send: @Sendable (TeamHostMethod, JSONValue, TeamAccountOwner) async throws -> JSONValue
@@ -32,6 +37,7 @@ struct TeamAPI: Sendable {
 struct TeamCapabilities: Decodable, Sendable {
     var canPublishCheckouts = false
     var canConnectCheckouts = false
+    var canPublishChats = false
     var actorId: String?
     var enabled: Bool
     var ready: Bool
@@ -44,12 +50,13 @@ struct TeamCapabilities: Decodable, Sendable {
         self.needsDeviceRegistration = needsDeviceRegistration
         self.authorizationRequired = authorizationRequired; self.version = version
     }
-    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts }
+    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         actorId = try c.decodeIfPresent(String.self, forKey: .actorId)
         canPublishCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canPublishCheckouts) ?? false
         canConnectCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canConnectCheckouts) ?? false
+        canPublishChats = try c.decodeIfPresent(Bool.self, forKey: .canPublishChats) ?? false
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         ready = try c.decodeIfPresent(Bool.self, forKey: .ready) ?? false
         needsDeviceRegistration = try c.decodeIfPresent(Bool.self, forKey: .needsDeviceRegistration) ?? false
@@ -187,15 +194,49 @@ struct TeamCheckoutPublished: Decodable, Sendable { let publication: TeamLocalPu
 struct TeamCheckoutWithdrawn: Decodable, Sendable { let withdrawn: Bool; let accountCleanupPending: Bool?
 }
 struct TeamActivity: Decodable, Sendable { var events: [TeamActivityEvent]; let nextOffset: Int? }
+struct TeamSharedChat: Codable, Identifiable, Hashable, Sendable { let id: String; let checkoutId: String; let revision: UInt64; let createdAt: String }
+struct TeamSharedChats: Decodable, Sendable { let shares: [TeamSharedChat]; let nextOffset: Int? }
+struct TeamChatSummary: Codable, Identifiable, Sendable {
+    let id: String; let checkoutId: String; let title: String; let backend: String
+    let historyTrimmed: Bool; let allowsAgentRuns: Bool
+}
+struct TeamChatDetails: Decodable, Sendable { let chat: TeamChatSummary }
+struct TeamChatHistory: Codable, Sendable {
+    let title: String; let backend: String; let historyTrimmed: Bool; let events: [JSONValue]
+    var renderId = UUID()
+    private enum CodingKeys: String, CodingKey { case title, backend, historyTrimmed, events }
+}
+struct TeamChatEvents: Decodable, Sendable {
+    let shareId: String; let events: [JSONValue]; let nextCursor: String?
+    let firstCursor: String?; let lastCursor: String?; let hasMore: Bool; let historyTrimmed: Bool; let asOfMs: Int64
+}
+struct TeamLocalChat: Codable, Identifiable, Sendable { let id: String; let title: String; let backend: String; let shared: Bool }
+struct TeamLocalChats: Decodable, Sendable { let chats: [TeamLocalChat]; let nextOffset: Int? }
+struct TeamChatPreview: Decodable, Sendable {
+    let conversation: String; let checkoutId: String; let repository: TeamRepository; let deviceName: String
+    let history: TeamChatHistory; let preview: String; let audience: String; let allowsAgentRuns: Bool
+}
+struct TeamChatPublication: Codable, Identifiable, Sendable { let id: String; let checkoutId: String; let revision: UInt64 }
+struct TeamChatPublished: Decodable, Sendable { let publication: TeamChatPublication }
+struct TeamLocalChatPublication: Decodable, Identifiable, Sendable {
+    let id: String; let checkoutId: String; let conversationId: String; let phase: String; let revision: UInt64; let accountCleanupPending: Bool
+}
+struct TeamLocalChatPublications: Decodable, Sendable { let publications: [TeamLocalChatPublication]; let nextOffset: Int? }
 struct TeamAuthorizationPreview: Decodable, Sendable { let deviceKey: String; let deviceName: String }
 struct TeamAuthorization: Decodable, Sendable { let authorizationURL: String; let deviceKey: String; let deviceName: String }
 
 enum TeamSection: String, CaseIterable, Identifiable, Sendable {
-    case overview, members, invitations, repositories, settings
+    case overview, chats, members, invitations, repositories, settings
     var id: String { rawValue }
 }
 struct TeamSelectionKey: Hashable, Sendable { let owner: TeamAccountOwner?; let organizationId: String? }
 struct TeamMutationContext: Equatable, Sendable { let owner: TeamAccountOwner; let organizationId: String?; let lifetime: UInt64 }
+
+@MainActor enum TeamDate {
+    private static let fractional: ISO8601DateFormatter = { let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return formatter }()
+    private static let standard = ISO8601DateFormatter()
+    static func parse(_ value: String) -> Date? { fractional.date(from: value) ?? standard.date(from: value) }
+}
 
 /// Only the hosted first-party avatar route may be fetched. A profile never
 /// chooses a network origin, path traversal, query or external image service.

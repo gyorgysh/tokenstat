@@ -3143,11 +3143,26 @@ struct ChatApproval: Codable, Sendable, Identifiable, Hashable {
     var createdAtMs: Int64
     var expiresAtMs: Int64
     var decision: String?
+    var readOnly: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case id
         case conversationID = "conversationId"
-        case verb, preview, shellPrefix, createdAtMs, expiresAtMs, decision
+        case verb, preview, shellPrefix, createdAtMs, expiresAtMs, decision, readOnly
+    }
+}
+extension ChatApproval {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        readOnly = try c.decodeIfPresent(Bool.self, forKey: .readOnly) ?? false
+        conversationID = readOnly ? "" : try c.decode(String.self, forKey: .conversationID)
+        verb = try c.decode(String.self, forKey: .verb)
+        preview = try c.decode(String.self, forKey: .preview)
+        shellPrefix = try c.decodeIfPresent(String.self, forKey: .shellPrefix)
+        createdAtMs = try c.decode(Int64.self, forKey: .createdAtMs)
+        expiresAtMs = try c.decode(Int64.self, forKey: .expiresAtMs)
+        decision = try c.decodeIfPresent(String.self, forKey: .decision)
     }
 }
 

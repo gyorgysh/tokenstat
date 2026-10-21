@@ -639,7 +639,7 @@ struct ChatHandoffRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(L10n.text("apple.chateventrow.handed_to_0_with_a_summary_of_the_conversa.136c6fc3", "\(agent)"))
+        .accessibilityLabel(brief.isEmpty ? L10n.text("apple.chateventrow.handed_to_0.902d7234", agent) : L10n.text("apple.chateventrow.handed_to_0_with_a_summary_of_the_conversa.136c6fc3", agent))
     }
 }
 
@@ -653,6 +653,7 @@ struct ChatHandoffRow: View {
 struct ChatApprovalCard: View {
     let approval: ChatApproval
     let isPending: Bool
+    private var canRespond: Bool { isPending && !approval.readOnly }
     let resolve: (ChatApproval, String) -> Void
 
     @State private var now = Date()
@@ -666,14 +667,14 @@ struct ChatApprovalCard: View {
                 Text(outcome.title)
                     .font(Theme.callout.weight(.semibold))
                 Spacer(minLength: Theme.Space.s)
-                if isPending, let remaining = remainingText {
+                if canRespond, let remaining = remainingText {
                     Text(remaining)
                         .font(Theme.numeric(11, weight: .medium))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                         .accessibilityLabel(L10n.text("apple.chateventrow.0_left_to_answer.63343d2a", "\(remaining)"))
                 }
-                Text(SeatStep.approvalWord(verb: approval.verb, pending: isPending))
+                Text(SeatStep.approvalWord(verb: approval.verb, pending: canRespond))
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(outcome.tint)
                     .lineLimit(1)
@@ -686,7 +687,7 @@ struct ChatApprovalCard: View {
                 .textSelection(.enabled)
                 .foregroundStyle(.primary)
                 .lineLimit(4)
-            if isPending {
+            if canRespond {
                 ChatApprovalActions(approval: approval, resolve: resolve)
                 if let note = SeatStep.allowAlwaysNote(verb: approval.verb, shellPrefix: approval.shellPrefix) {
                     Text(note)
@@ -704,12 +705,12 @@ struct ChatApprovalCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(
-                    isPending ? outcome.tint.opacity(0.55) : Theme.border,
-                    lineWidth: isPending ? 1.5 : 1
+                    canRespond ? outcome.tint.opacity(0.55) : Theme.border,
+                    lineWidth: canRespond ? 1.5 : 1
                 )
         }
-        .task(id: isPending) {
-            guard isPending else { return }
+        .task(id: canRespond) {
+            guard canRespond else { return }
             while !Task.isCancelled {
                 now = Date()
                 try? await Task.sleep(for: .seconds(1))
@@ -718,7 +719,7 @@ struct ChatApprovalCard: View {
     }
 
     private var outcome: ChatApprovalOutcome {
-        ChatApprovalOutcome(approval: approval, isPending: isPending)
+        ChatApprovalOutcome(approval: approval, isPending: canRespond)
     }
 
     private var remainingText: String? {

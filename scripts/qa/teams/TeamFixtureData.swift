@@ -17,11 +17,12 @@ enum TeamFixtureData {
         TeamMember(id: "fixture-admin", name: "Alex Morgan", handle: "example-alex", avatar: nil, role: .admin, revision: 1, eligible: true, ownershipEligible: false, joinedAt: timestamp),
         TeamMember(id: "fixture-downgraded", name: "山田 太郎", handle: "example-taro", avatar: nil, role: .member, revision: 1, eligible: false, ownershipEligible: false, joinedAt: timestamp)]
     static func json<T: Encodable>(_ value: T) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value)) }
+    static let chatEvents: [JSONValue] = [.object(["kind":.string("user"),"text":.string("Compare the fictional quarterly totals."),"seq":.int(0),"atMs":.int(1)]),.object(["kind":.string("agent"),"backend":.string("codex"),"seq":.int(100),"atMs":.int(2),"event":.object(["kind":.string("text"),"delta":.string("The fictional total increased from 24 to 42.")])])]
     static let api = TeamAPI { method, params, _ in
         switch method {
         case .capabilities:
             if state == .failure { throw TeamRequestFailure(code: "teams_unreachable", message: "The fictional account server is unavailable.") }
-            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canPublishCheckouts":.bool(true),"canConnectCheckouts":.bool(true)])
+            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canPublishCheckouts":.bool(true),"canConnectCheckouts":.bool(true),"canPublishChats":.bool(true)])
         case .authorizationPreview: return .object(["deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .prepareAuthorization: return .object(["authorizationURL":.string("https://accounts.example.test/settings/teams/devices/fixture"),"deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .checkoutOptions: return .object(["deviceName":.string("Example Mac"),"workspaces":.array([try json(TeamLocalWorkspace(id: "/example/Website", name: "Website", path: "/example/Website")),try json(TeamLocalWorkspace(id: "/example/Feature checkout", name: "Website feature", path: "/example/Feature checkout"))]),"nextOffset":.null])
@@ -31,7 +32,15 @@ enum TeamFixtureData {
         case .checkoutList: return .object(["publications":.array([try json(TeamLocalPublication(id: "checkout_" + String(repeating:"a",count:32), organizationId: organization.id, repositoryId: repository.id, workspaceId: "/example/Website", phase: "active", revision: 2, accountCleanupPending: false))]),"nextOffset":.null])
         case .connectionCall:
             guard case let .object(fields) = params, case let .object(target)? = fields["target"], let checkout = target["checkout"], let organization = target["organization"], let repository = target["repository"] else { throw CancellationError() }
+            if case let .string(method)? = fields["method"], let share = target["share"] {
+                if method == "team.chat.details" { return .object(["chat":.object(["id":share,"checkoutId":checkout,"title":.string("Quarterly totals"),"backend":.string("codex"),"historyTrimmed":.bool(false),"allowsAgentRuns":.bool(false)])]) }
+                if method == "team.chat.events" { return .object(["shareId":share,"events":.array(chatEvents),"nextCursor":.null,"firstCursor":.null,"lastCursor":.null,"hasMore":.bool(false),"historyTrimmed":.bool(false),"asOfMs":.int(1792500000000)]) }
+            }
             return .object(["checkoutId":checkout,"organizationId":organization,"repositoryId":repository,"state":.string("available")])
+        case .chatOptions: return .object(["chats":.array([try json(TeamLocalChat(id:"chat_fixture",title:"Quarterly totals",backend:"codex",shared:false))]),"nextOffset":.null])
+        case .chatPreview: return .object(["conversation":.string("chat_fixture"),"checkoutId":.string("checkout_"+String(repeating:"a",count:32)),"repository":try json(repository),"deviceName":.string("Example Mac"),"preview":.string(String(repeating:"ab",count:32)),"audience":.string("currentAndFutureRepositoryMembers"),"allowsAgentRuns":.bool(false),"history":try json(TeamChatHistory(title:"Quarterly totals",backend:"codex",historyTrimmed:false,events:chatEvents))])
+        case .chatList: return .object(["publications":.array([]),"nextOffset":.null])
+        case .chatPublish, .chatWithdraw: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
         case .checkoutPublish, .checkoutWithdraw: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
         case .directory:
             guard case let .object(fields) = params, case let .string(operation)? = fields["operation"] else { throw TeamRequestFailure(code: "fixture_request", message: "Choose a fixture action.") }
@@ -43,6 +52,9 @@ enum TeamFixtureData {
             case "checkouts.list": return .object(["checkouts":.array([
                 try json(TeamCheckout(id: "checkout_" + String(repeating:"a",count:32), organizationId: organization.id, repositoryId: repository.id, publisherId: "fixture-owner", machineId: "fixture-mac", hostKey: String(repeating:"ab",count:32), deviceName: "Example Mac", publisher: TeamPerson(id: "fixture-owner", name: "Example owner", handle: "example-owner", avatar: nil), revision: 1, createdAt: timestamp)),
                 try json(TeamCheckout(id: "checkout_" + String(repeating:"b",count:32), organizationId: organization.id, repositoryId: repository.id, publisherId: member.id, machineId: "fixture-workstation", hostKey: String(repeating:"cd",count:32), deviceName: "Márta’s workstation", publisher: TeamPerson(id: member.id, name: member.name, handle: member.handle, avatar: nil), revision: 1, createdAt: timestamp))]),"nextOffset":.null])
+            case "chats.list":
+                let checkout = fields["checkout"] ?? .string("checkout_"+String(repeating:"a",count:32))
+                return .object(["shares":.array([.object(["id":.string("share_"+String(repeating:"a",count:32)),"checkoutId":checkout,"revision":.int(1),"createdAt":.string(timestamp)])]),"nextOffset":.null])
             case "repositories.members": return .object(["members":.array(try members.map { try json(TeamRepositoryMember(id: $0.id, name: $0.name, handle: $0.handle, avatar: nil, role: $0.role == .owner ? .maintainer : nil, revision: 1, eligible: $0.eligible)) }),"nextOffset":.null])
             case "inbox.list": return .object(["invitations":.array(state == .invitation || state == .expiredInvitation ? [try json(invitation)] : []),"nextOffset":.null])
             case "invitations.list": return .object(["invitations":.array([]),"nextOffset":.null])

@@ -39,7 +39,7 @@ import AppKit
                 Text("Legend · \(store.selectedOrganization?.name ?? "Personal")").font(Theme.callout).foregroundStyle(.secondary).padding(.horizontal, Theme.Space.m).padding(.bottom, Theme.Space.m)
             }.frame(width: 250).background(Theme.sidebar)
             ThemeRule.vertical
-            TeamManagementView(store: store, canCreateOrganization: true, onAccount: {})
+            TeamManagementView(store: store, canCreateOrganization: true, onAccount: {}, transcript: TeamFixtureTranscript.render)
         }
         .tint(Theme.accent)
         .preferredColorScheme(dark ? .dark : .light)
