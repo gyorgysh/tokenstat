@@ -4,7 +4,7 @@
 //! include shared ancestors, so a lost guardian also fences parent-folder
 //! writers and linked checkouts without blocking independent siblings.
 
-use super::{Error, Lease, file};
+use super::{Error, Folder, Lease, file};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -54,20 +54,20 @@ fn requests(lease: &Lease) -> Vec<(String, bool)> {
     }
     merged.into_iter().collect()
 }
-fn marker_ready(lease: &Lease) -> Result<bool, Error> {
-    match std::fs::symlink_metadata(lease.root.path.join("claims.initialized")) {
+fn marker_ready(root: &Folder) -> Result<bool, Error> {
+    match std::fs::symlink_metadata(root.path.join("claims.initialized")) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         _ => Err(Error::RecoveryRequired),
     }
 }
-fn gate(lease: &Lease) -> Result<File, Error> {
-    let path = lease.root.path.join("claims.lock");
+fn gate(root: &Folder) -> Result<File, Error> {
+    let path = root.path.join("claims.lock");
     // A removed registry must not be recreated as an empty one. Creating the
     // file first would make the absence look like a fresh store.
     match std::fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if marker_ready(lease)? {
+            if marker_ready(root)? {
                 return Err(Error::RecoveryRequired);
             }
         }
@@ -87,10 +87,10 @@ fn gate(lease: &Lease) -> Result<File, Error> {
         }
     }
 }
-fn read(lease: &Lease, file: &mut File) -> Result<Index, Error> {
+fn read(root: &Folder, file: &mut File) -> Result<Index, Error> {
     let length = file.metadata().map_err(|_| Error::Unavailable)?.len();
     if length == 0 {
-        return if marker_ready(lease)? {
+        return if marker_ready(root)? {
             Err(Error::RecoveryRequired)
         } else {
             Ok(Index {
@@ -151,10 +151,10 @@ fn check_index(lease: &Lease, index: &Index) -> Result<(), Error> {
     Ok(())
 }
 pub(super) fn check(lease: &Lease) -> Result<(), Error> {
-    let mut file = gate(lease)?;
-    check_index(lease, &read(lease, &mut file)?)
+    let mut file = gate(&lease.root)?;
+    check_index(lease, &read(&lease.root, &mut file)?)
 }
-fn write(lease: &Lease, file: &mut File, index: &Index) -> Result<(), Error> {
+fn write(root: &Folder, file: &mut File, index: &Index) -> Result<(), Error> {
     let bytes = serde_json::to_vec(&serde_json::json!({"digest":digest(index)?,"payload":index}))
         .map_err(|_| Error::Unavailable)?;
     if bytes.len() as u64 > MAX_BYTES {
@@ -162,7 +162,7 @@ fn write(lease: &Lease, file: &mut File, index: &Index) -> Result<(), Error> {
     }
     // A torn in-place registry is intentionally unreadable. The independent
     // durable marker prevents a zero-length interruption becoming emptiness.
-    let marker = lease.root.path.join("claims.initialized");
+    let marker = root.path.join("claims.initialized");
     match std::fs::symlink_metadata(&marker) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let mut options = OpenOptions::new();
@@ -175,11 +175,7 @@ fn write(lease: &Lease, file: &mut File, index: &Index) -> Result<(), Error> {
             let created = options.open(marker).map_err(|_| Error::Unavailable)?;
             created.sync_all().map_err(|_| Error::Unavailable)?;
             #[cfg(unix)]
-            lease
-                .root
-                ._handle
-                .sync_all()
-                .map_err(|_| Error::Unavailable)?;
+            root._handle.sync_all().map_err(|_| Error::Unavailable)?;
         }
         Ok(m) if m.is_file() && !m.file_type().is_symlink() => {}
         _ => return Err(Error::RecoveryRequired),
@@ -198,15 +194,15 @@ impl Lease {
             return Err(Error::Changed);
         }
         self.ensure_current()?;
-        let mut file = gate(self)?;
-        let mut index = read(self, &mut file)?;
+        let mut file = gate(&self.root)?;
+        let mut index = read(&self.root, &mut file)?;
         check_index(self, &index)?;
         if index.claims.len() >= CAPACITY || index.claims.contains_key(id) {
             return Err(Error::RecoveryRequired);
         }
         index.claims.insert(id.into(), requests(self));
         self.claim = Some(id.into());
-        write(self, &mut file, &index)
+        write(&self.root, &mut file, &index)
     }
     /// The caller must already prove exact process completion or definite
     /// failure before birth. This low-level storage method supplies no proof.
@@ -215,12 +211,32 @@ impl Lease {
             return Err(Error::Changed);
         }
         self.ensure_current()?;
-        let mut file = gate(self)?;
-        let mut index = read(self, &mut file)?;
+        let mut file = gate(&self.root)?;
+        let mut index = read(&self.root, &mut file)?;
         check_index(self, &index)?;
         index.claims.remove(id);
-        write(self, &mut file, &index)?;
+        write(&self.root, &mut file, &index)?;
         self.claim = None;
         Ok(())
     }
+}
+
+/// Remove one run's claim after the caller proved that every process of the
+/// run is gone. Only the publisher's explicit recovery calls this: a fenced
+/// checkout refuses a normal lease, so there is no lease to clear it through.
+pub fn clear_orphaned_run(id: &str) -> Result<(), Error> {
+    clear_orphaned_run_at(id, &super::lock_root()?)
+}
+pub(super) fn clear_orphaned_run_at(id: &str, path: &std::path::Path) -> Result<(), Error> {
+    if !valid(id) {
+        return Err(Error::Changed);
+    }
+    file::private_directory(path)?;
+    let root = Folder::capture(path)?;
+    let mut file = gate(&root)?;
+    let mut index = read(&root, &mut file)?;
+    if index.claims.remove(id).is_none() {
+        return Ok(());
+    }
+    write(&root, &mut file, &index)
 }

@@ -506,6 +506,8 @@
   "common.teams.agent_grant_warning": "The agent runs on this computer with your agent account and your computer account. tokenstat gives it only the shared chat, but your computer account is not a sandbox.",
   "common.teams.agent_grant_confirm": "I understand an agent asked by this member runs on this computer with my account.",
   "common.teams.allow_agent_runs": "Allow agent runs",
+  "common.teams.agent_run_held": "An agent run on this computer ended without finishing cleanly. This chat and its project stay locked until it is released.",
+  "common.teams.release_agent_run": "Release the stopped agent",
   "common.teams.repository_name": "Repository name",
   "common.teams.retry_detail": "Check your connection and try again.",
   "common.teams.review_invitation": "Review invitation",

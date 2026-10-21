@@ -31,6 +31,14 @@ fn an_abandoned_claim_blocks_managed_writers_and_an_owned_completion_clears_only
         Lease::at(temp.path(), &root),
         Err(Error::Busy) | Err(Error::RecoveryRequired)
     ));
+    assert_eq!(
+        claim::clear_orphaned_run_at("not-an-id", &root),
+        Err(Error::Changed)
+    );
+    claim::clear_orphaned_run_at(&id, &root).unwrap();
+    Lease::at(&folder, &root).unwrap().ensure_current().unwrap();
+    // Clearing a claim that is already gone changes nothing.
+    claim::clear_orphaned_run_at(&id, &root).unwrap();
     let other = temp.path().join("independent");
     std::fs::create_dir(&other).unwrap();
     Lease::at(&other, &root).unwrap().ensure_current().unwrap();

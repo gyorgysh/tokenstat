@@ -93,6 +93,12 @@ private struct ChatSharingRecoverySheet: View {
                     if sharing?.sourceOnly == true {
                         TeamNotice(message: L10n.text("common.teams.local_record_unavailable"), warning: true)
                     }
+                    if sharing?.agentRunHeld == true {
+                        TeamNotice(message: L10n.text("common.teams.agent_run_held"), warning: true)
+                        Button(L10n.text("common.teams.release_agent_run"), .restore) { Task { await release() } }
+                            .buttonStyle(TeamButtonStyle()).disabled(loading || stopping)
+                            .accessibilityIdentifier("chat.sharing.release_run")
+                    }
                 }
                 if let error { TeamNotice(message: error, warning: true) }
                 if loading { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
@@ -131,6 +137,18 @@ private struct ChatSharingRecoverySheet: View {
             }
             sharing = row
         } catch is CancellationError {} catch { if isCurrent { self.error = error.localizedDescription } }
+    }
+
+    private func release() async {
+        guard isCurrent, !loading, !stopping, let id = target.reference.itemID else { return }
+        stopping = true; error = nil
+        defer { stopping = false }
+        do {
+            _ = try await Bridge.recoverAgentRun(workspaceID: target.reference.workspaceID, id: id,
+                scope: target.reference.scope, generation: target.session)
+        } catch is CancellationError {} catch { if isCurrent { self.error = error.localizedDescription } }
+        stopping = false
+        await load()
     }
 
     private func stop() async {

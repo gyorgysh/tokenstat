@@ -154,6 +154,15 @@ impl Store {
         })
     }
 
+    /// The unresolved Team run holding this chat, if any.
+    pub(crate) fn team_run_fence(
+        &self,
+        workspace: &str,
+        id: &str,
+    ) -> Result<Option<crate::chat_receipts::team_runs::Fence>, DispatchError> {
+        self.index_locked(workspace, id, |_, chat| Ok(chat.team_run_fence.clone()))
+    }
+
     pub(crate) fn ensure_sharing_snapshot(
         &self,
         workspace: &str,

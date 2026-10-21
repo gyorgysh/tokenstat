@@ -145,6 +145,14 @@ fn input(params: &str) -> Result<Input, DispatchError> {
     serde_json::from_str(params).map_err(|_| invalid())
 }
 
+/// Whether this host still follows a guardian for `fence`.
+pub(super) fn is_running(fence: &Fence) -> bool {
+    runs()
+        .as_ref()
+        .and_then(|table| table.get(fence.run_id()))
+        .is_some_and(|run| &run.fence == fence)
+}
+
 /// Whether a run is still going here. Anyone in the run's scope may ask,
 /// since everyone reading the chat sees that it is running.
 pub(super) fn status(

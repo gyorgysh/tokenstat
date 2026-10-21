@@ -26,6 +26,21 @@ pub(super) fn check_anchor() -> io::Result<()> {
     }
     Ok(())
 }
+pub(super) fn group_gone(group: u32) -> bool {
+    let Ok(group) = i32::try_from(group) else {
+        return false;
+    };
+    if group <= 1 {
+        return false;
+    }
+    // Signal 0 sends nothing. Only ESRCH proves absence.
+    let gone = |target: i32| {
+        // SAFETY: signal 0 only checks for existence and delivers nothing.
+        let status = unsafe { libc::kill(target, 0) };
+        status == -1 && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+    };
+    gone(-group) && gone(group)
+}
 pub(super) fn stop_self() -> io::Result<()> {
     check_anchor()?;
     unsafe {

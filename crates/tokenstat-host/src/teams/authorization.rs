@@ -1007,6 +1007,7 @@ mod tests {
                         "chat.list",
                         "chat.sharing.info",
                         "chat.sharing.stopLocal",
+                        "chat.sharing.recoverRun",
                         "pty.spawn",
                         "vault.get",
                         "teams.directory",

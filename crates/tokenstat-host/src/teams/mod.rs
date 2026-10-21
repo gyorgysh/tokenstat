@@ -21,6 +21,8 @@ mod provider;
 #[cfg(feature = "local-host")]
 mod publications;
 #[cfg(feature = "local-host")]
+mod recovery;
+#[cfg(feature = "local-host")]
 mod run_home;
 #[cfg(feature = "local-host")]
 mod runs;
@@ -127,7 +129,7 @@ pub(crate) fn local_sharing_call(
 ) -> Option<Result<Value, DispatchError>> {
     #[cfg(feature = "local-host")]
     {
-        local_sharing::call(method, params)
+        local_sharing::call(method, params).or_else(|| recovery::call(method, params))
     }
     #[cfg(not(feature = "local-host"))]
     {

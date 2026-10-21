@@ -311,6 +311,43 @@ impl Journal {
             mode: "ask",
         }))
     }
+    /// Close the unresolved run whose processes the caller proved gone. A run
+    /// that never reached Launching had no backend and simply did not start.
+    pub fn recover_unresolved_run(
+        &mut self,
+        fence: &runs::Fence,
+        started_proven_gone: bool,
+        at_ms: i64,
+    ) -> Result<runs::State, &'static str> {
+        use runs::State;
+        let ledger = self.runs.as_mut().ok_or("Run reservation is missing")?;
+        let record = ledger.unresolved().ok_or("No run needs recovery")?;
+        if &record.binding().fence != fence {
+            return Err("A different run holds this chat");
+        }
+        let request = record.request().clone();
+        let path: &[State] = match record.state() {
+            State::Reserved => &[State::NotStarted],
+            State::Launching | State::Running | State::Stopping if started_proven_gone => {
+                &[State::NeedsRecovery, State::Recovered]
+            }
+            State::NeedsRecovery if started_proven_gone => &[State::Recovered],
+            _ => return Err("This run may still have processes"),
+        };
+        for next in path {
+            ledger
+                .transition(
+                    &request.scope,
+                    &request.actor.person,
+                    &request.client_message_id,
+                    fence,
+                    *next,
+                    at_ms,
+                )
+                .map_err(|_| "Run transition could not be verified")?;
+        }
+        Ok(path[path.len() - 1])
+    }
     pub fn transition_run(
         &mut self,
         request: &runs::Request,

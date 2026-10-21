@@ -4,6 +4,7 @@
 //! not confine an agent or prevent edits by other programs.
 
 mod claim;
+pub use claim::clear_orphaned_run;
 mod file;
 #[cfg(test)]
 mod tests;

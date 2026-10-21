@@ -10,6 +10,7 @@ struct ChatLocalSharingInfo: Decodable, Sendable {
         let privateReady: Bool
         let sourceOnly: Bool?
         let accountCleanupPending: Bool
+        let agentRunHeld: Bool?
     }
     let sharing: Sharing?
 }
@@ -19,6 +20,10 @@ struct ChatLocalSharingStopped: Decodable, Sendable {
     let privateReady: Bool
     let localRecoveryNeeded: Bool
     let accountCleanupPending: Bool
+}
+
+struct ChatAgentRunRecovered: Decodable, Sendable {
+    let recovered: Bool
 }
 
 #if os(macOS)
@@ -36,6 +41,14 @@ extension Bridge {
         try await chatInvoke(peer: nil, "chat.sharing.stopLocal", ["workspaceId": workspaceID, "id": id,
             "share": sharing.id, "expectedRevision": sharing.revision, "sourceOnly": sharing.sourceOnly == true, "confirmStop": true],
             expectedScope: scope, expectedGeneration: generation, as: ChatLocalSharingStopped.self)
+    }
+
+    /// Release a chat held by an agent run whose guardian is gone. The host
+    /// refuses unless it can prove no process of that run is left.
+    static func recoverAgentRun(workspaceID: String, id: String,
+                                scope: WorkReference.Scope, generation: UInt64) async throws -> ChatAgentRunRecovered {
+        try await chatInvoke(peer: nil, "chat.sharing.recoverRun", ["workspaceId": workspaceID, "id": id, "confirmRecovery": true],
+                             expectedScope: scope, expectedGeneration: generation, as: ChatAgentRunRecovered.self)
     }
 }
 #endif

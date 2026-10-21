@@ -79,6 +79,11 @@ pub(super) fn configure(command: &mut Command) {
 pub(super) fn check_anchor() -> io::Result<()> {
     Ok(())
 }
+/// No proof yet on Windows: a crashed run stays fenced until the Job
+/// ownership is verified on a real Windows runner.
+pub(super) fn group_gone(_group: u32) -> bool {
+    false
+}
 pub(super) fn stop_self() -> io::Result<()> {
     Ok(())
 }

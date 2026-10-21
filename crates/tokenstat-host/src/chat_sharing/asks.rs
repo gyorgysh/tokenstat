@@ -740,6 +740,39 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Close a run whose guardian is gone, after the caller proved that none
+    /// of its processes remain. Clears the chat's fence; the writer claim is
+    /// cleared by the caller with the same proof.
+    pub(crate) fn recover_orphaned_run(
+        &self,
+        workspace: &str,
+        id: &str,
+        fence: &runs::Fence,
+        started_proven_gone: bool,
+    ) -> Result<runs::State, DispatchError> {
+        self.source_locked(workspace, id, false, |mut index, chat, bytes| {
+            if chat.team_run_fence.as_ref() != Some(fence) {
+                return Err(changed());
+            }
+            let directory = safe_join(&self.root, id).map_err(|_| unavailable())?;
+            let mut journal = writer::load(&directory, chat, bytes)?.ok_or_else(unavailable)?;
+            let state = journal
+                .recover_unresolved_run(fence, started_proven_gone, now_ms())
+                .map_err(|_| changed())?;
+            writer::save(&directory.join(writer::JOURNAL), &journal)?;
+            index
+                .conversations
+                .iter_mut()
+                .find(|c| c.id == id)
+                .ok_or_else(unavailable)?
+                .team_run_fence = None;
+            self.write_team_index(&index)?;
+            Ok(state)
+        })
+    }
+}
+
 #[path = "asks/output.rs"]
 mod output;
 

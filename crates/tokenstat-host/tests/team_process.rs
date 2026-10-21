@@ -81,7 +81,7 @@ fn closed_output_cannot_complete_an_owned_backend_and_stop_freezes_its_descendan
     let mut process = Owned::start(
         Path::new(env!("CARGO_BIN_EXE_tokenstat-hostd")),
         program(root.path(), "hold"),
-        || Ok(()),
+        |_| Ok(()),
     )
     .unwrap();
     started(&mut process);
@@ -105,7 +105,7 @@ fn foreground_exit_leaves_a_live_descendant_until_the_exact_owner_stops() {
     let mut process = Owned::start(
         Path::new(env!("CARGO_BIN_EXE_tokenstat-hostd")),
         program(root.path(), "finish"),
-        || Ok(()),
+        |_| Ok(()),
     )
     .unwrap();
     wait(|| matches!(process.poll().unwrap(), Poll::Exited(Some(0))));
@@ -125,7 +125,7 @@ fn refusal_after_anchor_birth_prevents_any_backend_birth() {
     let result = Owned::start(
         Path::new(env!("CARGO_BIN_EXE_tokenstat-hostd")),
         program(root.path(), "hold"),
-        || Err(io::Error::other("Fixture admission expired.")),
+        |_| Err(io::Error::other("Fixture admission expired.")),
     );
     assert!(result.is_err());
     assert!(!root.path().join("processes").exists());
@@ -138,7 +138,7 @@ fn delayed_admission_cannot_extend_a_one_shot_backend_birth_window() {
     let result = Owned::start(
         Path::new(env!("CARGO_BIN_EXE_tokenstat-hostd")),
         program(root.path(), "hold"),
-        || {
+        |_| {
             std::thread::sleep(Duration::from_millis(2200));
             Ok(())
         },
@@ -153,8 +153,8 @@ fn stopping_one_owner_never_stops_an_independent_run() {
     let one = tempfile::tempdir().unwrap();
     let two = tempfile::tempdir().unwrap();
     let helper = Path::new(env!("CARGO_BIN_EXE_tokenstat-hostd"));
-    let mut first = Owned::start(helper, program(one.path(), "hold"), || Ok(())).unwrap();
-    let mut second = Owned::start(helper, program(two.path(), "hold"), || Ok(())).unwrap();
+    let mut first = Owned::start(helper, program(one.path(), "hold"), |_| Ok(())).unwrap();
+    let mut second = Owned::start(helper, program(two.path(), "hold"), |_| Ok(())).unwrap();
     started(&mut first);
     started(&mut second);
     let leaf = two.path().join("processes.leaf");
@@ -174,7 +174,7 @@ fn a_definite_backend_spawn_failure_remains_distinct_from_process_completion() {
     let mut process = Owned::start(
         Path::new(env!("CARGO_BIN_EXE_tokenstat-hostd")),
         configured,
-        || Ok(()),
+        |_| Ok(()),
     )
     .unwrap();
     wait(|| matches!(process.poll().unwrap(), Poll::LaunchFailed));

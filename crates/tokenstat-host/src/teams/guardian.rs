@@ -310,7 +310,15 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     let mut output = output::Output::new(&program.output, prepared.backend());
     prepared.claim_writer()?;
     chats.transition_owned_run(source.target(), &prepared, State::Launching)?;
-    let process = Owned::start(&helper, program, || {
+    let fence = prepared.binding().fence.clone();
+    let (workspace, chat) = (
+        source.target().workspace.to_string(),
+        source.target().id.to_string(),
+    );
+    let process = Owned::start(&helper, program, |group| {
+        // Written before birth: a crash after this point can be recovered
+        // once the group is proven gone, and never before.
+        super::recovery::remember(&fence, &workspace, &chat, group)?;
         source
             .ensure_current()
             .map_err(|_| io::Error::other("Run source changed."))?;
@@ -457,6 +465,9 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         }
     };
     let result = chats.complete_owned_run(source.target(), *prepared, proof, terminal);
+    if result.is_ok() {
+        super::recovery::forget(&fence);
+    }
     let _ = authority.retire();
     event(json!({"event":"finished","result":result?}))
 }

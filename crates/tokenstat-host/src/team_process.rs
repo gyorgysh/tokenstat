@@ -250,6 +250,48 @@ pub fn anchor_main() -> io::Result<()> {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
+/// True only when no process is left in `group` or with its leader's id.
+/// A reused id reads as alive, which keeps a run fenced: the safe answer.
+pub(crate) fn group_gone(group: u32) -> bool {
+    os::group_gone(group)
+}
+
+/// This boot of this computer. A run recorded under another boot cannot
+/// have a process left.
+pub(crate) fn boot_identity() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut time = libc::timeval {
+            tv_sec: 0,
+            tv_usec: 0,
+        };
+        let mut size = std::mem::size_of::<libc::timeval>();
+        // SAFETY: the name is NUL-terminated and the buffer is a timeval of
+        // the size passed, which is what kern.boottime writes.
+        let status = unsafe {
+            libc::sysctlbyname(
+                c"kern.boottime".as_ptr(),
+                (&mut time as *mut libc::timeval).cast(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        (status == 0 && time.tv_sec > 0).then(|| format!("{}.{}", time.tv_sec, time.tv_usec))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+            .ok()
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty() && id.len() <= 64)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
+    }
+}
+
 pub fn guardian_main() -> Result<(), String> {
     crate::teams::guardian_main()
         .map_err(|_| "Team run needs recovery on its publishing computer.".into())
@@ -278,7 +320,7 @@ impl Owned {
     pub fn start(
         helper: &Path,
         program: Program,
-        before_birth: impl FnOnce() -> io::Result<()>,
+        before_birth: impl FnOnce(u32) -> io::Result<()>,
     ) -> io::Result<Self> {
         if !helper.is_absolute() || !program.valid() {
             return Err(invalid());
@@ -336,7 +378,8 @@ impl Owned {
         // least this much remaining time without a later scheduling gap
         // extending the one-shot window. Stamps stay only on private IPC.
         let window = BirthWindow::new()?;
-        before_birth()?;
+        // The anchor leads the process group the backend is born into.
+        before_birth(owner.child.id())?;
         window.ensure_live()?;
         send(
             owner.input.as_mut().ok_or_else(invalid)?,

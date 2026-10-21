@@ -64,15 +64,20 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                     Err(_) if binding.is_some() => None,
                     Err(error) => return Err(error),
                 };
+                // A crashed agent run keeps the chat fenced until the
+                // publisher releases it here.
+                let held = chats
+                    .team_run_fence(&input.workspace_id, &input.id)?
+                    .is_some();
                 if let Some(binding) = binding.as_ref().filter(|_| record.is_none()) {
                     return Ok(
                         json!({"sharing":{"id":binding.id,"revision":source_revision,"phase":"active",
-                        "privateReady":false,"sourceOnly":true,"accountCleanupPending":true}}),
+                        "privateReady":false,"sourceOnly":true,"accountCleanupPending":true,"agentRunHeld":held}}),
                     );
                 }
                 Ok(
                     json!({"sharing":record.map(|(parent,row)| json!({"id":row.id,"organizationId":parent.organization_id,"repositoryId":parent.repository_id,"checkoutId":parent.id,
-                    "revision":row.revision,"phase":row.phase,"privateReady":binding.is_none(),"accountCleanupPending":row.phase==Phase::Withdrawn && !row.cloud_withdrawn}))}),
+                    "revision":row.revision,"phase":row.phase,"privateReady":binding.is_none(),"accountCleanupPending":row.phase==Phase::Withdrawn && !row.cloud_withdrawn,"agentRunHeld":held}))}),
                 )
             }
             "chat.sharing.stopLocal" => {
