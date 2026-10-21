@@ -61,8 +61,15 @@ impl Fixture {
             client_message_created_at_ms: now_ms(),
             review: self
                 .store
-                .team_ask_review(self.target(), actor, &self.checkout, || Ok(()))
-                .unwrap(),
+                .team_ask_review(
+                    self.target(),
+                    actor,
+                    &self.folder,
+                    &self.checkout,
+                    || Ok(()),
+                )
+                .unwrap()
+                .digest,
         }
     }
     pub(super) fn prepare(
@@ -125,6 +132,7 @@ fn an_ask_has_one_canonical_author_and_retry_keeps_original_device_grant_and_fen
     assert_eq!(owned.context.message["text"], input.text);
     assert_eq!(owned.context.message["author"]["id"], "fixture-person");
     assert_eq!(owned.context.backend, "codex");
+    assert!(!owned.context.worktree.repository);
     assert_eq!(f.chat().team_run_fence.as_ref(), Some(&owned.binding.fence));
     assert!(tokenstat_workspace::writer::Lease::acquire(&f.folder).is_err());
     assert!(
@@ -570,5 +578,48 @@ fn damaged_or_cross_mode_journal_proof_never_turns_a_run_into_a_new_attempt() {
             "{field}"
         );
     }
+    f.store.refuse_prepared_ask(f.target(), owned).unwrap();
+}
+
+#[test]
+fn a_dirty_checkout_changes_the_review_and_blocks_the_old_one() {
+    let f = Fixture::new();
+    let actor = principal("fixture-person", 'a', 'b');
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&f.folder)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    run(&["init", "-b", "shared"]);
+    run(&["config", "user.name", "Test"]);
+    run(&["config", "user.email", "test@example.invalid"]);
+    run(&["commit", "--allow-empty", "-m", "init"]);
+    let clean = f.input(&actor, "ask-clean");
+    std::fs::write(f.folder.join("local.txt"), "uncommitted").unwrap();
+    let dirty = f.input(&actor, "ask-dirty");
+    assert_ne!(clean.review, dirty.review);
+    assert_eq!(
+        failed(f.prepare(&actor, &clean)).code,
+        "team_run_review_changed"
+    );
+    let owned = new(f.prepare(&actor, &dirty).unwrap());
+    assert!(owned.context.worktree.repository && owned.context.worktree.dirty);
+    assert_eq!(owned.context.worktree.branch.as_deref(), Some("shared"));
+    assert!(
+        owned
+            .context
+            .worktree
+            .head
+            .as_ref()
+            .is_some_and(|head| head.len() == 40)
+    );
     f.store.refuse_prepared_ask(f.target(), owned).unwrap();
 }

@@ -1192,6 +1192,140 @@ pub fn worktrees(dir: &Path) -> Result<Vec<Worktree>, String> {
     Ok(result)
 }
 
+/// Branch, commit and dirty state for one checkout, read once for a review.
+///
+/// A plain folder is a checkout with no repository. A repository whose state
+/// cannot be read is an error, so a review cannot proceed as if it were clean.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckoutReview {
+    pub repository: bool,
+    pub branch: Option<String>,
+    pub detached: bool,
+    pub head: Option<String>,
+    pub dirty: bool,
+    /// Digest of the status git reported. It changes when the dirty set
+    /// changes and does not carry the paths themselves.
+    pub change_digest: String,
+}
+
+const CHECKOUT_UNREADABLE: &str = "The checkout's git state could not be read.";
+
+pub fn checkout_review(dir: &Path) -> Result<CheckoutReview, &'static str> {
+    let probe = git_command(dir, &["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map_err(|_| CHECKOUT_UNREADABLE)?;
+    if !probe.status.success() {
+        let err = String::from_utf8_lossy(&probe.stderr);
+        if probe.status.code() == Some(128)
+            && err.to_ascii_lowercase().contains("not a git repository")
+        {
+            return Ok(plain_checkout());
+        }
+        return Err(CHECKOUT_UNREADABLE);
+    }
+    if String::from_utf8_lossy(&probe.stdout).trim() != "true" {
+        return Err(CHECKOUT_UNREADABLE);
+    }
+    let symbolic = git_command(dir, &["symbolic-ref", "-q", "--short", "HEAD"])
+        .output()
+        .map_err(|_| CHECKOUT_UNREADABLE)?;
+    let branch = if symbolic.status.success() {
+        let name = String::from_utf8_lossy(&symbolic.stdout).trim().to_string();
+        if !valid_branch(&name) {
+            return Err(CHECKOUT_UNREADABLE);
+        }
+        Some(name)
+    } else if symbolic.status.code() == Some(1) && symbolic.stdout.is_empty() {
+        None
+    } else {
+        return Err(CHECKOUT_UNREADABLE);
+    };
+    let head_out = git_command(
+        dir,
+        &["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"],
+    )
+    .output()
+    .map_err(|_| CHECKOUT_UNREADABLE)?;
+    let head = if head_out.status.success() {
+        let oid = String::from_utf8_lossy(&head_out.stdout).trim().to_string();
+        if !is_oid(&oid) {
+            return Err(CHECKOUT_UNREADABLE);
+        }
+        Some(oid)
+    } else if head_out.status.code() == Some(128) {
+        None
+    } else {
+        return Err(CHECKOUT_UNREADABLE);
+    };
+    if branch.is_none() && head.is_none() {
+        return Err(CHECKOUT_UNREADABLE);
+    }
+    let status = git_command(
+        dir,
+        &["status", "--porcelain=v2", "--untracked-files=normal", "-z"],
+    )
+    .output()
+    .map_err(|_| CHECKOUT_UNREADABLE)?;
+    if !status.status.success() || status.stdout.len() > 256 * 1024 {
+        return Err(CHECKOUT_UNREADABLE);
+    }
+    let dirty = status
+        .stdout
+        .split(|byte| *byte == 0)
+        .any(|record| record.first().is_some_and(|byte| *byte != b'#'));
+    Ok(CheckoutReview {
+        repository: true,
+        detached: branch.is_none(),
+        branch,
+        head,
+        dirty,
+        change_digest: checkout_digest(&status.stdout),
+    })
+}
+
+fn plain_checkout() -> CheckoutReview {
+    CheckoutReview {
+        repository: false,
+        branch: None,
+        detached: false,
+        head: None,
+        dirty: false,
+        change_digest: checkout_digest(b"not-a-repository"),
+    }
+}
+
+fn checkout_digest(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"tokenstat/checkout-review/v1\0");
+    hasher.update(bytes);
+    hasher
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut out, byte| {
+            out.push(char::from(b"0123456789abcdef"[(*byte >> 4) as usize]));
+            out.push(char::from(b"0123456789abcdef"[(*byte & 0xf) as usize]));
+            out
+        })
+}
+
+fn valid_branch(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && !name.starts_with('-')
+        && !name.ends_with('/')
+        && !name.contains("..")
+        && name.chars().all(|c| c.is_ascii_graphic() && c != '\\')
+}
+
+fn is_oid(value: &str) -> bool {
+    matches!(value.len(), 40 | 64)
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
 fn inside_work_tree(dir: &Path) -> bool {
     git(dir, &["rev-parse", "--is-inside-work-tree"])
         .map(|s| s.trim() == "true")
@@ -2117,6 +2251,52 @@ mod tests {
         assert!(show(&dir, "nope-not-a-rev").is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn checkout_review_tracks_branch_head_and_dirty_state() {
+        let plain = tempfile::tempdir().unwrap();
+        let empty = checkout_review(plain.path()).unwrap();
+        assert!(!empty.repository && !empty.dirty && empty.head.is_none());
+        assert_eq!(checkout_review(plain.path()).unwrap(), empty);
+
+        let dir = tempfile::tempdir().unwrap();
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&["init", "-b", "review"]);
+        run(&["config", "user.name", "Test"]);
+        run(&["config", "user.email", "test@example.invalid"]);
+        let unborn = checkout_review(dir.path()).unwrap();
+        assert!(
+            unborn.repository
+                && unborn.head.is_none()
+                && unborn.branch.as_deref() == Some("review")
+        );
+        run(&["commit", "--allow-empty", "-m", "init"]);
+        let clean = checkout_review(dir.path()).unwrap();
+        assert!(clean.repository && !clean.detached && !clean.dirty);
+        assert_eq!(clean.branch.as_deref(), Some("review"));
+        assert!(clean.head.as_ref().is_some_and(|head| head.len() == 40));
+        assert_ne!(clean.change_digest, empty.change_digest);
+        std::fs::write(dir.path().join("note.txt"), "local").unwrap();
+        let dirty = checkout_review(dir.path()).unwrap();
+        assert!(
+            dirty.dirty && dirty.head == clean.head && dirty.change_digest != clean.change_digest
+        );
+        run(&["checkout", "--detach"]);
+        let detached = checkout_review(dir.path()).unwrap();
+        assert!(detached.detached && detached.branch.is_none() && detached.head == clean.head);
     }
 
     #[test]

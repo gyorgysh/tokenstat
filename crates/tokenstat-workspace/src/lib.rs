@@ -28,7 +28,9 @@ pub mod registry;
 pub mod tree;
 pub mod writer;
 
-pub use git::{ChangeKind, Commit, CommitDetail, FileChange, FileDiff, GitStatus, Remote};
+pub use git::{
+    ChangeKind, CheckoutReview, Commit, CommitDetail, FileChange, FileDiff, GitStatus, Remote,
+};
 pub use gitwrite::GitOutcome;
 pub use registry::{Registry, RegistryError, Workspace};
 pub use tree::{TreeEntry, TreeError};

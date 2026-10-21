@@ -64,6 +64,12 @@ fn unavailable() -> DispatchError {
         "This Ask could not be verified. Check the chat before trying again.",
     )
 }
+fn checkout_unread() -> DispatchError {
+    DispatchError::new(
+        "team_checkout_unreadable",
+        "The checkout's git state could not be read. Review it before asking the agent.",
+    )
+}
 fn changed() -> DispatchError {
     DispatchError::new(
         "team_run_review_changed",
@@ -124,20 +130,32 @@ fn require_marker(
     }
     Ok(())
 }
+pub(crate) struct AskReview {
+    pub digest: String,
+    pub worktree: tokenstat_workspace::git::CheckoutReview,
+}
+
 fn review(
     history: &History,
     scope: &journal::Scope,
     checkout: &str,
-) -> Result<String, DispatchError> {
-    hash(&(
-        "tokenstat/team-ask-review/v1",
-        scope,
-        checkout,
-        &history.title,
-        &history.backend,
-        history.history_trimmed,
-        &history.events,
-    ))
+    folder: &Path,
+) -> Result<AskReview, DispatchError> {
+    let worktree =
+        tokenstat_workspace::git::checkout_review(folder).map_err(|_| checkout_unread())?;
+    Ok(AskReview {
+        digest: hash(&(
+            "tokenstat/team-ask-review/v2",
+            scope,
+            checkout,
+            &history.title,
+            &history.backend,
+            history.history_trimmed,
+            &history.events,
+            &worktree,
+        ))?,
+        worktree,
+    })
 }
 fn result(record: &runs::Record) -> Value {
     json!({"receipt":{"shareId":record.request().scope.share,"clientMessageId":record.request().client_message_id,
@@ -157,6 +175,8 @@ pub(crate) struct AskContext {
     history_trimmed: bool,
     events: Vec<Value>,
     message: Value,
+    /// The checkout state covered by this Ask's review.
+    worktree: tokenstat_workspace::git::CheckoutReview,
 }
 
 /// No Clone/Serialize and no launch method. A future supervised runner takes
@@ -267,9 +287,10 @@ impl Store {
         &self,
         target: SharedSource<'_>,
         principal: &AuthorizedTeamPrincipal,
+        folder: &Path,
         checkout: &str,
         mut current: impl FnMut() -> Result<(), DispatchError>,
-    ) -> Result<String, DispatchError> {
+    ) -> Result<AskReview, DispatchError> {
         let (scope, _) = scope(principal)?;
         self.source_locked(target.workspace, target.id, false, |_, chat, bytes| {
             principal.ensure_account_current()?;
@@ -286,7 +307,7 @@ impl Store {
                 &directory,
                 true,
             )?;
-            review(&history, &scope, checkout)
+            review(&history, &scope, checkout, folder)
         })
     }
     pub(crate) fn prepare_team_ask(
@@ -391,7 +412,8 @@ impl Store {
                     .ok_or_else(busy)?;
                 let history =
                     shared_project(chat, bytes, &scope.share, target.preview, Some(&journal), &directory, true)?;
-                if review(&history, &scope, checkout)? != input.review {
+                let reviewed = review(&history, &scope, checkout, folder)?;
+                if reviewed.digest != input.review {
                     return Err(changed());
                 }
                 crate::chat_receipts::validate_created_at(
@@ -503,6 +525,7 @@ impl Store {
                     context: AskContext {
                         title:history.title, backend:history.backend, history_trimmed:history.history_trimmed, events:history.events,
                         message:json!({"kind":"user","text":input.text,"mode":"ask","author":{"kind":"person","id":actor.id,"name":actor.name,"handle":actor.handle,"avatar":actor.avatar}}),
+                        worktree: reviewed.worktree,
                     },
                     _runner: runner,
                     writer,

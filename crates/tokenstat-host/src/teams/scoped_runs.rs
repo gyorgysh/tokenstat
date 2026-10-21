@@ -26,13 +26,18 @@ pub(super) fn review(
     principal.run_ticket()?;
     let source = Source::capture(principal)?;
     let checkout = checkout_digest(&source)?;
-    let review =
-        crate::chat::shared().team_ask_review(source.target(), principal, &checkout, || {
-            source.ensure_current()
-        })?;
+    let review = crate::chat::shared().team_ask_review(
+        source.target(),
+        principal,
+        &source.checkout.folder.canonical,
+        &checkout,
+        || source.ensure_current(),
+    )?;
     source.ensure_current()?;
     principal.ensure_account_current()?;
-    Ok(serde_json::json!({"review":review,"agentRuns":execution_ready()}))
+    Ok(
+        serde_json::json!({"review":review.digest,"agentRuns":execution_ready(),"worktree":review.worktree}),
+    )
 }
 pub(super) fn checkout_digest(source: &Source) -> Result<String, DispatchError> {
     Ok(tokenstat_identity::hex(&Sha256::digest(

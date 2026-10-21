@@ -150,10 +150,19 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         if init.program.is_some() {
             return Err(unavailable());
         }
-        let review = chats.team_ask_review(source.target(), &principal, &checkout, || {
-            source.ensure_current()
-        })?;
-        return event(json!({"event":"review","review":review,"agentRuns":false}));
+        let review = chats.team_ask_review(
+            source.target(),
+            &principal,
+            &source.checkout.folder.canonical,
+            &checkout,
+            || source.ensure_current(),
+        )?;
+        return event(json!({
+            "event": "review",
+            "review": review.digest,
+            "agentRuns": false,
+            "worktree": review.worktree
+        }));
     };
     if let Some(program) = &init.program {
         fixture_program(program, &source, &init.issuer)?;
