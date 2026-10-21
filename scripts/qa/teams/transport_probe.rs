@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .iter()
                 .map(|row| row.to_string() + "\n")
                 .collect::<String>();
-            if history.len() > 64 * 1024 {
+            if history.len() > 4 * 1024 * 1024 {
                 return Err("Fixture history is too large".into());
             }
             std::fs::write(directory.join("events.ndjson"), history)?;
