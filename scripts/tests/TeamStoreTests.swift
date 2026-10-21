@@ -111,6 +111,15 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         let legacy = JSONValue.object(["kind":.string("user"),"seq":.int(1),"author":.object(["kind":.string("localBeforeTeams")])])
         let authors = try TeamMessageAttribution.people([legacy, named])
         check(authors.count == 1 && authors["user-s42"]?.name == "Márta Nagy", "Named author was mapped to the wrong chat row")
+        if case var .object(ask) = named {
+            ask["mode"] = .string("ask"); ask["seq"] = .int(43)
+            let events = [named, JSONValue.object(ask)]
+            let askAuthors = try TeamMessageAttribution.people(events)
+            check(askAuthors.count == 2, "An attributed Ask hid the shared transcript")
+            check(TeamMessageAttribution.asks(events) == ["user-s43"], "An Ask received the Comment label")
+            ask["mode"] = .string("forged")
+            do { _ = try TeamMessageAttribution.people([.object(ask)]); preconditionFailure("Unknown message mode was accepted") } catch {}
+        }
         do { _ = try TeamMessageAttribution.people([named, named]); preconditionFailure("Duplicate author sequence was accepted") } catch {}
         let unverified = JSONValue.object(["kind":.string("user"),"seq":.int(42),"author":.object(["kind":.string("person"),"id":.string("forged"),"name":.string("Unverified")])])
         do { _ = try TeamMessageAttribution.people([unverified]); preconditionFailure("Unverified user fields became a named Comment") } catch {}

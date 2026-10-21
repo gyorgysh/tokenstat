@@ -195,6 +195,7 @@ pub struct Parser {
     inspection: crate::chat_inspection::Snapshot,
     inspection_dirty: bool,
     images: crate::chat_images::Collector,
+    collect_images: bool,
 }
 
 impl Parser {
@@ -221,6 +222,7 @@ impl Parser {
             inspection: Default::default(),
             inspection_dirty: false,
             images: Default::default(),
+            collect_images: true,
         }
     }
 
@@ -235,6 +237,12 @@ impl Parser {
         self.inspection.activity.goal = snapshot.activity.goal.clone();
         self.inspection.activity.goal_reported = snapshot.activity.goal_reported;
         self.inspection.session_id = snapshot.session_id.clone();
+    }
+
+    pub(crate) fn for_team(backend: &str) -> Self {
+        let mut parser = Self::new(backend);
+        parser.collect_images = false;
+        parser
     }
 
     pub(crate) fn take_images(&mut self) -> Vec<crate::chat_images::Image> {
@@ -523,7 +531,9 @@ impl Parser {
         } else {
             events_for_value(&self.backend, &value)
         };
-        self.images.observe(&self.backend, &value, &events);
+        if self.collect_images {
+            self.images.observe(&self.backend, &value, &events);
+        }
         if self.backend == "claude" {
             match value.get("type").and_then(Value::as_str) {
                 Some("assistant") => {

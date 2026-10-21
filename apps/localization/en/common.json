@@ -586,6 +586,7 @@
   "common.teams.local_reference_remaining": "Sharing stopped on this computer. This chat is private here. Your organization may still list it as shared.",
   "common.teams.open_shared_chat": "Open shared chat",
   "common.teams.comment": "Comment",
+  "common.teams.ask": "Ask agent",
   "common.teams.comment_placeholder": "Write a comment…",
   "common.teams.comment_audience": "Visible to everyone with repository access.",
   "common.teams.post_comment": "Post comment",

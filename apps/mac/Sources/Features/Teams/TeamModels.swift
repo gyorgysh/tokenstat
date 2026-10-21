@@ -232,12 +232,19 @@ enum TeamMessageAttribution {
         var people: [String: TeamPerson] = [:]
         for case let .object(row) in events where row["kind"] == .string("user") {
             guard case let .object(author)? = row["author"], author["kind"] == .string("person") else { continue }
-            guard row["mode"] == .string("comment"), case let .int(sequence)? = row["seq"], sequence >= 0 else { throw CocoaError(.coderReadCorrupt) }
+            guard row["mode"] == .string("comment") || row["mode"] == .string("ask"), case let .int(sequence)? = row["seq"], sequence >= 0 else { throw CocoaError(.coderReadCorrupt) }
             let person = try JSONDecoder().decode(TeamPerson.self, from: JSONEncoder().encode(JSONValue.object(author)))
             guard !person.id.isEmpty, person.id.utf8.count <= 128, !person.name.isEmpty, person.name.count <= 128,
                   people.updateValue(person, forKey: "user-s\(sequence)") == nil else { throw CocoaError(.coderReadCorrupt) }
         }
         return people
+    }
+    static func asks(_ events: [JSONValue]) -> Set<String> {
+        Set(events.compactMap { event in
+            guard case let .object(row) = event, row["kind"] == .string("user"), row["mode"] == .string("ask"),
+                  case let .int(sequence)? = row["seq"], sequence >= 0 else { return nil }
+            return "user-s\(sequence)"
+        })
     }
 }
 struct TeamChatDetails: Decodable, Sendable { let chat: TeamChatSummary }

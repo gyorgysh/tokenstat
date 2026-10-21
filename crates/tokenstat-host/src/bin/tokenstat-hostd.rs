@@ -43,6 +43,7 @@ fn main() -> ExitCode {
                 | "chat-live"
                 | "team-run-anchor"
                 | "team-run-guardian"
+                | "team-run-sdk"
                 | "--help"
                 | "-h"
                 | "--version"
@@ -122,6 +123,12 @@ fn run() -> Result<(), String> {
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "team-run-sdk" => {
+                if args.next().is_some() {
+                    return Err("Unexpected Team SDK arguments.".into());
+                }
+                return tokenstat_host::team_sdk::main();
+            }
             "team-run-guardian" => {
                 if args.next().is_some() {
                     return Err("Unexpected guardian arguments.".into());

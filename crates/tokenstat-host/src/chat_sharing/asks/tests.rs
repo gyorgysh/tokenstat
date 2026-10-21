@@ -3,7 +3,7 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn principal(person: &str, device: char, grant: char) -> AuthorizedTeamPrincipal {
+pub(super) fn principal(person: &str, device: char, grant: char) -> AuthorizedTeamPrincipal {
     AuthorizedTeamPrincipal::storage_fixture(serde_json::from_value(json!({
         "id":person,"name":"Example member","handle":"example-member","avatar":null,
         "deviceKey":device.to_string().repeat(64),"organizationId":"org_fixture","repositoryId":"repo_fixture",
@@ -12,16 +12,16 @@ fn principal(person: &str, device: char, grant: char) -> AuthorizedTeamPrincipal
         "epoch":1,"capabilities":["read","comment","run"],"role":"contributor","expiresAt":"2026-12-01T00:00:00Z"
     })).unwrap())
 }
-struct Fixture {
+pub(super) struct Fixture {
     root: tempfile::TempDir,
-    store: Store,
-    chat: Conversation,
-    preview: String,
+    pub(super) store: Store,
+    pub(super) chat: Conversation,
+    pub(super) preview: String,
     folder: PathBuf,
     checkout: String,
 }
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let (root, store, chat) = super::super::tests::fixture();
         let preview = store
             .sharing_history(&chat.workspace_id, &chat.id)
@@ -46,7 +46,7 @@ impl Fixture {
             checkout: "12".repeat(32),
         }
     }
-    fn target(&self) -> SharedSource<'_> {
+    pub(super) fn target(&self) -> SharedSource<'_> {
         SharedSource {
             workspace: &self.chat.workspace_id,
             id: &self.chat.id,
@@ -54,7 +54,7 @@ impl Fixture {
             revision: Some(self.chat.send_revision),
         }
     }
-    fn input(&self, actor: &AuthorizedTeamPrincipal, id: &str) -> AskInput {
+    pub(super) fn input(&self, actor: &AuthorizedTeamPrincipal, id: &str) -> AskInput {
         AskInput {
             text: "A fictional Ask".into(),
             client_message_id: id.into(),
@@ -65,7 +65,7 @@ impl Fixture {
                 .unwrap(),
         }
     }
-    fn prepare(
+    pub(super) fn prepare(
         &self,
         actor: &AuthorizedTeamPrincipal,
         input: &AskInput,
@@ -79,7 +79,7 @@ impl Fixture {
             || Ok(()),
         )
     }
-    fn history(&self) -> History {
+    pub(super) fn history(&self) -> History {
         self.store
             .shared_history(
                 &self.chat.workspace_id,
@@ -89,14 +89,14 @@ impl Fixture {
             )
             .unwrap()
     }
-    fn journal_bytes(&self) -> Vec<u8> {
+    pub(super) fn journal_bytes(&self) -> Vec<u8> {
         fs::read(self.store.root.join(&self.chat.id).join(writer::JOURNAL)).unwrap()
     }
     fn chat(&self) -> Conversation {
         self.store.current_send_conversation(&self.chat.id).unwrap()
     }
 }
-fn new(value: AskPreparation) -> PreparedAsk {
+pub(super) fn new(value: AskPreparation) -> PreparedAsk {
     match value {
         AskPreparation::New(value) => *value,
         AskPreparation::Existing(_) => panic!("retry was not a new admission"),

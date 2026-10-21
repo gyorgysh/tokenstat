@@ -23,7 +23,7 @@ struct TeamCommentDraftsView: View {
             HStack {
                 Text(L10n.text("common.teams.comment_drafts")).font(Theme.headline).accessibilityAddTraits(.isHeader)
                 Spacer(minLength: Theme.Space.s)
-                Button(L10n.text("common.done")) { dismiss() }.buttonStyle(TeamButtonStyle())
+                Button(L10n.text("common.done"), .done) { dismiss() }.buttonStyle(TeamButtonStyle())
             }.padding(Theme.Space.m)
             ThemeRule()
             if isCurrent() {

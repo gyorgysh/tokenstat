@@ -22,6 +22,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tokenstat_identity::teams::TeamTicket;
+#[path = "guardian/output.rs"]
+mod output;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -186,7 +188,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             return Err(error);
         }
     };
-    let Some(program) = init.program else {
+    let Some(mut program) = init.program else {
         // Production agent adapters remain disabled until scoped SDK, full
         // context/state review and physical grant UI are ready.
         let _ = authority.retire();
@@ -212,6 +214,28 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         let _ = chats.refuse_prepared_ask(source.target(), *prepared);
         return Err(error);
     }
+    let sdk = (|| {
+        let current = owner.clone();
+        let sdk_source = Source::capture(&principal)?;
+        source.ensure_current()?;
+        crate::team_sdk::Service::start(
+            &authority,
+            serde_json::to_value(prepared.context()).map_err(|_| unavailable())?,
+            prepared.binding().fence.run_id().into(),
+            move || current.ensure_current().is_ok() && sdk_source.ensure_current().is_ok(),
+        )
+        .map_err(map_io)
+    })();
+    let sdk = match sdk {
+        Ok(sdk) => sdk,
+        Err(error) => {
+            let _ = authority.retire();
+            let _ = chats.refuse_prepared_ask(source.target(), *prepared);
+            return Err(error);
+        }
+    };
+    sdk.configure(&mut program);
+    let mut output = output::Output::new(&program.output, prepared.backend());
     prepared.claim_writer()?;
     chats.transition_owned_run(source.target(), &prepared, State::Launching)?;
     let helper = std::env::current_exe().map_err(map_io)?;
@@ -258,7 +282,10 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         let mut renew = Instant::now() + Duration::from_secs(10);
         let mut running = false;
         let terminal = loop {
-            if authority.ensure_live().is_err() || source.ensure_current().is_err() {
+            if authority.ensure_live().is_err()
+                || source.ensure_current().is_err()
+                || sdk.ensure_live().is_err()
+            {
                 break State::Stopped;
             }
             match control.try_recv() {
@@ -272,6 +299,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             match process.poll().map_err(map_io)? {
                 Poll::Started => {
                     chats.transition_owned_run(source.target(), &prepared, State::Running)?;
+                    sdk.running().map_err(map_io)?;
                     running = true;
                     event(
                         json!({"event":"running","fence":prepared.binding().fence,"runId":prepared.binding().fence.run_id()}),
@@ -287,23 +315,62 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                 Poll::LaunchFailed => break State::NotStarted,
                 Poll::Running => {}
             }
+            if running {
+                output
+                    .drain(false, |batch, events| {
+                        chats
+                            .append_owned_output(source.target(), &prepared, batch, events, || {
+                                authority.ensure_live().map_err(api_error)?;
+                                source.ensure_current()
+                            })
+                            .map_err(|_| io::Error::other("Team output could not be verified."))
+                    })
+                    .map_err(map_io)?;
+            }
             if Instant::now() >= renew {
                 if authority.renew().is_err() {
+                    break State::Stopped;
+                }
+                if sdk.renew(&authority).is_err() {
                     break State::Stopped;
                 }
                 renew = Instant::now() + Duration::from_secs(10);
             }
             std::thread::sleep(Duration::from_millis(100));
         };
+        sdk.retire();
         if terminal == State::Stopped {
             chats.transition_owned_run(source.target(), &prepared, State::Stopping)?;
         }
         let proof = process.stop().map_err(map_io)?;
-        Ok((terminal, proof))
+        let final_output = if running && matches!(terminal, State::Succeeded | State::Failed) {
+            output
+                .drain(true, |batch, events| {
+                    chats
+                        .append_owned_output(source.target(), &prepared, batch, events, || {
+                            authority.ensure_live().map_err(api_error)?;
+                            source.ensure_current()
+                        })
+                        .map_err(|_| io::Error::other("Team output could not be verified."))
+                })
+                .map_err(map_io)
+        } else {
+            Ok(())
+        };
+        Ok((terminal, proof, final_output))
     })();
     let (terminal, proof) = match execution {
-        Ok(result) => result,
+        Ok((terminal, proof, Ok(()))) => (terminal, proof),
+        Ok((_, _, Err(error))) => {
+            // OS cleanup is proven, but output persistence needs repair.
+            // Keep both durable fences; never attempt a second stop using a
+            // completed process handle or report successful output delivery.
+            let _ = chats.transition_owned_run(source.target(), &prepared, State::NeedsRecovery);
+            let _ = authority.retire();
+            return Err(error);
+        }
         Err(error) => {
+            sdk.retire();
             // A lost host output pipe can still have a fully owned process.
             // Persist proven cleanup when possible instead of leaving a
             // needless orphan. Unknown outcomes always keep both fences.

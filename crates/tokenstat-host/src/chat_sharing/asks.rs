@@ -169,6 +169,7 @@ pub(crate) struct PreparedAsk {
     _runner: RunnerLease,
     writer: tokenstat_workspace::writer::Lease,
     claimed: bool,
+    actor: journal::Actor,
 }
 impl PreparedAsk {
     pub fn binding(&self) -> &runs::Binding {
@@ -176,6 +177,9 @@ impl PreparedAsk {
     }
     pub fn context(&self) -> &AskContext {
         &self.context
+    }
+    pub fn backend(&self) -> &str {
+        &self.context.backend
     }
     pub fn ensure_writer_current(&self) -> Result<(), DispatchError> {
         self.writer.ensure_current().map_err(|_| changed())
@@ -494,6 +498,7 @@ impl Store {
                     _runner: runner,
                     writer,
                     claimed:false,
+                    actor:actor.clone(),
                 })))
             },
         )
@@ -702,6 +707,9 @@ impl Store {
         )
     }
 }
+
+#[path = "asks/output.rs"]
+mod output;
 
 #[cfg(test)]
 #[path = "asks/tests.rs"]

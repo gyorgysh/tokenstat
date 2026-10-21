@@ -7,6 +7,7 @@ struct TeamTranscriptContent: View {
     let history: TeamChatHistory
     @State private var rows: [ChatDisplayItem] = []
     @State private var people: [String: TeamPerson] = [:]
+    @State private var asks: Set<String> = []
     @State private var readyRenderId: UUID?
     @State private var error: String?
     @Environment(\.teamAvatarOwner) private var owner
@@ -19,7 +20,7 @@ struct TeamTranscriptContent: View {
                         HStack(spacing: Theme.Space.s) {
                             Avatar(url: teamAvatarURL(person.avatar, owner: owner)?.absoluteString, name: person.name, handle: person.handle, size: 24, tint: Avatar.tint(for: person.id)).accessibilityHidden(true)
                             Text(person.name).font(Theme.caption.weight(.semibold)).lineLimit(2)
-                            Text(L10n.text("common.teams.comment")).font(Theme.caption).foregroundStyle(.secondary)
+                            Text(asks.contains(row.id) ? L10n.text("common.teams.ask") : L10n.text("common.teams.comment")).font(Theme.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .trailing).accessibilityElement(children: .combine)
                     } else {
                         Label(L10n.text("common.teams.local_before_teams"), systemImage: "person.crop.circle")
@@ -46,12 +47,12 @@ struct TeamTranscriptContent: View {
                 let result = try await Task.detached(priority: .userInitiated) {
                     let decoded = try JSONDecoder().decode([ChatTimelineEvent].self, from: JSONEncoder().encode(events))
                     try Task.checkCancellation()
-                    return (ChatDisplayItem.coalesce(decoded, defaultBackend: backend, running: false), try TeamMessageAttribution.people(events))
+                    return (ChatDisplayItem.coalesce(decoded, defaultBackend: backend, running: false), try TeamMessageAttribution.people(events), TeamMessageAttribution.asks(events))
                 }.value
                 try Task.checkCancellation()
-                rows = result.0; people = result.1; readyRenderId = history.renderId; error = nil
+                rows = result.0; people = result.1; asks = result.2; readyRenderId = history.renderId; error = nil
             } catch is CancellationError {} catch {
-                rows = []; people = [:]; readyRenderId = history.renderId; self.error = L10n.text("common.teams.history_cannot_display")
+                rows = []; people = [:]; asks = []; readyRenderId = history.renderId; self.error = L10n.text("common.teams.history_cannot_display")
             }
         }
     }
