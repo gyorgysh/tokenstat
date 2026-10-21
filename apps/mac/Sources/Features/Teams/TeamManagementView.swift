@@ -24,6 +24,7 @@ struct TeamManagementView: View {
                 organizationNavigation(org)
             }
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Theme.background)
         .tint(TeamColors.action)
