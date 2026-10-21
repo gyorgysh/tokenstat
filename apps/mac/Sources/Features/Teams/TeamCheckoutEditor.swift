@@ -7,7 +7,7 @@ struct TeamCheckoutEditor: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext
     let repository: TeamRepository
-    private enum Stage { case directory, choose, review, stop }
+    private enum Stage { case directory, choose, review, stop, agents }
     @State private var stage: Stage = .directory
     @State private var checkouts: [TeamCheckout] = []
     @State private var checkoutsNext: Int?
@@ -19,6 +19,7 @@ struct TeamCheckoutEditor: View {
     @State private var deviceName = ""
     @State private var preview: TeamCheckoutPreview?
     @State private var stopping: TeamLocalPublication?
+    @State private var agentsFor: TeamLocalPublication?
     @State private var confirmed = false
     @State private var loading = false
     @State private var saving = false
@@ -52,6 +53,11 @@ struct TeamCheckoutEditor: View {
                     case .choose: chooser
                     case .review: review
                     case .stop: stopReview
+                    case .agents:
+                        if let agentsFor {
+                            Text(workspaceName(agentsFor)).font(Theme.headline)
+                            TeamAgentGrants(store: store, context: context, repository: repository, checkoutId: agentsFor.id)
+                        }
                     }
                     if error != nil && !loading && stage == .directory {
                         Button(L10n.text("common.retry"), .refresh) { Task { await load() } }.buttonStyle(TeamButtonStyle())
@@ -63,7 +69,7 @@ struct TeamCheckoutEditor: View {
         } actions: {
             Button(stage == .directory || !isCurrent ? L10n.text("common.close") : L10n.text("common.back"), stage == .directory || !isCurrent ? .dismiss : .back) {
                 if stage == .directory || !isCurrent { dismiss() }
-                else { stage = .directory; preview = nil; stopping = nil; confirmed = false; error = nil }
+                else { stage = .directory; preview = nil; stopping = nil; agentsFor = nil; confirmed = false; error = nil }
             }.buttonStyle(TeamButtonStyle()).disabled(saving).keyboardShortcut(.cancelAction)
             Spacer(minLength: Theme.Space.s)
             if saving { ProgressView().controlSize(.small) }
@@ -81,9 +87,16 @@ struct TeamCheckoutEditor: View {
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         Text(publication.accountCleanupPending ? L10n.text("common.teams.cleanup_pending") : publication.phase == "active" ? L10n.text("common.teams.checkout_shared") : L10n.text("common.teams.publication_pending"))
                             .font(Theme.callout).foregroundStyle(.secondary)
-                        Button(publication.accountCleanupPending ? L10n.text("common.teams.retry_cleanup") : L10n.text("common.teams.stop_sharing"), .revoke) {
-                            stopping = publication; confirmed = false; error = nil; notice = nil; stage = .stop
-                        }.buttonStyle(TeamButtonStyle()).disabled(saving || loading)
+                        HStack(spacing: Theme.Space.s) {
+                            if publication.phase == "active" && !publication.accountCleanupPending {
+                                Button(L10n.text("common.teams.agent_runs"), .run) {
+                                    agentsFor = publication; error = nil; notice = nil; stage = .agents
+                                }.buttonStyle(TeamButtonStyle()).disabled(saving || loading)
+                            }
+                            Button(publication.accountCleanupPending ? L10n.text("common.teams.retry_cleanup") : L10n.text("common.teams.stop_sharing"), .revoke) {
+                                stopping = publication; confirmed = false; error = nil; notice = nil; stage = .stop
+                            }.buttonStyle(TeamButtonStyle()).disabled(saving || loading)
+                        }
                     }
                 }
             }
@@ -183,6 +196,8 @@ struct TeamCheckoutEditor: View {
         case .review:
             Button(L10n.text("common.teams.share_checkout"), .connect) { Task { await publish() } }
                 .buttonStyle(TeamButtonStyle(primary: true)).disabled(!confirmed || loading || saving).keyboardShortcut(.defaultAction).accessibilityIdentifier("team.checkout.publish")
+        case .agents:
+            EmptyView()
         case .stop:
             Button(L10n.text("common.teams.stop_sharing"), .revoke, role: .destructive) { Task { await withdraw() } }
                 .buttonStyle(TeamButtonStyle(primary: true)).disabled(!confirmed || loading || saving).keyboardShortcut(.defaultAction).accessibilityIdentifier("team.checkout.stop")
