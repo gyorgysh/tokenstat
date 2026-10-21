@@ -5,11 +5,11 @@ use crate::{chat::sharing::AskInput, error::DispatchError};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-// Admission is compiled and tested alongside canonical storage. Execution
-// remains closed until a supervised runner, scoped SDK and host grant UI are
-// ready. Changing this gate alone would only record a NotStarted attempt.
-fn execution_ready() -> bool {
-    false
+// Execution stays closed until the host grant UI and run recovery are ready.
+// Only a debug build inside the disposable Team fixture opens it, so the
+// public Ask and Stop path can be tested end to end.
+pub(super) fn execution_ready() -> bool {
+    super::guardian::fixture_enabled()
 }
 
 pub(super) fn review(

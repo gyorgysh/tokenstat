@@ -46,8 +46,8 @@ mod team_reach;
 #[cfg(feature = "local-host")]
 pub(crate) use team_connection::PageDirection as TeamPageDirection;
 pub(crate) use team_connection::{
-    CommentInput as TeamCommentInput, Link as TeamConnection, ReadMethod as TeamReadMethod,
-    ReadParams as TeamReadParams,
+    AskMethod as TeamAskMethod, CommentInput as TeamCommentInput, Link as TeamConnection,
+    ReadMethod as TeamReadMethod, ReadParams as TeamReadParams,
 };
 mod tunnel_lifecycle;
 mod tunnel_runtime;

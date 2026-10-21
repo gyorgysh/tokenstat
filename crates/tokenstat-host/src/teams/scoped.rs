@@ -19,12 +19,15 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             )
         })?;
         principal.ensure_live()?;
-        if matches!(method, "team.chat.ask" | "team.chat.ask.review") {
+        if matches!(
+            method,
+            "team.chat.ask" | "team.chat.ask.review" | "team.chat.ask.stop"
+        ) {
             #[cfg(feature = "local-host")]
-            return if method == "team.chat.ask.review" {
-                super::scoped_runs::review(&principal, params)
-            } else {
-                super::scoped_runs::send(&principal, params)
+            return match method {
+                "team.chat.ask.review" => super::scoped_runs::review(&principal, params),
+                "team.chat.ask.stop" => super::runs::stop(&principal, params),
+                _ => super::scoped_runs::send(&principal, params),
             };
             #[cfg(not(feature = "local-host"))]
             return Err(DispatchError::new(
@@ -148,7 +151,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         }
         Ok(
             json!({"version":1,"protocolVersion":crate::PROTOCOL_VERSION,"issuer":principal.issuer(),"organizationId":scope.organization_id,"repositoryId":scope.repository_id,"checkoutId":scope.checkout_id,"checkoutInfo":cfg!(feature="local-host"),
-            "sharedChats":cfg!(feature="local-host"),"chatCatalog":cfg!(feature="local-host"),"comments":cfg!(feature="local-host"),"agentRuns":false}),
+            "sharedChats":cfg!(feature="local-host"),"chatCatalog":cfg!(feature="local-host"),"comments":cfg!(feature="local-host"),"agentRuns":super::agent_runs_ready()}),
         )
     })())
 }

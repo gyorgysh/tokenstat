@@ -19,6 +19,8 @@ use tokenstat_sync::teams::{
 // allowing that record and JSON framing to reach the existing renderer intact.
 const RESPONSE_LIMIT: usize = 8 * 1024 * 1024;
 const RESPONSE_TIME: Duration = Duration::from_secs(15);
+/// An Ask answers once its agent has started, which can take a login shell.
+const ASK_RESPONSE_TIME: Duration = Duration::from_secs(90);
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -208,6 +210,27 @@ enum Transport {
 enum Purpose {
     Read,
     Comment,
+    Run,
+}
+
+/// The only methods an Ask connection may send. Each needs the Run capability.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub(crate) enum AskMethod {
+    #[serde(rename = "team.chat.ask.review")]
+    Review,
+    #[serde(rename = "team.chat.ask")]
+    Send,
+    #[serde(rename = "team.chat.ask.stop")]
+    Stop,
+}
+impl AskMethod {
+    pub(crate) fn wire(self) -> &'static str {
+        match self {
+            Self::Review => "team.chat.ask.review",
+            Self::Send => "team.chat.ask",
+            Self::Stop => "team.chat.ask.stop",
+        }
+    }
 }
 struct Relay {
     connection: Connection,
@@ -263,6 +286,22 @@ impl Link {
             Purpose::Comment,
         )
     }
+    pub(crate) fn connect_run(
+        owner: AccountSnapshot,
+        client: Arc<TeamClient>,
+        request: RequestTicket,
+        repository: String,
+        expected_key: tokenstat_identity::PublicKey,
+    ) -> Result<Self, DispatchError> {
+        Self::connect_for(
+            owner,
+            client,
+            request,
+            repository,
+            expected_key,
+            Purpose::Run,
+        )
+    }
     fn connect_for(
         owner: AccountSnapshot,
         client: Arc<TeamClient>,
@@ -277,9 +316,10 @@ impl Link {
         let expected = match purpose {
             Purpose::Read => vec![TeamCapability::Read],
             Purpose::Comment => vec![TeamCapability::Read, TeamCapability::Comment],
+            Purpose::Run => vec![TeamCapability::Read, TeamCapability::Run],
         };
         if request.capabilities != expected
-            || matches!(purpose, Purpose::Comment) && request.share_id.is_none()
+            || matches!(purpose, Purpose::Comment | Purpose::Run) && request.share_id.is_none()
         {
             return Err(api_error(TeamError::InvalidRequest));
         }
@@ -365,6 +405,17 @@ impl Link {
             return Err(DispatchError::new(
                 "team_host_update_required",
                 "Update tokenstat on the publishing computer to comment.",
+            ));
+        }
+        if matches!(purpose, Purpose::Run)
+            && protocol["protocolVersion"]
+                .as_str()
+                .and_then(|v| v.parse::<u32>().ok())
+                .is_none_or(|v| v < 47)
+        {
+            return Err(DispatchError::new(
+                "team_host_update_required",
+                "Update tokenstat on the publishing computer to ask its agent.",
             ));
         }
         Ok(link)
@@ -525,6 +576,64 @@ impl Link {
         };
         relay.connection.send(&bytes).map_err(|_| unknown())?;
         let time = RESPONSE_TIME
+            .min(self.deadline.saturating_duration_since(Instant::now()))
+            .min(
+                self.continuous_deadline
+                    .remaining()
+                    .ok_or_else(unavailable)?,
+            );
+        let response = relay
+            .connection
+            .receive_bounded(RESPONSE_LIMIT, time)
+            .map_err(|_| unknown())?;
+        self.ensure_current()?;
+        reply(&response, id)
+    }
+
+    /// One attempt only, like a comment. A lost reply to Send means the Ask
+    /// may have started: the caller reads the chat before asking again.
+    pub(crate) fn ask(
+        &mut self,
+        method: AskMethod,
+        params: &Value,
+    ) -> Result<Value, DispatchError> {
+        self.ensure_current()?;
+        if self.request.capabilities != [TeamCapability::Read, TeamCapability::Run]
+            || self.request.share_id.is_none()
+        {
+            return Err(api_error(TeamError::InvalidRequest));
+        }
+        let body = serde_json::to_string(params).map_err(|_| invalid())?;
+        if body.len() > 16 * 1024 {
+            return Err(api_error(TeamError::InvalidRequest));
+        }
+        if matches!(&self.transport, Transport::Local) {
+            let result = crate::teams::loopback_ask(
+                &self.client,
+                &self.proof,
+                &self.identity.public_key(),
+                self.deadline,
+                self.continuous_deadline,
+                method,
+                &body,
+            );
+            self.ensure_current()?;
+            return result;
+        }
+        let Transport::Relay(relay) = &mut self.transport else {
+            return Err(invalid());
+        };
+        let id = self.next_id;
+        self.next_id = self.next_id.checked_add(1).ok_or_else(invalid)?;
+        let bytes = serde_json::to_vec(&json!({"id":id,"method":method.wire(),"params":params}))
+            .map_err(|_| invalid())?;
+        let unknown = || {
+            DispatchError::delivery_unknown(
+                "The publishing computer did not answer. Check the chat before asking again.",
+            )
+        };
+        relay.connection.send(&bytes).map_err(|_| unknown())?;
+        let time = ASK_RESPONSE_TIME
             .min(self.deadline.saturating_duration_since(Instant::now()))
             .min(
                 self.continuous_deadline

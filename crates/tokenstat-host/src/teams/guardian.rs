@@ -83,6 +83,22 @@ fn event(value: Value) -> Result<(), DispatchError> {
     team_process::send(&mut io::stdout().lock(), &value).map_err(map_io)
 }
 
+/// A debug build inside the disposable Team fixture. Both markers are made
+/// by the fixture runner; a release build never answers yes.
+pub(super) fn fixture_enabled() -> bool {
+    if !cfg!(debug_assertions) {
+        return false;
+    }
+    let (Some(data), Ok(identity)) = (
+        tokenstat_paths::data_dir(),
+        tokenstat_identity::identity_dir(),
+    ) else {
+        return false;
+    };
+    data.join(".teams-transport-fixture").is_file()
+        && identity.join(".teams-transport-fixture").is_file()
+}
+
 fn fixture_program(program: &Program, source: &Source, issuer: &str) -> Result<(), DispatchError> {
     if !cfg!(debug_assertions) {
         return Err(unavailable());
@@ -450,7 +466,25 @@ pub(super) fn run(
     input: &AskInput,
 ) -> Result<Value, DispatchError> {
     use std::process::{Command, Stdio};
-    let helper = std::env::current_exe().map_err(map_io)?;
+    // The fixture host is a probe binary, so it names the hostd to run and
+    // may hand the guardian a disposable fake agent instead of a real one.
+    let (helper, program) = if fixture_enabled()
+        && let Some(hostd) = std::env::var_os("TOKENSTAT_TEAM_FIXTURE_HOSTD")
+    {
+        let file = tokenstat_paths::data_dir()
+            .ok_or_else(unavailable)?
+            .join("guardian-fixture/program.json");
+        let program = match std::fs::read(&file) {
+            Ok(bytes) => {
+                Some(serde_json::from_slice::<Program>(&bytes).map_err(|_| unavailable())?)
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(map_io(error)),
+        };
+        (std::path::PathBuf::from(hostd), program)
+    } else {
+        (std::env::current_exe().map_err(map_io)?, None)
+    };
     if helper.file_stem() != Some(std::ffi::OsStr::new("tokenstat-hostd")) {
         return Err(DispatchError::new(
             "host_required",
@@ -469,7 +503,7 @@ pub(super) fn run(
             .ok_or_else(unavailable)?
             .authentication_id(),
         input: Some(input.clone()),
-        program: None,
+        program,
     };
     principal.ensure_account_current()?;
     let mut command = Command::new(&helper);
@@ -507,15 +541,17 @@ pub(super) fn run(
             .take()
             .ok_or_else(unavailable)?,
     );
-    // Control stays open until the run finishes: its EOF stops the guardian.
-    // A retained host registry for public Stop is still required before
-    // execution is enabled.
-    let response = loop {
-        let response: Value = team_process::receive(&mut output).map_err(map_io)?;
-        if response["event"] != "running" {
-            break response;
-        }
-    };
+    let response: Value = team_process::receive(&mut output).map_err(map_io)?;
+    if response["event"] == "running" {
+        // The run outlives this request. The registry keeps its control pipe
+        // open, since EOF stops the guardian, and a reader thread reaps it.
+        let fence: Fence =
+            serde_json::from_value(response["fence"].clone()).map_err(|_| unavailable())?;
+        let input = parent.input.take().ok_or_else(unavailable)?;
+        let child = parent.child.take().ok_or_else(unavailable)?;
+        super::runs::register(principal, fence, input, child, output)?;
+        return Ok(json!({"state":"running","runId":response["runId"],"fence":response["fence"]}));
+    }
     drop(parent.input.take());
     if response["event"] != "finished" {
         return Err(unavailable());

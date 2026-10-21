@@ -22,6 +22,8 @@ mod provider;
 mod publications;
 #[cfg(feature = "local-host")]
 mod run_home;
+#[cfg(feature = "local-host")]
+mod runs;
 mod scoped;
 #[cfg(feature = "local-host")]
 mod scoped_chats;
@@ -62,6 +64,35 @@ pub(crate) fn loopback_read(
         scoped::call(method.wire(), &body).ok_or_else(|| api_error(TeamError::InvalidRequest))?
     })?;
     principal.ensure_live()?;
+    client.ensure_current().map_err(api_error)?;
+    Ok(value)
+}
+/// Whether this host lets a shared chat start its agent at all.
+fn agent_runs_ready() -> bool {
+    #[cfg(feature = "local-host")]
+    {
+        scoped_runs::execution_ready()
+    }
+    #[cfg(not(feature = "local-host"))]
+    {
+        false
+    }
+}
+/// The physical publisher asking its own agent. Same scoped boundary as a
+/// teammate's relay request, without a socket back to itself.
+pub(crate) fn loopback_ask(
+    client: &TeamClient,
+    proof: &tokenstat_sync::teams::TeamConnectionProof,
+    device: &tokenstat_identity::PublicKey,
+    deadline: std::time::Instant,
+    lease: crate::lease_clock::Deadline,
+    method: crate::remote::TeamAskMethod,
+    params: &str,
+) -> Result<Value, DispatchError> {
+    let principal = AuthorizedTeamPrincipal::loopback(client, proof, device, deadline, lease)?;
+    let value = crate::request_context::with_team_principal(principal.clone(), || {
+        scoped::call(method.wire(), params).ok_or_else(|| api_error(TeamError::InvalidRequest))?
+    })?;
     client.ensure_current().map_err(api_error)?;
     Ok(value)
 }
@@ -189,6 +220,7 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             directory::Request::Comment(request) => {
                 connections::comment(&owner, client.clone(), request)
             }
+            directory::Request::Ask(request) => connections::ask(&owner, client.clone(), request),
             #[cfg(feature = "local-host")]
             directory::Request::Sharing(request) => sharing::perform(&owner, &client, request),
             #[cfg(feature = "local-host")]

@@ -7,7 +7,7 @@ use super::api_error;
 use crate::{
     account_session::AccountSnapshot,
     error::DispatchError,
-    remote::{TeamCommentInput, TeamConnection, TeamReadMethod, TeamReadParams},
+    remote::{TeamAskMethod, TeamCommentInput, TeamConnection, TeamReadMethod, TeamReadParams},
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -120,6 +120,66 @@ pub(super) fn comment(
         identity.public_key(),
     )?
     .comment(&request.input)
+}
+
+/// Review, send or stop an Ask on a shared chat. `params` is checked again
+/// by the publishing computer, which owns the run.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct AskRequest {
+    target: Target,
+    method: TeamAskMethod,
+    #[serde(default)]
+    params: Value,
+}
+impl AskRequest {
+    pub(super) fn validate(mut self) -> Result<Self, DispatchError> {
+        if self.target.share.is_none() {
+            return Err(api_error(TeamError::InvalidRequest));
+        }
+        Request {
+            target: self.target.clone(),
+            method: TeamReadMethod::ChatDetails,
+            params: TeamReadParams::default(),
+        }
+        .validate()?;
+        if self.params.is_null() {
+            self.params = Value::Object(Default::default());
+        }
+        if !self.params.is_object() {
+            return Err(api_error(TeamError::InvalidRequest));
+        }
+        Ok(self)
+    }
+}
+
+/// An Ask uses its own Run proof and one request, outside the read pool.
+pub(super) fn ask(
+    owner: &AccountSnapshot,
+    client: TeamClient,
+    request: AskRequest,
+) -> Result<Value, DispatchError> {
+    let request = request.validate()?;
+    owner
+        .ensure_current()
+        .map_err(|_| api_error(TeamError::AccountChanged))?;
+    let identity = tokenstat_identity::MachineIdentity::load()
+        .map_err(|_| ended())?
+        .ok_or_else(ended)?;
+    let ticket = RequestTicket {
+        organization_id: request.target.organization,
+        checkout_id: request.target.checkout,
+        capabilities: vec![TeamCapability::Read, TeamCapability::Run],
+        share_id: request.target.share,
+    };
+    TeamConnection::connect_run(
+        owner.clone(),
+        Arc::new(client),
+        ticket,
+        request.target.repository,
+        identity.public_key(),
+    )?
+    .ask(request.method, &request.params)
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
