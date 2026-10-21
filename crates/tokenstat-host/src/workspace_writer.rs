@@ -119,7 +119,7 @@ impl Guard {
     ) -> Result<tokenstat_pty::SessionInfo, tokenstat_pty::PtyError> {
         self.spawn_with_io(request, false)
     }
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn spawn_piped(
         &mut self,
         request: &tokenstat_pty::Spawn,

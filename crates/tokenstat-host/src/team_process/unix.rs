@@ -59,13 +59,22 @@ impl Owner {
         }
         // Child is never polled/reaped by any other owner. Even an exited
         // anchor's waitable PID pins this group's identity until final wait.
-        if unsafe { libc::kill(-self.pid, libc::SIGKILL) } != 0 {
-            let e = io::Error::last_os_error();
-            if e.raw_os_error() != Some(libc::ESRCH) {
-                return Err(e);
-            }
+        if unsafe { libc::kill(-self.pid, libc::SIGKILL) } == 0 {
+            return Ok(());
         }
-        Ok(())
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(());
+        }
+        // A hosted macOS runner can refuse a signal addressed to another
+        // session even when it owns every member. Signal those members
+        // directly. The caller retries, so a child born between sweeps is
+        // still reached.
+        #[cfg(target_os = "macos")]
+        if error.raw_os_error() == Some(libc::EPERM) {
+            return signal_members(self.pid);
+        }
+        Err(error)
     }
     pub(super) fn stopped(&self, child: &Child) -> io::Result<bool> {
         if child.id() != self.pid as u32 {
@@ -95,7 +104,7 @@ impl Owner {
 }
 
 #[cfg(target_os = "macos")]
-fn no_live_members(group: i32) -> io::Result<bool> {
+fn group_pids(group: i32) -> io::Result<Vec<i32>> {
     // The unreaped anchor pins the group id. A growing list is retried and
     // bounded; a failed process inspection is never treated as completion.
     let mut capacity = 64usize;
@@ -116,33 +125,56 @@ fn no_live_members(group: i32) -> io::Result<bool> {
             capacity *= 2;
             continue;
         }
-        for pid in pids
+        return Ok(pids
             .into_iter()
             .take(bytes as usize / 4)
             .filter(|pid| *pid > 0)
-        {
-            let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-            let count = unsafe {
-                libc::proc_pidinfo(
-                    pid,
-                    libc::PROC_PIDTBSDINFO,
-                    0,
-                    (&mut info as *mut libc::proc_bsdinfo).cast(),
-                    std::mem::size_of_val(&info) as i32,
-                )
-            };
-            if count == 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
-                continue;
-            }
-            if count != std::mem::size_of_val(&info) as i32 {
-                return Err(super::invalid());
-            }
-            if info.pbi_pgid == group as u32 && info.pbi_status != 5 {
-                return Ok(false);
-            }
-        }
-        return Ok(true);
+            .collect());
     }
+}
+#[cfg(target_os = "macos")]
+fn signal_members(group: i32) -> io::Result<()> {
+    let mut denied = false;
+    for pid in group_pids(group)? {
+        if unsafe { libc::kill(pid, libc::SIGKILL) } == 0 {
+            continue;
+        }
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::ESRCH) => {}
+            Some(libc::EPERM) => denied = true,
+            _ => return Err(error),
+        }
+    }
+    if denied {
+        return Err(io::Error::from_raw_os_error(libc::EPERM));
+    }
+    Ok(())
+}
+#[cfg(target_os = "macos")]
+fn no_live_members(group: i32) -> io::Result<bool> {
+    for pid in group_pids(group)? {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let count = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                std::mem::size_of_val(&info) as i32,
+            )
+        };
+        if count == 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+            continue;
+        }
+        if count != std::mem::size_of_val(&info) as i32 {
+            return Err(super::invalid());
+        }
+        if info.pbi_pgid == group as u32 && info.pbi_status != 5 {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 #[cfg(target_os = "linux")]
 fn no_live_members(group: i32) -> io::Result<bool> {
