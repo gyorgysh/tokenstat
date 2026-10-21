@@ -26,6 +26,8 @@ use crate::transcript::{Event, Parser};
 pub mod files;
 #[path = "chat_router.rs"]
 pub mod router;
+#[path = "chat_sharing.rs"]
+pub(crate) mod sharing;
 #[path = "chat_steer.rs"]
 mod steering;
 
@@ -107,6 +109,8 @@ pub struct Conversation {
     pub id: String,
     pub workspace_id: String,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) team_share: Option<sharing::Binding>,
     pub backend: String,
     #[serde(default)]
     pub persona_id: Option<String>,
@@ -2291,6 +2295,7 @@ impl Store {
         let id = mint_record_id("chat");
         let now = now_ms();
         let chat = Conversation {
+            team_share: None,
             id,
             workspace_id: input.workspace_id,
             title: input
@@ -2338,6 +2343,8 @@ impl Store {
     pub fn fork(&self, id: &str) -> Result<Conversation, String> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        self.require_private_chat(id)
+            .map_err(|error| error.to_string())?;
         crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
         let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         let _transcript = self.transcript_guard()?;
@@ -2444,6 +2451,8 @@ impl Store {
     pub fn update(&self, id: &str, changes: Update) -> Result<Conversation, String> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        self.require_private_chat(id)
+            .map_err(|error| error.to_string())?;
         crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
         let model_edited =
             changes.backend.is_some() || changes.model.is_some() || changes.effort.is_some();
@@ -2607,6 +2616,9 @@ impl Store {
                 && chat.workspace_id != selected.workspace_id
             {
                 return Err("this conversation is no longer in that workspace".into());
+            }
+            if let Some(chat) = current.iter().find(|chat| chat.id == id) {
+                sharing::require_personal_send(chat).map_err(|error| error.to_string())?;
             }
             let before = current.len();
             current.retain(|chat| chat.id != id);
@@ -2772,7 +2784,7 @@ impl Store {
         let targets = self.edit_index_locked(&lifecycle, false, |_, current| {
             let targets: Vec<String> = current
                 .iter()
-                .filter(|chat| chat.workspace_id == workspace_id)
+                .filter(|chat| chat.workspace_id == workspace_id && chat.team_share.is_none())
                 .map(|chat| chat.id.clone())
                 .collect();
             if targets.iter().any(|id| active.contains(id)) {
@@ -2783,7 +2795,7 @@ impl Store {
                     return Err("Another instance of tokenstat is running one of these conversations. Stop it there before removing them.".into());
                 }
             }
-            current.retain(|chat| chat.workspace_id != workspace_id);
+            current.retain(|chat| chat.workspace_id != workspace_id || chat.team_share.is_some());
             Ok(targets)
         })?;
         for id in &targets {
@@ -3715,6 +3727,7 @@ impl Store {
             typed
         };
         let mut chat = self.current_send_conversation(id)?;
+        sharing::require_personal_send(&chat)?;
         // Before the running guard, deliberately. The case this exists for is
         // a send whose answer went missing, and the turn it started is
         // usually still going: "this chat is already responding" would be a
@@ -7591,6 +7604,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
+            team_share: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -9614,6 +9628,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         let sample = |id: &str, workspace: &str| Conversation {
+            team_share: None,
             id: id.into(),
             workspace_id: workspace.into(),
             title: "New chat".into(),
@@ -9792,6 +9807,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         // Unit test the durable mechanics without requiring a registered folder.
         let chat = Conversation {
+            team_share: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -9916,6 +9932,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
+            team_share: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -9975,6 +9992,7 @@ mod tests {
     /// all decide before anything is spawned.
     fn conversation_for_receipts(store: &Store, id: &str) {
         store.conversations.lock().unwrap().push(Conversation {
+            team_share: None,
             id: id.into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13250,6 +13268,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         let mut chat = Conversation {
+            team_share: None,
             id: "chat-handoff".into(),
             workspace_id: "ws".into(),
             title: "Handoff".into(),
@@ -13369,6 +13388,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         let chat = Conversation {
+            team_share: None,
             id: "chat-rebrief".into(),
             workspace_id: "ws".into(),
             title: "Rebrief".into(),
@@ -13513,6 +13533,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         let mut chat = Conversation {
+            team_share: None,
             id: "chat-standing".into(),
             workspace_id: "ws".into(),
             title: "Standing".into(),
@@ -13619,6 +13640,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
+            team_share: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13735,6 +13757,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
+            team_share: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13789,6 +13812,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
+            team_share: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13870,6 +13894,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         store.conversations.lock().unwrap().push(Conversation {
+            team_share: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -14160,6 +14185,7 @@ mod tests {
             .unwrap()
             .expect("a workspace with no choice recorded gets a starter");
         store.conversations.lock().unwrap().push(Conversation {
+            team_share: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),

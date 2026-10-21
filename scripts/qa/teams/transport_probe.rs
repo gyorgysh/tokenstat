@@ -54,6 +54,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             tokenstat_sync::keychain::store_token(&origin, bearer)?;
             tokenstat_sync::config::set_sync_host(&origin)?;
             println!("{}", json!({"id":input["id"],"ok":true,"result":{}}));
+        } else if input["method"] == "fixture.seedHistory" {
+            let id = input["params"]["conversation"]
+                .as_str()
+                .filter(|id| {
+                    !id.is_empty()
+                        && id.len() <= 128
+                        && id
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                })
+                .ok_or("Invalid fixture chat reference")?;
+            let directory = data.join("chat").join(id);
+            std::fs::create_dir_all(&directory)?;
+            let events = input["params"]["events"]
+                .as_array()
+                .ok_or("Missing fixture events")?;
+            let history = events
+                .iter()
+                .map(|row| row.to_string() + "\n")
+                .collect::<String>();
+            if history.len() > 64 * 1024 {
+                return Err("Fixture history is too large".into());
+            }
+            std::fs::write(directory.join("events.ndjson"), history)?;
+            let path = data.join("chat/conversations.json");
+            let mut index: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+            let chat = index["conversations"]
+                .as_array_mut()
+                .ok_or("Missing fixture chat index")?
+                .iter_mut()
+                .find(|row| row["id"] == id)
+                .ok_or("Missing fixture chat")?;
+            chat["resumeToken"] = json!("PRIVATE_FIXTURE_CONTINUATION");
+            chat["resumeTokens"] = json!({"codex":"PRIVATE_FIXTURE_CONTINUATION"});
+            chat["systemPrompt"] = json!("PRIVATE_FIXTURE_SYSTEM_SETUP");
+            std::fs::write(path, serde_json::to_vec(&index)?)?;
+            println!("{}", json!({"id":input["id"],"ok":true,"result":{}}));
         } else {
             println!("{}", tokenstat_host::server::respond(&line, &session));
         }

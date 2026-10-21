@@ -18,6 +18,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - A versioned data-only chart format, MCP creation, validation, schema and example tools, a `tokenstat chart` command, and JavaScript and Python helpers. Chart data stays in the conversation and works across agents, reopened chats and connected devices.
 - Teams account management on Mac, iPhone and iPad, with organization selection in the account menu, invitations, member roles, repository access and ownership recovery. Creating an organization requires Legend; members need Patron or Legend.
 - Review and share individual repository checkouts from their publishing computer. Team members can check availability through a separate authorized connection while personal remote access remains off. Each checkout stays on its own computer and branch.
+- Review a private chat's visible history before sharing it with repository members. Shared history uses a separate chat connection, preserves charts and tool output, and labels older messages as Local user (before Teams).
 
 ## [1.7.5] - 2026-10-21
 

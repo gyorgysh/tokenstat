@@ -22,6 +22,7 @@ fn job() -> (Job, Receiver<Result<Value, DispatchError>>) {
     (
         Job {
             method: TeamReadMethod::CheckoutInfo,
+            params: TeamReadParams::default(),
             deadline: Instant::now() + CALL_BUDGET,
             reply,
         },
@@ -34,7 +35,7 @@ struct Fake {
     fail: bool,
 }
 impl Transport for Fake {
-    fn call(&mut self, _: TeamReadMethod) -> Result<Value, DispatchError> {
+    fn call(&mut self, _: TeamReadMethod, _: &TeamReadParams) -> Result<Value, DispatchError> {
         self.calls += 1;
         if self.fail {
             Err(DispatchError::new("checkout_withdrawn", "Unavailable"))
@@ -79,7 +80,7 @@ fn scoped_requests_are_closed_and_reject_authority_or_personal_methods() {
         value["method"] = json!(method);
         assert!(serde_json::from_value::<Request>(value).is_err());
     }
-    for field in ["params", "peer", "actor", "ticket", "capabilities"] {
+    for field in ["peer", "actor", "ticket", "capabilities"] {
         let mut value = valid.clone();
         value[field] = json!({});
         assert!(serde_json::from_value::<Request>(value).is_err());
@@ -102,6 +103,50 @@ fn scoped_requests_are_closed_and_reject_authority_or_personal_methods() {
 }
 
 #[test]
+fn shared_reads_require_exact_chat_scope_and_closed_paging_parameters() {
+    let base = json!({"target":{"organization":"org_fixture","repository":"repo_fixture","checkout":"co_fixture","share":"share_fixture"},"method":"team.chat.events","params":{"limit":20,"cursor":"v1:share_fixture:42"}});
+    assert!(
+        serde_json::from_value::<Request>(base.clone())
+            .unwrap()
+            .validate()
+            .is_ok()
+    );
+    for params in [
+        json!({"limit":0}),
+        json!({"limit":101}),
+        json!({"cursor":"v1:share_other:42"}),
+        json!({"cursor":"v1:share_fixture:18446744073709551616"}),
+        json!({"actor":"forged"}),
+    ] {
+        let mut value = base.clone();
+        value["params"] = params;
+        assert!(
+            serde_json::from_value::<Request>(value)
+                .and_then(|request| request.validate().map_err(serde::de::Error::custom))
+                .is_err()
+        );
+    }
+    let mut unscoped = base.clone();
+    unscoped["target"].as_object_mut().unwrap().remove("share");
+    assert!(
+        serde_json::from_value::<Request>(unscoped)
+            .unwrap()
+            .validate()
+            .is_err()
+    );
+    for method in ["team.protocol", "team.checkout.info", "team.chat.details"] {
+        let mut value = base.clone();
+        value["method"] = json!(method);
+        assert!(
+            serde_json::from_value::<Request>(value)
+                .unwrap()
+                .validate()
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn connections_serialize_reads_and_never_borrow_other_scopes() {
     let pool = Arc::new(Pool::default());
     let counter = Arc::new(AtomicUsize::new(0));
@@ -110,7 +155,8 @@ fn connections_serialize_reads_and_never_borrow_other_scopes() {
         pool.call(
             original.clone(),
             connect(&counter),
-            TeamReadMethod::Protocol
+            TeamReadMethod::Protocol,
+            TeamReadParams::default()
         )
         .unwrap(),
         json!({"connection":0,"call":1})
@@ -119,7 +165,8 @@ fn connections_serialize_reads_and_never_borrow_other_scopes() {
         pool.call(
             original.clone(),
             connect(&counter),
-            TeamReadMethod::CheckoutInfo
+            TeamReadMethod::CheckoutInfo,
+            TeamReadParams::default()
         )
         .unwrap(),
         json!({"connection":0,"call":2})
@@ -148,8 +195,13 @@ fn connections_serialize_reads_and_never_borrow_other_scopes() {
     variants.push(changed);
     for (index, variant) in variants.into_iter().enumerate() {
         assert_eq!(
-            pool.call(variant, connect(&counter), TeamReadMethod::Protocol)
-                .unwrap(),
+            pool.call(
+                variant,
+                connect(&counter),
+                TeamReadMethod::Protocol,
+                TeamReadParams::default()
+            )
+            .unwrap(),
             json!({"connection":index+1,"call":1})
         );
     }

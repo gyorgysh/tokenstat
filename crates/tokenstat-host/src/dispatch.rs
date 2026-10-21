@@ -2160,6 +2160,7 @@ fn handoff_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     let p: Params = serde_json::from_str(params).map_err(|e| e.to_string())?;
     crate::workspaces::folder(&p.workspace_id)?;
     let store = crate::chat::shared();
+
     store.refresh_index().envelope()?;
     match method {
         "work.continuity.get" => {
@@ -2236,6 +2237,29 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         },
     )?;
     let store = crate::chat::shared();
+    if matches!(
+        method,
+        "chat.fork"
+            | "chat.update"
+            | "chat.remove"
+            | "chat.send"
+            | "chat.compact"
+            | "chat.attach"
+            | "chat.fileUploadStart"
+            | "chat.fileUploadChunk"
+            | "chat.fileUploadFinish"
+            | "chat.fileUploadCancel"
+            | "chat.routeAction"
+            | "chat.recover"
+            | "chat.steerSend"
+            | "chat.steer"
+            | "chat.steerClear"
+            | "chat.steerDeliver"
+            | "chat.answerQuestion"
+    ) && let Some(id) = p.id.as_deref()
+    {
+        store.require_private_chat(id)?;
+    }
     // Refresh directory views, without adding disk/lock work to streaming polls.
     if matches!(method, "chat.list" | "chat.recent") {
         store.refresh_index().envelope()?;

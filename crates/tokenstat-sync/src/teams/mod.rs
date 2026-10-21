@@ -589,6 +589,27 @@ impl TeamClient {
             None,
         )
     }
+    pub fn chat_publication(
+        &self,
+        org: &str,
+        checkout: &str,
+        share: &str,
+    ) -> Result<SharedChatReply, TeamError> {
+        self.request(
+            Method::GET,
+            &[
+                "organizations",
+                org,
+                "checkouts",
+                checkout,
+                "shares",
+                share,
+                "publication",
+            ],
+            None,
+            None,
+        )
+    }
     pub fn activity(&self, org: &str, page: Page) -> Result<Activity, TeamError> {
         self.request(
             Method::GET,

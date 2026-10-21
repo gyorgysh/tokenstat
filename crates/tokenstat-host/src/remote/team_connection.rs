@@ -14,7 +14,9 @@ use tokenstat_sync::teams::{
     RequestTicket, TeamCapability, TeamClient, TeamConnectionProof, TeamError,
 };
 
-const RESPONSE_LIMIT: usize = 1024 * 1024;
+// A canonical transcript record may be 4 MiB. Keep a hard transport cap while
+// allowing that record and JSON framing to reach the existing renderer intact.
+const RESPONSE_LIMIT: usize = 8 * 1024 * 1024;
 const RESPONSE_TIME: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -23,13 +25,73 @@ pub(crate) enum ReadMethod {
     Protocol,
     #[serde(rename = "team.checkout.info")]
     CheckoutInfo,
+    #[serde(rename = "team.chat.details")]
+    ChatDetails,
+    #[serde(rename = "team.chat.events")]
+    ChatEvents,
 }
 impl ReadMethod {
     fn wire(self) -> &'static str {
         match self {
             Self::Protocol => "team.protocol",
             Self::CheckoutInfo => "team.checkout.info",
+            Self::ChatDetails => "team.chat.details",
+            Self::ChatEvents => "team.chat.events",
         }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ReadParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) direction: Option<PageDirection>,
+}
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum PageDirection {
+    Older,
+    Newer,
+}
+impl ReadParams {
+    pub(crate) fn validate(&self, method: ReadMethod, share: Option<&str>) -> bool {
+        match method {
+            ReadMethod::Protocol | ReadMethod::CheckoutInfo => {
+                self.cursor.is_none() && self.limit.is_none() && self.direction.is_none()
+            }
+            ReadMethod::ChatDetails => {
+                share.is_some()
+                    && self.cursor.is_none()
+                    && self.limit.is_none()
+                    && self.direction.is_none()
+            }
+            ReadMethod::ChatEvents => {
+                share.is_some()
+                    && self.limit.is_none_or(|limit| (1..=100).contains(&limit))
+                    && self.after(share.unwrap_or_default()).is_ok()
+            }
+        }
+    }
+    pub(crate) fn after(&self, share: &str) -> Result<Option<u64>, DispatchError> {
+        self.cursor
+            .as_deref()
+            .map(|cursor| {
+                let prefix = format!("v1:{share}:");
+                cursor
+                    .strip_prefix(&prefix)
+                    .filter(|value| {
+                        !value.is_empty()
+                            && value.len() <= 20
+                            && value.bytes().all(|b| b.is_ascii_digit())
+                    })
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .ok_or_else(|| api_error(TeamError::InvalidRequest))
+            })
+            .transpose()
     }
 }
 
@@ -144,7 +206,7 @@ impl Link {
             _reach: reach,
         };
         link.ensure_current()?;
-        let protocol = link.call(ReadMethod::Protocol)?;
+        let protocol = link.call(ReadMethod::Protocol, &ReadParams::default())?;
         link.verify_protocol(&protocol)?;
         Ok(link)
     }
@@ -161,11 +223,18 @@ impl Link {
         Ok(())
     }
 
-    pub(crate) fn call(&mut self, method: ReadMethod) -> Result<Value, DispatchError> {
+    pub(crate) fn call(
+        &mut self,
+        method: ReadMethod,
+        params: &ReadParams,
+    ) -> Result<Value, DispatchError> {
         self.ensure_current()?;
+        if !params.validate(method, self.request.share_id.as_deref()) {
+            return Err(api_error(TeamError::InvalidRequest));
+        }
         let id = self.next_id;
         self.next_id = self.next_id.checked_add(1).ok_or_else(invalid)?;
-        let request = serde_json::to_vec(&json!({"id":id,"method":method.wire(),"params":{}}))
+        let request = serde_json::to_vec(&json!({"id":id,"method":method.wire(),"params":params}))
             .map_err(|_| invalid())?;
         self.connection.send(&request).map_err(|_| unavailable())?;
         let time = RESPONSE_TIME.min(self.deadline.saturating_duration_since(Instant::now()));
@@ -212,7 +281,7 @@ impl Link {
         self.deadline = next_deadline;
         // The relay ACK updates the host's channel ticket. This request makes
         // its authorization gate observe that ticket before the old deadline.
-        let protocol = self.call(ReadMethod::Protocol)?;
+        let protocol = self.call(ReadMethod::Protocol, &ReadParams::default())?;
         self.verify_protocol(&protocol)
     }
 
@@ -228,7 +297,15 @@ impl Link {
         if value["protocolVersion"]
             .as_str()
             .and_then(|version| version.parse::<u32>().ok())
-            .is_none_or(|version| version < 41)
+            .is_none_or(|version| {
+                version
+                    < if self.request.share_id.is_some() {
+                        42
+                    } else {
+                        41
+                    }
+            })
+            || self.request.share_id.is_some() && value["sharedChats"] != true
         {
             return Err(DispatchError::new(
                 "team_host_update_required",

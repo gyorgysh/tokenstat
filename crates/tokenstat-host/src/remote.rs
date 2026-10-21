@@ -43,7 +43,11 @@ use tokenstat_sync::profile::ProfileError;
 
 mod team_connection;
 mod team_reach;
-pub(crate) use team_connection::{Link as TeamConnection, ReadMethod as TeamReadMethod};
+#[cfg(feature = "local-host")]
+pub(crate) use team_connection::PageDirection as TeamPageDirection;
+pub(crate) use team_connection::{
+    Link as TeamConnection, ReadMethod as TeamReadMethod, ReadParams as TeamReadParams,
+};
 mod tunnel_lifecycle;
 mod tunnel_runtime;
 

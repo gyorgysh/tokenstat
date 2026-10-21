@@ -16,6 +16,8 @@ use std::{
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CHECKOUTS: usize = 4096;
+mod chats;
+pub(super) use chats::{ChatShare, ChatTarget};
 #[cfg(test)]
 mod tests;
 
@@ -128,12 +130,15 @@ pub(super) struct Checkout {
 struct Index {
     version: u32,
     checkouts: Vec<Checkout>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    chats: Vec<ChatShare>,
 }
 impl Default for Index {
     fn default() -> Self {
         Self {
             version: 1,
             checkouts: Vec::new(),
+            chats: Vec::new(),
         }
     }
 }
@@ -639,6 +644,7 @@ fn load(path: &Path) -> Result<Index, DispatchError> {
     {
         return Err(storage());
     }
+    chats::validate(&index)?;
     Ok(index)
 }
 fn save(root: &Path, destination: &Path, index: &Index) -> Result<(), DispatchError> {

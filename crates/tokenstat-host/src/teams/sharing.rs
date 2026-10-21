@@ -106,7 +106,13 @@ pub(super) fn parse(method: &str, body: Value) -> Option<Result<Request, Dispatc
         _ => return None,
     })
 }
-fn binding(client: &TeamClient) -> Result<Owner, DispatchError> {
+pub(super) fn binding(client: &TeamClient) -> Result<Owner, DispatchError> {
+    binding_features(client, &["checkout-publication"])
+}
+pub(super) fn binding_features(
+    client: &TeamClient,
+    required: &[&str],
+) -> Result<Owner, DispatchError> {
     let identity = tokenstat_identity::MachineIdentity::load_or_create().map_err(|_| {
         DispatchError::new(
             "identity_unavailable",
@@ -120,14 +126,19 @@ fn binding(client: &TeamClient) -> Result<Owner, DispatchError> {
             "Enable Teams for this computer in your account settings.",
         ));
     }
-    if !capabilities
-        .features
-        .iter()
-        .any(|feature| feature == "checkout-publication")
-    {
+    if required.iter().any(|required| {
+        !capabilities
+            .features
+            .iter()
+            .any(|feature| feature == required)
+    }) {
         return Err(DispatchError::new(
             "teams_unavailable",
-            "Checkout sharing is not available on this account server yet.",
+            if required.contains(&"chat-publication") {
+                "Chat sharing is not available on this account server yet."
+            } else {
+                "Checkout sharing is not available on this account server yet."
+            },
         ));
     }
     if capabilities.device_key.as_deref() != Some(identity.public_key_hex().as_str()) {
@@ -144,7 +155,10 @@ fn binding(client: &TeamClient) -> Result<Owner, DispatchError> {
         host_key: identity.public_key_hex(),
     })
 }
-fn local_binding(owner: &AccountSnapshot, client: &TeamClient) -> Result<Owner, DispatchError> {
+pub(super) fn local_binding(
+    owner: &AccountSnapshot,
+    client: &TeamClient,
+) -> Result<Owner, DispatchError> {
     let status = owner
         .status(false)
         .map_err(|_| api_error(TeamError::NotSignedIn))?;
@@ -205,7 +219,7 @@ fn update_remote_reach(
     }
     Ok(())
 }
-fn repository(
+pub(super) fn repository(
     client: &TeamClient,
     organization: &str,
     id: &str,

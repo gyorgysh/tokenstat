@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 use crate::error::DispatchError;
+use crate::remote::{TeamReadMethod, TeamReadParams};
 use serde_json::{Value, json};
 
 /// This is a closed dispatch boundary. No Team request falls through to the
@@ -18,28 +19,40 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             )
         })?;
         principal.ensure_live()?;
-        if !matches!(method, "team.protocol" | "team.checkout.info") {
-            return Err(DispatchError::new(
+        let operation = serde_json::from_value::<TeamReadMethod>(json!(method)).map_err(|_| {
+            DispatchError::new(
                 "team_method_required",
                 "This action is not available through a Team connection.",
-            ));
-        }
+            )
+        })?;
         if params.len() > 16 * 1024 {
             return Err(DispatchError::new(
                 "invalid_request",
                 "Check the Team request and try again.",
             ));
         }
-        let body: Value = serde_json::from_str(params).map_err(|_| {
+        let body: TeamReadParams = serde_json::from_str(params).map_err(|_| {
             DispatchError::new("invalid_request", "Check the Team request and try again.")
         })?;
-        if !body.as_object().is_some_and(|body| body.is_empty()) {
+        if !body.validate(operation, principal.value().share_id.as_deref()) {
             return Err(DispatchError::new(
                 "invalid_request",
                 "Check the Team request and try again.",
             ));
         }
         let scope = principal.value();
+        if matches!(
+            operation,
+            TeamReadMethod::ChatDetails | TeamReadMethod::ChatEvents
+        ) {
+            #[cfg(feature = "local-host")]
+            return super::scoped_chats::call(&principal, operation, &body);
+            #[cfg(not(feature = "local-host"))]
+            return Err(DispatchError::new(
+                "host_required",
+                "Open this chat on its publishing computer.",
+            ));
+        }
         #[cfg(feature = "local-host")]
         if method == "team.checkout.info" {
             let owner = super::publications::Owner {
@@ -77,11 +90,9 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                 "Open this checkout on its publishing computer.",
             ));
         }
-        // Content becomes available only after local publication and scoped
-        // resource methods are installed. Directory consent alone grants none.
         Ok(
             json!({"version":1,"protocolVersion":crate::PROTOCOL_VERSION,"issuer":principal.issuer(),"organizationId":scope.organization_id,"repositoryId":scope.repository_id,"checkoutId":scope.checkout_id,"checkoutInfo":cfg!(feature="local-host"),
-            "sharedChats":false,"agentRuns":false}),
+            "sharedChats":cfg!(feature="local-host"),"agentRuns":false}),
         )
     })())
 }

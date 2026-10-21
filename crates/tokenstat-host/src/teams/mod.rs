@@ -5,12 +5,16 @@
 //! this machine's account credential or its personal workspace policy.
 
 mod authorization;
+#[cfg(feature = "local-host")]
+mod chats;
 mod connections;
 mod directory;
 mod ingress;
 #[cfg(feature = "local-host")]
 mod publications;
 mod scoped;
+#[cfg(feature = "local-host")]
+mod scoped_chats;
 #[cfg(feature = "local-host")]
 mod sharing;
 use crate::account_session::AccountSnapshot;
@@ -107,6 +111,8 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             }
             #[cfg(feature = "local-host")]
             directory::Request::Sharing(request) => sharing::perform(&owner, &client, request),
+            #[cfg(feature = "local-host")]
+            directory::Request::Chat(request) => chats::perform(&owner, &client, request),
         };
         owner.ensure_current().map_err(changed)?;
         client.ensure_current().map_err(api_error)?;
@@ -139,11 +145,18 @@ fn capabilities(client: &TeamClient) -> Result<Value, DispatchError> {
                     .features
                     .iter()
                     .any(|feature| feature == "scoped-connections");
+            let can_publish_chats = can_publish
+                && can_connect
+                && capabilities
+                    .features
+                    .iter()
+                    .any(|feature| feature == "chat-publication");
             let mut value = serialize(capabilities)?;
             value["ready"] = json!(ready);
             value["needsDeviceRegistration"] = json!(false);
             value["canPublishCheckouts"] = json!(can_publish);
             value["canConnectCheckouts"] = json!(can_connect);
+            value["canPublishChats"] = json!(can_publish_chats);
             Ok(value)
         }
         Err(TeamError::Rejected { code, .. }) if code == "device_required" => Ok(

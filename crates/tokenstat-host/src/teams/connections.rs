@@ -7,7 +7,7 @@ use super::api_error;
 use crate::{
     account_session::AccountSnapshot,
     error::DispatchError,
-    remote::{TeamConnection, TeamReadMethod},
+    remote::{TeamConnection, TeamReadMethod, TeamReadParams},
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -42,6 +42,8 @@ pub(super) struct Target {
 pub(super) struct Request {
     target: Target,
     method: TeamReadMethod,
+    #[serde(default)]
+    params: TeamReadParams,
 }
 impl Request {
     pub(super) fn validate(self) -> Result<Self, DispatchError> {
@@ -61,6 +63,12 @@ impl Request {
         }) {
             return Err(api_error(TeamError::InvalidRequest));
         }
+        if !self
+            .params
+            .validate(self.method, self.target.share.as_deref())
+        {
+            return Err(api_error(TeamError::InvalidRequest));
+        }
         Ok(self)
     }
 }
@@ -73,13 +81,21 @@ struct Key {
     target: Target,
 }
 trait Transport: Send {
-    fn call(&mut self, method: TeamReadMethod) -> Result<Value, DispatchError>;
+    fn call(
+        &mut self,
+        method: TeamReadMethod,
+        params: &TeamReadParams,
+    ) -> Result<Value, DispatchError>;
     fn renew(&mut self) -> Result<(), DispatchError>;
     fn ensure_current(&self) -> Result<(), DispatchError>;
 }
 impl Transport for TeamConnection {
-    fn call(&mut self, method: TeamReadMethod) -> Result<Value, DispatchError> {
-        self.call(method)
+    fn call(
+        &mut self,
+        method: TeamReadMethod,
+        params: &TeamReadParams,
+    ) -> Result<Value, DispatchError> {
+        self.call(method, params)
     }
     fn renew(&mut self) -> Result<(), DispatchError> {
         self.renew()
@@ -91,6 +107,7 @@ impl Transport for TeamConnection {
 type Connector = Box<dyn FnOnce() -> Result<Box<dyn Transport>, DispatchError> + Send>;
 struct Job {
     method: TeamReadMethod,
+    params: TeamReadParams,
     deadline: Instant,
     reply: SyncSender<Result<Value, DispatchError>>,
 }
@@ -198,6 +215,7 @@ impl Pool {
         key: Key,
         connector: Connector,
         method: TeamReadMethod,
+        params: TeamReadParams,
     ) -> Result<Value, DispatchError> {
         let deadline = Instant::now() + CALL_BUDGET;
         let (reply, receive) = mpsc::sync_channel(1);
@@ -206,6 +224,7 @@ impl Pool {
             connector,
             Job {
                 method,
+                params,
                 deadline,
                 reply,
             },
@@ -264,7 +283,7 @@ fn work(receiver: Receiver<Job>, connector: Connector) {
             let _ = job.reply.send(Err(ended()));
             continue;
         }
-        let result = connection.call(job.method);
+        let result = connection.call(job.method, &job.params);
         let failed = result.is_err();
         let _ = job.reply.send(result);
         last_use = Instant::now();
@@ -316,8 +335,12 @@ pub(super) fn perform(
         )?))
     });
     static POOL: OnceLock<Arc<Pool>> = OnceLock::new();
-    POOL.get_or_init(|| Arc::new(Pool::default()))
-        .call(key, connector, request.method)
+    POOL.get_or_init(|| Arc::new(Pool::default())).call(
+        key,
+        connector,
+        request.method,
+        request.params,
+    )
 }
 
 #[cfg(test)]

@@ -458,7 +458,7 @@ mod tests {
                     ))
                     .unwrap();
                     assert_eq!(value["result"]["checkoutId"], "checkout_fixture");
-                    assert_eq!(value["result"]["sharedChats"], false);
+                    assert_eq!(value["result"]["sharedChats"], cfg!(feature = "local-host"));
                     let forged: Value = serde_json::from_str(&crate::server::respond(
                         r#"{"id":3,"method":"team.protocol","params":{"actorId":"another-user"}}"#,
                         session,

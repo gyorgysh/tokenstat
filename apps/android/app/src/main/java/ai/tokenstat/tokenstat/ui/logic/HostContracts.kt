@@ -15,10 +15,11 @@ object HostContracts {
     const val TEAM_SESSIONS_MIN_PROTOCOL = 39
     const val TEAM_CHECKOUTS_MIN_PROTOCOL = 40
     const val TEAM_CONNECTIONS_MIN_PROTOCOL = 41
+    const val TEAM_CHAT_SHARING_MIN_PROTOCOL = 42
     fun supportsTeams(protocol: Long?): Boolean = protocol != null && protocol >= TEAMS_MIN_PROTOCOL
     const val CHAT_RECOVERY_MIN_PROTOCOL = 34
     fun supportsChatRecovery(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_RECOVERY_MIN_PROTOCOL
-    const val PROTOCOL_VERSION = "41"
+    const val PROTOCOL_VERSION = "42"
     const val WORKTREES_MIN_PROTOCOL = 24
     const val CHAT_MIN_PROTOCOL = 4
     const val CHAT_FORK_MIN_PROTOCOL = 26

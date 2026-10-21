@@ -16,6 +16,8 @@ pub(super) enum Request {
     Connection(super::connections::Request),
     #[cfg(feature = "local-host")]
     Sharing(super::sharing::Request),
+    #[cfg(feature = "local-host")]
+    Chat(super::chats::Request),
 }
 pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError> {
     let invalid =
@@ -28,6 +30,10 @@ pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError
     // These are verified by AccountSnapshot before any network operation.
     object.remove("_accountScope");
     object.remove("_accountSession");
+    #[cfg(feature = "local-host")]
+    if let Some(request) = super::chats::parse(method, Value::Object(object.clone())) {
+        return request.map(Request::Chat);
+    }
     #[cfg(feature = "local-host")]
     if let Some(request) = super::sharing::parse(method, Value::Object(object.clone())) {
         return request.map(Request::Sharing);
@@ -183,6 +189,13 @@ pub(super) enum Operation {
         #[serde(default)]
         page: Page,
     },
+    #[serde(rename = "chats.list")]
+    SharedChats {
+        organization: String,
+        checkout: String,
+        #[serde(default)]
+        page: Page,
+    },
     #[serde(rename = "execution.list")]
     ExecutionGrants {
         organization: String,
@@ -304,6 +317,11 @@ pub(super) fn perform(client: &TeamClient, operation: Operation) -> Result<Value
             repository,
             page,
         } => api!(client.checkouts(&organization, &repository, page)),
+        Operation::SharedChats {
+            organization,
+            checkout,
+            page,
+        } => api!(client.shared_chats(&organization, &checkout, page)),
         Operation::ExecutionGrants {
             organization,
             checkout,
