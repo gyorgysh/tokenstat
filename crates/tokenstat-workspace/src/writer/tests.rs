@@ -92,9 +92,17 @@ fn a_torn_or_missing_initialized_claim_registry_never_becomes_an_empty_registry(
                 std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
             }
         }
+        let result = Lease::at(&folder, &root).err();
+        let present = std::fs::read_dir(&root)
+            .map(|entries| {
+                entries
+                    .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+                    .collect::<Vec<_>>()
+            })
+            .ok();
         assert!(
-            matches!(Lease::at(&folder, &root), Err(Error::RecoveryRequired)),
-            "{damage}"
+            matches!(result, Some(Error::RecoveryRequired)),
+            "{damage}: {result:?}; {present:?}"
         );
     }
 }

@@ -42,7 +42,6 @@ struct TeamManagementView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Theme.background)
-        .tint(TeamColors.action)
         .navigationTitle(store.selectedOrganization?.name ?? L10n.text("common.teams.title"))
         .onPreferenceChange(TeamChatReadingKey.self) { readingSharedChat = $0 }
         .onChange(of: store.owner) { showingDrafts = false }

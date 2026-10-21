@@ -19,31 +19,30 @@ struct TeamCommentDraftsView: View {
     @State private var removing: TeamCommentDraftStore.Entry?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(L10n.text("common.teams.comment_drafts")).font(Theme.headline).accessibilityAddTraits(.isHeader)
-                Spacer(minLength: Theme.Space.s)
-                Button(L10n.text("common.done"), .done) { dismiss() }.buttonStyle(TeamButtonStyle())
-            }.padding(Theme.Space.m)
-            ThemeRule()
-            if isCurrent() {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Space.l) {
-                        Text(L10n.text("common.teams.comment_drafts_detail")).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        if let error { TeamNotice(message: error, warning: true) }
-                        if unreadable { TeamNotice(message: L10n.text("common.teams.comment_drafts_unreadable"), warning: true) }
-                        if loaded, entries.isEmpty, next == nil, !unreadable {
-                            Text(L10n.text("common.teams.no_comment_drafts")).font(Theme.body).foregroundStyle(.secondary).accessibilityIdentifier("team.drafts.empty")
-                        }
-                        ForEach(entries) { entry in row(entry) }
-                        if loading { ProgressView().accessibilityLabel(L10n.text("common.loading")) }
-                        Button(next == nil ? L10n.text("common.refresh") : L10n.text("common.teams.load_more"), .refresh) { Task { await load(more: next != nil) } }
-                            .buttonStyle(TeamButtonStyle()).disabled(loading)
-                    }.padding(Theme.Space.l).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+        ThemedSheet(
+            title: L10n.text("common.teams.comment_drafts"),
+            subtitle: L10n.text("common.teams.comment_drafts_detail"),
+            icon: .edit,
+            scrolls: true,
+            fills: true,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                if isCurrent() {
+                    if let error { TeamNotice(message: error, warning: true) }
+                    if unreadable { TeamNotice(message: L10n.text("common.teams.comment_drafts_unreadable"), warning: true) }
+                    if loaded, entries.isEmpty, next == nil, !unreadable {
+                        Text(L10n.text("common.teams.no_comment_drafts")).font(Theme.body).foregroundStyle(.secondary).accessibilityIdentifier("team.drafts.empty")
+                    }
+                    ForEach(entries) { entry in row(entry) }
+                    if loading { ProgressView().accessibilityLabel(L10n.text("common.loading")) }
+                    Button(next == nil ? L10n.text("common.refresh") : L10n.text("common.teams.load_more"), .refresh) { Task { await load(more: next != nil) } }
+                        .buttonStyle(TeamButtonStyle()).disabled(loading)
                 }
             }
+        } actions: {
+            Button(L10n.text("common.done"), .done) { dismiss() }.buttonStyle(TeamButtonStyle()).keyboardShortcut(.cancelAction)
         }
-        .background(Theme.background).tint(TeamColors.action)
         .task { await load(more: false) }
         .alert(L10n.text("common.teams.remove_local_draft"), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button(L10n.text("common.cancel"), role: .cancel) { removing = nil }

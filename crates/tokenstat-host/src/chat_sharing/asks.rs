@@ -453,13 +453,13 @@ impl Store {
                     .reserve_ask(row, request.clone(), binding.clone(), bytes)
                     .map_err(|_| unavailable())?;
                 if !directory.exists() {
-                    let mut builder = fs::DirBuilder::new();
+                    fs::create_dir(&directory).map_err(|_| unavailable())?;
                     #[cfg(unix)]
                     {
-                        use std::os::unix::fs::DirBuilderExt;
-                        builder.mode(0o700);
+                        use std::os::unix::fs::PermissionsExt;
+                        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+                            .map_err(|_| unavailable())?;
                     }
-                    builder.create(&directory).map_err(|_| unavailable())?;
                 }
                 let source = index
                     .conversations

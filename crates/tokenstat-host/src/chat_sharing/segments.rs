@@ -233,13 +233,13 @@ fn write_payload(directory: &Path, bytes: &[u8]) -> Result<String, super::super:
     }
     let root = directory.join(DIRECTORY);
     if !root.exists() {
-        let mut builder = std::fs::DirBuilder::new();
+        std::fs::create_dir(&root).map_err(|_| invalid())?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::DirBuilderExt;
-            builder.mode(0o700);
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))
+                .map_err(|_| invalid())?;
         }
-        builder.create(&root).map_err(|_| invalid())?;
     }
     let metadata = std::fs::symlink_metadata(&root).map_err(|_| invalid())?;
     if !metadata.is_dir() || super::super::reparse_or_link(&metadata) {

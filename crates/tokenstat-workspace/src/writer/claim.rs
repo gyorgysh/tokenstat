@@ -54,10 +54,32 @@ fn requests(lease: &Lease) -> Vec<(String, bool)> {
     }
     merged.into_iter().collect()
 }
+fn marker_ready(lease: &Lease) -> Result<bool, Error> {
+    match std::fs::symlink_metadata(lease.root.path.join("claims.initialized")) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        _ => Err(Error::RecoveryRequired),
+    }
+}
 fn gate(lease: &Lease) -> Result<File, Error> {
+    let path = lease.root.path.join("claims.lock");
+    // A removed registry must not be recreated as an empty one. Creating the
+    // file first would make the absence look like a fresh store.
+    match std::fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if marker_ready(lease)? {
+                return Err(Error::RecoveryRequired);
+            }
+        }
+        Ok(metadata) if !metadata.is_file() || metadata.file_type().is_symlink() => {
+            return Err(Error::RecoveryRequired);
+        }
+        Ok(_) => {}
+        Err(_) => return Err(Error::Unavailable),
+    }
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        match file::lock(&lease.root.path.join("claims.lock"), true) {
+        match file::lock(&path, true) {
             Err(Error::Busy) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(5))
             }
@@ -68,12 +90,13 @@ fn gate(lease: &Lease) -> Result<File, Error> {
 fn read(lease: &Lease, file: &mut File) -> Result<Index, Error> {
     let length = file.metadata().map_err(|_| Error::Unavailable)?.len();
     if length == 0 {
-        return match std::fs::symlink_metadata(lease.root.path.join("claims.initialized")) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Index {
+        return if marker_ready(lease)? {
+            Err(Error::RecoveryRequired)
+        } else {
+            Ok(Index {
                 version: 1,
                 ..Index::default()
-            }),
-            _ => Err(Error::RecoveryRequired),
+            })
         };
     }
     if length > MAX_BYTES {

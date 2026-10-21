@@ -185,7 +185,7 @@ assert ".modifier(ClientOwnedPushDestination(tab: navigation.destination))" in s
 requested = mobile[mobile.index("private func openRequestedChat() async"):mobile.index("/// The slim strip both chat screens")]
 assert "request == navigation.requestedChatGeneration" in requested and "reader.selected?.id == id" in requested, "requested chat publication must reject superseded requests and selections"
 chat_menu = (root / "apps/mac/Sources/Client/ClientChatMenu.swift").read_text()
-fork_action = chat_menu[chat_menu.index('let ticket = navigation.chatActionTicket()'):chat_menu.index('}.disabled(copying')]
+fork_action = chat_menu[chat_menu.index('let ticket = navigation.chatActionTicket()'):chat_menu.index('}.disabled(conversation.teamShare != nil || copying')]
 assert fork_action.index('let ticket =') < fork_action.index('Task {'), "Fork must capture navigation ownership before launching its task"
 assert "navigation.acceptsChatAction(ticket)" in fork_action and "visible && !Task.isCancelled" in fork_action, "Fork delivery must validate intent, stack, account and visibility"
 assert fork_action.index('guard isCurrent() else') > fork_action.index('func isCurrent()'), "Fork must guard before its mutation"

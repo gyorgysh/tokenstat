@@ -263,9 +263,13 @@ impl Store {
                 return Err(DispatchError::new("team_history_limit", "This shared chat is full. Start another chat to continue."));
             }
             if !directory.exists() {
-                let mut builder = fs::DirBuilder::new();
-                #[cfg(unix)] { use std::os::unix::fs::DirBuilderExt; builder.mode(0o700); }
-                builder.create(&directory).map_err(|_| unavailable())?;
+                fs::create_dir(&directory).map_err(|_| unavailable())?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+                        .map_err(|_| unavailable())?;
+                }
             }
             let path = directory.join(JOURNAL);
             if !chat.team_journal_initialized {

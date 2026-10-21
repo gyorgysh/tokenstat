@@ -278,7 +278,7 @@ fn atomic_external_withdrawal_invalidates_cached_bindings_with_an_unchanged_time
     index.checkouts[0].phase = Phase::Withdrawn;
     index.checkouts[0].revision += 1;
     save(&store.root, &path, &index).unwrap();
-    File::options()
+    fs::File::options()
         .write(true)
         .open(&path)
         .unwrap()

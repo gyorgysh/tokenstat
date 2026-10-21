@@ -215,6 +215,24 @@ def first_view_name(closure: str) -> str | None:
     return None
 
 
+def uses_surface(name: str, files: list[tuple[Path, str]], seen: set[str], depth: int) -> bool:
+    """A sheet may compose ThemedSheet through the editors it constructs."""
+    if depth > 6 or name in seen or name in KEYWORDS:
+        return False
+    seen.add(name)
+    definition = find_definition(name, files)
+    if not definition:
+        return False
+    if SURFACE.search(definition):
+        return True
+    for child in re.findall(r"\b([A-Z][A-Za-z0-9_]*)\s*[\({]", definition):
+        if child == name or child in KEYWORDS:
+            continue
+        if uses_surface(child, files, seen, depth + 1):
+            return True
+    return False
+
+
 def find_definition(name: str, files: list[tuple[Path, str]]) -> str | None:
     struct = re.compile(rf"\bstruct\s+{re.escape(name)}\b")
     var = re.compile(rf"\bvar\s+{re.escape(name)}\b")
@@ -273,8 +291,7 @@ for path, original in swift_files:
             continue
         if name in VIEWERS:
             continue
-        definition = find_definition(name, swift_files)
-        if definition and SURFACE.search(definition):
+        if uses_surface(name, swift_files, set(), 0):
             continue
         problems.append(
             f"{path}:{line_number(src, m.start())}  .{name} sheet is not on ThemedSheet. "

@@ -247,6 +247,22 @@ impl Lease {
     }
 }
 
+impl Drop for Lease {
+    fn drop(&mut self) {
+        // Closing the descriptor releases a lock on a normal return. A panic
+        // unwind on macOS can leave that release pending, so unlock explicitly
+        // while the descriptors are still open.
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            for (_, file) in &self.locks {
+                // The descriptor belongs to this lease. LOCK_UN releases only that hold.
+                let _ = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+            }
+        }
+    }
+}
+
 fn lock_root() -> Result<PathBuf, Error> {
     #[cfg(test)]
     {

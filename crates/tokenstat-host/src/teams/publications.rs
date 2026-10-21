@@ -8,7 +8,7 @@
 use crate::{chat_receipts::OwnerLease, error::DispatchError};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
@@ -482,7 +482,7 @@ fn initialized(root: &Path) -> Result<(), DispatchError> {
         Err(_) => return Err(storage()),
     }
     #[cfg(unix)]
-    File::open(root)
+    std::fs::File::open(root)
         .and_then(|folder| folder.sync_all())
         .map_err(|_| storage())?;
     Ok(())
@@ -664,7 +664,7 @@ fn save(root: &Path, destination: &Path, index: &Index) -> Result<(), DispatchEr
         match temporary.persist(destination) {
             Ok(_) => {
                 #[cfg(unix)]
-                File::open(root)
+                std::fs::File::open(root)
                     .and_then(|folder| folder.sync_all())
                     .map_err(|_| storage())?;
                 return Ok(());
