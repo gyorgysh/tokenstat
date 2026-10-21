@@ -4034,7 +4034,7 @@
   "apple.sidebarhovercard.untitled_conversation.31d248c4": "Untitled conversation",
   "apple.clientloginview.developer_mode_enabled": "Developer mode enabled",
   "apple.clientloginview.developer_mode_disabled": "Developer mode disabled",
-  "apple.clientloginview.demo_login_instructions": "For Demo login, tap the tokenstat logo 10 times to turn it on or off, then choose Sign in.",
+  "apple.clientloginview.demo_login_instructions": "Tap 10 times to enable Developer Mode",
   "apple.sidebarhovercard.usage_not_reported": "Not reported yet",
   "apple.sidebarhovercard.usage_unavailable": "Couldn’t load usage",
   "apple.sidebarrowactions.actions_for_0.29a5141b": "Actions for {0}",

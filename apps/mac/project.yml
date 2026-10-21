@@ -271,7 +271,8 @@ settings:
     # 165 updates iOS login hint placement and makes the demo shortcut a toggle.
     # 166 prepares 1.7.3 with the redesigned Mac installer disk image.
     # 167 prepares 1.7.4 with the macOS simulator inspector.
-    CURRENT_PROJECT_VERSION: "167"
+    # 168 is the same 1.7.4. The login screen says the ten taps enable Developer Mode.
+    CURRENT_PROJECT_VERSION: "168"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
