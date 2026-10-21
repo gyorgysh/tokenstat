@@ -6,11 +6,14 @@
 use super::*;
 use sha2::{Digest, Sha256};
 
+#[path = "chat_sharing/asks.rs"]
+mod asks;
 #[path = "chat_sharing/journal.rs"]
 mod journal;
 #[path = "chat_sharing/writer.rs"]
 mod writer;
 pub(crate) use crate::remote::TeamCommentInput as CommentInput;
+pub(crate) use asks::{AskInput, AskPreparation};
 pub(crate) use writer::SharedSource;
 pub(super) use writer::fork_journal;
 
@@ -612,7 +615,7 @@ fn project_with_journal(
         let mut value = visible(event)?;
         if let Some(author) = author {
             value["author"] = author.person;
-            value["mode"] = json!("comment");
+            value["mode"] = json!(author.mode);
         }
         value["seq"] = json!(sequence);
         events.push(value);

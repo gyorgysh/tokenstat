@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+#[path = "journal/asks.rs"]
+mod asks;
+pub(super) use asks::AskRecord;
 
 const CAPACITY: usize = 4096;
 const MAX_RECORD_BYTES: usize = 64 * 1024;
@@ -147,6 +150,7 @@ pub(super) struct VerifiedAttribution {
     pub key: String,
     pub scope: Scope,
     pub person: Value,
+    pub mode: &'static str,
 }
 
 impl Record {
@@ -237,6 +241,10 @@ pub(super) struct Journal {
     pending: Option<Pending>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     runs: Option<crate::chat_receipts::team_runs::Ledger>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    asks: BTreeMap<String, Receipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_ask: Option<asks::PendingAsk>,
 }
 
 impl Journal {
@@ -247,6 +255,8 @@ impl Journal {
             receipts: BTreeMap::new(),
             pending: None,
             runs: None,
+            asks: BTreeMap::new(),
+            pending_ask: None,
         }
     }
     pub fn decode(bytes: &[u8], source: &Source) -> Result<Self, &'static str> {
@@ -263,6 +273,7 @@ impl Journal {
             return Err("comment journal does not match this source");
         }
         journal.validate_runs()?;
+        journal.validate_asks()?;
         if journal.receipts.iter().any(|(key, receipt)| {
             !lower_hex(key, 64)
                 || !lower_hex(receipt.request_digest(), 64)
@@ -284,6 +295,7 @@ impl Journal {
     }
     pub fn encoded(&self) -> Result<Vec<u8>, &'static str> {
         self.validate_runs()?;
+        self.validate_asks()?;
         let bytes = serde_json::to_vec(self).map_err(|_| "comment journal could not be encoded")?;
         if bytes.len() as u64 > MAX_JOURNAL_BYTES {
             return Err("comment journal is full");
@@ -292,6 +304,9 @@ impl Journal {
     }
     pub fn receipt(&self, record: &Record) -> Result<Option<&Receipt>, &'static str> {
         let a = &record.attribution;
+        if self.asks.contains_key(&record.key()?) {
+            return Err("this message id was already used to ask an agent");
+        }
         if self
             .runs
             .as_ref()
@@ -354,7 +369,7 @@ impl Journal {
         if before.len() as u64 > super::HISTORY_LIMIT {
             return Err("comment history is too large");
         }
-        if self.pending.is_some() {
+        if self.pending.is_some() || self.pending_ask.is_some() {
             return Err("an earlier comment needs reconciliation");
         }
         if self.receipt(&record)?.is_some() {
@@ -373,8 +388,9 @@ impl Journal {
     /// A read can settle an exact row already on disk. It cannot append text
     /// or turn an unresolved reservation into permission to replay a write.
     pub fn observe(&mut self, bytes: &[u8]) -> Result<bool, &'static str> {
+        let ask_changed = self.observe_ask(bytes)?;
         let Some(pending) = &self.pending else {
-            return Ok(false);
+            return Ok(ask_changed);
         };
         let before =
             usize::try_from(pending.before_bytes).map_err(|_| "comment position is invalid")?;
@@ -431,6 +447,9 @@ impl Journal {
     /// the entire previous canonical prefix is still exact. Its original id
     /// receives a permanent negative receipt, never a fresh acceptance.
     pub fn retire_unwritten(&mut self, bytes: &[u8]) -> Result<bool, &'static str> {
+        if self.pending_ask.is_some() {
+            return Err("an earlier Ask needs recovery on the publishing computer");
+        }
         let Some(pending) = &self.pending else {
             return Ok(false);
         };
@@ -453,6 +472,12 @@ impl Journal {
         raw: &Value,
         seq: u64,
     ) -> Result<Option<VerifiedAttribution>, &'static str> {
+        if raw.get("teamAsk").is_some() {
+            if raw.get("teamComment").is_some() {
+                return Err("ambiguous message mode");
+            }
+            return self.ask_author(raw, seq);
+        }
         if raw.get("teamComment").is_none() {
             return Ok(None);
         }
@@ -483,6 +508,7 @@ impl Journal {
             key,
             scope: record.attribution.scope,
             person: json!({"kind":"person","id":a.id,"name":a.name,"handle":a.handle,"avatar":a.avatar}),
+            mode: "comment",
         }))
     }
     pub fn require_complete(
@@ -493,11 +519,15 @@ impl Journal {
         if self.receipts.iter().any(|(key, receipt)| matches!(receipt, Receipt::Accepted { share: bound, .. } if bound == share && !seen.contains(key))) {
             return Err("accepted comments are missing from history");
         }
+        if self.asks.iter().any(|(key, receipt)| matches!(receipt, Receipt::Accepted { share: bound, .. } if bound == share && !seen.contains(key))) {
+            return Err("accepted Asks are missing from history");
+        }
         Ok(())
     }
     pub fn forked(mut self, source: Source) -> Self {
         self.source = source;
         self.pending = None;
+        self.pending_ask = None;
         // These are process/admission identities for the original source.
         // A copied conversation cannot inherit its authority or recovery.
         self.runs = None;

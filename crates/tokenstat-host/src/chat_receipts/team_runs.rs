@@ -408,6 +408,9 @@ impl Ledger {
     pub fn unresolved(&self) -> Option<&Record> {
         self.records.values().find(|r| !r.state.terminal())
     }
+    pub fn records(&self) -> impl Iterator<Item = &Record> {
+        self.records.values()
+    }
     pub fn reserve(
         &mut self,
         request: Request,

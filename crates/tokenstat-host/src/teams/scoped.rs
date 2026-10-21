@@ -19,6 +19,19 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             )
         })?;
         principal.ensure_live()?;
+        if matches!(method, "team.chat.ask" | "team.chat.ask.review") {
+            #[cfg(feature = "local-host")]
+            return if method == "team.chat.ask.review" {
+                super::scoped_runs::review(&principal, params)
+            } else {
+                super::scoped_runs::send(&principal, params)
+            };
+            #[cfg(not(feature = "local-host"))]
+            return Err(DispatchError::new(
+                "host_required",
+                "Open this chat on its publishing computer.",
+            ));
+        }
         if method == "team.chat.comment" {
             if params.len() > 16 * 1024 {
                 return Err(DispatchError::new(

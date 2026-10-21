@@ -22,6 +22,8 @@ mod scoped_chats;
 #[cfg(feature = "local-host")]
 mod scoped_comments;
 #[cfg(feature = "local-host")]
+mod scoped_runs;
+#[cfg(feature = "local-host")]
 mod scoped_source;
 #[cfg(feature = "local-host")]
 mod sharing;

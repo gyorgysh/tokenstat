@@ -19,6 +19,8 @@ pub(crate) struct AuthorizedTeamPrincipal {
     expires_at: u64,
     issuer: String,
     #[cfg(feature = "local-host")]
+    ticket: Option<VerifiedTeamTicket>,
+    #[cfg(feature = "local-host")]
     client: Option<TeamClient>,
 }
 impl AuthorizedTeamPrincipal {
@@ -81,6 +83,8 @@ impl AuthorizedTeamPrincipal {
             expires_at: claims.exp,
             issuer: claims.iss.clone(),
             #[cfg(feature = "local-host")]
+            ticket: Some(proof.ticket().clone()),
+            #[cfg(feature = "local-host")]
             client: Some(client.clone()),
         })
     }
@@ -96,6 +100,37 @@ impl AuthorizedTeamPrincipal {
     }
     pub(crate) fn value(&self) -> &TeamPrincipal {
         &self.value
+    }
+    /// Only the original verified Run proof can admit host-owned authority.
+    /// A directory principal or caller-supplied actor/grant is insufficient.
+    #[cfg(feature = "local-host")]
+    pub(crate) fn run_ticket(&self) -> Result<&VerifiedTeamTicket, DispatchError> {
+        self.ensure_account_current()?;
+        let ticket = self.ticket.as_ref().ok_or_else(expired)?;
+        let c = ticket.claims();
+        let p = &self.value;
+        if !p
+            .capabilities
+            .contains(&tokenstat_sync::teams::TeamCapability::Run)
+            || !c
+                .cap
+                .contains(&tokenstat_identity::teams::TeamCapability::Run)
+            || c.iss != self.issuer
+            || c.sub != p.person.id
+            || c.device != p.device_key
+            || c.org != p.organization_id
+            || c.repository != p.repository_id
+            || c.checkout != p.checkout_id
+            || c.host != p.host_key
+            || c.publisher != p.publisher_id
+            || c.share != p.share_id
+            || c.grant != p.grant_id
+            || c.share.is_none()
+            || c.grant.is_none()
+        {
+            return Err(expired());
+        }
+        Ok(ticket)
     }
     pub(crate) fn ensure_live(&self) -> Result<(), DispatchError> {
         self.ensure_live_at(Time::now())
@@ -137,6 +172,7 @@ impl AuthorizedTeamPrincipal {
                 .expect("supported platform clock"),
             expires_at: Time::now().wall + 60,
             issuer: "https://accounts.example.test".into(),
+            ticket: None,
             #[cfg(feature = "local-host")]
             client: None,
         }
@@ -325,6 +361,8 @@ impl Gate {
         }
         let issuer = next.iss.clone();
         let expires_at = next.exp;
+        #[cfg(feature = "local-host")]
+        let ticket = Some(verified.clone());
         self.previous = verified;
         self.deadline = deadline;
         self.continuous_deadline = continuous_deadline;
@@ -334,6 +372,8 @@ impl Gate {
             continuous_deadline,
             expires_at,
             issuer,
+            #[cfg(feature = "local-host")]
+            ticket,
             #[cfg(feature = "local-host")]
             client: None,
         })
@@ -428,6 +468,69 @@ mod tests {
             "deviceKey":c.device,"organizationId":c.org,"repositoryId":c.repository,"checkoutId":c.checkout,"hostKey":c.host,
             "publisherId":c.publisher,"shareId":c.share,"grantId":c.grant,"epoch":c.epoch,"capabilities":c.cap,"role":"contributor",
             "expiresAt":jiff::Timestamp::from_second(c.exp as i64).unwrap().to_string()})).unwrap()
+    }
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn admission_retains_the_original_verified_run_ticket_and_rejects_substituted_principal_fields()
+    {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../../../fixtures/teams/run-lease-v1.json"))
+                .unwrap();
+        let keys = TrustedTeamKeys::from_response(
+            serde_json::from_value(fixture["keys"].clone()).unwrap(),
+            "https://accounts.example.test",
+        )
+        .unwrap();
+        let ticket = ticket(&fixture["actorTicket"]);
+        let now = Time {
+            wall: fixture["nowMs"].as_u64().unwrap() / 1000,
+            monotonic: Instant::now(),
+            ..Time::now()
+        };
+        let mut gate = Gate::new(
+            keys,
+            [0xaa; 32],
+            tokenstat_identity::MachineIdentity::from_secret([7; 32]).public_key(),
+            "fixture-owner".into(),
+            &ticket,
+            now,
+        )
+        .unwrap();
+        let mut captured = gate
+            .authorize(&ticket, || now, |proof| Ok(principal(proof)))
+            .unwrap();
+        assert_eq!(
+            captured.ticket.as_ref().unwrap().ticket().wire_value(),
+            ticket.wire_value()
+        );
+        // The public signature vector is historical. Only this unit fixture's
+        // local expiry is moved so the retained binding can be exercised.
+        captured.expires_at = Time::now().wall + 60;
+        assert!(captured.run_ticket().is_ok());
+        for field in 0..9 {
+            let mut changed = captured.clone();
+            match field {
+                0 => changed.value.person.id = "another-person".into(),
+                1 => changed.value.device_key = "cc".repeat(32),
+                2 => changed.value.organization_id = "another-org".into(),
+                3 => changed.value.repository_id = "another-repo".into(),
+                4 => changed.value.checkout_id = "another-checkout".into(),
+                5 => changed.value.publisher_id = "another-host-owner".into(),
+                6 => changed.value.host_key = "dd".repeat(32),
+                7 => changed.value.share_id = Some(format!("share_{}", "cc".repeat(16))),
+                _ => changed.value.grant_id = Some(format!("grant_{}", "dd".repeat(16))),
+            }
+            assert!(changed.run_ticket().is_err(), "{field}");
+        }
+        let mut absent = captured.clone();
+        absent.ticket = None;
+        assert!(absent.run_ticket().is_err());
+        let mut read_only = captured;
+        read_only
+            .value
+            .capabilities
+            .retain(|c| *c != tokenstat_sync::teams::TeamCapability::Run);
+        assert!(read_only.run_ticket().is_err());
     }
     fn gate(now: Time) -> Gate {
         Gate::new(

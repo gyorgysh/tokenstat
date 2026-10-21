@@ -4,7 +4,7 @@ use super::{journal::*, *};
 use crate::teams::AuthorizedTeamPrincipal;
 use tokenstat_sync::teams::{RepositoryRole, TeamCapability};
 
-const JOURNAL: &str = "team-comments.json";
+pub(super) const JOURNAL: &str = "team-comments.json";
 
 pub(crate) struct SharedSource<'a> {
     pub workspace: &'a str,
@@ -19,14 +19,14 @@ fn unavailable() -> DispatchError {
         "Comment delivery could not be verified. Keep your draft and check the chat before sending again.",
     )
 }
-fn source(chat: &Conversation) -> Source {
+pub(super) fn source(chat: &Conversation) -> Source {
     Source {
         conversation: chat.id.clone(),
         workspace: chat.workspace_id.clone(),
         created_at_ms: chat.created_at_ms,
     }
 }
-fn context(
+pub(super) fn context(
     principal: &AuthorizedTeamPrincipal,
     write: bool,
 ) -> Result<(Scope, Actor), DispatchError> {
@@ -67,7 +67,7 @@ fn context(
     ))
 }
 
-fn save(path: &Path, journal: &Journal) -> Result<(), DispatchError> {
+pub(super) fn save(path: &Path, journal: &Journal) -> Result<(), DispatchError> {
     replace_chat_file(path, &journal.encoded().map_err(|_| unavailable())?)
         .map_err(|_| unavailable())
 }
@@ -158,7 +158,7 @@ enum Step {
 }
 
 impl Store {
-    fn write_team_index(&self, index: &Index) -> Result<(), DispatchError> {
+    pub(super) fn write_team_index(&self, index: &Index) -> Result<(), DispatchError> {
         let bytes = serde_json::to_vec(index).map_err(|_| unavailable())?;
         if bytes.len() as u64 > INDEX_LIMIT {
             return Err(unavailable());
@@ -168,7 +168,7 @@ impl Store {
         *self.conversations.lock().map_err(|_| unavailable())? = index.conversations.clone();
         Ok(())
     }
-    fn record_comment_time(
+    pub(super) fn record_comment_time(
         &self,
         index: &mut Index,
         id: &str,
