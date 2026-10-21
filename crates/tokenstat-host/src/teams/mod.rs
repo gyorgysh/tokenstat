@@ -34,7 +34,8 @@ pub(crate) fn serve(
         connection.close();
         return;
     };
-    while let Ok(bytes) = connection.receive_within(16 * 1024, std::time::Duration::from_secs(60)) {
+    while let Ok(bytes) = connection.receive_bounded(16 * 1024, std::time::Duration::from_secs(60))
+    {
         let Ok(line) = std::str::from_utf8(&bytes) else {
             break;
         };

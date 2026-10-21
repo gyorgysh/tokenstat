@@ -44,6 +44,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokenstat_identity::{MachineIdentity, PeerStore, PublicKey, Trust, fingerprint};
 
+mod deadline;
 pub mod tunnel;
 
 /// The Noise pattern. XX rather than KK because the server does not know the
@@ -1638,6 +1639,85 @@ mod tests {
                 "cut at {cut}"
             );
             assert_eq!(reader.0.timeout, Some(STREAM_READ_TIMEOUT));
+        }
+    }
+
+    #[test]
+    fn bounded_messages_cannot_be_kept_alive_by_trickling_header_or_body_bytes() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize};
+        struct Trickle {
+            bytes: std::io::Cursor<Vec<u8>>,
+            fast_prefix: u64,
+            closed: Arc<AtomicBool>,
+            reads: Arc<AtomicUsize>,
+        }
+        impl Read for Trickle {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                if self.bytes.position() >= self.fast_prefix {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                self.reads.fetch_add(1, Ordering::Relaxed);
+                let length = output.len().min(1);
+                self.bytes.read(&mut output[..length])
+            }
+        }
+        impl Write for Trickle {
+            fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
+                Ok(input.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl Transport for Trickle {
+            fn close(&mut self) {
+                self.closed.store(true, Ordering::Relaxed);
+            }
+            fn set_deadline(&mut self, _: Option<Duration>) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn set_read_timeout(&mut self, _: Option<Duration>) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        for (fast_prefix, budget, max, succeeds) in [
+            (0, Duration::ZERO, 1024, false),
+            (0, Duration::from_millis(20), 1024, false),
+            (24, Duration::from_millis(20), 1024, false),
+            (u64::MAX, Duration::from_secs(10), 1024, true),
+            (u64::MAX, Duration::from_secs(10), 2, false),
+        ] {
+            let (mut sender, receiver) = transport_pair();
+            let mut wire = StutteringTransport {
+                data: Vec::new(),
+                position: 0,
+                timeout: None,
+                stall: false,
+            };
+            write_one(&mut sender, &mut wire, b"scoped request").unwrap();
+            let closed = Arc::new(AtomicBool::new(false));
+            let reads = Arc::new(AtomicUsize::new(0));
+            let mut connection = Connection {
+                noise: receiver,
+                stream: Box::new(Trickle {
+                    bytes: std::io::Cursor::new(wire.data),
+                    fast_prefix,
+                    closed: closed.clone(),
+                    reads: reads.clone(),
+                }),
+                peer: [0xbb; 32],
+                intro_label: String::new(),
+                relay: false,
+            };
+            let result = connection.receive_bounded(max, budget);
+            assert_eq!(result.is_ok(), succeeds);
+            assert_eq!(closed.load(Ordering::Relaxed), !succeeds);
+            if budget.is_zero() {
+                assert_eq!(reads.load(Ordering::Relaxed), 0);
+            }
+            if succeeds {
+                assert_eq!(result.unwrap(), b"scoped request");
+            }
         }
     }
 
