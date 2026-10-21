@@ -33,7 +33,7 @@ pub(crate) enum ReadMethod {
     ChatEvents,
 }
 impl ReadMethod {
-    fn wire(self) -> &'static str {
+    pub(crate) fn wire(self) -> &'static str {
         match self {
             Self::Protocol => "team.protocol",
             Self::CheckoutInfo => "team.checkout.info",
@@ -148,12 +148,23 @@ fn deadline(proof: &TeamConnectionProof) -> Result<Instant, DispatchError> {
     Ok(Instant::now() + Duration::from_secs(seconds))
 }
 
-// The private fields prevent construction without the verified account proof,
-// exact host Noise pin and separately admitted Team channel.
-pub(crate) struct Link {
+enum Transport {
+    // The physical publisher still obtains and validates the same signed
+    // read proof. There is no socket to pair back to itself.
+    Local,
+    Relay(Box<Relay>),
+}
+struct Relay {
     connection: Connection,
     channel: TeamChannelHandle,
     tunnel: tunnel_lifecycle::OwnedTunnel,
+    _reach: team_reach::Demand,
+}
+
+// The private fields prevent construction without the verified account proof.
+// A different computer additionally requires the pinned Noise/Team channel.
+pub(crate) struct Link {
+    transport: Transport,
     owner: AccountSnapshot,
     client: Arc<TeamClient>,
     request: RequestTicket,
@@ -162,7 +173,6 @@ pub(crate) struct Link {
     proof: TeamConnectionProof,
     deadline: Instant,
     next_id: u64,
-    _reach: team_reach::Demand,
 }
 impl Link {
     pub(crate) fn connect(
@@ -191,38 +201,47 @@ impl Link {
         if proof.ticket().claims().iss != client.origin() {
             return Err(invalid());
         }
-        let scope = current_team_scope(&owner).map_err(|_| api_error(TeamError::AccountChanged))?;
-        if scope.key != identity.public_key() {
-            return Err(api_error(TeamError::AccountChanged));
-        }
-        let reach = team_reach::acquire(scope).map_err(|_| unavailable())?;
-        let tunnel = crate::account_session::with_snapshot(Some(owner.clone()), || {
-            tunnel_lifecycle::ensure(session_for_serving()?, &load_settings(), false)
-        })
-        .map_err(|_| unavailable())?
-        .ok_or_else(unavailable)?;
-        // Socket creation is asynchronous. An initial Team open must wait for
-        // READY, rather than racing the writer's first registration.
-        let ready_deadline = (Instant::now() + Duration::from_secs(10)).min(deadline);
-        let socket = tunnel.socket().map_err(|_| unavailable())?;
-        while !socket.status().connected {
-            tunnel.ensure_current().map_err(|_| unavailable())?;
-            if Instant::now() >= ready_deadline {
-                return Err(unavailable());
+        let transport = if proof.host_key() == &identity.public_key() {
+            Transport::Local
+        } else {
+            let scope =
+                current_team_scope(&owner).map_err(|_| api_error(TeamError::AccountChanged))?;
+            if scope.key != identity.public_key() {
+                return Err(api_error(TeamError::AccountChanged));
             }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        let transport = socket
-            .open_team_channel(*proof.host_key(), proof.ticket().ticket())
-            .map_err(|_| unavailable())?;
-        let channel = transport.team_authorization().ok_or_else(invalid)?;
-        let connection =
-            handshake_initiator_bounded(Box::new(transport), &identity, *proof.host_key())
+            let reach = team_reach::acquire(scope).map_err(|_| unavailable())?;
+            let tunnel = crate::account_session::with_snapshot(Some(owner.clone()), || {
+                tunnel_lifecycle::ensure(session_for_serving()?, &load_settings(), false)
+            })
+            .map_err(|_| unavailable())?
+            .ok_or_else(unavailable)?;
+            // Socket creation is asynchronous. An initial Team open must wait
+            // for READY rather than racing the writer's first registration.
+            let ready_deadline = (Instant::now() + Duration::from_secs(10)).min(deadline);
+            let socket = tunnel.socket().map_err(|_| unavailable())?;
+            while !socket.status().connected {
+                tunnel.ensure_current().map_err(|_| unavailable())?;
+                if Instant::now() >= ready_deadline {
+                    return Err(unavailable());
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let transport = socket
+                .open_team_channel(*proof.host_key(), proof.ticket().ticket())
                 .map_err(|_| unavailable())?;
+            let channel = transport.team_authorization().ok_or_else(invalid)?;
+            let connection =
+                handshake_initiator_bounded(Box::new(transport), &identity, *proof.host_key())
+                    .map_err(|_| unavailable())?;
+            Transport::Relay(Box::new(Relay {
+                connection,
+                channel,
+                tunnel,
+                _reach: reach,
+            }))
+        };
         let mut link = Self {
-            connection,
-            channel,
-            tunnel,
+            transport,
             owner,
             client,
             request,
@@ -231,7 +250,6 @@ impl Link {
             proof,
             deadline,
             next_id: 1,
-            _reach: reach,
         };
         link.ensure_current()?;
         let protocol = link.call(ReadMethod::Protocol, &ReadParams::default())?;
@@ -244,7 +262,9 @@ impl Link {
             .ensure_current()
             .map_err(|_| api_error(TeamError::AccountChanged))?;
         self.client.ensure_current().map_err(api_error)?;
-        self.tunnel.ensure_current().map_err(|_| unavailable())?;
+        if let Transport::Relay(relay) = &self.transport {
+            relay.tunnel.ensure_current().map_err(|_| unavailable())?;
+        }
         if Instant::now() >= self.deadline || self.proof.ticket().claims().exp <= wall() {
             return Err(unavailable());
         }
@@ -260,13 +280,28 @@ impl Link {
         if !params.validate(method, self.request.share_id.as_deref()) {
             return Err(api_error(TeamError::InvalidRequest));
         }
+        if matches!(&self.transport, Transport::Local) {
+            let result = crate::teams::loopback_read(
+                &self.client,
+                &self.proof,
+                &self.identity.public_key(),
+                self.deadline,
+                method,
+                params,
+            );
+            self.ensure_current()?;
+            return result;
+        }
+        let Transport::Relay(relay) = &mut self.transport else {
+            return Err(invalid());
+        };
         let id = self.next_id;
         self.next_id = self.next_id.checked_add(1).ok_or_else(invalid)?;
         let request = serde_json::to_vec(&json!({"id":id,"method":method.wire(),"params":params}))
             .map_err(|_| invalid())?;
-        self.connection.send(&request).map_err(|_| unavailable())?;
+        relay.connection.send(&request).map_err(|_| unavailable())?;
         let time = RESPONSE_TIME.min(self.deadline.saturating_duration_since(Instant::now()));
-        let bytes = self
+        let bytes = relay
             .connection
             .receive_bounded(RESPONSE_LIMIT, time)
             .map_err(|_| unavailable())?;
@@ -303,14 +338,17 @@ impl Link {
             return Err(api_error(TeamError::AccountChanged));
         }
         let next_deadline = deadline(&next)?;
-        self.channel
-            .renew(next.ticket().ticket())
-            .map_err(|_| unavailable())?;
-        self.tunnel.ensure_current().map_err(|_| unavailable())?;
+        if let Transport::Relay(relay) = &self.transport {
+            relay
+                .channel
+                .renew(next.ticket().ticket())
+                .map_err(|_| unavailable())?;
+            relay.tunnel.ensure_current().map_err(|_| unavailable())?;
+        }
         self.proof = next;
         self.deadline = next_deadline;
-        // The relay ACK updates the host's channel ticket. This request makes
-        // its authorization gate observe that ticket before the old deadline.
+        // A relay ACK updates the host's channel ticket. Local and remote
+        // reads both validate the replacement through the scoped boundary.
         let protocol = self.call(ReadMethod::Protocol, &ReadParams::default())?;
         self.verify_protocol(&protocol)
     }
@@ -347,7 +385,9 @@ impl Link {
 }
 impl Drop for Link {
     fn drop(&mut self) {
-        self.connection.close();
+        if let Transport::Relay(relay) = &mut self.transport {
+            relay.connection.close();
+        }
     }
 }
 

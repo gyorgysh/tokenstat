@@ -31,6 +31,25 @@ use tokenstat_sync::teams::{TeamClient, TeamError};
 pub(crate) fn scoped_call(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
     scoped::call(method, params)
 }
+/// A typed read on the physical publisher uses identical principal checks and
+/// scoped dispatch. It never enters personal RPC or accepts a guest path.
+pub(crate) fn loopback_read(
+    client: &TeamClient,
+    proof: &tokenstat_sync::teams::TeamConnectionProof,
+    device: &tokenstat_identity::PublicKey,
+    deadline: std::time::Instant,
+    method: crate::remote::TeamReadMethod,
+    params: &crate::remote::TeamReadParams,
+) -> Result<Value, DispatchError> {
+    let principal = AuthorizedTeamPrincipal::loopback(client, proof, device, deadline)?;
+    let body = serde_json::to_string(params).map_err(|_| api_error(TeamError::InvalidRequest))?;
+    let value = crate::request_context::with_team_principal(principal.clone(), || {
+        scoped::call(method.wire(), &body).ok_or_else(|| api_error(TeamError::InvalidRequest))?
+    })?;
+    principal.ensure_live()?;
+    client.ensure_current().map_err(api_error)?;
+    Ok(value)
+}
 pub(crate) fn local_sharing_call(
     method: &str,
     params: &str,

@@ -19,6 +19,49 @@ pub(crate) struct AuthorizedTeamPrincipal {
     client: Option<TeamClient>,
 }
 impl AuthorizedTeamPrincipal {
+    pub(super) fn loopback(
+        client: &TeamClient,
+        proof: &tokenstat_sync::teams::TeamConnectionProof,
+        device: &PublicKey,
+        deadline: Instant,
+    ) -> Result<Self, DispatchError> {
+        let claims = proof.ticket().claims();
+        let start = Time::now();
+        let deadline = local_deadline(proof.ticket(), deadline, start);
+        if proof.host_key() != device
+            || claims.device != hex(device)
+            || claims.host != hex(device)
+            || claims.sub != claims.publisher
+            || claims.iss != client.origin()
+            || start.monotonic >= deadline
+        {
+            return Err(expired());
+        }
+        // Even the physical publisher needs current repository membership,
+        // device consent and the exact signed share scope on every call.
+        let value = client
+            .validate_connection(proof.ticket())
+            .map_err(|error| {
+                if matches!(&error, tokenstat_sync::teams::TeamError::Rejected { code, .. }
+                if matches!(code.as_str(), "team_access_changed" | "invalid_team_ticket"))
+                {
+                    expired()
+                } else {
+                    api_error(error)
+                }
+            })?;
+        client.ensure_current().map_err(api_error)?;
+        if Instant::now() >= deadline || Time::now().wall >= claims.exp {
+            return Err(expired());
+        }
+        Ok(Self {
+            value,
+            deadline,
+            issuer: claims.iss.clone(),
+            #[cfg(feature = "local-host")]
+            client: Some(client.clone()),
+        })
+    }
     pub(super) fn issuer(&self) -> &str {
         &self.issuer
     }
@@ -38,6 +81,10 @@ impl AuthorizedTeamPrincipal {
         }
         Ok(())
     }
+}
+
+fn local_deadline(ticket: &VerifiedTeamTicket, requested: Instant, now: Time) -> Instant {
+    requested.min(now.monotonic + std::time::Duration::from_secs(ticket.lease_seconds(now.wall)))
 }
 
 #[derive(Clone, Copy)]
@@ -418,6 +465,30 @@ mod tests {
             result.is_err(),
             "a validation finishing after expiry must not expose a principal"
         );
+    }
+    #[test]
+    fn loopback_reads_cannot_extend_the_signed_lease_or_the_original_deadline() {
+        let f = fixture();
+        let start = Time {
+            wall: f["now"].as_u64().unwrap(),
+            monotonic: Instant::now(),
+        };
+        let proof = gate(start).previous;
+        let long = start.monotonic + Duration::from_secs(300);
+        let original = local_deadline(&proof, long, start);
+        assert_eq!(original, start.monotonic + Duration::from_secs(59));
+        let short = start.monotonic + Duration::from_secs(2);
+        assert_eq!(local_deadline(&proof, short, start), short);
+        let rollback = Time {
+            wall: start.wall - 1000,
+            monotonic: start.monotonic + Duration::from_secs(50),
+        };
+        assert_eq!(local_deadline(&proof, original, rollback), original);
+        let expired = Time {
+            wall: start.wall + 60,
+            monotonic: start.monotonic + Duration::from_secs(60),
+        };
+        assert_eq!(local_deadline(&proof, long, expired), expired.monotonic);
     }
     #[test]
     fn a_new_valid_execution_grant_cannot_revive_an_admitted_connection() {
