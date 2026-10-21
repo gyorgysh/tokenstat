@@ -30,7 +30,7 @@ import AppKit
     @State private var sheet: TeamSheet?
     @State private var dark = true
     @State private var showingSource = false
-    private let owner = TeamAccountOwner(scope: .account(origin: "https://accounts.example.test", handle: "example-owner")!, generation: 1, session: "fixture")
+    private let owner = TeamAccountOwner(scope: .account(origin: "https://accounts.example.test", handle: "example-owner")!, generation: 1, session: "fixture", personId: TeamFixtureData.state == .member ? "fixture-member" : "fixture-owner")
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {

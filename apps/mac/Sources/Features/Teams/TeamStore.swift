@@ -56,7 +56,7 @@ final class TeamStore {
         let revision = loadRevision
         if changed {
             formLifetime &+= 1
-            owner = next; capabilities = nil; localDraftPersonId = nil; organizations = []; inbox = []
+            owner = next; capabilities = nil; localDraftPersonId = next?.personId; organizations = []; inbox = []
             organizationsNextOffset = nil; inboxNextOffset = nil
             selectedOrganizationId = nil; selectedRepositoryId = nil; selectionSummary = nil
             directory = nil; cachedDirectories = [:]; cacheOrder = []; inFlightSelection = nil
@@ -71,8 +71,12 @@ final class TeamStore {
         do {
             let capabilities: TeamCapabilities = try await api.request(.capabilities, owner: next)
             guard isCurrent(next, revision) else { return }
+            if let person = next.personId, let actor = capabilities.actorId, person != actor {
+                localDraftPersonId = nil
+                throw TeamRequestFailure(code: "account_changed", message: L10n.text("common.teams.account_changed"))
+            }
             self.capabilities = capabilities
-            localDraftPersonId = capabilities.actorId
+            localDraftPersonId = capabilities.actorId ?? next.personId
             guard capabilities.enabled else { clearAuthorization(); phase = .unavailable; return }
             guard capabilities.ready else { clearAuthorization(); phase = .authorization; return }
             let api = api

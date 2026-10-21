@@ -7,6 +7,13 @@ struct TeamAccountOwner: Hashable, Sendable {
     let scope: WorkReference.Scope
     let generation: UInt64
     let session: String
+    /// Verified account profile identity; usable for local writing recovery,
+    /// never as a substitute for current Team capabilities or membership.
+    let personId: String?
+    init(scope: WorkReference.Scope, generation: UInt64, session: String, personId: String? = nil) {
+        self.scope = scope; self.generation = generation; self.session = session
+        self.personId = personId.flatMap { !$0.isEmpty && $0.utf8.count <= 128 ? $0 : nil }
+    }
 }
 enum TeamHostMethod: String, Sendable {
     case capabilities = "teams.capabilities"

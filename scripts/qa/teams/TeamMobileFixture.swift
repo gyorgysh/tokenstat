@@ -6,6 +6,7 @@ import SwiftUI
     @State private var store = TeamStore(api: TeamFixtureData.api)
     @State private var sheet: TeamSheet?
     @State private var dark = true
+    @Environment(\.teamCommentDraftStorage) private var commentStorage
     var body: some View {
         NavigationStack {
             TeamManagementView(store: store, canCreateOrganization: true, onAccount: {}, transcript: TeamFixtureTranscript.render)
@@ -43,7 +44,14 @@ import SwiftUI
                 .presentationDetents([.large]).presentationDragIndicator(.visible)
         }
         .task {
-            let owner = TeamAccountOwner(scope: .account(origin: "https://accounts.example.test", handle: "example-owner")!, generation: 1, session: "fixture")
+            let owner = TeamAccountOwner(scope: .account(origin: "https://accounts.example.test", handle: "example-owner")!, generation: 1, session: "fixture", personId: TeamFixtureData.state == .member ? "fixture-member" : "fixture-owner")
+            if TeamFixtureData.state == .draftOffline {
+                let target = TeamCommentTarget(origin: owner.scope.origin, person: "fixture-owner", organization: "org_fixture", repository: "repo_fixture", checkout: "checkout_fixture", share: "share_fixture", host: String(repeating: "ab", count: 32))
+                do {
+                    let saved = try await commentStorage.save(target, text: "Saved before the fictional outage", expected: nil, location: TeamCommentLocation(organization: "Example Studio", repository: "Website", chat: "Quarterly totals", computer: "Example Mac"))
+                    if let saved { _ = try await commentStorage.reserve(target, expected: saved) }
+                } catch { assertionFailure("Could not prepare the disposable offline draft") }
+            }
             await store.bind(to: owner)
             if TeamFixtureData.state != .invitation && TeamFixtureData.state != .expiredInvitation { store.select(store.organizations.first) }
             await store.refreshSelected()

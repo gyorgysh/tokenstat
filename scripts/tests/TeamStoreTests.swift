@@ -83,9 +83,28 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         try await selectionOutsideFirstPage()
         try await authorizationRevokedDuringWrite()
         try await authorityLossRetiresPendingReadsAndOldForms()
+        try await offlineDraftOwnership()
         avatars()
         try messageAuthors()
         print("Team directory ownership, recovery, pagination and avatar tests passed")
+    }
+    @MainActor static func offlineDraftOwnership() async throws {
+        let fixture = Fixture(), store = TeamStore(api: await fixture.api())
+        await fixture.fail("capabilities", code: "teams_unreachable")
+        let scope = owner("alpha")
+        let known = TeamAccountOwner(scope: scope.scope, generation: scope.generation, session: scope.session, personId: "fixture-owner")
+        await store.bind(to: known)
+        check(store.phase == .failed && store.localDraftPersonId == "fixture-owner", "A Team outage hid writing owned by the already verified account")
+        check(store.capabilities == nil && store.organizations.isEmpty, "Local recovery identity granted Team access")
+        await store.bind(to: owner("beta"))
+        check(store.localDraftPersonId == nil, "Another account inherited the previous person's recovery identity")
+        await store.bind(to: nil)
+        check(store.owner == nil && store.localDraftPersonId == nil, "Signed-out recovery exposed an account's writing")
+        let mismatch = TeamStore(api: await Fixture().api())
+        let wrong = TeamAccountOwner(scope: known.scope, generation: known.generation, session: known.session, personId: "different_person")
+        await mismatch.bind(to: wrong)
+        check(mismatch.phase == .failed && mismatch.localDraftPersonId == nil && mismatch.capabilities == nil, "A different server actor overrode the captured profile identity")
+        check(mismatch.organizations.isEmpty, "Mismatched identity reached the Team directory")
     }
     static func messageAuthors() throws {
         let named = JSONValue.object(["kind":.string("user"),"seq":.int(42),"mode":.string("comment"),"author":.object(["kind":.string("person"),"id":.string("fixture-member"),"name":.string("Márta Nagy"),"handle":.null,"avatar":.null])])

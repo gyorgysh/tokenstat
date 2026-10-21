@@ -187,6 +187,16 @@ final class TeamFixtureUITests: XCTestCase {
         remove.tap(); app.alerts.buttons["Remove draft"].tap()
         XCTAssertTrue(app.staticTexts["team.drafts.empty"].waitForExistence(timeout: 5))
     }
+    func testKnownAccountRecoversLocalDraftWhenTeamsIsOffline() {
+        let app = launch("draftOffline", largeText: true)
+        let open = app.buttons["team.drafts.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        XCTAssertTrue(app.staticTexts["Saved before the fictional outage"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Quarterly totals"].exists)
+        XCTAssertTrue(app.staticTexts["Delivery isn’t confirmed."].exists)
+        XCTAssertFalse(app.buttons["team.comment.send"].exists)
+        capture(app, "Known account offline draft recovery large text")
+    }
     private func sharedChatScenario(largeText: Bool) {
         let app = launch(largeText: largeText)
         XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))

@@ -400,7 +400,7 @@ struct ClientRootView: View {
         let context = WorkSessionContext.shared
         guard account.signedIn, let scope = context.scope, scope.kind == .account,
               let session = context.accountSession, !session.isEmpty else { return nil }
-        return TeamAccountOwner(scope: scope, generation: context.generation, session: session)
+        return TeamAccountOwner(scope: scope, generation: context.generation, session: session, personId: account.account?.accountId)
     }
 
     private var rootPresentations: some View {

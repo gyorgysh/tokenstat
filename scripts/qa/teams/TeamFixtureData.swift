@@ -2,7 +2,7 @@
 import Foundation
 
 enum TeamFixtureData {
-    enum State: String { case ready, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer }
+    enum State: String { case ready, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer, draftOffline }
     static let state: State = {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--fixture-state"), args.indices.contains(index + 1) else { return .ready }
@@ -21,7 +21,7 @@ enum TeamFixtureData {
     static let api = TeamAPI { method, params, _ in
         switch method {
         case .capabilities:
-            if state == .failure { throw TeamRequestFailure(code: "teams_unreachable", message: "The fictional account server is unavailable.") }
+            if state == .failure || state == .draftOffline { throw TeamRequestFailure(code: "teams_unreachable", message: "The fictional account server is unavailable.") }
             return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canPublishCheckouts":.bool(true),"canConnectCheckouts":.bool(true),"canPublishChats":.bool(true)])
         case .authorizationPreview: return .object(["deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .prepareAuthorization: return .object(["authorizationURL":.string("https://accounts.example.test/settings/teams/devices/fixture"),"deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
