@@ -5,11 +5,12 @@ use crate::{chat::sharing::AskInput, error::DispatchError};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-// Execution stays closed until the host grant UI and run recovery are ready.
-// Only a debug build inside the disposable Team fixture opens it, so the
-// public Ask and Stop path can be tested end to end.
+// Release builds stay closed until the whole-change review and the Windows
+// proof are done. A debug build opens it so the owner's own test builds can
+// run agents for teammates the owner allowed, and the disposable fixture
+// opens it for the end-to-end check. Unit tests stay closed.
 pub(super) fn execution_ready() -> bool {
-    super::guardian::fixture_enabled()
+    (cfg!(debug_assertions) && !cfg!(test)) || super::guardian::fixture_enabled()
 }
 
 pub(super) fn review(

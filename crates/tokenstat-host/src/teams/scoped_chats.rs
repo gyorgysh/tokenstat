@@ -71,7 +71,7 @@ pub(super) fn call(
             (
                 marker,
                 json!({"chat":{"id":row.id,"checkoutId":row.checkout_id,"title":history.title,
-            "backend":history.backend,"historyTrimmed":history.history_trimmed,"allowsAgentRuns":false,
+            "backend":history.backend,"historyTrimmed":history.history_trimmed,"allowsAgentRuns":super::agent_runs_ready() && super::provider::supported(&history.backend).is_ok(),
             "allowsComments":row.source_revision.is_some() && matches!(scope.role,RepositoryRole::Contributor | RepositoryRole::Maintainer)}}),
             )
         }

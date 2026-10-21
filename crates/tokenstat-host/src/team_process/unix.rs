@@ -39,7 +39,75 @@ pub(super) fn group_gone(group: u32) -> bool {
         let status = unsafe { libc::kill(target, 0) };
         status == -1 && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
     };
-    gone(-group) && gone(group)
+    // The anchor leads its own session too. A child can move to another
+    // group but not back into the session once it leaves it, so the
+    // session is the proof that holds. Unknown answers keep the fence.
+    gone(-group) && gone(group) && session_gone(group)
+}
+
+#[cfg(target_os = "macos")]
+fn session_gone(session: i32) -> bool {
+    // SAFETY: a null buffer asks only for the count.
+    let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
+    if count <= 0 {
+        return false;
+    }
+    let mut pids = vec![0 as libc::pid_t; count as usize * 2 + 64];
+    let bytes = i32::try_from(pids.len() * std::mem::size_of::<libc::pid_t>()).unwrap_or(i32::MAX);
+    // SAFETY: the buffer holds `bytes` bytes of pid_t values.
+    let found = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), bytes) };
+    if found <= 0 || found as usize >= pids.len() {
+        return false;
+    }
+    pids[..found as usize]
+        .iter()
+        .filter(|pid| **pid > 0)
+        .all(|pid| {
+            // SAFETY: getsid reads another process's session id and nothing else.
+            let owner = unsafe { libc::getsid(*pid) };
+            if owner == -1 {
+                return io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+            }
+            owner != session
+        })
+}
+
+#[cfg(target_os = "linux")]
+fn session_gone(session: i32) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return false;
+        };
+        let name = entry.file_name();
+        if !name.to_string_lossy().bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let stat = match std::fs::read_to_string(entry.path().join("stat")) {
+            Ok(stat) => stat,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(_) => return false,
+        };
+        // After the command name: state, ppid, pgrp, session.
+        let Some(session_field) = stat
+            .rsplit_once(')')
+            .and_then(|(_, rest)| rest.split_whitespace().nth(3))
+            .and_then(|field| field.parse::<i32>().ok())
+        else {
+            return false;
+        };
+        if session_field == session {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn session_gone(_session: i32) -> bool {
+    false
 }
 pub(super) fn stop_self() -> io::Result<()> {
     check_anchor()?;
@@ -243,4 +311,32 @@ fn no_live_members(group: i32) -> io::Result<bool> {
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn no_live_members(_: i32) -> io::Result<bool> {
     Err(io::ErrorKind::Unsupported.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_live_session_is_never_gone() {
+        // SAFETY: getsid(0) reads this process's own session id.
+        let own = unsafe { libc::getsid(0) };
+        assert!(own > 0);
+        assert!(!session_gone(own));
+        assert!(!group_gone(own as u32));
+    }
+
+    #[test]
+    fn a_finished_session_is_gone() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "exit 0"]);
+        configure(&mut command);
+        let mut child = command.spawn().unwrap();
+        let session = child.id();
+        child.wait().unwrap();
+        // A reused id would read as alive, which is the safe answer.
+        if group_gone(session) {
+            assert!(session_gone(session as i32));
+        }
+    }
 }
