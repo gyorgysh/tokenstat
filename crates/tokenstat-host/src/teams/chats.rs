@@ -204,7 +204,7 @@ fn finish_review(
     let history =
         crate::chat::shared().sharing_history(&local.workspace_id, &request.conversation)?;
     let receipt = json!({"v":1,"account":owner.id,"owner":binding,"organization":request.organization,"repository":repository.id,"repositoryRevision":repository.revision,
-        "checkout":local.id,"publicationRevision":local.revision,"cloudRevision":cloud_revision,"conversation":request.conversation,"history":history.fingerprint});
+        "checkout":local.id,"publicationRevision":local.revision,"cloudRevision":cloud_revision,"conversation":request.conversation,"history":history.fingerprint,"sourceRevision":history.source_revision});
     let preview = tokenstat_identity::hex(&Sha256::digest(
         serde_json::to_vec(&receipt).map_err(|_| invalid())?,
     ));
@@ -319,18 +319,34 @@ pub(super) fn perform(
                     "This chat changed after its sharing preview. Review the history again.",
                 ));
             }
-            let prepared = store.prepare_chat(
+            let prepared = store.prepare_chat_at_revision(
                 &target,
                 &request.conversation,
                 &input.request_id,
                 &review.history.fingerprint,
+                review.history.source_revision,
             )?;
             let chats = crate::chat::shared();
-            if let Err(error) = chats.freeze_sharing(
+            if let Err(error) = chats.freeze_sharing_if_current(
                 &review.checkout.workspace_id,
                 &request.conversation,
                 &prepared.id,
                 &review.history.fingerprint,
+                review.history.source_revision,
+                || {
+                    let row = store
+                        .chat_request(&target, &input.request_id)?
+                        .ok_or_else(changed)?;
+                    if row.id != prepared.id
+                        || row.conversation_id != request.conversation
+                        || row.preview != review.history.fingerprint
+                        || row.source_revision != Some(review.history.source_revision)
+                        || row.phase == Phase::Withdrawn
+                    {
+                        return Err(changed());
+                    }
+                    Ok(())
+                },
             ) {
                 if matches!(
                     error.code.as_str(),
@@ -376,45 +392,46 @@ pub(super) fn perform(
             if previous.cloud_withdrawn {
                 return Ok(json!({"withdrawn":true}));
             }
-            let current = match client.chat_publication(
-                &request.organization,
-                &request.checkout,
-                &retired.id,
-            ) {
-                Ok(value)
-                    if value.share.id == retired.id
-                        && value.share.checkout_id == retired.checkout_id =>
-                {
-                    value.share
+            // Missing is not a withdrawal receipt: an earlier POST may still
+            // commit after a timeout. Reserve a terminal cloud tombstone with
+            // expectedRevision 0, or delete the exact observed live revision.
+            // One revision race gets a fresh read; no publish is replayed.
+            for _ in 0..2 {
+                let revision = match client.chat_publication(
+                    &request.organization,
+                    &request.checkout,
+                    &retired.id,
+                ) {
+                    Ok(value)
+                        if value.share.id == retired.id
+                            && value.share.checkout_id == retired.checkout_id =>
+                    {
+                        value.share.revision
+                    }
+                    Err(TeamError::Rejected {
+                        status: 404, code, ..
+                    }) if code == "not_found" => 0,
+                    _ => break,
+                };
+                match client.withdraw_chat(
+                    &request.organization,
+                    &request.checkout,
+                    &retired.id,
+                    Revision {
+                        expected_revision: revision,
+                    },
+                ) {
+                    Ok(value) if value.withdrawn => {
+                        store.confirm_chat_withdrawal(&target, &retired.id)?;
+                        return Ok(json!({"withdrawn":true}));
+                    }
+                    Err(TeamError::Rejected {
+                        status: 409, code, ..
+                    }) if code == "revision_conflict" => continue,
+                    _ => break,
                 }
-                Err(TeamError::Rejected {
-                    status: 404, code, ..
-                }) if code == "not_found" => {
-                    store.confirm_chat_withdrawal(&target, &retired.id)?;
-                    return Ok(json!({"withdrawn":true}));
-                }
-                _ => return Ok(json!({"withdrawn":true,"accountCleanupPending":true})),
-            };
-            match client.withdraw_chat(
-                &request.organization,
-                &request.checkout,
-                &retired.id,
-                Revision {
-                    expected_revision: current.revision,
-                },
-            ) {
-                Ok(value) if value.withdrawn => {
-                    store.confirm_chat_withdrawal(&target, &retired.id)?;
-                    Ok(json!({"withdrawn":true}))
-                }
-                Err(TeamError::Rejected {
-                    status: 404, code, ..
-                }) if code == "not_found" => {
-                    store.confirm_chat_withdrawal(&target, &retired.id)?;
-                    Ok(json!({"withdrawn":true}))
-                }
-                _ => Ok(json!({"withdrawn":true,"accountCleanupPending":true})),
             }
+            Ok(json!({"withdrawn":true,"accountCleanupPending":true}))
         }
     }
 }

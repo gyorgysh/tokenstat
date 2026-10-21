@@ -17,6 +17,8 @@ pub(crate) struct Binding {
     pub(crate) history_through: Option<u64>,
     pub(crate) history_bytes: u64,
     pub(crate) initial_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source_revision: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -32,6 +34,8 @@ pub(crate) struct History {
     pub(crate) history_through: Option<u64>,
     #[serde(skip_serializing)]
     pub(crate) history_bytes: u64,
+    #[serde(skip_serializing)]
+    pub(crate) source_revision: u64,
 }
 
 fn invalid() -> DispatchError {
@@ -39,6 +43,17 @@ fn invalid() -> DispatchError {
         "chat_history_unavailable",
         "This chat's history could not be reviewed. Repair it before sharing.",
     )
+}
+fn reparse_or_link(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            // FILE_ATTRIBUTE_REPARSE_POINT
+            return true;
+        }
+    }
+    metadata.file_type().is_symlink()
 }
 fn read_private(path: &Path, limit: u64, allow_missing: bool) -> Result<Vec<u8>, DispatchError> {
     use std::io::Read;
@@ -62,7 +77,7 @@ fn read_private(path: &Path, limit: u64, allow_missing: bool) -> Result<Vec<u8>,
         Err(_) => return Err(invalid()),
     };
     let metadata = file.metadata().map_err(|_| invalid())?;
-    if !metadata.is_file() || metadata.len() > limit {
+    if !metadata.is_file() || reparse_or_link(&metadata) || metadata.len() > limit {
         return Err(invalid());
     }
     let mut bytes = Vec::new();
@@ -76,6 +91,25 @@ fn read_private(path: &Path, limit: u64, allow_missing: bool) -> Result<Vec<u8>,
 }
 
 impl Store {
+    pub(crate) fn sharing_binding(
+        &self,
+        workspace: &str,
+        id: &str,
+    ) -> Result<Option<Binding>, DispatchError> {
+        self.sharing_state(workspace, id)
+            .map(|(binding, _)| binding)
+    }
+
+    pub(crate) fn sharing_state(
+        &self,
+        workspace: &str,
+        id: &str,
+    ) -> Result<(Option<Binding>, u64), DispatchError> {
+        self.index_locked(workspace, id, |_, chat| {
+            Ok((chat.team_share.clone(), chat.send_revision))
+        })
+    }
+
     pub(crate) fn sharing_history(
         &self,
         workspace: &str,
@@ -84,6 +118,7 @@ impl Store {
         self.review_locked(workspace, id, |_, history| Ok(history))
     }
 
+    #[cfg(test)]
     pub(crate) fn freeze_sharing(
         &self,
         workspace: &str,
@@ -91,12 +126,34 @@ impl Store {
         share: &str,
         expected: &str,
     ) -> Result<(), DispatchError> {
+        let chat = self.current_send_conversation(id).map_err(|_| invalid())?;
+        let revision = chat
+            .team_share
+            .as_ref()
+            .and_then(|binding| binding.source_revision)
+            .unwrap_or(chat.send_revision);
+        self.freeze_sharing_if_current(workspace, id, share, expected, revision, || Ok(()))
+    }
+
+    pub(crate) fn freeze_sharing_if_current(
+        &self,
+        workspace: &str,
+        id: &str,
+        share: &str,
+        expected: &str,
+        source_revision: u64,
+        current: impl FnOnce() -> Result<(), DispatchError>,
+    ) -> Result<(), DispatchError> {
         if !share.strip_prefix("share_").is_some_and(|suffix| {
             suffix.len() == 32 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
         }) {
             return Err(invalid());
         }
         self.review_locked(workspace, id, |mut index, history| {
+            // This check belongs under source acceptance. A local withdrawal
+            // that already cleared this marker must prevent a delayed
+            // publisher from freezing the source again after recovery's ACK.
+            current()?;
             if history.fingerprint != expected {
                 return Err(DispatchError::new(
                     "chat_history_changed",
@@ -109,7 +166,11 @@ impl Store {
                 .find(|chat| chat.id == id && chat.workspace_id == workspace)
                 .ok_or_else(invalid)?;
             match chat.team_share.as_ref() {
-                Some(current) if current.id == share && current.initial_fingerprint == expected => {
+                Some(current)
+                    if current.id == share
+                        && current.initial_fingerprint == expected
+                        && current.source_revision == Some(source_revision) =>
+                {
                     return Ok(());
                 }
                 Some(_) => {
@@ -120,11 +181,18 @@ impl Store {
                 }
                 None => {}
             }
+            if chat.send_revision != source_revision {
+                return Err(DispatchError::new(
+                    "chat_history_changed",
+                    "This chat changed after its sharing preview. Review the history again.",
+                ));
+            }
             chat.team_share = Some(Binding {
                 id: share.into(),
                 history_through: history.history_through,
                 history_bytes: history.history_bytes,
                 initial_fingerprint: expected.into(),
+                source_revision: Some(source_revision),
             });
             chat.send_revision = next_send_revision(chat.send_revision).map_err(|_| invalid())?;
             chat.updated_at_ms = now_ms();
@@ -143,6 +211,19 @@ impl Store {
         workspace: &str,
         id: &str,
         share: &str,
+    ) -> Result<(), DispatchError> {
+        self.clear_sharing_at_revision(workspace, id, share, None)
+    }
+
+    /// Canonical-only recovery is safe even if the publication journal was
+    /// lost. Clearing increments source acceptance: a backed-up prepared
+    /// publication cannot freeze this source again with the old consent.
+    pub(crate) fn clear_sharing_at_revision(
+        &self,
+        workspace: &str,
+        id: &str,
+        share: &str,
+        expected: Option<u64>,
     ) -> Result<(), DispatchError> {
         validate_record_id(id).map_err(|_| invalid())?;
         let _acceptance =
@@ -163,6 +244,9 @@ impl Store {
                             .into(),
                     );
                 }
+            }
+            if expected.is_some_and(|revision| revision != chat.send_revision) {
+                return Err("This chat changed. Refresh sharing before stopping it.".into());
             }
             chat.team_share = None;
             chat.send_revision = next_send_revision(chat.send_revision)?;
@@ -220,12 +304,7 @@ impl Store {
         id: &str,
         operation: impl FnOnce(Index, History) -> Result<T, DispatchError>,
     ) -> Result<T, DispatchError> {
-        self.source_locked(workspace, id, true, |index, _, bytes| {
-            let chat = index
-                .conversations
-                .iter()
-                .find(|chat| chat.id == id)
-                .ok_or_else(invalid)?;
+        self.source_locked(workspace, id, true, |index, chat, bytes| {
             let history = project(chat, bytes)?;
             operation(index, history)
         })
@@ -238,12 +317,47 @@ impl Store {
         require_idle: bool,
         operation: impl FnOnce(Index, &Conversation, &[u8]) -> Result<T, DispatchError>,
     ) -> Result<T, DispatchError> {
+        self.index_locked(workspace, id, |index, chat| {
+            let _transcript = self.transcript_guard().map_err(|_| invalid())?;
+            if require_idle
+                && (chat.running || self.active.lock().map_err(|_| invalid())?.contains_key(id))
+            {
+                return Err(DispatchError::new(
+                    "chat_running",
+                    "Finish or stop this chat's current turn before sharing its history.",
+                ));
+            }
+            let _runner = if require_idle {
+                Some(
+                    crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)
+                        .map_err(|_| invalid())?
+                        .ok_or_else(|| DispatchError::new("chat_running", "Finish or stop this chat's current turn before sharing its history."))?,
+                )
+            } else { None };
+            let directory = safe_join(&self.root, id).map_err(|_| invalid())?;
+            // A bounded regular leaf is insufficient if a conversation's
+            // directory was replaced with a symlink or Windows reparse point.
+            match fs::symlink_metadata(&directory) {
+                Ok(metadata) if metadata.is_dir() && !reparse_or_link(&metadata) => {}
+                Err(error) if error.kind()==std::io::ErrorKind::NotFound && chat.last_message_at_ms.is_none() => {}
+                _ => return Err(invalid()),
+            }
+            let bytes = read_private(&directory.join("events.ndjson"), HISTORY_LIMIT, chat.last_message_at_ms.is_none())?;
+            operation(index, chat, &bytes)
+        })
+    }
+
+    fn index_locked<T>(
+        &self,
+        workspace: &str,
+        id: &str,
+        operation: impl FnOnce(Index, &Conversation) -> Result<T, DispatchError>,
+    ) -> Result<T, DispatchError> {
         validate_record_id(id).map_err(|_| invalid())?;
         let _acceptance =
             crate::chat_receipts::Operation::conversation(&self.root, id).map_err(|_| invalid())?;
         let _lifecycle =
             crate::work_handoff_store::lifecycle_lock(&self.root).map_err(|_| invalid())?;
-        let _transcript = self.transcript_guard().map_err(|_| invalid())?;
         let index: Index = serde_json::from_slice(&read_private(
             &self.root.join("conversations.json"),
             INDEX_LIMIT,
@@ -255,35 +369,8 @@ impl Store {
             .iter()
             .find(|chat| chat.id == id && chat.workspace_id == workspace)
             .ok_or_else(invalid)?;
-        if require_idle
-            && (chat.running || self.active.lock().map_err(|_| invalid())?.contains_key(id))
-        {
-            return Err(DispatchError::new(
-                "chat_running",
-                "Finish or stop this chat's current turn before sharing its history.",
-            ));
-        }
-        let _runner =
-            if require_idle {
-                Some(crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)
-            .map_err(|_| invalid())?
-            .ok_or_else(|| {
-                DispatchError::new(
-                    "chat_running",
-                    "Finish or stop this chat's current turn before sharing its history.",
-                )
-            })?)
-            } else {
-                None
-            };
-        let directory = safe_join(&self.root, id).map_err(|_| invalid())?;
-        let bytes = read_private(
-            &directory.join("events.ndjson"),
-            HISTORY_LIMIT,
-            chat.last_message_at_ms.is_none(),
-        )?;
         let chat = chat.clone();
-        operation(index, &chat, &bytes)
+        operation(index, &chat)
     }
 }
 
@@ -363,6 +450,11 @@ fn project(chat: &Conversation, bytes: &[u8]) -> Result<History, DispatchError> 
         fingerprint,
         history_through,
         history_bytes: bytes.len() as u64,
+        source_revision: chat
+            .team_share
+            .as_ref()
+            .and_then(|binding| binding.source_revision)
+            .unwrap_or(chat.send_revision),
     })
 }
 

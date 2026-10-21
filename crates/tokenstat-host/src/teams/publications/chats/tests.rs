@@ -200,3 +200,106 @@ fn missing_parent_records_fail_closed_after_a_disk_replacement() {
     assert!(store.resolve_chat(&target, &prepared.id).is_err());
     assert!(path.is_file());
 }
+
+#[test]
+fn physical_owner_recovery_is_revision_checked_and_cannot_revive_or_retire_a_replacement() {
+    let (_root, store, owner, checkout) = fixture();
+    let target = target(&owner, &checkout);
+    let pending = store
+        .prepare_chat(
+            &target,
+            "chat_fixture",
+            "first-publication",
+            &"ab".repeat(32),
+        )
+        .unwrap();
+    let active = store
+        .activate_chat(&target, &pending.id, pending.revision, 1)
+        .unwrap();
+    assert!(
+        store
+            .retire_source(
+                "wrong-workspace",
+                "chat_fixture",
+                &active.id,
+                active.revision
+            )
+            .is_err()
+    );
+    assert!(
+        store
+            .retire_source(
+                &checkout.workspace_id,
+                "wrong-conversation",
+                &active.id,
+                active.revision
+            )
+            .is_err()
+    );
+    assert!(
+        store
+            .retire_source(
+                &checkout.workspace_id,
+                "chat_fixture",
+                &active.id,
+                active.revision + 1
+            )
+            .is_err()
+    );
+    assert!(store.resolve_chat(&target, &active.id).is_ok());
+    let (_, retired) = store
+        .retire_source(
+            &checkout.workspace_id,
+            "chat_fixture",
+            &active.id,
+            active.revision,
+        )
+        .unwrap();
+    assert!(retired.phase == Phase::Withdrawn);
+    assert!(!retired.cloud_withdrawn);
+    assert!(store.resolve_chat(&target, &active.id).is_err());
+    let next = store
+        .prepare_chat(
+            &target,
+            "chat_fixture",
+            "replacement-publication",
+            &"cd".repeat(32),
+        )
+        .unwrap();
+    let replacement = store
+        .activate_chat(&target, &next.id, next.revision, 1)
+        .unwrap();
+    store
+        .retire_source(
+            &checkout.workspace_id,
+            "chat_fixture",
+            &active.id,
+            active.revision,
+        )
+        .unwrap();
+    assert!(store.resolve_chat(&target, &replacement.id).is_ok());
+    assert_eq!(
+        store
+            .source_record(&checkout.workspace_id, "chat_fixture", None)
+            .unwrap()
+            .unwrap()
+            .1
+            .id,
+        replacement.id
+    );
+    store
+        .withdraw(&owner, &checkout.id, checkout.revision)
+        .unwrap();
+    // Revocation is still local and available after losing the parent or the
+    // account that originally published it. There is no activation operation.
+    assert!(
+        store
+            .retire_source(
+                &checkout.workspace_id,
+                "chat_fixture",
+                &replacement.id,
+                replacement.revision
+            )
+            .is_ok()
+    );
+}

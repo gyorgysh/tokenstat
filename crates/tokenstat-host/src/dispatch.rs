@@ -1293,6 +1293,9 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
     if let Some(result) = crate::teams::scoped_call(method, params) {
         return result;
     }
+    if let Some(result) = crate::teams::local_sharing_call(method, params) {
+        return result;
+    }
     if owner_only_method(method) {
         crate::request_context::refuse_remote("account and update methods")?;
     }
@@ -4935,6 +4938,7 @@ fn highlight(params: &str) -> Result<Value, String> {
 /// See [`sessionless`] for why that matters.
 pub fn call_sessionless(method: &str, params: &str) -> Option<String> {
     crate::teams::scoped_call(method, params)
+        .or_else(|| crate::teams::local_sharing_call(method, params))
         .or_else(|| sessionless(method, params))
         .map(|result| match result {
             Ok(v) => ok(v),

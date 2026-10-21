@@ -9,7 +9,7 @@ use crate::{account_session::AccountSnapshot, error::DispatchError};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tokenstat_sync::teams::{Page, Repository, RepositoryRole, Revision, TeamClient, TeamError};
+use tokenstat_sync::teams::{Page, Repository, RepositoryRole, TeamClient, TeamError};
 
 #[cfg(test)]
 mod tests;
@@ -423,49 +423,43 @@ pub(super) fn perform(
             if retired.cloud_withdrawn {
                 return Ok(json!({"withdrawn":true}));
             }
-            let revision = match client.checkout_publication(&retired.organization_id, &retired.id)
-            {
-                Ok(reply) => {
-                    let current = reply.checkout;
-                    if current.id != retired.id
-                        || current.organization_id != retired.organization_id
-                        || current.repository_id != retired.repository_id
-                        || current.publisher_id != binding.publisher_id
-                        || current.host_key != binding.host_key
-                    {
-                        return Err(api_error(TeamError::InvalidResponse));
+            for _ in 0..2 {
+                let revision =
+                    match client.checkout_publication(&retired.organization_id, &retired.id) {
+                        Ok(reply) => {
+                            let current = reply.checkout;
+                            if current.id != retired.id
+                                || current.organization_id != retired.organization_id
+                                || current.repository_id != retired.repository_id
+                                || current.publisher_id != binding.publisher_id
+                                || current.host_key != binding.host_key
+                            {
+                                return Err(api_error(TeamError::InvalidResponse));
+                            }
+                            current.revision
+                        }
+                        Err(TeamError::Rejected {
+                            status: 404, code, ..
+                        }) if code == "not_found" => 0,
+                        Err(_) => break,
+                    };
+                match client.withdraw_checkout_reference(
+                    &retired.organization_id,
+                    &retired.repository_id,
+                    &retired.id,
+                    revision,
+                ) {
+                    Ok(result) if result.withdrawn => {
+                        store.confirm_cloud_withdrawal(&binding, &retired.id)?;
+                        return serialize(result);
                     }
-                    Some(current.revision)
+                    Err(TeamError::Rejected {
+                        status: 409, code, ..
+                    }) if code == "revision_conflict" => continue,
+                    _ => break,
                 }
-                Err(TeamError::Rejected {
-                    status: 404, code, ..
-                }) if code == "not_found" => {
-                    store.confirm_cloud_withdrawal(&binding, &retired.id)?;
-                    return Ok(json!({"withdrawn":true}));
-                }
-                Err(_) => None,
-            };
-            let Some(expected_revision) = revision else {
-                return Ok(json!({"withdrawn":true,"accountCleanupPending":true}));
-            };
-            match client.withdraw_checkout(
-                &retired.organization_id,
-                &retired.id,
-                Revision { expected_revision },
-            ) {
-                Ok(result) if result.withdrawn => {
-                    store.confirm_cloud_withdrawal(&binding, &retired.id)?;
-                    serialize(result)
-                }
-                Ok(_) => Ok(json!({"withdrawn":true,"accountCleanupPending":true})),
-                Err(TeamError::Rejected {
-                    status: 404, code, ..
-                }) if code == "not_found" => {
-                    store.confirm_cloud_withdrawal(&binding, &retired.id)?;
-                    Ok(json!({"withdrawn":true}))
-                }
-                Err(_) => Ok(json!({"withdrawn":true,"accountCleanupPending":true})),
             }
+            Ok(json!({"withdrawn":true,"accountCleanupPending":true}))
         }
     }
 }

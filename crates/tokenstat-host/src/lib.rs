@@ -269,4 +269,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 40 adds host-private checkout publication and scoped availability.
 /// Version 41 adds the separate local scoped Team connection pool.
 /// Version 42 adds reviewed shared-chat publication and private-send fences.
-pub const PROTOCOL_VERSION: &str = "42";
+/// Version 43 adds local sharing inspection and recovery without an account.
+pub const PROTOCOL_VERSION: &str = "43";

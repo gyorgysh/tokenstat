@@ -437,6 +437,8 @@ mod tests {
                         "totals",
                         "workspace.list",
                         "chat.list",
+                        "chat.sharing.info",
+                        "chat.sharing.stopLocal",
                         "pty.spawn",
                         "vault.get",
                         "teams.directory",

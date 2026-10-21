@@ -11,6 +11,8 @@ mod connections;
 mod directory;
 mod ingress;
 #[cfg(feature = "local-host")]
+mod local_sharing;
+#[cfg(feature = "local-host")]
 mod publications;
 mod scoped;
 #[cfg(feature = "local-host")]
@@ -26,6 +28,20 @@ use tokenstat_sync::teams::{TeamClient, TeamError};
 
 pub(crate) fn scoped_call(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
     scoped::call(method, params)
+}
+pub(crate) fn local_sharing_call(
+    method: &str,
+    params: &str,
+) -> Option<Result<Value, DispatchError>> {
+    #[cfg(feature = "local-host")]
+    {
+        local_sharing::call(method, params)
+    }
+    #[cfg(not(feature = "local-host"))]
+    {
+        let _ = (method, params);
+        None
+    }
 }
 
 pub(crate) fn restore_remote_reach(

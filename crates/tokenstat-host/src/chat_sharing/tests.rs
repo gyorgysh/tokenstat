@@ -318,3 +318,213 @@ fn history_review_refuses_linked_source_files_and_non_regular_inputs() {
     assert!(!error.message.contains("unrelated private message"));
     assert!(read_private(&directory, HISTORY_LIMIT, false).is_err());
 }
+
+#[cfg(unix)]
+#[test]
+fn history_review_refuses_linked_conversation_directories() {
+    let (root, store, chat) = fixture();
+    let outside = root.path().join("other-private-history");
+    fs::create_dir(&outside).unwrap();
+    fs::write(
+        outside.join("events.ndjson"),
+        b"{\"kind\":\"user\",\"text\":\"PRIVATE_UNRELATED_HISTORY\",\"at_ms\":1}\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&outside, store.root.join(&chat.id)).unwrap();
+    assert_eq!(
+        store
+            .sharing_history(&chat.workspace_id, &chat.id)
+            .err()
+            .unwrap()
+            .code,
+        "chat_history_unavailable"
+    );
+}
+
+#[test]
+fn publication_current_check_runs_under_source_acceptance_before_freezing() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    let (_root, store, chat) = fixture();
+    let store = Arc::new(store);
+    let history = store.sharing_history(&chat.workspace_id, &chat.id).unwrap();
+    let share = format!("share_{}", "a".repeat(32));
+    let held = crate::chat_receipts::Operation::conversation(&store.root, &chat.id).unwrap();
+    let retired = Arc::new(AtomicBool::new(false));
+    let (started, wait_started) = mpsc::channel();
+    let (checked, wait_checked) = mpsc::channel();
+    let worker = {
+        let store = store.clone();
+        let retired = retired.clone();
+        let chat = chat.clone();
+        let share = share.clone();
+        std::thread::spawn(move || {
+            started.send(()).unwrap();
+            store.freeze_sharing_if_current(
+                &chat.workspace_id,
+                &chat.id,
+                &share,
+                &history.fingerprint,
+                history.source_revision,
+                || {
+                    checked.send(()).unwrap();
+                    if retired.load(Ordering::Acquire) {
+                        Err(DispatchError::new(
+                            "chat_sharing_changed",
+                            "Sharing stopped.",
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                },
+            )
+        })
+    };
+    wait_started.recv().unwrap();
+    let checked_before_acceptance = wait_checked
+        .recv_timeout(Duration::from_millis(100))
+        .is_ok();
+    retired.store(true, Ordering::Release);
+    drop(held);
+    let result = worker.join().unwrap();
+    assert!(
+        !checked_before_acceptance,
+        "a pre-lock check could re-freeze a source after local recovery ACKed it"
+    );
+    assert_eq!(result.unwrap_err().code, "chat_sharing_changed");
+    assert!(
+        store
+            .sharing_binding(&chat.workspace_id, &chat.id)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn a_stopped_source_needs_fresh_consent_even_if_visible_history_has_not_changed() {
+    let (_root, store, chat) = fixture();
+    let reviewed = store.sharing_history(&chat.workspace_id, &chat.id).unwrap();
+    let first = format!("share_{}", "a".repeat(32));
+    let next = format!("share_{}", "b".repeat(32));
+    store
+        .freeze_sharing_if_current(
+            &chat.workspace_id,
+            &chat.id,
+            &first,
+            &reviewed.fingerprint,
+            reviewed.source_revision,
+            || Ok(()),
+        )
+        .unwrap();
+    let frozen = store.sharing_history(&chat.workspace_id, &chat.id).unwrap();
+    assert_eq!(
+        reviewed.source_revision, frozen.source_revision,
+        "a frozen pending publication retains its original consent revision for retry"
+    );
+    store
+        .clear_sharing(&chat.workspace_id, &chat.id, &first)
+        .unwrap();
+    let current = store.sharing_history(&chat.workspace_id, &chat.id).unwrap();
+    assert_eq!(
+        reviewed.fingerprint, current.fingerprint,
+        "visible content does not change when sharing stops"
+    );
+    assert_ne!(reviewed.source_revision, current.source_revision);
+    let stale = store
+        .freeze_sharing_if_current(
+            &chat.workspace_id,
+            &chat.id,
+            &next,
+            &reviewed.fingerprint,
+            reviewed.source_revision,
+            || Ok(()),
+        )
+        .unwrap_err();
+    assert_eq!(stale.code, "chat_history_changed");
+    assert!(
+        store
+            .sharing_binding(&chat.workspace_id, &chat.id)
+            .unwrap()
+            .is_none()
+    );
+    store
+        .freeze_sharing_if_current(
+            &chat.workspace_id,
+            &chat.id,
+            &next,
+            &current.fingerprint,
+            current.source_revision,
+            || Ok(()),
+        )
+        .unwrap();
+}
+
+#[test]
+fn canonical_recovery_requires_the_exact_source_revision_and_invalidates_old_consent() {
+    let (_root, store, chat) = fixture();
+    let share = "share_ffffffffffffffffffffffffffffffff";
+    let history = store.sharing_history(&chat.workspace_id, &chat.id).unwrap();
+    store
+        .freeze_sharing_if_current(
+            &chat.workspace_id,
+            &chat.id,
+            share,
+            &history.fingerprint,
+            history.source_revision,
+            || Ok(()),
+        )
+        .unwrap();
+    let (_, revision) = store.sharing_state(&chat.workspace_id, &chat.id).unwrap();
+    assert!(
+        store
+            .clear_sharing_at_revision(&chat.workspace_id, &chat.id, share, Some(revision + 1))
+            .is_err()
+    );
+    assert!(
+        store
+            .sharing_binding(&chat.workspace_id, &chat.id)
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        store
+            .clear_sharing_at_revision(
+                &chat.workspace_id,
+                &chat.id,
+                "share_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                Some(revision)
+            )
+            .is_err()
+    );
+    store
+        .clear_sharing_at_revision(&chat.workspace_id, &chat.id, share, Some(revision))
+        .unwrap();
+    store
+        .clear_sharing_at_revision(&chat.workspace_id, &chat.id, share, Some(revision))
+        .unwrap();
+    assert!(
+        store
+            .shared_history(&chat.workspace_id, &chat.id, share, &history.fingerprint)
+            .is_err()
+    );
+    assert!(
+        store
+            .freeze_sharing_if_current(
+                &chat.workspace_id,
+                &chat.id,
+                share,
+                &history.fingerprint,
+                history.source_revision,
+                || Ok(())
+            )
+            .is_err()
+    );
+    assert!(
+        store
+            .sharing_binding(&chat.workspace_id, &chat.id)
+            .unwrap()
+            .is_none()
+    );
+}

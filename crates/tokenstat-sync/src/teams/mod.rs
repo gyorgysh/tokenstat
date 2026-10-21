@@ -495,6 +495,25 @@ impl TeamClient {
             None,
         )
     }
+    /// Retire the exact reference even if its publication request timed out
+    /// before a row was observable. Zero explicitly means "not yet present";
+    /// the server reserves a terminal ref under this repository and device.
+    pub fn withdraw_checkout_reference(
+        &self,
+        org: &str,
+        repository: &str,
+        checkout: &str,
+        expected_revision: u64,
+    ) -> Result<Withdrawn, TeamError> {
+        self.request(
+            Method::DELETE,
+            &["organizations", org, "checkouts", checkout],
+            Some(
+                serde_json::json!({"repositoryId":repository,"expectedRevision":expected_revision}),
+            ),
+            None,
+        )
+    }
     pub fn execution_grants(
         &self,
         org: &str,

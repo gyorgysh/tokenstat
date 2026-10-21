@@ -18,6 +18,8 @@ pub(in crate::teams) struct ChatShare {
     pub revision: u64,
     pub cloud_revision: Option<u64>,
     pub cloud_withdrawn: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_revision: Option<u64>,
 }
 #[derive(Clone, Copy)]
 pub(in crate::teams) struct ChatTarget<'a> {
@@ -61,6 +63,63 @@ fn digest(value: &str) -> bool {
 }
 
 impl Store {
+    /// Physical-owner recovery is revocation only. It does not require the
+    /// original cloud account or key to still exist, and cannot activate a ref.
+    pub(in crate::teams) fn source_record(
+        &self,
+        workspace: &str,
+        conversation: &str,
+        share: Option<&str>,
+    ) -> Result<Option<(Checkout, ChatShare)>, DispatchError> {
+        self.read(|index| {
+            Ok(index.chats.iter().rev().find_map(|row| {
+                if row.conversation_id != conversation
+                    || !share.map_or(
+                        row.phase != Phase::Withdrawn || !row.cloud_withdrawn,
+                        |id| row.id == id,
+                    )
+                {
+                    return None;
+                }
+                index
+                    .checkouts
+                    .iter()
+                    .find(|parent| parent.id == row.checkout_id && parent.workspace_id == workspace)
+                    .map(|parent| (parent.clone(), row.clone()))
+            }))
+        })
+    }
+    pub(in crate::teams) fn retire_source(
+        &self,
+        workspace: &str,
+        conversation: &str,
+        share: &str,
+        expected: u64,
+    ) -> Result<(Checkout, ChatShare), DispatchError> {
+        self.transaction(|index| {
+            let position = index
+                .chats
+                .iter()
+                .position(|row| row.id == share && row.conversation_id == conversation)
+                .ok_or_else(missing)?;
+            let row = &index.chats[position];
+            let parent = index
+                .checkouts
+                .iter()
+                .find(|parent| parent.id == row.checkout_id && parent.workspace_id == workspace)
+                .cloned()
+                .ok_or_else(missing)?;
+            let row = &mut index.chats[position];
+            if row.phase != Phase::Withdrawn {
+                if row.revision != expected {
+                    return Err(conflict());
+                }
+                row.phase = Phase::Withdrawn;
+                row.revision = next_revision(row.revision)?;
+            }
+            Ok((parent, row.clone()))
+        })
+    }
     pub(in crate::teams) fn local_chats(
         &self,
         target: &ChatTarget<'_>,
@@ -145,12 +204,23 @@ impl Store {
             Ok(())
         })
     }
+    #[cfg(test)]
     pub(in crate::teams) fn prepare_chat(
         &self,
         target: &ChatTarget<'_>,
         conversation: &str,
         request: &str,
         preview: &str,
+    ) -> Result<ChatShare, DispatchError> {
+        self.prepare_chat_at_revision(target, conversation, request, preview, 0)
+    }
+    pub(in crate::teams) fn prepare_chat_at_revision(
+        &self,
+        target: &ChatTarget<'_>,
+        conversation: &str,
+        request: &str,
+        preview: &str,
+        source_revision: u64,
     ) -> Result<ChatShare, DispatchError> {
         if !crate::chat_receipts::valid_id(conversation)
             || !crate::chat_receipts::valid_id(request)
@@ -161,7 +231,7 @@ impl Store {
         self.transaction(|index| {
             parent(index,target)?;
             if let Some(row) = index.chats.iter().find(|row| row.checkout_id == target.checkout && row.request_id == request) {
-                if row.conversation_id != conversation || row.preview != preview || row.phase == Phase::Withdrawn { return Err(conflict()); }
+                if row.conversation_id != conversation || row.preview != preview || row.source_revision != Some(source_revision) || row.phase == Phase::Withdrawn { return Err(conflict()); }
                 return Ok(row.clone());
             }
             if index.chats.iter().any(|row| row.conversation_id == conversation && row.phase != Phase::Withdrawn) {
@@ -169,7 +239,7 @@ impl Store {
             }
             if index.chats.len() >= MAX_SHARES { return Err(unavailable("chat_sharing_limit", "This computer's chat sharing records have reached their limit.")); }
             let row = ChatShare { id:opaque("share"), checkout_id:target.checkout.into(),conversation_id:conversation.into(),request_id:request.into(),preview:preview.into(),
-                phase:Phase::Prepared,revision:1,cloud_revision:None,cloud_withdrawn:false };
+                phase:Phase::Prepared,revision:1,cloud_revision:None,cloud_withdrawn:false,source_revision:Some(source_revision) };
             index.chats.push(row.clone()); Ok(row)
         })
     }
