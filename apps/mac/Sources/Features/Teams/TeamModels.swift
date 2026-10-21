@@ -19,6 +19,7 @@ enum TeamHostMethod: String, Sendable {
     case checkoutList = "teams.checkout.list"
     case checkoutWithdraw = "teams.checkout.withdraw"
     case connectionCall = "teams.connection.call"
+    case commentSend = "teams.comment.send"
     case chatOptions = "teams.chat.options"
     case chatPreview = "teams.chat.preview"
     case chatPublish = "teams.chat.publish"
@@ -204,6 +205,33 @@ struct TeamChatCatalog: Decodable, Sendable { let shares: [TeamSharedChat]; let 
 struct TeamChatSummary: Codable, Identifiable, Sendable {
     let id: String; let checkoutId: String; let title: String; let backend: String
     let historyTrimmed: Bool; let allowsAgentRuns: Bool
+    var allowsComments: Bool? = nil
+}
+struct TeamCommentReceipt: Codable, Equatable, Sendable {
+    enum State: String, Codable, Sendable { case unknown, pending, accepted, notAccepted }
+    let shareId: String
+    let clientMessageId: String
+    let state: State
+    let sequence: UInt64?
+    let acceptedAtMs: Int64?
+    func matches(share: String, message: String) -> Bool {
+        shareId == share && clientMessageId == message &&
+            (state == .accepted ? sequence != nil && (acceptedAtMs ?? 0) > 0 : sequence == nil && acceptedAtMs == nil)
+    }
+}
+struct TeamCommentResult: Decodable, Sendable { let receipt: TeamCommentReceipt }
+enum TeamMessageAttribution {
+    static func people(_ events: [JSONValue]) throws -> [String: TeamPerson] {
+        var people: [String: TeamPerson] = [:]
+        for case let .object(row) in events where row["kind"] == .string("user") {
+            guard case let .object(author)? = row["author"], author["kind"] == .string("person") else { continue }
+            guard row["mode"] == .string("comment"), case let .int(sequence)? = row["seq"], sequence >= 0 else { throw CocoaError(.coderReadCorrupt) }
+            let person = try JSONDecoder().decode(TeamPerson.self, from: JSONEncoder().encode(JSONValue.object(author)))
+            guard !person.id.isEmpty, person.id.utf8.count <= 128, !person.name.isEmpty, person.name.count <= 128,
+                  people.updateValue(person, forKey: "user-s\(sequence)") == nil else { throw CocoaError(.coderReadCorrupt) }
+        }
+        return people
+    }
 }
 struct TeamChatDetails: Decodable, Sendable { let chat: TeamChatSummary }
 struct TeamChatHistory: Codable, Sendable {

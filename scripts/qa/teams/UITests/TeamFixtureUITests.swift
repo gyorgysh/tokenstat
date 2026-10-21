@@ -112,6 +112,54 @@ final class TeamFixtureUITests: XCTestCase {
     }
     func testSharedHistoryAndExplicitChatConsent() { sharedChatScenario(largeText: false) }
     func testSharedHistoryWithLargeText() { sharedChatScenario(largeText: true) }
+    func testCommentPostsWithVerifiedAuthor() { commentScenario(uncertain: false, largeText: false) }
+    func testUncertainCommentSurvivesNavigationAndChecksReceiptWithLargeText() { commentScenario(uncertain: true, largeText: true) }
+    func testViewerDoesNotHaveACommentComposer() {
+        let app = launch("commentViewer")
+        openSharedChat(app)
+        XCTAssertFalse(app.buttons["team.comment.send"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["team.comment.text"].exists)
+    }
+    private func openSharedChat(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))
+        app.buttons["Fixture"].tap(); app.buttons["Team chats"].tap()
+        let repository = app.buttons["team.chats.repository"]
+        XCTAssertTrue(repository.waitForExistence(timeout: 5)); repository.tap(); app.buttons["Website"].firstMatch.tap()
+        let shared = app.buttons["team.chats.open.share_" + String(repeating: "a", count: 32)]
+        XCTAssertTrue(shared.waitForExistence(timeout: 5)); reveal(shared, in: app); shared.tap()
+        XCTAssertTrue(app.staticTexts["Quarterly totals"].waitForExistence(timeout: 5))
+    }
+    private func commentScenario(uncertain: Bool, largeText: Bool) {
+        let app = launch(uncertain ? "commentUncertain" : "comment", largeText: largeText)
+        openSharedChat(app)
+        if largeText {
+            let expand = app.buttons["team.comment.expand"]
+            XCTAssertTrue(expand.waitForExistence(timeout: 5)); XCTAssertTrue(expand.isHittable); expand.tap()
+        }
+        let input = app.descendants(matching: .any)["team.comment.text"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 5)); XCTAssertTrue(input.isHittable)
+        input.tap(); input.typeText("A fictional UI comment")
+        let send = app.buttons["team.comment.send"]
+        XCTAssertTrue(send.isEnabled); XCTAssertTrue(send.isHittable)
+        capture(app, largeText ? "Comment composer large text" : "Comment composer")
+        send.tap()
+        if uncertain {
+            let check = app.buttons["team.comment.check"]
+            XCTAssertTrue(check.waitForExistence(timeout: 5)); XCTAssertFalse(input.isEnabled)
+            capture(app, "Uncertain comment large text")
+            app.buttons["team.chat.back"].tap()
+            let shared = app.buttons["team.chats.open.share_" + String(repeating: "a", count: 32)]
+            XCTAssertTrue(shared.waitForExistence(timeout: 5)); reveal(shared, in: app); shared.tap()
+            XCTAssertTrue(check.waitForExistence(timeout: 5)); XCTAssertFalse(input.isEnabled)
+            XCTAssertTrue(String(describing: input.value).contains("A fictional UI comment"))
+            check.tap()
+        }
+        XCTAssertTrue(app.staticTexts["Comment posted."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["team.comment.check"].exists)
+        XCTAssertTrue(app.staticTexts["A fictional UI comment"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "A fictional UI comment")).count, 1)
+        capture(app, largeText ? "Accepted comment large text" : "Accepted comment")
+    }
     private func sharedChatScenario(largeText: Bool) {
         let app = launch(largeText: largeText)
         XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))

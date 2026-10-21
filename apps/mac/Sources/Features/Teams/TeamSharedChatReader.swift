@@ -19,26 +19,55 @@ struct TeamSharedChatReader: View {
     @State private var error: String?
     @State private var loadId = UUID()
     @State private var windowed = false
-    private var isCurrent: Bool { store.mutationContext == context && store.phase == .ready }
+    @State private var reloadAfterRead = false
+    @State private var editingComment = false
+    @State private var pendingComment = false
+    @State private var loadedEarlier = false
+    @Environment(\.teamCommentDraftStorage) private var commentStorage
+    @Environment(\.dynamicTypeSize) private var textSize
+    private var isCurrent: Bool {
+        store.mutationContext == context && store.phase == .ready && context.organizationId == repository.organizationId
+            && checkout.organizationId == repository.organizationId && checkout.repositoryId == repository.id && share.checkoutId == checkout.id
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            ViewThatFits(in: .horizontal) {
-                HStack { header; Spacer(minLength: Theme.Space.m); refresh }
-                VStack(alignment: .leading, spacing: Theme.Space.s) { header; refresh }
-            }.padding(Theme.Space.m).background(Theme.panel)
+            if !editingComment {
+                Group {
+                if textSize.isAccessibilitySize {
+                    HStack(alignment: .top, spacing: Theme.Space.s) { header; refresh }
+                } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack { header; Spacer(minLength: Theme.Space.m); refresh }
+                    VStack(alignment: .leading, spacing: Theme.Space.s) { header; refresh }
+                }
+                }
+                }.padding(Theme.Space.m).background(Theme.panel)
+            }
             if let error { TeamNotice(message: error, warning: true).padding(Theme.Space.m) }
             if let summary {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
-                        if hasMore {
-                            Button(L10n.text("common.teams.load_earlier"), .history) { Task { await load(earlier: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
+                            if hasMore {
+                                Button(L10n.text("common.teams.load_earlier"), .history) { Task { await load(earlier: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
+                            }
+                            if summary.historyTrimmed { TeamNotice(message: L10n.text("common.teams.shared_history_trimmed")) }
+                            if windowed { TeamNotice(message: L10n.text("common.teams.shared_history_window")) }
+                            if let renderedHistory { transcript(renderedHistory).environment(\.teamAvatarOwner, context.owner) }
+                            if events.isEmpty && !loading { Text(L10n.text("common.teams.no_chat_messages")).font(Theme.body).foregroundStyle(.secondary) }
+                            Color.clear.frame(height: 1).id("team-history-end")
+                        }.frame(maxWidth: 1000).frame(maxWidth: .infinity).padding(Theme.Space.l)
+                    }
+                    .onPreferenceChange(TeamTranscriptRenderedKey.self) { rendered in
+                        guard rendered == renderedHistory?.renderId, !loadedEarlier else { return }
+                        let selection = loadId
+                        Task { @MainActor in
+                            await Task.yield()
+                            guard isCurrent, loadId == selection else { return }
+                            proxy.scrollTo("team-history-end", anchor: .bottom)
                         }
-                        if summary.historyTrimmed { TeamNotice(message: L10n.text("common.teams.shared_history_trimmed")) }
-                        if windowed { TeamNotice(message: L10n.text("common.teams.shared_history_window")) }
-                        if let renderedHistory { transcript(renderedHistory) }
-                        if events.isEmpty && !loading { Text(L10n.text("common.teams.no_chat_messages")).font(Theme.body).foregroundStyle(.secondary) }
-                    }.frame(maxWidth: 1000).frame(maxWidth: .infinity).padding(Theme.Space.l)
+                    }
                 }
             } else if loading {
                 TeamLoadingView()
@@ -48,29 +77,46 @@ struct TeamSharedChatReader: View {
             Spacer(minLength: 0)
             ThemeRule()
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                if let asOf {
+                if !editingComment, !pendingComment, let asOf {
                     Text(L10n.text("common.teams.history_checked", asOf.formatted(date: .abbreviated, time: .shortened))).font(Theme.caption).foregroundStyle(.secondary)
                 }
-                Text(L10n.text("common.teams.shared_read_only")).font(Theme.callout).foregroundStyle(.secondary)
+                if summary?.allowsComments != true, !pendingComment {
+                    Text(L10n.text("common.teams.shared_read_only")).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                if let summary, let person = store.capabilities?.actorId, isCurrent {
+                    let target = TeamCommentTarget(origin: context.owner.scope.origin, person: person, organization: repository.organizationId, repository: repository.id, checkout: checkout.id, share: share.id, host: checkout.hostKey)
+                    TeamCommentComposer(store: store, context: context, target: target, allowsComments: summary.allowsComments == true, storage: commentStorage, presentationChanged: { focused, pending in
+                        #if os(iOS)
+                        editingComment = focused
+                        #endif
+                        pendingComment = pending
+                    }) {
+                        if loading { reloadAfterRead = true } else { Task { await load(earlier: false) } }
+                    }.id(target)
+                }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(Theme.Space.m).background(Theme.panel)
         }
         .task { await load(earlier: false) }
-        .onDisappear { loadId = UUID(); loading = false }
+        .onDisappear { loadId = UUID(); loading = false; reloadAfterRead = false }
     }
     private var header: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             Button(L10n.text("common.teams.chats"), .back, action: back).buttonStyle(TeamButtonStyle()).accessibilityIdentifier("team.chat.back")
+                .environment(\.compactActions, textSize.isAccessibilitySize)
+                .frame(minWidth: 44, minHeight: 44)
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text(summary?.title ?? L10n.text("common.teams.shared_chat")).font(Theme.headline).lineLimit(2).accessibilityAddTraits(.isHeader)
+                Text(summary?.title ?? L10n.text("common.teams.shared_chat")).font(Theme.headline).lineLimit(2).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
                 Text([repository.name, checkout.deviceName ?? L10n.text("common.teams.computer"), checkout.publisher?.name].compactMap { $0 }.joined(separator: " · "))
-                    .font(Theme.caption).foregroundStyle(.secondary).lineLimit(2)
-            }
+                    .font(Theme.caption).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }.frame(maxWidth: .infinity, alignment: .leading).layoutPriority(1)
         }
     }
     private var refresh: some View {
         HStack(spacing: Theme.Space.s) {
             if loading { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
             Button(L10n.text("common.refresh"), .refresh) { Task { await load(earlier: false) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
+                .environment(\.compactActions, textSize.isAccessibilitySize)
+                .frame(minWidth: 44, minHeight: 44)
         }
     }
     private func fields(_ method: String, params: [String: JSONValue] = [:]) -> [String: JSONValue] {
@@ -79,7 +125,15 @@ struct TeamSharedChatReader: View {
     private func load(earlier: Bool) async {
         guard isCurrent, !loading, !earlier || hasMore else { return }
         let id = UUID(); loadId = id; loading = true; error = nil
-        defer { if loadId == id { loading = false } }
+        defer {
+            if loadId == id {
+                loading = false
+                if reloadAfterRead, isCurrent {
+                    reloadAfterRead = false
+                    Task { await load(earlier: false) }
+                }
+            }
+        }
         do {
             let details: TeamChatDetails
             if earlier, let summary { details = TeamChatDetails(chat: summary) }
@@ -105,7 +159,7 @@ struct TeamSharedChatReader: View {
                 throw TeamRequestFailure(code: "invalid_response", message: L10n.text("common.teams.history_cannot_display"))
             }
             windowed = earlier && (windowed || bounded.count < combined.count)
-            summary = details.chat; events = bounded; cursor = page.nextCursor; hasMore = page.hasMore
+            summary = details.chat; events = bounded; cursor = page.nextCursor; hasMore = page.hasMore; loadedEarlier = earlier
             renderedHistory = TeamChatHistory(title: details.chat.title, backend: details.chat.backend, historyTrimmed: details.chat.historyTrimmed, events: bounded)
             asOf = Date(timeIntervalSince1970: Double(page.asOfMs) / 1000)
         } catch is CancellationError {} catch {

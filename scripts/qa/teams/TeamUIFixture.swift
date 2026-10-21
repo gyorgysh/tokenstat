@@ -8,17 +8,18 @@ import AppKit
 #endif
 
 @main struct TeamUIFixture: App {
+    private let commentStorage = TeamCommentDraftStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("team-ui-drafts-" + UUID().uuidString))
     init() { AppFonts.register() }
     var body: some Scene {
         #if os(macOS)
         WindowGroup("Teams UI fixture") {
             if ProcessInfo.processInfo.arguments.contains("--fixture-shared-source") { TeamSourceFixture() }
-            else { TeamFixtureRoot() }
+            else { TeamFixtureRoot().environment(\.teamCommentDraftStorage, commentStorage) }
         }.defaultSize(width: 1150, height: 760)
         #else
         WindowGroup("Teams UI fixture") {
             if ProcessInfo.processInfo.arguments.contains("--fixture-shared-source") { TeamSourceFixture() }
-            else { TeamMobileFixtureRoot() }
+            else { TeamMobileFixtureRoot().environment(\.teamCommentDraftStorage, commentStorage) }
         }
         #endif
     }

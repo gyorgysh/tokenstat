@@ -9,6 +9,14 @@ struct TeamManagementView: View {
     @State private var sheet: TeamSheet?
     @State private var query = ""
     @State private var selectedMemberId: String?
+    @State private var readingSharedChat = false
+    private var compactReader: Bool {
+        #if os(iOS)
+        readingSharedChat
+        #else
+        false
+        #endif
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,7 +31,7 @@ struct TeamManagementView: View {
             if let error = store.error {
                 TeamNotice(message: error, warning: true).padding(Theme.Space.m)
             }
-            if let org = store.selectedOrganization, store.phase == .ready {
+            if let org = store.selectedOrganization, store.phase == .ready, !compactReader {
                 organizationNavigation(org)
             }
             content
@@ -32,6 +40,10 @@ struct TeamManagementView: View {
         .background(Theme.background)
         .tint(TeamColors.action)
         .navigationTitle(store.selectedOrganization?.name ?? L10n.text("common.teams.title"))
+        .onPreferenceChange(TeamChatReadingKey.self) { readingSharedChat = $0 }
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(compactReader ? .inline : .large)
+        #endif
         .sheet(item: $sheet) { route in
             TeamEditorSheet(store: store, route: route, canCreateOrganization: canCreateOrganization, onAccount: onAccount)
                 #if os(macOS)

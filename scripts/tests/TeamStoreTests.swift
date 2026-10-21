@@ -84,7 +84,17 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         try await authorizationRevokedDuringWrite()
         try await authorityLossRetiresPendingReadsAndOldForms()
         avatars()
+        try messageAuthors()
         print("Team directory ownership, recovery, pagination and avatar tests passed")
+    }
+    static func messageAuthors() throws {
+        let named = JSONValue.object(["kind":.string("user"),"seq":.int(42),"mode":.string("comment"),"author":.object(["kind":.string("person"),"id":.string("fixture-member"),"name":.string("Márta Nagy"),"handle":.null,"avatar":.null])])
+        let legacy = JSONValue.object(["kind":.string("user"),"seq":.int(1),"author":.object(["kind":.string("localBeforeTeams")])])
+        let authors = try TeamMessageAttribution.people([legacy, named])
+        check(authors.count == 1 && authors["user-s42"]?.name == "Márta Nagy", "Named author was mapped to the wrong chat row")
+        do { _ = try TeamMessageAttribution.people([named, named]); preconditionFailure("Duplicate author sequence was accepted") } catch {}
+        let unverified = JSONValue.object(["kind":.string("user"),"seq":.int(42),"author":.object(["kind":.string("person"),"id":.string("forged"),"name":.string("Unverified")])])
+        do { _ = try TeamMessageAttribution.people([unverified]); preconditionFailure("Unverified user fields became a named Comment") } catch {}
     }
     @MainActor static func lateError() async throws {
         let fixture = Fixture(), store = TeamStore(api: await fixture.api())

@@ -47,7 +47,10 @@ def selection():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--select-only", action="store_true", help="Report a compatible installed runtime without creating or changing a device.")
+    parser.add_argument("--only-test", action="append", default=[], help="Run a named XCTest method for a focused local check; omit for the full CI suite.")
     args = parser.parse_args()
+    if len(set(args.only_test)) != len(args.only_test) or any(not name.startswith("test") or not name.isalnum() for name in args.only_test):
+        parser.error("Use distinct XCTest method names beginning with test.")
     selected = selection()
     if args.select_only:
         print(json.dumps(selected))
@@ -74,13 +77,15 @@ def main():
                 "-configuration", "Debug", "-destination", "platform=iOS Simulator,id=" + owned_device,
                 "-derivedDataPath", str(result_root / "DerivedData"), "-resultBundlePath", str(bundle),
                 "-parallel-testing-enabled", "NO", "CODE_SIGNING_ALLOWED=NO", "test",
+                *["-only-testing:TeamFixtureUITests/TeamFixtureUITests/" + name for name in args.only_test],
             ], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=1200)
         if result.returncode:
             print((result_root / "build.log").read_text()[-5000:], file=sys.stderr)
             return result.returncode
         summary = json.loads(output("xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(bundle), "--compact"))
         (result_root / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-        if summary.get("result") != "Passed" or summary.get("passedTests", 0) < 10 or summary.get("skippedTests", 0):
+        required = len(args.only_test) if args.only_test else 13
+        if summary.get("result") != "Passed" or summary.get("passedTests", 0) < required or summary.get("skippedTests", 0):
             raise RuntimeError("Teams UI checks did not run and pass every required scenario.")
         print(f"Teams UI: {summary['passedTests']} passed. Results: {bundle}")
         return 0

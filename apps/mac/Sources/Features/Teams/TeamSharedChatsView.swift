@@ -38,6 +38,7 @@ struct TeamSharedChatsView: View {
                 directory
             }
         }
+        .preference(key: TeamChatReadingKey.self, value: selected != nil)
         .task(id: store.selectedRepositoryId) { await loadCheckouts() }
         .task(id: checkoutId) { await loadShares(more: false) }
         .sheet(isPresented: $shareSheet) {

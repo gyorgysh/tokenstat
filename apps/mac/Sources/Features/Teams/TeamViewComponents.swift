@@ -1,6 +1,28 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
+struct TeamTranscriptRenderedKey: PreferenceKey {
+    static let defaultValue: UUID? = nil
+    static func reduce(value: inout UUID?, nextValue: () -> UUID?) { value = nextValue() ?? value }
+}
+struct TeamChatReadingKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
+private struct TeamAvatarOwnerKey: EnvironmentKey { static let defaultValue: TeamAccountOwner? = nil }
+private struct TeamCommentStorageKey: EnvironmentKey { static let defaultValue = TeamCommentDraftStore.shared }
+extension EnvironmentValues {
+    var teamCommentDraftStorage: TeamCommentDraftStore {
+        get { self[TeamCommentStorageKey.self] }
+        set { self[TeamCommentStorageKey.self] = newValue }
+    }
+    var teamAvatarOwner: TeamAccountOwner? {
+        get { self[TeamAvatarOwnerKey.self] }
+        set { self[TeamAvatarOwnerKey.self] = newValue }
+    }
+}
+
 enum TeamColors {
     static let action = Color.adaptive(light: Color(red: 0x5C / 255, green: 0x2B / 255, blue: 0xD9 / 255), dark: Color(red: 0xA7 / 255, green: 0x8B / 255, blue: 0xFA / 255))
     static let destructive = Color.adaptive(light: Color(red: 0xB4 / 255, green: 0x23 / 255, blue: 0x18 / 255), dark: Color(red: 1, green: 0x8A / 255, blue: 0x80 / 255))
@@ -106,7 +128,9 @@ struct TeamButtonStyle: ButtonStyle {
             .font(Theme.callout.weight(.semibold))
             .multilineTextAlignment(.center)
             .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.xs)
             .frame(minHeight: Theme.Control.heightComfortable)
+            .fixedSize(horizontal: false, vertical: true)
             .labelStyle(ActionLabelStyle())
             .foregroundStyle(configuration.role == .destructive ? TeamColors.destructive : TeamColors.action)
             .background(primary ? Theme.accentSoft : Theme.controlSeat,

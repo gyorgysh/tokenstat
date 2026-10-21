@@ -6,14 +6,25 @@ import SwiftUI
 struct TeamTranscriptContent: View {
     let history: TeamChatHistory
     @State private var rows: [ChatDisplayItem] = []
+    @State private var people: [String: TeamPerson] = [:]
+    @State private var readyRenderId: UUID?
     @State private var error: String?
+    @Environment(\.teamAvatarOwner) private var owner
     var body: some View {
         LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
             if let error { TeamNotice(message: error, warning: true) }
             ForEach(rows) { row in
                 if case .user = row.kind {
-                    Label(L10n.text("common.teams.local_before_teams"), systemImage: "person.crop.circle")
-                        .font(Theme.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .trailing)
+                    if let person = people[row.id] {
+                        HStack(spacing: Theme.Space.s) {
+                            Avatar(url: teamAvatarURL(person.avatar, owner: owner)?.absoluteString, name: person.name, handle: person.handle, size: 24, tint: Avatar.tint(for: person.id)).accessibilityHidden(true)
+                            Text(person.name).font(Theme.caption.weight(.semibold)).lineLimit(2)
+                            Text(L10n.text("common.teams.comment")).font(Theme.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .trailing).accessibilityElement(children: .combine)
+                    } else {
+                        Label(L10n.text("common.teams.local_before_teams"), systemImage: "person.crop.circle")
+                            .font(Theme.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .trailing)
+                    }
                 }
                 if case let .attachment(file) = row.kind {
                     Label(file.name, systemImage: "paperclip").font(Theme.callout).foregroundStyle(.secondary)
@@ -23,6 +34,7 @@ struct TeamTranscriptContent: View {
                 }
             }
         }
+        .preference(key: TeamTranscriptRenderedKey.self, value: readyRenderId)
         // A link in someone else's checkout must not become an action on a
         // personal checkout, simulator or workbench on this device.
         .environment(\.openURL, OpenURLAction { url in
@@ -34,12 +46,12 @@ struct TeamTranscriptContent: View {
                 let result = try await Task.detached(priority: .userInitiated) {
                     let decoded = try JSONDecoder().decode([ChatTimelineEvent].self, from: JSONEncoder().encode(events))
                     try Task.checkCancellation()
-                    return ChatDisplayItem.coalesce(decoded, defaultBackend: backend, running: false)
+                    return (ChatDisplayItem.coalesce(decoded, defaultBackend: backend, running: false), try TeamMessageAttribution.people(events))
                 }.value
                 try Task.checkCancellation()
-                rows = result; error = nil
+                rows = result.0; people = result.1; readyRenderId = history.renderId; error = nil
             } catch is CancellationError {} catch {
-                rows = []; self.error = L10n.text("common.teams.history_cannot_display")
+                rows = []; people = [:]; readyRenderId = history.renderId; self.error = L10n.text("common.teams.history_cannot_display")
             }
         }
     }

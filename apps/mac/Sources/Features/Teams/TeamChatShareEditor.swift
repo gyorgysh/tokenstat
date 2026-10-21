@@ -87,7 +87,7 @@ struct TeamChatShareEditor: View {
             ThemeRule()
             Text(L10n.text("common.teams.history_preview")).font(Theme.headline).accessibilityAddTraits(.isHeader)
             if preview.history.historyTrimmed { TeamNotice(message: L10n.text("common.teams.shared_history_trimmed")) }
-            transcript(preview.history)
+            transcript(preview.history).environment(\.teamAvatarOwner, context.owner)
         }
     }
     private func stopReview(_ row: TeamLocalChatPublication) -> some View {
