@@ -125,6 +125,10 @@ pub struct Conversation {
     /// initialized journal is damage, never an empty delivery history.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) team_journal_initialized: bool,
+    /// Keeps private mutation fenced even if run receipts or publication
+    /// records are damaged. Clear only for this exact, proven completed run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) team_run_fence: Option<crate::chat_receipts::team_runs::Fence>,
     pub backend: String,
     #[serde(default)]
     pub persona_id: Option<String>,
@@ -2311,6 +2315,7 @@ impl Store {
         let chat = Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id,
             workspace_id: input.workspace_id,
             title: input
@@ -2802,7 +2807,7 @@ impl Store {
         let targets = self.edit_index_locked(&lifecycle, false, |_, current| {
             let targets: Vec<String> = current
                 .iter()
-                .filter(|chat| chat.workspace_id == workspace_id && chat.team_share.is_none())
+                .filter(|chat| chat.workspace_id == workspace_id && chat.team_share.is_none() && chat.team_run_fence.is_none())
                 .map(|chat| chat.id.clone())
                 .collect();
             if targets.iter().any(|id| active.contains(id)) {
@@ -2813,7 +2818,7 @@ impl Store {
                     return Err("Another instance of tokenstat is running one of these conversations. Stop it there before removing them.".into());
                 }
             }
-            current.retain(|chat| chat.workspace_id != workspace_id || chat.team_share.is_some());
+            current.retain(|chat| chat.workspace_id != workspace_id || chat.team_share.is_some() || chat.team_run_fence.is_some());
             Ok(targets)
         })?;
         for id in &targets {
@@ -7628,6 +7633,7 @@ mod tests {
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -9659,6 +9665,7 @@ mod tests {
         let sample = |id: &str, workspace: &str| Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: id.into(),
             workspace_id: workspace.into(),
             title: "New chat".into(),
@@ -9839,6 +9846,7 @@ mod tests {
         let chat = Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -9965,6 +9973,7 @@ mod tests {
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -10026,6 +10035,7 @@ mod tests {
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: id.into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13303,6 +13313,7 @@ mod tests {
         let mut chat = Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-handoff".into(),
             workspace_id: "ws".into(),
             title: "Handoff".into(),
@@ -13424,6 +13435,7 @@ mod tests {
         let chat = Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-rebrief".into(),
             workspace_id: "ws".into(),
             title: "Rebrief".into(),
@@ -13570,6 +13582,7 @@ mod tests {
         let mut chat = Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-standing".into(),
             workspace_id: "ws".into(),
             title: "Standing".into(),
@@ -13678,6 +13691,7 @@ mod tests {
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13796,6 +13810,7 @@ mod tests {
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13852,6 +13867,7 @@ mod tests {
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -13935,6 +13951,7 @@ mod tests {
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
@@ -14227,6 +14244,7 @@ mod tests {
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
             team_journal_initialized: false,
+            team_run_fence: None,
             id: "chat-test".into(),
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),

@@ -36,6 +36,57 @@ fn record() -> Record {
 }
 
 #[test]
+fn a_run_receipt_cannot_be_reinterpreted_as_a_comment_or_moved_to_another_source() {
+    use crate::chat_receipts::team_runs as runs;
+    let row = record();
+    let mut journal = Journal::new(source());
+    let a = &row.attribution;
+    let mut ledger = runs::Ledger::new(runs::Source {
+        conversation: source().conversation,
+        workspace: source().workspace,
+        created_at_ms: 1,
+    })
+    .unwrap();
+    ledger
+        .reserve(
+            runs::Request {
+                scope: runs::Scope {
+                    issuer: a.scope.issuer.clone(),
+                    organization: a.scope.organization.clone(),
+                    repository: a.scope.repository.clone(),
+                    checkout: a.scope.checkout.clone(),
+                    share: a.scope.share.clone(),
+                },
+                actor: runs::Actor {
+                    person: a.actor.id.clone(),
+                    device: a.actor.device.clone(),
+                },
+                client_message_id: a.client_message_id.clone(),
+                client_message_created_at_ms: 1,
+                request_digest: "11".repeat(32),
+                context_digest: "22".repeat(32),
+                checkout_digest: "33".repeat(32),
+                backend: "codex".into(),
+            },
+            runs::Binding {
+                fence: runs::Fence::new(format!("run_{}", "44".repeat(16)), "55".repeat(32))
+                    .unwrap(),
+                cloud_reference: format!("runlease_{}", "66".repeat(16)),
+                grant: format!("grant_{}", "77".repeat(16)),
+            },
+            2,
+        )
+        .unwrap();
+    journal.runs = Some(ledger);
+    assert!(journal.receipt(&row).is_err());
+    let mut raw: Value = serde_json::from_slice(&journal.encoded().unwrap()).unwrap();
+    raw["runs"]["source"]["conversation"] = json!("other-chat");
+    assert!(Journal::decode(&serde_json::to_vec(&raw).unwrap(), &source()).is_err());
+    let durable = Journal::decode(&journal.encoded().unwrap(), &source()).unwrap();
+    assert!(durable.receipt(&row).is_err());
+}
+
+#[test]
 fn a_reserved_row_is_recovered_exactly_once_without_replaying_missing_text() {
     let mut journal = Journal::new(source());
     let row = record();

@@ -232,7 +232,7 @@ impl Store {
         } = target;
         input.validate()?;
         let (scope, actor) = context(principal, true)?;
-        self.source_locked(workspace, id, true, |mut index, chat, bytes| {
+        self.source_locked(workspace, id, false, |mut index, chat, bytes| {
             principal.ensure_account_current()?; current()?;
             let marker = chat.team_share.as_ref().ok_or_else(paused)?;
             if source_revision.is_none() || marker.source_revision != source_revision || marker.id != scope.share || marker.initial_fingerprint != preview { return Err(paused()); }

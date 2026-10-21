@@ -22,6 +22,49 @@ pub(super) fn fixture() -> (tempfile::TempDir, Store, Conversation) {
     store.conversations.lock().unwrap().push(chat.clone());
     (root, store, chat)
 }
+
+#[test]
+fn an_unresolved_run_keeps_private_operations_fenced_after_publication_metadata_is_lost() {
+    let (_root, store, chat) = fixture();
+    let mut index: Index =
+        serde_json::from_slice(&fs::read(store.root.join("conversations.json")).unwrap()).unwrap();
+    let fence = crate::chat_receipts::team_runs::Fence::new(
+        format!("run_{}", "ab".repeat(16)),
+        "cd".repeat(32),
+    )
+    .unwrap();
+    index.conversations[0].team_run_fence = Some(fence.clone());
+    fs::write(
+        store.root.join("conversations.json"),
+        serde_json::to_vec(&index).unwrap(),
+    )
+    .unwrap();
+    // The Store still has its old in-memory copy, without a sharing marker.
+    assert_eq!(
+        store.require_private_chat(&chat.id).unwrap_err().code,
+        "team_run_recovery_required"
+    );
+    assert!(store.fork(&chat.id).is_err());
+    assert_eq!(
+        store
+            .clear_sharing(
+                &chat.workspace_id,
+                &chat.id,
+                &format!("share_{}", "11".repeat(16))
+            )
+            .unwrap_err()
+            .code,
+        "team_run_recovery_required"
+    );
+    assert_eq!(store.remove_all(&chat.workspace_id).unwrap(), 0);
+    assert_eq!(
+        store
+            .current_send_conversation(&chat.id)
+            .unwrap()
+            .team_run_fence,
+        Some(fence)
+    );
+}
 #[test]
 fn previews_never_serialize_resume_tokens_private_setup_or_untrusted_actor_fields() {
     let (_root, _store, mut chat) = fixture();

@@ -15,6 +15,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
+pub mod team_runs;
 
 /// Thirty days. A client returning later than this is starting again rather
 /// than resending, and a receipt that is gone is not evidence that the turn

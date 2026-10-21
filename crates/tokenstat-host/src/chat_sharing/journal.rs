@@ -235,6 +235,8 @@ pub(super) struct Journal {
     source: Source,
     receipts: BTreeMap<String, Receipt>,
     pending: Option<Pending>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runs: Option<crate::chat_receipts::team_runs::Ledger>,
 }
 
 impl Journal {
@@ -244,6 +246,7 @@ impl Journal {
             source,
             receipts: BTreeMap::new(),
             pending: None,
+            runs: None,
         }
     }
     pub fn decode(bytes: &[u8], source: &Source) -> Result<Self, &'static str> {
@@ -259,6 +262,7 @@ impl Journal {
         {
             return Err("comment journal does not match this source");
         }
+        journal.validate_runs()?;
         if journal.receipts.iter().any(|(key, receipt)| {
             !lower_hex(key, 64)
                 || !lower_hex(receipt.request_digest(), 64)
@@ -279,6 +283,7 @@ impl Journal {
         Ok(journal)
     }
     pub fn encoded(&self) -> Result<Vec<u8>, &'static str> {
+        self.validate_runs()?;
         let bytes = serde_json::to_vec(self).map_err(|_| "comment journal could not be encoded")?;
         if bytes.len() as u64 > MAX_JOURNAL_BYTES {
             return Err("comment journal is full");
@@ -286,6 +291,30 @@ impl Journal {
         Ok(bytes)
     }
     pub fn receipt(&self, record: &Record) -> Result<Option<&Receipt>, &'static str> {
+        let a = &record.attribution;
+        if self
+            .runs
+            .as_ref()
+            .map(|runs| {
+                runs.status(
+                    &crate::chat_receipts::team_runs::Scope {
+                        issuer: a.scope.issuer.clone(),
+                        organization: a.scope.organization.clone(),
+                        repository: a.scope.repository.clone(),
+                        checkout: a.scope.checkout.clone(),
+                        share: a.scope.share.clone(),
+                    },
+                    &a.actor.id,
+                    &a.client_message_id,
+                )
+            })
+            .transpose()
+            .map_err(|_| "run receipt could not be verified")?
+            .flatten()
+            .is_some()
+        {
+            return Err("this message id was already used to ask an agent");
+        }
         let receipt = self.receipts.get(&record.key()?);
         let request_digest = record.request_digest()?;
         if receipt.is_some_and(|receipt| receipt.request_digest() != request_digest) {
@@ -469,9 +498,23 @@ impl Journal {
     pub fn forked(mut self, source: Source) -> Self {
         self.source = source;
         self.pending = None;
+        // These are process/admission identities for the original source.
+        // A copied conversation cannot inherit its authority or recovery.
+        self.runs = None;
         self.receipts
             .retain(|_, receipt| matches!(receipt, Receipt::Accepted { .. }));
         self
+    }
+    fn validate_runs(&self) -> Result<(), &'static str> {
+        if let Some(runs) = &self.runs {
+            runs.validate(&crate::chat_receipts::team_runs::Source {
+                conversation: self.source.conversation.clone(),
+                workspace: self.source.workspace.clone(),
+                created_at_ms: self.source.created_at_ms,
+            })
+            .map_err(|_| "run receipts do not match this source")?;
+        }
+        Ok(())
     }
 }
 

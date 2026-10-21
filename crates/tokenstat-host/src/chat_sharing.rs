@@ -315,11 +315,16 @@ impl Store {
         let lifecycle =
             crate::work_handoff_store::lifecycle_lock(&self.root).map_err(|_| invalid())?;
         let _transcript = self.transcript_guard().map_err(|_| invalid())?;
+        let mut run_blocked = false;
         self.edit_index_locked(&lifecycle, false, |_, current| {
             let chat = current
                 .iter_mut()
                 .find(|chat| chat.id == id && chat.workspace_id == workspace)
                 .ok_or("This chat is no longer in that checkout.")?;
+            if chat.team_run_fence.is_some() {
+                run_blocked = true;
+                return Err("This chat has an unresolved Team run. Stop or recover it on the publishing computer before continuing.".into());
+            }
             match chat.team_share.as_ref() {
                 None => match expected {
                     None => return Ok(()),
@@ -351,7 +356,13 @@ impl Store {
             chat.updated_at_ms = now_ms();
             Ok(())
         })
-        .map_err(|_| invalid())
+        .map_err(|_| {
+            if run_blocked {
+                run_recovery_required()
+            } else {
+                invalid()
+            }
+        })
     }
 
     pub(crate) fn require_private_chat(&self, id: &str) -> Result<(), DispatchError> {
@@ -415,7 +426,7 @@ impl Store {
         self.index_locked(workspace, id, |index, chat| {
             let _transcript = self.transcript_guard().map_err(|_| invalid())?;
             if require_idle
-                && (chat.running || self.active.lock().map_err(|_| invalid())?.contains_key(id))
+                && (chat.team_run_fence.is_some() || chat.running || self.active.lock().map_err(|_| invalid())?.contains_key(id))
             {
                 return Err(DispatchError::new(
                     "chat_running",
@@ -477,6 +488,9 @@ fn paused() -> DispatchError {
 }
 
 pub(super) fn require_personal_send(chat: &Conversation) -> Result<(), DispatchError> {
+    if chat.team_run_fence.is_some() {
+        return Err(run_recovery_required());
+    }
     if chat.team_share.is_some() {
         return Err(DispatchError::new(
             "shared_chat_requires_team",
@@ -484,6 +498,12 @@ pub(super) fn require_personal_send(chat: &Conversation) -> Result<(), DispatchE
         ));
     }
     Ok(())
+}
+fn run_recovery_required() -> DispatchError {
+    DispatchError::new(
+        "team_run_recovery_required",
+        "This chat has an unresolved Team run. Stop or recover it on the publishing computer before continuing.",
+    )
 }
 
 #[cfg(test)]

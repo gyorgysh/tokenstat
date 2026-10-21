@@ -128,6 +128,59 @@ fn canonical_comments_use_the_verified_person_and_survive_retries_across_devices
 }
 
 #[test]
+fn discussion_can_append_while_a_runner_owns_the_conversation_without_sending_to_it() {
+    let (_root, store, chat, preview) = fixture();
+    let runner = crate::chat_receipts::RunnerLease::try_acquire(&store.root, &chat.id)
+        .unwrap()
+        .unwrap();
+    let mut index: Index =
+        serde_json::from_slice(&fs::read(store.root.join("conversations.json")).unwrap()).unwrap();
+    index.conversations[0].running = true;
+    index.conversations[0].team_run_fence = Some(
+        crate::chat_receipts::team_runs::Fence::new(
+            format!("run_{}", "12".repeat(16)),
+            "34".repeat(32),
+        )
+        .unwrap(),
+    );
+    fs::write(
+        store.root.join("conversations.json"),
+        serde_json::to_vec(&index).unwrap(),
+    )
+    .unwrap();
+    let actor = principal("contributor", true, "fixture-member", 'a');
+    accepted(
+        &store
+            .team_comment(
+                target(&chat, &preview),
+                &actor,
+                &input("discussion-during-run"),
+                || Ok(()),
+            )
+            .unwrap(),
+    );
+    assert!(
+        crate::chat_receipts::RunnerLease::try_acquire(&store.root, &chat.id)
+            .unwrap()
+            .is_none()
+    );
+    assert!(store.current_send_conversation(&chat.id).unwrap().running);
+    assert!(store.active.lock().unwrap().is_empty());
+    let history = store
+        .shared_history(
+            &chat.workspace_id,
+            &chat.id,
+            actor.value().share_id.as_deref().unwrap(),
+            &preview,
+        )
+        .unwrap();
+    assert_eq!(history.events.len(), 1);
+    assert_eq!(history.events[0]["mode"], "comment");
+    assert_eq!(history.events[0]["kind"], "user");
+    drop(runner);
+}
+
+#[test]
 fn role_and_exact_source_checks_happen_before_any_comment_is_reserved() {
     let (_root, store, chat, preview) = fixture();
     for actor in [
