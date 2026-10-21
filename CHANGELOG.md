@@ -22,6 +22,11 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Stop a chat's local sharing from the publishing computer even when signed out. Private drafts stay in their original chat while sharing pauses personal sends and queued messages.
 - Post named comments in shared chats without starting an agent. If delivery cannot be confirmed, keep the original pending message and check its receipt before sending again.
 - Recover your saved Team comment drafts when a computer is offline or access changes. Drafts retain their chat and computer labels, with copy and reviewed removal actions that work at larger text sizes.
+- Agent turns and Git/editor actions report when a checkout is already in use, including linked checkouts. Independent clones can run at the same time.
+
+### Fixed
+
+- Terminal status now follows process exit. Closing output no longer marks a running process as stopped, and failed stops remain available for recovery.
 
 ## [1.7.5] - 2026-10-21
 

@@ -26,6 +26,7 @@ mod git_environment;
 pub mod gitwrite;
 pub mod registry;
 pub mod tree;
+pub mod writer;
 
 pub use git::{ChangeKind, Commit, CommitDetail, FileChange, FileDiff, GitStatus, Remote};
 pub use gitwrite::GitOutcome;

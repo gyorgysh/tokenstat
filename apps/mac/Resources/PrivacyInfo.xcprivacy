@@ -87,14 +87,15 @@
 	</array>
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>
-		<!-- Validate the type and size of app-owned draft files before
-		     reading them from the app's support directory. -->
+		<!-- Validate app-owned drafts and metadata of files/folders the
+		     person chose, including repository coordination. -->
 		<dict>
 			<key>NSPrivacyAccessedAPIType</key>
 			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>C617.1</string>
+				<string>3B52.1</string>
 			</array>
 		</dict>
 		<!-- Local elapsed-time budgets, including Team authority expiry

@@ -205,7 +205,15 @@ fn app_managed_helper() -> bool {
 /// "not yet, two things are running" is an answer somebody can act on and
 /// "not yet" is not.
 fn live_work() -> usize {
-    live_chats() + live_terminals()
+    let listed = live_chats() + live_terminals();
+    #[cfg(feature = "local-host")]
+    {
+        // A process retained after an early drain may no longer have a chat
+        // lease or terminal row. Zero requires both sources to be idle.
+        listed.max(crate::workspace_writer::pending_count())
+    }
+    #[cfg(not(feature = "local-host"))]
+    listed
 }
 
 /// Agent turns this daemon owns right now.

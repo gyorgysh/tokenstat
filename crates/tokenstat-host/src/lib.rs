@@ -174,6 +174,8 @@ pub mod work_transcript_identity;
 #[cfg(feature = "local-host")]
 pub mod workflows;
 #[cfg(feature = "local-host")]
+pub(crate) mod workspace_writer;
+#[cfg(feature = "local-host")]
 pub mod workspaces;
 
 pub use dispatch::call;

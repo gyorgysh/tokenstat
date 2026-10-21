@@ -239,6 +239,7 @@ fn tracking_ref(remote: &str, remote_ref: &str) -> String {
 /// fast-forward, or when git would have to touch a file with uncommitted
 /// changes. Each refusal leaves the working tree exactly as it was.
 pub fn pull(dir: &Path, reviewed: &Review) -> Result<Outcome, String> {
+    let _writer = crate::writer::Lease::acquire(dir).map_err(|error| error.to_string())?;
     let _lease = Lease::acquire(&index_path(dir)?.with_file_name("tokenstat-git-operation.lock"))?;
     let Some(target) = reviewed.upstream_head.as_deref() else {
         return Err("The upstream branch is gone. There is nothing to pull.".into());

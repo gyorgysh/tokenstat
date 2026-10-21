@@ -2167,7 +2167,10 @@ fn drain_pty(
         node,
         reader,
     } = ctx;
-    let info = tokenstat_pty::manager()
+    let mut writer = crate::workspace_writer::Guard::acquire(Path::new(cwd))
+        .map_err(|error| error.to_string())?;
+    writer.ensure_current().map_err(|error| error.to_string())?;
+    let info = writer
         .spawn(&tokenstat_pty::Spawn {
             command: crate::launcher::spawn_command(&argv[0]),
             args: argv[1..].to_vec(),

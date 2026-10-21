@@ -467,6 +467,7 @@ pub fn commit(dir: &Path, id: &str, reviewed: &Review, message: &str) -> Result<
         return Ok(previous);
     }
     let index = index_path(dir)?;
+    let _writer = crate::writer::Lease::acquire(dir).map_err(|error| error.to_string())?;
     let _lease = lease::Lease::acquire(&index.with_file_name("tokenstat-git-operation.lock"))?;
     // Recheck after taking the lock, including another request with this ID.
     if let Some(previous) = receipt(dir, id)? {
@@ -627,6 +628,7 @@ fn perform(
 /// Explicitly reconcile an interrupted commit. Never create another commit or
 /// replace an index whose ownership/content cannot be proven from the receipt.
 pub fn recover(dir: &Path, id: &str) -> Result<Receipt, String> {
+    let _writer = crate::writer::Lease::acquire(dir).map_err(|error| error.to_string())?;
     let index = index_path(dir)?;
     let _lease = lease::Lease::acquire(&index.with_file_name("tokenstat-git-operation.lock"))?;
     let mut result = receipt(dir, id)?.ok_or("No submitted commit was found.")?;

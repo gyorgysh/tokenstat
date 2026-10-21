@@ -59,7 +59,7 @@ impl GitOutcome {
 /// one would operate on a repository the user never chose. Paths handed to
 /// these commands are literal file names, never patterns, so pathspec magic is
 /// off for the same reason it is in the read-only module.
-fn git_command(dir: &Path) -> Command {
+pub(crate) fn git_command(dir: &Path) -> Command {
     let mut command = Command::new("git");
     #[cfg(windows)]
     {
@@ -93,6 +93,17 @@ fn git_command(dir: &Path) -> Command {
 /// push that wants a password must fail with a message the window can show,
 /// not block forever on a terminal that does not exist.
 fn git(dir: &Path, args: &[&str]) -> GitOutcome {
+    let writer = match crate::writer::Lease::acquire(dir) {
+        Ok(writer) => writer,
+        Err(error) => return GitOutcome::failed(error.to_string()),
+    };
+    git_with_writer(dir, args, &writer)
+}
+
+fn git_with_writer(dir: &Path, args: &[&str], writer: &crate::writer::Lease) -> GitOutcome {
+    if let Err(error) = writer.ensure_current() {
+        return GitOutcome::failed(error.to_string());
+    }
     match git_command(dir).args(args).output() {
         Ok(out) => GitOutcome::from(out),
         Err(e) => GitOutcome::failed(format!("could not run git: {e}")),
@@ -215,6 +226,10 @@ pub fn fetch_pull(dir: &Path, number: u32, branch: &str) -> GitOutcome {
     if number == 0 || branch.is_empty() || !valid_branch(dir, branch) {
         return GitOutcome::failed("that is not a valid local branch name");
     }
+    let writer = match crate::writer::Lease::acquire(dir) {
+        Ok(writer) => writer,
+        Err(error) => return GitOutcome::failed(error.to_string()),
+    };
     let exists = git_command(dir)
         .args([
             "show-ref",
@@ -230,11 +245,11 @@ pub fn fetch_pull(dir: &Path, number: u32, branch: &str) -> GitOutcome {
     }
 
     let source = format!("pull/{number}/head:refs/heads/{branch}");
-    let fetched = git(dir, &["fetch", "origin", &source]);
+    let fetched = git_with_writer(dir, &["fetch", "origin", &source], &writer);
     if !fetched.ok {
         return fetched;
     }
-    let switched = git(dir, &["switch", branch]);
+    let switched = git_with_writer(dir, &["switch", branch], &writer);
     if switched.ok {
         switched
     } else {
@@ -258,10 +273,17 @@ fn valid_branch(dir: &Path, name: &str) -> bool {
 /// The path is checked against the canonical workspace root, so a symlink
 /// cannot turn an editor save into a write outside the folder the user chose.
 pub fn write_text(dir: &Path, relative: &str, content: &str) -> GitOutcome {
+    let writer = match crate::writer::Lease::acquire(dir) {
+        Ok(writer) => writer,
+        Err(error) => return GitOutcome::failed(error.to_string()),
+    };
     let path = match crate::tree::resolve(dir, relative) {
         Ok(path) => path,
         Err(error) => return GitOutcome::failed(error.to_string()),
     };
+    if let Err(error) = writer.ensure_current() {
+        return GitOutcome::failed(error.to_string());
+    }
     match std::fs::write(path, content) {
         Ok(()) => GitOutcome {
             ok: true,

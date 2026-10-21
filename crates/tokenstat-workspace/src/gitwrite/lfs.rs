@@ -299,6 +299,7 @@ fn pointers_remain(dir: &Path) -> Result<bool, String> {
 /// The explicit enable action replaces only repository-local LFS filters.
 /// Never force installation over an existing hook or change global filters.
 pub fn setup(dir: &Path, allow_install: bool) -> Result<Status, String> {
+    let _writer = crate::writer::Lease::acquire(dir).map_err(|error| error.to_string())?;
     let _lease = Lease::acquire(&index_path(dir)?.with_file_name("tokenstat-git-operation.lock"))?;
     if !installed(dir) {
         if !allow_install {

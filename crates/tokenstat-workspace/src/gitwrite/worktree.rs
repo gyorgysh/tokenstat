@@ -29,6 +29,11 @@ pub fn create(
     if destination.parent().is_none_or(|parent| !parent.is_dir()) {
         return GitOutcome::failed("Choose an existing folder to hold this worktree.");
     }
+    let parent = destination.parent().expect("validated destination parent");
+    let writer = match crate::writer::Lease::acquire_pair(repository, parent) {
+        Ok(writer) => writer,
+        Err(error) => return GitOutcome::failed(error.to_string()),
+    };
     let valid = git_command(repository)
         .args(["check-ref-format", "--branch", &branch])
         .output();
@@ -43,6 +48,9 @@ pub fn create(
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_owned(),
         _ => return GitOutcome::failed("The starting branch or commit is unavailable."),
     };
+    if let Err(error) = writer.ensure_current() {
+        return GitOutcome::failed(error.to_string());
+    }
     match git_command(repository)
         .args(["worktree", "add", "-b", &branch, "--"])
         .arg(destination)
@@ -170,6 +178,83 @@ mod tests {
             .ok
         );
         assert!(!parent.path().join("duplicate").exists());
+    }
+
+    #[test]
+    fn a_busy_destination_is_refused_before_creating_a_branch_or_folder() {
+        let repository = repository();
+        let parent = tempfile::tempdir().unwrap();
+        let held = crate::writer::Lease::acquire(parent.path()).unwrap();
+        let destination = parent.path().join("new-checkout");
+        assert!(
+            !create(
+                repository.path(),
+                &destination,
+                "fixture",
+                "destination-busy",
+                "HEAD"
+            )
+            .ok
+        );
+        assert!(!destination.exists());
+        assert!(
+            !git_command(repository.path())
+                .args([
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    "refs/heads/fixture/destination-busy"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        drop(held);
+        assert!(
+            create(
+                repository.path(),
+                &destination,
+                "fixture",
+                "destination-busy",
+                "HEAD"
+            )
+            .ok
+        );
+    }
+
+    #[test]
+    fn a_destination_above_the_source_does_not_conflict_with_its_own_locks() {
+        let parent = tempfile::tempdir().unwrap();
+        let source = parent.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        assert!(
+            git_command(&source)
+                .args(["init", "-q"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            git_command(&source)
+                .args([
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "-c",
+                    "commit.gpgSign=false",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "Fixture baseline"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let destination = parent.path().join("new-checkout");
+        let outcome = create(&source, &destination, "fixture", "sibling", "HEAD");
+        assert!(outcome.ok, "{}", outcome.message);
     }
 
     #[test]

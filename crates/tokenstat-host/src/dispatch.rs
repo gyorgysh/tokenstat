@@ -3655,20 +3655,31 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 p.model_id.as_deref(),
             ));
             let command = crate::launcher::spawn_command(&p.command);
-            let info = tokenstat_pty::manager()
-                .spawn(&tokenstat_pty::Spawn {
-                    command,
-                    args,
-                    cwd: ws.path.clone(),
-                    workspace_id: Some(ws.id.clone()),
-                    hidden: p.hidden,
-                    rows: p.rows,
-                    cols: p.cols,
-                    no_color: p.no_color,
-                    dark: p.dark,
-                    environment,
-                })
-                .map_err(|e| e.to_string())?;
+            let mut writer = if crate::launcher::is_agent_command(&p.command) {
+                Some(
+                    crate::workspace_writer::Guard::acquire(&ws.path)
+                        .map_err(|error| error.to_string())?,
+                )
+            } else {
+                None
+            };
+            let request = tokenstat_pty::Spawn {
+                command,
+                args,
+                cwd: ws.path.clone(),
+                workspace_id: Some(ws.id.clone()),
+                hidden: p.hidden,
+                rows: p.rows,
+                cols: p.cols,
+                no_color: p.no_color,
+                dark: p.dark,
+                environment,
+            };
+            let info = match writer.as_mut() {
+                Some(writer) => writer.spawn(&request),
+                None => tokenstat_pty::manager().spawn(&request),
+            }
+            .map_err(|e| e.to_string())?;
             crate::live_work::start_terminal(&info);
             serde_json::to_value(info).map_err(|e| e.to_string())
         }

@@ -85,6 +85,16 @@ static APPROVAL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// clients without making an id depend on a filesystem round trip.
 static RECORD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+fn workspace_writer_error(error: tokenstat_workspace::writer::Error) -> DispatchError {
+    use tokenstat_workspace::writer::Error;
+    let code = match &error {
+        Error::Busy => "checkout_busy",
+        Error::Unavailable => "checkout_unavailable",
+        Error::Changed => "checkout_changed",
+    };
+    DispatchError::new(code, error.to_string())
+}
+
 fn validate_record_id(id: &str) -> Result<(), String> {
     if id.is_empty()
         || id.contains('/')
@@ -3845,6 +3855,9 @@ impl Store {
         // not have this backend on PATH, and CI runners often have none.
         let runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
             .ok_or("This conversation is already running in another instance of tokenstat.")?;
+        let workspace = crate::workspaces::folder(&chat.workspace_id)?;
+        let mut writer = crate::workspace_writer::Guard::acquire(&workspace.path)
+            .map_err(workspace_writer_error)?;
         if !routing_continuation && !compact {
             chat = self.router_return_locked(id, chat)?;
         }
@@ -3863,7 +3876,6 @@ impl Store {
         let attachments = self.attachment_paths(id, attachment_ids)?;
         let response_output_dir = self.prepare_response_output_dir(id)?;
         self.recover_codex_session(&mut chat);
-        let workspace = crate::workspaces::folder(&chat.workspace_id)?;
         self.recover_opencode_session(&mut chat, &workspace.path);
         let resume_token = chat
             .resume_tokens
@@ -4162,6 +4174,7 @@ impl Store {
         if let Err(error) = crate::account_session::check_current()
             .map_err(crate::error::DispatchError::from)
             .and_then(|()| crate::workspace_policy::require_current_access())
+            .and_then(|()| writer.ensure_current().map_err(workspace_writer_error))
         {
             if let Some(key) = &receipt_key {
                 let _ = self.drop_receipt(id, key);
@@ -4170,7 +4183,7 @@ impl Store {
         }
         let spawn_argv = live_speed.as_ref().map_or(&argv, |live| &live.argv);
         tokenstat_sync::push::begin_activity(id, activity_revision);
-        let info = match tokenstat_pty::manager()
+        let info = match writer
             .spawn(&tokenstat_pty::Spawn {
                 command: crate::launcher::spawn_command(&spawn_argv[0]),
                 args: spawn_argv[1..].to_vec(),
@@ -4374,6 +4387,7 @@ impl Store {
                     }
                 },
             );
+            drop(writer);
         });
         recorded
             .map(SendOutcome::Started)

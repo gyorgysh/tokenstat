@@ -167,6 +167,7 @@ fn stored_receipt(dir: &Path, id: &str) -> Result<Option<StoredReceipt>, String>
 /// Publish only the submitted object ID. Branch switches, new local commits,
 /// push.default=matching, mirror remotes and follow-tags cannot widen the push.
 pub fn push(dir: &Path, id: &str, reviewed: &Review, retry: bool) -> Result<Receipt, String> {
+    let _writer = crate::writer::Lease::acquire(dir).map_err(|error| error.to_string())?;
     let path = path(dir, id)?;
     let _lease = Lease::acquire(&index_path(dir)?.with_file_name("tokenstat-git-operation.lock"))?;
     let previous = stored_receipt(dir, id)?;
@@ -280,6 +281,7 @@ pub fn push(dir: &Path, id: &str, reviewed: &Review, retry: bool) -> Result<Rece
 /// Explicit recovery observes the exact destination. It neither fetches nor
 /// pushes, and an unreachable remote remains an unknown outcome.
 pub fn recover(dir: &Path, id: &str) -> Result<Receipt, String> {
+    let _writer = crate::writer::Lease::acquire(dir).map_err(|error| error.to_string())?;
     let _lease = Lease::acquire(&index_path(dir)?.with_file_name("tokenstat-git-operation.lock"))?;
     let stored = stored_receipt(dir, id)?.ok_or("No submitted push was found.")?;
     let mut result = stored.result;

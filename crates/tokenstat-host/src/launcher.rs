@@ -1289,6 +1289,17 @@ fn executable_name(command: &str) -> &str {
     name
 }
 
+pub(crate) fn is_agent_command(command: &str) -> bool {
+    let name = executable_name(command);
+    PROFILES
+        .iter()
+        .filter(|profile| profile.harness_id.is_some())
+        .any(|profile| {
+            command_names(profile)
+                .any(|command| executable_name(command).eq_ignore_ascii_case(name))
+        })
+}
+
 fn valid_model_id(model: &str) -> bool {
     !model.is_empty() && model.len() <= 512 && !model.chars().any(char::is_control)
 }

@@ -35,6 +35,8 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::Serialize;
 
+#[cfg(all(test, unix))]
+mod ownership_tests;
 pub mod program_status;
 use program_status::{ProgramStatus, Tracker as ProgramStatusTracker};
 
@@ -260,6 +262,39 @@ struct Session {
     program_status: Arc<Mutex<ProgramStatusTracker>>,
 }
 
+/// A retained observation of one exact process, independent of the session
+/// directory and its cached UI status. It grants no access to another process.
+#[derive(Clone)]
+pub struct ProcessWitness {
+    session: Arc<Session>,
+    id: String,
+}
+impl ProcessWitness {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn output_closed(&self) -> bool {
+        self.session.output_closed.load(Ordering::SeqCst)
+    }
+
+    /// Both the owned child and its output must have completed. EOF or a
+    /// best-effort Stop flag alone cannot release a workspace writer.
+    pub fn completed(&self) -> bool {
+        let mut child = match self.session.child.try_lock() {
+            Ok(child) => child,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return false,
+        };
+        let exited = matches!(child.try_wait(), Ok(Some(_)));
+        drop(child);
+        if exited {
+            self.session.alive.store(false, Ordering::SeqCst);
+            self.session.buffer_space.notify_all();
+        }
+        exited && self.output_closed()
+    }
+}
+
 /// One front end showing a session, and the geometry it can display.
 ///
 /// A pty has exactly one size, so two front ends of different shapes cannot
@@ -396,6 +431,46 @@ impl Manager {
         Ok(info)
     }
 
+    /// Managed work retains its process before it becomes visible to another
+    /// caller that may close the session. No pooled interactive shell is used.
+    pub fn spawn_owned(&self, req: &Spawn) -> Result<(SessionInfo, ProcessWitness), PtyError> {
+        self.spawn_owned_checked(req, || Ok(()))
+    }
+    pub fn spawn_owned_checked(
+        &self,
+        req: &Spawn,
+        check: impl FnOnce() -> Result<(), PtyError>,
+    ) -> Result<(SessionInfo, ProcessWitness), PtyError> {
+        self.spawn_owned_with_io(req, check, false)
+    }
+    /// Noninteractive owned work can use its original byte stream on every
+    /// platform. Interactive terminals retain their normal PTY transport.
+    pub fn spawn_piped_owned_checked(
+        &self,
+        req: &Spawn,
+        check: impl FnOnce() -> Result<(), PtyError>,
+    ) -> Result<(SessionInfo, ProcessWitness), PtyError> {
+        self.spawn_owned_with_io(req, check, true)
+    }
+    fn spawn_owned_with_io(
+        &self,
+        req: &Spawn,
+        check: impl FnOnce() -> Result<(), PtyError>,
+        piped: bool,
+    ) -> Result<(SessionInfo, ProcessWitness), PtyError> {
+        let id = self.next_session_id();
+        let (session, info) = self.build_session_checked(req, id, check, piped)?;
+        let witness = ProcessWitness {
+            session: Arc::clone(&session),
+            id: info.id.clone(),
+        };
+        self.sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(info.id.clone(), session);
+        Ok((info, witness))
+    }
+
     /// Open a pty, spawn the command and start its reader thread. Used by both
     /// the fresh path and the shell pool, so the two share one definition of
     /// what a session is.
@@ -403,6 +478,15 @@ impl Manager {
         &self,
         req: &Spawn,
         id: String,
+    ) -> Result<(Arc<Session>, SessionInfo), PtyError> {
+        self.build_session_checked(req, id, || Ok(()), false)
+    }
+    fn build_session_checked(
+        &self,
+        req: &Spawn,
+        id: String,
+        check: impl FnOnce() -> Result<(), PtyError>,
+        piped: bool,
     ) -> Result<(Arc<Session>, SessionInfo), PtyError> {
         let size = PtySize {
             rows: req.rows.max(1),
@@ -440,7 +524,9 @@ impl Manager {
             cmd.env(key, value);
         }
 
-        let (master, child, mut reader, writer) = spawn_session_process(cmd, size, req.hidden)?;
+        check()?;
+        let (master, child, mut reader, writer) =
+            spawn_session_process(cmd, size, req.hidden, piped)?;
 
         let buffer = Arc::new(Mutex::new(Buffer::new()));
         let buffer_space = Arc::new(Condvar::new());
@@ -504,11 +590,6 @@ impl Manager {
                     }
                 }
                 output_closed.store(true, Ordering::SeqCst);
-                alive.store(false, Ordering::SeqCst);
-                program_status
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .process_exited();
                 buffer_space.notify_all();
             });
         }
@@ -1096,11 +1177,15 @@ impl Manager {
         // That is also why a poisoned lock is recovered rather than skipped.
         {
             let mut child = s.child.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Ok(Some(status)) = child.try_wait() {
-                s.alive.store(false, Ordering::SeqCst);
-                s.exit_code
-                    .store(status.exit_code() as i32, Ordering::SeqCst);
-                s.buffer_space.notify_all();
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    s.alive.store(false, Ordering::SeqCst);
+                    s.exit_code
+                        .store(status.exit_code() as i32, Ordering::SeqCst);
+                    s.buffer_space.notify_all();
+                }
+                Ok(None) => s.alive.store(true, Ordering::SeqCst),
+                Err(_) => {}
             }
         }
 
@@ -1118,11 +1203,14 @@ impl Manager {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .total;
-        info.pid = s
-            .child
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .process_id();
+        info.pid = if info.alive {
+            s.child
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .process_id()
+        } else {
+            None
+        };
         info.last_activity_at_ms = *s
             .last_activity
             .lock()
@@ -1144,6 +1232,16 @@ impl Manager {
         #[cfg(windows)]
         let hidden = s.info.lock().unwrap_or_else(PoisonError::into_inner).hidden;
         let mut child = s.child.lock().unwrap_or_else(PoisonError::into_inner);
+        // A reaped child's numeric PID may now identify another process.
+        // Never signal it again, and never turn an observation error into a
+        // claim that this owned process has stopped.
+        if let Some(status) = child.try_wait()? {
+            s.alive.store(false, Ordering::SeqCst);
+            s.exit_code
+                .store(status.exit_code() as i32, Ordering::SeqCst);
+            s.buffer_space.notify_all();
+            return Ok(());
+        }
         #[cfg(windows)]
         if hidden
             && matches!(child.try_wait(), Ok(None))
@@ -1154,15 +1252,26 @@ impl Manager {
             // handle and live PID still identify this exact agent session.
             kill_windows_process_tree(pid);
         }
-        let _ = child.kill();
-        s.alive.store(false, Ordering::SeqCst);
+        if let Err(error) = child.kill()
+            && child.try_wait()?.is_none()
+        {
+            return Err(error.into());
+        }
+        if let Some(status) = child.try_wait()? {
+            s.alive.store(false, Ordering::SeqCst);
+            s.exit_code
+                .store(status.exit_code() as i32, Ordering::SeqCst);
+        }
         s.buffer_space.notify_all();
         Ok(())
     }
 
     /// Kill and forget. The buffer goes with it.
     pub fn close(&self, id: &str) -> Result<(), PtyError> {
-        let _ = self.kill(id);
+        match self.kill(id) {
+            Ok(()) | Err(PtyError::NoSession(_)) => {}
+            Err(error) => return Err(error),
+        }
         self.sessions
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1213,12 +1322,11 @@ fn spawn_session_process(
     cmd: CommandBuilder,
     size: PtySize,
     hidden: bool,
+    piped: bool,
 ) -> Result<SessionIo, PtyError> {
     // ConPTY is a screen renderer: it wraps and redraws long JSON records.
     // Daemon-owned Windows agents need their original byte stream instead.
-    #[cfg(windows)]
-    if hidden {
-        use std::os::windows::process::CommandExt;
+    if piped || cfg!(windows) && hidden {
         use std::process::{Command, Stdio};
         let argv = cmd.get_argv();
         let mut process = Command::new(&argv[0]);
@@ -1238,7 +1346,16 @@ fn spawn_session_process(
             .stdin(Stdio::null())
             .stderr(output.try_clone()?)
             .stdout(output);
-        process.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            process.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            process.process_group(0);
+        }
         let child = process.spawn()?;
         // Command owns copies of its output handles. Drop them so EOF follows
         // the child's exit, rather than waiting forever for this parent.
@@ -1250,8 +1367,6 @@ fn spawn_session_process(
             Box::new(std::io::sink()),
         ));
     }
-    #[cfg(not(windows))]
-    let _ = hidden;
     let pair = native_pty_system()
         .openpty(size)
         .map_err(|e| PtyError::Spawn(e.to_string()))?;
