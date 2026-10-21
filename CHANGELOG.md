@@ -9,6 +9,13 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.7.5] - 2026-10-21
+
+### Fixed
+
+- The login screen says to tap the tokenstat logo 10 times to enable developer mode.
+- Certificate checks reject distrusted emSign intermediates. This covers the CLI, the host, and the Mac, Windows, iPhone, iPad and Android apps.
+
 ## [1.7.4] - 2026-10-19
 
 ### Added
