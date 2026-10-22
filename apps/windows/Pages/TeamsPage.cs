@@ -202,7 +202,45 @@ internal sealed class TeamsPage : Page
                 var chosen = (Target(orgId, repoId, id, shareId), title, computer);
                 card.Children.Add(ActionIconGlyph.Button(title, ActionIcon.Comment, async (_, _) => await ShowChatAsync(chosen.Item1, chosen.title, chosen.computer)));
             }
+            if (Format.Text(repo, "role") is "contributor" or "maintainer") card.Children.Add(NewChat(orgId, repoId, id, computer));
         }
+    }
+
+    /// A member starts an empty shared chat on that computer and asks its
+    /// agent there, without waiting for the owner to share one.
+    private UIElement NewChat(string orgId, string repoId, string checkout, string computer)
+    {
+        var panel = new StackPanel { Spacing = Theme.SpaceXs, Margin = new Thickness(0, 4, 0, 0) };
+        var box = new TextBox { Header = L10n.Text("common.teams.new_chat_title"), PlaceholderText = L10n.Text("common.teams.new_chat_placeholder") };
+        // Kept per title so a retry after a lost reply settles to the same chat.
+        (string Title, string Id)? request = null;
+        Button? start = null;
+        start = ActionIconGlyph.Button(L10n.Text("common.teams.new_chat"), ActionIcon.Create, async (_, _) =>
+        {
+            var title = box.Text.Trim();
+            if (title.Length == 0) return;
+            if (request is not { } pending || pending.Title != title) request = pending = (title, "new-" + Guid.NewGuid().ToString("N"));
+            start!.IsEnabled = false;
+            try
+            {
+                var made = await CallAsync("teams.ask", new JsonObject
+                {
+                    ["target"] = Target(orgId, repoId, checkout), ["method"] = "team.chat.new",
+                    ["params"] = new JsonObject { ["title"] = title, ["requestId"] = pending.Id },
+                });
+                var share = Format.Text(made, "share");
+                if (share.Length > 0) await ShowChatAsync(Target(orgId, repoId, checkout, share), title, computer);
+            }
+            catch (Exception error)
+            {
+                panel.Children.Add(new TextBlock { Text = error.Message, Foreground = Theme.Brush(static () => Theme.Warning), TextWrapping = TextWrapping.Wrap });
+                start.IsEnabled = true;
+            }
+        });
+        panel.Children.Add(box);
+        panel.Children.Add(start);
+        panel.Children.Add(new TextBlock { Text = L10n.Text("common.teams.new_chat_detail", computer), Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
+        return panel;
     }
 
     private UIElement LaneRow(string orgId, string repoId, string checkout, JsonObject lane, List<JsonObject> all)

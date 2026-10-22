@@ -234,6 +234,9 @@ private fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, on
     var shares by remember(repoId) { mutableStateOf<Map<String, List<JsonObject>>>(emptyMap()) }
     var message by remember(repoId) { mutableStateOf<String?>(null) }
     var busy by remember(repoId) { mutableStateOf(false) }
+    var newTitles by remember(repoId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    // Kept per title so a retry after a lost reply settles to the same chat.
+    var newRequest by remember(repoId) { mutableStateOf<Pair<String, String>?>(null) }
 
     suspend fun load() {
         if (repo.str("role") == null) return
@@ -289,6 +292,29 @@ private fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, on
         }
     }
 
+    fun startChat(checkout: String, computer: String) {
+        val title = newTitles[checkout].orEmpty().trim()
+        if (title.isEmpty()) return
+        val request = newRequest?.takeIf { it.first == title } ?: (title to "new-" + UUID.randomUUID()).also { newRequest = it }
+        scope.launch {
+            busy = true
+            try {
+                val made = calls.call("teams.ask", buildJsonObject {
+                    put("target", target(orgId, repoId, checkout)); put("method", "team.chat.new")
+                    put("params", buildJsonObject { put("title", title); put("requestId", request.second) })
+                })
+                newTitles = newTitles - checkout; newRequest = null
+                made.str("share")?.let { onOpenChat(ChatTarget(target(orgId, repoId, checkout, it), title, computer)) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                message = failure.message
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     TsCard(title = repo.str("name") ?: "", subtitle = if (repo.str("role") == null) L10n.text("common.teams.no_access") else null) {
         message?.let { Text(it, color = LocalTsColors.current.textSecondary) }
         if (repo.str("role") != null && checkouts.isEmpty()) {
@@ -308,6 +334,14 @@ private fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, on
                 TsSecondaryButton(title, icon = ActionIcon.Comment.vector, onClick = {
                     onOpenChat(ChatTarget(target(orgId, repoId, id, shareId), title, computer))
                 })
+            }
+            if (repo.str("role") in setOf("contributor", "maintainer")) {
+                OutlinedTextField(newTitles[id].orEmpty(), { newTitles = newTitles + (id to it) }, Modifier.fillMaxWidth(),
+                    label = { Text(L10n.text("common.teams.new_chat_title")) },
+                    placeholder = { Text(L10n.text("common.teams.new_chat_placeholder")) })
+                TsAccentButton(L10n.text("common.teams.new_chat"), enabled = newTitles[id].orEmpty().isNotBlank() && !busy,
+                    icon = ActionIcon.Create.vector, onClick = { startChat(id, computer) })
+                Text(L10n.text("common.teams.new_chat_detail", computer), color = LocalTsColors.current.textSecondary)
             }
         }
     }
