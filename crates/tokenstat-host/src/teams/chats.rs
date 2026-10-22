@@ -446,15 +446,28 @@ fn publish(
 /// computer. It is created empty, with no persona, and shared with the
 /// repository like any other, so the Ask that follows is about nothing the
 /// publisher had not already chosen to share.
+/// What a member asked for, from their checkout-scoped Run proof.
+pub(super) struct NewChat<'a> {
+    pub organization: &'a str,
+    pub repository: &'a str,
+    pub checkout: &'a str,
+    pub title: &'a str,
+    pub request_id: &'a str,
+    pub person: &'a str,
+}
 pub(super) fn start_for_member(
     owner: &AccountSnapshot,
     client: &TeamClient,
-    organization: &str,
-    repository: &str,
-    checkout: &str,
-    title: &str,
-    request_id: &str,
+    asked: NewChat<'_>,
 ) -> Result<Value, DispatchError> {
+    let NewChat {
+        organization,
+        repository,
+        checkout,
+        title,
+        request_id,
+        person,
+    } = asked;
     identifiers([organization, repository, checkout])?;
     let source = Target {
         organization: organization.into(),
@@ -470,6 +483,7 @@ pub(super) fn start_for_member(
     {
         return Ok(json!({"share":previous.id}));
     }
+    admit_new_chat(person, checkout)?;
     let chats = crate::chat::shared();
     let chat = chats
         .create(crate::chat::Create {
@@ -505,5 +519,51 @@ pub(super) fn start_for_member(
             let _ = chats.remove(&chat.id);
             Err(error)
         }
+    }
+}
+
+/// A Run proof lives for minutes, so one person could otherwise fill this
+/// computer with empty chats before it expires. Ten an hour per person and
+/// checkout is more than anyone starts by hand.
+fn admit_new_chat(person: &str, checkout: &str) -> Result<(), DispatchError> {
+    use std::{
+        collections::HashMap,
+        sync::Mutex,
+        time::{Duration, Instant},
+    };
+    const PER_HOUR: usize = 10;
+    type Started = HashMap<(String, String), Vec<Instant>>;
+    static STARTED: Mutex<Option<Started>> = Mutex::new(None);
+    let mut started = STARTED.lock().map_err(|_| changed())?;
+    let started = started.get_or_insert_with(HashMap::new);
+    let hour = Duration::from_secs(3600);
+    started.retain(|_, times| {
+        times.retain(|at| at.elapsed() < hour);
+        !times.is_empty()
+    });
+    let times = started
+        .entry((person.to_string(), checkout.to_string()))
+        .or_default();
+    if times.len() >= PER_HOUR {
+        return Err(DispatchError::new(
+            "team_new_chat_limit",
+            "You started several chats on this computer in the last hour. Use one of them, or try again later.",
+        ));
+    }
+    times.push(Instant::now());
+    Ok(())
+}
+
+#[cfg(test)]
+mod new_chat_tests {
+    #[test]
+    fn new_chats_are_capped_per_person_and_checkout() {
+        for _ in 0..10 {
+            assert!(super::admit_new_chat("cap-person", "cap-checkout").is_ok());
+        }
+        let refused = super::admit_new_chat("cap-person", "cap-checkout").unwrap_err();
+        assert_eq!(refused.code, "team_new_chat_limit");
+        assert!(super::admit_new_chat("cap-person", "other-checkout").is_ok());
+        assert!(super::admit_new_chat("other-person", "cap-checkout").is_ok());
     }
 }

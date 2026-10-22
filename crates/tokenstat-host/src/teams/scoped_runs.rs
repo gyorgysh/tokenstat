@@ -108,11 +108,14 @@ pub(super) fn new_chat(
     let result = super::chats::start_for_member(
         &owner,
         &client,
-        &scope.organization_id,
-        &scope.repository_id,
-        &scope.checkout_id,
-        title,
-        &input.request_id,
+        super::chats::NewChat {
+            organization: &scope.organization_id,
+            repository: &scope.repository_id,
+            checkout: &scope.checkout_id,
+            title,
+            request_id: &input.request_id,
+            person: &scope.person.id,
+        },
     )?;
     principal.ensure_account_current()?;
     Ok(result)
