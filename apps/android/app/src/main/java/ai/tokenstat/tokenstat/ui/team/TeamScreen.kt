@@ -415,7 +415,15 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Uni
     suspend fun askCall(method: String, params: JsonObject): JsonObject =
         calls.call("teams.ask", buildJsonObject { put("target", chat.target); put("method", method); put("params", params) })
 
-    LaunchedEffect(chat) { load() }
+    LaunchedEffect(chat) {
+        load()
+        // New comments and agent output appear while the chat is open.
+        // Paused while someone is typing, and while an Ask is watched below.
+        while (true) {
+            delay(10_000)
+            if (!busy && fence == null && comment.isBlank() && ask.isBlank()) load()
+        }
+    }
     LaunchedEffect(fence) {
         val running = fence ?: return@LaunchedEffect
         while (true) {

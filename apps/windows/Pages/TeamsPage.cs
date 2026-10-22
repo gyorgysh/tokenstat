@@ -370,6 +370,23 @@ internal sealed class TeamsPage : Page
             }));
             Note(L10n.Text("common.teams.ask_detail", computer));
         }
+        _ = KeepCurrentAsync(target, title, computer, _view, _body.Children.OfType<TextBox>().ToList());
+    }
+
+    /// New comments and agent output appear while the chat is open. Stops
+    /// when another screen is drawn, and waits while someone is typing.
+    private async Task KeepCurrentAsync(JsonObject target, string title, string computer, int view, List<TextBox> inputs)
+    {
+        while (true)
+        {
+            await Task.Delay(10_000);
+            if (!IsLoaded || _view != view) return;
+            if (inputs.All(box => box.Text.Length == 0))
+            {
+                await ShowChatAsync(target, title, computer);
+                return;
+            }
+        }
     }
 
     /// Refresh while the agent works, with Stop, until the host says it ended.
