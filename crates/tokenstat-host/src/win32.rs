@@ -165,6 +165,8 @@ unsafe extern "system" {
     pub(crate) fn Process32FirstW(snapshot: Handle, entry: *mut ProcessEntry32) -> Bool;
     pub(crate) fn Process32NextW(snapshot: Handle, entry: *mut ProcessEntry32) -> Bool;
     pub(crate) fn OpenProcess(access: Dword, inherit: Bool, pid: Dword) -> Handle;
+    pub(crate) fn GetCurrentProcess() -> Handle;
+    pub(crate) fn GetExitCodeProcess(process: Handle, code: *mut Dword) -> Bool;
     pub(crate) fn GetProcessTimes(
         process: Handle,
         created: *mut FileTime,

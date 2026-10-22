@@ -69,26 +69,20 @@ unsafe extern "system" {
     fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
     fn IsProcessInJob(process: Handle, job: Handle, result: *mut i32) -> i32;
     fn TerminateJobObject(job: Handle, code: u32) -> i32;
-    fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
-    fn GetCurrentProcess() -> Handle;
-    fn GetProcessTimes(
-        process: Handle,
-        creation: *mut u64,
-        exit: *mut u64,
-        kernel: *mut u64,
-        user: *mut u64,
-    ) -> i32;
-    fn GetExitCodeProcess(process: Handle, code: *mut u32) -> i32;
 }
 const QUERY_LIMITED: u32 = 0x1000;
 const INVALID_PARAMETER: i32 = 87;
 const STILL_ACTIVE: u32 = 259;
 
+use crate::win32::{FileTime, GetCurrentProcess, GetExitCodeProcess, GetProcessTimes, OpenProcess};
+
 fn started(process: Handle) -> Option<u64> {
-    let (mut creation, mut exit, mut kernel, mut user) = (0u64, 0u64, 0u64, 0u64);
-    // SAFETY: four valid out-pointers to FILETIME-sized integers.
+    let blank = || FileTime { low: 0, high: 0 };
+    let (mut creation, mut exit, mut kernel, mut user) = (blank(), blank(), blank(), blank());
+    // SAFETY: four valid out-pointers to FILETIME structures.
     let ok = unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) };
-    (ok != 0 && creation != 0).then_some(creation)
+    let created = (u64::from(creation.high) << 32) | u64::from(creation.low);
+    (ok != 0 && created != 0).then_some(created)
 }
 fn error() -> io::Error {
     io::Error::last_os_error()
