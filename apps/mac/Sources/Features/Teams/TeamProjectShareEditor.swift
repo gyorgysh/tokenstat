@@ -32,21 +32,32 @@ struct TeamProjectShareEditor: View {
     @State private var includedMembers: Set<String> = []
     @State private var membersLoaded = false
     @State private var accessRole: TeamRepositoryRole = .contributor
+    @State private var detailsExpanded = false
+    @FocusState private var nameFocused: Bool
     @Environment(\.dismiss) private var dismiss
 
     private var canCreate: Bool { organization?.role.canManage == true && organization?.isActive == true }
+    private var projectChoices: [TeamRepository] {
+        guard store.mutationContext == context else { return [] }
+        let current = store.directory?.repositories.repositories.filter { $0.organizationId == context.organizationId } ?? []
+        return current + repositories.filter { old in !current.contains { $0.id == old.id } }
+    }
     private var shareable: [TeamRepository] {
-        repositories.filter { $0.role == .contributor || $0.role == .maintainer }
+        projectChoices.filter { $0.role == .contributor || $0.role == .maintainer }
+    }
+    private var matchingProject: TeamRepository? {
+        let key = trimmedName.precomposedStringWithCanonicalMapping.lowercased()
+        return shareable.first { $0.name.precomposedStringWithCanonicalMapping.lowercased() == key }
     }
     private var workspace: TeamLocalWorkspace? { workspaces.first { $0.id == workspaceId } }
     private var trimmedName: String { newName.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var targetName: String {
-        repositoryId.flatMap { id in repositories.first { $0.id == id }?.name } ?? trimmedName
+        repositoryId.flatMap { id in projectChoices.first { $0.id == id }?.name } ?? trimmedName
     }
     private var valid: Bool {
         guard workspace != nil, confirmed else { return false }
-        if repositoryId != nil { return true }
-        return canCreate && membersLoaded && !trimmedName.isEmpty && trimmedName.utf16.count <= 80
+        if let repositoryId { return shareable.contains { $0.id == repositoryId } }
+        return canCreate && membersLoaded && (created?.name == trimmedName || matchingProject == nil) && !trimmedName.isEmpty && trimmedName.utf16.count <= 80
     }
 
     var body: some View {
@@ -71,11 +82,21 @@ struct TeamProjectShareEditor: View {
             if !loading && workspaces.isEmpty { TeamNotice(message: L10n.text("common.teams.no_local_checkouts")) }
             if initialWorkspace == nil || !canCreate { targetFields }
             else {
-                DisclosureGroup(L10n.text("common.teams.project_details")) {
+                DisclosureGroup(L10n.text("common.teams.project_details"), isExpanded: $detailsExpanded) {
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                         targetFields
                         if let workspace { Text(workspace.path).font(Theme.mono(12)).foregroundStyle(.secondary).textSelection(.enabled) }
                     }.padding(.top, Theme.Space.s)
+                }
+            }
+            if repositoryId == nil, let matchingProject, created == nil {
+                TeamNotice(message: L10n.text("common.teams.project_already_exists", matchingProject.name))
+                HStack(spacing: Theme.Space.s) {
+                    Button(L10n.text("common.teams.use_existing_project", matchingProject.name), .connect) {
+                        repositoryId = matchingProject.id; detailsExpanded = false
+                    }.buttonStyle(TeamButtonStyle()).accessibilityIdentifier("team.project.use_existing")
+                    Button(L10n.text("common.teams.choose_another_project_name"), .edit) { detailsExpanded = true; nameFocused = true }
+                        .buttonStyle(TeamButtonStyle())
                 }
             }
             if repositoryId == nil && canCreate {
@@ -104,6 +125,8 @@ struct TeamProjectShareEditor: View {
                 }
             } else if repositoryId == nil {
                 TeamNotice(message: L10n.text("common.teams.share_project_existing_only"))
+            } else {
+                TeamNotice(message: L10n.text("common.teams.project_existing_access"))
             }
             if !deviceName.isEmpty {
                 LabeledContent(L10n.text("common.teams.computer"), value: deviceName)
@@ -146,8 +169,8 @@ struct TeamProjectShareEditor: View {
                 ForEach(shareable) { repository in Text(repository.name).tag(Optional(repository.id)) }
             }.disabled(saving || created != nil).accessibilityIdentifier("team.project.repository")
             if repositoryId == nil && canCreate {
-                TextField(L10n.text("common.teams.repository_name"), text: Binding(get: { newName }, set: { newName = $0; nameEdited = true }))
-                    .textFieldStyle(ThemedFieldStyle()).disabled(saving || created != nil)
+                TextField(L10n.text("common.teams.repository_name"), text: Binding(get: { newName }, set: { newName = $0; nameEdited = true; confirmed = false }))
+                    .textFieldStyle(ThemedFieldStyle()).disabled(saving || created != nil).focused($nameFocused).accessibilityIdentifier("team.project.name")
             }
             if store.directory?.repositories.nextOffset != nil {
                 Button(L10n.text("common.teams.load_more"), .more) { Task { await store.loadMore(.repositories) } }
@@ -210,7 +233,7 @@ struct TeamProjectShareEditor: View {
                 // A new repository exists from here on. If sharing then fails,
                 // it stays listed and the project can be shared into it again.
                 let repository: TeamRepository
-                if let repositoryId, let existing = repositories.first(where: { $0.id == repositoryId }) {
+                if let repositoryId, let existing = shareable.first(where: { $0.id == repositoryId }) {
                     repository = existing
                 } else if let created, created.name == trimmedName {
                     repository = created
@@ -230,7 +253,13 @@ struct TeamProjectShareEditor: View {
                 await store.reloadAfterChange()
                 guard store.mutationContext == context else { return }
                 if let onShared { onShared(repository, result.publication) } else { dismiss() }
-            } catch is CancellationError {} catch { self.error = error.localizedDescription }
+            } catch is CancellationError {} catch {
+                self.error = error.localizedDescription
+                if (error as? TeamRequestFailure)?.code == "repository_exists" {
+                    detailsExpanded = true
+                    await store.reloadAfterChange()
+                }
+            }
         }
     }
 }

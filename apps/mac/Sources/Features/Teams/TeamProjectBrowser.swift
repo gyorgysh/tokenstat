@@ -8,7 +8,7 @@ struct TeamProjectBrowser: View {
     let manageTeams: () -> Void
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
+            LazyVStack(alignment: .leading, spacing: Theme.Space.l) {
                 TeamSectionHeader(title: L10n.text("common.teams.shared_projects"), subtitle: L10n.text("common.teams.shared_projects_detail")) {
                     Button(L10n.text("common.teams.manage_teams"), .team, action: manageTeams).buttonStyle(TeamButtonStyle())
                 }
@@ -29,6 +29,7 @@ struct TeamProjectBrowser: View {
             }.frame(maxWidth: 860, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, Theme.Space.l)
         }
+        .task { await store.reloadAfterChange() }
     }
 }
 
@@ -41,6 +42,7 @@ private struct TeamProjectGroup: View {
     @State private var loading = false
     @State private var loaded = false
     @State private var error: String?
+    @State private var request = UUID()
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text(organization.name).font(Theme.headline).accessibilityAddTraits(.isHeader)
@@ -75,18 +77,20 @@ private struct TeamProjectGroup: View {
             }
             if loading { ProgressView().controlSize(.small) }
         }.padding(.horizontal, Theme.Space.l)
-            .task { await load(more: false) }
+            .task(id: store.catalogRefresh) { await load(more: false) }
     }
     private func load(more: Bool) async {
         guard organization.isActive else { loaded = true; return }
-        guard !loading else { return }
-        loading = true; defer { loading = false }
+        if more && loading { return }
+        let id = UUID(); request = id
+        loading = true; defer { if request == id { loading = false } }
         do {
             let result: TeamRepositories = try await store.read("repositories.list", fields: ["organization": .string(organization.id),
                 "page": TeamStore.page(offset: more ? nextOffset ?? 0 : 0)], context: context)
+            guard request == id else { return }
             let rows = result.repositories.filter { $0.organizationId == organization.id && $0.role != nil }
             projects = more ? projects + rows.filter { next in !projects.contains { $0.id == next.id } } : rows
             nextOffset = result.nextOffset; loaded = true; error = nil
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        } catch is CancellationError {} catch { if request == id, store.mutationContext == context { self.error = error.localizedDescription } }
     }
 }

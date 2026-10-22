@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
+actor TeamFixtureProjects {
+    static let shared = TeamFixtureProjects()
+    private(set) var hasNewProject = false
+    func addProject() { hasNewProject = true }
+}
+
 enum TeamFixtureData {
     enum State: String { case ready, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer, draftOffline, askUncertain }
     static let state: State = {
@@ -64,7 +70,12 @@ enum TeamFixtureData {
             case "organizations.list": return .object(["organizations":.array(state == .empty ? [] : [try json(organization)]),"nextOffset":.null])
             case "organizations.get": return .object(["organization":try json(organization),"ownershipRequest":.null])
             case "members.list": return .object(["members":.array(try members.map { try json($0) }),"nextOffset":.null])
-            case "repositories.list": return .object(["repositories":.array([try json(repository)]),"nextOffset":.null])
+            case "repositories.list":
+                var rows = [try json(repository)]
+                if await TeamFixtureProjects.shared.hasNewProject {
+                    rows.append(try json(TeamRepository(id: "repo_refresh_fixture", organizationId: organization.id, name: "New shared project", role: .viewer, revision: 1, createdAt: timestamp)))
+                }
+                return .object(["repositories": .array(rows), "nextOffset": .null])
             case "checkouts.list": return .object(["checkouts":.array([
                 try json(TeamCheckout(id: "checkout_" + String(repeating:"a",count:32), organizationId: organization.id, repositoryId: repository.id, publisherId: "fixture-owner", machineId: "fixture-mac", hostKey: String(repeating:"ab",count:32), deviceName: "Example Mac", publisher: TeamPerson(id: "fixture-owner", name: "Example owner", handle: "example-owner", avatar: nil), revision: 1, createdAt: timestamp)),
                 try json(TeamCheckout(id: "checkout_" + String(repeating:"b",count:32), organizationId: organization.id, repositoryId: repository.id, publisherId: member.id, machineId: "fixture-workstation", hostKey: String(repeating:"cd",count:32), deviceName: "Márta’s workstation", publisher: TeamPerson(id: member.id, name: member.name, handle: member.handle, avatar: nil), revision: 1, createdAt: timestamp))]),"nextOffset":.null])

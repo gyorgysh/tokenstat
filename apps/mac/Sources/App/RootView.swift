@@ -4821,7 +4821,7 @@ private struct WorkspaceRow: View {
                         .lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: Theme.Space.xs)
                     changeCounts.opacity(isHovering ? 0 : 1)
-                        .frame(minWidth: 52, alignment: .trailing)
+                        .frame(minWidth: share == nil ? 52 : 80, alignment: .trailing)
                 }
                 .padding(.horizontal, Theme.Space.s)
                 .frame(maxWidth: .infinity)
@@ -4886,6 +4886,12 @@ private struct WorkspaceRow: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(label). \(folder.subtitle ?? L10n.text("apple.rootview.no_branch.db114adc"))")
+        .accessibilityActions {
+            if let share {
+                Button(L10n.text(isShared ? "common.teams.open_shared_project" : "common.teams.share_project"),
+                       isShared ? ActionIcon.team : ActionIcon.connect, action: share)
+            }
+        }
     }
 
     private var menu: [NativeMenuItem] {

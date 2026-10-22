@@ -104,9 +104,22 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         await sharedProjectDiscovery()
         await lateSharedProjectAccountResponse()
         await staleSharedProjectNavigation()
+        await projectCatalogRefresh()
         avatars()
         try messageAuthors()
         print("Team directory ownership, recovery, pagination and avatar tests passed")
+    }
+    @MainActor static func projectCatalogRefresh() async {
+        let fixture = Fixture(), store = TeamStore(api: await fixture.api())
+        let account = owner("alpha")
+        await store.bind(to: account)
+        let first = store.catalogRefresh
+        await store.bind(to: account, refresh: true)
+        check(store.catalogRefresh > first, "A successful refresh did not invalidate visible project cards")
+        let refreshed = store.catalogRefresh
+        await fixture.fail("organizations.list", code: "teams_unreachable")
+        await store.bind(to: account, refresh: true)
+        check(store.catalogRefresh == refreshed && !store.organizations.isEmpty, "A failed refresh discarded the cached project directory or pretended it was fresh")
     }
     @MainActor static func sharedProjectDiscovery() async {
         let fixture = Fixture(), store = TeamStore(api: await fixture.api())

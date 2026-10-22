@@ -6,7 +6,7 @@ import SwiftUI
     @State private var store = TeamStore(api: TeamFixtureData.api)
     @State private var sheet: TeamSheet?
     @State private var dark = true
-    @State private var showingFolder = false
+    @State private var sharingFolder: TeamLocalWorkspace?
     @Environment(\.teamCommentDraftStorage) private var commentStorage
     var body: some View {
         NavigationStack {
@@ -19,7 +19,9 @@ import SwiftUI
                             Button("Example Studio") { store.select(store.organizations.first) }
                             Button("Team chats") { store.show(.chats) }
                             Button("Shared projects") { store.showProjects() }
-                            Button("Share Website") { showingFolder = true }
+                            Button("Refresh shared projects") { Task { await TeamFixtureProjects.shared.addProject(); await store.reloadAfterChange() } }
+                            Button("Share Website") { sharingFolder = .init(id: "/example/Website", name: "Website", path: "/example/Website") }
+                            Button("Share Client") { sharingFolder = .init(id: "/example/Client", name: "Client", path: "/example/Client") }
                             if TeamFixtureData.state == .commentUncertain {
                                 Button("Remove repository access") { Task { await TeamFixtureComments.shared.removeAccess(); await store.refreshSelected() } }
                             }
@@ -46,10 +48,10 @@ import SwiftUI
                 .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("--fixture-large-text") ? .accessibility3 : .large)
                 .presentationDetents([.large]).presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showingFolder) {
-            TeamFolderShareView(store: store, workspace: .init(id: "/example/Website", name: "Website", path: "/example/Website"),
-                onManageTeams: { showingFolder = false; store.show(.overview); store.select(nil) },
-                onOpen: { organization, repository, checkout in showingFolder = false; store.openProject(repository, in: organization, checkout: checkout) })
+        .sheet(item: $sharingFolder) { workspace in
+            TeamFolderShareView(store: store, workspace: workspace,
+                onManageTeams: { sharingFolder = nil; store.show(.overview); store.select(nil) },
+                onOpen: { organization, repository, checkout in sharingFolder = nil; store.openProject(repository, in: organization, checkout: checkout) })
                 .presentationDetents([.large]).presentationDragIndicator(.visible)
         }
         .task {

@@ -25,7 +25,7 @@ struct TeamManagementView: View {
         VStack(spacing: 0) {
             #if os(macOS)
             DetailChromeBar {
-                if store.section != .chats {
+                if store.browsingProjects || store.section != .chats {
                     Button(L10n.text("common.refresh"), .refresh) { refresh() }
                         .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing)
                 }
@@ -76,7 +76,7 @@ struct TeamManagementView: View {
         #if !os(macOS)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if store.section != .chats { Button(L10n.text("common.refresh"), systemImage: "arrow.clockwise") { refresh() }.disabled(store.isRefreshing) }
+                if store.browsingProjects || store.section != .chats { Button(L10n.text("common.refresh"), systemImage: "arrow.clockwise") { refresh() }.disabled(store.isRefreshing) }
                 if store.localDraftPersonId != nil { draftsButton }
             }
         }

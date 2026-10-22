@@ -12,6 +12,12 @@ final class TeamFixtureUITests: XCTestCase {
         app.launchArguments = ["--fixture-state", state]
         if largeText { app.launchArguments.append("--fixture-large-text") }
         app.launch()
+        if state == "ready" {
+            // The fixture menu gains management actions when the initial
+            // account/directory load finishes. Open it only after that layout
+            // settles, so its items cannot move during a synthesized tap.
+            XCTAssertTrue(app.buttons["Invite member"].waitForExistence(timeout: 15))
+        }
         return app
     }
     private func capture(_ app: XCUIApplication, _ name: String) {
@@ -58,7 +64,10 @@ final class TeamFixtureUITests: XCTestCase {
         app.buttons["Fixture"].tap(); app.buttons["Personal"].tap()
         app.buttons["Fixture"].tap(); app.buttons["Shared projects"].tap()
         let project = app.buttons["team.project.open.repo_fixture"]
-        XCTAssertTrue(project.waitForExistence(timeout: 5)); project.tap()
+        XCTAssertTrue(project.waitForExistence(timeout: 5))
+        app.buttons["Fixture"].tap(); app.buttons["Refresh shared projects"].tap()
+        XCTAssertTrue(app.buttons["team.project.open.repo_refresh_fixture"].waitForExistence(timeout: 5), "A directory refresh did not reveal a newly shared project")
+        project.tap()
         XCTAssertTrue(app.buttons["team.chats.checkout"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["team.chats.checkout"].label.contains("All teammates"))
         let chat = app.buttons["team.chats.open.share_" + String(repeating: "a", count: 32)]
@@ -69,9 +78,10 @@ final class TeamFixtureUITests: XCTestCase {
     func testFolderShareStartsWithChosenFolderAndReviewsTeamAccess() {
         let app = launch()
         XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))
-        app.buttons["Fixture"].tap(); app.buttons["Share Website"].tap()
+        app.buttons["Fixture"].tap(); app.buttons["Share Client"].tap()
         let team = app.buttons["team.project.team"]
         XCTAssertTrue(team.waitForExistence(timeout: 5)); team.tap(); app.buttons["Example Studio"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Client"].waitForExistence(timeout: 5), "The chosen folder did not reach the sharing form")
         let confirm = app.switches["team.project.confirm"]
         reveal(confirm, in: app)
         XCTAssertTrue(confirm.exists)
@@ -82,6 +92,27 @@ final class TeamFixtureUITests: XCTestCase {
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: submit)
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
         capture(app, "Folder sharing reviews team and people")
+        submit.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
+    }
+    func testExistingProjectNeedsAnExplicitChoiceBeforeSharingTheFolder() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))
+        app.buttons["Fixture"].tap(); app.buttons["Share Website"].tap()
+        let team = app.buttons["team.project.team"]
+        XCTAssertTrue(team.waitForExistence(timeout: 5)); team.tap(); app.buttons["Example Studio"].firstMatch.tap()
+        let existing = app.buttons["team.project.use_existing"]
+        XCTAssertTrue(existing.waitForExistence(timeout: 5))
+        let submit = app.buttons["team.editor.submit"]
+        XCTAssertFalse(submit.isEnabled)
+        existing.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "existing access")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(submit.isEnabled)
+        let confirm = app.switches["team.project.confirm"]
+        reveal(confirm, in: app); confirm.tap()
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: submit)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
+        capture(app, "Existing project requires explicit choice")
         submit.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
     }

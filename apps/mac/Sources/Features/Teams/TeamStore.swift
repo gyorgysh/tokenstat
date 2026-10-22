@@ -35,6 +35,7 @@ final class TeamStore {
     private(set) var preferredCheckoutId: String?
     private(set) var localProjects: [TeamLocalPublication] = []
     private(set) var localProjectsError: String?
+    private(set) var catalogRefresh: UInt64 = 0
     private var projectsRevision: UInt64 = 0
     private var projectOpenRevision: UInt64 = 0
 
@@ -95,6 +96,7 @@ final class TeamStore {
             self.organizations = orgs.organizations; organizationsNextOffset = orgs.nextOffset
             self.inbox = inbox.invitations; inboxNextOffset = inbox.nextOffset
             phase = .ready
+            catalogRefresh &+= 1
             await refreshLocalProjects()
             guard isCurrent(next, revision) else { return }
             // A directory refresh is not proof that an unreturned later page
