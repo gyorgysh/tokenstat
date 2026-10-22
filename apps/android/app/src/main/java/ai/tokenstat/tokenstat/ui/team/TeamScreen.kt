@@ -400,7 +400,9 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Uni
         error?.let { Text(it, color = colors.danger) }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(events) { event ->
-                val author = (event["author"] as? JsonObject)?.str("name") ?: event.str("kind").orEmpty()
+                val by = event["author"] as? JsonObject
+                val author = if (by?.str("kind") == "formerMember") L10n.text("common.teams.former_member")
+                    else by?.str("name") ?: event.str("kind").orEmpty()
                 val text = event.str("text") ?: (event["event"] as? JsonObject)?.str("delta") ?: return@items
                 Column {
                     Text(author, color = colors.textSecondary)

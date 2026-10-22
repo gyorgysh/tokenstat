@@ -267,7 +267,9 @@ internal sealed class TeamsPage : Page
             var text = Format.Text(item, "text");
             if (text.Length == 0) text = Format.Text(item["event"], "delta");
             if (text.Length == 0) continue;
-            var author = Format.Text(item["author"], "name");
+            var author = Format.Text(item["author"], "kind") == "formerMember"
+                ? L10n.Text("common.teams.former_member")
+                : Format.Text(item["author"], "name");
             if (author.Length == 0) author = Format.Text(item, "kind");
             _body.Children.Add(new TextBlock { Text = author, Opacity = 0.6, FontSize = 12 });
             _body.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });

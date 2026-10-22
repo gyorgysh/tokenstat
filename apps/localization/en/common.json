@@ -625,6 +625,7 @@
   "common.teams.stop_chat_sharing_detail": "Repository members will lose future access. People may keep information they already read or downloaded. The original chat stays on this computer and can continue privately.",
   "common.teams.stop_chat_sharing_confirm": "Stop sharing this chat with repository members.",
   "common.teams.local_before_teams": "Local user (before Teams)",
+  "common.teams.former_member": "Former member",
   "common.teams.history_cannot_display": "This history could not be displayed. Refresh the chat and try again.",
   "common.teams.shared_history_window": "Showing an earlier part of the chat. Refresh to return to the latest messages.",
   "common.teams.private_source_notice": "Drafts here stay private. Open Team chats to continue.",

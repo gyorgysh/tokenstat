@@ -8,6 +8,7 @@ struct TeamTranscriptContent: View {
     @State private var rows: [ChatDisplayItem] = []
     @State private var people: [String: TeamPerson] = [:]
     @State private var asks: Set<String> = []
+    @State private var former: Set<String> = []
     @State private var readyRenderId: UUID?
     @State private var error: String?
     @Environment(\.teamAvatarOwner) private var owner
@@ -22,6 +23,9 @@ struct TeamTranscriptContent: View {
                             Text(person.name).font(Theme.caption.weight(.semibold)).lineLimit(2)
                             Text(asks.contains(row.id) ? L10n.text("common.teams.ask") : L10n.text("common.teams.comment")).font(Theme.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .trailing).accessibilityElement(children: .combine)
+                    } else if former.contains(row.id) {
+                        Label(L10n.text("common.teams.former_member"), systemImage: "person.crop.circle.badge.minus")
+                            .font(Theme.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .trailing)
                     } else {
                         Label(L10n.text("common.teams.local_before_teams"), systemImage: "person.crop.circle")
                             .font(Theme.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .trailing)
@@ -47,12 +51,12 @@ struct TeamTranscriptContent: View {
                 let result = try await Task.detached(priority: .userInitiated) {
                     let decoded = try JSONDecoder().decode([ChatTimelineEvent].self, from: JSONEncoder().encode(events))
                     try Task.checkCancellation()
-                    return (ChatDisplayItem.coalesce(decoded, defaultBackend: backend, running: false), try TeamMessageAttribution.people(events), TeamMessageAttribution.asks(events))
+                    return (ChatDisplayItem.coalesce(decoded, defaultBackend: backend, running: false), try TeamMessageAttribution.people(events), TeamMessageAttribution.asks(events), TeamMessageAttribution.former(events))
                 }.value
                 try Task.checkCancellation()
-                rows = result.0; people = result.1; asks = result.2; readyRenderId = history.renderId; error = nil
+                rows = result.0; people = result.1; asks = result.2; former = result.3; readyRenderId = history.renderId; error = nil
             } catch is CancellationError {} catch {
-                rows = []; people = [:]; asks = []; readyRenderId = history.renderId; self.error = L10n.text("common.teams.history_cannot_display")
+                rows = []; people = [:]; asks = []; former = []; readyRenderId = history.renderId; self.error = L10n.text("common.teams.history_cannot_display")
             }
         }
     }

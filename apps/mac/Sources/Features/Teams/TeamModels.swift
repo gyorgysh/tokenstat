@@ -243,6 +243,16 @@ enum TeamMessageAttribution {
         }
         return people
     }
+    /// Comments and Asks by people who have left the organization. The host
+    /// sends no name or id for them, only that they were here.
+    static func former(_ events: [JSONValue]) -> Set<String> {
+        Set(events.compactMap { event in
+            guard case let .object(row) = event, row["kind"] == .string("user"),
+                  case let .object(author)? = row["author"], author["kind"] == .string("formerMember"),
+                  case let .int(sequence)? = row["seq"], sequence >= 0 else { return nil }
+            return "user-s\(sequence)"
+        })
+    }
     static func asks(_ events: [JSONValue]) -> Set<String> {
         Set(events.compactMap { event in
             guard case let .object(row) = event, row["kind"] == .string("user"), row["mode"] == .string("ask"),

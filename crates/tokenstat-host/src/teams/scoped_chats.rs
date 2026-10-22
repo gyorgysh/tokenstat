@@ -12,7 +12,12 @@ use crate::{
     remote::{TeamPageDirection, TeamReadMethod, TeamReadParams},
 };
 use serde_json::{Value, json};
-use tokenstat_sync::teams::{RepositoryRole, TeamCapability};
+use std::{
+    collections::HashSet,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
+use tokenstat_sync::teams::{Page, RepositoryRole, TeamCapability, TeamClient};
 
 const PAGE_TARGET: usize = 512 * 1024;
 
@@ -92,9 +97,15 @@ pub(super) fn call(
             if viewed.binding.source_revision != row.source_revision {
                 return Err(changed());
             }
+            let mut events = viewed.events;
+            if let Some(current) = current_members(&scope.organization_id) {
+                for event in &mut events {
+                    former_authors(event, &current);
+                }
+            }
             let body = page_body(
                 share,
-                viewed.events,
+                events,
                 viewed.has_more,
                 viewed.history_trimmed,
                 older,
@@ -122,6 +133,60 @@ pub(super) fn call(
     chats.ensure_sharing_snapshot(&checkout.workspace_id, &row.conversation_id, &marker)?;
     principal.ensure_live()?;
     Ok(result)
+}
+
+/// Who is in the organization now, from the publisher's own view, held for a
+/// minute so paging through a chat does not ask the server every time.
+/// `None` when the list cannot be read: authors then show as recorded.
+fn current_members(organization: &str) -> Option<HashSet<String>> {
+    static CACHE: Mutex<Option<(String, Instant, HashSet<String>)>> = Mutex::new(None);
+    if let Ok(cache) = CACHE.lock()
+        && let Some((org, at, members)) = cache.as_ref()
+        && org == organization
+        && at.elapsed() < Duration::from_secs(60)
+    {
+        return Some(members.clone());
+    }
+    let client = TeamClient::capture().ok()?;
+    let mut members = HashSet::new();
+    let mut offset = 0;
+    for _ in 0..20 {
+        let page = client
+            .members(organization, Page { limit: 100, offset })
+            .ok()?;
+        members.extend(page.members.into_iter().map(|member| member.person.id));
+        match page.next_offset {
+            Some(next) => offset = next,
+            None => {
+                if let Ok(mut cache) = CACHE.lock() {
+                    *cache = Some((organization.to_string(), Instant::now(), members.clone()));
+                }
+                return Some(members);
+            }
+        }
+    }
+    None
+}
+
+/// A person who has left the organization, or deleted their account, reads
+/// as a former member with nothing that links back to them. The event keeps
+/// its place, so the conversation still reads in order.
+fn former_authors(event: &mut Value, current: &HashSet<String>) {
+    let former = |person: &mut Value| {
+        if person["kind"] == "person"
+            && person["id"]
+                .as_str()
+                .is_some_and(|id| !current.contains(id))
+        {
+            *person = json!({"kind":"formerMember"});
+        }
+    };
+    if let Some(author) = event.get_mut("author") {
+        former(author);
+        if let Some(initiator) = author.get_mut("initiatedBy") {
+            former(initiator);
+        }
+    }
 }
 
 fn changed() -> DispatchError {
@@ -190,6 +255,26 @@ fn page_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn people_who_left_read_as_former_members() {
+        let current = HashSet::from(["kept".to_string()]);
+        let mut comment = json!({"kind":"user","author":{"kind":"person","id":"gone","name":"Gone","handle":"gone","avatar":"a"}});
+        let mut reply = json!({"kind":"agent","author":{"kind":"agent","initiatedBy":{"kind":"person","id":"gone","name":"Gone"}}});
+        let mut stays = json!({"author":{"kind":"person","id":"kept","name":"Kept"}});
+        let mut local = json!({"author":{"kind":"localBeforeTeams"}});
+        for event in [&mut comment, &mut reply, &mut stays, &mut local] {
+            former_authors(event, &current);
+        }
+        assert_eq!(comment["author"], json!({"kind":"formerMember"}));
+        assert_eq!(
+            reply["author"]["initiatedBy"],
+            json!({"kind":"formerMember"})
+        );
+        assert_eq!(reply["author"]["kind"], "agent");
+        assert_eq!(stays["author"]["name"], "Kept");
+        assert_eq!(local["author"]["kind"], "localBeforeTeams");
+    }
     #[test]
     fn pages_keep_large_events_whole_and_cursors_cannot_cross_shares() {
         let events = vec![
