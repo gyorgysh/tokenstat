@@ -405,10 +405,15 @@ private fun SharedFile(file: JsonObject, fetch: suspend (String) -> JsonObject) 
                         val reply = fetch(id)
                         val media = (reply["attachment"] as? JsonObject)?.str("mediaType").orEmpty()
                         if (media.startsWith("image/") && media != "image/svg+xml") {
-                            val bytes = android.util.Base64.decode(reply.str("data").orEmpty(), android.util.Base64.DEFAULT)
+                            val data = reply.str("data").orEmpty()
+                            if (data.length > 8 * 1024 * 1024) throw IllegalStateException(L10n.text("common.teams.file_unavailable"))
+                            val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
                             // A small file can still describe a huge bitmap.
                             val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
                             android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                            val (w, h) = bounds.outWidth.toLong() to bounds.outHeight.toLong()
+                            if (w <= 0 || h <= 0 || w * h > 100_000_000L || maxOf(w, h) / minOf(w, h) > 50)
+                                throw IllegalStateException(L10n.text("common.teams.file_unavailable"))
                             var sample = 1
                             while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) sample *= 2
                             val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }

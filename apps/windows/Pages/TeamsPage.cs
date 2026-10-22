@@ -419,12 +419,22 @@ internal sealed class TeamsPage : Page
                 var media = Format.Text(reply["attachment"], "mediaType");
                 if (media.StartsWith("image/", StringComparison.Ordinal) && media != "image/svg+xml")
                 {
-                    var bytes = Convert.FromBase64String(Format.Text(reply, "data"));
+                    var data = Format.Text(reply, "data");
+                    if (data.Length > 8 * 1024 * 1024) throw new InvalidOperationException(L10n.Text("common.teams.file_unavailable"));
+                    var bytes = Convert.FromBase64String(data);
                     using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
                     await stream.WriteAsync(bytes.AsBuffer());
                     stream.Seek(0);
-                    // A small file can still describe a huge bitmap.
-                    var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage { DecodePixelWidth = 1024 };
+                    // A small file can still describe a huge bitmap. Read its
+                    // real size first, refuse extremes, and only scale down.
+                    var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(stream);
+                    uint width = decoder.PixelWidth, height = decoder.PixelHeight;
+                    if (width == 0 || height == 0 || (ulong)width * height > 100_000_000UL || Math.Max(width, height) / Math.Min(width, height) > 50)
+                        throw new InvalidOperationException(L10n.Text("common.teams.file_unavailable"));
+                    stream.Seek(0);
+                    var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+                    if (width >= height) bitmap.DecodePixelWidth = (int)Math.Min(width, 2048u);
+                    else bitmap.DecodePixelHeight = (int)Math.Min(height, 2048u);
                     await bitmap.SetSourceAsync(stream);
                     panel.Children.Remove(open);
                     panel.Children.Add(new Image { Source = bitmap, MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left });

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+import ImageIO
 import SwiftUI
 
 /// Reuses the chat renderer while leaving personal models, file transfers and
@@ -115,12 +116,17 @@ struct TeamTranscriptContent: View {
 
 enum TeamFilePreview {
     static func image(_ file: TeamAttachmentFile) -> Image? {
-        guard file.mediaType?.hasPrefix("image/") == true, file.mediaType != "image/svg+xml" else { return nil }
-        #if os(macOS)
-        return NSImage(data: file.data).map(Image.init(nsImage:))
-        #else
-        return UIImage(data: file.data).map(Image.init(uiImage:))
-        #endif
+        guard file.mediaType?.hasPrefix("image/") == true, file.mediaType != "image/svg+xml",
+              let source = CGImageSourceCreateWithData(file.data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int, let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0, width * height <= 100_000_000, max(width, height) / min(width, height) <= 50 else { return nil }
+        // A small file can still describe a huge bitmap. Decode a bounded
+        // thumbnail, never the full image.
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2048,
+                                        kCGImageSourceCreateThumbnailWithTransform: true]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return Image(decorative: image, scale: 1)
     }
     /// Plain data a saved file may keep as its extension. Anything else,
     /// including every type that can launch or be followed from Finder,
