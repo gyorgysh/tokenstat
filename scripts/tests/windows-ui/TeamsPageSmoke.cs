@@ -78,6 +78,75 @@ namespace NativeUiTests
             if (!JsonNode.DeepEquals(fence, stopped)) throw new Exception("Stop lost the original run fence");
             body.Children.Remove(page);
             Program.Log("PASS: the production Teams reader preserves accessible Stop through malformed status and a history read failure");
+            await DirectoryAsync(body);
+        }
+
+        private static async Task DirectoryAsync(StackPanel body)
+        {
+            var observed = new List<JsonObject>();
+            var laterRequests = 0;
+            static JsonObject Row(string id, string name, string? org = null) => org is null
+                ? new JsonObject { ["id"] = id, ["name"] = name }
+                : new JsonObject { ["id"] = id, ["name"] = name, ["organizationId"] = org, ["role"] = "viewer" };
+            static JsonObject Page(string field, JsonObject[] rows, int? next = null) => new() { [field] = new JsonArray(rows.Cast<JsonNode?>().ToArray()), ["nextOffset"] = next };
+            Task<JsonNode> Host(string method, JsonObject? fields)
+            {
+                if (method == "account.status") return Task.FromResult<JsonNode>(new JsonObject {
+                    ["signedIn"] = true, ["host"] = "https://fixture.invalid", ["handle"] = "fictional", ["accountId"] = "person-fixture", ["accountSession"] = "fictional-session",
+                });
+                observed.Add((JsonObject)fields!.DeepClone());
+                if (method == "teams.capabilities") return Task.FromResult<JsonNode>(new JsonObject { ["enabled"] = true, ["ready"] = true, ["actorId"] = "person-fixture" });
+                if (method != "teams.directory") throw new Exception("Unexpected fictional directory method");
+                var operation = Format.Text(fields, "operation");
+                var offset = fields?["page"]?["offset"]?.GetValue<int>() ?? 0;
+                JsonNode answer = operation switch {
+                    "organizations.list" when offset == 0 => Page("organizations", [Row("org-first", "First fictional team")], 100),
+                    "organizations.list" when ++laterRequests == 1 => throw new Tokenstat.Host.HostException("teams_unreachable", "Fictional temporary page failure"),
+                    "organizations.list" => Page("organizations", [Row("org-later", "Later fictional team")]),
+                    "organizations.get" => new JsonObject { ["organization"] = Row(Format.Text(fields, "organization"), "Later fictional team") },
+                    "repositories.list" when Format.Text(fields, "organization") == "org-first" => Page("repositories", []),
+                    "repositories.list" when offset == 0 => Page("repositories", [Row("repo-first", "First fictional project", "org-later")], 100),
+                    "repositories.list" => Page("repositories", [Row("repo-later", "Later fictional project", "org-later")]),
+                    "checkouts.list" => Page("checkouts", []),
+                    _ => throw new Exception("Unexpected fictional directory operation"),
+                };
+                return Task.FromResult(answer);
+            }
+            var page = new TeamsPage(Host);
+            body.Children.Add(page); body.UpdateLayout();
+            static IEnumerable<DependencyObject> Descendants(DependencyObject root)
+            {
+                yield return root;
+                for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+                    foreach (var child in Descendants(VisualTreeHelper.GetChild(root, i))) yield return child;
+            }
+            Button? Find(string name) => Descendants(page).OfType<Button>().SingleOrDefault(button => AutomationProperties.GetName(button) == name);
+            async Task Wait(Func<bool> ready, string reason)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                while (!ready() && DateTime.UtcNow < deadline) { page.UpdateLayout(); await Task.Delay(20); }
+                if (!ready()) throw new Exception(reason);
+            }
+            async Task Click(string name)
+            {
+                await Wait(() => Find(name) is { IsEnabled: true }, "Missing directory control: " + name);
+                if (new ButtonAutomationPeer(Find(name)!).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke) throw new Exception("Directory action is inaccessible");
+                invoke.Invoke();
+            }
+            await Click("First fictional team");
+            await Click(L10n.Text("common.teams.organizations"));
+            await Click(L10n.Text("common.teams.more_organizations"));
+            await Wait(() => laterRequests == 1 && Find(L10n.Text("common.teams.more_organizations")) is { IsEnabled: true }, "Failed directory page could not be retried");
+            if (Find("First fictional team") is null) throw new Exception("Offline page discarded loaded teams");
+            await Click(L10n.Text("common.teams.more_organizations"));
+            await Click("Later fictional team");
+            await Click(L10n.Text("common.teams.load_more"));
+            await Wait(() => Descendants(page).OfType<TextBlock>().Any(text => text.Text == "Later fictional project"), "The later project page was unreachable");
+            if (!observed.Any(row => Format.Text(row, "operation") == "repositories.list" && row["page"]?["offset"]?.GetValue<int>() == 100 && Format.Text(row, "organization") == "org-later"))
+                throw new Exception("Project paging lost its exact team");
+            if (observed.Any(row => Format.Text(row, "_accountSession") != "fictional-session")) throw new Exception("Directory paging lost the account receipt");
+            body.Children.Remove(page);
+            Program.Log("PASS: production Teams directory pages preserve results through failure and open teams/projects beyond page one");
         }
     }
 }
@@ -92,6 +161,7 @@ namespace Tokenstat.Pages
 {
     internal static class SshVaultScope
     {
-        internal static JsonObject? From(JsonNode account) => null;
+        internal static JsonObject? From(JsonNode account) => Format.Flag(account, "signedIn")
+            ? new JsonObject { ["kind"] = "account", ["origin"] = Format.Text(account, "host"), ["identity"] = Format.Text(account, "handle") } : null;
     }
 }

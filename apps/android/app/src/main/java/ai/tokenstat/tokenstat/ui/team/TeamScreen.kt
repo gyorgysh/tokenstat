@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -112,15 +113,18 @@ private sealed interface Phase {
 /// The Team tab on Android: the member's side of Teams. Publishing a project
 /// and choosing how its work lands happen on the computer that owns it.
 @Composable
-fun TeamScreen(account: JsonObject?) {
+fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> JsonElement = { method, fields -> CoreClient.call(method, fields) }) {
     // The account object is refreshed often. Only a different login or
     // session starts the screen over.
     val owner = WatchingOwner.from(account)
     val identity = owner?.let { it.scope.toString() + "|" + it.receipt }
-    val calls = remember(identity) { TeamCalls(account) }
+    val calls = remember(identity, request) { TeamCalls(account, request) }
     val scope = rememberCoroutineScope()
     var phase by remember(identity) { mutableStateOf<Phase>(Phase.Loading) }
     var organizations by remember(identity) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var organizationsNext by remember(identity) { mutableStateOf<Int?>(null) }
+    var loadingOrganizations by remember(identity) { mutableStateOf(false) }
+    var organizationsError by remember(identity) { mutableStateOf<String?>(null) }
     var organization by remember(identity) { mutableStateOf<JsonObject?>(null) }
     var chat by remember(identity) { mutableStateOf<ChatTarget?>(null) }
     var drafts by remember(identity) { mutableStateOf(false) }
@@ -136,8 +140,11 @@ fun TeamScreen(account: JsonObject?) {
                 !capabilities.bool("ready") -> Phase.Authorize
                 else -> {
                     calls.verify(capabilities)
-                    organizations = calls.directory("organizations.list").list("organizations")
-                    if (organization == null) organization = organizations.singleOrNull()
+                    val page = TeamDirectoryPage.read(calls.directory("organizations.list"), "organizations", 0)
+                    organizations = page.rows; organizationsNext = page.next; organizationsError = null
+                    val selected = organization?.str("id")
+                    organization = page.rows.firstOrNull { it.str("id") == selected }
+                        ?: if (page.next != null) organization else page.rows.singleOrNull()
                     Phase.Ready
                 }
             }
@@ -145,6 +152,21 @@ fun TeamScreen(account: JsonObject?) {
             throw cancelled
         } catch (error: Throwable) {
             Phase.Failed(error.message ?: L10n.text("common.teams.load_failed"))
+        }
+    }
+    suspend fun moreOrganizations() {
+        val offset = organizationsNext ?: return
+        if (loadingOrganizations) return
+        loadingOrganizations = true
+        try {
+            val page = TeamDirectoryPage.read(calls.directory("organizations.list", offset = offset), "organizations", offset)
+            organizations = TeamCatalogPage.append(organizations, page.rows); organizationsNext = page.next; organizationsError = null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            organizationsError = teamFailure(failure)
+        } finally {
+            loadingOrganizations = false
         }
     }
     LaunchedEffect(identity) { load() }
@@ -173,20 +195,26 @@ fun TeamScreen(account: JsonObject?) {
             Phase.Ready -> {
                 val org = organization
                 if (org == null) {
-                    if (organizations.isEmpty()) {
+                    if (organizations.isEmpty() && organizationsNext == null) {
                         EmptyState(title = L10n.text("common.teams.no_organizations"), message = L10n.text("common.teams.no_organizations_detail"))
                     } else {
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(organizations, key = { it.str("id") ?: "" }) { row ->
                                 TsSecondaryButton(row.str("name") ?: "", onClick = { organization = row }, icon = ActionIcon.Next.vector)
                             }
+                            organizationsError?.let { failure -> item { Text(failure, color = LocalTsColors.current.danger) } }
+                            if (organizationsNext != null) item {
+                                TsSecondaryButton(L10n.text("common.teams.more_organizations"), enabled = !loadingOrganizations,
+                                    onClick = { scope.launch { moreOrganizations() } }, icon = ActionIcon.More.vector)
+                            }
+                            if (loadingOrganizations) item { CircularProgressIndicator() }
                         }
                     }
                 } else {
-                    if (organizations.size > 1) {
+                    if (organizations.size > 1 || organizationsNext != null) {
                         TsSecondaryButton(L10n.text("common.teams.organizations"), onClick = { organization = null }, icon = ActionIcon.Back.vector)
                     }
-                    Repositories(calls, org, onOpenChat = { chat = it })
+                    key(identity, org.str("id")) { Repositories(calls, org, onOpenChat = { chat = it }) }
                 }
             }
         }
@@ -231,25 +259,45 @@ data class ChatTarget(val target: JsonObject, val title: String, val computer: S
 @Composable
 private fun Repositories(calls: TeamCalls, org: JsonObject, onOpenChat: (ChatTarget) -> Unit) {
     val orgId = org.str("id") ?: return
-    var repositories by remember(orgId) { mutableStateOf<List<JsonObject>?>(null) }
-    var error by remember(orgId) { mutableStateOf<String?>(null) }
-    LaunchedEffect(orgId) {
+    val scope = rememberCoroutineScope()
+    var repositories by remember(calls, orgId) { mutableStateOf<List<JsonObject>?>(null) }
+    var next by remember(calls, orgId) { mutableStateOf<Int?>(null) }
+    var loading by remember(calls, orgId) { mutableStateOf(false) }
+    var error by remember(calls, orgId) { mutableStateOf<String?>(null) }
+    suspend fun load(more: Boolean) {
+        if (loading) return
+        val offset = if (more) next ?: return else 0
+        loading = true
         try {
-            repositories = calls.directory("repositories.list") { with("organization" to JsonPrimitive(orgId)) }.list("repositories")
+            val page = TeamDirectoryPage.read(calls.directory("repositories.list", offset = offset) { with("organization" to JsonPrimitive(orgId)) }, "repositories", offset)
+            require(page.rows.all { it.str("organizationId") == orgId }) { "Invalid Team project" }
+            repositories = if (more) TeamCatalogPage.append(repositories ?: emptyList(), page.rows) else page.rows
+            next = page.next; error = null
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (failure: Throwable) {
-            error = failure.message
+        } catch (failure: Exception) {
+            error = teamFailure(failure)
+        } finally {
+            loading = false
         }
     }
+    LaunchedEffect(calls, orgId) { load(false) }
     Text(org.str("name") ?: "", style = TsType.cardTitle, color = LocalTsColors.current.textPrimary)
     error?.let { Text(it, color = LocalTsColors.current.danger) }
+    if (error != null && repositories == null) {
+        TsSecondaryButton(L10n.text("common.retry"), onClick = { scope.launch { load(false) } }, icon = ActionIcon.Refresh.vector)
+    }
     val rows = repositories
     when {
         rows == null && error == null -> CircularProgressIndicator()
-        rows != null && rows.isEmpty() -> EmptyState(title = L10n.text("common.teams.no_repositories"), message = L10n.text("common.teams.no_repositories_member"))
+        rows != null && rows.isEmpty() && next == null && error == null -> EmptyState(title = L10n.text("common.teams.no_repositories"), message = L10n.text("common.teams.no_repositories_member"))
         rows != null -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(rows, key = { it.str("id") ?: "" }) { repo -> RepositoryCard(calls, orgId, repo, onOpenChat) }
+            if (next != null) item {
+                TsSecondaryButton(L10n.text("common.teams.load_more"), enabled = !loading,
+                    onClick = { scope.launch { load(true) } }, icon = ActionIcon.More.vector)
+            }
+            if (loading) item { CircularProgressIndicator() }
         }
     }
 }

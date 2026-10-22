@@ -22,6 +22,8 @@ internal sealed partial class TeamsPage : Page
     private JsonObject? _scope;
     private string? _session;
     private JsonObject? _organization;
+    private List<JsonObject> _organizations = [];
+    private int? _organizationsNext;
     // Bumped by every redraw, so a load or a watch that outlived its screen
     // stops instead of drawing over the one now shown.
     private int _view;
@@ -63,7 +65,7 @@ internal sealed partial class TeamsPage : Page
         return await _call(method, body);
     }
 
-    private static JsonObject Page100() => new() { ["limit"] = 100, ["offset"] = 0 };
+    private static JsonObject Page100(int offset = 0) => new() { ["limit"] = 100, ["offset"] = offset };
 
     private static JsonObject Target(string org, string repo, string checkout, string? share = null)
     {
@@ -99,6 +101,7 @@ internal sealed partial class TeamsPage : Page
             if (_scope?.ToJsonString() != scope?.ToJsonString() || _session != session)
             {
                 _organization = null;
+                _organizations = []; _organizationsNext = null;
                 _comments.Clear(); _checkoutHosts.Clear(); _newChatWriting.Clear(); _newChatRequests.Clear(); _askAttempts.Clear(); _openedImages.Clear(); _flash = null;
                 _askWriting.Clear(); _activeRuns.Clear(); _stoppingRuns.Clear();
                 _historyTarget = null; _history = new([]); _readingEarlier = false;
@@ -114,37 +117,77 @@ internal sealed partial class TeamsPage : Page
             var actor = Format.Text(capabilities, "actorId");
             if (actor.Length == 0 || !string.IsNullOrEmpty(_person) && _person != actor) throw new HostException("account_changed", L10n.Text("common.teams.account_changed"));
             _person = actor;
-            var organizations = (await CallAsync("teams.directory", new JsonObject { ["operation"] = "organizations.list", ["page"] = Page100() }))["organizations"] as JsonArray;
-            var rows = organizations?.OfType<JsonObject>().ToList() ?? [];
+            var page = TeamDirectoryPage.Read(await CallAsync("teams.directory", new JsonObject { ["operation"] = "organizations.list", ["page"] = Page100() }), "organizations", 0);
             if (!IsLoaded || _view != view) return;
-            if (rows.Count == 0)
+            _organizations = page.Rows; _organizationsNext = page.Next;
+            if (page.Rows.Count == 0 && page.Next is null)
             {
                 Note(L10n.Text("common.teams.no_organizations"));
                 Note(L10n.Text("common.teams.no_organizations_detail"));
                 return;
             }
-            _organization = rows.FirstOrDefault(row => Format.Text(row, "id") == Format.Text(_organization, "id"))
-                ?? (rows.Count == 1 ? rows[0] : null);
+            var selected = page.Rows.FirstOrDefault(row => Format.Text(row, "id") == Format.Text(_organization, "id"));
+            if (selected is null && _organization is not null && page.Next is not null)
+            {
+                // A selected team may be on a later page. Recheck that exact
+                // membership instead of redirecting to the first team.
+                var current = await CallAsync("teams.directory", new JsonObject { ["operation"] = "organizations.get", ["organization"] = Format.Text(_organization, "id") });
+                if (!IsLoaded || _view != view) return;
+                selected = current["organization"] as JsonObject ?? throw new InvalidDataException();
+                if (Format.Text(selected, "id") != Format.Text(_organization, "id")) throw new InvalidDataException();
+            }
+            _organization = selected ?? (page.Rows.Count == 1 && page.Next is null ? page.Rows[0] : null);
             if (_organization is null)
             {
-                foreach (var org in rows)
-                {
-                    var chosen = org;
-                    _body.Children.Add(ActionIconGlyph.Button(Format.Text(org, "name"), ActionIcon.Next, async (_, _) => { _organization = chosen; await LoadAsync(); }));
-                }
+                ShowOrganizations();
                 return;
             }
             Reset(Format.Text(_organization, "name"));
             AddDraftsButton();
             view = _view;
-            await ShowRepositoriesAsync(_organization, rows.Count > 1);
+            await ShowRepositoriesAsync(_organization, page.Rows.Count > 1 || page.Next is not null);
         }
         catch (Exception error)
         {
             if (!IsLoaded || _view != view) return;
+            if (_organization is not null && error is HostException { Code: "not_found" or "forbidden" or "organization_paused" or "patron_required" })
+            {
+                _organization = null; ShowOrganizations(); Note(error.Message, true); return;
+            }
             Note(error.Message, true);
             _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh, async (_, _) => await LoadAsync()));
         }
+    }
+
+    private void ShowOrganizations()
+    {
+        Reset(L10n.Text("common.teams.title")); AddDraftsButton();
+        var view = _view;
+        foreach (var organization in _organizations)
+        {
+            var chosen = organization;
+            _body.Children.Add(ActionIconGlyph.Button(Format.Text(organization, "name"), ActionIcon.Next,
+                async (_, _) => { if (IsLoaded && _view == view) { _organization = chosen; await LoadAsync(); } }));
+        }
+        if (_organizationsNext is not { } offset) return;
+        Button? more = null;
+        more = ActionIconGlyph.Button(L10n.Text("common.teams.more_organizations"), ActionIcon.More, async (_, _) =>
+        {
+            if (!IsLoaded || _view != view || !more!.IsEnabled) return;
+            more.IsEnabled = false;
+            try
+            {
+                var page = TeamDirectoryPage.Read(await CallAsync("teams.directory", new JsonObject {
+                    ["operation"] = "organizations.list", ["page"] = Page100(offset),
+                }), "organizations", offset);
+                if (!IsLoaded || _view != view) return;
+                _organizations = TeamCatalogPage.Append(_organizations, page.Rows); _organizationsNext = page.Next;
+                ShowOrganizations();
+            }
+            catch (Exception error) { if (IsLoaded && _view == view) Note(error.Message, true); }
+            finally { if (IsLoaded && _view == view) more.IsEnabled = true; }
+        });
+        _body.Children.Add(more);
     }
 
     private void ShowAuthorize()
@@ -181,18 +224,45 @@ internal sealed partial class TeamsPage : Page
         if (_flash is { } flash) { _flash = null; Note(flash); }
         if (canSwitch)
             _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.organizations"), ActionIcon.Back, async (_, _) => { _organization = null; await LoadAsync(); }));
-        var repositories = (await CallAsync("teams.directory", new JsonObject
+        int? next = 0;
+        var seen = new HashSet<string>();
+        var loading = false;
+        TextBlock? failure = null;
+        Button? more = null;
+        async Task LoadMore()
         {
-            ["operation"] = "repositories.list", ["organization"] = orgId, ["page"] = Page100(),
-        }))["repositories"] as JsonArray;
-        var rows = repositories?.OfType<JsonObject>().ToList() ?? [];
-        if (!IsLoaded || _view != view) return;
-        if (rows.Count == 0) { Note(L10n.Text("common.teams.no_repositories")); Note(L10n.Text("common.teams.no_repositories_member")); return; }
-        foreach (var repo in rows)
-        {
-            if (_view != view) return;
-            await AddRepositoryAsync(orgId, repo);
+            if (loading || next is not { } offset || !IsLoaded || _view != view) return;
+            loading = true; more!.IsEnabled = false;
+            try
+            {
+                var page = TeamDirectoryPage.Read(await CallAsync("teams.directory", new JsonObject {
+                    ["operation"] = "repositories.list", ["organization"] = orgId, ["page"] = Page100(offset),
+                }), "repositories", offset);
+                if (!IsLoaded || _view != view) return;
+                if (page.Rows.Any(row => Format.Text(row, "organizationId") != orgId)) throw new InvalidDataException();
+                if (failure is not null) { _body.Children.Remove(failure); failure = null; }
+                _body.Children.Remove(more);
+                foreach (var repo in page.Rows)
+                {
+                    if (!IsLoaded || _view != view) return;
+                    if (seen.Add(Format.Text(repo, "id"))) await AddRepositoryAsync(orgId, repo);
+                }
+                if (!IsLoaded || _view != view) return;
+                next = page.Next;
+                if (seen.Count == 0 && next is null) { Note(L10n.Text("common.teams.no_repositories")); Note(L10n.Text("common.teams.no_repositories_member")); }
+                if (next is not null) _body.Children.Add(more);
+            }
+            catch (Exception error)
+            {
+                if (!IsLoaded || _view != view) return;
+                if (failure is null) { failure = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Theme.Brush(static () => Theme.Warning) }; _body.Children.Add(failure); }
+                failure.Text = error.Message;
+                if (!_body.Children.Contains(more)) _body.Children.Add(more);
+            }
+            finally { loading = false; if (IsLoaded && _view == view) more.IsEnabled = true; }
         }
+        more = ActionIconGlyph.Button(L10n.Text("common.teams.load_more"), ActionIcon.More, async (_, _) => await LoadMore());
+        await LoadMore();
     }
 
     private async Task AddRepositoryAsync(string orgId, JsonObject repo)
