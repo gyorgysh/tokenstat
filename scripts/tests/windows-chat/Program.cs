@@ -4,6 +4,17 @@ using Tokenstat.Pages;
 
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
+await TeamCommentTests.RunAsync();
+var latestTeamHistory = new TeamHistoryWindow([new JsonObject { ["seq"] = 3 }, new JsonObject { ["seq"] = 4 }]);
+var earlierTeamHistory = latestTeamHistory.Merge([new JsonObject { ["seq"] = 1 }, new JsonObject { ["seq"] = 2 }], true);
+Check(earlierTeamHistory.Events.Select(row => row["seq"]!.GetValue<int>()).SequenceEqual(new[] { 1, 2, 3, 4 }), "Team history prepends earlier events without reversing either page");
+var boundedTeamHistory = earlierTeamHistory.Merge([], true, rowLimit: 2);
+Check(boundedTeamHistory.Events.Count == 2 && boundedTeamHistory.Truncated, "Team paging never grows an unbounded transcript window");
+var unicodeTeamRow = new JsonObject { ["text"] = string.Concat(Enumerable.Repeat("🙂", 10)) };
+var unicodeTeamBytes = System.Text.Encoding.UTF8.GetByteCount(unicodeTeamRow.ToJsonString());
+Check(new TeamHistoryWindow([]).Merge([unicodeTeamRow], false, byteLimit: unicodeTeamBytes - 1).Events.Count == 0, "Team history bounds encoded UTF-8 rather than character counts");
+var refreshedTeamHistory = boundedTeamHistory.Merge([new JsonObject { ["seq"] = 9 }], false);
+Check(refreshedTeamHistory.Events.Count == 1 && !refreshedTeamHistory.Truncated, "Team refresh replaces the old window and clears its truncation notice");
 Check(SessionIdentities.Read(null).Entries.Count == 0 && SessionIdentities.Read(Json("{}" )).Entries.Count == 0,
     "older hosts omit native IDs without falling back to opaque resume credentials");
 const string nativeSessionId = "11111111-1111-4111-8111-111111111111";

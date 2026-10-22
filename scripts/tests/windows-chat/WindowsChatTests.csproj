@@ -7,6 +7,9 @@
     <NoWarn>$(NoWarn);CS0649</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../apps/windows/Pages/TeamCommentDraftStore.cs" Link="TeamCommentDraftStore.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamCommentModel.cs" Link="TeamCommentModel.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamHistoryWindow.cs" Link="TeamHistoryWindow.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatCommandRules.cs" Link="ChatCommandRules.cs" />
     <Compile Include="../../../apps/windows/Pages/NewChatSetup.cs" Link="NewChatSetup.cs" />
     <Compile Include="../../../apps/windows/Pages/SessionIdentities.cs" Link="SessionIdentities.cs" />

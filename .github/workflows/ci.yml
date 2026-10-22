@@ -582,11 +582,11 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Native Android chart container
+      - name: Native Android charts and Teams comment recovery
         timeout-minutes: 12
         run: bash scripts/tests/run-chart-android.sh
 
-      - name: Keep native chart test reports
+      - name: Keep native chart and Teams test reports
         if: always()
         uses: actions/upload-artifact@v7
         with:

@@ -19,6 +19,9 @@
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../apps/windows/Pages/TeamCommentDraftStore.cs" Link="TeamCommentDraftStore.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamCommentModel.cs" Link="TeamCommentModel.cs" />
+    <Compile Include="../windows-chat/TeamCommentTests.cs" Link="TeamCommentTests.cs" />
     <Compile Include="../../../apps/windows/Navigation/DesktopOpenRequest.cs" Link="DesktopOpenRequest.cs" />
     <Compile Include="../../../apps/windows/Pages/DesktopWorkbenchState.cs" Link="DesktopWorkbenchState.cs" />
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />

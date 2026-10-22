@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -46,7 +47,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.util.UUID
 
@@ -54,6 +54,20 @@ import java.util.UUID
 /// call when that login is no longer the one it was made for.
 private class TeamCalls(account: JsonObject?) {
     private val owner = WatchingOwner.from(account)
+    val origin = owner?.scope?.str("origin")
+    private val accountPerson = account?.str("accountId")?.takeIf { it.isNotBlank() }
+    var person: String? = accountPerson; private set
+    fun verify(capabilities: JsonObject) {
+        val actor = capabilities.str("actorId")?.takeIf { it.isNotBlank() } ?: throw IllegalStateException(L10n.text("common.teams.account_changed"))
+        if (accountPerson != null && accountPerson != actor) throw IllegalStateException(L10n.text("common.teams.account_changed"))
+        person = actor
+    }
+    fun commentTarget(chat: ChatTarget): TeamCommentTarget? {
+        val fields = chat.target
+        return TeamCommentTarget(origin ?: return null, person ?: return null, fields.str("organization") ?: return null,
+            fields.str("repository") ?: return null, fields.str("checkout") ?: return null, fields.str("share") ?: return null,
+            chat.host.takeIf { it.isNotBlank() } ?: return null)
+    }
 
     suspend fun call(method: String, fields: JsonObject = buildJsonObject {}): JsonObject {
         val owner = owner ?: throw IllegalStateException(L10n.text("common.teams.load_failed"))
@@ -106,6 +120,9 @@ fun TeamScreen(account: JsonObject?) {
     var organizations by remember(identity) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var organization by remember(identity) { mutableStateOf<JsonObject?>(null) }
     var chat by remember(identity) { mutableStateOf<ChatTarget?>(null) }
+    var drafts by remember(identity) { mutableStateOf(false) }
+    val context = LocalContext.current.applicationContext
+    val draftStorage = remember(context) { TeamCommentDraftStore.shared(java.io.File(context.filesDir, "team-comment-drafts")) }
 
     suspend fun load() {
         phase = Phase.Loading
@@ -115,6 +132,7 @@ fun TeamScreen(account: JsonObject?) {
                 !capabilities.bool("enabled") -> Phase.Unavailable
                 !capabilities.bool("ready") -> Phase.Authorize
                 else -> {
+                    calls.verify(capabilities)
                     organizations = calls.directory("organizations.list").list("organizations")
                     if (organization == null) organization = organizations.singleOrNull()
                     Phase.Ready
@@ -128,14 +146,20 @@ fun TeamScreen(account: JsonObject?) {
     }
     LaunchedEffect(identity) { load() }
 
+    if (drafts) {
+        TeamCommentRecoveryList(draftStorage, calls.origin, calls.person, onBack = { drafts = false })
+        return
+    }
     val current = chat
     if (current != null) {
-        TeamChatReader(calls, current, onBack = { chat = null })
+        TeamChatReader(calls, current, draftStorage, onBack = { chat = null })
         return
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(L10n.text("common.teams.title"), style = TsType.cardTitle,
             color = LocalTsColors.current.textPrimary, modifier = Modifier.padding(top = 16.dp))
+        if (calls.origin != null && calls.person != null) TsSecondaryButton(L10n.text("common.teams.comment_drafts"),
+            icon = ActionIcon.History.vector, onClick = { drafts = true })
         when (val state = phase) {
             Phase.Loading -> CircularProgressIndicator()
             Phase.Unavailable -> EmptyState(title = L10n.text("common.teams.load_failed"), message = L10n.text("common.teams.retry_detail"))
@@ -199,9 +223,7 @@ private fun AuthorizeCard(calls: TeamCalls, onDone: () -> Unit) {
     }
 }
 
-private data class CommentAttempt(val text: String, val id: String, val createdAtMs: Long)
-
-data class ChatTarget(val target: JsonObject, val title: String, val computer: String)
+data class ChatTarget(val target: JsonObject, val title: String, val computer: String, val host: String)
 
 @Composable
 private fun Repositories(calls: TeamCalls, org: JsonObject, onOpenChat: (ChatTarget) -> Unit) {
@@ -308,7 +330,7 @@ private fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, on
                     put("params", buildJsonObject { put("title", title); put("requestId", request.second) })
                 })
                 newTitles = newTitles - checkout; newRequest = null
-                made.str("share")?.let { onOpenChat(ChatTarget(target(orgId, repoId, checkout, it), title, computer)) }
+                made.str("share")?.let { onOpenChat(ChatTarget(target(orgId, repoId, checkout, it), title, computer, checkouts.firstOrNull { row -> row.str("id") == checkout }?.str("hostKey").orEmpty())) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -336,7 +358,7 @@ private fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, on
                 val shareId = share.str("id") ?: continue
                 val title = share.str("title")?.takeIf { it.isNotBlank() } ?: L10n.text("common.teams.shared_chat")
                 TsSecondaryButton(title, icon = ActionIcon.Comment.vector, onClick = {
-                    onOpenChat(ChatTarget(target(orgId, repoId, id, shareId), title, computer))
+                    onOpenChat(ChatTarget(target(orgId, repoId, id, shareId), title, computer, checkout.str("hostKey").orEmpty()))
                 })
             }
             if (repo.str("role") in setOf("contributor", "maintainer")) {
@@ -447,16 +469,20 @@ private fun decodeBounded(data: String): androidx.compose.ui.graphics.ImageBitma
 
 /// One shared chat: its history as text, a comment box, and Ask with Stop.
 @Composable
-private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Unit) {
+private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: TeamCommentDraftStore, onBack: () -> Unit) {
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
-    var events by remember(chat) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var history by remember(chat) { mutableStateOf(TeamHistoryWindow(emptyList())) }
+    val events = history.events
+    var nextCursor by remember(chat) { mutableStateOf<String?>(null) }
+    var hasMore by remember(chat) { mutableStateOf(false) }
+    var loadedEarlier by remember(chat) { mutableStateOf(false) }
+    var loading by remember(chat) { mutableStateOf(false) }
     var allowsComments by remember(chat) { mutableStateOf(false) }
     var allowsAgentRuns by remember(chat) { mutableStateOf(false) }
-    var comment by remember(chat) { mutableStateOf("") }
-    // One id per comment text: a retry after an unknown result is the same
-    // message, so the host keeps one copy.
-    var commentAttempt by remember(chat) { mutableStateOf<CommentAttempt?>(null) }
+    val commentTarget = remember(calls, chat) { calls.commentTarget(chat) }
+    val commentModel = remember(calls, chat) { commentTarget?.let { TeamCommentModel(draftStorage, it,
+        chat.title.take(160) + " · " + chat.computer.take(160), calls::call) } }
     var ask by remember(chat) { mutableStateOf("") }
     var askAttempt by remember(chat) { mutableStateOf<JsonObject?>(null) }
     var fence by remember(chat) { mutableStateOf<JsonElement?>(null) }
@@ -467,17 +493,40 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Uni
         calls.call("teams.connection.call", buildJsonObject {
             put("target", chat.target); put("method", method); put("params", params)
         })
-    suspend fun load() {
+    suspend fun load(earlier: Boolean = false) {
+        if (loading || earlier && !hasMore) return
+        loading = true
         try {
-            val details = read("team.chat.details")["chat"]?.jsonObject
-            allowsComments = details?.bool("allowsComments") == true
-            allowsAgentRuns = details?.bool("allowsAgentRuns") == true
-            events = read("team.chat.events", buildJsonObject { put("direction", "older"); put("limit", 100) }).list("events")
+            val details = read("team.chat.details")["chat"] as? JsonObject
+                ?: throw CoreFailure("invalid_response", L10n.text("common.teams.history_cannot_display"))
+            val cursor = if (earlier) nextCursor else null
+            val page = read("team.chat.events", buildJsonObject {
+                put("direction", "older"); put("limit", 100)
+                cursor?.let { put("cursor", it) }
+            })
+            val more = page.bool("hasMore")
+            val next = page.str("nextCursor")
+            val incoming = page.list("events")
+            if (details.str("id") != chat.target.str("share") || details.str("checkoutId") != chat.target.str("checkout") ||
+                page.str("shareId") != chat.target.str("share") || more && (incoming.isEmpty() || next == null || next == cursor)) {
+                throw CoreFailure("invalid_response", L10n.text("common.teams.history_cannot_display"))
+            }
+            val before = history
+            history = withContext(Dispatchers.Default) { before.merge(incoming, earlier) }
+            nextCursor = next; hasMore = more; loadedEarlier = earlier
+            allowsComments = details.bool("allowsComments")
+            allowsAgentRuns = details.bool("allowsAgentRuns")
             error = null
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Throwable) {
             error = failure.message
+            if (failure is CoreFailure && failure.code !in setOf("team_connection_unavailable", "teams_unreachable", "teams_busy", "chat_window_full")) {
+                history = TeamHistoryWindow(emptyList()); hasMore = false; nextCursor = null
+                allowsComments = false; allowsAgentRuns = false
+            }
+        } finally {
+            loading = false
         }
     }
     suspend fun askCall(method: String, params: JsonObject): JsonObject =
@@ -489,26 +538,35 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Uni
         // Paused while someone is typing, and while an Ask is watched below.
         while (true) {
             delay(10_000)
-            if (!busy && fence == null && comment.isBlank() && ask.isBlank()) load()
+            if (!busy && fence == null && !loadedEarlier && commentModel?.text.isNullOrBlank() && ask.isBlank()) load()
         }
     }
     LaunchedEffect(fence) {
         val running = fence ?: return@LaunchedEffect
         while (true) {
             delay(3000)
-            load()
+            if (!loadedEarlier) load()
             val status = runCatching { askCall("team.chat.ask.status", buildJsonObject { put("fence", running) }) }.getOrNull()
             if (status?.bool("running") == false) break
         }
         fence = null
-        load()
+        if (!loadedEarlier) load()
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        TsSecondaryButton(L10n.text("common.back"), onClick = onBack, icon = ActionIcon.Back.vector)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TsSecondaryButton(L10n.text("common.back"), onClick = onBack, icon = ActionIcon.Back.vector)
+            TsSecondaryButton(L10n.text("common.refresh"), enabled = !loading, icon = ActionIcon.Refresh.vector,
+                onClick = { scope.launch { load() } })
+        }
         Text(chat.title, style = TsType.cardTitle, color = colors.textPrimary)
         error?.let { Text(it, color = colors.danger) }
+        if (history.truncated) Text(L10n.text("common.teams.shared_history_window"), color = colors.textSecondary)
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (hasMore) item {
+                TsSecondaryButton(L10n.text("common.teams.load_earlier"), enabled = !loading,
+                    icon = ActionIcon.History.vector, onClick = { scope.launch { load(earlier = true) } })
+            }
             items(events) { event ->
                 val shared = (event["event"] as? JsonObject)?.takeIf { it.str("kind") == "attachment" }
                 if (shared != null) {
@@ -525,34 +583,9 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Uni
                 }
             }
         }
-        if (allowsComments) {
-            OutlinedTextField(comment, { comment = it }, Modifier.fillMaxWidth(), placeholder = { Text(L10n.text("common.teams.comment_placeholder")) })
-            TsSecondaryButton(L10n.text("common.teams.comment"), enabled = comment.isNotBlank() && !busy, icon = ActionIcon.Comment.vector, onClick = {
-                scope.launch {
-                    busy = true
-                    try {
-                        val text = comment.trim()
-                        val attempt = commentAttempt?.takeIf { it.text == text }
-                            ?: CommentAttempt(text, UUID.randomUUID().toString(), System.currentTimeMillis()).also { commentAttempt = it }
-                        calls.call("teams.comment.send", buildJsonObject {
-                            put("target", chat.target)
-                            put("input", buildJsonObject {
-                                put("text", text); put("clientMessageId", attempt.id)
-                                put("clientMessageCreatedAtMs", attempt.createdAtMs)
-                            })
-                        })
-                        comment = ""; commentAttempt = null
-                        load()
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (failure: Throwable) {
-                        error = failure.message
-                    } finally {
-                        busy = false
-                    }
-                }
-            })
-        }
+        if (allowsComments && commentModel != null) TeamCommentComposer(commentModel, onPosted = {
+            if (!loadedEarlier) load()
+        })
         if (allowsAgentRuns) {
             val running = fence
             if (running != null) {
