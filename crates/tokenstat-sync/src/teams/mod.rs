@@ -494,6 +494,11 @@ impl TeamClient {
             None,
         )
     }
+    /// How often each repository this person can read has moved, for a
+    /// host catching up after being offline.
+    pub fn my_moves(&self) -> Result<Value, TeamError> {
+        self.request(Method::GET, &["teams", "moves"], None, None)
+    }
     pub fn withdraw_checkout(
         &self,
         org: &str,

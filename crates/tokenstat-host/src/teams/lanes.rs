@@ -565,6 +565,42 @@ pub(super) fn land_ready(
     Ok(json!({"landed":landed,"message":message}))
 }
 
+/// After a relay registration: catch up every repository that moved since
+/// this computer last looked. Sequences seen are kept beside the settings.
+pub(crate) fn caught_up_since_last_seen(client: &tokenstat_sync::teams::TeamClient) {
+    let Ok(moves) = client.my_moves() else {
+        return;
+    };
+    let Ok(root) = root() else {
+        return;
+    };
+    let file = root.join("moves-seen.json");
+    let mut seen: BTreeMap<String, u64> = fs::read(&file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    let mut changed = false;
+    for row in moves["moves"].as_array().into_iter().flatten().take(1000) {
+        let (Some(repository), Some(sequence)) =
+            (row["repositoryId"].as_str(), row["sequence"].as_u64())
+        else {
+            continue;
+        };
+        if seen.get(repository).is_some_and(|known| *known >= sequence) {
+            continue;
+        }
+        caught_up(repository);
+        seen.insert(repository.into(), sequence);
+        changed = true;
+    }
+    if changed
+        && fs::create_dir_all(&root).is_ok()
+        && let Ok(bytes) = serde_json::to_vec(&seen)
+    {
+        let _ = fs::write(file, bytes);
+    }
+}
+
 /// What the shared chat reads after a run, in plain words.
 /// Record whether a kept lane is ready to land or blocked.
 fn mark(path: &Path, ready: bool) {

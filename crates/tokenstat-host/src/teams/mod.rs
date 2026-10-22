@@ -81,6 +81,18 @@ pub fn install_sync() {
             .name("team-caught-up".into())
             .spawn(move || lanes::caught_up(&repository));
     });
+    #[cfg(feature = "local-host")]
+    tokenstat_remote::tunnel::on_connected(|| {
+        let _ = std::thread::Builder::new()
+            .name("team-catch-up".into())
+            .spawn(|| {
+                if let Ok(owner) = AccountSnapshot::capture()
+                    && let Ok(client) = client(&owner)
+                {
+                    lanes::caught_up_since_last_seen(&client);
+                }
+            });
+    });
 }
 
 /// Whether this host lets a shared chat start its agent at all.

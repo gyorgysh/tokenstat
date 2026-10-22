@@ -33,6 +33,15 @@ use crate::{RemoteError, Transport};
 type TeamMovedHook = Box<dyn Fn(&str) + Send + Sync>;
 static TEAM_MOVED: std::sync::OnceLock<TeamMovedHook> = std::sync::OnceLock::new();
 
+/// Called each time this machine registers with the relay, so work missed
+/// while it was offline can be caught up.
+static CONNECTED: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+/// Register the host's handler for a fresh relay registration.
+pub fn on_connected(hook: impl Fn() + Send + Sync + 'static) {
+    let _ = CONNECTED.set(Box::new(hook));
+}
+
 /// Register the host's handler for `TEAM-MOVED` lines. The first one wins.
 pub fn on_team_moved(hook: impl Fn(&str) + Send + Sync + 'static) {
     let _ = TEAM_MOVED.set(Box::new(hook));
@@ -1137,6 +1146,9 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
             };
             session.mark_read();
             eprintln!("tunnel: registered, this machine is diallable");
+            if let Some(hook) = CONNECTED.get() {
+                hook();
+            }
         }
         Message::Text(text) => {
             // A refusal the machine can answer itself is answered here, before
