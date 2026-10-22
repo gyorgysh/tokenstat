@@ -198,3 +198,90 @@ impl Owner {
         Ok(accounting.active == 0)
     }
 }
+
+/// The recovery proof on a real Windows process table. CI runs these on its
+/// Windows runner, which is where "the guardian is gone" has to be true.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        process::Stdio,
+        time::{Duration, Instant},
+    };
+
+    /// A child that would live a minute on its own.
+    fn sleeper() -> Child {
+        Command::new("cmd")
+            .args(["/C", "ping -n 60 127.0.0.1 >NUL"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    }
+
+    fn creation(pid: u32) -> u64 {
+        // SAFETY: OpenProcess returns null or a handle we own and close below.
+        let raw = unsafe { OpenProcess(QUERY_LIMITED, 0, pid) };
+        assert!(!raw.is_null());
+        // SAFETY: a non-null handle from OpenProcess.
+        let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
+        started(handle.as_raw_handle()).unwrap()
+    }
+
+    fn until(what: &str, done: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !done() {
+            assert!(Instant::now() < deadline, "{what}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn this_process_is_its_own_live_owner() {
+        let (pid, born) = run_owner(0);
+        assert_eq!(pid, std::process::id());
+        assert_ne!(born, 0);
+        assert!(!run_owner_gone(pid, born));
+        // Nothing unclear proves a run gone.
+        assert!(!run_owner_gone(0, born));
+        assert!(!run_owner_gone(pid, 0));
+    }
+
+    #[test]
+    fn an_ended_owner_is_proven_gone_and_a_reused_pid_is_not_it() {
+        let mut child = sleeper();
+        let pid = child.id();
+        let born = creation(pid);
+        assert!(!run_owner_gone(pid, born), "a live owner read as gone");
+        // Another start time at the same pid is another process.
+        assert!(run_owner_gone(pid, born + 1));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        until("an ended owner did not read as gone", || {
+            run_owner_gone(pid, born)
+        });
+    }
+
+    #[test]
+    fn closing_the_job_ends_everything_in_it() {
+        let mut child = sleeper();
+        let owner = Owner::attach(&child).unwrap();
+        assert!(!owner.stopped(&child).unwrap());
+        drop(owner);
+        until("kill on close left the anchor running", || {
+            matches!(child.try_wait(), Ok(Some(_)))
+        });
+    }
+
+    #[test]
+    fn terminating_the_job_is_observed_as_stopped() {
+        let mut child = sleeper();
+        let owner = Owner::attach(&child).unwrap();
+        owner.terminate(&child).unwrap();
+        until("terminate left the job active", || {
+            owner.stopped(&child).unwrap()
+        });
+        child.wait().unwrap();
+    }
+}
