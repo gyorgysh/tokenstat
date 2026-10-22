@@ -451,7 +451,10 @@ pub(crate) fn caught_up(repository: &str) {
         {
             continue;
         }
-        let _ = lane::catch_up(&row.folder.canonical, &settings.target, remote);
+        record_catch_up(
+            &row.id,
+            &lane::catch_up(&row.folder.canonical, &settings.target, remote),
+        );
         let Ok(kept) = fs::read_dir(lane::root(&data, &row.id)) else {
             continue;
         };
@@ -460,11 +463,16 @@ pub(crate) fn caught_up(repository: &str) {
             if !path.is_dir() {
                 continue;
             }
-            let status = fs::read(path.with_extension("json"))
+            let Some(about) = fs::read(path.with_extension("json"))
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<About>(&bytes).ok())
-                .and_then(|about| about.status);
-            if status.as_deref() == Some("running") || lane::rebase_in_progress(&path) {
+            else {
+                continue;
+            };
+            if about.status.as_deref() == Some("running")
+                || lane::pointer(&path).ok().as_deref() != Some(about.pointer.as_str())
+                || lane::rebase_in_progress(&path)
+            {
                 continue;
             }
             // A lease held means an agent is working in that lane right now.
@@ -575,6 +583,50 @@ pub(super) fn land_ready(
     Ok(json!({"landed":landed,"message":message}))
 }
 
+/// Words for the last catch-up of a checkout, kept for the owner to see.
+fn record_catch_up(checkout: &str, outcome: &lane::CatchUp) {
+    let note = match outcome {
+        lane::CatchUp::Updated | lane::CatchUp::Current => None,
+        lane::CatchUp::OtherBranch => {
+            Some("This folder is on another branch, so it was not updated.")
+        }
+        lane::CatchUp::Dirty => Some("This folder has uncommitted changes, so it was not updated."),
+        lane::CatchUp::Diverged => Some(
+            "This folder has its own commits on the target, so it was not updated. Pull or rebase it yourself.",
+        ),
+        lane::CatchUp::Busy => {
+            Some("Another change was being written in this folder, so it was not updated.")
+        }
+        lane::CatchUp::Failed(_) => {
+            Some("Fetching the target failed, so this folder was not updated.")
+        }
+    };
+    let Ok(root) = root() else {
+        return;
+    };
+    let file = root.join("caught-up.json");
+    let mut notes: BTreeMap<String, String> = fs::read(&file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    match note {
+        Some(note) => notes.insert(checkout.into(), note.into()),
+        None => notes.remove(checkout),
+    };
+    if fs::create_dir_all(&root).is_ok()
+        && let Ok(bytes) = serde_json::to_vec(&notes)
+    {
+        let _ = fs::write(file, bytes);
+    }
+}
+
+fn catch_up_note(checkout: &str) -> Option<String> {
+    let bytes = fs::read(root().ok()?.join("caught-up.json")).ok()?;
+    serde_json::from_slice::<BTreeMap<String, String>>(&bytes)
+        .ok()?
+        .remove(checkout)
+}
+
 /// After a relay registration: catch up every repository that moved since
 /// this computer last looked. Sequences seen are kept beside the settings.
 pub(crate) fn caught_up_since_last_seen(client: &tokenstat_sync::teams::TeamClient) {
@@ -672,7 +724,11 @@ pub(super) fn discard(
     }
     let _lease = tokenstat_workspace::writer::Lease::acquire_lane(&path)
         .map_err(|_| DispatchError::new("team_lane_busy", "This lane is in use right now."))?;
-    lane::abort_rebase(&path);
+    // Git runs inside the lane only while its pointer is still tokenstat's.
+    // Otherwise the lane goes through the main repository alone.
+    if lane::pointer(&path).ok().as_deref() == Some(about.pointer.as_str()) {
+        lane::abort_rebase(&path);
+    }
     drop(_lease);
     let removed = Lane {
         path,
@@ -752,7 +808,10 @@ struct Input {
 
 /// `teams.lanes.get` and `teams.lanes.set`, for the publisher on this computer.
 pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
-    if !matches!(method, "teams.lanes.get" | "teams.lanes.set") {
+    if !matches!(
+        method,
+        "teams.lanes.get" | "teams.lanes.set" | "teams.lanes.catchUp"
+    ) {
         return None;
     }
     Some((|| {
@@ -782,6 +841,18 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             return Err(invalid());
         }
         let mut file = load();
+        if method == "teams.lanes.catchUp" {
+            // The owner asked to try again now, on this computer only.
+            let settings = settings(&input.checkout).ok_or_else(unavailable)?;
+            let remote = settings.remote.as_deref().ok_or_else(invalid)?;
+            let row = super::publications::Store::capture()?
+                .active_checkout(&input.checkout)?
+                .ok_or_else(unavailable)?;
+            record_catch_up(
+                &input.checkout,
+                &lane::catch_up(&row.folder.canonical, &settings.target, remote),
+            );
+        }
         if method == "teams.lanes.set" {
             let settings = input.settings.ok_or_else(invalid)?;
             if !validate(&settings) {
@@ -790,7 +861,9 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             file.checkouts.insert(input.checkout.clone(), settings);
             save(&file)?;
         }
-        Ok(json!({"settings": file.checkouts.get(&input.checkout)}))
+        Ok(
+            json!({"settings": file.checkouts.get(&input.checkout), "catchUp": catch_up_note(&input.checkout)}),
+        )
     })())
 }
 

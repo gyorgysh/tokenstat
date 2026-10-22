@@ -30,6 +30,7 @@ enum TeamHostMethod: String, Sendable {
     case ask = "teams.ask"
     case lanesGet = "teams.lanes.get"
     case lanesSet = "teams.lanes.set"
+    case lanesCatchUp = "teams.lanes.catchUp"
     case chatOptions = "teams.chat.options"
     case chatPreview = "teams.chat.preview"
     case chatPublish = "teams.chat.publish"

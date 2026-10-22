@@ -277,6 +277,19 @@ impl Store {
                 .collect())
         })
     }
+    /// One active publication on this computer by its checkout id.
+    pub(super) fn active_checkout(
+        &self,
+        checkout: &str,
+    ) -> Result<Option<Checkout>, DispatchError> {
+        self.read(|index| {
+            Ok(index
+                .checkouts
+                .iter()
+                .find(|row| row.id == checkout && row.phase == Phase::Active)
+                .cloned())
+        })
+    }
     /// The principal's own publication, with its folder unchanged on this
     /// computer. Every Team read or action on a checkout passes this first.
     pub(super) fn current_for(

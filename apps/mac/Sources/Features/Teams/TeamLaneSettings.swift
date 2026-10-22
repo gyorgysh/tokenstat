@@ -18,6 +18,8 @@ struct TeamLaneSettings: View {
     @State private var saving = false
     @State private var saved = false
     @State private var error: String?
+    @State private var catchUp: String?
+    @State private var retrying = false
 
     private var checkArguments: [String] {
         check.split(whereSeparator: \.isWhitespace).map(String.init)
@@ -30,6 +32,11 @@ struct TeamLaneSettings: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text(L10n.text("common.teams.workflow")).font(Theme.headline)
             if let error { TeamNotice(message: error, warning: true) }
+            if let catchUp {
+                TeamNotice(message: catchUp, warning: true)
+                Button(L10n.text("common.teams.catch_up_again"), .refresh) { Task { await retry() } }
+                    .buttonStyle(TeamButtonStyle()).disabled(retrying)
+            }
             Picker(L10n.text("common.teams.workflow"), selection: $mode) {
                 Text(L10n.text("common.teams.workflow_manual")).tag(Mode.manual)
                 Text(L10n.text("common.teams.workflow_review")).tag(Mode.review)
@@ -76,6 +83,7 @@ struct TeamLaneSettings: View {
     private func load() async {
         do {
             let result: TeamLaneSettingsResult = try await store.read(.lanesGet, fields: ["checkout": .string(checkoutId)], context: context)
+            catchUp = result.catchUp
             if let settings = result.settings {
                 mode = !settings.enabled ? .manual : settings.review == true ? .review : .automatic
                 target = settings.target; remote = settings.remote ?? ""
@@ -83,6 +91,15 @@ struct TeamLaneSettings: View {
             }
             loaded = true
         } catch is CancellationError {} catch { self.error = error.localizedDescription; loaded = true }
+    }
+
+    private func retry() async {
+        guard !retrying else { return }
+        retrying = true; defer { retrying = false }
+        do {
+            let result: TeamLaneSettingsResult = try await store.perform(.lanesCatchUp, fields: ["checkout": .string(checkoutId)], context: context)
+            catchUp = result.catchUp
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 
     private func save() async {
@@ -108,4 +125,4 @@ struct TeamLaneSettings: View {
 struct TeamLaneSettingsValue: Codable, Sendable {
     let enabled: Bool; let target: String; let remote: String?; let check: [String]; let checkRunsChangedCode: Bool?; let review: Bool?
 }
-struct TeamLaneSettingsResult: Codable, Sendable { let settings: TeamLaneSettingsValue? }
+struct TeamLaneSettingsResult: Codable, Sendable { let settings: TeamLaneSettingsValue?; var catchUp: String? = nil }

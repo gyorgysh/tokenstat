@@ -51,7 +51,7 @@ enum TeamFixtureData {
         case .commentSend:
             guard state == .comment || state == .commentUncertain else { throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.") }
             return try await TeamFixtureComments.shared.send(params, uncertain: state == .commentUncertain)
-        case .checkoutPublish, .checkoutWithdraw, .ask, .lanesSet: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
+        case .checkoutPublish, .checkoutWithdraw, .ask, .lanesSet, .lanesCatchUp: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
         case .lanesGet: return .object(["settings": .null])
         case .directory:
             if await TeamFixtureComments.shared.accessRemoved { throw TeamRequestFailure(code: "forbidden", message: "Access to this fictional repository was removed.") }
