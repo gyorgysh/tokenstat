@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -302,6 +303,11 @@ internal sealed class TeamsPage : Page
         catch (Exception error) { Note(error.Message, true); return; }
         foreach (var item in (page["events"] as JsonArray)?.OfType<JsonObject>() ?? [])
         {
+            if (Format.Text(item["event"], "kind") == "attachment")
+            {
+                _body.Children.Add(SharedFile(target, item["event"]!.AsObject()));
+                continue;
+            }
             var text = Format.Text(item, "text");
             if (text.Length == 0) text = Format.Text(item["event"], "delta");
             if (text.Length == 0) continue;
@@ -387,6 +393,55 @@ internal sealed class TeamsPage : Page
                 return;
             }
         }
+    }
+
+    /// A file the shared history shows. Images open inline on request. Nothing
+    /// is handed to another app: the file comes from someone else's computer
+    /// and its name comes from an agent's output.
+    private UIElement SharedFile(JsonObject target, JsonObject file)
+    {
+        var panel = new StackPanel { Spacing = Theme.SpaceXs };
+        var id = Format.Text(file, "id");
+        var name = new string(Format.Text(file, "name").Where(c => !char.IsControl(c)
+            && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format).ToArray());
+        if (name.Length == 0) name = L10n.Text("common.teams.shared_file");
+        panel.Children.Add(new TextBlock { Text = name, TextTrimming = TextTrimming.CharacterEllipsis });
+        Button? open = null;
+        open = ActionIconGlyph.Button(L10n.Text("common.teams.open_file_action"), ActionIcon.Download, async (_, _) =>
+        {
+            open!.IsEnabled = false;
+            try
+            {
+                var reply = await CallAsync("teams.connection.call", new JsonObject
+                {
+                    ["target"] = target.DeepClone(), ["method"] = "team.chat.attachment", ["params"] = new JsonObject { ["attachment"] = id },
+                });
+                var media = Format.Text(reply["attachment"], "mediaType");
+                if (media.StartsWith("image/", StringComparison.Ordinal) && media != "image/svg+xml")
+                {
+                    var bytes = Convert.FromBase64String(Format.Text(reply, "data"));
+                    using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+                    await stream.WriteAsync(bytes.AsBuffer());
+                    stream.Seek(0);
+                    // A small file can still describe a huge bitmap.
+                    var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage { DecodePixelWidth = 1024 };
+                    await bitmap.SetSourceAsync(stream);
+                    panel.Children.Remove(open);
+                    panel.Children.Add(new Image { Source = bitmap, MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left });
+                }
+                else
+                {
+                    panel.Children.Add(new TextBlock { Text = L10n.Text("common.teams.file_on_computer"), Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
+                }
+            }
+            catch (Exception error)
+            {
+                panel.Children.Add(new TextBlock { Text = error.Message, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
+                open.IsEnabled = true;
+            }
+        });
+        panel.Children.Add(open);
+        return panel;
     }
 
     /// Refresh while the agent works, with Stop, until the host says it ended.

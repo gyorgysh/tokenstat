@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -378,6 +379,58 @@ private fun LaneRow(lane: JsonObject, all: List<JsonObject>, busy: Boolean, onLa
     }
 }
 
+/// A file the shared history shows. Images open inline on request. Nothing
+/// is handed to another app, because the file comes from someone else's
+/// computer and its name comes from an agent's output.
+@Composable
+private fun SharedFile(file: JsonObject, fetch: suspend (String) -> JsonObject) {
+    val colors = LocalTsColors.current
+    val scope = rememberCoroutineScope()
+    val id = file.str("id") ?: return
+    val name = file.str("name").orEmpty().filter { Character.getType(it) != Character.FORMAT.toInt() && !it.isISOControl() }
+        .ifBlank { L10n.text("common.teams.shared_file") }
+    var image by remember(id) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var note by remember(id) { mutableStateOf<String?>(null) }
+    var busy by remember(id) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(name, color = colors.textPrimary, maxLines = 1)
+        val shown = image
+        if (shown != null) {
+            androidx.compose.foundation.Image(shown, contentDescription = name, modifier = Modifier.fillMaxWidth())
+        } else {
+            TsSecondaryButton(L10n.text("common.teams.open_file_action"), enabled = !busy, icon = ActionIcon.Download.vector, onClick = {
+                scope.launch {
+                    busy = true
+                    try {
+                        val reply = fetch(id)
+                        val media = (reply["attachment"] as? JsonObject)?.str("mediaType").orEmpty()
+                        if (media.startsWith("image/") && media != "image/svg+xml") {
+                            val bytes = android.util.Base64.decode(reply.str("data").orEmpty(), android.util.Base64.DEFAULT)
+                            // A small file can still describe a huge bitmap.
+                            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                            var sample = 1
+                            while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) sample *= 2
+                            val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+                            image = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
+                            if (image == null) note = L10n.text("common.teams.file_unavailable")
+                        } else {
+                            note = L10n.text("common.teams.file_on_computer")
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Throwable) {
+                        note = failure.message
+                    } finally {
+                        busy = false
+                    }
+                }
+            })
+        }
+        note?.let { Text(it, color = colors.textSecondary) }
+    }
+}
+
 /// One shared chat: its history as text, a comment box, and Ask with Stop.
 @Composable
 private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Unit) {
@@ -442,6 +495,11 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Uni
         error?.let { Text(it, color = colors.danger) }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(events) { event ->
+                val shared = (event["event"] as? JsonObject)?.takeIf { it.str("kind") == "attachment" }
+                if (shared != null) {
+                    SharedFile(shared) { id -> read("team.chat.attachment", buildJsonObject { put("attachment", id) }) }
+                    return@items
+                }
                 val by = event["author"] as? JsonObject
                 val author = if (by?.str("kind") == "formerMember") L10n.text("common.teams.former_member")
                     else by?.str("name") ?: event.str("kind").orEmpty()
