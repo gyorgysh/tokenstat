@@ -138,6 +138,7 @@ struct TeamSharedChatsView: View {
             Text(L10n.text("common.teams.new_chat_title")).font(Theme.callout.weight(.semibold))
             HStack(spacing: Theme.Space.s) {
                 TextField(L10n.text("common.teams.new_chat_placeholder"), text: $newTitle).textFieldStyle(ThemedFieldStyle())
+                    .accessibilityLabel(L10n.text("common.teams.new_chat_title"))
                     .onSubmit { Task { await startChat(checkout) } }
                 Button(L10n.text("common.teams.new_chat"), .create) { Task { await startChat(checkout) } }
                     .buttonStyle(TeamButtonStyle(primary: true))

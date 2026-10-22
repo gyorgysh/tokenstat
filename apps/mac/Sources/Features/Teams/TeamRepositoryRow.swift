@@ -40,7 +40,7 @@ struct TeamRepositoryRow: View {
                             Image(systemName: ActionIcon.device.symbol).foregroundStyle(.secondary).accessibilityHidden(true)
                             Text(source(checkout)).font(Theme.callout).foregroundStyle(.secondary).lineLimit(2)
                             if localIds.contains(checkout.id) { TeamRoleBadge(text: L10n.text("common.teams.this_computer")) }
-                        }
+                        }.accessibilityElement(children: .combine)
                     }
                     if more { Text(L10n.text("common.teams.more_computers")).font(Theme.caption).foregroundStyle(.secondary) }
                 }
@@ -90,6 +90,8 @@ struct TeamRepositoryRow: View {
                 }
                 Text(lane.ask.isEmpty ? lane.branch : lane.ask).font(Theme.body).lineLimit(2)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
             Text(lane.state == "running"
                 ? L10n.text("common.teams.lane_running", lane.askedBy.name, String(lane.files.count))
                 : lane.state == "ready"

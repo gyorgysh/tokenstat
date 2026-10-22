@@ -54,14 +54,17 @@ struct TeamLaneSettings: View {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text(L10n.text("common.teams.target_branch")).font(Theme.callout.weight(.semibold))
                     TextField("main", text: $target).textFieldStyle(ThemedFieldStyle())
+                        .accessibilityLabel(L10n.text("common.teams.target_branch"))
                 }
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text(L10n.text("common.teams.remote")).font(Theme.callout.weight(.semibold))
                     TextField("origin", text: $remote).textFieldStyle(ThemedFieldStyle())
+                        .accessibilityLabel(L10n.text("common.teams.remote"))
                 }
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text(L10n.text("common.teams.check_command")).font(Theme.callout.weight(.semibold))
                     TextField(L10n.text("common.teams.check_command_placeholder"), text: $check).textFieldStyle(ThemedFieldStyle())
+                        .accessibilityLabel(L10n.text("common.teams.check_command"))
                 }
                 if mode == .review {
                     Toggle(L10n.text("common.teams.open_pull_request"), isOn: $pullRequest).toggleStyle(.checkboxForTeam)
@@ -79,7 +82,7 @@ struct TeamLaneSettings: View {
                 Button(L10n.text("common.save"), .save) { Task { await save() } }
                     .buttonStyle(TeamButtonStyle(primary: true))
                     .disabled(!loaded || saving || !valid)
-                if saving { ProgressView().controlSize(.small) }
+                if saving { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
                 if saved { Text(L10n.text("common.teams.workflow_saved")).font(Theme.callout).foregroundStyle(.secondary) }
             }
         }
