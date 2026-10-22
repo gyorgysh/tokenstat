@@ -121,6 +121,8 @@ pub(super) struct Lane {
     pub branch: String,
     repository: PathBuf,
     pointer: String,
+    /// A rebase stopped at its conflicts and waits for the agent's fix.
+    rebasing: bool,
     keep: bool,
 }
 impl Lane {
@@ -169,6 +171,7 @@ pub(super) fn open(
         branch,
         repository: repository.into(),
         pointer: String::new(),
+        rebasing: false,
         keep: false,
     };
     opened.pointer = lane::pointer(&opened.path).map_err(failed)?;
@@ -184,6 +187,15 @@ pub(super) fn open(
 /// Commit, check and land one finished lane. One landing at a time per
 /// checkout on this computer, so each lands onto the one before it.
 pub(super) fn finish(lane: &mut Lane, settings: &Settings, message: &str) -> Landing {
+    settle(lane, settings, message, false)
+}
+
+/// Land again after the agent worked on a conflict or a failed check.
+pub(super) fn finish_fix(lane: &mut Lane, settings: &Settings, message: &str) -> Landing {
+    settle(lane, settings, message, true)
+}
+
+fn settle(lane: &mut Lane, settings: &Settings, message: &str, after_fix: bool) -> Landing {
     let lock = (|| {
         let path = root().ok()?.join(format!(
             "{}.landing",
@@ -212,9 +224,16 @@ pub(super) fn finish(lane: &mut Lane, settings: &Settings, message: &str) -> Lan
             message: "The lane's git link was changed.".into(),
         };
     }
+    if lane.rebasing {
+        lane.rebasing = false;
+        if let Err(message) = lane::finish_rebase(&lane.path) {
+            lane.keep();
+            return Landing::Blocked { message };
+        }
+    }
     match lane::commit_all(&lane.path, message) {
-        Ok(false) => return Landing::Nothing,
-        Ok(true) => {}
+        Ok(false) if !after_fix => return Landing::Nothing,
+        Ok(_) => {}
         Err(message) => {
             lane.keep();
             return Landing::Blocked { message };
@@ -226,10 +245,50 @@ pub(super) fn finish(lane: &mut Lane, settings: &Settings, message: &str) -> Lan
         settings.remote.as_deref(),
         &settings.check,
     );
-    if !matches!(landing, Landing::Landed { .. }) {
-        lane.keep();
-    }
+    // A lane kept by an earlier attempt is done once its work landed.
+    lane.keep = !matches!(landing, Landing::Landed { .. });
     landing
+}
+
+/// What happens after a landing that did not go through.
+pub(super) enum Next {
+    /// Run the agent again in the same lane with this instruction.
+    Agent(String),
+    Done(Landing),
+}
+
+/// Turn a conflict or a failed check into the agent's next instruction.
+/// A conflict starts the rebase and leaves its markers in the lane.
+pub(super) fn next_step(
+    lane: &mut Lane,
+    settings: &Settings,
+    landing: Landing,
+    message: &str,
+) -> Next {
+    match landing {
+        Landing::Conflict { .. } => {
+            match lane::start_rebase(&lane.path, &settings.target, settings.remote.as_deref()) {
+                Ok(files) if !files.is_empty() => {
+                    lane.rebasing = true;
+                    Next::Agent(format!(
+                        "Work that landed on {} while you worked conflicts with your change in: {}. Those files now contain conflict markers (<<<<<<<, =======, >>>>>>>). Edit them so both changes work together and remove every marker. Change nothing else. tokenstat finishes the merge and lands it after you finish.",
+                        settings.target,
+                        files.join(", ")
+                    ))
+                }
+                // The target moved again and the conflict went with it.
+                Ok(_) => Next::Done(finish_fix(lane, settings, message)),
+                Err(message) => Next::Done(Landing::Blocked { message }),
+            }
+        }
+        // The owner turned checks on knowing they run changed code, so the
+        // agent may read what its own change made the check print.
+        Landing::CheckFailed { output } => Next::Agent(format!(
+            "The project check failed after your change. Fix the cause by editing files in this folder. tokenstat runs the check again after you finish. The check printed:\n```\n{}\n```",
+            output.trim()
+        )),
+        other => Next::Done(other),
+    }
 }
 
 /// What the shared chat reads after a run, in plain words.

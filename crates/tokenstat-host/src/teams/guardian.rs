@@ -22,8 +22,12 @@ use std::{
     time::{Duration, Instant},
 };
 use tokenstat_identity::teams::TeamTicket;
+use tokenstat_workspace::gitwrite::lane::Landing;
 #[path = "guardian/output.rs"]
 mod output;
+
+/// How many times a lane agent may try again after its work could not land.
+const FIX_ATTEMPTS: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -337,16 +341,31 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         source.target().workspace.to_string(),
         source.target().id.to_string(),
     );
-    let process = Owned::start(&helper, program, |group| {
+    let base_program = program.clone();
+    let message = input
+        .text
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .take(200)
+        .collect::<String>();
+    let birth = |group: u32, first: bool| -> io::Result<()> {
         // Written before birth: a crash after this point can be recovered
         // once the group is proven gone, and never before.
         super::recovery::remember(&fence, &workspace, &chat, group)?;
         source
             .ensure_current()
             .map_err(|_| io::Error::other("Run source changed."))?;
-        chats
-            .ensure_launching_ask(source.target(), &prepared, || source.ensure_current())
-            .map_err(|_| io::Error::other("Run source changed."))?;
+        if first {
+            chats
+                .ensure_launching_ask(source.target(), &prepared, || source.ensure_current())
+                .map_err(|_| io::Error::other("Run source changed."))?;
+        }
+        Ok(())
+    };
+    let process = Owned::start(&helper, program, |group| {
+        birth(group, true)?;
         if authority
             .remaining()
             .map_err(|_| io::Error::other("Run authority expired."))?
@@ -381,44 +400,95 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     let execution = (|| {
         control_thread.map_err(map_io)?;
         let mut renew = Instant::now() + Duration::from_secs(10);
-        let mut running = false;
-        let terminal = loop {
-            if authority.ensure_live().is_err()
-                || source.ensure_current().is_err()
-                || sdk.ensure_live().is_err()
-            {
-                break State::Stopped;
-            }
-            match control.try_recv() {
-                Ok(Ok(Control::Stop { fence })) if fence == prepared.binding().fence => {
+        let mut ever_running = false;
+        let mut attempt = 0u32;
+        loop {
+            let mut running = false;
+            let terminal = loop {
+                if authority.ensure_live().is_err()
+                    || source.ensure_current().is_err()
+                    || sdk.ensure_live().is_err()
+                {
                     break State::Stopped;
                 }
-                Ok(Ok(_)) => {}
-                Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => break State::Stopped,
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
-            match process.poll().map_err(map_io)? {
-                Poll::Started => {
-                    chats.transition_owned_run(source.target(), &prepared, State::Running)?;
-                    sdk.running().map_err(map_io)?;
-                    running = true;
-                    event(
-                        json!({"event":"running","fence":prepared.binding().fence,"runId":prepared.binding().fence.run_id()}),
-                    )?;
+                match control.try_recv() {
+                    Ok(Ok(Control::Stop { fence })) if fence == prepared.binding().fence => {
+                        break State::Stopped;
+                    }
+                    Ok(Ok(_)) => {}
+                    Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => break State::Stopped,
+                    Err(mpsc::TryRecvError::Empty) => {}
                 }
-                Poll::Exited(code) => {
-                    break if running && code == Some(0) {
-                        State::Succeeded
-                    } else {
-                        State::Failed
-                    };
+                match process.poll().map_err(map_io)? {
+                    Poll::Started => {
+                        // A fix attempt is the same run: Running is recorded once.
+                        if !ever_running {
+                            chats.transition_owned_run(
+                                source.target(),
+                                &prepared,
+                                State::Running,
+                            )?;
+                            sdk.running().map_err(map_io)?;
+                            event(
+                                json!({"event":"running","fence":prepared.binding().fence,"runId":prepared.binding().fence.run_id()}),
+                            )?;
+                        }
+                        running = true;
+                        ever_running = true;
+                    }
+                    Poll::Exited(code) => {
+                        break if running && code == Some(0) {
+                            State::Succeeded
+                        } else {
+                            State::Failed
+                        };
+                    }
+                    Poll::LaunchFailed => {
+                        break if ever_running {
+                            State::Failed
+                        } else {
+                            State::NotStarted
+                        };
+                    }
+                    Poll::Running => {}
                 }
-                Poll::LaunchFailed => break State::NotStarted,
-                Poll::Running => {}
+                if running {
+                    output
+                        .drain(false, |batch, events| {
+                            chats
+                                .append_owned_output(
+                                    source.target(),
+                                    &prepared,
+                                    batch,
+                                    events,
+                                    || {
+                                        authority.ensure_live().map_err(api_error)?;
+                                        source.ensure_current()
+                                    },
+                                )
+                                .map_err(|_| io::Error::other("Team output could not be verified."))
+                        })
+                        .map_err(map_io)?;
+                }
+                if Instant::now() >= renew {
+                    if authority.renew().is_err() {
+                        break State::Stopped;
+                    }
+                    if sdk.renew(&authority).is_err() {
+                        break State::Stopped;
+                    }
+                    renew = Instant::now() + Duration::from_secs(10);
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            };
+            if terminal == State::Stopped {
+                sdk.retire();
+                chats.transition_owned_run(source.target(), &prepared, State::Stopping)?;
             }
-            if running {
+            let proof = process.stop().map_err(map_io)?;
+            let final_output = if running && matches!(terminal, State::Succeeded | State::Failed) {
                 output
-                    .drain(false, |batch, events| {
+                    .drain(true, |batch, events| {
                         chats
                             .append_owned_output(source.target(), &prepared, batch, events, || {
                                 authority.ensure_live().map_err(api_error)?;
@@ -426,39 +496,61 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                             })
                             .map_err(|_| io::Error::other("Team output could not be verified."))
                     })
-                    .map_err(map_io)?;
+                    .map_err(map_io)
+            } else {
+                Ok(())
+            };
+            let (Some(lane), Some(settings)) = (lane.as_mut(), lane_settings.as_ref()) else {
+                sdk.retire();
+                return Ok((terminal, proof, final_output));
+            };
+            if terminal != State::Succeeded || final_output.is_err() {
+                sdk.retire();
+                return Ok((terminal, proof, final_output));
             }
-            if Instant::now() >= renew {
-                if authority.renew().is_err() {
-                    break State::Stopped;
+            let landing = if attempt == 0 {
+                super::lanes::finish(lane, settings, &message)
+            } else {
+                super::lanes::finish_fix(lane, settings, &message)
+            };
+            let next = if attempt < FIX_ATTEMPTS
+                && !matches!(landing, Landing::Landed { .. } | Landing::Nothing)
+            {
+                super::lanes::next_step(lane, settings, landing, &message)
+            } else {
+                super::lanes::Next::Done(landing)
+            };
+            let _ = authority.renew();
+            let (note, instruction) = match next {
+                super::lanes::Next::Done(landing) => {
+                    (super::lanes::describe(&landing, lane, settings), None)
                 }
-                if sdk.renew(&authority).is_err() {
-                    break State::Stopped;
-                }
-                renew = Instant::now() + Duration::from_secs(10);
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        };
-        sdk.retire();
-        if terminal == State::Stopped {
-            chats.transition_owned_run(source.target(), &prepared, State::Stopping)?;
+                super::lanes::Next::Agent(instruction) => (
+                    "This work could not land as it was, so the agent is working on it again."
+                        .to_string(),
+                    Some(instruction),
+                ),
+            };
+            let posted = output.note(&note, |batch, events| {
+                chats
+                    .append_owned_output(source.target(), &prepared, batch, events, || {
+                        authority.ensure_live().map_err(api_error)?;
+                        source.ensure_current()
+                    })
+                    .map_err(|_| io::Error::other("Team output could not be verified."))
+            });
+            let Some(instruction) = instruction else {
+                sdk.retire();
+                return Ok((terminal, proof, final_output.and(posted.map_err(map_io))));
+            };
+            attempt += 1;
+            let mut follow = base_program.clone();
+            super::provider::follow_up(&run_home, &mut follow, attempt, &instruction)
+                .map_err(map_io)?;
+            output.follow(&follow.output);
+            let _ = proof;
+            process = Owned::start(&helper, follow, |group| birth(group, false)).map_err(map_io)?;
         }
-        let proof = process.stop().map_err(map_io)?;
-        let final_output = if running && matches!(terminal, State::Succeeded | State::Failed) {
-            output
-                .drain(true, |batch, events| {
-                    chats
-                        .append_owned_output(source.target(), &prepared, batch, events, || {
-                            authority.ensure_live().map_err(api_error)?;
-                            source.ensure_current()
-                        })
-                        .map_err(|_| io::Error::other("Team output could not be verified."))
-                })
-                .map_err(map_io)
-        } else {
-            Ok(())
-        };
-        Ok((terminal, proof, final_output))
     })();
     let (terminal, proof) = match execution {
         Ok((terminal, proof, Ok(()))) => (terminal, proof),
@@ -486,29 +578,6 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             return Err(error);
         }
     };
-    if terminal == State::Succeeded
-        && let (Some(lane), Some(settings)) = (lane.as_mut(), lane_settings.as_ref())
-    {
-        let message = input
-            .text
-            .lines()
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .take(200)
-            .collect::<String>();
-        let landing = super::lanes::finish(lane, settings, &message);
-        let note = super::lanes::describe(&landing, lane, settings);
-        let _ = authority.renew();
-        let _ = output.note(&note, |batch, events| {
-            chats
-                .append_owned_output(source.target(), &prepared, batch, events, || {
-                    authority.ensure_live().map_err(api_error)?;
-                    source.ensure_current()
-                })
-                .map_err(|_| io::Error::other("Team output could not be verified."))
-        });
-    }
     let result = chats.complete_owned_run(source.target(), *prepared, proof, terminal);
     if result.is_ok() {
         super::recovery::forget(&fence);

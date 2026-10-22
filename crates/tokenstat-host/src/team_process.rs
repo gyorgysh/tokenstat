@@ -74,7 +74,7 @@ impl BirthWindow {
 /// Constructed only by the trusted backend adapter, never deserialized from
 /// an incoming Team request. Control stays on a separate private pipe; raw
 /// backend output goes only to fresh private files owned by the guardian.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Program {
     pub executable: PathBuf,

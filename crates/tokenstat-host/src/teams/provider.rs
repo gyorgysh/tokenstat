@@ -140,6 +140,23 @@ pub(super) fn configure(
     Ok(())
 }
 
+/// The same lane agent again, with what blocked its landing as the prompt.
+/// Fresh IO files per attempt; arguments and environment stay the same.
+pub(super) fn follow_up(
+    home: &RunHome,
+    program: &mut Program,
+    attempt: u32,
+    instruction: &str,
+) -> io::Result<()> {
+    program.input = home.file(&format!("input-{attempt}"));
+    program.output = home.file(&format!("output-{attempt}"));
+    program.errors = home.file(&format!("errors-{attempt}"));
+    let prompt = format!(
+        "You are continuing work in your own copy of the project. You can read and edit files only inside this folder and cannot run commands. Do not commit. {instruction}"
+    );
+    write_new(&program.input, prompt.as_bytes())
+}
+
 fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::io::Write;
     let mut options = fs::OpenOptions::new();

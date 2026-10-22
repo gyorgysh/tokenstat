@@ -15,6 +15,7 @@ pub(super) struct Output {
     path: PathBuf,
     file: Option<File>,
     parser: Parser,
+    backend: String,
     batch: u32,
 }
 impl Output {
@@ -23,8 +24,15 @@ impl Output {
             path: path.into(),
             file: None,
             parser: Parser::for_team(backend),
+            backend: backend.into(),
             batch: 0,
         }
+    }
+    /// Read a later attempt's output file, continuing the batch numbering.
+    pub fn follow(&mut self, path: &Path) {
+        self.path = path.into();
+        self.file = None;
+        self.parser = Parser::for_team(&self.backend);
     }
     pub fn drain(
         &mut self,

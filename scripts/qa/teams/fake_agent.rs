@@ -93,6 +93,15 @@ fn main() {
     let state = PathBuf::from(args.get(2).expect("fixture state"));
     let mut context = String::new();
     io::stdin().read_to_string(&mut context).unwrap();
+    if context.contains("conflict markers") {
+        // A follow-up after a conflicting landing: resolve every marker.
+        let shared = std::path::Path::new("shared.txt");
+        assert!(fs::read_to_string(shared).unwrap().contains("<<<<<<<"));
+        fs::write(shared, "teammate and agent\n").unwrap();
+        println!("{}", r#"{"type":"item.completed","item":{"id":"fixture-fix","type":"agent_message","text":"Fictional conflict resolved"}}"#);
+        println!("{}", r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#);
+        return;
+    }
     assert!(context.contains("Fictional supervised Ask"));
     assert!(!context.contains("PRIVATE_FIXTURE"));
     let later_was_approved = context.contains("Fictional later discussion");
@@ -133,7 +142,27 @@ fn main() {
         // A lane agent's whole job: change a file in its own folder.
         fs::write("lane-edit.txt", "Fictional lane change\n").unwrap();
     }
-    if mode == "finish" || mode == "edit" {
+    if mode == "conflict" {
+        // A teammate lands a change to the same line while this agent works.
+        let remote = args.get(4).expect("fixture remote");
+        let other = state.with_extension("teammate");
+        let git = |dir: &std::path::Path, list: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.name=Teammate", "-c", "user.email=teammate@example.invalid", "-c", "commit.gpgSign=false"])
+                .args(list)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        };
+        git(state.parent().unwrap(), &["clone", "-q", remote, other.to_str().unwrap()]);
+        fs::write(other.join("shared.txt"), "teammate\n").unwrap();
+        git(&other, &["commit", "-qam", "Teammate change"]);
+        git(&other, &["push", "-q", "origin", "main"]);
+        fs::write("shared.txt", "agent\n").unwrap();
+    }
+    if mode == "finish" || mode == "edit" || mode == "conflict" {
         return;
     }
     #[cfg(unix)]
