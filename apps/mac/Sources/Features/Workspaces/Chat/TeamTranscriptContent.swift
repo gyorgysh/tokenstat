@@ -42,10 +42,10 @@ struct TeamTranscriptContent: View {
                         // otherwise, so nothing it names can launch.
                         if let image = TeamFilePreview.image(fetched) {
                             image.resizable().scaledToFit().frame(maxWidth: 480, maxHeight: 360, alignment: .leading)
-                                .clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityLabel(fetched.name)
+                                .clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityLabel(TeamFilePreview.safeName(fetched.name))
                         } else {
                             HStack(spacing: Theme.Space.s) {
-                                Label(fetched.name, systemImage: "doc").font(Theme.callout).lineLimit(1)
+                                Label(TeamFilePreview.safeName(fetched.name), systemImage: "doc").font(Theme.callout).lineLimit(1).truncationMode(.middle)
                                 #if os(macOS)
                                 Button(L10n.text("common.teams.save_file"), .download) { TeamFilePreview.save(fetched) }
                                     .buttonStyle(TeamButtonStyle())
@@ -122,18 +122,54 @@ enum TeamFilePreview {
         return UIImage(data: file.data).map(Image.init(uiImage:))
         #endif
     }
+    /// Extensions macOS can launch or follow straight from Finder. A saved
+    /// file never keeps one of these as its last extension.
+    private static let launching: Set<String> = [
+        "app", "command", "tool", "sh", "zsh", "bash", "csh", "terminal", "workflow", "action", "scpt", "scptd",
+        "applescript", "pkg", "mpkg", "dmg", "jar", "webloc", "inetloc", "fileloc", "url", "html", "htm", "xhtml",
+        "svg", "shtml", "plugin", "prefpane", "kext", "bundle", "framework", "dylib", "osax", "saver", "widget",
+        "mobileconfig", "configprofile", "py", "rb", "pl", "js", "jxa", "jse", "vbs", "ps1", "bat", "cmd", "exe",
+    ]
+
+    /// The name as sent by another computer, made safe to show and to save:
+    /// no control or direction characters, no path, no leading dot, bounded,
+    /// and never ending in an extension that launches.
+    static func safeName(_ raw: String) -> String {
+        var name = String(String.UnicodeScalarView(raw.unicodeScalars.filter { scalar in
+            !(scalar.properties.generalCategory == .control || scalar.properties.generalCategory == .format
+              || scalar == "/" || scalar == "\\" || scalar == ":")
+        })).trimmingCharacters(in: .whitespaces)
+        while name.hasPrefix(".") { name.removeFirst() }
+        if name.count > 120 {
+            let ext = (name as NSString).pathExtension
+            name = String(name.prefix(100)) + (ext.isEmpty || ext.count > 10 ? "" : "." + ext)
+        }
+        if name.isEmpty { name = "file" }
+        if launching.contains((name as NSString).pathExtension.lowercased()) { name += ".download" }
+        return name
+    }
+
     #if os(macOS)
     /// Saved where the person chooses, marked as downloaded so macOS checks
-    /// it before anything in it can run.
+    /// it before anything in it can run. The mark goes on a hidden copy
+    /// first, and only a marked copy is moved into place.
     @MainActor static func save(_ file: TeamAttachmentFile) {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = file.name
+        panel.nameFieldStringValue = safeName(file.name)
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        let staged = url.deletingLastPathComponent().appendingPathComponent(".tokenstat-" + UUID().uuidString)
         do {
-            try file.data.write(to: url, options: .atomic)
+            try file.data.write(to: staged, options: .withoutOverwriting)
             let mark = "0081;\(String(Int(Date().timeIntervalSince1970), radix: 16));tokenstat;"
-            _ = mark.withCString { value in setxattr(url.path, "com.apple.quarantine", value, strlen(value), 0, 0) }
+            let marked = mark.withCString { value in setxattr(staged.path, "com.apple.quarantine", value, strlen(value), 0, 0) }
+            guard marked == 0 else { throw CocoaError(.fileWriteUnknown) }
+            if FileManager.default.fileExists(atPath: url.path) {
+                _ = try FileManager.default.replaceItemAt(url, withItemAt: staged, options: .usingNewMetadataOnly)
+            } else {
+                try FileManager.default.moveItem(at: staged, to: url)
+            }
         } catch {
+            try? FileManager.default.removeItem(at: staged)
             NSSound.beep()
         }
     }
