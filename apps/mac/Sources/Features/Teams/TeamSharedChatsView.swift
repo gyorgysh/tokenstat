@@ -113,8 +113,15 @@ struct TeamSharedChatsView: View {
                         }
                     }
                 }.padding(.horizontal, Theme.Space.l)
+                .frame(maxWidth: 860, alignment: .leading)
             }
-            .frame(maxWidth: 860, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, Theme.Space.l)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, Theme.Space.l)
+        }
+        .onAppear {
+            // One repository needs no choice. Picking it saves an empty step.
+            if store.selectedRepositoryId == nil, availableRepositories.count == 1 {
+                store.selectedRepositoryId = availableRepositories[0].id
+            }
         }
     }
     private func computerName(_ row: TeamCheckout) -> String {

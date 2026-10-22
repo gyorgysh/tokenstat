@@ -24,8 +24,9 @@ extension EnvironmentValues {
 }
 
 enum TeamColors {
-    static let action = Color.adaptive(light: Color(red: 0x5C / 255, green: 0x2B / 255, blue: 0xD9 / 255), dark: Color(red: 0xA7 / 255, green: 0x8B / 255, blue: 0xFA / 255))
-    static let destructive = Color.adaptive(light: Color(red: 0xB4 / 255, green: 0x23 / 255, blue: 0x18 / 255), dark: Color(red: 1, green: 0x8A / 255, blue: 0x80 / 255))
+    // The app's own accent and danger, so Team screens read as the same app.
+    static let action = Theme.accent
+    static let destructive = Theme.danger
     // Keep the app's amber hue, with enough contrast for small text on light panels.
     static let warning = Color.adaptive(light: Color(red: 0x80 / 255, green: 0x54 / 255, blue: 0x0A / 255), dark: Theme.warning)
 }
@@ -97,9 +98,9 @@ struct TeamPersonLabel: View {
 struct TeamRoleBadge: View {
     let text: String
     var body: some View {
-        Text(text).font(Theme.callout).foregroundStyle(TeamColors.action)
-            .padding(.horizontal, Theme.Space.s).padding(.vertical, Theme.Space.xs)
-            .background(Theme.rowHighlight, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        Text(text).font(Theme.caption.weight(.medium)).foregroundStyle(.secondary)
+            .padding(.horizontal, Theme.Space.s).padding(.vertical, 3)
+            .background(Theme.rowHighlight, in: Capsule())
     }
 }
 struct TeamNotice: View {
@@ -118,27 +119,22 @@ struct TeamNotice: View {
         .accessibilityElement(children: .combine)
     }
 }
-/// Matches the app's colors while preserving a comfortable target on touch
-/// platforms and allowing a long translated label to wrap.
+/// The app's own button styles. Touch platforms get the comfortable size.
 struct TeamButtonStyle: ButtonStyle {
     var primary = false
-    @Environment(\.isEnabled) private var enabled
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Theme.callout.weight(.semibold))
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, Theme.Space.xs)
-            .frame(minHeight: Theme.Control.heightComfortable)
-            .fixedSize(horizontal: false, vertical: true)
-            .labelStyle(ActionLabelStyle())
-            .foregroundStyle(configuration.role == .destructive ? TeamColors.destructive : TeamColors.action)
-            .background(primary ? Theme.accentSoft : Theme.controlSeat,
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(primary ? Theme.accent.opacity(0.35) : Theme.border, lineWidth: 1))
-            .contentShape(.rect)
-            .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
+    #if os(iOS)
+    private let comfortable = true
+    #else
+    private let comfortable = false
+    #endif
+    @ViewBuilder func makeBody(configuration: Configuration) -> some View {
+        if configuration.role == .destructive {
+            DestructiveButtonStyle().makeBody(configuration: configuration)
+        } else if primary {
+            AccentButtonStyle(comfortable: comfortable).makeBody(configuration: configuration)
+        } else {
+            SecondaryButtonStyle(comfortable: comfortable).makeBody(configuration: configuration)
+        }
     }
 }
 struct TeamLoadingView: View {

@@ -7,20 +7,29 @@ struct TeamSidebarLinks: View {
     @Bindable var store: TeamStore
     let isTeamSelected: Bool
     let open: (TeamSection) -> Void
+    /// Personal scope has nothing to list here. Teams stay reachable from
+    /// the scope menu, and an invitation waiting for this person is the one
+    /// reason to show a row anyway.
+    private var visible: Bool {
+        store.selectedOrganization != nil || !store.inbox.isEmpty
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text(store.selectedOrganization?.name ?? L10n.text("common.teams.title"))
-                .font(Theme.callout.weight(.semibold)).foregroundStyle(.secondary)
-                .lineLimit(2).padding(.horizontal, Theme.Space.m).padding(.top, Theme.Space.l)
-                .accessibilityAddTraits(.isHeader)
-            if store.selectedOrganization != nil && store.phase == .ready {
-                row(.chats)
-                row(.members)
-                if store.selectedOrganization?.role.canManage == true { row(.invitations) }
-                row(.settings)
-            } else { row(.overview) }
+        if visible {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                Text(store.selectedOrganization?.name ?? L10n.text("common.teams.title"))
+                    .font(Theme.callout.weight(.semibold)).foregroundStyle(.secondary)
+                    .lineLimit(2).padding(.horizontal, Theme.Space.m).padding(.top, Theme.Space.l)
+                    .accessibilityAddTraits(.isHeader)
+                if store.selectedOrganization != nil && store.phase == .ready {
+                    row(.chats)
+                    row(.repositories)
+                    row(.members)
+                    if store.selectedOrganization?.role.canManage == true { row(.invitations) }
+                    row(.settings)
+                } else { row(.overview) }
+            }
+            .padding(.bottom, Theme.Space.s)
         }
-        .padding(.bottom, Theme.Space.s)
     }
     private func row(_ section: TeamSection) -> some View {
         Button { open(section) } label: {

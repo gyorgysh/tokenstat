@@ -338,21 +338,13 @@ struct TeamManagementView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(directory.repositories.repositories) { repository in
-                            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                                HStack {
-                                    Label(repository.name, systemImage: "folder").font(Theme.body.weight(.medium))
-                                    Spacer(minLength: Theme.Space.m)
-                                    TeamRoleBadge(text: repository.role?.label ?? L10n.text("common.teams.unassigned"))
-                                }
-                                if repository.role != nil {
-                                    Button(L10n.text("common.teams.chats"), .comment) { store.selectedRepositoryId = repository.id; store.show(.chats) }.buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)
-                                    Button(L10n.text("common.teams.checkouts"), .checkout) { if let context = store.mutationContext { sheet = .checkouts(context, repository) } }.buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)
-                                }
-                                if organization.role.canManage || repository.role == .maintainer {
-                                    Button(L10n.text("common.teams.manage_access"), .permissions) { if let context = store.mutationContext { sheet = .access(context, repository) } }.buttonStyle(TeamButtonStyle())
-                                    Button(L10n.text("common.teams.rename_repository"), .edit) { if let context = store.mutationContext { sheet = .renameRepository(context, repository) } }.buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)
-                                }
-                            }.padding(Theme.Space.l).frame(maxWidth: .infinity, alignment: .leading).background(Theme.panel)
+                            if let context = store.mutationContext {
+                                TeamRepositoryRow(store: store, context: context, repository: repository, organization: organization,
+                                    openChats: { store.selectedRepositoryId = repository.id; store.show(.chats) },
+                                    openCheckouts: { sheet = .checkouts(context, repository) },
+                                    manageAccess: { sheet = .access(context, repository) },
+                                    rename: { sheet = .renameRepository(context, repository) })
+                            }
                             ThemeRule()
                         }
                     }
