@@ -23,6 +23,15 @@ const PAGE_TARGET: usize = 512 * 1024;
 /// Base64 of this fits one Team response with room to spare.
 const ATTACHMENT_LIMIT: u64 = 5 * 1024 * 1024;
 
+fn allows_agent_runs(ready: bool, backend: &str, role: RepositoryRole) -> bool {
+    ready
+        && matches!(
+            role,
+            RepositoryRole::Contributor | RepositoryRole::Maintainer
+        )
+        && super::provider::supported(backend).is_ok()
+}
+
 pub(super) fn call(
     principal: &AuthorizedTeamPrincipal,
     method: TeamReadMethod,
@@ -78,7 +87,7 @@ pub(super) fn call(
             (
                 marker,
                 json!({"chat":{"id":row.id,"checkoutId":row.checkout_id,"title":history.title,
-            "backend":history.backend,"historyTrimmed":history.history_trimmed,"allowsAgentRuns":super::agent_runs_ready() && super::provider::supported(&history.backend).is_ok(),
+            "backend":history.backend,"historyTrimmed":history.history_trimmed,"allowsAgentRuns":allows_agent_runs(super::agent_runs_ready(), &history.backend, scope.role),
             "allowsComments":row.source_revision.is_some() && matches!(scope.role,RepositoryRole::Contributor | RepositoryRole::Maintainer)}}),
             )
         }
@@ -359,6 +368,25 @@ fn page_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_only_members_are_never_offered_agent_execution() {
+        for ready in [false, true] {
+            for role in [
+                RepositoryRole::Viewer,
+                RepositoryRole::Contributor,
+                RepositoryRole::Maintainer,
+            ] {
+                for backend in ["claude", "codex", "muse", "unknown"] {
+                    assert_eq!(
+                        allows_agent_runs(ready, backend, role),
+                        ready && backend == "claude" && role != RepositoryRole::Viewer,
+                        "{ready:?} {backend} {role:?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn people_who_left_read_as_former_members() {

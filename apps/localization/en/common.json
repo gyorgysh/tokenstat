@@ -696,5 +696,6 @@
   "common.teams.tool_failed": "Failed",
   "common.teams.text_page": "Page {0} of {1}",
   "common.teams.previous_page": "Previous",
-  "common.teams.recorded_changes": "Recorded changes"
+  "common.teams.recorded_changes": "Recorded changes",
+  "common.teams.run_status_unconfirmed": "The agent's status could not be confirmed. Stop is still available."
 }

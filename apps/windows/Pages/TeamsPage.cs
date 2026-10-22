@@ -625,7 +625,12 @@ internal sealed partial class TeamsPage : Page
             {
                 var reply = await CallAsync("teams.ask", new JsonObject { ["target"] = target.DeepClone(), ["method"] = "team.chat.ask.status", ["params"] = new JsonObject { ["fence"] = fence.DeepClone() } });
                 if (!IsLoaded || _view != view) return;
-                if (!Format.Flag(reply, "running"))
+                if (reply["running"] is not JsonValue value || !value.TryGetValue<bool>(out var running))
+                {
+                    status.Text = L10n.Text("common.teams.run_status_unconfirmed");
+                    continue;
+                }
+                if (!running)
                 {
                     _activeRuns.Remove(key); _stoppingRuns.Remove(key);
                     if (!canRefresh()) { status.Text = L10n.Text("common.done"); stop.IsEnabled = false; return; }
@@ -644,12 +649,6 @@ internal sealed partial class TeamsPage : Page
             catch (Exception error)
             {
                 if (!IsLoaded || _view != view) return;
-                if (error is HostException failure && failure.Code is not ("team_connection_unavailable" or "teams_unreachable" or "teams_busy" or "host_timeout" or "host_unavailable"))
-                {
-                    _activeRuns.Remove(key); _stoppingRuns.Remove(key);
-                    await ShowChatAsync(target, title, computer);
-                    return;
-                }
                 status.Text = error.Message;
             }
         }

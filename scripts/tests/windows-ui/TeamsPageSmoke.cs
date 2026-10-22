@@ -21,6 +21,8 @@ namespace NativeUiTests
             var fence = new JsonObject { ["fixture"] = "exact-original-fence" };
             JsonNode? stopped = null;
             var calls = 0;
+            var statusReads = 0;
+            var stopAttempts = 0;
             Task<JsonNode> Host(string method, JsonObject? fields)
             {
                 if (method == "account.status") return Task.FromResult<JsonNode>(new JsonObject());
@@ -31,7 +33,13 @@ namespace NativeUiTests
                 }
                 if (Format.Text(fields, "method") == "team.chat.ask.stop")
                 {
+                    if (++stopAttempts == 1) throw new Tokenstat.Host.HostException("team_connection_unavailable", "Fictional Stop request failed");
                     stopped = fields?["params"]?["fence"]?.DeepClone();
+                    return Task.FromResult<JsonNode>(new JsonObject());
+                }
+                if (Format.Text(fields, "method") == "team.chat.ask.status")
+                {
+                    statusReads++;
                     return Task.FromResult<JsonNode>(new JsonObject());
                 }
                 throw new Exception("Unexpected fictional host call");
@@ -46,6 +54,9 @@ namespace NativeUiTests
             runs[target.ToJsonString()] = fence;
             var show = (Task<bool>)typeof(TeamsPage).GetMethod("ShowChatAsync", flags)!.Invoke(page, [target, "Fictional chat", "Fictional computer", null])!;
             if (await show || calls != 1) throw new Exception("Teams fixture did not exercise the history read failure");
+            deadline = DateTime.UtcNow.AddSeconds(7);
+            while (statusReads == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+            if (statusReads == 0 || runs.Count != 1) throw new Exception("An unconfirmed status discarded the known run");
             page.UpdateLayout();
             static IEnumerable<Button> Buttons(DependencyObject root)
             {
@@ -59,10 +70,14 @@ namespace NativeUiTests
             if (invoke is null) throw new Exception("Stop has no accessible invoke action");
             invoke.Invoke();
             deadline = DateTime.UtcNow.AddSeconds(3);
+            while (stopAttempts == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+            if (stopAttempts != 1 || !stop.IsEnabled) throw new Exception("Failed Stop could not be retried");
+            invoke.Invoke();
+            deadline = DateTime.UtcNow.AddSeconds(3);
             while (stopped is null && DateTime.UtcNow < deadline) await Task.Delay(20);
             if (!JsonNode.DeepEquals(fence, stopped)) throw new Exception("Stop lost the original run fence");
             body.Children.Remove(page);
-            Program.Log("PASS: the production Teams reader preserves accessible Stop through a history read failure");
+            Program.Log("PASS: the production Teams reader preserves accessible Stop through malformed status and a history read failure");
         }
     }
 }

@@ -32,6 +32,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Teams browsers on Android and Windows can load more computers and shared chats, with retry controls for unreachable computers. Overlap summaries identify which computers are included.
 - Pending Team comments on Android and Windows survive navigation and app restarts. Explicit retries retain the original words and message ID; delayed receipts preserve newer drafts.
 - Retrying a Team Ask after a lost reply keeps the original request and recovers Stop for the same run. Windows rejects replies from a screen that has already closed.
+- Stop remains available when shared history or the agent's status cannot be confirmed. Android also reports failed Stop requests so they can be retried.
+- Read-only repository members are no longer offered Ask in shared chats.
 - Repository checks run under process supervision and recheck permission before landing. Stopped checks cannot push, interrupted recovery can be retried, and automatic catch-up preserves untracked and ignored files.
 
 ## [1.7.5] - 2026-10-21

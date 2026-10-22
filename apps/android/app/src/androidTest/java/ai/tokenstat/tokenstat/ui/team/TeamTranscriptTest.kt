@@ -34,12 +34,14 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class TeamTranscriptTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
-    @Test fun knownStopSurvivesAHistoryReadFailure() {
+    @Test fun knownStopSurvivesMalformedStatusAndAHistoryReadFailure() {
         val account = buildJsonObject { put("signedIn", true); put("host", "https://fixture.invalid"); put("handle", "fixture"); put("accountId", "person-fixture"); put("accountSession", "fictional-session") }
         val target = buildJsonObject { put("organization", "org-fixture"); put("repository", "repo-fixture"); put("checkout", "checkout-fixture"); put("share", "share-fixture") }
         val fence = buildJsonObject { put("fixture", "exact-original-fence") }
         var failed = false
         var stopped: JsonElement? = null
+        var stopAttempts = 0
+        val statusReads = java.util.concurrent.atomic.AtomicInteger()
         val calls = TeamCalls(account) { method, body ->
             when (body["method"]?.jsonPrimitive?.content) {
                 "team.chat.details" -> {
@@ -49,8 +51,11 @@ class TeamTranscriptTest {
                 "team.chat.events" -> buildJsonObject { put("shareId", "share-fixture"); put("events", JsonArray(emptyList())); put("hasMore", false) }
                 "team.chat.ask.review" -> buildJsonObject { put("agentRuns", true); put("review", "fictional-review") }
                 "team.chat.ask" -> buildJsonObject { put("state", "running"); put("fence", fence) }
-                "team.chat.ask.status" -> buildJsonObject { put("running", true) }
-                "team.chat.ask.stop" -> { stopped = body["params"]!!.jsonObject["fence"]; buildJsonObject {} }
+                "team.chat.ask.status" -> { statusReads.incrementAndGet(); buildJsonObject {} }
+                "team.chat.ask.stop" -> {
+                    if (++stopAttempts == 1) throw CoreFailure("team_connection_unavailable", "Fictional Stop request failed")
+                    stopped = body["params"]!!.jsonObject["fence"]; buildJsonObject { put("stopping", true) }
+                }
                 else -> error("Unexpected fictional call: $method")
             }
         }
@@ -69,10 +74,14 @@ class TeamTranscriptTest {
             compose.onNode(hasSetTextAction()).performTextInput("Fictional question")
             compose.onNodeWithText(L10n.text("common.teams.ask"), useUnmergedTree = true).performClick()
             compose.waitUntil(5_000) { compose.onAllNodesWithText(L10n.text("common.teams.stop_agent")).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(7_000) { statusReads.get() > 0 }
+            compose.onNodeWithText(L10n.text("common.teams.stop_agent")).assertIsDisplayed()
             compose.runOnIdle { failed = true }
             compose.onNodeWithText(L10n.text("common.refresh")).performClick()
             compose.waitUntil(5_000) { compose.onAllNodesWithText("Fictional history read failure").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText(L10n.text("common.teams.stop_agent")).assertIsDisplayed().performClick()
+            compose.onNodeWithText("Fictional Stop request failed").assertIsDisplayed()
+            compose.onNodeWithText(L10n.text("common.teams.stop_agent")).assertIsEnabled().performClick()
             compose.runOnIdle { assertEquals(fence, stopped) }
         } finally { folder.deleteRecursively() }
     }

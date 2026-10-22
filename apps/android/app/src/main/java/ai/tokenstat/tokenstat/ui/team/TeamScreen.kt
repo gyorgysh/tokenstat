@@ -47,6 +47,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.put
 import java.util.UUID
 
@@ -590,7 +591,9 @@ internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Te
             delay(3000)
             if (!loadedEarlier) load()
             val status = runCatching { askCall("team.chat.ask.status", buildJsonObject { put("fence", running) }) }.getOrNull()
-            if (status?.bool("running") == false) break
+            val confirmed = (status?.get("running") as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+            if (confirmed == false) break
+            if (status != null && confirmed == null) error = L10n.text("common.teams.run_status_unconfirmed")
         }
         fence = null
         if (!loadedEarlier) load()
@@ -622,7 +625,11 @@ internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Te
             if (running != null) {
                 Text(L10n.text("common.teams.agent_working", chat.computer), color = colors.textSecondary)
                 TsSecondaryButton(L10n.text("common.teams.stop_agent"), icon = ActionIcon.Stop.vector, onClick = {
-                    scope.launch { runCatching { askCall("team.chat.ask.stop", buildJsonObject { put("fence", running) }) } }
+                    scope.launch {
+                        try { askCall("team.chat.ask.stop", buildJsonObject { put("fence", running) }) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (failure: Throwable) { error = failure.message }
+                    }
                 })
             } else {
                 OutlinedTextField(ask, { ask = it }, Modifier.fillMaxWidth(), enabled = !busy && askAttempt == null,

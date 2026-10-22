@@ -102,7 +102,7 @@ struct TeamAskBar: View {
     private func stop() async {
         guard let fence, !stopping else { return }
         stopping = true; error = nil
-        do { let _: JSONValue = try await call("team.chat.ask.stop", ["fence": fence]) }
+        do { let _: TeamAskStopped = try await call("team.chat.ask.stop", ["fence": fence]) }
         catch is CancellationError {} catch { self.error = error.localizedDescription; stopping = false }
     }
 }
@@ -110,3 +110,4 @@ struct TeamAskBar: View {
 struct TeamAskReview: Decodable, Sendable { let review: String; let agentRuns: Bool }
 struct TeamAskStarted: Decodable, Sendable { let state: String?; let fence: JSONValue? }
 struct TeamAskStatus: Decodable, Sendable { let running: Bool }
+struct TeamAskStopped: Decodable, Sendable { let stopping: Bool }
