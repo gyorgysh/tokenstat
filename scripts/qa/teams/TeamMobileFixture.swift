@@ -6,6 +6,7 @@ import SwiftUI
     @State private var store = TeamStore(api: TeamFixtureData.api)
     @State private var sheet: TeamSheet?
     @State private var dark = true
+    @State private var showingFolder = false
     @Environment(\.teamCommentDraftStorage) private var commentStorage
     var body: some View {
         NavigationStack {
@@ -17,6 +18,8 @@ import SwiftUI
                             Button("Personal") { store.select(nil) }
                             Button("Example Studio") { store.select(store.organizations.first) }
                             Button("Team chats") { store.show(.chats) }
+                            Button("Shared projects") { store.showProjects() }
+                            Button("Share Website") { showingFolder = true }
                             if TeamFixtureData.state == .commentUncertain {
                                 Button("Remove repository access") { Task { await TeamFixtureComments.shared.removeAccess(); await store.refreshSelected() } }
                             }
@@ -41,6 +44,12 @@ import SwiftUI
         .sheet(item: $sheet) { route in
             TeamEditorSheet(store: store, route: route, canCreateOrganization: true, onAccount: {})
                 .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("--fixture-large-text") ? .accessibility3 : .large)
+                .presentationDetents([.large]).presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showingFolder) {
+            TeamFolderShareView(store: store, workspace: .init(id: "/example/Website", name: "Website", path: "/example/Website"),
+                onManageTeams: { showingFolder = false; store.show(.overview); store.select(nil) },
+                onOpen: { organization, repository, checkout in showingFolder = false; store.openProject(repository, in: organization, checkout: checkout) })
                 .presentationDetents([.large]).presentationDragIndicator(.visible)
         }
         .task {

@@ -30,6 +30,7 @@ import AppKit
     @State private var sheet: TeamSheet?
     @State private var dark = true
     @State private var showingSource = false
+    @State private var showingFolder = false
     private let owner = TeamAccountOwner(scope: .account(origin: "https://accounts.example.test", handle: "example-owner")!, generation: 1, session: "fixture", personId: TeamFixtureData.state == .member ? "fixture-member" : "fixture-owner")
     var body: some View {
         HStack(spacing: 0) {
@@ -38,7 +39,7 @@ import AppKit
                 Text("Example repositories").font(Theme.callout).foregroundStyle(.secondary).padding(Theme.Space.m)
                 Label("Website", systemImage: "folder").font(Theme.body).padding(Theme.Space.m)
                 Label("iOS app", systemImage: "folder").font(Theme.body).padding(Theme.Space.m)
-                TeamSidebarLinks(store: store, isTeamSelected: true) { store.show($0) }
+                TeamSidebarLinks(store: store, isTeamSelected: true, open: { store.show($0) }, openProjects: { store.showProjects() })
                 Spacer()
                 ZStack {
                     HStack { Text("Example owner"); Spacer(); Image(systemName: "chevron.up.chevron.down") }.font(Theme.body).padding(Theme.Space.m)
@@ -56,6 +57,7 @@ import AppKit
         .toolbar {
             Toggle("Dark", isOn: $dark)
             Button("Shared source") { showingSource = true }
+            Button("Share Website") { showingFolder = true }
             Menu("Fixture size") {
                 Button("Wide (1150)") { NSApp.keyWindow?.setContentSize(NSSize(width: 1150, height: 760)) }
                 Button("Narrow (950)") { NSApp.keyWindow?.setContentSize(NSSize(width: 950, height: 700)) }
@@ -77,6 +79,12 @@ import AppKit
             }
         }
         .sheet(isPresented: $showingSource) { TeamSourceFixture().frame(width: 650, height: 600) }
+        .sheet(isPresented: $showingFolder) {
+            TeamFolderShareView(store: store, workspace: .init(id: "/example/Website", name: "Website", path: "/example/Website"),
+                onManageTeams: { showingFolder = false; store.show(.overview); store.select(nil) },
+                onOpen: { organization, repository, checkout in showingFolder = false; store.openProject(repository, in: organization, checkout: checkout) })
+                .frame(width: 580, height: 720)
+        }
         .sheet(item: $sheet) { route in
             TeamEditorSheet(store: store, route: route, canCreateOrganization: true, onAccount: {}).frame(width: 560, height: 600)
         }

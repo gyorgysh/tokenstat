@@ -187,6 +187,7 @@ struct RootView: View {
     @State private var terminals = TerminalsModel()
     @State private var workspacePendingRemove: WorkspaceFolder?
     @State private var worktreeProject: WorkspaceFolder?
+    @State private var sharingProject: WorkspaceFolder?
     /// A section-level destructive action. Kept separate from removing the
     /// workspace itself because this deletes transcripts, not the folder row.
     @State private var workspacePendingChatRemoval: WorkspaceFolder?
@@ -513,8 +514,10 @@ struct RootView: View {
             await teams.refreshSelected()
         }
         .task(id: teams.selectionKey) { await teams.refreshSelected() }
+        .onChange(of: teams.owner) { sharingProject = nil }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if route.isGlobal(.team) || teams.phase == .authorization { Task { await teams.reloadAfterChange() } }
+            else { Task { await teams.refreshLocalProjects() } }
         }
         .task {
             await launch.prepare()
@@ -623,6 +626,15 @@ struct RootView: View {
             resolvePendingSimulatorAttach()
             resolvePendingDesktopOpen()
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
+        }
+        .sheet(item: $sharingProject) { folder in
+            TeamFolderShareView(store: teams, workspace: .init(id: folder.id, name: folder.name, path: folder.path), onManageTeams: {
+                sharingProject = nil; teams.show(.overview); teams.select(nil); navigate(to: .global(.team))
+            }, onOpen: { organization, repository, checkout in
+                sharingProject = nil
+                teams.openProject(repository, in: organization, checkout: checkout)
+                navigate(to: .global(.team))
+            }).frame(width: 580, height: 720)
         }
         .sheet(item: $worktreeProject) { folder in
             RemoteHostFeatureGate(feature: .worktrees, peer: folder.machineID, hostName: folder.machineLabel) {
@@ -2337,9 +2349,9 @@ struct RootView: View {
                             if section == "projects" { projectsSection }
                             else if section == "servers" { liveServersSection }
                         }
-                        TeamSidebarLinks(store: teams, isTeamSelected: route.isGlobal(.team)) { section in
+                        TeamSidebarLinks(store: teams, isTeamSelected: route.isGlobal(.team), open: { section in
                             teams.show(section); navigate(to: .global(.team))
-                        }
+                        }, openProjects: { teams.showProjects(); navigate(to: .global(.team)) })
                     }
                     .padding(.bottom, Theme.Space.m)
                 }
@@ -2423,6 +2435,14 @@ struct RootView: View {
     /// Opening and repository selection are local. A conversation is created
     /// only after Send or Open chat captures the landing page's account and draft.
     private func startNewChat(in chosen: WorkspaceFolder? = nil) {
+        if let chosen, !chosen.isRemote, !teams.localProjects(for: chosen.id).isEmpty {
+            openSharedProject(chosen)
+            return
+        }
+        startPrivateChat(in: chosen)
+    }
+
+    private func startPrivateChat(in chosen: WorkspaceFolder? = nil) {
         chat.saveDraftNow()
         chatStart.activate(scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation,
                            repositoryID: chosen?.id)
@@ -2684,6 +2704,8 @@ struct RootView: View {
                 isCurrent: isCurrent,
                 summary: workspaces.summary(for: folder.id),
                 activeTerminals: activeSessions.count,
+                isShared: !folder.isRemote && !teams.localProjects(for: folder.id).isEmpty,
+                share: folder.isRemote ? nil : { openSharedProject(folder) },
                 rename: { name in
                     let scope = WorkSessionContext.shared.scope
                     let reference = pinReference(for: folder)
@@ -3450,6 +3472,14 @@ struct RootView: View {
         }
         items.append(.separator)
         if !folder.isRemote {
+            if !teams.localProjects(for: folder.id).isEmpty {
+                items.append(.init(L10n.text("common.teams.open_shared_project"), icon: .team) { openSharedProject(folder) })
+                items.append(.init(L10n.text("common.teams.new_private_chat"), icon: .create) { startPrivateChat(in: folder) })
+            }
+            items.append(.init(L10n.text("common.teams.share_project"), icon: .connect) { sharingProject = folder })
+            items.append(.separator)
+        }
+        if !folder.isRemote {
             items.append(.init(L10n.text("apple.rootview.reveal_in_finder.cc849385"), icon: .reveal) { workspaces.revealInFinder(folder) })
         } else if let peer = folder.machineID, !peer.isEmpty {
             items.append(.init(L10n.text("apple.rootview.disconnect_from_0.cc8c176c", "\(folder.machineLabel ?? L10n.text("apple.rootview.this_computer.058bf37c"))"), icon: .disconnect) {
@@ -3468,6 +3498,18 @@ struct RootView: View {
         items.append(.separator)
         items.append(.init(L10n.text("apple.rootview.remove_from_tokenstat.195e6064"), icon: .delete, destructive: true) { workspacePendingRemove = folder })
         return items
+    }
+
+    private func openSharedProject(_ folder: WorkspaceFolder) {
+        let publications = teams.localProjects(for: folder.id)
+        guard publications.count == 1, let publication = publications.first else { sharingProject = folder; return }
+        let openingRoute = route, owner = teams.owner
+        Task {
+            let opened = await teams.openLocalProject(publication)
+            guard route == openingRoute, teams.owner == owner else { return }
+            if !opened { teams.showProjects() }
+            navigate(to: .global(.team))
+        }
     }
 
     private func duplicateTerminal(_ session: TerminalSession, in folder: WorkspaceFolder) {
@@ -4745,6 +4787,8 @@ private struct WorkspaceRow: View {
     let isCurrent: Bool
     let summary: WorkspaceSummary?
     let activeTerminals: Int
+    var isShared = false
+    var share: (() -> Void)? = nil
     let rename: (String) async throws -> Void
     let remove: () -> Void
     let reveal: () -> Void
@@ -4767,7 +4811,7 @@ private struct WorkspaceRow: View {
         ZStack(alignment: .trailing) {
             Button(action: action) {
                 HStack(spacing: Theme.Space.s) {
-                    Image(systemName: folder.isRemote ? "network" : (folder.exists ? "folder" : "questionmark.folder"))
+                    Image(systemName: folder.isRemote ? "network" : (isShared ? "folder.badge.person.crop" : (folder.exists ? "folder" : "questionmark.folder")))
                         .symbolVariant(isCurrent ? .fill : .none)
                         .font(Theme.fit(13, weight: .medium))
                         .foregroundStyle(isCurrent ? Theme.accent : Theme.controlGlyph)
@@ -4786,6 +4830,20 @@ private struct WorkspaceRow: View {
             }
             .buttonStyle(.plain)
             HStack(spacing: 4) {
+                if let share {
+                    Button(action: share) {
+                        Image(systemName: (isShared ? ActionIcon.team : ActionIcon.connect).symbol)
+                            .font(Theme.fit(12, weight: .medium))
+                            .foregroundStyle(isShared ? Theme.accent : Theme.controlGlyph)
+                            .frame(width: 24, height: 24).contentShape(.rect)
+                    }.buttonStyle(.plain)
+                        .help(L10n.text(isShared ? "common.teams.open_shared_project" : "common.teams.share_project"))
+                        .accessibilityLabel(L10n.text(isShared ? "common.teams.open_shared_project" : "common.teams.share_project"))
+                        .accessibilityIdentifier("project.share.\(folder.id)")
+                        .opacity(isHovering || isShared ? 1 : 0)
+                        .allowsHitTesting(isHovering || isShared)
+                        .accessibilityHidden(!isHovering && !isShared)
+                }
                 SidebarRowActions(name: folder.name, visible: isHovering,
                                   deleteTitle: L10n.text("apple.rootview.remove_project.704e7388"), delete: remove,
                                   hover: { _ in }, actions: { menu })

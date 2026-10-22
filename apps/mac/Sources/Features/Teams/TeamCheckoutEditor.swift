@@ -258,6 +258,7 @@ struct TeamCheckoutEditor: View {
             var fields = target(preview.workspaceId)
             fields["preview"] = .string(preview.preview); fields["requestId"] = .string(requestId); fields["confirmSharing"] = .bool(true)
             let _: TeamCheckoutPublished = try await store.perform(.checkoutPublish, fields: fields, context: context)
+            await store.refreshLocalProjects()
             guard isCurrent else { throw CancellationError() }
             stage = .directory; self.preview = nil; confirmed = false; notice = L10n.text("common.teams.checkout_shared")
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
@@ -269,6 +270,7 @@ struct TeamCheckoutEditor: View {
         saving = true; error = nil
         do {
             let result: TeamCheckoutWithdrawn = try await store.perform(.checkoutWithdraw, fields: ["checkout":.string(stopping.id),"expectedRevision":.uint(stopping.revision)], context: context)
+            await store.refreshLocalProjects()
             guard isCurrent, result.withdrawn else { throw CancellationError() }
             stage = .directory; self.stopping = nil; confirmed = false
             notice = result.accountCleanupPending == true ? L10n.text("common.teams.cleanup_pending") : L10n.text("common.teams.sharing_stopped")

@@ -16,6 +16,8 @@ struct TeamSharedChatsView: View {
     @State private var sharesCursor: String?
     @State private var catalogAvailable = true
     @State private var selected: TeamSharedChat?
+    @State private var selectedComputer: TeamCheckout?
+    @State private var catalogRefresh = UUID()
     @State private var loadingCheckouts = false
     @State private var loadingShares = false
     @State private var checkoutLoad = UUID()
@@ -23,6 +25,7 @@ struct TeamSharedChatsView: View {
     private var loading: Bool { loadingCheckouts || loadingShares }
     @State private var error: String?
     @State private var shareSheet = false
+    @State private var settingsSheet = false
     @State private var localCheckoutIds: Set<String> = []
     @State private var newTitle = ""
     // Kept per title so a retry after a lost reply settles to the same chat.
@@ -32,10 +35,14 @@ struct TeamSharedChatsView: View {
     private var availableRepositories: [TeamRepository] { repositories.filter { $0.role != nil } }
     private var repository: TeamRepository? { availableRepositories.first { $0.id == store.selectedRepositoryId } }
     private var checkout: TeamCheckout? { checkouts.first { $0.id == checkoutId } }
+    private var localCheckout: TeamCheckout? {
+        if let preferred = store.preferredCheckoutId { return checkouts.first { $0.id == preferred && localCheckoutIds.contains($0.id) } }
+        return checkouts.first { localCheckoutIds.contains($0.id) }
+    }
 
     var body: some View {
         Group {
-            if let selected, let repository, let checkout {
+            if let selected, let repository, let checkout = selectedComputer ?? checkout {
                 TeamSharedChatReader(store: store, context: context, repository: repository, checkout: checkout, share: selected, transcript: transcript) { self.selected = nil }
                     .id(selected.id)
             } else {
@@ -43,7 +50,7 @@ struct TeamSharedChatsView: View {
             }
         }
         .preference(key: TeamChatReadingKey.self, value: selected != nil)
-        .task(id: store.selectedRepositoryId) { await loadCheckouts() }
+        .task(id: "\(store.selectedRepositoryId ?? "")|\(store.preferredCheckoutId ?? "")") { await loadCheckouts() }
         .task(id: checkoutId) { await loadShares(more: false) }
         .sheet(isPresented: $shareSheet) {
             if let repository, let checkout {
@@ -56,41 +63,80 @@ struct TeamSharedChatsView: View {
             }
         }
         .onChange(of: shareSheet) { if !shareSheet { Task { await loadShares(more: false) } } }
+        .sheet(isPresented: $settingsSheet) {
+            if let repository, let checkout, localCheckoutIds.contains(checkout.id) {
+                TeamSharedProjectSettings(store: store, context: context, repository: repository, checkout: checkout)
+                    #if os(macOS)
+                    .frame(width: 640, height: 720)
+                    #else
+                    .presentationDetents([.large]).presentationDragIndicator(.visible)
+                    #endif
+            }
+        }
     }
     private var directory: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
-                TeamSectionHeader(title: L10n.text("common.teams.chats"), subtitle: L10n.text("common.teams.shared_chats_detail")) {
-                    Button(L10n.text("common.refresh"), .refresh) { Task { await loadShares(more: false) } }.buttonStyle(TeamButtonStyle()).disabled(loading || checkout == nil)
+                TeamSectionHeader(title: store.focusedProject?.name ?? L10n.text("common.teams.chats"), subtitle: L10n.text("common.teams.shared_project_chats_detail")) {
+                    Button(L10n.text("common.refresh"), .refresh) {
+                        catalogRefresh = UUID()
+                        Task { if checkout == nil { await loadCheckouts() } else { await loadShares(more: false) } }
+                    }.buttonStyle(TeamButtonStyle()).disabled(loading || repository == nil)
                 }
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let error { TeamNotice(message: error, warning: true) }
                     if availableRepositories.isEmpty {
                         TeamNotice(message: L10n.text("common.teams.no_repositories_member"))
                     } else {
-                        TeamPickerField(title: L10n.text("common.teams.repository_name"), selection: $store.selectedRepositoryId) {
+                        if store.focusedProject?.id != repository?.id || repository == nil {
+                          TeamPickerField(title: L10n.text("common.teams.repository_name"), selection: $store.selectedRepositoryId) {
                             Text(L10n.text("common.teams.choose_repository")).tag(Optional<String>.none)
                             ForEach(availableRepositories) { Text($0.name).tag(Optional($0.id)) }
                         }.accessibilityIdentifier("team.chats.repository")
+                        }
                         if repository != nil {
-                            TeamPickerField(title: L10n.text("common.teams.computer"), selection: $checkoutId) {
-                                Text(L10n.text("common.teams.choose_computer")).tag(Optional<String>.none)
+                            TeamPickerField(title: L10n.text("common.teams.chats_from"), selection: $checkoutId) {
+                                Text(L10n.text("common.teams.all_teammates")).tag(Optional<String>.none)
                                 ForEach(checkouts) { row in Text(computerName(row)).tag(Optional(row.id)) }
                             }.accessibilityIdentifier("team.chats.checkout")
                             if checkoutsNext != nil {
                                 Button(L10n.text("common.teams.load_more"), .more) { Task { await loadCheckouts(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
                             }
-                            if checkouts.isEmpty && !loading { TeamNotice(message: L10n.text("common.teams.no_checkouts")) }
+                            if checkouts.isEmpty && !loading && error == nil { TeamNotice(message: L10n.text("common.teams.no_checkouts")) }
                         }
                     }
                     if loading { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
+                    if checkoutId == nil, let repository {
+                        LazyVStack(spacing: Theme.Space.m) {
+                            ForEach(checkouts) { computer in
+                                TeamProjectChatGroup(store: store, context: context, repository: repository, checkout: computer,
+                                    refresh: catalogRefresh, open: { share in selectedComputer = computer; selected = share },
+                                    start: computerCanStart(repository) ? { checkoutId = computer.id } : nil)
+                            }
+                        }
+                        if let local = localCheckout {
+                            HStack(spacing: Theme.Space.s) {
+                                Button(L10n.text("common.teams.share_chat"), .connect) { checkoutId = local.id; shareSheet = true }
+                                    .buttonStyle(TeamButtonStyle()).accessibilityIdentifier("team.chats.share")
+                                Button(L10n.text("common.teams.project_settings"), .settings) { checkoutId = local.id; settingsSheet = true }.buttonStyle(TeamButtonStyle())
+                            }
+                            Text(L10n.text("common.teams.project_chats_private")).font(Theme.callout).foregroundStyle(.secondary)
+                        }
+                    }
                     if let checkout {
+                        if localCheckoutIds.contains(checkout.id) {
+                            Button(L10n.text("common.teams.project_settings"), .settings) { settingsSheet = true }
+                                .buttonStyle(TeamButtonStyle()).accessibilityIdentifier("team.project.settings")
+                        }
                         if let publisher = checkout.publisher {
                             TeamPersonLabel(id: publisher.id, name: publisher.name, handle: publisher.handle, avatar: publisher.avatar, owner: context.owner)
                         }
-                        if shares.isEmpty && sharesNext == nil && sharesCursor == nil && !loading { TeamNotice(message: L10n.text("common.teams.no_shared_chats")) }
+                        if shares.isEmpty && sharesNext == nil && sharesCursor == nil && !loading && error == nil {
+                            TeamNotice(message: localCheckoutIds.contains(checkout.id) ? L10n.text("common.teams.project_chats_private") : L10n.text("common.teams.no_shared_chats"))
+                        }
                         ForEach(shares) { share in
                             Button {
+                                selectedComputer = checkout
                                 selected = share
                             } label: {
                                 HStack(spacing: Theme.Space.m) {
@@ -131,6 +177,7 @@ struct TeamSharedChatsView: View {
             }
         }
     }
+    private func computerCanStart(_ repository: TeamRepository) -> Bool { repository.role == .contributor || repository.role == .maintainer }
     /// A member starts an empty shared chat on that computer and asks its
     /// agent there, without waiting for the owner to share one.
     private func newChat(_ checkout: TeamCheckout) -> some View {
@@ -161,7 +208,7 @@ struct TeamSharedChatsView: View {
                 "params":.object(["title":.string(title),"requestId":.string(request.id)])], context: context)
             newTitle = ""; newRequest = nil
             await loadShares(more: false)
-            selected = shares.first { $0.id == result.share }
+            selectedComputer = checkout; selected = shares.first { $0.id == result.share }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
     private func computerName(_ row: TeamCheckout) -> String {
@@ -178,12 +225,19 @@ struct TeamSharedChatsView: View {
             guard isCurrent, checkoutLoad == load, self.repository?.id == repository.id else { return }
             checkouts = more ? checkouts + result.checkouts.filter { next in !checkouts.contains { $0.id == next.id } } : result.checkouts
             checkoutsNext = result.nextOffset
-            if store.capabilities?.canPublishChats == true {
-                let local: TeamLocalPublications = try await store.read(.checkoutList, fields: ["organization":.string(repository.organizationId),"repository":.string(repository.id),"page":TeamStore.page()], context: context)
-                guard isCurrent, checkoutLoad == load, self.repository?.id == repository.id else { return }
-                localCheckoutIds = Set(local.publications.filter { $0.phase == "active" }.map(\.id))
+            if !more, let preferred = store.preferredCheckoutId {
+                while !checkouts.contains(where: { $0.id == preferred }), let offset = checkoutsNext {
+                    let page: TeamCheckouts = try await store.read("checkouts.list", fields: ["organization": .string(repository.organizationId),
+                        "repository": .string(repository.id), "page": TeamStore.page(offset: offset)], context: context)
+                    guard isCurrent, checkoutLoad == load, self.repository?.id == repository.id else { return }
+                    checkouts += page.checkouts.filter { next in !checkouts.contains { $0.id == next.id } }
+                    guard page.nextOffset == nil || page.nextOffset! > offset else { throw CancellationError() }
+                    checkoutsNext = page.nextOffset
+                }
             }
-            if checkoutId == nil { checkoutId = checkouts.first?.id }
+            if store.capabilities?.canPublishChats == true {
+                localCheckoutIds = Set(store.localProjects.filter { $0.organizationId == repository.organizationId && $0.repositoryId == repository.id && $0.phase == "active" }.map(\.id))
+            }
         } catch is CancellationError {} catch { if isCurrent, checkoutLoad == load, self.repository?.id == repository.id { self.error = error.localizedDescription } }
     }
     private func loadShares(more: Bool) async {

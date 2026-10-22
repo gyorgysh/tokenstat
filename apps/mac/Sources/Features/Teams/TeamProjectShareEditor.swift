@@ -9,6 +9,10 @@ struct TeamProjectShareEditor: View {
     let context: TeamMutationContext
     let organization: TeamOrganization?
     let repositories: [TeamRepository]
+    var initialWorkspace: TeamLocalWorkspace? = nil
+    var onShared: ((TeamRepository, TeamLocalPublication) -> Void)? = nil
+    var onStateChange: ((Bool, Bool) -> Void)? = nil
+    var teamPicker: AnyView? = nil
     @State private var workspaces: [TeamLocalWorkspace] = []
     @State private var workspacesNext: Int?
     @State private var deviceName = ""
@@ -24,6 +28,10 @@ struct TeamProjectShareEditor: View {
     @State private var saving = false
     @State private var error: String?
     @State private var requestId = UUID().uuidString
+    @State private var members: [TeamMember] = []
+    @State private var includedMembers: Set<String> = []
+    @State private var membersLoaded = false
+    @State private var accessRole: TeamRepositoryRole = .contributor
     @Environment(\.dismiss) private var dismiss
 
     private var canCreate: Bool { organization?.role.canManage == true && organization?.isActive == true }
@@ -38,42 +46,74 @@ struct TeamProjectShareEditor: View {
     private var valid: Bool {
         guard workspace != nil, confirmed else { return false }
         if repositoryId != nil { return true }
-        return canCreate && !trimmedName.isEmpty && trimmedName.utf16.count <= 80
+        return canCreate && membersLoaded && !trimmedName.isEmpty && trimmedName.utf16.count <= 80
     }
 
     var body: some View {
-        TeamEditorFrame(title: L10n.text("common.teams.share_project"), subtitle: organization?.name ?? "", icon: .connect,
+        TeamEditorFrame(title: L10n.text("common.teams.share_project"), subtitle: initialWorkspace?.name ?? organization?.name ?? "", icon: .connect,
             submitTitle: L10n.text("common.teams.share_project"), submitIcon: .connect, valid: valid && !loading,
             saving: saving || store.isMutating, error: error, submit: share) {
-            Text(L10n.text("common.teams.share_project_detail")).font(Theme.body).foregroundStyle(.secondary)
-            TeamPickerField(title: L10n.text("common.teams.project"), selection: $workspaceId) {
+            if let teamPicker { teamPicker }
+            if initialWorkspace == nil {
+              Text(L10n.text("common.teams.share_project_detail")).font(Theme.body).foregroundStyle(.secondary)
+              TeamPickerField(title: L10n.text("common.teams.project"), selection: $workspaceId) {
                 Text(L10n.text("common.teams.choose_project")).tag(Optional<String>.none)
                 ForEach(workspaces) { workspace in Text(workspace.name).tag(Optional(workspace.id)) }
-            }.disabled(loading || saving).accessibilityIdentifier("team.project.picker")
-            if let workspace {
+            }.disabled(loading || saving || created != nil).accessibilityIdentifier("team.project.picker")
+            }
+            if initialWorkspace == nil, let workspace {
                 Text(workspace.path).font(Theme.mono(12)).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
-            if workspacesNext != nil {
+            if initialWorkspace == nil && workspacesNext != nil {
                 Button(L10n.text("common.teams.load_more"), .more) { Task { await load(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading || saving)
             }
             if loading { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
             if !loading && workspaces.isEmpty { TeamNotice(message: L10n.text("common.teams.no_local_checkouts")) }
-            TeamPickerField(title: L10n.text("common.teams.shared_as"), selection: $repositoryId) {
-                if canCreate { Text(L10n.text("common.teams.new_repository")).tag(Optional<String>.none) }
-                ForEach(shareable) { repository in Text(repository.name).tag(Optional(repository.id)) }
-            }.disabled(saving).accessibilityIdentifier("team.project.repository")
+            if initialWorkspace == nil || !canCreate { targetFields }
+            else {
+                DisclosureGroup(L10n.text("common.teams.project_details")) {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        targetFields
+                        if let workspace { Text(workspace.path).font(Theme.mono(12)).foregroundStyle(.secondary).textSelection(.enabled) }
+                    }.padding(.top, Theme.Space.s)
+                }
+            }
             if repositoryId == nil && canCreate {
-                TextField(L10n.text("common.teams.repository_name"), text: Binding(get: { newName }, set: { newName = $0; nameEdited = true }))
-                    .textFieldStyle(ThemedFieldStyle()).disabled(saving)
-                Text(L10n.text("common.teams.repository_create_access")).font(Theme.callout).foregroundStyle(.secondary)
+                if created != nil && !saving { TeamNotice(message: L10n.text("common.teams.project_setup_partial"), warning: true) }
+                Text(L10n.text("common.teams.project_access_review")).font(Theme.callout).foregroundStyle(.secondary)
+                if !membersLoaded { ProgressView().controlSize(.small) }
+                if !membersLoaded && error != nil {
+                    Button(L10n.text("common.retry"), .refresh) { Task { await loadMembers() } }.buttonStyle(TeamButtonStyle())
+                }
+                ForEach(members) { member in
+                    Toggle(isOn: Binding(get: { includedMembers.contains(member.id) }, set: { included in
+                        if included { includedMembers.insert(member.id) } else { includedMembers.remove(member.id) }
+                        confirmed = false
+                    })) {
+                        HStack {
+                            TeamPersonLabel(id: member.id, name: member.name, handle: member.handle, avatar: member.avatar, owner: context.owner)
+                            if !member.eligible { Text(L10n.text("common.teams.needs_patron")).font(Theme.callout).foregroundStyle(.secondary) }
+                        }
+                    }.toggleStyle(.checkboxForTeam).disabled(saving || created != nil || !member.eligible)
+                }
+                if !members.isEmpty {
+                    TeamPickerField(title: L10n.text("common.teams.access_level"), selection: $accessRole) {
+                        Text(L10n.text("common.teams.project_collaborate")).tag(TeamRepositoryRole.contributor)
+                        Text(L10n.text("common.teams.project_read_comment")).tag(TeamRepositoryRole.viewer)
+                    }.disabled(saving || created != nil)
+                }
             } else if repositoryId == nil {
                 TeamNotice(message: L10n.text("common.teams.share_project_existing_only"))
             }
             if !deviceName.isEmpty {
                 LabeledContent(L10n.text("common.teams.computer"), value: deviceName)
             }
-            TeamNotice(message: L10n.text("common.teams.checkout_share_detail"))
-            Text(L10n.text("common.teams.checkout_share_exclusions")).font(Theme.body).foregroundStyle(.secondary)
+            if initialWorkspace != nil {
+                Text(L10n.text("common.teams.project_sharing_review")).font(Theme.callout).foregroundStyle(.secondary)
+            } else {
+                TeamNotice(message: L10n.text("common.teams.checkout_share_detail"))
+                Text(L10n.text("common.teams.checkout_share_exclusions")).font(Theme.body).foregroundStyle(.secondary)
+            }
             if workspace != nil && !targetName.isEmpty {
                 Toggle(L10n.text("common.teams.checkout_share_confirm", targetName), isOn: $confirmed)
                     .toggleStyle(.checkboxForTeam).accessibilityIdentifier("team.project.confirm")
@@ -81,14 +121,74 @@ struct TeamProjectShareEditor: View {
         }
         .task {
             if !canCreate { repositoryId = shareable.first?.id }
-            await load(more: false)
+            if let initialWorkspace {
+                workspaces = [initialWorkspace]; workspaceId = initialWorkspace.id
+                newName = initialWorkspace.name
+            } else {
+                await load(more: false)
+            }
+            if canCreate { await loadMembers() }
         }
         .onChange(of: workspaceId) { _, _ in
             confirmed = false
             if !nameEdited { newName = workspace?.name ?? "" }
         }
         .onChange(of: repositoryId) { _, _ in confirmed = false }
+        .onChange(of: accessRole) { _, _ in confirmed = false }
+        .onChange(of: saving) { _, value in onStateChange?(value, created != nil) }
         .interactiveDismissDisabled(saving)
+    }
+
+    private var targetFields: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            TeamPickerField(title: L10n.text("common.teams.shared_as"), selection: $repositoryId) {
+                if canCreate { Text(L10n.text("common.teams.new_repository")).tag(Optional<String>.none) }
+                ForEach(shareable) { repository in Text(repository.name).tag(Optional(repository.id)) }
+            }.disabled(saving || created != nil).accessibilityIdentifier("team.project.repository")
+            if repositoryId == nil && canCreate {
+                TextField(L10n.text("common.teams.repository_name"), text: Binding(get: { newName }, set: { newName = $0; nameEdited = true }))
+                    .textFieldStyle(ThemedFieldStyle()).disabled(saving || created != nil)
+            }
+            if store.directory?.repositories.nextOffset != nil {
+                Button(L10n.text("common.teams.load_more"), .more) { Task { await store.loadMore(.repositories) } }
+                    .buttonStyle(TeamButtonStyle()).disabled(saving || store.isLoadingDirectory || created != nil)
+            }
+        }
+    }
+
+    private func loadMembers() async {
+        guard let organization = context.organizationId else { return }
+        do {
+            var offset = 0, rows: [TeamMember] = []
+            while true {
+                let page: TeamMembers = try await store.read("members.list", fields: ["organization": .string(organization), "page": TeamStore.page(offset: offset)], context: context)
+                rows += page.members.filter { next in !rows.contains { $0.id == next.id } }
+                guard let next = page.nextOffset else { break }
+                guard next > offset else { throw CancellationError() }
+                offset = next
+            }
+            members = rows.filter { $0.id != store.capabilities?.actorId }
+            includedMembers = Set(members.filter(\.eligible).map(\.id)); membersLoaded = true
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+
+    private func shareAccess(to repository: TeamRepository) async throws {
+        var offset = 0
+        var members: [TeamRepositoryMember] = []
+        while true {
+            let page: TeamRepositoryMembers = try await store.read("repositories.members", fields: ["organization": .string(repository.organizationId),
+                "repository": .string(repository.id), "page": TeamStore.page(offset: offset)], context: context)
+            members += page.members.filter { next in !members.contains { $0.id == next.id } }
+            guard let next = page.nextOffset else { break }
+            guard next > offset else { throw CancellationError() }
+            offset = next
+        }
+        let grants = try TeamProjectAccessReview.grants(reviewed: includedMembers, role: accessRole, members: members)
+        for member in grants {
+            let _: JSONValue = try await store.perform("repositories.access", fields: ["organization": .string(repository.organizationId),
+                "repository": .string(repository.id), "user": .string(member.id), "input": .object([
+                    "role": .string(accessRole.rawValue), "expectedRevision": .uint(member.revision)])], context: context)
+        }
     }
 
     private func load(more: Bool) async {
@@ -119,14 +219,17 @@ struct TeamProjectShareEditor: View {
                     repository = result.repository
                     created = repository
                 }
+                if repositoryId == nil { try await shareAccess(to: repository) }
                 let target: [String: JSONValue] = ["organization": .string(organizationId), "repository": .string(repository.id), "workspace": .string(workspaceId)]
                 let preview: TeamCheckoutPreview = try await store.read(.checkoutPreview, fields: target, context: context)
                 guard preview.workspaceId == workspaceId, preview.repository.id == repository.id,
                     preview.repository.organizationId == organizationId, !preview.sharesExistingChats, !preview.allowsAgentRuns else { throw CancellationError() }
                 var fields = target
                 fields["preview"] = .string(preview.preview); fields["requestId"] = .string(requestId); fields["confirmSharing"] = .bool(true)
-                let _: TeamCheckoutPublished = try await store.perform(.checkoutPublish, fields: fields, context: context)
-                dismiss(); await store.reloadAfterChange()
+                let result: TeamCheckoutPublished = try await store.perform(.checkoutPublish, fields: fields, context: context)
+                await store.reloadAfterChange()
+                guard store.mutationContext == context else { return }
+                if let onShared { onShared(repository, result.publication) } else { dismiss() }
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
     }

@@ -2,6 +2,10 @@
 import XCTest
 
 final class TeamFixtureUITests: XCTestCase {
+    override func tearDown() {
+        XCUIApplication(bundleIdentifier: "ai.tokenstat.qa.teams").terminate()
+        super.tearDown()
+    }
     private func launch(_ state: String = "ready", largeText: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "ai.tokenstat.qa.teams")
@@ -43,7 +47,41 @@ final class TeamFixtureUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "No access")).firstMatch.exists)
         capture(app, "Invitation defaults")
         handle.tap(); handle.typeText("@example-invited")
-        XCTAssertTrue(submit.isEnabled)
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: submit)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
+        submit.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
+    }
+    func testSharedProjectsOpenWithoutAccountScopeOrComputerSelection() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))
+        app.buttons["Fixture"].tap(); app.buttons["Personal"].tap()
+        app.buttons["Fixture"].tap(); app.buttons["Shared projects"].tap()
+        let project = app.buttons["team.project.open.repo_fixture"]
+        XCTAssertTrue(project.waitForExistence(timeout: 5)); project.tap()
+        XCTAssertTrue(app.buttons["team.chats.checkout"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["team.chats.checkout"].label.contains("All teammates"))
+        let chat = app.buttons["team.chats.open.share_" + String(repeating: "a", count: 32)]
+        XCTAssertTrue(chat.waitForExistence(timeout: 10)); reveal(chat, in: app); chat.tap()
+        XCTAssertTrue(app.staticTexts["Quarterly totals"].waitForExistence(timeout: 5))
+        capture(app, "Shared project opens all teammates")
+    }
+    func testFolderShareStartsWithChosenFolderAndReviewsTeamAccess() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))
+        app.buttons["Fixture"].tap(); app.buttons["Share Website"].tap()
+        let team = app.buttons["team.project.team"]
+        XCTAssertTrue(team.waitForExistence(timeout: 5)); team.tap(); app.buttons["Example Studio"].firstMatch.tap()
+        let confirm = app.switches["team.project.confirm"]
+        reveal(confirm, in: app)
+        XCTAssertTrue(confirm.exists)
+        XCTAssertFalse(app.buttons["team.project.picker"].exists, "The selected folder had to be chosen again")
+        let submit = app.buttons["team.editor.submit"]
+        XCTAssertFalse(submit.isEnabled)
+        reveal(confirm, in: app); confirm.tap()
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: submit)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
+        capture(app, "Folder sharing reviews team and people")
         submit.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
     }
@@ -143,7 +181,7 @@ final class TeamFixtureUITests: XCTestCase {
         let repository = app.buttons["team.chats.repository"]
         XCTAssertTrue(repository.waitForExistence(timeout: 5)); repository.tap(); app.buttons["Website"].firstMatch.tap()
         let shared = app.buttons["team.chats.open.share_" + String(repeating: "a", count: 32)]
-        XCTAssertTrue(shared.waitForExistence(timeout: 5)); reveal(shared, in: app); shared.tap()
+        reveal(shared, in: app); shared.tap()
         XCTAssertTrue(app.staticTexts["Quarterly totals"].waitForExistence(timeout: 5))
     }
     private func commentScenario(uncertain: Bool, largeText: Bool) {
@@ -223,7 +261,7 @@ final class TeamFixtureUITests: XCTestCase {
         XCTAssertTrue(repository.waitForExistence(timeout: 5))
         repository.tap(); app.buttons["Website"].firstMatch.tap()
         let shared = app.buttons["team.chats.open.share_" + String(repeating: "a", count: 32)]
-        XCTAssertTrue(shared.waitForExistence(timeout: 5)); reveal(shared, in: app)
+        reveal(shared, in: app)
         XCTAssertTrue(shared.label.contains("Quarterly totals"))
         capture(app, "Approved shared chat titles")
         shared.tap()
@@ -293,6 +331,7 @@ final class TeamFixtureUITests: XCTestCase {
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         let scroll = app.scrollViews.firstMatch
         for _ in 0..<8 {
+            if !element.exists { scroll.swipeUp(); continue }
             let center = CGPoint(x: element.frame.midX, y: element.frame.midY)
             if element.isHittable && scroll.frame.insetBy(dx: 0, dy: 8).contains(center) { return }
             scroll.swipeUp()

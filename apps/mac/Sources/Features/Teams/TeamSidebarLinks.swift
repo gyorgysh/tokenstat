@@ -7,11 +7,9 @@ struct TeamSidebarLinks: View {
     @Bindable var store: TeamStore
     let isTeamSelected: Bool
     let open: (TeamSection) -> Void
-    /// Personal scope has nothing to list here. Teams stay reachable from
-    /// the scope menu, and an invitation waiting for this person is the one
-    /// reason to show a row anyway.
+    var openProjects: (() -> Void)? = nil
     private var visible: Bool {
-        store.selectedOrganization != nil || !store.inbox.isEmpty
+        store.owner != nil
     }
     var body: some View {
         if visible {
@@ -20,6 +18,18 @@ struct TeamSidebarLinks: View {
                     .font(Theme.callout.weight(.semibold)).foregroundStyle(.secondary)
                     .lineLimit(2).padding(.horizontal, Theme.Space.m).padding(.top, Theme.Space.l)
                     .accessibilityAddTraits(.isHeader)
+                if let openProjects {
+                    Button(action: openProjects) {
+                        HStack(spacing: Theme.Space.s) {
+                            Image(systemName: ActionIcon.team.symbol).frame(width: 18).accessibilityHidden(true)
+                            Text(L10n.text("common.teams.shared_projects")).lineLimit(2)
+                            Spacer(minLength: 0)
+                        }.font(Theme.body).padding(.horizontal, Theme.Space.m).padding(.vertical, Theme.Space.s)
+                            .frame(minHeight: Theme.Control.heightComfortable).contentShape(.rect)
+                            .background(isTeamSelected && store.browsingProjects ? Theme.rowSelected : .clear, in: RoundedRectangle(cornerRadius: 8))
+                    }.buttonStyle(.plain).padding(.horizontal, Theme.Space.xs)
+                        .accessibilityIdentifier("team.projects.sidebar")
+                }
                 if store.selectedOrganization != nil && store.phase == .ready {
                     row(.chats)
                     row(.repositories)
@@ -40,15 +50,15 @@ struct TeamSidebarLinks: View {
                 if section == .overview, !store.inbox.isEmpty { Text(String(store.inbox.count)).foregroundStyle(.secondary) }
             }
             .font(Theme.body)
-            .foregroundStyle(isTeamSelected && store.section == section ? TeamColors.action : Color.primary)
+            .foregroundStyle(isTeamSelected && !store.browsingProjects && store.section == section ? TeamColors.action : Color.primary)
             .padding(.horizontal, Theme.Space.m).padding(.vertical, Theme.Space.s)
             .frame(minHeight: Theme.Control.heightComfortable)
-            .background(isTeamSelected && store.section == section ? Theme.rowSelected : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(isTeamSelected && !store.browsingProjects && store.section == section ? Theme.rowSelected : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .padding(.horizontal, Theme.Space.xs)
-        .accessibilityAddTraits(isTeamSelected && store.section == section ? .isSelected : [])
+        .accessibilityAddTraits(isTeamSelected && !store.browsingProjects && store.section == section ? .isSelected : [])
     }
 }
 #if os(macOS)

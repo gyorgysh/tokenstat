@@ -53,18 +53,19 @@ struct TeamEditorFrame<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        ThemedSheet(title: title, subtitle: subtitle, icon: icon, scrolls: true, onClose: { dismiss() }) {
+        ThemedSheet(title: title, subtitle: subtitle, icon: icon, scrolls: true, onClose: { if !saving { dismiss() } }) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 if let error { TeamNotice(message: error, warning: true) }
                 content()
             }
         } actions: {
-            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }.buttonStyle(TeamButtonStyle()).keyboardShortcut(.cancelAction).accessibilityIdentifier("team.editor.cancel")
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }.buttonStyle(TeamButtonStyle()).keyboardShortcut(.cancelAction).disabled(saving).accessibilityIdentifier("team.editor.cancel")
             Spacer(minLength: Theme.Space.s)
             if saving { ProgressView().controlSize(.small) }
             Button(submitTitle, submitIcon, role: destructive ? .destructive : nil, action: submit)
                 .buttonStyle(TeamButtonStyle(primary: true)).disabled(!valid || saving).keyboardShortcut(.defaultAction).accessibilityIdentifier("team.editor.submit")
         }
+        .interactiveDismissDisabled(saving)
     }
 }
 struct TeamAuthorizationEditor: View {

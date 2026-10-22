@@ -20,6 +20,7 @@ private actor Fixture {
     var eligible = true
     var ownerRecovery = false
     var paginate = false
+    var publishing = false
     var failures: [String: String] = [:]
     func api() -> TeamAPI { TeamAPI { method, params, owner in try await self.send(method, params, owner) } }
     func delay(_ key: String) { delayed.insert(key) }
@@ -30,6 +31,7 @@ private actor Fixture {
     func downgrade() { eligible = false }
     func recoverOwner() { eligible = false; ownerRecovery = true }
     func usePages() { paginate = true }
+    func usePublishing() { publishing = true }
     func fail(_ operation: String, code: String) { failures[operation] = code }
     func send(_ method: TeamHostMethod, _ params: JSONValue, _ owner: TeamAccountOwner) async throws -> JSONValue {
         guard case let .object(fields) = params else { fatalError("Fixture parameters must be an object") }
@@ -40,7 +42,7 @@ private actor Fixture {
         if let code = failures[operation] { throw TeamRequestFailure(code: code, message: "Fixture authorization changed") }
         if delayed.contains(key) { return try await withCheckedThrowingContinuation { waiting[key] = $0 } }
         switch operation {
-        case "capabilities": return .object(["enabled":.bool(enabled), "actorId":.string("fixture-owner"), "ready":.bool(authorized), "version":.int(1), "authorizationRequired":.bool(!authorized)])
+        case "capabilities": return .object(["enabled":.bool(enabled), "actorId":.string("fixture-owner"), "ready":.bool(authorized), "version":.int(1), "authorizationRequired":.bool(!authorized), "canPublishCheckouts":.bool(publishing)])
         case "organizations.list":
             let page = fields["page"]
             if case let .object(values) = page, values["offset"] == .int(100) {
@@ -50,7 +52,22 @@ private actor Fixture {
         case "inbox.list", "invitations.list": return .object(["invitations":.array([]), "nextOffset":.null])
         case "organizations.get": return .object(["organization":organization(org, eligible: eligible, ownerRecovery: ownerRecovery), "ownershipRequest":.null])
         case "members.list": return members(org)
-        case "repositories.list": return .object(["repositories":.array([]), "nextOffset":.null])
+        case "repositories.list":
+            if publishing, org == "org_c" {
+                if case let .object(page) = fields["page"], page["offset"] == .int(100) {
+                    return .object(["repositories": .array([.object(["id": .string("project_late"), "organizationId": .string(org),
+                        "name": .string("Shared example"), "role": .string("maintainer"), "revision": .int(1), "createdAt": .string("2026-01-01T00:00:00Z")])]), "nextOffset": .null])
+                }
+                return .object(["repositories": .array([]), "nextOffset": .int(100)])
+            }
+            return .object(["repositories":.array([]), "nextOffset":.null])
+        case "teams.checkout.list":
+            let later: Bool
+            if case let .object(page) = fields["page"] { later = page["offset"] == .int(100) } else { later = false }
+            let row: JSONValue = .object(["id": .string(later ? "checkout_late" : "checkout_first"), "organizationId": .string("org_c"),
+                "repositoryId": .string("project_late"), "workspaceId": .string(later ? "folder_late" : "folder_first"),
+                "phase": .string("active"), "revision": .int(1), "accountCleanupPending": .bool(false)])
+            return .object(["publications": .array([row]), "nextOffset": later ? .null : .int(100)])
         case "members.remove": return .object(["removed":.bool(true)])
         default: fatalError("Unexpected fixture operation: \(operation)")
         }
@@ -84,9 +101,55 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         try await authorizationRevokedDuringWrite()
         try await authorityLossRetiresPendingReadsAndOldForms()
         try await offlineDraftOwnership()
+        await sharedProjectDiscovery()
+        await lateSharedProjectAccountResponse()
+        await staleSharedProjectNavigation()
         avatars()
         try messageAuthors()
         print("Team directory ownership, recovery, pagination and avatar tests passed")
+    }
+    @MainActor static func sharedProjectDiscovery() async {
+        let fixture = Fixture(), store = TeamStore(api: await fixture.api())
+        await fixture.usePublishing(); await fixture.usePages()
+        await store.bind(to: owner("alpha"))
+        check(store.localProjects(for: "folder_late").first?.id == "checkout_late", "The later publication page lost the folder's shared badge")
+        check(store.localProjects(for: "unrelated").isEmpty, "A different folder inherited sharing")
+        store.showProjects()
+        check(store.browsingProjects && store.selectedOrganization == nil, "Shared projects required switching account scope")
+        let opened = await store.openLocalProject(store.localProjects(for: "folder_late")[0])
+        check(opened && store.selectedOrganizationId == "org_c" && store.selectedRepositoryId == "project_late", "The folder opened the wrong project beyond the first team/project pages")
+        check(store.preferredCheckoutId == "checkout_late" && store.focusedProject?.id == "project_late" && !store.browsingProjects, "The folder lost its exact computer or focused project")
+        await fixture.fail("teams.checkout.list", code: "teams_unreachable")
+        await store.refreshLocalProjects()
+        check(!store.localProjects(for: "folder_late").isEmpty && store.localProjectsError != nil, "An outage falsely marked the shared folder private")
+        await store.bind(to: owner("beta"))
+        check(store.localProjects.isEmpty && store.focusedProject == nil && store.preferredCheckoutId == nil, "An account switch retained another person's project state")
+    }
+    @MainActor static func lateSharedProjectAccountResponse() async {
+        let fixture = Fixture(), store = TeamStore(api: await fixture.api())
+        await fixture.usePublishing()
+        let key = "alpha|teams.checkout.list|"
+        await fixture.delay(key)
+        let pending = Task { await store.bind(to: owner("alpha")) }
+        await waitFor(key, fixture: fixture)
+        await store.bind(to: nil)
+        await fixture.release(key, value: .object(["publications": .array([]), "nextOffset": .null]))
+        await pending.value
+        check(store.phase == .signedOut && store.localProjects.isEmpty, "A late sharing response revived the signed-out account")
+    }
+    @MainActor static func staleSharedProjectNavigation() async {
+        let fixture = Fixture(), store = TeamStore(api: await fixture.api())
+        await fixture.usePublishing(); await fixture.usePages()
+        await store.bind(to: owner("alpha"))
+        let key = "alpha|repositories.list|org_c"
+        await fixture.delay(key)
+        let publication = store.localProjects(for: "folder_late")[0]
+        let pending = Task { await store.openLocalProject(publication) }
+        await waitFor(key, fixture: fixture)
+        store.select(store.organizations.first { $0.id == "org_a" })
+        await fixture.release(key, value: .object(["repositories": .array([]), "nextOffset": .null]))
+        let opened = await pending.value
+        check(!opened && store.selectedOrganizationId == "org_a" && store.focusedProject == nil, "A slow folder lookup replaced the user's later team selection")
     }
     @MainActor static func offlineDraftOwnership() async throws {
         let fixture = Fixture(), store = TeamStore(api: await fixture.api())

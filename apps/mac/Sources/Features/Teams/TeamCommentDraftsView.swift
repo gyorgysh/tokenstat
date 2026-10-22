@@ -44,14 +44,13 @@ struct TeamCommentDraftsView: View {
             Button(L10n.text("common.done"), .done) { dismiss() }.buttonStyle(TeamButtonStyle()).keyboardShortcut(.cancelAction)
         }
         .task { await load(more: false) }
-        .alert(L10n.text("common.teams.remove_local_draft"), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+        .alert(L10n.text("common.teams.remove_local_draft"), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { entry in
             Button(L10n.text("common.cancel"), role: .cancel) { removing = nil }
             Button(L10n.text("common.teams.remove_draft"), role: .destructive) {
-                guard let entry = removing else { return }
                 removing = nil
                 Task { await remove(entry) }
             }
-        } message: { Text(L10n.text("common.teams.remove_local_draft_detail")) }
+        } message: { _ in Text(L10n.text("common.teams.remove_local_draft_detail")) }
     }
     private func row(_ entry: TeamCommentDraftStore.Entry) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {

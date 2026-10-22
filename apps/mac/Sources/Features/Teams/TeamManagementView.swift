@@ -35,7 +35,7 @@ struct TeamManagementView: View {
             if let error = store.error {
                 TeamNotice(message: error, warning: true).padding(Theme.Space.m)
             }
-            if let org = store.selectedOrganization, store.phase == .ready, !compactReader {
+            if let org = store.selectedOrganization, store.phase == .ready, !compactReader, !store.browsingProjects {
                 organizationNavigation(org)
             }
             content
@@ -106,7 +106,9 @@ struct TeamManagementView: View {
                 Button(L10n.text("common.retry"), .refresh) { refresh() }.buttonStyle(TeamButtonStyle(primary: true))
             }
         case .ready:
-            if let organization = store.selectedOrganization {
+            if store.browsingProjects {
+                TeamProjectBrowser(store: store) { store.show(.overview); store.select(nil) }
+            } else if let organization = store.selectedOrganization {
                 organizationContent(organization)
             } else { personalContent }
         }
@@ -156,7 +158,7 @@ struct TeamManagementView: View {
             switch store.section {
             case .chats:
                 if let context = store.mutationContext {
-                    TeamSharedChatsView(store: store, context: context, repositories: directory.repositories.repositories, transcript: transcript)
+                    TeamSharedChatsView(store: store, context: context, repositories: projectChoices(directory), transcript: transcript)
                         .id(store.selectionKey)
                 }
             case .members, .overview: membersContent(directory)
@@ -169,6 +171,12 @@ struct TeamManagementView: View {
                 Button(L10n.text("common.retry"), .refresh) { Task { await store.refreshSelected() } }.buttonStyle(TeamButtonStyle())
             }
         }
+    }
+    private func projectChoices(_ directory: TeamDirectorySnapshot) -> [TeamRepository] {
+        let rows = directory.repositories.repositories
+        if let focused = store.focusedProject, focused.organizationId == directory.details.organization.id,
+            !rows.contains(where: { $0.id == focused.id }) { return rows + [focused] }
+        return rows
     }
     private var personalContent: some View {
         ScrollView {

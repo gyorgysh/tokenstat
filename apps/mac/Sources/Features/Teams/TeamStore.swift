@@ -30,6 +30,13 @@ final class TeamStore {
     private(set) var error: String?
     var section: TeamSection = .overview
     var selectedRepositoryId: String?
+    private(set) var browsingProjects = false
+    private(set) var focusedProject: TeamRepository?
+    private(set) var preferredCheckoutId: String?
+    private(set) var localProjects: [TeamLocalPublication] = []
+    private(set) var localProjectsError: String?
+    private var projectsRevision: UInt64 = 0
+    private var projectOpenRevision: UInt64 = 0
 
     private let api: TeamAPI
     private var loadRevision: UInt64 = 0
@@ -62,6 +69,7 @@ final class TeamStore {
             directory = nil; cachedDirectories = [:]; cacheOrder = []; inFlightSelection = nil
             directoryRevision &+= 1; mutationId = nil; isMutating = false; isLoadingDirectory = false
             section = .overview
+            clearProjects()
         }
         error = nil
         guard let next else { phase = .signedOut; isRefreshing = false; return }
@@ -87,6 +95,8 @@ final class TeamStore {
             self.organizations = orgs.organizations; organizationsNextOffset = orgs.nextOffset
             self.inbox = inbox.invitations; inboxNextOffset = inbox.nextOffset
             phase = .ready
+            await refreshLocalProjects()
+            guard isCurrent(next, revision) else { return }
             // A directory refresh is not proof that an unreturned later page
             // was revoked. Keep a selected organization until its own lookup.
             if let selectedOrganizationId, let returned = self.organizations.first(where: { $0.id == selectedOrganizationId }), !returned.isActive {
@@ -102,17 +112,92 @@ final class TeamStore {
     }
 
     func select(_ organization: TeamOrganization?) {
+        projectOpenRevision &+= 1; browsingProjects = false
         selectionSummary = organization
         guard selectedOrganizationId != organization?.id else { return }
         formLifetime &+= 1
         directoryRevision &+= 1; inFlightSelection = nil; isLoadingDirectory = false
         mutationId = nil; isMutating = false
         selectedOrganizationId = organization?.id; selectedRepositoryId = nil
+        focusedProject = nil; preferredCheckoutId = nil; browsingProjects = false
         directory = organization.flatMap { cachedDirectories[$0.id] }
         section = organization == nil ? .overview : .members
         error = nil
     }
-    func show(_ section: TeamSection) { self.section = section }
+    func show(_ section: TeamSection) { projectOpenRevision &+= 1; browsingProjects = false; self.section = section }
+    func showProjects() { projectOpenRevision &+= 1; browsingProjects = true }
+    func openProject(_ repository: TeamRepository, in organization: TeamOrganization, checkout: String? = nil) {
+        guard phase == .ready, organization.isActive, repository.role != nil, repository.organizationId == organization.id else { return }
+        select(organization)
+        focusedProject = repository; selectedRepositoryId = repository.id
+        preferredCheckoutId = checkout; browsingProjects = false; section = .chats
+    }
+    func localProjects(for workspace: String) -> [TeamLocalPublication] {
+        localProjects.filter { $0.workspaceId == workspace && $0.phase == "active" }
+    }
+    /// This directory belongs to the signed-in person and physical host, not
+    /// the selected team. Never infer sharing from a folder name or Git URL.
+    func refreshLocalProjects() async {
+        guard let owner, phase == .ready, capabilities?.canPublishCheckouts == true else { return }
+        projectsRevision &+= 1
+        let revision = projectsRevision
+        var rows: [TeamLocalPublication] = [], offset = 0
+        do {
+            while true {
+                let page: TeamLocalPublications = try await api.request(.checkoutList, ["page": Self.page(offset: offset)], owner: owner)
+                guard self.owner == owner, phase == .ready, projectsRevision == revision else { return }
+                rows += page.publications.filter { next in !rows.contains { $0.id == next.id } }
+                guard let next = page.nextOffset else { break }
+                guard next > offset else { throw TeamRequestFailure(code: "invalid_response", message: L10n.text("common.teams.load_failed")) }
+                offset = next
+            }
+            localProjects = rows; localProjectsError = nil
+        } catch is CancellationError {} catch {
+            guard self.owner == owner, projectsRevision == revision else { return }
+            // A failed refresh is not proof that the folder became private.
+            localProjectsError = error.localizedDescription
+            _ = retireAuthorization(for: error)
+        }
+    }
+    private func clearProjects() {
+        projectOpenRevision &+= 1
+        projectsRevision &+= 1; localProjects = []; localProjectsError = nil
+        focusedProject = nil; preferredCheckoutId = nil; browsingProjects = false
+    }
+    func openLocalProject(_ publication: TeamLocalPublication) async -> Bool {
+        guard let owner, phase == .ready else { return false }
+        let revision = loadRevision
+        projectOpenRevision &+= 1
+        let request = projectOpenRevision
+        do {
+            var offset = 0
+            var organization: TeamOrganization?
+            repeat {
+                let page: TeamOrganizations = try await api.request(.directory, ["operation": .string("organizations.list"), "page": Self.page(offset: offset)], owner: owner)
+                guard isCurrent(owner, revision), phase == .ready, projectOpenRevision == request else { return false }
+                organization = page.organizations.first { $0.id == publication.organizationId }
+                if organization != nil { break }
+                guard let next = page.nextOffset, next > offset else { return false }
+                offset = next
+            } while true
+            guard let organization, organization.isActive else { return false }
+            offset = 0
+            repeat {
+                let page: TeamRepositories = try await api.request(.directory, ["operation": .string("repositories.list"),
+                    "organization": .string(organization.id), "page": Self.page(offset: offset)], owner: owner)
+                guard isCurrent(owner, revision), phase == .ready, projectOpenRevision == request else { return false }
+                if let repository = page.repositories.first(where: { $0.id == publication.repositoryId && $0.organizationId == organization.id && $0.role != nil }) {
+                    openProject(repository, in: organization, checkout: publication.id)
+                    return true
+                }
+                guard let next = page.nextOffset, next > offset else { return false }
+                offset = next
+            } while true
+        } catch is CancellationError {} catch {
+            if isCurrent(owner, revision), projectOpenRevision == request { self.error = error.localizedDescription; _ = retireAuthorization(for: error) }
+        }
+        return false
+    }
     func clearError() { error = nil }
 
     func refreshSelected() async {
@@ -279,6 +364,7 @@ final class TeamStore {
         return retired
     }
     private func clearAuthorization() {
+        clearProjects()
         loadRevision &+= 1; formLifetime &+= 1; isRefreshing = false
         organizations = []; inbox = []; organizationsNextOffset = nil; inboxNextOffset = nil
         cachedDirectories = [:]; cacheOrder = []; directory = nil; selectedOrganizationId = nil; selectedRepositoryId = nil; selectionSummary = nil

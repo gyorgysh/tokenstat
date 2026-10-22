@@ -36,7 +36,8 @@ enum TeamFixtureData {
             if fields["method"] == .string("team.lanes") { return .object(["lanes": .array([])]) }
             if fields["method"] == .string("team.chat.catalog") {
                 guard target["share"] == nil else { throw CancellationError() }
-                return .object(["shares":.array([.object(["id":.string("share_"+String(repeating:"a",count:32)),"checkoutId":checkout,"revision":.int(1),"createdAt":.string(timestamp),"title":.string("Quarterly totals"),"backend":.string("codex")])]),"nextCursor":.null])
+                let own = checkout == .string("checkout_" + String(repeating: "a", count: 32))
+                return .object(["shares":.array([.object(["id":.string("share_"+String(repeating: own ? "a" : "b",count:32)),"checkoutId":checkout,"revision":.int(1),"createdAt":.string(timestamp),"title":.string(own ? "Quarterly totals" : "Teammate's feature"),"backend":.string("codex")])]),"nextCursor":.null])
             }
             if case let .string(method)? = fields["method"], let share = target["share"] {
                 if method == "team.chat.details" { return .object(["chat":.object(["id":share,"checkoutId":checkout,"title":.string("Quarterly totals"),"backend":.string("codex"),"historyTrimmed":.bool(false),"allowsAgentRuns":.bool(state == .askUncertain),"allowsComments":.bool(state == .comment || state == .commentUncertain)])]) }
