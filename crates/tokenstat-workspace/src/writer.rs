@@ -74,11 +74,18 @@ struct Target {
     folder: Folder,
     common: Option<Folder>,
     ancestors: Vec<Folder>,
+    lane: bool,
 }
 impl Target {
     fn capture(path: &Path) -> Result<Self, Error> {
+        Self::capture_as(path, false)
+    }
+    /// A lane is a linked worktree outside every project folder. It holds only
+    /// its own folder: git's ref and index locks cover the shared directory,
+    /// so other lanes and the main checkout keep working beside it.
+    fn capture_as(path: &Path, lane: bool) -> Result<Self, Error> {
         let folder = Folder::capture(path)?;
-        let common = if git_marker(&folder.path)? {
+        let common = if !lane && git_marker(&folder.path)? {
             let path = common_directory(&folder.path)?;
             Some(Folder::capture(&path)?)
         } else {
@@ -103,6 +110,7 @@ impl Target {
             folder,
             common,
             ancestors,
+            lane,
         })
     }
     fn requests(&self) -> Vec<(Identity, bool)> {
@@ -158,6 +166,10 @@ impl Lease {
     pub fn acquire(folder: &Path) -> Result<Self, Error> {
         Self::at(folder, &lock_root()?)
     }
+    /// Hold one lane for an agent run. See `Target::capture_as`.
+    pub fn acquire_lane(folder: &Path) -> Result<Self, Error> {
+        Self::at_with(folder, None, &lock_root()?, true)
+    }
     /// Coordinate a source and an existing destination parent atomically.
     /// Merging first avoids conflicting with this operation's own ancestors.
     pub fn acquire_pair(folder: &Path, destination_parent: &Path) -> Result<Self, Error> {
@@ -171,7 +183,15 @@ impl Lease {
         destination: Option<&Path>,
         root: &Path,
     ) -> Result<Self, Error> {
-        let target = Target::capture(folder)?;
+        Self::at_with(folder, destination, root, false)
+    }
+    fn at_with(
+        folder: &Path,
+        destination: Option<&Path>,
+        root: &Path,
+        lane: bool,
+    ) -> Result<Self, Error> {
+        let target = Target::capture_as(folder, lane)?;
         let additional = destination
             .map(|path| Target::capture(path).map(|target| (path.to_owned(), target)))
             .transpose()?;
@@ -228,7 +248,8 @@ impl Lease {
         result
     }
     fn check_current(&self) -> Result<(), Error> {
-        let target = Target::capture(&self.original).map_err(|_| Error::Changed)?;
+        let target =
+            Target::capture_as(&self.original, self.target.lane).map_err(|_| Error::Changed)?;
         let root = Folder::capture(&self.root.path).map_err(|_| Error::Changed)?;
         if !self.target.same(&target) || root.identity != self.root.identity {
             return Err(Error::Changed);

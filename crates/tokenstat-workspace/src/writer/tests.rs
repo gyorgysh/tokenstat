@@ -115,6 +115,39 @@ fn a_torn_or_missing_initialized_claim_registry_never_becomes_an_empty_registry(
     }
 }
 
+#[test]
+fn lanes_run_beside_the_main_checkout_and_each_other() {
+    let temp = tempfile::tempdir().unwrap();
+    let main = temp.path().join("primary");
+    repo(&main);
+    let lanes = temp.path().join("lanes");
+    std::fs::create_dir(&lanes).unwrap();
+    let (a, b) = (lanes.join("a"), lanes.join("b"));
+    for (lane, branch) in [(&a, "lane-a"), (&b, "lane-b")] {
+        git(
+            &main,
+            &["worktree", "add", "-qb", branch, lane.to_str().unwrap()],
+        );
+    }
+    let root = temp.path().join("locks");
+    let main_lease = Lease::at(&main, &root).unwrap();
+    let mut first = Lease::at_with(&a, None, &root, true).unwrap();
+    let second = Lease::at_with(&b, None, &root, true).unwrap();
+    // One lane still has one writer.
+    assert!(Lease::at_with(&a, None, &root, true).is_err());
+    first.claim_run(&"ab".repeat(32)).unwrap();
+    first.ensure_current().unwrap();
+    drop(main_lease);
+    // A lane's unresolved run fences that lane, not the project.
+    Lease::at(&main, &root).unwrap().ensure_current().unwrap();
+    drop((first, second));
+    assert!(matches!(
+        Lease::at_with(&a, None, &root, true),
+        Err(Error::RecoveryRequired)
+    ));
+    Lease::at_with(&b, None, &root, true).unwrap();
+}
+
 fn git(dir: &Path, args: &[&str]) {
     let output = crate::gitwrite::git_command(dir)
         .args([

@@ -14,6 +14,7 @@ use std::process::Command;
 
 use serde::Serialize;
 
+pub mod lane;
 mod lease;
 pub mod lfs;
 pub mod reviewed_pull;
