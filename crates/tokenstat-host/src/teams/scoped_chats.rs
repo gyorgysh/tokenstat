@@ -121,7 +121,7 @@ pub(super) fn call(
             // in this chat, or in another chat, is not reachable from here.
             // The shown files are read once per shared revision, not on
             // every click, because that means projecting the whole history.
-            let (marker, size) = match shown_file(share, &row, wanted) {
+            let (marker, size) = match shown_file(&row, wanted) {
                 Some(found) => found,
                 None => {
                     let history = chats.shared_history(
@@ -146,7 +146,7 @@ pub(super) fn call(
                         })
                         .collect();
                     let size = files.get(wanted).copied();
-                    remember_files(share, &row, marker.clone(), files);
+                    remember_files(&row, marker.clone(), files);
                     let Some(size) = size else {
                         return Err(not_shared());
                     };
@@ -253,26 +253,29 @@ fn former_authors(event: &mut Value, current: &HashSet<String>) {
 }
 
 type ChatMarker = crate::chat::sharing::Binding;
-type ShownFiles = (String, Option<u64>, ChatMarker, HashMap<String, u64>);
+type ShownFiles = (ChatShare, ChatMarker, HashMap<String, u64>);
 static SHOWN: Mutex<Vec<ShownFiles>> = Mutex::new(Vec::new());
 
-/// The file's size when this exact shared revision is known to show it.
-/// `None` means not cached yet; an uncached share is read in full once.
-fn shown_file(share: &str, row: &ChatShare, wanted: &str) -> Option<(ChatMarker, u64)> {
+/// The file's size when this exact share record, unchanged in every field,
+/// is known to show it, and the chat still carries the same binding.
+/// `None` means not cached: that share is read in full.
+fn shown_file(row: &ChatShare, wanted: &str) -> Option<(ChatMarker, u64)> {
+    row.source_revision?;
     let cache = SHOWN.lock().ok()?;
-    let (_, _, marker, files) = cache
-        .iter()
-        .find(|(id, revision, _, _)| id == share && *revision == row.source_revision)?;
+    let (_, marker, files) = cache.iter().find(|(cached, _, _)| cached == row)?;
     Some((marker.clone(), *files.get(wanted)?))
 }
 
-fn remember_files(share: &str, row: &ChatShare, marker: ChatMarker, files: HashMap<String, u64>) {
+fn remember_files(row: &ChatShare, marker: ChatMarker, files: HashMap<String, u64>) {
+    if row.source_revision.is_none() || marker.source_revision != row.source_revision {
+        return;
+    }
     if let Ok(mut cache) = SHOWN.lock() {
-        cache.retain(|(id, _, _, _)| id != share);
+        cache.retain(|(cached, _, _)| cached.id != row.id);
         if cache.len() >= 32 {
             cache.remove(0);
         }
-        cache.push((share.to_string(), row.source_revision, marker, files));
+        cache.push((row.clone(), marker, files));
     }
 }
 
