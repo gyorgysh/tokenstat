@@ -30,6 +30,9 @@ pub(super) struct Settings {
     /// account. It runs only after the owner said they understand that.
     #[serde(default)]
     pub check_runs_changed_code: bool,
+    /// Lanes with review: work stops when it is ready, and a person lands it.
+    #[serde(default)]
+    pub review: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -148,6 +151,14 @@ struct About {
     ask: String,
     asked_by: Value,
     started_at_ms: i64,
+    /// The shared chat the Ask came from, so Land goes through its scope.
+    #[serde(default)]
+    share: Option<String>,
+    repository: PathBuf,
+    pointer: String,
+    /// "ready" once checked and waiting for a person, "blocked" otherwise.
+    #[serde(default)]
+    status: Option<String>,
 }
 
 pub(super) fn open(
@@ -156,6 +167,7 @@ pub(super) fn open(
     settings: &Settings,
     ask: &str,
     asked_by: Value,
+    share: Option<String>,
 ) -> Result<Lane, DispatchError> {
     let failed = |_| {
         DispatchError::new(
@@ -205,6 +217,10 @@ pub(super) fn open(
             .take(200)
             .collect(),
         asked_by,
+        share,
+        repository: opened.repository.clone(),
+        pointer: opened.pointer.clone(),
+        status: None,
         started_at_ms: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -221,7 +237,7 @@ pub(super) fn open(
 /// Lanes for one checkout on this computer: who asked for what, which files
 /// each has changed so far, and which lanes touch the same files. A lane is
 /// running while an agent holds it, and kept when its work could not land.
-pub(super) fn list(checkout: &str) -> Result<Value, DispatchError> {
+pub(super) fn list(checkout: &str, share: Option<&str>) -> Result<Value, DispatchError> {
     let parent = lane::root(
         &tokenstat_paths::data_dir().ok_or_else(unavailable)?,
         checkout,
@@ -240,6 +256,10 @@ pub(super) fn list(checkout: &str) -> Result<Value, DispatchError> {
             else {
                 continue;
             };
+            // A connection scoped to one shared chat sees that chat's lanes only.
+            if share.is_some() && about.share.as_deref() != share {
+                continue;
+            }
             let running = tokenstat_workspace::writer::Lease::acquire_lane(&path).is_err();
             let files = lane::changed_files(&path).unwrap_or_default();
             lanes.push((about, running, files));
@@ -257,7 +277,8 @@ pub(super) fn list(checkout: &str) -> Result<Value, DispatchError> {
                 .map(|(other, _, _)| other.branch.as_str())
                 .collect();
             json!({"branch":about.branch,"ask":about.ask,"askedBy":about.asked_by,"startedAtMs":about.started_at_ms,
-                "state": if *running { "running" } else { "kept" },"files":files,"overlaps":overlaps})
+                "state": if *running { "running" } else if about.status.as_deref() == Some("ready") { "ready" } else { "kept" },
+                "share":about.share,"files":files,"overlaps":overlaps})
         })
         .collect();
     Ok(json!({"lanes": rows}))
@@ -318,14 +339,24 @@ fn settle(lane: &mut Lane, settings: &Settings, message: &str, after_fix: bool) 
             return Landing::Blocked { message };
         }
     }
-    let landing = lane::land(
-        &lane.path,
-        &settings.target,
-        settings.remote.as_deref(),
-        &settings.check,
-    );
+    let landing = if settings.review {
+        lane::prepare(
+            &lane.path,
+            &settings.target,
+            settings.remote.as_deref(),
+            &settings.check,
+        )
+    } else {
+        lane::land(
+            &lane.path,
+            &settings.target,
+            settings.remote.as_deref(),
+            &settings.check,
+        )
+    };
     // A lane kept by an earlier attempt is done once its work landed.
     lane.keep = !matches!(landing, Landing::Landed { .. });
+    mark(&lane.path, matches!(landing, Landing::Ready { .. }));
     landing
 }
 
@@ -432,9 +463,117 @@ pub(crate) fn caught_up(repository: &str) {
     }
 }
 
+/// Land a lane that waits for review. Only the person who asked, a
+/// maintainer or the publisher may, through a verified Run connection.
+pub(super) fn land_ready(
+    principal: &super::AuthorizedTeamPrincipal,
+    params: &str,
+) -> Result<Value, DispatchError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LandInput {
+        branch: String,
+    }
+    principal.run_ticket()?;
+    if params.len() > 1024 {
+        return Err(invalid());
+    }
+    let input: LandInput = serde_json::from_str(params).map_err(|_| invalid())?;
+    let value = principal.value();
+    let settings = settings(&value.checkout_id).ok_or_else(unavailable)?;
+    let parent = lane::root(
+        &tokenstat_paths::data_dir().ok_or_else(unavailable)?,
+        &value.checkout_id,
+    );
+    let found = fs::read_dir(&parent)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .find_map(|path| {
+            let about =
+                serde_json::from_slice::<About>(&fs::read(path.with_extension("json")).ok()?)
+                    .ok()?;
+            (about.branch == input.branch).then_some((path, about))
+        });
+    let Some((path, about)) = found else {
+        return Ok(json!({"landed":false,"message":"This work is no longer waiting."}));
+    };
+    let asker = about
+        .asked_by
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if about.share != value.share_id
+        || !(value.person.id == asker
+            || value.person.id == value.publisher_id
+            || value.role == tokenstat_sync::teams::RepositoryRole::Maintainer)
+    {
+        return Err(DispatchError::new(
+            "team_land_forbidden",
+            "Only the person who asked, a maintainer or the publisher can land this work.",
+        ));
+    }
+    let _lease = tokenstat_workspace::writer::Lease::acquire_lane(&path).map_err(|_| {
+        DispatchError::new("team_lane_busy", "An agent is still working in this lane.")
+    })?;
+    if lane::pointer(&path).ok().as_deref() != Some(about.pointer.as_str()) {
+        return Err(DispatchError::new(
+            "team_lane_changed",
+            "This lane's git link was changed.",
+        ));
+    }
+    let mut lane = Lane {
+        path: path.clone(),
+        branch: about.branch.clone(),
+        repository: about.repository.clone(),
+        pointer: about.pointer.clone(),
+        rebasing: false,
+        keep: true,
+    };
+    let landing = lane::land(
+        &path,
+        &settings.target,
+        settings.remote.as_deref(),
+        &settings.check,
+    );
+    let landed = matches!(landing, Landing::Landed { .. });
+    let message = describe(&landing, &lane, &settings);
+    if landed {
+        lane.keep = false;
+        if let Ok(client) = principal.account_client() {
+            let _ = client.checkout_moved(&value.organization_id, &value.checkout_id);
+        }
+    } else {
+        mark(&path, false);
+    }
+    drop(lane);
+    Ok(json!({"landed":landed,"message":message}))
+}
+
 /// What the shared chat reads after a run, in plain words.
+/// Record whether a kept lane is ready to land or blocked.
+fn mark(path: &Path, ready: bool) {
+    let file = path.with_extension("json");
+    if let Some(mut about) = fs::read(&file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<About>(&bytes).ok())
+    {
+        about.status = Some(if ready { "ready" } else { "blocked" }.into());
+        if let Ok(bytes) = serde_json::to_vec(&about) {
+            let _ = fs::write(file, bytes);
+        }
+    }
+}
+
 pub(super) fn describe(landing: &Landing, lane: &Lane, settings: &Settings) -> String {
     match landing {
+        Landing::Ready { .. } => format!(
+            "Ready to land on {}: committed, rebased and checked. The person who asked, a maintainer or the publisher can land it from Work in progress.",
+            settings.target
+        ),
         Landing::Nothing => "The agent made no changes, so nothing was landed.".into(),
         Landing::Landed { commit } => format!(
             "Landed on {} as {}.",
@@ -523,6 +662,7 @@ mod tests {
             remote: remote.map(str::to_string),
             check: check.iter().map(|s| s.to_string()).collect(),
             check_runs_changed_code: true,
+            review: false,
         }
     }
 

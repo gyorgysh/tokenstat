@@ -7,7 +7,9 @@ struct TeamLaneSettings: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext
     let checkoutId: String
-    @State private var automatic = false
+    private enum Mode: Hashable { case manual, review, automatic }
+    @State private var mode: Mode = .manual
+    private var automatic: Bool { mode != .manual }
     @State private var target = "main"
     @State private var remote = "origin"
     @State private var check = ""
@@ -28,14 +30,17 @@ struct TeamLaneSettings: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text(L10n.text("common.teams.workflow")).font(Theme.headline)
             if let error { TeamNotice(message: error, warning: true) }
-            Picker(L10n.text("common.teams.workflow"), selection: $automatic) {
-                Text(L10n.text("common.teams.workflow_manual")).tag(false)
-                Text(L10n.text("common.teams.workflow_lanes")).tag(true)
+            Picker(L10n.text("common.teams.workflow"), selection: $mode) {
+                Text(L10n.text("common.teams.workflow_manual")).tag(Mode.manual)
+                Text(L10n.text("common.teams.workflow_review")).tag(Mode.review)
+                Text(L10n.text("common.teams.workflow_lanes")).tag(Mode.automatic)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .disabled(!loaded || saving)
-            Text(automatic ? L10n.text("common.teams.workflow_lanes_detail") : L10n.text("common.teams.workflow_manual_detail"))
+            Text(mode == .automatic ? L10n.text("common.teams.workflow_lanes_detail")
+                : mode == .review ? L10n.text("common.teams.workflow_review_detail")
+                : L10n.text("common.teams.workflow_manual_detail"))
                 .font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if automatic {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -64,7 +69,7 @@ struct TeamLaneSettings: View {
             }
         }
         .task { await load() }
-        .onChange(of: automatic) { saved = false }
+        .onChange(of: mode) { saved = false }
         .onChange(of: check) { saved = false; checkAcknowledged = false }
     }
 
@@ -72,7 +77,8 @@ struct TeamLaneSettings: View {
         do {
             let result: TeamLaneSettingsResult = try await store.read(.lanesGet, fields: ["checkout": .string(checkoutId)], context: context)
             if let settings = result.settings {
-                automatic = settings.enabled; target = settings.target; remote = settings.remote ?? ""
+                mode = !settings.enabled ? .manual : settings.review == true ? .review : .automatic
+                target = settings.target; remote = settings.remote ?? ""
                 check = settings.check.joined(separator: " "); checkAcknowledged = settings.checkRunsChangedCode ?? false
             }
             loaded = true
@@ -89,6 +95,7 @@ struct TeamLaneSettings: View {
             "target": .string(target.trimmingCharacters(in: .whitespaces)),
             "check": .array(checkArguments.map(JSONValue.string)),
             "checkRunsChangedCode": .bool(checkAcknowledged && !checkArguments.isEmpty),
+            "review": .bool(mode == .review),
         ]
         if !trimmedRemote.isEmpty { settings["remote"] = .string(trimmedRemote) }
         do {
@@ -99,6 +106,6 @@ struct TeamLaneSettings: View {
 }
 
 struct TeamLaneSettingsValue: Codable, Sendable {
-    let enabled: Bool; let target: String; let remote: String?; let check: [String]; let checkRunsChangedCode: Bool?
+    let enabled: Bool; let target: String; let remote: String?; let check: [String]; let checkRunsChangedCode: Bool?; let review: Bool?
 }
 struct TeamLaneSettingsResult: Codable, Sendable { let settings: TeamLaneSettingsValue? }

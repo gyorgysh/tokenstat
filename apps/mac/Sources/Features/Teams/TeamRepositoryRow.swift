@@ -18,6 +18,8 @@ struct TeamRepositoryRow: View {
     @State private var localIds: Set<String> = []
     @State private var loaded = false
     @State private var lanes: [String: [TeamLane]] = [:]
+    @State private var landing: String?
+    @State private var landMessage: String?
 
     private var canManage: Bool { organization.role.canManage || repository.role == .maintainer }
 
@@ -46,7 +48,10 @@ struct TeamRepositoryRow: View {
                 if !work.isEmpty {
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         Text(L10n.text("common.teams.work_in_progress")).font(Theme.callout.weight(.semibold))
-                        ForEach(work, id: \.branch) { lane in laneRow(lane, all: work) }
+                        if let landMessage { TeamNotice(message: landMessage) }
+                        ForEach(checkouts) { checkout in
+                            ForEach(lanes[checkout.id] ?? [], id: \.branch) { lane in laneRow(lane, all: work, checkout: checkout) }
+                        }
                     }
                 }
             }
@@ -75,7 +80,7 @@ struct TeamRepositoryRow: View {
         }
     }
 
-    private func laneRow(_ lane: TeamLane, all: [TeamLane]) -> some View {
+    private func laneRow(_ lane: TeamLane, all: [TeamLane], checkout: TeamCheckout) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
                 if lane.state == "running" {
@@ -87,6 +92,8 @@ struct TeamRepositoryRow: View {
             }
             Text(lane.state == "running"
                 ? L10n.text("common.teams.lane_running", lane.askedBy.name, String(lane.files.count))
+                : lane.state == "ready"
+                ? L10n.text("common.teams.lane_ready", lane.askedBy.name, String(lane.files.count))
                 : L10n.text("common.teams.lane_kept", lane.askedBy.name, String(lane.files.count)))
                 .font(Theme.caption).foregroundStyle(.secondary)
             let overlapping = all.filter { lane.overlaps.contains($0.branch) }.map { $0.ask.isEmpty ? $0.branch : $0.ask }
@@ -94,10 +101,28 @@ struct TeamRepositoryRow: View {
                 Label(L10n.text("common.teams.lane_overlap", overlapping.joined(separator: ", ")), systemImage: "exclamationmark.triangle")
                     .font(Theme.caption).foregroundStyle(TeamColors.warning)
             }
+            if lane.state == "ready", let share = lane.share {
+                Button(L10n.text("common.teams.land"), .merge) { Task { await land(lane, share: share, checkout: checkout) } }
+                    .buttonStyle(TeamButtonStyle(primary: true)).disabled(landing != nil)
+            }
         }
         .padding(Theme.Space.s)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.controlSeat, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func land(_ lane: TeamLane, share: String, checkout: TeamCheckout) async {
+        guard landing == nil else { return }
+        landing = lane.branch; landMessage = nil
+        defer { landing = nil }
+        let target: JSONValue = .object(["organization": .string(repository.organizationId), "repository": .string(repository.id),
+                                         "checkout": .string(checkout.id), "share": .string(share)])
+        do {
+            let result: TeamLandResult = try await store.read(.ask, fields: ["target": target, "method": .string("team.lanes.land"),
+                "params": .object(["branch": .string(lane.branch)])], context: context)
+            landMessage = result.message
+        } catch is CancellationError {} catch { landMessage = error.localizedDescription }
+        await load()
     }
 
     private func source(_ checkout: TeamCheckout) -> String {
@@ -136,6 +161,7 @@ struct TeamRepositoryRow: View {
 struct TeamLane: Codable, Sendable, Hashable {
     struct Person: Codable, Sendable, Hashable { let id: String; let name: String }
     let branch: String; let ask: String; let askedBy: Person; let startedAtMs: Int64
-    let state: String; let files: [String]; let overlaps: [String]
+    let state: String; let files: [String]; let overlaps: [String]; var share: String? = nil
 }
+struct TeamLandResult: Codable, Sendable { let landed: Bool; let message: String }
 struct TeamLanes: Codable, Sendable { let lanes: [TeamLane] }

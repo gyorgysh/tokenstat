@@ -25,12 +25,14 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                 | "team.chat.ask.review"
                 | "team.chat.ask.stop"
                 | "team.chat.ask.status"
+                | "team.lanes.land"
         ) {
             #[cfg(feature = "local-host")]
             return match method {
                 "team.chat.ask.review" => super::scoped_runs::review(&principal, params),
                 "team.chat.ask.stop" => super::runs::stop(&principal, params),
                 "team.chat.ask.status" => super::runs::status(&principal, params),
+                "team.lanes.land" => super::lanes::land_ready(&principal, params),
                 _ => super::scoped_runs::send(&principal, params),
             };
             #[cfg(not(feature = "local-host"))]
@@ -98,7 +100,41 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         if operation == TeamReadMethod::Lanes {
             #[cfg(feature = "local-host")]
             {
-                let result = super::lanes::list(&scope.checkout_id)?;
+                // Same gates as checkout info: a read capability, this exact
+                // publication, and its folder unchanged on this computer.
+                if !scope
+                    .capabilities
+                    .contains(&tokenstat_sync::teams::TeamCapability::Read)
+                {
+                    return Err(DispatchError::new(
+                        "team_method_required",
+                        "This action is not available through a Team connection.",
+                    ));
+                }
+                let owner = super::publications::Owner {
+                    issuer: principal.issuer().into(),
+                    publisher_id: scope.publisher_id.clone(),
+                    host_key: scope.host_key.clone(),
+                };
+                let row = super::publications::Store::capture()?.resolve(
+                    &owner,
+                    &scope.organization_id,
+                    &scope.repository_id,
+                    &scope.checkout_id,
+                )?;
+                let workspace = crate::workspaces::get(&row.workspace_id).map_err(|_| {
+                    DispatchError::new(
+                        "checkout_not_shared",
+                        "This checkout is no longer registered on this computer.",
+                    )
+                })?;
+                if super::publications::Folder::capture(&workspace.path)? != row.folder {
+                    return Err(DispatchError::new(
+                        "checkout_changed",
+                        "This checkout changed. Ask its publisher to review sharing.",
+                    ));
+                }
+                let result = super::lanes::list(&scope.checkout_id, scope.share_id.as_deref())?;
                 principal.ensure_live()?;
                 return Ok(result);
             }

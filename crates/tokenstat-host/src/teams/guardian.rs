@@ -197,6 +197,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             settings,
             &input.text,
             json!({"id": principal.value().person.id, "name": principal.value().person.name}),
+            principal.value().share_id.clone(),
         )?),
         None => None,
     };
@@ -539,8 +540,10 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                 );
             }
             let next = if attempt < FIX_ATTEMPTS
-                && !matches!(landing, Landing::Landed { .. } | Landing::Nothing)
-            {
+                && !matches!(
+                    landing,
+                    Landing::Landed { .. } | Landing::Ready { .. } | Landing::Nothing
+                ) {
                 super::lanes::next_step(lane, settings, landing, &message)
             } else {
                 super::lanes::Next::Done(landing)
@@ -624,6 +627,9 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         }
     };
     let result = chats.complete_owned_run(source.target(), *prepared, proof, terminal);
+    // The run's writer claim is cleared; the lane goes now, before anyone is
+    // told the run finished, so a lane list never shows finished work.
+    drop(lane);
     if result.is_ok() {
         super::recovery::forget(&fence);
     }

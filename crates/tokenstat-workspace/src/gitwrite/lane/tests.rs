@@ -298,3 +298,29 @@ fn a_teammates_landing_reaches_a_clean_checkout_and_leaves_others_alone() {
     ));
     assert_eq!(catch_up(&f.main, "main", "origin"), CatchUp::Diverged);
 }
+
+#[test]
+fn a_prepared_lane_waits_and_lands_later_on_the_newest_target() {
+    let f = fixture();
+    let (a, b) = (lane(&f, "a"), lane(&f, "b"));
+    std::fs::write(a.join("a.txt"), "one\ntwo\nthree\nreviewed\n").unwrap();
+    commit_all(&a, "Reviewed change").unwrap();
+    assert!(matches!(
+        prepare(&a, "main", Some("origin"), &[]),
+        Landing::Ready { .. }
+    ));
+    assert_eq!(remote_file(&f, "a.txt"), "one\ntwo\nthree");
+    // Somebody else lands first; the reviewed lane still lands on top.
+    std::fs::write(b.join("b.txt"), "b first\n").unwrap();
+    commit_all(&b, "First").unwrap();
+    assert!(matches!(
+        land(&b, "main", Some("origin"), &[]),
+        Landing::Landed { .. }
+    ));
+    assert!(matches!(
+        land(&a, "main", Some("origin"), &[]),
+        Landing::Landed { .. }
+    ));
+    assert_eq!(remote_file(&f, "a.txt"), "one\ntwo\nthree\nreviewed");
+    assert_eq!(remote_file(&f, "b.txt"), "b first");
+}

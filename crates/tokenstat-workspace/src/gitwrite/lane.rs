@@ -29,6 +29,10 @@ pub enum Landing {
     Landed {
         commit: String,
     },
+    /// Rebased and checked, waiting for a person to land it.
+    Ready {
+        commit: String,
+    },
     /// Rebasing onto the target conflicts in these files. The lane is left
     /// as it was before the rebase.
     Conflict {
@@ -263,6 +267,27 @@ fn check(lane: &Path, command: &[String]) -> Result<(), String> {
 /// only, and a push that lost a race is retried from a fresh fetch. Without
 /// one, the local branch moves only if no worktree has it checked out.
 pub fn land(lane: &Path, target: &str, remote: Option<&str>, check_command: &[String]) -> Landing {
+    land_with(lane, target, remote, check_command, true)
+}
+
+/// Rebase and check like `land`, but stop before the target moves. A person
+/// lands it later with `land`, which rebases and checks again.
+pub fn prepare(
+    lane: &Path,
+    target: &str,
+    remote: Option<&str>,
+    check_command: &[String],
+) -> Landing {
+    land_with(lane, target, remote, check_command, false)
+}
+
+fn land_with(
+    lane: &Path,
+    target: &str,
+    remote: Option<&str>,
+    check_command: &[String],
+    push: bool,
+) -> Landing {
     for _ in 0..PUSH_ATTEMPTS {
         match refresh(lane, target, remote) {
             Landing::Nothing => {}
@@ -281,6 +306,9 @@ pub fn land(lane: &Path, target: &str, remote: Option<&str>, check_command: &[St
             Ok(commit) => commit,
             Err(message) => return Landing::Blocked { message },
         };
+        if !push {
+            return Landing::Ready { commit };
+        }
         match remote {
             Some(remote) => {
                 let refspec = format!("HEAD:refs/heads/{target}");
