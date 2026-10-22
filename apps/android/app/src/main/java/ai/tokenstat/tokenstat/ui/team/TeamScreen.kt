@@ -446,7 +446,7 @@ private fun LaneRow(lane: JsonObject, all: List<JsonObject>, busy: Boolean, onLa
 /// is handed to another app, because the file comes from someone else's
 /// computer and its name comes from an agent's output.
 @Composable
-private fun SharedFile(file: JsonObject, fetch: suspend (String) -> JsonObject) {
+internal fun SharedFile(file: JsonObject, fetch: suspend (String) -> JsonObject) {
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
     val id = file.str("id") ?: return
@@ -507,11 +507,11 @@ private fun decodeBounded(data: String): androidx.compose.ui.graphics.ImageBitma
 
 /// One shared chat: its history as text, a comment box, and Ask with Stop.
 @Composable
-private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: TeamCommentDraftStore, onBack: () -> Unit) {
+internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: TeamCommentDraftStore, onBack: () -> Unit) {
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
     var history by remember(chat) { mutableStateOf(TeamHistoryWindow(emptyList())) }
-    val events = history.events
+    var blocks by remember(chat) { mutableStateOf<List<TeamBlock>>(emptyList()) }
     var nextCursor by remember(chat) { mutableStateOf<String?>(null) }
     var hasMore by remember(chat) { mutableStateOf(false) }
     var loadedEarlier by remember(chat) { mutableStateOf(false) }
@@ -550,7 +550,11 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Tea
                 throw CoreFailure("invalid_response", L10n.text("common.teams.history_cannot_display"))
             }
             val before = history
-            history = withContext(Dispatchers.Default) { before.merge(incoming, earlier) }
+            val projected = withContext(Dispatchers.Default) {
+                val window = before.merge(incoming, earlier)
+                window to TeamTranscript.project(window.events, details.str("backend").orEmpty())
+            }
+            history = projected.first; blocks = projected.second
             nextCursor = next; hasMore = more; loadedEarlier = earlier
             allowsComments = details.bool("allowsComments")
             allowsAgentRuns = details.bool("allowsAgentRuns")
@@ -558,9 +562,10 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Tea
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Throwable) {
-            error = failure.message
-            if (failure is CoreFailure && failure.code !in setOf("team_connection_unavailable", "teams_unreachable", "teams_busy", "chat_window_full")) {
-                history = TeamHistoryWindow(emptyList()); hasMore = false; nextCursor = null
+            val invalid = failure is IllegalArgumentException || failure is IllegalStateException
+            error = if (invalid) L10n.text("common.teams.history_cannot_display") else failure.message
+            if (invalid || failure is CoreFailure && failure.code !in setOf("team_connection_unavailable", "teams_unreachable", "teams_busy", "chat_window_full")) {
+                history = TeamHistoryWindow(emptyList()); blocks = emptyList(); hasMore = false; nextCursor = null
                 allowsComments = false; allowsAgentRuns = false
             }
         } finally {
@@ -605,26 +610,14 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Tea
                 TsSecondaryButton(L10n.text("common.teams.load_earlier"), enabled = !loading,
                     icon = ActionIcon.History.vector, onClick = { scope.launch { load(earlier = true) } })
             }
-            items(events) { event ->
-                val shared = (event["event"] as? JsonObject)?.takeIf { it.str("kind") == "attachment" }
-                if (shared != null) {
-                    SharedFile(shared) { id -> read("team.chat.attachment", buildJsonObject { put("attachment", id) }) }
-                    return@items
-                }
-                val by = event["author"] as? JsonObject
-                val author = if (by?.str("kind") == "formerMember") L10n.text("common.teams.former_member")
-                    else by?.str("name") ?: event.str("kind").orEmpty()
-                val text = event.str("text") ?: (event["event"] as? JsonObject)?.str("delta") ?: return@items
-                Column {
-                    Text(author, color = colors.textSecondary)
-                    Text(text, color = colors.textPrimary)
-                }
+            items(blocks, key = { it.id }) { block ->
+                TeamTranscriptRow(block) { id -> read("team.chat.attachment", buildJsonObject { put("attachment", id) }) }
             }
         }
         if (allowsComments && commentModel != null) TeamCommentComposer(commentModel, onPosted = {
             if (!loadedEarlier) load()
         })
-        if (allowsAgentRuns) {
+        if (allowsAgentRuns || fence != null) {
             val running = fence
             if (running != null) {
                 Text(L10n.text("common.teams.agent_working", chat.computer), color = colors.textSecondary)

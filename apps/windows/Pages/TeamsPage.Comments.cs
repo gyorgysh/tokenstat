@@ -43,7 +43,7 @@ internal sealed partial class TeamsPage
             {
                 fields["_accountScope"] = accountScope.DeepClone();
                 if (session is not null) fields["_accountSession"] = session;
-                return await AppServices.Host.CallAsync(method, fields);
+                return await _call(method, fields);
             }
             static string Label(string text) => string.Concat(text.EnumerateRunes().Take(160).Select(r => System.Text.Rune.IsControl(r) ? " " : r.ToString()));
             _comments[binding] = model = new(TeamCommentDraftStore.Shared, binding, Label(title) + " · " + Label(computer), BoundCall);

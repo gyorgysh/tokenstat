@@ -120,6 +120,16 @@ private func waitFor(_ key: String, fixture: Fixture) async {
             ask["mode"] = .string("forged")
             do { _ = try TeamMessageAttribution.people([.object(ask)]); preconditionFailure("Unknown message mode was accepted") } catch {}
         }
+        let initiator: JSONValue = .object(["kind":.string("person"),"id":.string("fixture-member"),"name":.string("Fictional member")])
+        var proof: [String: JSONValue] = ["kind":.string("agent"),"backend":.string("claude"),"runId":.string("run_" + String(repeating: "a", count: 32)),"initiatedBy":initiator]
+        var agent: [String: JSONValue] = ["kind":.string("agent"),"backend":.string("claude"),"seq":.int(44),"mode":.string("agent"),"author":.object(proof)]
+        let namedAgent = try TeamMessageAttribution.agents([.object(agent)])
+        check(namedAgent["text-s44"]?.name == "Fictional member", "Verified agent initiator was lost")
+        proof["initiatedBy"] = .object(["kind":.string("formerMember"),"name":.string("Must not appear")]); agent["author"] = .object(proof)
+        let formerAgent = try TeamMessageAttribution.agents([.object(agent)])
+        check(formerAgent["text-s44"]?.name == nil && formerAgent["text-s44"]?.backend == "claude", "Former agent initiator retained a name")
+        agent["backend"] = .string("codex")
+        do { _ = try TeamMessageAttribution.agents([.object(agent)]); preconditionFailure("Agent backend mismatch was accepted") } catch {}
         do { _ = try TeamMessageAttribution.people([named, named]); preconditionFailure("Duplicate author sequence was accepted") } catch {}
         let unverified = JSONValue.object(["kind":.string("user"),"seq":.int(42),"author":.object(["kind":.string("person"),"id":.string("forged"),"name":.string("Unverified")])])
         do { _ = try TeamMessageAttribution.people([unverified]); preconditionFailure("Unverified user fields became a named Comment") } catch {}

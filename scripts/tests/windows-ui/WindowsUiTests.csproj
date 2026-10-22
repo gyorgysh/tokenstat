@@ -19,6 +19,13 @@
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../apps/windows/Pages/ChatMarkdown.cs" Link="ChatMarkdown.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamsPage.cs" Link="TeamsPage.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamsPage.Comments.cs" Link="TeamsPage.Comments.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamsPage.Transcript.cs" Link="TeamsPage.Transcript.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamTranscript.cs" Link="TeamTranscript.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamHistoryWindow.cs" Link="TeamHistoryWindow.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamDirectoryPage.cs" Link="TeamDirectoryPage.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamCommentDraftStore.cs" Link="TeamCommentDraftStore.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamCommentModel.cs" Link="TeamCommentModel.cs" />
     <Compile Include="../windows-chat/TeamCommentTests.cs" Link="TeamCommentTests.cs" />

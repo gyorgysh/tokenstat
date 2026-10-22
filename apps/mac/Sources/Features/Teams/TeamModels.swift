@@ -236,7 +236,37 @@ struct TeamCommentReceipt: Codable, Equatable, Sendable {
     }
 }
 struct TeamCommentResult: Decodable, Sendable { let receipt: TeamCommentReceipt }
+struct TeamAgentAttribution: Equatable, Sendable {
+    let backend: String
+    let name: String?
+}
 enum TeamMessageAttribution {
+    static func agents(_ events: [JSONValue]) throws -> [String: TeamAgentAttribution] {
+        var result: [String: TeamAgentAttribution] = [:]
+        for case let .object(row) in events where row["kind"] == .string("agent") {
+            guard let value = row["author"] else { continue }
+            guard case let .object(author) = value, author["kind"] == .string("agent"), row["mode"] == .string("agent"),
+                  case let .string(backend)? = row["backend"], author["backend"] == .string(backend),
+                  case let .int(sequence)? = row["seq"], sequence >= 0,
+                  case let .string(run)? = author["runId"], run.hasPrefix("run_"), run.utf8.count == 36,
+                  run.dropFirst(4).utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                  case let .object(person)? = author["initiatedBy"] else { throw CocoaError(.coderReadCorrupt) }
+            let attribution: TeamAgentAttribution
+            if person["kind"] == .string("formerMember") {
+                attribution = .init(backend: backend, name: nil)
+            } else {
+                guard person["kind"] == .string("person") else { throw CocoaError(.coderReadCorrupt) }
+                let actor = try JSONDecoder().decode(TeamPerson.self, from: JSONEncoder().encode(JSONValue.object(person)))
+                guard !actor.id.isEmpty, actor.id.utf8.count <= 128, !actor.name.isEmpty, actor.name.count <= 128 else { throw CocoaError(.coderReadCorrupt) }
+                attribution = .init(backend: backend, name: actor.name)
+            }
+            for prefix in ["text", "think", "tool", "edit", "failed", "usage"] {
+                guard result.updateValue(attribution, forKey: "\(prefix)-s\(sequence)") == nil else { throw CocoaError(.coderReadCorrupt) }
+            }
+        }
+        return result
+    }
+
     static func people(_ events: [JSONValue]) throws -> [String: TeamPerson] {
         var people: [String: TeamPerson] = [:]
         for case let .object(row) in events where row["kind"] == .string("user") {

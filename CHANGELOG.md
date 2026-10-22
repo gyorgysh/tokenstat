@@ -23,7 +23,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Post named comments in shared chats without starting an agent. If delivery cannot be confirmed, keep the original pending message and check its receipt before sending again.
 - Recover your saved Team comment drafts when a computer is offline or access changes. Drafts retain their chat and computer labels, with copy and reviewed removal actions that work at larger text sizes.
 - Agent turns and Git/editor actions report when a checkout is already in use, including linked checkouts. Independent clones can run at the same time.
-- Teams reading and comments on Android and Windows, with shared files, earlier-history paging, saved local comment drafts, delivery checks and periodic chat refresh. Images open inside the app; other files can be saved on Mac with a quarantine mark.
+- Teams reading and comments on Android and Windows, with Markdown, offline charts, read-only tool details, shared files, earlier-history paging, saved local comment drafts, delivery checks and periodic chat refresh. Agent replies identify the teammate who asked. Images open inside the app; other files can be saved on Mac with a quarantine mark.
 - In development builds, Ask and Stop in shared Claude Code chats, separate work lanes, checked automatic landing or review, pull requests, overlap warnings and automatic checkout catch-up. Agent execution remains disabled in release builds while release verification is completed.
 
 ### Fixed

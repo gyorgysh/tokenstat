@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="../../../apps/windows/Pages/TeamCommentDraftStore.cs" Link="TeamCommentDraftStore.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamCommentModel.cs" Link="TeamCommentModel.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamTranscript.cs" Link="TeamTranscript.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamDirectoryPage.cs" Link="TeamDirectoryPage.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamHistoryWindow.cs" Link="TeamHistoryWindow.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatCommandRules.cs" Link="ChatCommandRules.cs" />

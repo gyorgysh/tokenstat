@@ -7,6 +7,7 @@ import SwiftUI
 struct TeamTranscriptContent: View {
     let history: TeamChatHistory
     @State private var rows: [ChatDisplayItem] = []
+    @State private var agents: [String: TeamAgentAttribution] = [:]
     @State private var people: [String: TeamPerson] = [:]
     @State private var asks: Set<String> = []
     @State private var former: Set<String> = []
@@ -72,7 +73,8 @@ struct TeamTranscriptContent: View {
                         if let fileError, fetching == nil { Text(fileError).font(Theme.caption).foregroundStyle(TeamColors.warning) }
                     }
                 } else {
-                    ChatEventRow(item: row, defaultAgentName: label(history.backend), agentLabel: label, attachmentData: nil,
+                    ChatEventRow(item: row, defaultAgentName: agents[row.id].map(attributedLabel) ?? label(history.backend),
+                                 agentLabel: { backend in agents[row.id].map(attributedLabel) ?? label(backend) }, attachmentData: nil,
                                  isPending: false, resolve: { _, _ in }, canAnswerQuestions: false)
                 }
             }
@@ -89,12 +91,12 @@ struct TeamTranscriptContent: View {
                 let result = try await Task.detached(priority: .userInitiated) {
                     let decoded = try JSONDecoder().decode([ChatTimelineEvent].self, from: JSONEncoder().encode(events))
                     try Task.checkCancellation()
-                    return (ChatDisplayItem.coalesce(decoded, defaultBackend: backend, running: false), try TeamMessageAttribution.people(events), TeamMessageAttribution.asks(events), TeamMessageAttribution.former(events))
+                    return (ChatDisplayItem.coalesce(decoded, defaultBackend: backend, running: false), try TeamMessageAttribution.people(events), TeamMessageAttribution.asks(events), TeamMessageAttribution.former(events), try TeamMessageAttribution.agents(events))
                 }.value
                 try Task.checkCancellation()
-                rows = result.0; people = result.1; asks = result.2; former = result.3; readyRenderId = history.renderId; error = nil
+                rows = result.0; people = result.1; asks = result.2; former = result.3; agents = result.4; readyRenderId = history.renderId; error = nil
             } catch is CancellationError {} catch {
-                rows = []; people = [:]; asks = []; former = []; readyRenderId = history.renderId; self.error = L10n.text("common.teams.history_cannot_display")
+                rows = []; people = [:]; asks = []; former = []; agents = [:]; readyRenderId = history.renderId; self.error = L10n.text("common.teams.history_cannot_display")
             }
         }
     }
@@ -113,6 +115,9 @@ struct TeamTranscriptContent: View {
                 files[id] = file
             }
         } catch is CancellationError {} catch { fileError = error.localizedDescription }
+    }
+    private func attributedLabel(_ attribution: TeamAgentAttribution) -> String {
+        L10n.text("common.teams.agent_asked_by", label(attribution.backend), attribution.name ?? L10n.text("common.teams.former_member"))
     }
     private func label(_ backend: String) -> String {
         switch backend {

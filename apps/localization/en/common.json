@@ -679,5 +679,22 @@
   "common.teams.remove_draft": "Remove draft",
   "common.teams.account_changed": "Your account changed. Sign in again to continue.",
   "common.teams.load_more_computers": "More computers",
-  "common.teams.partial_lanes": "Work and overlaps are shown for the computers loaded here."
+  "common.teams.partial_lanes": "Work and overlaps are shown for the computers loaded here.",
+  "common.teams.agent": "Agent",
+  "common.teams.agent_asked_by": "{0} · asked by {1}",
+  "common.teams.tool_output": "Tool output",
+  "common.teams.recorded_question": "Recorded question",
+  "common.teams.recorded_message": "Recorded message",
+  "common.teams.recorded_handoff": "Agent handoff",
+  "common.teams.recorded_approval": "Recorded approval",
+  "common.teams.answer_withdrawn": "A recorded answer was withdrawn.",
+  "common.teams.event_unavailable": "Update tokenstat to display this part of the shared history.",
+  "common.teams.run_finished": "Agent run finished.",
+  "common.teams.run_failed": "Agent run ended with an error.",
+  "common.teams.thinking": "Thinking",
+  "common.teams.tool_succeeded": "Completed",
+  "common.teams.tool_failed": "Failed",
+  "common.teams.text_page": "Page {0} of {1}",
+  "common.teams.previous_page": "Previous",
+  "common.teams.recorded_changes": "Recorded changes"
 }

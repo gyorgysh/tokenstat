@@ -18,6 +18,7 @@ namespace Tokenstat.Pages;
 internal sealed partial class TeamsPage : Page
 {
     private readonly StackPanel _body = new() { Spacing = Theme.SpaceM, Padding = new Thickness(24), MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly Func<string, JsonObject?, Task<JsonNode>> _call;
     private JsonObject? _scope;
     private string? _session;
     private JsonObject? _organization;
@@ -43,8 +44,10 @@ internal sealed partial class TeamsPage : Page
     // Images opened in a chat, kept so the live refresh does not close them.
     private readonly Dictionary<string, Microsoft.UI.Xaml.Media.Imaging.BitmapImage> _openedImages = new();
 
-    public TeamsPage()
+    public TeamsPage() : this(null) { }
+    internal TeamsPage(Func<string, JsonObject?, Task<JsonNode>>? call)
     {
+        _call = call ?? ((method, fields) => AppServices.Host.CallAsync(method, fields));
         Content = new ScrollViewer { Content = _body };
         Loaded += async (_, _) => await LoadAsync();
         Unloaded += (_, _) => _view++;
@@ -57,7 +60,7 @@ internal sealed partial class TeamsPage : Page
         var body = fields?.DeepClone() as JsonObject ?? new JsonObject();
         body["_accountScope"] = _scope?.DeepClone();
         if (_session is not null) body["_accountSession"] = _session;
-        return await AppServices.Host.CallAsync(method, body);
+        return await _call(method, body);
     }
 
     private static JsonObject Page100() => new() { ["limit"] = 100, ["offset"] = 0 };
@@ -89,7 +92,7 @@ internal sealed partial class TeamsPage : Page
         var view = _view;
         try
         {
-            var status = await AppServices.Host.CallAsync("account.status");
+            var status = await _call("account.status", null);
             if (!IsLoaded || _view != view) return;
             var scope = SshVaultScope.From(status);
             var session = Format.Text(status, "accountSession");
@@ -402,10 +405,14 @@ internal sealed partial class TeamsPage : Page
         Reset(title);
         var view = _view;
         var targetKey = target.ToJsonString();
+        var loading = true;
+        _readingEarlier = earlierCursor is not null;
         var previous = _historyTarget == targetKey ? _history : new TeamHistoryWindow([]);
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => await LoadAsync()));
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => await ShowChatAsync(target, title, computer)));
+        if (_activeRuns.TryGetValue(targetKey, out var active)) AddActiveRunControls(target, active, title, computer, view, () => !loading && !_readingEarlier && CommentIdle);
         JsonNode details, page;
+        List<TeamBlock> transcript;
         try
         {
             details = await CallAsync("teams.connection.call", new JsonObject { ["target"] = target.DeepClone(), ["method"] = "team.chat.details", ["params"] = new JsonObject() });
@@ -421,11 +428,14 @@ internal sealed partial class TeamsPage : Page
             var next = Format.Text(page, "nextCursor");
             if (Format.Flag(page, "hasMore") && (incoming.Count == 0 || next.Length == 0 || next == earlierCursor))
                 throw new HostException("invalid_response", L10n.Text("common.teams.history_cannot_display"));
-            var window = await Task.Run(() => previous.Merge(incoming, earlierCursor is not null));
+            var projected = await Task.Run(() => {
+                var window = previous.Merge(incoming, earlierCursor is not null);
+                return (window, rows: TeamTranscript.Project(window.Events, Format.Text(details["chat"], "backend")));
+            });
             if (!IsLoaded || _view != view) return false;
-            _historyTarget = targetKey; _history = window; _readingEarlier = earlierCursor is not null;
+            _historyTarget = targetKey; _history = projected.window; transcript = projected.rows;
         }
-        catch (Exception error) { if (IsLoaded && _view == view) Note(error.Message, true); return false; }
+        catch (Exception error) { loading = false; if (IsLoaded && _view == view) Note(error is InvalidDataException ? L10n.Text("common.teams.history_cannot_display") : error.Message, true); return false; }
         if (!IsLoaded || _view != view) return false;
         if (Format.Flag(page, "hasMore"))
         {
@@ -434,47 +444,11 @@ internal sealed partial class TeamsPage : Page
                 async (_, _) => await ShowChatAsync(target, title, computer, next)));
         }
         if (_history.Truncated) Note(L10n.Text("common.teams.shared_history_window"));
-        foreach (var item in _history.Events)
-        {
-            if (Format.Text(item["event"], "kind") == "attachment")
-            {
-                _body.Children.Add(SharedFile(target, item["event"]!.AsObject()));
-                continue;
-            }
-            var text = Format.Text(item, "text");
-            if (text.Length == 0) text = Format.Text(item["event"], "delta");
-            if (text.Length == 0) continue;
-            var author = Format.Text(item["author"], "kind") == "formerMember"
-                ? L10n.Text("common.teams.former_member")
-                : Format.Text(item["author"], "name");
-            if (author.Length == 0) author = Format.Text(item, "kind");
-            _body.Children.Add(new TextBlock { Text = author, Opacity = 0.6, FontSize = 12 });
-            _body.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
-        }
+        foreach (var block in transcript) _body.Children.Add(TranscriptRow(target, block));
         var chat = details["chat"];
         if (Format.Flag(chat, "allowsComments")) await AddCommentComposerAsync(target, title, computer, view);
         if (!IsLoaded || _view != view) return false;
-        if (_activeRuns.TryGetValue(targetKey, out var running))
-        {
-            var status = new TextBlock { Text = _stoppingRuns.Contains(targetKey) ? L10n.Text("common.teams.agent_stopping") : L10n.Text("common.teams.agent_working", computer), TextWrapping = TextWrapping.Wrap };
-            _body.Children.Add(status);
-            Button? stop = null;
-            stop = ActionIconGlyph.Button(L10n.Text("common.teams.stop_agent"), ActionIcon.Stop, async (_, _) =>
-            {
-                stop!.IsEnabled = false; _stoppingRuns.Add(targetKey);
-                status.Text = L10n.Text("common.teams.agent_stopping");
-                try { await CallAsync("teams.ask", new JsonObject { ["target"] = target.DeepClone(), ["method"] = "team.chat.ask.stop", ["params"] = new JsonObject { ["fence"] = running.DeepClone() } }); }
-                catch (Exception error)
-                {
-                    if (!IsLoaded || _view != view) return;
-                    _stoppingRuns.Remove(targetKey); stop.IsEnabled = true; status.Text = error.Message;
-                }
-            });
-            stop.IsEnabled = !_stoppingRuns.Contains(targetKey);
-            _body.Children.Add(stop);
-            _ = WatchAsync(target, running, title, computer, view, status, stop);
-        }
-        else if (Format.Flag(chat, "allowsAgentRuns"))
+        if (!_activeRuns.ContainsKey(targetKey) && Format.Flag(chat, "allowsAgentRuns"))
         {
             var ask = new TextBox { PlaceholderText = L10n.Text("common.teams.ask_placeholder"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
             ask.Text = _askWriting.GetValueOrDefault(targetKey) ?? "";
@@ -526,8 +500,31 @@ internal sealed partial class TeamsPage : Page
             _body.Children.Add(askButton);
             Note(L10n.Text("common.teams.ask_detail", computer));
         }
+        loading = false;
         if (!_readingEarlier && !_activeRuns.ContainsKey(targetKey)) _ = KeepCurrentAsync(target, title, computer, view, _body.Children.OfType<TextBox>().ToList());
         return true;
+    }
+
+    private void AddActiveRunControls(JsonObject target, JsonNode running, string title, string computer, int view, Func<bool> canRefresh)
+    {
+        var targetKey = target.ToJsonString();
+        var status = new TextBlock { Text = _stoppingRuns.Contains(targetKey) ? L10n.Text("common.teams.agent_stopping") : L10n.Text("common.teams.agent_working", computer), TextWrapping = TextWrapping.Wrap };
+        _body.Children.Add(status);
+        Button? stop = null;
+        stop = ActionIconGlyph.Button(L10n.Text("common.teams.stop_agent"), ActionIcon.Stop, async (_, _) =>
+        {
+            stop!.IsEnabled = false; _stoppingRuns.Add(targetKey);
+            status.Text = L10n.Text("common.teams.agent_stopping");
+            try { await CallAsync("teams.ask", new JsonObject { ["target"] = target.DeepClone(), ["method"] = "team.chat.ask.stop", ["params"] = new JsonObject { ["fence"] = running.DeepClone() } }); }
+            catch (Exception error)
+            {
+                if (!IsLoaded || _view != view) return;
+                _stoppingRuns.Remove(targetKey); stop.IsEnabled = true; status.Text = error.Message;
+            }
+        });
+        stop.IsEnabled = !_stoppingRuns.Contains(targetKey);
+        _body.Children.Add(stop);
+        _ = WatchAsync(target, running, title, computer, view, status, stop, canRefresh);
     }
 
     /// New comments and agent output appear while the chat is open. Stops
@@ -551,6 +548,7 @@ internal sealed partial class TeamsPage : Page
     /// and its name comes from an agent's output.
     private UIElement SharedFile(JsonObject target, JsonObject file)
     {
+        var view = _view;
         var panel = new StackPanel { Spacing = Theme.SpaceXs };
         var id = Format.Text(file, "id");
         var name = new string(Format.Text(file, "name").Where(c => !char.IsControl(c)
@@ -573,6 +571,7 @@ internal sealed partial class TeamsPage : Page
                 {
                     ["target"] = target.DeepClone(), ["method"] = "team.chat.attachment", ["params"] = new JsonObject { ["attachment"] = id },
                 });
+                if (!IsLoaded || _view != view) return;
                 var media = Format.Text(reply["attachment"], "mediaType");
                 if (media.StartsWith("image/", StringComparison.Ordinal) && media != "image/svg+xml")
                 {
@@ -593,6 +592,7 @@ internal sealed partial class TeamsPage : Page
                     if (width >= height) bitmap.DecodePixelWidth = (int)Math.Min(width, 2048u);
                     else bitmap.DecodePixelHeight = (int)Math.Min(height, 2048u);
                     await bitmap.SetSourceAsync(stream);
+                    if (!IsLoaded || _view != view) return;
                     if (_openedImages.Count >= 16) _openedImages.Clear();
                     _openedImages[key] = bitmap;
                     panel.Children.Remove(open);
@@ -614,7 +614,7 @@ internal sealed partial class TeamsPage : Page
     }
 
     /// Refresh while the agent works, with Stop, until the host says it ended.
-    private async Task WatchAsync(JsonObject target, JsonNode fence, string title, string computer, int view, TextBlock status, Button stop)
+    private async Task WatchAsync(JsonObject target, JsonNode fence, string title, string computer, int view, TextBlock status, Button stop, Func<bool> canRefresh)
     {
         var key = target.ToJsonString();
         while (true)
@@ -628,14 +628,14 @@ internal sealed partial class TeamsPage : Page
                 if (!Format.Flag(reply, "running"))
                 {
                     _activeRuns.Remove(key); _stoppingRuns.Remove(key);
-                    if (_readingEarlier) { status.Text = L10n.Text("common.done"); stop.IsEnabled = false; return; }
+                    if (!canRefresh()) { status.Text = L10n.Text("common.done"); stop.IsEnabled = false; return; }
                     await ShowChatAsync(target, title, computer);
                     return;
                 }
                 status.Text = _stoppingRuns.Contains(key) ? L10n.Text("common.teams.agent_stopping") : L10n.Text("common.teams.agent_working", computer);
                 // Paging back and writing both keep the mounted controls. A
                 // status check never throws away the reader's place or text.
-                if (!_readingEarlier && CommentIdle && _body.Children.OfType<TextBox>().All(box => box.Text.Length == 0))
+                if (canRefresh() && _body.Children.OfType<TextBox>().All(box => box.Text.Length == 0))
                 {
                     await ShowChatAsync(target, title, computer);
                     return;

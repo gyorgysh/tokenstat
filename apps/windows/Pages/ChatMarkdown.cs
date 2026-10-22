@@ -28,7 +28,7 @@ namespace Tokenstat.Pages;
 /// does not make requests. Code blocks are drawn by the caller so they keep
 /// the chat's own copy menu and horizontal scrolling.
 /// </summary>
-internal static class ChatMarkdown
+internal sealed class ChatMarkdown(bool allowDesktopActions)
 {
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .DisableHtml()
@@ -40,7 +40,10 @@ internal static class ChatMarkdown
 
     private const double BodySize = 14;
 
-    public static UIElement Create(string text, Func<string, UIElement> codeBlock)
+    public static UIElement Create(string text, Func<string, UIElement> codeBlock, bool allowDesktopActions = true) =>
+        new ChatMarkdown(allowDesktopActions).Render(text, codeBlock);
+
+    private UIElement Render(string text, Func<string, UIElement> codeBlock)
     {
         MarkdownDocument document;
         try
@@ -56,7 +59,7 @@ internal static class ChatMarkdown
         return body.Children.Count == 0 ? Plain(text) : body;
     }
 
-    private static TextBlock Plain(string text) => new()
+    private TextBlock Plain(string text) => new()
     {
         Text = text,
         TextWrapping = TextWrapping.Wrap,
@@ -64,7 +67,7 @@ internal static class ChatMarkdown
         FontSize = BodySize,
     };
 
-    private static StackPanel Blocks(ContainerBlock blocks, Func<string, UIElement> codeBlock)
+    private StackPanel Blocks(ContainerBlock blocks, Func<string, UIElement> codeBlock)
     {
         var panel = new StackPanel { Spacing = Theme.SpaceS };
         foreach (var block in blocks)
@@ -111,7 +114,7 @@ internal static class ChatMarkdown
         return panel;
     }
 
-    private static RichTextBlock ParagraphText(LeafBlock leaf)
+    private RichTextBlock ParagraphText(LeafBlock leaf)
     {
         var paragraph = new Paragraph { Margin = new Thickness(0) };
         if (leaf.Inline is not null) Append(leaf.Inline, paragraph.Inlines);
@@ -133,7 +136,7 @@ internal static class ChatMarkdown
         return text;
     }
 
-    private static StackPanel ListItems(ListBlock list, Func<string, UIElement> codeBlock)
+    private StackPanel ListItems(ListBlock list, Func<string, UIElement> codeBlock)
     {
         var items = new StackPanel { Spacing = 4 };
         var number = int.TryParse(list.OrderedStart, out var start) ? start : 1;
@@ -160,7 +163,7 @@ internal static class ChatMarkdown
     }
 
     /// <summary>A pipe table as a grid: a tinted header row and hairlines between rows.</summary>
-    private static UIElement TableGrid(Table table, Func<string, UIElement> codeBlock)
+    private UIElement TableGrid(Table table, Func<string, UIElement> codeBlock)
     {
         var grid = new Grid();
         var columns = table.OfType<TableRow>().Select(row => row.Count).DefaultIfEmpty(0).Max();
@@ -204,7 +207,7 @@ internal static class ChatMarkdown
         };
     }
 
-    private static void Append(ContainerInline container, InlineCollection output)
+    private void Append(ContainerInline container, InlineCollection output)
     {
         foreach (var inline in container)
         {
@@ -233,7 +236,7 @@ internal static class ChatMarkdown
                     output.Add(span);
                     break;
                 case LinkInline link:
-                    if (!link.IsImage && NoteMarkdown.Link(link.Url) is { } uri)
+                    if (!link.IsImage && Link(link.Url) is { } uri)
                     {
                         var anchor = Anchor(uri);
                         Append(link, anchor.Inlines);
@@ -245,7 +248,7 @@ internal static class ChatMarkdown
                     }
                     break;
                 case AutolinkInline link:
-                    if (NoteMarkdown.Link(link.IsEmail ? "mailto:" + link.Url : link.Url) is { } destination)
+                    if (Link(link.IsEmail ? "mailto:" + link.Url : link.Url) is { } destination)
                     {
                         var anchor = Anchor(destination);
                         anchor.Inlines.Add(new Run { Text = link.Url });
@@ -263,9 +266,15 @@ internal static class ChatMarkdown
         }
     }
 
-    private static Hyperlink Anchor(Uri uri)
+    private Uri? Link(string? value)
     {
-        if (Tokenstat.Navigation.DesktopOpenRequest.Parse(uri.AbsoluteUri) is not { } request)
+        var uri = NoteMarkdown.Link(value);
+        return uri is not null && (allowDesktopActions || uri.Scheme is "http" or "https" or "mailto") ? uri : null;
+    }
+
+    private Hyperlink Anchor(Uri uri)
+    {
+        if (!allowDesktopActions || Tokenstat.Navigation.DesktopOpenRequest.Parse(uri.AbsoluteUri) is not { } request)
             return new Hyperlink { NavigateUri = uri };
         var anchor = new Hyperlink();
         anchor.Click += (_, _) => AppServices.OpenDesktopAction?.Invoke(request);
