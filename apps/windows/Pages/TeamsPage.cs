@@ -28,6 +28,8 @@ internal sealed class TeamsPage : Page
     // One id per comment text: a retry after an unknown result is the same
     // message, so the host keeps one copy.
     private (string Text, string Id, long CreatedAtMs)? _commentAttempt;
+    // Images opened in a chat, kept so the live refresh does not close them.
+    private readonly Dictionary<string, Microsoft.UI.Xaml.Media.Imaging.BitmapImage> _openedImages = new();
 
     public TeamsPage()
     {
@@ -406,6 +408,12 @@ internal sealed class TeamsPage : Page
             && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format).ToArray());
         if (name.Length == 0) name = L10n.Text("common.teams.shared_file");
         panel.Children.Add(new TextBlock { Text = name, TextTrimming = TextTrimming.CharacterEllipsis });
+        var key = Format.Text(target, "share") + "/" + id;
+        if (_openedImages.TryGetValue(key, out var opened))
+        {
+            panel.Children.Add(new Image { Source = opened, MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left });
+            return panel;
+        }
         Button? open = null;
         open = ActionIconGlyph.Button(L10n.Text("common.teams.open_file_action"), ActionIcon.Download, async (_, _) =>
         {
@@ -421,7 +429,7 @@ internal sealed class TeamsPage : Page
                 {
                     var data = Format.Text(reply, "data");
                     if (data.Length > 8 * 1024 * 1024) throw new InvalidOperationException(L10n.Text("common.teams.file_unavailable"));
-                    var bytes = Convert.FromBase64String(data);
+                    var bytes = await Task.Run(() => Convert.FromBase64String(data));
                     using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
                     await stream.WriteAsync(bytes.AsBuffer());
                     stream.Seek(0);
@@ -436,6 +444,8 @@ internal sealed class TeamsPage : Page
                     if (width >= height) bitmap.DecodePixelWidth = (int)Math.Min(width, 2048u);
                     else bitmap.DecodePixelHeight = (int)Math.Min(height, 2048u);
                     await bitmap.SetSourceAsync(stream);
+                    if (_openedImages.Count >= 16) _openedImages.Clear();
+                    _openedImages[key] = bitmap;
                     panel.Children.Remove(open);
                     panel.Children.Add(new Image { Source = bitmap, MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left });
                 }

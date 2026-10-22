@@ -5,7 +5,7 @@
 
 use super::{
     AuthorizedTeamPrincipal,
-    publications::{ChatTarget, Folder, Owner, Store},
+    publications::{ChatShare, ChatTarget, Folder, Owner, Store},
 };
 use crate::{
     error::DispatchError,
@@ -13,7 +13,7 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -117,31 +117,43 @@ pub(super) fn call(
         }
         TeamReadMethod::ChatAttachment => {
             let wanted = params.attachment.as_deref().ok_or_else(changed)?;
-            let history = chats.shared_history(
-                &checkout.workspace_id,
-                &row.conversation_id,
-                &row.id,
-                &row.preview,
-            )?;
-            let marker = history.binding.clone().ok_or_else(changed)?;
-            if marker.source_revision != row.source_revision {
-                return Err(changed());
-            }
             // Only a file the shared history shows. An id from anywhere else
             // in this chat, or in another chat, is not reachable from here.
-            let shown = history.events.iter().find(|event| {
-                event["event"]["kind"] == "attachment" && event["event"]["id"] == wanted
-            });
-            let Some(shown) = shown else {
-                return Err(DispatchError::new(
-                    "attachment_not_shared",
-                    "This file is not part of the shared chat.",
-                ));
+            // The shown files are read once per shared revision, not on
+            // every click, because that means projecting the whole history.
+            let (marker, size) = match shown_file(share, &row, wanted) {
+                Some(found) => found,
+                None => {
+                    let history = chats.shared_history(
+                        &checkout.workspace_id,
+                        &row.conversation_id,
+                        &row.id,
+                        &row.preview,
+                    )?;
+                    let marker = history.binding.clone().ok_or_else(changed)?;
+                    if marker.source_revision != row.source_revision {
+                        return Err(changed());
+                    }
+                    let files: HashMap<String, u64> = history
+                        .events
+                        .iter()
+                        .filter(|event| event["event"]["kind"] == "attachment")
+                        .filter_map(|event| {
+                            Some((
+                                event["event"]["id"].as_str()?.to_string(),
+                                event["event"]["size"].as_u64().unwrap_or(u64::MAX),
+                            ))
+                        })
+                        .collect();
+                    let size = files.get(wanted).copied();
+                    remember_files(share, &row, marker.clone(), files);
+                    let Some(size) = size else {
+                        return Err(not_shared());
+                    };
+                    (marker, size)
+                }
             };
-            if shown["event"]["size"]
-                .as_u64()
-                .is_none_or(|size| size > ATTACHMENT_LIMIT)
-            {
+            if size > ATTACHMENT_LIMIT {
                 return Err(too_large());
             }
             let data = chats
@@ -238,6 +250,37 @@ fn former_authors(event: &mut Value, current: &HashSet<String>) {
             former(initiator);
         }
     }
+}
+
+type ChatMarker = crate::chat::sharing::Binding;
+type ShownFiles = (String, Option<u64>, ChatMarker, HashMap<String, u64>);
+static SHOWN: Mutex<Vec<ShownFiles>> = Mutex::new(Vec::new());
+
+/// The file's size when this exact shared revision is known to show it.
+/// `None` means not cached yet; an uncached share is read in full once.
+fn shown_file(share: &str, row: &ChatShare, wanted: &str) -> Option<(ChatMarker, u64)> {
+    let cache = SHOWN.lock().ok()?;
+    let (_, _, marker, files) = cache
+        .iter()
+        .find(|(id, revision, _, _)| id == share && *revision == row.source_revision)?;
+    Some((marker.clone(), *files.get(wanted)?))
+}
+
+fn remember_files(share: &str, row: &ChatShare, marker: ChatMarker, files: HashMap<String, u64>) {
+    if let Ok(mut cache) = SHOWN.lock() {
+        cache.retain(|(id, _, _, _)| id != share);
+        if cache.len() >= 32 {
+            cache.remove(0);
+        }
+        cache.push((share.to_string(), row.source_revision, marker, files));
+    }
+}
+
+fn not_shared() -> DispatchError {
+    DispatchError::new(
+        "attachment_not_shared",
+        "This file is not part of the shared chat.",
+    )
 }
 
 fn too_large() -> DispatchError {

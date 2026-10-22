@@ -35,8 +35,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -407,17 +409,9 @@ private fun SharedFile(file: JsonObject, fetch: suspend (String) -> JsonObject) 
                         if (media.startsWith("image/") && media != "image/svg+xml") {
                             val data = reply.str("data").orEmpty()
                             if (data.length > 8 * 1024 * 1024) throw IllegalStateException(L10n.text("common.teams.file_unavailable"))
-                            val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
-                            // A small file can still describe a huge bitmap.
-                            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-                            val (w, h) = bounds.outWidth.toLong() to bounds.outHeight.toLong()
-                            if (w <= 0 || h <= 0 || w * h > 100_000_000L || maxOf(w, h) / minOf(w, h) > 50)
-                                throw IllegalStateException(L10n.text("common.teams.file_unavailable"))
-                            var sample = 1
-                            while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) sample *= 2
-                            val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-                            image = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
+                            // Decoding is off the main thread: a 5 MB file is
+                            // enough to stall the Team tab.
+                            image = withContext(Dispatchers.Default) { decodeBounded(data) }
                             if (image == null) note = L10n.text("common.teams.file_unavailable")
                         } else {
                             note = L10n.text("common.teams.file_on_computer")
@@ -434,6 +428,20 @@ private fun SharedFile(file: JsonObject, fetch: suspend (String) -> JsonObject) 
         }
         note?.let { Text(it, color = colors.textSecondary) }
     }
+}
+
+/// A small file can still describe a huge bitmap. Refuse extremes and
+/// decode the larger side at no more than 2048 pixels.
+private fun decodeBounded(data: String): androidx.compose.ui.graphics.ImageBitmap? {
+    val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    val (w, h) = bounds.outWidth.toLong() to bounds.outHeight.toLong()
+    if (w <= 0 || h <= 0 || w * h > 100_000_000L || maxOf(w, h) / minOf(w, h) > 50) return null
+    var sample = 1
+    while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) sample *= 2
+    val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+    return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
 }
 
 /// One shared chat: its history as text, a comment box, and Ask with Stop.

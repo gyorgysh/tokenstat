@@ -14,6 +14,9 @@ struct TeamTranscriptContent: View {
     @State private var error: String?
     @Environment(\.teamAvatarOwner) private var owner
     @Environment(\.teamAttachmentLoader) private var loadAttachment
+    // An image is decoded once, when it arrives, and its bytes dropped.
+    // Only a file that can be saved keeps its bytes.
+    @State private var images: [String: (name: String, image: CGImage)] = [:]
     @State private var files: [String: TeamAttachmentFile] = [:]
     @State private var fetching: String?
     @State private var fileError: String?
@@ -37,21 +40,19 @@ struct TeamTranscriptContent: View {
                     }
                 }
                 if case let .attachment(file) = row.kind {
-                    if let fetched = files[file.id] {
+                    if let shown = images[file.id] {
                         // Never opened from here: a file from another computer
                         // is looked at inline when it is an image, and saved
                         // otherwise, so nothing it names can launch.
-                        if let image = TeamFilePreview.image(fetched) {
-                            image.resizable().scaledToFit().frame(maxWidth: 480, maxHeight: 360, alignment: .leading)
-                                .clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityLabel(TeamFilePreview.safeName(fetched.name))
-                        } else {
-                            HStack(spacing: Theme.Space.s) {
-                                Label(TeamFilePreview.safeName(fetched.name), systemImage: "doc").font(Theme.callout).lineLimit(1).truncationMode(.middle)
-                                #if os(macOS)
-                                Button(L10n.text("common.teams.save_file"), .download) { TeamFilePreview.save(fetched) }
-                                    .buttonStyle(TeamButtonStyle())
-                                #endif
-                            }
+                        Image(decorative: shown.image, scale: 1).resizable().scaledToFit().frame(maxWidth: 480, maxHeight: 360, alignment: .leading)
+                            .clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityLabel(TeamFilePreview.safeName(shown.name))
+                    } else if let fetched = files[file.id] {
+                        HStack(spacing: Theme.Space.s) {
+                            Label(TeamFilePreview.safeName(fetched.name), systemImage: "doc").font(Theme.callout).lineLimit(1).truncationMode(.middle)
+                            #if os(macOS)
+                            Button(L10n.text("common.teams.save_file"), .download) { TeamFilePreview.save(fetched) }
+                                .buttonStyle(TeamButtonStyle())
+                            #endif
                         }
                     } else {
                         // Fetched on request: a file comes from the publishing
@@ -101,7 +102,17 @@ struct TeamTranscriptContent: View {
         guard let loadAttachment, fetching == nil else { return }
         fetching = id; fileError = nil
         defer { fetching = nil }
-        do { files[id] = try await loadAttachment(id) } catch is CancellationError {} catch { fileError = error.localizedDescription }
+        do {
+            let file = try await loadAttachment(id)
+            if file.mediaType?.hasPrefix("image/") == true {
+                guard let image = await Task.detached(priority: .userInitiated, operation: { TeamFilePreview.image(file) }).value else {
+                    fileError = L10n.text("common.teams.file_unavailable"); return
+                }
+                images[id] = (file.name, image)
+            } else {
+                files[id] = file
+            }
+        } catch is CancellationError {} catch { fileError = error.localizedDescription }
     }
     private func label(_ backend: String) -> String {
         switch backend {
@@ -115,7 +126,7 @@ struct TeamTranscriptContent: View {
 }
 
 enum TeamFilePreview {
-    static func image(_ file: TeamAttachmentFile) -> Image? {
+    nonisolated static func image(_ file: TeamAttachmentFile) -> CGImage? {
         guard file.mediaType?.hasPrefix("image/") == true, file.mediaType != "image/svg+xml",
               let source = CGImageSourceCreateWithData(file.data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -126,7 +137,7 @@ enum TeamFilePreview {
         let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2048,
                                         kCGImageSourceCreateThumbnailWithTransform: true]
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        return Image(decorative: image, scale: 1)
+        return image
     }
     /// Plain data a saved file may keep as its extension. Anything else,
     /// including every type that can launch or be followed from Finder,
