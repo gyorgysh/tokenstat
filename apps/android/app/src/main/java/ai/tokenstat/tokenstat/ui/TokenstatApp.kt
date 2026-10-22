@@ -247,6 +247,7 @@ private enum class Destination(val id: String, val label: String, val icon: Imag
     // stay comparable. SSH stays last: entries order is the default bar.
     Devices("machines", L10n.text("common.devices"), Icons.Default.Laptop, L10n.text("android.tokenstatapp.computers_on_your_account.232226fe")),
     Ssh("ssh", "SSH", Icons.Default.Terminal, L10n.text("android.tokenstatapp.saved_servers_and_keys.47db8e47")),
+    Team("team", L10n.text("common.teams.title"), Icons.Default.Groups, L10n.text("common.teams.repository_list_detail")),
 }
 
 /// Five doors after onboarding, not three: still checking, could not check
@@ -875,6 +876,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     // Saved servers, for somebody who lives in them. No back
                     // button: the bar behind it is the way out.
                     Destination.Ssh -> AndroidSSHScreen(model, state, onPlans = { Plans.open() }, tabBarScroll = tabBarScroll)
+                    Destination.Team -> ai.tokenstat.tokenstat.ui.team.TeamScreen(state.account)
                 }
                 }
             }
