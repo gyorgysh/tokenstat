@@ -56,6 +56,8 @@ struct TeamCheckoutEditor: View {
                     case .agents:
                         if let agentsFor {
                             Text(workspaceName(agentsFor)).font(Theme.headline)
+                            TeamLaneSettings(store: store, context: context, checkoutId: agentsFor.id)
+                            ThemeRule()
                             TeamAgentGrants(store: store, context: context, repository: repository, checkoutId: agentsFor.id)
                         }
                     }

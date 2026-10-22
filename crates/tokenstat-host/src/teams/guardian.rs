@@ -520,7 +520,16 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             } else {
                 super::lanes::Next::Done(landing)
             };
-            let _ = authority.renew();
+            // No further agent without a live, renewed authority.
+            let renewed = authority.renew().is_ok();
+            let next = match next {
+                super::lanes::Next::Agent(_) if !renewed => {
+                    super::lanes::Next::Done(Landing::Blocked {
+                        message: "This run's permission ended before the fix.".into(),
+                    })
+                }
+                other => other,
+            };
             let (note, instruction) = match next {
                 super::lanes::Next::Done(landing) => {
                     (super::lanes::describe(&landing, lane, settings), None)
@@ -549,7 +558,18 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                 .map_err(map_io)?;
             output.follow(&follow.output);
             let _ = proof;
-            process = Owned::start(&helper, follow, |group| birth(group, false)).map_err(map_io)?;
+            process = Owned::start(&helper, follow, |group| {
+                birth(group, false)?;
+                if authority
+                    .remaining()
+                    .map_err(|_| io::Error::other("Run authority expired."))?
+                    < team_process::BIRTH
+                {
+                    return Err(io::Error::other("Run authority expired."));
+                }
+                Ok(())
+            })
+            .map_err(map_io)?;
         }
     })();
     let (terminal, proof) = match execution {

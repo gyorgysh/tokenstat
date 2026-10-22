@@ -179,6 +179,11 @@ pub fn start_rebase(
     Ok(files)
 }
 
+/// Give up a rebase started by `start_rebase`; the lane keeps its own work.
+pub fn abort_rebase(lane: &Path) {
+    let _ = run(lane, &["rebase", "--abort"]);
+}
+
 /// Finish a rebase started by `start_rebase` once the agent resolved it.
 /// Any conflict marker left behind aborts the rebase instead.
 pub fn finish_rebase(lane: &Path) -> Result<(), String> {

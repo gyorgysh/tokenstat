@@ -269,6 +269,15 @@ pub(super) fn next_step(
         Landing::Conflict { .. } => {
             match lane::start_rebase(&lane.path, &settings.target, settings.remote.as_deref()) {
                 Ok(files) if !files.is_empty() => {
+                    // The rebase brought in teammates' files. An agent goes
+                    // back in only if no link leads out of the lane now.
+                    if !matches!(lane::escaping_link(&lane.path), Ok(None)) {
+                        lane::abort_rebase(&lane.path);
+                        lane.keep();
+                        return Next::Done(Landing::Blocked {
+                            message: "The project now has a link that leads outside it.".into(),
+                        });
+                    }
                     lane.rebasing = true;
                     Next::Agent(format!(
                         "Work that landed on {} while you worked conflicts with your change in: {}. Those files now contain conflict markers (<<<<<<<, =======, >>>>>>>). Edit them so both changes work together and remove every marker. Change nothing else. tokenstat finishes the merge and lands it after you finish.",
@@ -283,6 +292,11 @@ pub(super) fn next_step(
         }
         // The owner turned checks on knowing they run changed code, so the
         // agent may read what its own change made the check print.
+        Landing::CheckFailed { .. } if !matches!(lane::escaping_link(&lane.path), Ok(None)) => {
+            Next::Done(Landing::Blocked {
+                message: "The project now has a link that leads outside it.".into(),
+            })
+        }
         Landing::CheckFailed { output } => Next::Agent(format!(
             "The project check failed after your change. Fix the cause by editing files in this folder. tokenstat runs the check again after you finish. The check printed:\n```\n{}\n```",
             output.trim()
