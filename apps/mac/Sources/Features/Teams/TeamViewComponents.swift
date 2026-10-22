@@ -11,7 +11,10 @@ struct TeamChatReadingKey: PreferenceKey {
 }
 
 private struct TeamAvatarOwnerKey: EnvironmentKey { static let defaultValue: TeamAccountOwner? = nil }
-typealias TeamAttachmentLoader = @MainActor @Sendable (String) async throws -> Data
+/// A file from someone else's computer. Name and type are the ones that
+/// computer derived from the stored file, never the history's own label.
+struct TeamAttachmentFile: Sendable { let name: String; let mediaType: String?; let data: Data }
+typealias TeamAttachmentLoader = @MainActor @Sendable (String) async throws -> TeamAttachmentFile
 private struct TeamAttachmentLoaderKey: EnvironmentKey { static let defaultValue: TeamAttachmentLoader? = nil }
 private struct TeamCommentStorageKey: EnvironmentKey { static let defaultValue = TeamCommentDraftStore.shared }
 extension EnvironmentValues {

@@ -136,7 +136,7 @@ struct TeamSharedChatReader: View {
                 .frame(minWidth: 44, minHeight: 44)
         }
     }
-    private func attachment(_ id: String) async throws -> Data {
+    private func attachment(_ id: String) async throws -> TeamAttachmentFile {
         let reply: TeamAttachmentReply
         do {
             reply = try await store.read(.connectionCall, fields: fields("team.chat.attachment", params: ["attachment":.string(id)]), context: context)
@@ -146,7 +146,7 @@ struct TeamSharedChatReader: View {
         guard reply.shareId == share.id, reply.attachment.id == id, let data = Data(base64Encoded: reply.data) else {
             throw TeamRequestFailure(code: "invalid_response", message: L10n.text("common.teams.file_unavailable"))
         }
-        return data
+        return TeamAttachmentFile(name: reply.attachment.name, mediaType: reply.attachment.mediaType, data: data)
     }
     private func fields(_ method: String, params: [String: JSONValue] = [:]) -> [String: JSONValue] {
         ["target":.object(["organization":.string(repository.organizationId),"repository":.string(repository.id),"checkout":.string(checkout.id),"share":.string(share.id)]),"method":.string(method),"params":.object(params)]

@@ -13,7 +13,7 @@ struct TeamTranscriptContent: View {
     @State private var error: String?
     @Environment(\.teamAvatarOwner) private var owner
     @Environment(\.teamAttachmentLoader) private var loadAttachment
-    @State private var files: [String: Data] = [:]
+    @State private var files: [String: TeamAttachmentFile] = [:]
     @State private var fetching: String?
     @State private var fileError: String?
     var body: some View {
@@ -36,9 +36,22 @@ struct TeamTranscriptContent: View {
                     }
                 }
                 if case let .attachment(file) = row.kind {
-                    if let data = files[file.id] {
-                        ChatEventRow(item: row, defaultAgentName: label(history.backend), agentLabel: label, attachmentData: data,
-                                     isPending: false, resolve: { _, _ in }, canAnswerQuestions: false)
+                    if let fetched = files[file.id] {
+                        // Never opened from here: a file from another computer
+                        // is looked at inline when it is an image, and saved
+                        // otherwise, so nothing it names can launch.
+                        if let image = TeamFilePreview.image(fetched) {
+                            image.resizable().scaledToFit().frame(maxWidth: 480, maxHeight: 360, alignment: .leading)
+                                .clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityLabel(fetched.name)
+                        } else {
+                            HStack(spacing: Theme.Space.s) {
+                                Label(fetched.name, systemImage: "doc").font(Theme.callout).lineLimit(1)
+                                #if os(macOS)
+                                Button(L10n.text("common.teams.save_file"), .download) { TeamFilePreview.save(fetched) }
+                                    .buttonStyle(TeamButtonStyle())
+                                #endif
+                            }
+                        }
                     } else {
                         // Fetched on request: a file comes from the publishing
                         // computer, and only when someone wants to see it.
@@ -98,4 +111,31 @@ struct TeamTranscriptContent: View {
         }
     }
     @MainActor static func render(_ history: TeamChatHistory) -> AnyView { AnyView(TeamTranscriptContent(history: history)) }
+}
+
+enum TeamFilePreview {
+    static func image(_ file: TeamAttachmentFile) -> Image? {
+        guard file.mediaType?.hasPrefix("image/") == true, file.mediaType != "image/svg+xml" else { return nil }
+        #if os(macOS)
+        return NSImage(data: file.data).map(Image.init(nsImage:))
+        #else
+        return UIImage(data: file.data).map(Image.init(uiImage:))
+        #endif
+    }
+    #if os(macOS)
+    /// Saved where the person chooses, marked as downloaded so macOS checks
+    /// it before anything in it can run.
+    @MainActor static func save(_ file: TeamAttachmentFile) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = file.name
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try file.data.write(to: url, options: .atomic)
+            let mark = "0081;\(String(Int(Date().timeIntervalSince1970), radix: 16));tokenstat;"
+            _ = mark.withCString { value in setxattr(url.path, "com.apple.quarantine", value, strlen(value), 0, 0) }
+        } catch {
+            NSSound.beep()
+        }
+    }
+    #endif
 }
