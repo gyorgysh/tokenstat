@@ -468,6 +468,16 @@ pub fn catch_up(dir: &Path, target: &str, remote: &str) -> CatchUp {
     }
 }
 
+/// Push the lane's branch to the remote under its own name, for a pull
+/// request. The target branch is not touched.
+pub fn publish_branch(lane: &Path, remote: &str, branch: &str) -> Result<(), String> {
+    run(
+        lane,
+        &["push", "-q", remote, &format!("HEAD:refs/heads/{branch}")],
+    )
+    .map(|_| ())
+}
+
 /// Where lanes for one checkout live.
 pub fn root(data: &Path, checkout: &str) -> PathBuf {
     data.join("team-lanes").join(checkout)

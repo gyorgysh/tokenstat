@@ -14,7 +14,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 def output(*arguments):
-    return subprocess.check_output(arguments, cwd=ROOT, text=True, timeout=60).strip()
+    # A cold runner's CoreSimulator service can take minutes to answer its
+    # first query. Wait longer and try once more before failing the job.
+    for attempt in range(2):
+        try:
+            return subprocess.check_output(arguments, cwd=ROOT, text=True, timeout=180).strip()
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                raise
 
 
 def selection():

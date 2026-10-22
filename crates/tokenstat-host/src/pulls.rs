@@ -587,6 +587,22 @@ fn create(p: &Params) -> Result<Value, String> {
     serde_json::to_value(result).map_err(|e| e.to_string())
 }
 
+/// Open a pull request for a Team lane's pushed branch against the target,
+/// with the publisher's own GitHub sign-in on this computer.
+pub(crate) fn open_for_lane(
+    workspace_id: &str,
+    branch: &str,
+    base: &str,
+    title: &str,
+    body: &str,
+) -> Result<String, String> {
+    let repo = repo_for(workspace_id, "pulls.create")?;
+    let result = tokenstat_sync::forge::create(&repo, branch, base, title, body, false)
+        .map_err(|e| e.to_string())?;
+    invalidate_workspace(workspace_id);
+    Ok(result.url)
+}
+
 fn validate_published_branch(
     p: &Params,
     branch: &tokenstat_workspace::git::PullBranch,

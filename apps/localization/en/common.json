@@ -524,6 +524,8 @@
   "common.teams.check_confirm": "I understand the check runs changed code with my account.",
   "common.teams.workflow_saved": "Saved.",
   "common.teams.catch_up_again": "Try updating again",
+  "common.teams.open_pull_request": "Open a pull request instead of waiting for Land",
+  "common.teams.open_pull_request_detail": "Ready work is pushed as its own branch and a pull request is opened against the target with your GitHub sign-in in tokenstat. The link appears in the shared chat.",
   "common.teams.work_in_progress": "Work in progress",
   "common.teams.lane_running": "Agent working for {0}, {1} files changed so far",
   "common.teams.lane_kept": "Waiting: did not land for {0}, {1} files changed",

@@ -545,6 +545,16 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                     &principal.value().checkout_id,
                 );
             }
+            let pull_note = if settings.review
+                && settings.pull_request
+                && matches!(landing, Landing::Ready { .. })
+            {
+                Some(super::lanes::open_pull(
+                    lane, settings, &message, &workspace,
+                ))
+            } else {
+                None
+            };
             let next = if attempt < FIX_ATTEMPTS
                 && !matches!(
                     landing,
@@ -565,9 +575,10 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                 other => other,
             };
             let (note, instruction) = match next {
-                super::lanes::Next::Done(landing) => {
-                    (super::lanes::describe(&landing, lane, settings), None)
-                }
+                super::lanes::Next::Done(landing) => (
+                    pull_note.unwrap_or_else(|| super::lanes::describe(&landing, lane, settings)),
+                    None,
+                ),
                 super::lanes::Next::Agent(instruction) => (
                     "This work could not land as it was, so the agent is working on it again."
                         .to_string(),

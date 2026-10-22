@@ -14,6 +14,7 @@ struct TeamLaneSettings: View {
     @State private var remote = "origin"
     @State private var check = ""
     @State private var checkAcknowledged = false
+    @State private var pullRequest = false
     @State private var loaded = false
     @State private var saving = false
     @State private var saved = false
@@ -62,6 +63,13 @@ struct TeamLaneSettings: View {
                     Text(L10n.text("common.teams.check_command")).font(Theme.callout.weight(.semibold))
                     TextField(L10n.text("common.teams.check_command_placeholder"), text: $check).textFieldStyle(ThemedFieldStyle())
                 }
+                if mode == .review {
+                    Toggle(L10n.text("common.teams.open_pull_request"), isOn: $pullRequest).toggleStyle(.checkboxForTeam)
+                    if pullRequest {
+                        Text(L10n.text("common.teams.open_pull_request_detail")).font(Theme.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 if !checkArguments.isEmpty {
                     TeamNotice(message: L10n.text("common.teams.check_warning"), warning: true)
                     Toggle(L10n.text("common.teams.check_confirm"), isOn: $checkAcknowledged).toggleStyle(.checkboxForTeam)
@@ -77,6 +85,7 @@ struct TeamLaneSettings: View {
         }
         .task { await load() }
         .onChange(of: mode) { saved = false }
+        .onChange(of: pullRequest) { saved = false }
         .onChange(of: check) { saved = false; checkAcknowledged = false }
     }
 
@@ -86,7 +95,7 @@ struct TeamLaneSettings: View {
             catchUp = result.catchUp
             if let settings = result.settings {
                 mode = !settings.enabled ? .manual : settings.review == true ? .review : .automatic
-                target = settings.target; remote = settings.remote ?? ""
+                target = settings.target; remote = settings.remote ?? ""; pullRequest = settings.pullRequest ?? false
                 check = settings.check.joined(separator: " "); checkAcknowledged = settings.checkRunsChangedCode ?? false
             }
             loaded = true
@@ -113,6 +122,7 @@ struct TeamLaneSettings: View {
             "check": .array(checkArguments.map(JSONValue.string)),
             "checkRunsChangedCode": .bool(checkAcknowledged && !checkArguments.isEmpty),
             "review": .bool(mode == .review),
+            "pullRequest": .bool(mode == .review && pullRequest),
         ]
         if !trimmedRemote.isEmpty { settings["remote"] = .string(trimmedRemote) }
         do {
@@ -123,6 +133,6 @@ struct TeamLaneSettings: View {
 }
 
 struct TeamLaneSettingsValue: Codable, Sendable {
-    let enabled: Bool; let target: String; let remote: String?; let check: [String]; let checkRunsChangedCode: Bool?; let review: Bool?
+    let enabled: Bool; let target: String; let remote: String?; let check: [String]; let checkRunsChangedCode: Bool?; let review: Bool?; let pullRequest: Bool?
 }
 struct TeamLaneSettingsResult: Codable, Sendable { let settings: TeamLaneSettingsValue?; var catchUp: String? = nil }

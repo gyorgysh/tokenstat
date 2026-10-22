@@ -33,6 +33,10 @@ pub(super) struct Settings {
     /// Lanes with review: work stops when it is ready, and a person lands it.
     #[serde(default)]
     pub review: bool,
+    /// With review on: open a pull request for ready work instead of waiting
+    /// for Land, for repositories where changes go through review.
+    #[serde(default)]
+    pub pull_request: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -742,6 +746,39 @@ pub(super) fn discard(
     Ok(json!({"discarded":true}))
 }
 
+/// Push a ready lane's branch and open a pull request for it. The lane goes
+/// once the request exists; the branch on the remote carries the work.
+pub(super) fn open_pull(
+    lane: &mut Lane,
+    settings: &Settings,
+    title: &str,
+    workspace: &str,
+) -> String {
+    let Some(remote) = settings.remote.as_deref() else {
+        return format!(
+            "Ready, but a pull request needs a remote. It is kept on branch {}.",
+            lane.branch
+        );
+    };
+    if let Err(message) = lane::publish_branch(&lane.path, remote, &lane.branch) {
+        return format!(
+            "Ready, but the branch could not be pushed: {message} It is kept on branch {}.",
+            lane.branch
+        );
+    }
+    let body = "Opened by tokenstat from a shared Team chat. The work was committed, rebased and checked in its own lane.";
+    match crate::pulls::open_for_lane(workspace, &lane.branch, &settings.target, title, body) {
+        Ok(url) => {
+            lane.keep = false;
+            format!("Opened a pull request for review: {url}")
+        }
+        Err(message) => format!(
+            "Ready, and branch {} is on {remote}, but the pull request could not be opened: {message}",
+            lane.branch
+        ),
+    }
+}
+
 /// What the shared chat reads after a run, in plain words.
 /// The run ended without its work landing. A rebase stopped for the agent
 /// is given up, so the lane keeps its own commits and nothing half done.
@@ -879,6 +916,7 @@ mod tests {
             check: check.iter().map(|s| s.to_string()).collect(),
             check_runs_changed_code: true,
             review: false,
+            pull_request: false,
         }
     }
 
