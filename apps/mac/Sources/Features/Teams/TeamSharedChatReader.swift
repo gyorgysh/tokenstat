@@ -102,6 +102,15 @@ struct TeamSharedChatReader: View {
             }.frame(maxWidth: .infinity, alignment: .leading).padding(Theme.Space.m).background(Theme.panel)
         }
         .task { await load(earlier: false) }
+        .task(id: share.id) {
+            // Reading only: new comments and agent output appear while the
+            // chat is open. Paused while someone is writing or paging back.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled, isCurrent, !loading, !editingComment, !pendingComment, !loadedEarlier else { continue }
+                await load(earlier: false)
+            }
+        }
         .onDisappear { loadId = UUID(); loading = false; reloadAfterRead = false }
     }
     private var header: some View {
