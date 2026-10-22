@@ -220,7 +220,7 @@ pub(super) fn open(
         share,
         repository: opened.repository.clone(),
         pointer: opened.pointer.clone(),
-        status: None,
+        status: Some("running".into()),
         started_at_ms: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -244,11 +244,12 @@ pub(super) fn list(checkout: &str, share: Option<&str>) -> Result<Value, Dispatc
     );
     let mut lanes = Vec::new();
     if let Ok(entries) = fs::read_dir(&parent) {
-        for entry in entries.flatten().take(64) {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
+        for path in entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .take(64)
+        {
             let Some(about) = fs::read(path.with_extension("json"))
                 .ok()
                 .filter(|bytes| bytes.len() <= 16 * 1024)
@@ -260,7 +261,9 @@ pub(super) fn list(checkout: &str, share: Option<&str>) -> Result<Value, Dispatc
             if share.is_some() && about.share.as_deref() != share {
                 continue;
             }
-            let running = tokenstat_workspace::writer::Lease::acquire_lane(&path).is_err();
+            // Read from the lane's own record: taking its lock here could make
+            // a new Ask's own lock fail.
+            let running = about.status.as_deref() == Some("running");
             let files = lane::changed_files(&path).unwrap_or_default();
             lanes.push((about, running, files));
         }
@@ -457,6 +460,13 @@ pub(crate) fn caught_up(repository: &str) {
             if !path.is_dir() {
                 continue;
             }
+            let status = fs::read(path.with_extension("json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<About>(&bytes).ok())
+                .and_then(|about| about.status);
+            if status.as_deref() == Some("running") || lane::rebase_in_progress(&path) {
+                continue;
+            }
             // A lease held means an agent is working in that lane right now.
             if let Ok(_lease) = tokenstat_workspace::writer::Lease::acquire_lane(&path) {
                 let _ = lane::refresh(&path, &settings.target, Some(remote));
@@ -602,6 +612,16 @@ pub(crate) fn caught_up_since_last_seen(client: &tokenstat_sync::teams::TeamClie
 }
 
 /// What the shared chat reads after a run, in plain words.
+/// The run ended without its work landing. A rebase stopped for the agent
+/// is given up, so the lane keeps its own commits and nothing half done.
+pub(super) fn abandon(lane: &mut Lane) {
+    if lane.rebasing {
+        lane.rebasing = false;
+        lane::abort_rebase(&lane.path);
+    }
+    mark(&lane.path, false);
+}
+
 /// Record whether a kept lane is ready to land or blocked.
 fn mark(path: &Path, ready: bool) {
     let file = path.with_extension("json");

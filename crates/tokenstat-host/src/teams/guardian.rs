@@ -338,12 +338,15 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     }
     let mut output = output::Output::new(&program.output, prepared.backend());
     prepared.claim_writer()?;
-    chats.transition_owned_run(source.target(), &prepared, State::Launching)?;
     let fence = prepared.binding().fence.clone();
     let (workspace, chat) = (
         source.target().workspace.to_string(),
         source.target().id.to_string(),
     );
+    // A record exists before Launching, so a crash before the agent's group
+    // is known can still be released after the computer restarts.
+    super::recovery::remember(&fence, &workspace, &chat, 0).map_err(map_io)?;
+    chats.transition_owned_run(source.target(), &prepared, State::Launching)?;
     let base_program = program.clone();
     let message = input
         .text
@@ -508,6 +511,8 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                 return Ok((terminal, proof, final_output));
             };
             if terminal != State::Succeeded || final_output.is_err() {
+                // A fix attempt that did not finish leaves no half rebase.
+                super::lanes::abandon(lane);
                 sdk.retire();
                 return Ok((terminal, proof, final_output));
             }
@@ -523,6 +528,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                 !stop_waiting && authority.renew().is_ok() && source.ensure_current().is_ok();
             let landing = if !may_land {
                 lane.keep();
+                super::lanes::abandon(lane);
                 Landing::Blocked {
                     message: "The run was stopped or lost its permission before landing.".into(),
                 }
