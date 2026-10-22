@@ -209,6 +209,8 @@ fn run() -> Result<(), String> {
     // existing capability cache on one worker while the app paints instead
     // of making its first model/composer request pay for both CLI probes.
     tokenstat_host::chat_live::warm_capabilities();
+    // Teammates' landings reach this computer as one line on the relay.
+    tokenstat_host::install_team_sync();
 
     server::serve(listener, session)
 }

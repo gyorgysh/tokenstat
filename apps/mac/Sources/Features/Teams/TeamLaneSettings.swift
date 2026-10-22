@@ -38,13 +38,16 @@ struct TeamLaneSettings: View {
             Text(automatic ? L10n.text("common.teams.workflow_lanes_detail") : L10n.text("common.teams.workflow_manual_detail"))
                 .font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if automatic {
-                LabeledContent(L10n.text("common.teams.target_branch")) {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text(L10n.text("common.teams.target_branch")).font(Theme.callout.weight(.semibold))
                     TextField("main", text: $target).textFieldStyle(ThemedFieldStyle())
                 }
-                LabeledContent(L10n.text("common.teams.remote")) {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text(L10n.text("common.teams.remote")).font(Theme.callout.weight(.semibold))
                     TextField("origin", text: $remote).textFieldStyle(ThemedFieldStyle())
                 }
-                LabeledContent(L10n.text("common.teams.check_command")) {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text(L10n.text("common.teams.check_command")).font(Theme.callout.weight(.semibold))
                     TextField(L10n.text("common.teams.check_command_placeholder"), text: $check).textFieldStyle(ThemedFieldStyle())
                 }
                 if !checkArguments.isEmpty {

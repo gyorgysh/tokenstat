@@ -305,6 +305,54 @@ pub(super) fn next_step(
     }
 }
 
+/// A teammate landed work on `repository`. Each automatic-lanes checkout of
+/// it on this computer fast-forwards when it safely can, and lanes kept from
+/// earlier runs rebase onto the new target while no agent is in them.
+pub(crate) fn caught_up(repository: &str) {
+    let Ok(store) = super::publications::Store::capture() else {
+        return;
+    };
+    let Ok(rows) = store.active_for_repository(repository) else {
+        return;
+    };
+    let Some(data) = tokenstat_paths::data_dir() else {
+        return;
+    };
+    for row in rows {
+        let Some(settings) = settings(&row.id) else {
+            continue;
+        };
+        let Some(remote) = settings.remote.as_deref() else {
+            continue;
+        };
+        let Ok(workspace) = crate::workspaces::get(&row.workspace_id) else {
+            continue;
+        };
+        // The folder must still be the one that was published.
+        if super::publications::Folder::capture(&workspace.path)
+            .ok()
+            .as_ref()
+            != Some(&row.folder)
+        {
+            continue;
+        }
+        let _ = lane::catch_up(&row.folder.canonical, &settings.target, remote);
+        let Ok(kept) = fs::read_dir(lane::root(&data, &row.id)) else {
+            continue;
+        };
+        for entry in kept.flatten().take(64) {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            // A lease held means an agent is working in that lane right now.
+            if let Ok(_lease) = tokenstat_workspace::writer::Lease::acquire_lane(&path) {
+                let _ = lane::refresh(&path, &settings.target, Some(remote));
+            }
+        }
+    }
+}
+
 /// What the shared chat reads after a run, in plain words.
 pub(super) fn describe(landing: &Landing, lane: &Lane, settings: &Settings) -> String {
     match landing {

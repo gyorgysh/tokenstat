@@ -106,6 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let machine = tokenstat_sync::config::ensure_machine_id()?;
     let session = Arc::new(Mutex::new(tokenstat_host::Session::open_default()?));
     tokenstat_host::remote::register_session(session.clone());
+    tokenstat_host::install_team_sync();
     println!("{}", json!({"ready":true,"key":key,"machine":machine}));
     io::stdout().flush()?;
     let mut runs = HashMap::new();

@@ -27,6 +27,27 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{HandshakeError, Message, WebSocket};
 
 use crate::{RemoteError, Transport};
+
+/// Called with a repository id when the relay says its target moved. The
+/// line carries nothing else; the host fetches what changed from git.
+type TeamMovedHook = Box<dyn Fn(&str) + Send + Sync>;
+static TEAM_MOVED: std::sync::OnceLock<TeamMovedHook> = std::sync::OnceLock::new();
+
+/// Register the host's handler for `TEAM-MOVED` lines. The first one wins.
+pub fn on_team_moved(hook: impl Fn(&str) + Send + Sync + 'static) {
+    let _ = TEAM_MOVED.set(Box::new(hook));
+}
+
+/// The repository id in a `TEAM-MOVED` line, if it is one.
+fn team_moved(text: &str) -> Option<&str> {
+    let id = text.strip_prefix("TEAM-MOVED ")?;
+    (!id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'))
+    .then_some(id)
+}
 mod team;
 pub use team::TeamChannelHandle;
 use tokenstat_identity::teams::TeamTicket;
@@ -1230,10 +1251,16 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
         }
         let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
         let Some(socket) = guard.as_mut() else { break };
+        let mut moved = None;
         let frame = match socket.read() {
             Ok(Message::Binary(frame)) => {
                 session.mark_read();
                 Some(frame)
+            }
+            Ok(Message::Text(text)) => {
+                session.mark_read();
+                moved = team_moved(text.as_str()).map(str::to_string);
+                None
             }
             Ok(Message::Close(_)) => break,
             Ok(_) => {
@@ -1254,6 +1281,9 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
         drop(guard);
         if let Some(frame) = frame {
             dispatch_frame(session, &frame);
+        }
+        if let (Some(repository), Some(hook)) = (moved, TEAM_MOVED.get()) {
+            hook(&repository);
         }
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -1829,6 +1859,16 @@ mod tests {
         );
         // Anything that is not a denial passes through untouched.
         assert_eq!(denial_message("READY"), "READY");
+        assert_eq!(team_moved("TEAM-MOVED repo_0123abc"), Some("repo_0123abc"));
+        for bad in [
+            "TEAM-MOVED ",
+            "TEAM-MOVED a b",
+            "TEAM-MOVED ../x",
+            "READY",
+            "team-moved repo",
+        ] {
+            assert_eq!(team_moved(bad), None, "{bad}");
+        }
     }
 
     #[test]

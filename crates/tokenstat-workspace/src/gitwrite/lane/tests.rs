@@ -262,3 +262,39 @@ fn links_out_of_the_lane_are_found_and_hooks_never_run() {
     assert!(!marker.exists());
     assert!(pointer(&a).unwrap().starts_with("gitdir: "));
 }
+
+#[test]
+fn a_teammates_landing_reaches_a_clean_checkout_and_leaves_others_alone() {
+    let f = fixture();
+    let a = lane(&f, "a");
+    std::fs::write(a.join("b.txt"), "landed\n").unwrap();
+    commit_all(&a, "Landed by a teammate").unwrap();
+    assert!(matches!(
+        land(&a, "main", Some("origin"), &[]),
+        Landing::Landed { .. }
+    ));
+    // Uncommitted work is never touched.
+    std::fs::write(f.main.join("a.txt"), "unsaved\n").unwrap();
+    assert_eq!(catch_up(&f.main, "main", "origin"), CatchUp::Dirty);
+    git(&f.main, &["checkout", "-q", "--", "a.txt"]);
+    assert_eq!(catch_up(&f.main, "main", "origin"), CatchUp::Updated);
+    assert_eq!(
+        std::fs::read_to_string(f.main.join("b.txt")).unwrap(),
+        "landed\n"
+    );
+    assert_eq!(catch_up(&f.main, "main", "origin"), CatchUp::Current);
+    // Another branch, or local commits of its own, are left for the person.
+    git(&f.main, &["checkout", "-q", "-b", "feature"]);
+    assert_eq!(catch_up(&f.main, "main", "origin"), CatchUp::OtherBranch);
+    git(&f.main, &["checkout", "-q", "main"]);
+    std::fs::write(f.main.join("a.txt"), "local commit\n").unwrap();
+    git(&f.main, &["commit", "-qam", "Local"]);
+    let b = lane(&f, "b");
+    std::fs::write(b.join("b.txt"), "landed again\n").unwrap();
+    commit_all(&b, "Second landing").unwrap();
+    assert!(matches!(
+        land(&b, "main", Some("origin"), &[]),
+        Landing::Landed { .. }
+    ));
+    assert_eq!(catch_up(&f.main, "main", "origin"), CatchUp::Diverged);
+}

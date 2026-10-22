@@ -156,6 +156,8 @@ pub(crate) mod lease_clock;
 #[cfg(feature = "local-host")]
 pub(crate) mod provider_limit;
 pub(crate) mod teams;
+/// Start listening for teammates' landings. The daemon calls it once.
+pub use teams::install_sync as install_team_sync;
 #[cfg(feature = "local-host")]
 mod todo;
 #[cfg(feature = "local-host")]

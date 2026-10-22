@@ -262,6 +262,21 @@ impl Store {
                 .collect())
         })
     }
+    /// Every active publication of a repository on this computer, whoever
+    /// published it. Used to catch up after a teammate landed work.
+    pub(super) fn active_for_repository(
+        &self,
+        repository: &str,
+    ) -> Result<Vec<Checkout>, DispatchError> {
+        self.read(|index| {
+            Ok(index
+                .checkouts
+                .iter()
+                .filter(|row| row.repository_id == repository && row.phase == Phase::Active)
+                .cloned()
+                .collect())
+        })
+    }
     pub(super) fn has_active_key(&self, key: &str) -> Result<bool, DispatchError> {
         if !self
             .root

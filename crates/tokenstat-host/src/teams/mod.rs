@@ -71,6 +71,18 @@ pub(crate) fn loopback_read(
     client.ensure_current().map_err(api_error)?;
     Ok(value)
 }
+/// Listen for teammates' landings on the relay connection. Each one is
+/// handled on its own thread so the tunnel never waits on git.
+pub fn install_sync() {
+    #[cfg(feature = "local-host")]
+    tokenstat_remote::tunnel::on_team_moved(|repository| {
+        let repository = repository.to_string();
+        let _ = std::thread::Builder::new()
+            .name("team-caught-up".into())
+            .spawn(move || lanes::caught_up(&repository));
+    });
+}
+
 /// Whether this host lets a shared chat start its agent at all.
 fn agent_runs_ready() -> bool {
     #[cfg(feature = "local-host")]

@@ -362,6 +362,53 @@ pub fn escaping_link(lane: &Path) -> Result<Option<PathBuf>, String> {
     Ok(None)
 }
 
+/// What happened when a person's own checkout tried to catch up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CatchUp {
+    Updated,
+    Current,
+    /// The folder is on another branch, so it is left alone.
+    OtherBranch,
+    /// Uncommitted changes. Nobody's unsaved work is ever touched.
+    Dirty,
+    /// The local branch has its own commits. The person merges, not tokenstat.
+    Diverged,
+    /// Another writer holds the folder right now.
+    Busy,
+    Failed(String),
+}
+
+/// Bring a person's own checkout up to the target after a teammate landed:
+/// a fast-forward only, only on the target branch, only with nothing
+/// uncommitted. Hooks stay off, so a landed hook script never runs from a sync.
+pub fn catch_up(dir: &Path, target: &str, remote: &str) -> CatchUp {
+    let Ok(_writer) = crate::writer::Lease::acquire(dir) else {
+        return CatchUp::Busy;
+    };
+    if let Err(message) = run(dir, &["fetch", "-q", remote, target]) {
+        return CatchUp::Failed(message);
+    }
+    if run(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap_or_default() != target {
+        return CatchUp::OtherBranch;
+    }
+    if !run(dir, &["status", "--porcelain", "--untracked-files=no"])
+        .is_ok_and(|status| status.is_empty())
+    {
+        return CatchUp::Dirty;
+    }
+    let theirs = format!("{remote}/{target}");
+    if run(dir, &["rev-list", "--count", &format!("HEAD..{theirs}")]).as_deref() == Ok("0") {
+        return CatchUp::Current;
+    }
+    if run(dir, &["merge-base", "--is-ancestor", "HEAD", &theirs]).is_err() {
+        return CatchUp::Diverged;
+    }
+    match run(dir, &["merge", "--ff-only", "-q", &theirs]) {
+        Ok(_) => CatchUp::Updated,
+        Err(message) => CatchUp::Failed(message),
+    }
+}
+
 /// Where lanes for one checkout live.
 pub fn root(data: &Path, checkout: &str) -> PathBuf {
     data.join("team-lanes").join(checkout)

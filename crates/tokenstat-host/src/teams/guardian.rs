@@ -508,11 +508,34 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                 sdk.retire();
                 return Ok((terminal, proof, final_output));
             }
-            let landing = if attempt == 0 {
+            // Landing pushes to the shared remote, so it passes the same gate
+            // as starting an agent: live authority, unchanged checkout, and no
+            // Stop waiting. Anything else keeps the lane and lands nothing.
+            let stop_waiting = match control.try_recv() {
+                Ok(Ok(Control::Stop { fence })) => fence == prepared.binding().fence,
+                Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => true,
+                Err(mpsc::TryRecvError::Empty) => false,
+            };
+            let may_land =
+                !stop_waiting && authority.renew().is_ok() && source.ensure_current().is_ok();
+            let landing = if !may_land {
+                lane.keep();
+                Landing::Blocked {
+                    message: "The run was stopped or lost its permission before landing.".into(),
+                }
+            } else if attempt == 0 {
                 super::lanes::finish(lane, settings, &message)
             } else {
                 super::lanes::finish_fix(lane, settings, &message)
             };
+            if matches!(landing, Landing::Landed { .. }) {
+                // Members' hosts catch up from this one bit. A failed report
+                // only delays them until their next landing notice.
+                let _ = client.checkout_moved(
+                    &principal.value().organization_id,
+                    &principal.value().checkout_id,
+                );
+            }
             let next = if attempt < FIX_ATTEMPTS
                 && !matches!(landing, Landing::Landed { .. } | Landing::Nothing)
             {

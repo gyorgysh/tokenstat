@@ -484,6 +484,16 @@ impl TeamClient {
             None,
         )
     }
+    /// Tell the account service this checkout's repository target moved,
+    /// so members' hosts catch up. Carries no commit, branch or path.
+    pub fn checkout_moved(&self, org: &str, checkout: &str) -> Result<Value, TeamError> {
+        self.request(
+            Method::POST,
+            &["organizations", org, "checkouts", checkout, "moved"],
+            Some(json!({})),
+            None,
+        )
+    }
     pub fn withdraw_checkout(
         &self,
         org: &str,
