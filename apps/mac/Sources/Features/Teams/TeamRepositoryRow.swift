@@ -96,7 +96,10 @@ struct TeamRepositoryRow: View {
                 ? L10n.text("common.teams.lane_ready", lane.askedBy.name, String(lane.files.count))
                 : L10n.text("common.teams.lane_kept", lane.askedBy.name, String(lane.files.count)))
                 .font(Theme.caption).foregroundStyle(.secondary)
-            let overlapping = all.filter { lane.overlaps.contains($0.branch) }.map { $0.ask.isEmpty ? $0.branch : $0.ask }
+            // Compared here across every computer's lanes, not only within one host.
+            let files = Set(lane.files)
+            let overlapping = all.filter { $0.branch != lane.branch && !files.isDisjoint(with: $0.files) }
+                .map { $0.ask.isEmpty ? $0.branch : $0.ask }
             if !overlapping.isEmpty {
                 Label(L10n.text("common.teams.lane_overlap", overlapping.joined(separator: ", ")), systemImage: "exclamationmark.triangle")
                     .font(Theme.caption).foregroundStyle(TeamColors.warning)
