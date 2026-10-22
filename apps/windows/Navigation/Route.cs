@@ -20,6 +20,7 @@ internal enum GlobalSection
     Notes,
     Workflows,
     Automations,
+    Team,
     Account,
     About,
 }
@@ -61,7 +62,7 @@ internal static class Sections
         [GlobalSection.Home, GlobalSection.Insights, GlobalSection.Machines];
 
     public static readonly GlobalSection[] Everywhere =
-        [GlobalSection.Todo, GlobalSection.Notes, GlobalSection.Workflows, GlobalSection.Automations];
+        [GlobalSection.Todo, GlobalSection.Notes, GlobalSection.Workflows, GlobalSection.Automations, GlobalSection.Team];
 
     public static readonly SSHSection[] SshRows =
         [SSHSection.Hosts, SSHSection.Keys, SSHSection.Snippets, SSHSection.KnownHosts, SSHSection.Vault];
@@ -77,6 +78,7 @@ internal static class Sections
         GlobalSection.Notes => L10n.Text("common.notes"),
         GlobalSection.Workflows => L10n.Text("common.workflows"),
         GlobalSection.Automations => L10n.Text("common.automations"),
+        GlobalSection.Team => L10n.Text("common.teams.title"),
         GlobalSection.Account => L10n.Text("common.account"),
         GlobalSection.About => L10n.Text("windows.route.about.4efca0d1"),
         _ => section.ToString(),
@@ -93,6 +95,7 @@ internal static class Sections
         GlobalSection.Notes => Microsoft.UI.Xaml.Controls.Symbol.OpenFile,
         GlobalSection.Workflows => Microsoft.UI.Xaml.Controls.Symbol.Switch,
         GlobalSection.Automations => Microsoft.UI.Xaml.Controls.Symbol.Flag,
+        GlobalSection.Team => Microsoft.UI.Xaml.Controls.Symbol.People,
         GlobalSection.Account => Microsoft.UI.Xaml.Controls.Symbol.Contact,
         GlobalSection.About => Microsoft.UI.Xaml.Controls.Symbol.Help,
         _ => Microsoft.UI.Xaml.Controls.Symbol.Placeholder,

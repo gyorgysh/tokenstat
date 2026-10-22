@@ -1430,6 +1430,7 @@ public sealed partial class MainWindow : Window
                     GlobalSection.Notes => _globalNotesPage ??= new NotesPage(),
                     GlobalSection.Workflows => new WorkflowsPage(),
                     GlobalSection.Automations => new AutomationsPage(),
+                    GlobalSection.Team => new TeamsPage(),
                     GlobalSection.Account => new AccountPage(),
                     GlobalSection.About => new AboutPage(),
                     _ => new AboutPage(),
