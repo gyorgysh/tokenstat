@@ -33,6 +33,7 @@ enum TeamFixtureData {
         case .connectionCall:
             if await TeamFixtureComments.shared.accessRemoved { throw TeamRequestFailure(code: "forbidden", message: "Access to this fictional repository was removed.") }
             guard case let .object(fields) = params, case let .object(target)? = fields["target"], let checkout = target["checkout"], let organization = target["organization"], let repository = target["repository"] else { throw CancellationError() }
+            if fields["method"] == .string("team.lanes") { return .object(["lanes": .array([])]) }
             if fields["method"] == .string("team.chat.catalog") {
                 guard target["share"] == nil else { throw CancellationError() }
                 return .object(["shares":.array([.object(["id":.string("share_"+String(repeating:"a",count:32)),"checkoutId":checkout,"revision":.int(1),"createdAt":.string(timestamp),"title":.string("Quarterly totals"),"backend":.string("codex")])]),"nextCursor":.null])
@@ -50,7 +51,8 @@ enum TeamFixtureData {
         case .commentSend:
             guard state == .comment || state == .commentUncertain else { throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.") }
             return try await TeamFixtureComments.shared.send(params, uncertain: state == .commentUncertain)
-        case .checkoutPublish, .checkoutWithdraw: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
+        case .checkoutPublish, .checkoutWithdraw, .ask, .lanesSet: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
+        case .lanesGet: return .object(["settings": .null])
         case .directory:
             if await TeamFixtureComments.shared.accessRemoved { throw TeamRequestFailure(code: "forbidden", message: "Access to this fictional repository was removed.") }
             guard case let .object(fields) = params, case let .string(operation)? = fields["operation"] else { throw TeamRequestFailure(code: "fixture_request", message: "Choose a fixture action.") }

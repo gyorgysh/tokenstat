@@ -57,6 +57,9 @@ fn fixture() -> Fixture {
             main.to_str().unwrap(),
         ],
     );
+    // Windows runners convert line endings by default, which would make a
+    // fresh checkout look modified. The fixture's bytes are its own.
+    git(&main, &["config", "core.autocrlf", "false"]);
     git(&main, &["checkout", "-q", "-b", "main"]);
     std::fs::write(main.join("a.txt"), "one\ntwo\nthree\n").unwrap();
     std::fs::write(main.join("b.txt"), "b\n").unwrap();
