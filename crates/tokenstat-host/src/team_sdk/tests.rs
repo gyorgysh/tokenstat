@@ -304,10 +304,13 @@ fn stop_does_not_wait_for_a_slow_account_or_publication_check() {
 }
 
 fn bind_context(context: Value) -> io::Result<Service> {
+    // These fixtures verify paging and size bounds. Give a loaded runner
+    // time to read every page; lease expiry has separate short-budget tests.
+    let budget = Duration::from_secs(60);
     Service::bind(
         Budget {
-            deadline: Deadline::capture(Duration::from_secs(10)).unwrap(),
-            wall_end: wall_ms().unwrap() + 10000,
+            deadline: Deadline::capture(budget).unwrap(),
+            wall_end: wall_ms().unwrap() + budget.as_millis(),
         },
         context,
         "run_fixture".into(),

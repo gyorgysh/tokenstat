@@ -69,6 +69,7 @@ struct Gate {
 struct Shared {
     token: [u8; 32],
     context: Value,
+    context_bytes: usize,
     run: String,
     gate: Mutex<Gate>,
     current: Box<dyn Fn() -> bool + Send + Sync>,
@@ -155,6 +156,7 @@ impl Service {
         let shared = Arc::new(Shared {
             token,
             context,
+            context_bytes: encoded.len(),
             run,
             current,
             workers: AtomicUsize::new(0),
@@ -431,9 +433,10 @@ fn context_page(source: &Value, events: &[Value], total: usize, next: Option<Str
 }
 fn page_context(shared: &Shared, args: &Value) -> Result<Value, &'static str> {
     let cursor = context_cursor(args)?;
-    let encoded = serde_json::to_vec(&shared.context).map_err(|_| "The run is unavailable.")?;
+    // The accepted context never changes. Measuring the full snapshot for
+    // every page needlessly copies megabytes while a caller waits.
     if cursor == 0
-        && encoded.len() <= CONTEXT
+        && shared.context_bytes <= CONTEXT
         && !args
             .as_object()
             .is_some_and(|object| object.contains_key("cursor"))
