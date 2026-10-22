@@ -52,7 +52,7 @@ import java.util.UUID
 
 /// Every Team call carries the signed-in account's receipt. The host drops a
 /// call when that login is no longer the one it was made for.
-private class TeamCalls(account: JsonObject?) {
+internal class TeamCalls(account: JsonObject?, private val bridge: suspend (String, JsonObject) -> JsonElement = { method, params -> CoreClient.call(method, params) }) {
     private val owner = WatchingOwner.from(account)
     val origin = owner?.scope?.str("origin")
     private val accountPerson = account?.str("accountId")?.takeIf { it.isNotBlank() }
@@ -76,16 +76,18 @@ private class TeamCalls(account: JsonObject?) {
             put("_accountScope", owner.scope)
             owner.receipt?.let { put("_accountSession", it) }
         }
-        return CoreClient.call(method, params) as? JsonObject ?: JsonObject(emptyMap())
+        return bridge(method, params) as? JsonObject ?: JsonObject(emptyMap())
     }
 
-    suspend fun directory(operation: String, extra: JsonObject.() -> JsonObject = { this }): JsonObject =
+    suspend fun directory(operation: String, limit: Int = 100, offset: Int = 0, extra: JsonObject.() -> JsonObject = { this }): JsonObject =
         call("teams.directory", buildJsonObject {
             put("operation", operation)
-            put("page", buildJsonObject { put("limit", 100); put("offset", 0) })
+            put("page", buildJsonObject { put("limit", limit); put("offset", offset) })
         }.extra())
 }
 
+private fun teamFailure(failure: Exception): String = if (failure is IllegalArgumentException || failure is IllegalStateException)
+    L10n.text("common.teams.load_failed") else failure.message ?: L10n.text("common.teams.load_failed")
 private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
 private fun JsonObject.bool(key: String): Boolean = str(key) == "true"
 private fun JsonObject.list(key: String): List<JsonObject> =
@@ -252,48 +254,62 @@ private fun Repositories(calls: TeamCalls, org: JsonObject, onOpenChat: (ChatTar
 }
 
 @Composable
-private fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, onOpenChat: (ChatTarget) -> Unit) {
+internal fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, onOpenChat: (ChatTarget) -> Unit) {
     val repoId = repo.str("id") ?: return
     val scope = rememberCoroutineScope()
     var checkouts by remember(repoId) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var lanes by remember(repoId) { mutableStateOf<Map<String, List<JsonObject>>>(emptyMap()) }
     var shares by remember(repoId) { mutableStateOf<Map<String, List<JsonObject>>>(emptyMap()) }
+    var checkoutNext by remember(repoId) { mutableStateOf<Int?>(null) }
+    var catalogNext by remember(repoId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var hostErrors by remember(repoId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var loading by remember(repoId) { mutableStateOf(false) }
+    var loaded by remember(repoId) { mutableStateOf(false) }
     var message by remember(repoId) { mutableStateOf<String?>(null) }
     var busy by remember(repoId) { mutableStateOf(false) }
     var newTitles by remember(repoId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     // Kept per title so a retry after a lost reply settles to the same chat.
-    var newRequest by remember(repoId) { mutableStateOf<Pair<String, String>?>(null) }
+    var newRequests by remember(repoId) { mutableStateOf<Map<String, Pair<String, String>>>(emptyMap()) }
 
-    suspend fun load() {
-        if (repo.str("role") == null) return
-        checkouts = try {
-            calls.directory("checkouts.list") {
-                with("organization" to JsonPrimitive(orgId), "repository" to JsonPrimitive(repoId))
-            }.list("checkouts").take(3)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Throwable) {
-            emptyList()
-        }
-        // Each computer answers for its own lanes and chats. One that is
-        // offline shows nothing rather than an error here.
-        val nextLanes = mutableMapOf<String, List<JsonObject>>()
-        val nextShares = mutableMapOf<String, List<JsonObject>>()
-        for (checkout in checkouts) {
+    suspend fun loadCatalog(checkout: String, more: Boolean = false) {
+        val cursor = if (more) catalogNext[checkout] else null
+        val answer = calls.call("teams.connection.call", buildJsonObject {
+            put("target", target(orgId, repoId, checkout)); put("method", "team.chat.catalog")
+            put("params", buildJsonObject { put("limit", 50); cursor?.let { put("cursor", it) } })
+        })
+        val page = TeamCatalogPage.read(answer, checkout, cursor)
+        shares = shares + (checkout to TeamCatalogPage.append(if (more) shares[checkout].orEmpty() else emptyList(), page.rows))
+        catalogNext = catalogNext - checkout
+        page.next?.let { catalogNext = catalogNext + (checkout to it) }
+        hostErrors = hostErrors - checkout
+    }
+    suspend fun loadWork(rows: List<JsonObject>) {
+        for (checkout in rows) {
             val id = checkout.str("id") ?: continue
-            val where = target(orgId, repoId, id)
-            runCatching {
-                calls.call("teams.connection.call", buildJsonObject {
-                    put("target", where); put("method", "team.lanes"); put("params", buildJsonObject {})
-                }).list("lanes")
-            }.getOrNull()?.let { nextLanes[id] = it }
-            runCatching {
-                calls.call("teams.connection.call", buildJsonObject {
-                    put("target", where); put("method", "team.chat.catalog"); put("params", buildJsonObject { put("limit", 50) })
-                }).list("shares")
-            }.getOrNull()?.let { nextShares[id] = it }
+            try {
+                lanes = lanes + (id to calls.call("teams.connection.call", buildJsonObject {
+                    put("target", target(orgId, repoId, id)); put("method", "team.lanes"); put("params", buildJsonObject {})
+                }).list("lanes"))
+                loadCatalog(id)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { hostErrors = hostErrors + (id to teamFailure(failure)) }
         }
-        lanes = nextLanes; shares = nextShares
+    }
+    suspend fun load(more: Boolean = false) {
+        if (repo.str("role") == null || loading) return
+        loading = true
+        try {
+            val offset = if (more) checkoutNext ?: return else 0
+            val answer = calls.directory("checkouts.list", limit = 3, offset = offset) {
+                with("organization" to JsonPrimitive(orgId), "repository" to JsonPrimitive(repoId))
+            }
+            val page = TeamDirectoryPage.read(answer, "checkouts", offset)
+            checkouts = TeamCatalogPage.append(if (more) checkouts else emptyList(), page.rows)
+            checkoutNext = page.next; loaded = true; message = null
+            loadWork(page.rows)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { message = teamFailure(failure) }
+        finally { loading = false }
     }
     LaunchedEffect(repoId) { load() }
 
@@ -314,14 +330,15 @@ private fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, on
                 failure.message
             }
             busy = false
-            load()
+            loading = true
+            try { loadWork(checkouts) } finally { loading = false }
         }
     }
 
     fun startChat(checkout: String, computer: String) {
         val title = newTitles[checkout].orEmpty().trim()
         if (title.isEmpty()) return
-        val request = newRequest?.takeIf { it.first == title } ?: (title to "new-" + UUID.randomUUID()).also { newRequest = it }
+        val request = newRequests[checkout]?.takeIf { it.first == title } ?: (title to "new-" + UUID.randomUUID()).also { newRequests = newRequests + (checkout to it) }
         scope.launch {
             busy = true
             try {
@@ -329,7 +346,8 @@ private fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, on
                     put("target", target(orgId, repoId, checkout)); put("method", "team.chat.new")
                     put("params", buildJsonObject { put("title", title); put("requestId", request.second) })
                 })
-                newTitles = newTitles - checkout; newRequest = null
+                if (newTitles[checkout]?.trim() == title) newTitles = newTitles - checkout
+                if (newRequests[checkout] == request) newRequests = newRequests - checkout
                 made.str("share")?.let { onOpenChat(ChatTarget(target(orgId, repoId, checkout, it), title, computer, checkouts.firstOrNull { row -> row.str("id") == checkout }?.str("hostKey").orEmpty())) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -343,16 +361,23 @@ private fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, on
 
     TsCard(title = repo.str("name") ?: "", subtitle = if (repo.str("role") == null) L10n.text("common.teams.no_access") else null) {
         message?.let { Text(it, color = LocalTsColors.current.textSecondary) }
-        if (repo.str("role") != null && checkouts.isEmpty()) {
+        if (repo.str("role") != null && loaded && checkouts.isEmpty()) {
             Text(L10n.text("common.teams.repository_not_shared"), color = LocalTsColors.current.textSecondary)
         }
+        if (loading) CircularProgressIndicator()
+        if (checkoutNext != null || hostErrors.isNotEmpty()) Text(L10n.text("common.teams.partial_lanes"), color = LocalTsColors.current.textSecondary)
         val allLanes = checkouts.flatMap { lanes[it.str("id")] ?: emptyList() }
         for (checkout in checkouts) {
             val id = checkout.str("id") ?: continue
             val computer = checkout.str("deviceName") ?: L10n.text("common.teams.computer")
             Text(computer, color = LocalTsColors.current.textPrimary, modifier = Modifier.padding(top = 4.dp))
+            hostErrors[id]?.let { failure ->
+                Text(failure, color = LocalTsColors.current.warning)
+                TsSecondaryButton(L10n.text("common.retry"), enabled = !loading && !busy, icon = ActionIcon.Refresh.vector,
+                    onClick = { scope.launch { loading = true; try { loadWork(listOf(checkout)) } finally { loading = false } } })
+            }
             for (lane in lanes[id].orEmpty()) {
-                LaneRow(lane, allLanes, busy, onLand = { act("team.lanes.land", id, lane) }, onDiscard = { act("team.lanes.discard", id, lane) })
+                LaneRow(lane, allLanes, busy || loading, onLand = { act("team.lanes.land", id, lane) }, onDiscard = { act("team.lanes.discard", id, lane) })
             }
             for (share in shares[id].orEmpty()) {
                 val shareId = share.str("id") ?: continue
@@ -361,15 +386,28 @@ private fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, on
                     onOpenChat(ChatTarget(target(orgId, repoId, id, shareId), title, computer, checkout.str("hostKey").orEmpty()))
                 })
             }
+            if (catalogNext[id] != null) TsSecondaryButton(L10n.text("common.teams.load_more"), enabled = !loading && !busy,
+                icon = ActionIcon.More.vector, onClick = { scope.launch {
+                    loading = true
+                    try { loadCatalog(id, more = true) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { hostErrors = hostErrors + (id to teamFailure(failure)) }
+                    finally { loading = false }
+                } })
             if (repo.str("role") in setOf("contributor", "maintainer")) {
                 OutlinedTextField(newTitles[id].orEmpty(), { newTitles = newTitles + (id to it) }, Modifier.fillMaxWidth(),
                     label = { Text(L10n.text("common.teams.new_chat_title")) },
                     placeholder = { Text(L10n.text("common.teams.new_chat_placeholder")) })
-                TsAccentButton(L10n.text("common.teams.new_chat"), enabled = newTitles[id].orEmpty().isNotBlank() && !busy,
+                TsAccentButton(L10n.text("common.teams.new_chat"), enabled = newTitles[id].orEmpty().isNotBlank() && !busy && !loading,
                     icon = ActionIcon.Create.vector, onClick = { startChat(id, computer) })
                 Text(L10n.text("common.teams.new_chat_detail", computer), color = LocalTsColors.current.textSecondary)
             }
         }
+        if (checkoutNext != null) TsSecondaryButton(L10n.text("common.teams.load_more_computers"), enabled = !loading && !busy,
+            icon = ActionIcon.More.vector, onClick = { scope.launch { load(more = true) } })
+        if (!loaded && !loading && message != null) TsSecondaryButton(L10n.text("common.retry"), icon = ActionIcon.Refresh.vector,
+            onClick = { scope.launch { load() } })
+
     }
 }
 

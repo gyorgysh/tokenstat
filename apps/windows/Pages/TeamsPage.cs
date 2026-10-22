@@ -31,6 +31,8 @@ internal sealed partial class TeamsPage : Page
     private string? _person;
     private readonly Dictionary<TeamCommentTarget, TeamCommentModel> _comments = new();
     private readonly Dictionary<string, string> _checkoutHosts = new();
+    private readonly Dictionary<string, string> _newChatWriting = new();
+    private readonly Dictionary<string, (string Title, string Id)> _newChatRequests = new();
     private readonly Dictionary<string, JsonObject> _askAttempts = new();
     private readonly Dictionary<string, string> _askWriting = new();
     private readonly Dictionary<string, JsonNode> _activeRuns = new();
@@ -94,7 +96,7 @@ internal sealed partial class TeamsPage : Page
             if (_scope?.ToJsonString() != scope?.ToJsonString() || _session != session)
             {
                 _organization = null;
-                _comments.Clear(); _checkoutHosts.Clear(); _askAttempts.Clear(); _openedImages.Clear(); _flash = null;
+                _comments.Clear(); _checkoutHosts.Clear(); _newChatWriting.Clear(); _newChatRequests.Clear(); _askAttempts.Clear(); _openedImages.Clear(); _flash = null;
                 _askWriting.Clear(); _activeRuns.Clear(); _stoppingRuns.Clear();
                 _historyTarget = null; _history = new([]); _readingEarlier = false;
             }
@@ -195,60 +197,113 @@ internal sealed partial class TeamsPage : Page
         var view = _view;
         var repoId = Format.Text(repo, "id");
         var card = new StackPanel { Spacing = Theme.SpaceS, Padding = new Thickness(16), Background = Theme.PanelBrush, CornerRadius = new CornerRadius(10) };
-        card.Children.Add(new TextBlock { Text = Format.Text(repo, "name"), FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         _body.Children.Add(card);
-        if (repo["role"] is null) { card.Children.Add(new TextBlock { Text = L10n.Text("common.teams.no_access"), Opacity = 0.7 }); return; }
-        List<JsonObject> checkouts;
-        try
-        {
-            checkouts = ((await CallAsync("teams.directory", new JsonObject
-            {
-                ["operation"] = "checkouts.list", ["organization"] = orgId, ["repository"] = repoId, ["page"] = Page100(),
-            }))["checkouts"] as JsonArray)?.OfType<JsonObject>().Take(3).ToList() ?? [];
-        }
-        catch { checkouts = []; }
-        if (!IsLoaded || _view != view) return;
-        if (checkouts.Count == 0) { card.Children.Add(new TextBlock { Text = L10n.Text("common.teams.repository_not_shared"), Opacity = 0.7 }); return; }
-        // Each computer answers for its own lanes and chats. One that is
-        // offline shows nothing rather than an error here.
+        List<JsonObject> checkouts = [];
         var lanes = new Dictionary<string, List<JsonObject>>();
         var shares = new Dictionary<string, List<JsonObject>>();
-        foreach (var checkout in checkouts)
+        var cursors = new Dictionary<string, string>();
+        var failures = new Dictionary<string, string>();
+        int? nextOffset = 0;
+        var loading = false; var loaded = false; string? error = null;
+        bool Current() => IsLoaded && _view == view;
+        static string Message(Exception e) => e is InvalidDataException ? L10n.Text("common.teams.load_failed") : e.Message;
+        async Task LoadCatalog(string checkout, bool more = false)
         {
-            var id = Format.Text(checkout, "id");
+            var cursor = more ? cursors.GetValueOrDefault(checkout) : null;
+            var query = new JsonObject { ["limit"] = 50 };
+            if (cursor is not null) query["cursor"] = cursor;
+            var answer = await CallAsync("teams.connection.call", new JsonObject { ["target"] = Target(orgId, repoId, checkout), ["method"] = "team.chat.catalog", ["params"] = query });
+            if (!Current()) return;
+            var page = TeamCatalogPage.Read(answer, checkout, cursor);
+            shares[checkout] = TeamCatalogPage.Append(more ? shares.GetValueOrDefault(checkout) ?? [] : [], page.Rows);
+            cursors.Remove(checkout); if (page.Next is not null) cursors[checkout] = page.Next;
+            failures.Remove(checkout);
+        }
+        async Task LoadWork(string id)
+        {
+            var work = await CallAsync("teams.connection.call", new JsonObject { ["target"] = Target(orgId, repoId, id), ["method"] = "team.lanes", ["params"] = new JsonObject() });
+            if (!Current()) return;
+            lanes[id] = (work["lanes"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
+            await LoadCatalog(id);
+        }
+        async Task LoadMore()
+        {
+            if (loading || nextOffset is null || !Current()) return;
+            loading = true; Render();
             try
             {
-                var answer = await CallAsync("teams.connection.call", new JsonObject { ["target"] = Target(orgId, repoId, id), ["method"] = "team.lanes", ["params"] = new JsonObject() });
-                lanes[id] = (answer["lanes"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
+                var offset = nextOffset.Value;
+                var answer = await CallAsync("teams.directory", new JsonObject { ["operation"] = "checkouts.list", ["organization"] = orgId, ["repository"] = repoId, ["page"] = new JsonObject { ["limit"] = 3, ["offset"] = offset } });
+                if (!Current()) return;
+                var page = TeamDirectoryPage.Read(answer, "checkouts", offset);
+                checkouts = TeamCatalogPage.Append(checkouts, page.Rows); nextOffset = page.Next; loaded = true; error = null;
+                foreach (var checkout in page.Rows)
+                {
+                    var id = Format.Text(checkout, "id");
+                    _checkoutHosts[Target(orgId, repoId, id).ToJsonString()] = Format.Text(checkout, "hostKey");
+                    try
+                    {
+                        await LoadWork(id);
+                    }
+                    catch (Exception e) { if (!Current()) return; failures[id] = Message(e); }
+                    if (!Current()) return;
+                }
             }
-            catch { lanes[id] = []; }
-            if (!IsLoaded || _view != view) return;
-            try
-            {
-                var answer = await CallAsync("teams.connection.call", new JsonObject { ["target"] = Target(orgId, repoId, id), ["method"] = "team.chat.catalog", ["params"] = new JsonObject { ["limit"] = 50 } });
-                shares[id] = (answer["shares"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
-            }
-            catch { shares[id] = []; }
-            if (!IsLoaded || _view != view) return;
+            catch (Exception e) { if (Current()) error = Message(e); }
+            finally { loading = false; if (Current()) Render(); }
         }
-        var all = lanes.Values.SelectMany(list => list).ToList();
-        foreach (var checkout in checkouts)
+        void Render()
         {
-            var id = Format.Text(checkout, "id");
-            var computer = Format.Text(checkout, "deviceName", L10n.Text("common.teams.computer"));
-            _checkoutHosts[Target(orgId, repoId, id).ToJsonString()] = Format.Text(checkout, "hostKey");
-            card.Children.Add(new TextBlock { Text = computer, Opacity = 0.8, Margin = new Thickness(0, 6, 0, 0) });
-            foreach (var lane in lanes[id]) card.Children.Add(LaneRow(orgId, repoId, id, lane, all));
-            foreach (var share in shares[id])
+            if (!Current()) return;
+            card.Children.Clear();
+            card.Children.Add(new TextBlock { Text = Format.Text(repo, "name"), FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            if (repo["role"] is null) { card.Children.Add(new TextBlock { Text = L10n.Text("common.teams.no_access"), Opacity = 0.7 }); return; }
+            if (error is not null) card.Children.Add(new TextBlock { Text = error, TextWrapping = TextWrapping.Wrap });
+            if (loaded && checkouts.Count == 0) card.Children.Add(new TextBlock { Text = L10n.Text("common.teams.repository_not_shared"), Opacity = 0.7 });
+            if (loading) card.Children.Add(new ProgressRing { IsActive = true, Width = 20, Height = 20 });
+            if (nextOffset is not null || failures.Count > 0) card.Children.Add(new TextBlock { Text = L10n.Text("common.teams.partial_lanes"), Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
+            var all = lanes.Values.SelectMany(rows => rows).ToList();
+            foreach (var checkout in checkouts)
             {
-                var shareId = Format.Text(share, "id");
-                var title = Format.Text(share, "title");
-                if (title.Length == 0) title = L10n.Text("common.teams.shared_chat");
-                var chosen = (Target(orgId, repoId, id, shareId), title, computer);
-                card.Children.Add(ActionIconGlyph.Button(title, ActionIcon.Comment, async (_, _) => await ShowChatAsync(chosen.Item1, chosen.title, chosen.computer)));
+                var id = Format.Text(checkout, "id");
+                var computer = Format.Text(checkout, "deviceName", L10n.Text("common.teams.computer"));
+                card.Children.Add(new TextBlock { Text = computer, Opacity = 0.8, Margin = new Thickness(0, 6, 0, 0) });
+                if (failures.TryGetValue(id, out var failure))
+                {
+                    card.Children.Add(new TextBlock { Text = failure, TextWrapping = TextWrapping.Wrap });
+                    var retry = ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh, async (_, _) => {
+                        loading = true; Render();
+                        try { await LoadWork(id); } catch (Exception e) { if (Current()) failures[id] = Message(e); }
+                        finally { loading = false; if (Current()) Render(); }
+                    });
+                    retry.IsEnabled = !loading; card.Children.Add(retry);
+                }
+                foreach (var lane in lanes.GetValueOrDefault(id) ?? []) card.Children.Add(LaneRow(orgId, repoId, id, lane, all));
+                foreach (var share in shares.GetValueOrDefault(id) ?? [])
+                {
+                    var shareId = Format.Text(share, "id"); var title = Format.Text(share, "title");
+                    if (title.Length == 0) title = L10n.Text("common.teams.shared_chat");
+                    card.Children.Add(ActionIconGlyph.Button(title, ActionIcon.Comment, async (_, _) => await ShowChatAsync(Target(orgId, repoId, id, shareId), title, computer)));
+                }
+                if (cursors.ContainsKey(id))
+                {
+                    var more = ActionIconGlyph.Button(L10n.Text("common.teams.load_more"), ActionIcon.More, async (_, _) => {
+                        loading = true; Render();
+                        try { await LoadCatalog(id, true); } catch (Exception e) { if (Current()) failures[id] = Message(e); }
+                        finally { loading = false; if (Current()) Render(); }
+                    });
+                    more.IsEnabled = !loading; card.Children.Add(more);
+                }
+                if (Format.Text(repo, "role") is "contributor" or "maintainer") card.Children.Add(NewChat(orgId, repoId, id, computer));
             }
-            if (Format.Text(repo, "role") is "contributor" or "maintainer") card.Children.Add(NewChat(orgId, repoId, id, computer));
+            if (nextOffset is not null)
+            {
+                var more = ActionIconGlyph.Button(L10n.Text(loaded ? "common.teams.load_more_computers" : "common.retry"), ActionIcon.More, async (_, _) => await LoadMore());
+                more.IsEnabled = !loading; card.Children.Add(more);
+            }
         }
+        Render();
+        if (repo["role"] is not null) await LoadMore();
     }
 
     /// A member starts an empty shared chat on that computer and asks its
@@ -258,14 +313,15 @@ internal sealed partial class TeamsPage : Page
         var view = _view;
         var panel = new StackPanel { Spacing = Theme.SpaceXs, Margin = new Thickness(0, 4, 0, 0) };
         var box = new TextBox { Header = L10n.Text("common.teams.new_chat_title"), PlaceholderText = L10n.Text("common.teams.new_chat_placeholder") };
-        // Kept per title so a retry after a lost reply settles to the same chat.
-        (string Title, string Id)? request = null;
+        var key = Target(orgId, repoId, checkout).ToJsonString();
+        box.Text = _newChatWriting.GetValueOrDefault(key) ?? "";
+        box.TextChanged += (_, _) => { if (_view == view) _newChatWriting[key] = box.Text; };
         Button? start = null;
         start = ActionIconGlyph.Button(L10n.Text("common.teams.new_chat"), ActionIcon.Create, async (_, _) =>
         {
             var title = box.Text.Trim();
             if (title.Length == 0) return;
-            if (request is not { } pending || pending.Title != title) request = pending = (title, "new-" + Guid.NewGuid().ToString("N"));
+            if (!_newChatRequests.TryGetValue(key, out var pending) || pending.Title != title) _newChatRequests[key] = pending = (title, "new-" + Guid.NewGuid().ToString("N"));
             start!.IsEnabled = false;
             try
             {
@@ -276,6 +332,8 @@ internal sealed partial class TeamsPage : Page
                 });
                 var share = Format.Text(made, "share");
                 if (!IsLoaded || _view != view) return;
+                if (_newChatWriting.GetValueOrDefault(key)?.Trim() == title) _newChatWriting.Remove(key);
+                if (_newChatRequests.GetValueOrDefault(key) == pending) _newChatRequests.Remove(key);
                 if (share.Length > 0) await ShowChatAsync(Target(orgId, repoId, checkout, share), title, computer);
             }
             catch (Exception error)

@@ -582,7 +582,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Native Android charts and Teams comment recovery
+      - name: Native Android charts and Teams recovery and paging
         timeout-minutes: 12
         run: bash scripts/tests/run-chart-android.sh
 

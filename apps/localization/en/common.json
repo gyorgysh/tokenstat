@@ -677,5 +677,7 @@
   "common.teams.remove_local_draft": "Remove local draft?",
   "common.teams.remove_local_draft_detail": "This removes the saved text and delivery details from this device. A comment already sent may still appear in the chat. Removing this draft won’t cancel it.",
   "common.teams.remove_draft": "Remove draft",
-  "common.teams.account_changed": "Your account changed. Sign in again to continue."
+  "common.teams.account_changed": "Your account changed. Sign in again to continue.",
+  "common.teams.load_more_computers": "More computers",
+  "common.teams.partial_lanes": "Work and overlaps are shown for the computers loaded here."
 }

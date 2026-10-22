@@ -4,6 +4,7 @@ using Tokenstat.Pages;
 
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
+TeamPageTests.Run();
 await TeamCommentTests.RunAsync();
 var latestTeamHistory = new TeamHistoryWindow([new JsonObject { ["seq"] = 3 }, new JsonObject { ["seq"] = 4 }]);
 var earlierTeamHistory = latestTeamHistory.Merge([new JsonObject { ["seq"] = 1 }, new JsonObject { ["seq"] = 2 }], true);

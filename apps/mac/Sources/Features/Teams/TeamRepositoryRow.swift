@@ -48,6 +48,7 @@ struct TeamRepositoryRow: View {
                 if !work.isEmpty {
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         Text(L10n.text("common.teams.work_in_progress")).font(Theme.callout.weight(.semibold))
+                        if more || lanes.count < checkouts.count { Text(L10n.text("common.teams.partial_lanes")).font(Theme.caption).foregroundStyle(.secondary) }
                         if let landMessage { TeamNotice(message: landMessage) }
                         ForEach(checkouts) { checkout in
                             ForEach(lanes[checkout.id] ?? [], id: \.branch) { lane in laneRow(lane, all: work, checkout: checkout) }
