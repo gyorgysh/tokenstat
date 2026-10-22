@@ -26,6 +26,10 @@ pub(super) struct Settings {
     pub remote: Option<String>,
     #[serde(default)]
     pub check: Vec<String>,
+    /// A check runs code a teammate's agent changed, with the owner's
+    /// account. It runs only after the owner said they understand that.
+    #[serde(default)]
+    pub check_runs_changed_code: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -93,6 +97,7 @@ fn valid_name(value: &str) -> bool {
 fn validate(settings: &Settings) -> bool {
     valid_name(&settings.target)
         && settings.remote.as_deref().is_none_or(valid_name)
+        && (settings.check.is_empty() || settings.check_runs_changed_code)
         && settings.check.len() <= 64
         && settings
             .check
@@ -115,6 +120,7 @@ pub(super) struct Lane {
     pub path: PathBuf,
     pub branch: String,
     repository: PathBuf,
+    pointer: String,
     keep: bool,
 }
 impl Lane {
@@ -141,7 +147,10 @@ pub(super) fn open(
             "A lane for this work could not be created.",
         )
     };
-    let parent = lane::root(&tokenstat_paths::data_dir().ok_or_else(unavailable)?, checkout);
+    let parent = lane::root(
+        &tokenstat_paths::data_dir().ok_or_else(unavailable)?,
+        checkout,
+    );
     fs::create_dir_all(&parent).map_err(|_| unavailable())?;
     let id = format!("{:016x}", rand::random::<u64>());
     let path = parent.join(&id);
@@ -155,12 +164,21 @@ pub(super) fn open(
         None => settings.target.clone(),
     };
     lane::create(repository, &path, &branch, &base).map_err(failed)?;
-    Ok(Lane {
+    let mut opened = Lane {
         path,
         branch,
         repository: repository.into(),
+        pointer: String::new(),
         keep: false,
-    })
+    };
+    opened.pointer = lane::pointer(&opened.path).map_err(failed)?;
+    if lane::escaping_link(&opened.path).map_err(failed)?.is_some() {
+        return Err(DispatchError::new(
+            "team_lane_link",
+            "This project has a link that leads outside it, so an agent cannot work in it safely.",
+        ));
+    }
+    Ok(opened)
 }
 
 /// Commit, check and land one finished lane. One landing at a time per
@@ -184,6 +202,14 @@ pub(super) fn finish(lane: &mut Lane, settings: &Settings, message: &str) -> Lan
         lane.keep();
         return Landing::Blocked {
             message: "Another landing could not be waited for.".into(),
+        };
+    }
+    // The agent could edit files in the lane. Its git pointer must still be
+    // the one tokenstat created, or git would follow the agent's choice.
+    if lane::pointer(&lane.path).ok().as_deref() != Some(lane.pointer.as_str()) {
+        lane.keep();
+        return Landing::Blocked {
+            message: "The lane's git link was changed.".into(),
         };
     }
     match lane::commit_all(&lane.path, message) {
@@ -221,10 +247,11 @@ pub(super) fn describe(landing: &Landing, lane: &Lane, settings: &Settings) -> S
             files.join(", "),
             lane.branch
         ),
-        Landing::CheckFailed { output } => format!(
-            "Not landed: the check failed. It is kept on branch {}.\n\n```\n{}\n```",
-            lane.branch,
-            output.trim()
+        // The output can hold anything the changed code printed. It stays on
+        // this computer and never goes into the shared chat.
+        Landing::CheckFailed { .. } => format!(
+            "Not landed: the check failed. It is kept on branch {}.",
+            lane.branch
         ),
         Landing::Blocked { message } => format!(
             "Not landed: {message} It is kept on branch {}.",
@@ -295,6 +322,7 @@ mod tests {
             target: target.into(),
             remote: remote.map(str::to_string),
             check: check.iter().map(|s| s.to_string()).collect(),
+            check_runs_changed_code: true,
         }
     }
 
@@ -311,5 +339,8 @@ mod tests {
         }
         assert!(!validate(&settings("main", Some("--upload-pack=x"), &[])));
         assert!(!validate(&settings("main", None, &["bad\0arg"])));
+        let mut unacknowledged = settings("main", None, &["make", "check"]);
+        unacknowledged.check_runs_changed_code = false;
+        assert!(!validate(&unacknowledged));
     }
 }

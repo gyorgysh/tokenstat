@@ -44,8 +44,21 @@ pub enum Landing {
     },
 }
 
+/// Every lane git command runs with hooks and fsmonitor off. A lane holds
+/// files an agent wrote, and neither may make git run them.
+fn lane_git(dir: &Path) -> Command {
+    let mut command = git_command(dir);
+    command.env("GIT_CONFIG_NOSYSTEM", "1").args([
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
+    ]);
+    command
+}
+
 fn run(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let output = git_command(dir)
+    let output = lane_git(dir)
         .args(args)
         .output()
         .map_err(|error| error.to_string())?;
@@ -144,6 +157,46 @@ pub fn refresh(lane: &Path, target: &str, remote: Option<&str>) -> Landing {
         return Landing::Conflict { files };
     }
     Landing::Nothing
+}
+
+/// Start a rebase onto the latest target and stop at its conflicts, leaving
+/// the conflict markers in the lane for its agent to resolve. Returns the
+/// conflicted files, empty when the rebase went through on its own.
+pub fn start_rebase(
+    lane: &Path,
+    target: &str,
+    remote: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let base = base_ref(lane, target, remote)?;
+    if run(lane, &["rebase", "-q", &base]).is_ok() {
+        return Ok(Vec::new());
+    }
+    let files = conflicted(lane);
+    if files.is_empty() {
+        let _ = run(lane, &["rebase", "--abort"]);
+        return Err("The rebase stopped without a conflict.".into());
+    }
+    Ok(files)
+}
+
+/// Finish a rebase started by `start_rebase` once the agent resolved it.
+/// Any conflict marker left behind aborts the rebase instead.
+pub fn finish_rebase(lane: &Path) -> Result<(), String> {
+    run(lane, &["add", "-A"])?;
+    if run(lane, &["diff", "--cached", "--check"]).is_err() {
+        let _ = run(lane, &["rebase", "--abort"]);
+        return Err("Conflict markers are still in the files.".into());
+    }
+    let output = lane_git(lane)
+        .env("GIT_EDITOR", "true")
+        .args(["rebase", "--continue"])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let _ = run(lane, &["rebase", "--abort"]);
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(())
 }
 
 fn tail(bytes: &[u8]) -> String {
@@ -260,6 +313,48 @@ fn checked_out(lane: &Path, target: &str) -> bool {
     let wanted = format!("branch refs/heads/{target}");
     run(lane, &["worktree", "list", "--porcelain"])
         .is_ok_and(|list| list.lines().any(|line| line == wanted))
+}
+
+/// What the lane's `.git` file says. Recorded at creation and compared
+/// before every later git step, so an edited pointer is never followed.
+pub fn pointer(lane: &Path) -> Result<String, String> {
+    let meta = std::fs::symlink_metadata(lane.join(".git")).map_err(|error| error.to_string())?;
+    if !meta.is_file() || meta.len() > 4096 {
+        return Err("The lane's git pointer is not a plain file.".into());
+    }
+    std::fs::read_to_string(lane.join(".git")).map_err(|error| error.to_string())
+}
+
+/// The first link inside the lane that leads outside it, if any. A lane like
+/// that is refused: an agent confined to the lane could read through it.
+pub fn escaping_link(lane: &Path) -> Result<Option<PathBuf>, String> {
+    let root = lane.canonicalize().map_err(|error| error.to_string())?;
+    let mut stack = vec![root.clone()];
+    let mut seen = 0usize;
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            seen += 1;
+            if seen > 500_000 {
+                return Err("The project is too large to check for links.".into());
+            }
+            let path = entry.path();
+            if path.file_name().is_some_and(|name| name == ".git") && dir == root {
+                continue;
+            }
+            let kind = entry.file_type().map_err(|error| error.to_string())?;
+            if kind.is_symlink() {
+                match path.canonicalize() {
+                    Ok(target) if target.starts_with(&root) => {}
+                    // A dangling link is refused too: what it names may appear later.
+                    _ => return Ok(Some(path)),
+                }
+            } else if kind.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Where lanes for one checkout live.

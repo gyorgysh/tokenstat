@@ -189,3 +189,76 @@ fn without_a_remote_a_checked_out_target_is_not_moved() {
         Landing::Blocked { .. }
     ));
 }
+
+#[test]
+fn a_conflict_is_left_for_the_agent_and_lands_once_resolved() {
+    let f = fixture();
+    let (a, b) = (lane(&f, "a"), lane(&f, "b"));
+    std::fs::write(a.join("a.txt"), "one\nTWO from a\nthree\n").unwrap();
+    std::fs::write(b.join("a.txt"), "one\nTWO from b\nthree\n").unwrap();
+    commit_all(&a, "a").unwrap();
+    commit_all(&b, "b").unwrap();
+    assert!(matches!(
+        land(&a, "main", Some("origin"), &[]),
+        Landing::Landed { .. }
+    ));
+    assert_eq!(
+        start_rebase(&b, "main", Some("origin")).unwrap(),
+        vec!["a.txt".to_string()]
+    );
+    assert!(
+        std::fs::read_to_string(b.join("a.txt"))
+            .unwrap()
+            .contains("<<<<<<<")
+    );
+    // Markers left behind are refused, and the lane goes back to its own work.
+    assert!(finish_rebase(&b).is_err());
+    assert_eq!(
+        std::fs::read_to_string(b.join("a.txt")).unwrap(),
+        "one\nTWO from b\nthree\n"
+    );
+    // A resolved conflict finishes and lands on top of a.
+    start_rebase(&b, "main", Some("origin")).unwrap();
+    std::fs::write(b.join("a.txt"), "one\nTWO from a and b\nthree\n").unwrap();
+    finish_rebase(&b).unwrap();
+    assert!(matches!(
+        land(&b, "main", Some("origin"), &[]),
+        Landing::Landed { .. }
+    ));
+    assert_eq!(remote_file(&f, "a.txt"), "one\nTWO from a and b\nthree");
+}
+
+#[cfg(unix)]
+#[test]
+fn links_out_of_the_lane_are_found_and_hooks_never_run() {
+    let f = fixture();
+    let a = lane(&f, "a");
+    assert_eq!(escaping_link(&a).unwrap(), None);
+    std::os::unix::fs::symlink("a.txt", a.join("inside")).unwrap();
+    assert_eq!(escaping_link(&a).unwrap(), None);
+    std::os::unix::fs::symlink(&f.main, a.join("outside")).unwrap();
+    assert_eq!(
+        escaping_link(&a).unwrap(),
+        Some(a.canonicalize().unwrap().join("outside"))
+    );
+    std::fs::remove_file(a.join("outside")).unwrap();
+    // A hook in the shared git directory is not run by a lane commit.
+    let hooks = f.main.join(".git/hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    let marker = f.lanes.join("hook-ran");
+    std::fs::write(
+        hooks.join("pre-commit"),
+        format!("#!/bin/sh\ntouch {}\n", marker.display()),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(
+        hooks.join("pre-commit"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    std::fs::write(a.join("b.txt"), "changed\n").unwrap();
+    assert!(commit_all(&a, "Change").unwrap());
+    assert!(!marker.exists());
+    assert!(pointer(&a).unwrap().starts_with("gitdir: "));
+}

@@ -177,6 +177,8 @@ const LANE_TOOLS: [&str; 5] = [
     "mcp__tokenstat_team",
 ];
 
+const LANE_DENIED: [&str; 3] = ["Edit(./.git)", "Edit(./.git/**)", "Read(./.git/**)"];
+
 fn claude_args(config: &Path, lane: bool) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p",
@@ -201,6 +203,9 @@ fn claude_args(config: &Path, lane: bool) -> Vec<String> {
             "--allowedTools".into(),
         ]);
         args.extend(LANE_TOOLS.map(str::to_string));
+        // The git pointer and directory are tokenstat's, never the agent's.
+        args.push("--disallowedTools".into());
+        args.extend(LANE_DENIED.map(str::to_string));
     } else {
         // No built-in tools. Read, Grep and Glob accept paths outside the
         // checkout, and Bash reads anything.
@@ -331,8 +336,12 @@ mod tests {
                 .iter()
                 .any(|a| a.contains("Bash") || a.contains("skip-permissions"))
         );
-        let allowed = &program.args[at("--allowedTools")..];
+        let allowed = &program.args[at("--allowedTools")..at("--disallowedTools") - 1];
         assert_eq!(allowed, LANE_TOOLS.map(str::to_string));
+        assert_eq!(
+            &program.args[at("--disallowedTools")..],
+            LANE_DENIED.map(str::to_string)
+        );
         assert!(
             allowed
                 .iter()
