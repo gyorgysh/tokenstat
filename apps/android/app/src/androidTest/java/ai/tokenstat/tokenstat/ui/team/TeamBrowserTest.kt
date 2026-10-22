@@ -86,9 +86,13 @@ class TeamBrowserTest {
         compose.waitForIdle()
         val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
         val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: error("no screenshot")
-        java.io.File(instrumentation.targetContext.getExternalFilesDir(null), "$name.png").outputStream().use {
-            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
-        }
+        val resolver = instrumentation.targetContext.contentResolver
+        val image = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "$name.png")
+            put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/tokenstat-teams-qa")
+        }) ?: error("cannot save fictional screenshot")
+        resolver.openOutputStream(image)!!.use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
     }
 
 }

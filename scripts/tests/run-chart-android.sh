@@ -39,10 +39,18 @@ chart_pid=$!
 for chart_attempt in $(seq 1 120); do
   kill -0 "$chart_pid" || { cat target/chart-android-ci/emulator.log; exit 1; }
   if [ "$("$ANDROID_HOME/platform-tools/adb" -s "$chart_serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
-    ANDROID_SERIAL="$chart_serial" gradle -p apps/android connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=ai.tokenstat.tokenstat.ui.workspace.ChatChartTest,ai.tokenstat.tokenstat.ui.team.TeamCommentTest,ai.tokenstat.tokenstat.ui.team.TeamBrowserTest
-    "$ANDROID_HOME/platform-tools/adb" -s "$chart_serial" pull /sdcard/Android/data/ai.tokenstat.tokenstat/files/teams-comment-uncertain.png target/chart-android-ci/teams-comment-uncertain.png
-    "$ANDROID_HOME/platform-tools/adb" -s "$chart_serial" pull /sdcard/Android/data/ai.tokenstat.tokenstat/files/teams-browser-later-chat.png target/chart-android-ci/teams-browser-later-chat.png
-    "$ANDROID_HOME/platform-tools/adb" -s "$chart_serial" pull /sdcard/Android/data/ai.tokenstat.tokenstat/files/teams-browser-later-computer.png target/chart-android-ci/teams-browser-later-computer.png
+    for chart_suite in \
+      ai.tokenstat.tokenstat.ui.workspace.ChatChartTest \
+      ai.tokenstat.tokenstat.ui.team.TeamCommentTest \
+      ai.tokenstat.tokenstat.ui.team.TeamBrowserTest; do
+      ANDROID_SERIAL="$chart_serial" gradle -p apps/android connectedDebugAndroidTest "-Pandroid.testInstrumentationRunnerArguments.class=$chart_suite"
+      chart_reports="target/chart-android-ci/$chart_suite"
+      mkdir -p "$chart_reports"
+      cp -R apps/android/app/build/outputs/androidTest-results "$chart_reports/results"
+      cp -R apps/android/app/build/reports/androidTests "$chart_reports/reports"
+      python3 scripts/tests/check-android-native-results.py "$chart_reports/results" "$chart_suite"
+    done
+    "$ANDROID_HOME/platform-tools/adb" -s "$chart_serial" pull /sdcard/Pictures/tokenstat-teams-qa target/chart-android-ci/screenshots
     exit 0
   fi
   sleep 2

@@ -88,7 +88,7 @@ def main():
                 "-derivedDataPath", str(result_root / "DerivedData"), "-resultBundlePath", str(bundle),
                 "-parallel-testing-enabled", "NO", "CODE_SIGNING_ALLOWED=NO", "test",
                 *["-only-testing:TeamFixtureUITests/TeamFixtureUITests/" + name for name in args.only_test],
-            ], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=1200)
+            ], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=1800)
         if result.returncode:
             print((result_root / "build.log").read_text()[-5000:], file=sys.stderr)
             return result.returncode

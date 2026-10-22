@@ -62,7 +62,13 @@ class TeamCommentTest {
             assertEquals("Keep these literal words 🙂", restarted.load(target)?.text)
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             val screenshot = instrumentation.uiAutomation.takeScreenshot() ?: error("no screenshot")
-            File(context.getExternalFilesDir(null), "teams-comment-uncertain.png").outputStream().use { screenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            val resolver = context.contentResolver
+            val image = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "teams-comment-uncertain.png")
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/tokenstat-teams-qa")
+            }) ?: error("cannot save fictional screenshot")
+            resolver.openOutputStream(image)!!.use { screenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }
             // The checked receipt can settle a saved attempt without resending.
             val recovered = TeamCommentModel(restarted, target, "Fictional shared chat") { method, _ ->
                 assertEquals("teams.connection.call", method)

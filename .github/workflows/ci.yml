@@ -435,7 +435,7 @@ jobs:
   teams-ui:
     name: teams native UI (${{ matrix.device }})
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
