@@ -67,6 +67,8 @@ pub(crate) enum ReadMethod {
     ChatEvents,
     #[serde(rename = "team.chat.receipt")]
     ChatReceipt,
+    #[serde(rename = "team.lanes")]
+    Lanes,
 }
 impl ReadMethod {
     pub(crate) fn wire(self) -> &'static str {
@@ -77,6 +79,7 @@ impl ReadMethod {
             Self::ChatDetails => "team.chat.details",
             Self::ChatEvents => "team.chat.events",
             Self::ChatReceipt => "team.chat.receipt",
+            Self::Lanes => "team.lanes",
         }
     }
 }
@@ -105,7 +108,7 @@ impl ReadParams {
             return false;
         }
         match method {
-            ReadMethod::Protocol | ReadMethod::CheckoutInfo => {
+            ReadMethod::Protocol | ReadMethod::CheckoutInfo | ReadMethod::Lanes => {
                 self.cursor.is_none() && self.limit.is_none() && self.direction.is_none()
             }
             ReadMethod::ChatCatalog => {

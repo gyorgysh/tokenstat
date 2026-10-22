@@ -134,14 +134,28 @@ impl Drop for Lane {
     fn drop(&mut self) {
         if !self.keep {
             let _ = lane::remove(&self.repository, &self.path, &self.branch);
+            let _ = fs::remove_file(self.path.with_extension("json"));
         }
     }
+}
+
+/// What a lane is for, written beside it so members can see who is doing
+/// what. Local to this computer; it travels only over the Team channel.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct About {
+    branch: String,
+    ask: String,
+    asked_by: Value,
+    started_at_ms: i64,
 }
 
 pub(super) fn open(
     repository: &Path,
     checkout: &str,
     settings: &Settings,
+    ask: &str,
+    asked_by: Value,
 ) -> Result<Lane, DispatchError> {
     let failed = |_| {
         DispatchError::new(
@@ -181,7 +195,72 @@ pub(super) fn open(
             "This project has a link that leads outside it, so an agent cannot work in it safely.",
         ));
     }
+    let about = About {
+        branch: opened.branch.clone(),
+        ask: ask
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(200)
+            .collect(),
+        asked_by,
+        started_at_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or_default(),
+    };
+    fs::write(
+        opened.path.with_extension("json"),
+        serde_json::to_vec(&about).map_err(|_| unavailable())?,
+    )
+    .map_err(|_| unavailable())?;
     Ok(opened)
+}
+
+/// Lanes for one checkout on this computer: who asked for what, which files
+/// each has changed so far, and which lanes touch the same files. A lane is
+/// running while an agent holds it, and kept when its work could not land.
+pub(super) fn list(checkout: &str) -> Result<Value, DispatchError> {
+    let parent = lane::root(
+        &tokenstat_paths::data_dir().ok_or_else(unavailable)?,
+        checkout,
+    );
+    let mut lanes = Vec::new();
+    if let Ok(entries) = fs::read_dir(&parent) {
+        for entry in entries.flatten().take(64) {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(about) = fs::read(path.with_extension("json"))
+                .ok()
+                .filter(|bytes| bytes.len() <= 16 * 1024)
+                .and_then(|bytes| serde_json::from_slice::<About>(&bytes).ok())
+            else {
+                continue;
+            };
+            let running = tokenstat_workspace::writer::Lease::acquire_lane(&path).is_err();
+            let files = lane::changed_files(&path).unwrap_or_default();
+            lanes.push((about, running, files));
+        }
+    }
+    lanes.sort_by_key(|(about, _, _)| about.started_at_ms);
+    let rows: Vec<Value> = lanes
+        .iter()
+        .map(|(about, running, files)| {
+            let overlaps: Vec<&str> = lanes
+                .iter()
+                .filter(|(other, _, theirs)| {
+                    other.branch != about.branch && theirs.iter().any(|file| files.contains(file))
+                })
+                .map(|(other, _, _)| other.branch.as_str())
+                .collect();
+            json!({"branch":about.branch,"ask":about.ask,"askedBy":about.asked_by,"startedAtMs":about.started_at_ms,
+                "state": if *running { "running" } else { "kept" },"files":files,"overlaps":overlaps})
+        })
+        .collect();
+    Ok(json!({"lanes": rows}))
 }
 
 /// Commit, check and land one finished lane. One landing at a time per

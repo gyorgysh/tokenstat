@@ -95,6 +95,19 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                 "Open this chat on its publishing computer.",
             ));
         }
+        if operation == TeamReadMethod::Lanes {
+            #[cfg(feature = "local-host")]
+            {
+                let result = super::lanes::list(&scope.checkout_id)?;
+                principal.ensure_live()?;
+                return Ok(result);
+            }
+            #[cfg(not(feature = "local-host"))]
+            return Err(DispatchError::new(
+                "host_required",
+                "Open this checkout on its publishing computer.",
+            ));
+        }
         if operation == TeamReadMethod::ChatCatalog {
             #[cfg(feature = "local-host")]
             return super::catalog::call(&principal, &body);
@@ -155,7 +168,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         }
         Ok(
             json!({"version":1,"protocolVersion":crate::PROTOCOL_VERSION,"issuer":principal.issuer(),"organizationId":scope.organization_id,"repositoryId":scope.repository_id,"checkoutId":scope.checkout_id,"checkoutInfo":cfg!(feature="local-host"),
-            "sharedChats":cfg!(feature="local-host"),"chatCatalog":cfg!(feature="local-host"),"comments":cfg!(feature="local-host"),"agentRuns":super::agent_runs_ready()}),
+            "sharedChats":cfg!(feature="local-host"),"chatCatalog":cfg!(feature="local-host"),"comments":cfg!(feature="local-host"),"agentRuns":super::agent_runs_ready(),"lanes":cfg!(feature="local-host")}),
         )
     })())
 }

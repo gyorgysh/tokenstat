@@ -362,6 +362,21 @@ pub fn escaping_link(lane: &Path) -> Result<Option<PathBuf>, String> {
     Ok(None)
 }
 
+/// Files the lane changed since it was cut, committed or not. Read only.
+pub fn changed_files(lane: &Path) -> Result<Vec<String>, String> {
+    let base = run(lane, &["merge-base", "HEAD", "@{upstream}"])
+        .or_else(|_| run(lane, &["rev-parse", "HEAD"]))?;
+    let mut files: Vec<String> = run(lane, &["diff", "--name-only", &base])?
+        .lines()
+        .chain(run(lane, &["ls-files", "--others", "--exclude-standard"])?.lines())
+        .take(500)
+        .map(str::to_string)
+        .collect();
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
 /// What happened when a person's own checkout tried to catch up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CatchUp {

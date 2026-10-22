@@ -17,6 +17,7 @@ struct TeamRepositoryRow: View {
     @State private var more = false
     @State private var localIds: Set<String> = []
     @State private var loaded = false
+    @State private var lanes: [String: [TeamLane]] = [:]
 
     private var canManage: Bool { organization.role.canManage || repository.role == .maintainer }
 
@@ -40,6 +41,13 @@ struct TeamRepositoryRow: View {
                         }
                     }
                     if more { Text(L10n.text("common.teams.more_computers")).font(Theme.caption).foregroundStyle(.secondary) }
+                }
+                let work = checkouts.flatMap { lanes[$0.id] ?? [] }
+                if !work.isEmpty {
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        Text(L10n.text("common.teams.work_in_progress")).font(Theme.callout.weight(.semibold))
+                        ForEach(work, id: \.branch) { lane in laneRow(lane, all: work) }
+                    }
                 }
             }
             ViewThatFits(in: .horizontal) {
@@ -67,6 +75,31 @@ struct TeamRepositoryRow: View {
         }
     }
 
+    private func laneRow(_ lane: TeamLane, all: [TeamLane]) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.s) {
+                if lane.state == "running" {
+                    ProgressView().controlSize(.mini).accessibilityHidden(true)
+                } else {
+                    Image(systemName: "pause.circle").foregroundStyle(.secondary).accessibilityHidden(true)
+                }
+                Text(lane.ask.isEmpty ? lane.branch : lane.ask).font(Theme.body).lineLimit(2)
+            }
+            Text(lane.state == "running"
+                ? L10n.text("common.teams.lane_running", lane.askedBy.name, String(lane.files.count))
+                : L10n.text("common.teams.lane_kept", lane.askedBy.name, String(lane.files.count)))
+                .font(Theme.caption).foregroundStyle(.secondary)
+            let overlapping = all.filter { lane.overlaps.contains($0.branch) }.map { $0.ask.isEmpty ? $0.branch : $0.ask }
+            if !overlapping.isEmpty {
+                Label(L10n.text("common.teams.lane_overlap", overlapping.joined(separator: ", ")), systemImage: "exclamationmark.triangle")
+                    .font(Theme.caption).foregroundStyle(TeamColors.warning)
+            }
+        }
+        .padding(Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.controlSeat, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private func source(_ checkout: TeamCheckout) -> String {
         let computer = checkout.deviceName ?? L10n.text("common.teams.computer")
         guard let person = checkout.publisher?.name else { return computer }
@@ -89,5 +122,20 @@ struct TeamRepositoryRow: View {
             }
         } catch {}
         loaded = true
+        // Each computer answers for its own lanes. One that is offline just
+        // shows nothing; it is not an error on this screen.
+        for checkout in checkouts.prefix(3) {
+            let target: JSONValue = .object(["organization": .string(repository.organizationId), "repository": .string(repository.id), "checkout": .string(checkout.id)])
+            if let result: TeamLanes = try? await store.read(.connectionCall, fields: ["target": target, "method": .string("team.lanes"), "params": .object([:])], context: context) {
+                lanes[checkout.id] = result.lanes
+            }
+        }
     }
 }
+
+struct TeamLane: Codable, Sendable, Hashable {
+    struct Person: Codable, Sendable, Hashable { let id: String; let name: String }
+    let branch: String; let ask: String; let askedBy: Person; let startedAtMs: Int64
+    let state: String; let files: [String]; let overlaps: [String]
+}
+struct TeamLanes: Codable, Sendable { let lanes: [TeamLane] }

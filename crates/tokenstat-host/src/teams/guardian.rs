@@ -195,6 +195,8 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             &source.checkout.folder.canonical,
             &principal.value().checkout_id,
             settings,
+            &input.text,
+            json!({"id": principal.value().person.id, "name": principal.value().person.name}),
         )?),
         None => None,
     };

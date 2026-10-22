@@ -140,7 +140,8 @@ fn main() {
     fs::write(&state, format!("{} {}", std::process::id(), child.id())).unwrap();
     if mode == "edit" {
         // A lane agent's whole job: change a file in its own folder.
-        fs::write("lane-edit.txt", "Fictional lane change\n").unwrap();
+        let file = args.get(4).map_or("lane-edit.txt", String::as_str);
+        fs::write(file, "Fictional lane change\n").unwrap();
     }
     if mode == "conflict" {
         // A teammate lands a change to the same line while this agent works.
