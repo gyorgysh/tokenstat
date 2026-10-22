@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.team
 
 import ai.tokenstat.tokenstat.core.CoreClient
+import ai.tokenstat.tokenstat.core.CoreFailure
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
@@ -457,6 +458,7 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Uni
     // message, so the host keeps one copy.
     var commentAttempt by remember(chat) { mutableStateOf<CommentAttempt?>(null) }
     var ask by remember(chat) { mutableStateOf("") }
+    var askAttempt by remember(chat) { mutableStateOf<JsonObject?>(null) }
     var fence by remember(chat) { mutableStateOf<JsonElement?>(null) }
     var error by remember(chat) { mutableStateOf<String?>(null) }
     var busy by remember(chat) { mutableStateOf(false) }
@@ -559,27 +561,32 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Uni
                     scope.launch { runCatching { askCall("team.chat.ask.stop", buildJsonObject { put("fence", running) }) } }
                 })
             } else {
-                OutlinedTextField(ask, { ask = it }, Modifier.fillMaxWidth(), placeholder = { Text(L10n.text("common.teams.ask_placeholder")) })
+                OutlinedTextField(ask, { ask = it }, Modifier.fillMaxWidth(), enabled = !busy && askAttempt == null,
+                    placeholder = { Text(L10n.text("common.teams.ask_placeholder")) })
                 TsAccentButton(L10n.text("common.teams.ask"), enabled = ask.isNotBlank() && !busy, icon = ActionIcon.Run.vector, onClick = {
                     scope.launch {
                         busy = true
                         try {
-                            val review = askCall("team.chat.ask.review", buildJsonObject {})
-                            if (!review.bool("agentRuns")) {
-                                error = L10n.text("common.teams.agent_runs_off", chat.computer)
-                            } else {
-                                val sent = askCall("team.chat.ask", buildJsonObject {
+                            if (askAttempt == null) {
+                                val review = askCall("team.chat.ask.review", buildJsonObject {})
+                                if (!review.bool("agentRuns")) {
+                                    error = L10n.text("common.teams.agent_runs_off", chat.computer)
+                                    return@launch
+                                }
+                                askAttempt = buildJsonObject {
                                     put("text", ask.trim()); put("review", review.str("review") ?: "")
                                     put("clientMessageId", UUID.randomUUID().toString())
                                     put("clientMessageCreatedAtMs", System.currentTimeMillis())
-                                })
-                                ask = ""
-                                if (sent.str("state") == "running") fence = sent["fence"]
-                                load()
+                                }
                             }
+                            val sent = askCall("team.chat.ask", askAttempt ?: return@launch)
+                            ask = ""; askAttempt = null
+                            if (sent.str("state") == "running") fence = sent["fence"]
+                            load()
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (failure: Throwable) {
+                            if (failure is CoreFailure && failure.code in setOf("team_run_review_changed", "invalid_ask")) askAttempt = null
                             error = failure.message
                         } finally {
                             busy = false

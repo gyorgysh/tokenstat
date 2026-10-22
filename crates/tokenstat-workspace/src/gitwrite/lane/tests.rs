@@ -267,6 +267,102 @@ fn links_out_of_the_lane_are_found_and_hooks_never_run() {
 }
 
 #[test]
+fn git_errors_do_not_copy_private_remote_details_into_shared_results() {
+    let f = fixture();
+    let remote = f.lanes.join("fixture-private-credential/missing");
+    git(
+        &f.main,
+        &["remote", "set-url", "origin", remote.to_str().unwrap()],
+    );
+    let message = fetch(&f.main, "origin", "main").unwrap_err();
+    assert_eq!(message, "Git could not complete fetch.");
+    assert!(!message.contains("fixture-private-credential"));
+}
+
+#[test]
+fn committed_changes_stay_visible_without_an_upstream() {
+    let f = fixture();
+    git(&f.main, &["config", "branch.autoSetupMerge", "false"]);
+    let a = lane(&f, "a");
+    std::fs::write(a.join("a.txt"), "ready for review\n").unwrap();
+    commit_all(&a, "Reviewed change").unwrap();
+    assert_eq!(
+        changed_files(&a, Some("origin/main")).unwrap(),
+        vec!["a.txt"]
+    );
+}
+
+#[test]
+fn permission_is_checked_again_after_the_check_and_before_the_target_moves() {
+    for remote in [None, Some("origin")] {
+        let f = fixture();
+        let a = lane(&f, "a");
+        std::fs::write(a.join("a.txt"), "must not land\n").unwrap();
+        commit_all(&a, "A checked change").unwrap();
+        let mut allowed = true;
+        let outcome = land_controlled(&a, "main", remote, &[], true, &mut |step| match step {
+            Control::Guard if allowed => Ok(()),
+            Control::Guard => Err("Permission ended during the check.".into()),
+            Control::Check(_, _) => {
+                allowed = false;
+                Ok(())
+            }
+        });
+        assert!(matches!(outcome, Landing::Blocked { .. }));
+        assert_eq!(remote_file(&f, "a.txt"), "one\ntwo\nthree");
+        assert_eq!(git(&f.main, &["show", "main:a.txt"]), "one\ntwo\nthree");
+    }
+}
+
+#[test]
+fn catch_up_preserves_untracked_and_ignored_files() {
+    let f = fixture();
+    git(&f.main, &["config", "core.excludesFile", "/dev/null"]);
+    std::fs::write(f.main.join(".git/info/exclude"), "ignored.txt\n").unwrap();
+    let a = lane(&f, "a");
+    std::fs::write(a.join("ignored.txt"), "landed\n").unwrap();
+    git(&a, &["add", "-f", "ignored.txt"]);
+    commit_all(&a, "Add a new file").unwrap();
+    assert!(matches!(
+        land(&a, "main", Some("origin"), &[]),
+        Landing::Landed { .. }
+    ));
+    std::fs::write(f.main.join("untracked.txt"), "unsaved\n").unwrap();
+    assert_eq!(catch_up(&f.main, "main", "origin"), CatchUp::Dirty);
+    assert_eq!(
+        std::fs::read_to_string(f.main.join("untracked.txt")).unwrap(),
+        "unsaved\n"
+    );
+    std::fs::remove_file(f.main.join("untracked.txt")).unwrap();
+    std::fs::write(f.main.join("ignored.txt"), "private unsaved\n").unwrap();
+    assert!(matches!(
+        catch_up(&f.main, "main", "origin"),
+        CatchUp::Failed(_)
+    ));
+    assert_eq!(
+        std::fs::read_to_string(f.main.join("ignored.txt")).unwrap(),
+        "private unsaved\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_large_check_log_returns_only_its_tail() {
+    let f = fixture();
+    let a = lane(&f, "a");
+    let command = [
+        "/bin/sh".into(),
+        "-c".into(),
+        "dd if=/dev/zero bs=1048576 count=8 2>/dev/null; printf 'final failure'; exit 1".into(),
+    ];
+    let output = check(&a, &command).unwrap_err();
+    assert!(output.len() <= OUTPUT_TAIL);
+    assert!(output.ends_with("final failure"));
+    let private = git(&a, &["rev-parse", "--absolute-git-dir"]);
+    assert!(!Path::new(&private).join("tokenstat-check.log").exists());
+}
+
+#[test]
 fn a_teammates_landing_reaches_a_clean_checkout_and_leaves_others_alone() {
     let f = fixture();
     let a = lane(&f, "a");

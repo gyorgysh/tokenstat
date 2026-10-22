@@ -32,6 +32,9 @@ struct Run {
 /// Where a run belongs. Stop is checked against all of it.
 #[derive(Clone, PartialEq, Eq)]
 struct Scope {
+    issuer: String,
+    publisher: String,
+    host: String,
     organization: String,
     repository: String,
     checkout: String,
@@ -42,6 +45,9 @@ impl Scope {
     fn of(principal: &AuthorizedTeamPrincipal) -> Self {
         let value = principal.value();
         Self {
+            issuer: principal.issuer().into(),
+            publisher: value.publisher_id.clone(),
+            host: value.host_key.clone(),
             organization: value.organization_id.clone(),
             repository: value.repository_id.clone(),
             checkout: value.checkout_id.clone(),
@@ -103,12 +109,15 @@ fn follow(id: Option<String>, mut child: Child, mut output: BufReader<ChildStdou
                 break;
             }
         }
+        // A finished frame can precede the guardian's final drops. Keep the
+        // run visible until it exits, so a subsequent Ask/Land cannot race
+        // its writer cleanup.
+        let _ = child.wait();
         if let Some(id) = &key
             && let Some(table) = runs().as_mut()
         {
             table.remove(id);
         }
-        let _ = child.wait();
     };
     let spawned = std::thread::Builder::new()
         .name("team-run-follow".into())
@@ -151,6 +160,18 @@ pub(super) fn is_running(fence: &Fence) -> bool {
         .as_ref()
         .and_then(|table| table.get(fence.run_id()))
         .is_some_and(|run| &run.fence == fence)
+}
+
+/// A retry can recover control of its own still-running Ask after losing the
+/// first reply. The canonical receipt was verified before this lookup.
+pub(super) fn resume(principal: &AuthorizedTeamPrincipal, receipt: &Value) -> Option<Value> {
+    let id = receipt.get("receipt")?.get("runId")?.as_str()?;
+    let guard = runs();
+    let run = guard.as_ref()?.get(id)?;
+    if run.scope != Scope::of(principal) || run.initiator != principal.value().person.id {
+        return None;
+    }
+    Some(json!({"state":"running","runId":id,"fence":run.fence,"receipt":receipt["receipt"]}))
 }
 
 /// Whether a run is still going here. Anyone in the run's scope may ask,
@@ -263,6 +284,16 @@ mod tests {
         ));
         let elsewhere = principal("lead", "maintainer", &format!("share_{}", "b".repeat(32)));
         assert!(!may_stop(&elsewhere, &scope, "asker"));
+        let maintainer = principal("lead", "maintainer", &format!("share_{}", "a".repeat(32)));
+        for changed in ["issuer", "publisher", "host"] {
+            let mut other = scope.clone();
+            match changed {
+                "issuer" => other.issuer = "https://other.example.test".into(),
+                "publisher" => other.publisher = "other-publisher".into(),
+                _ => other.host = "e".repeat(64),
+            }
+            assert!(!may_stop(&maintainer, &other, "asker"));
+        }
     }
 
     #[test]

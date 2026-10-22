@@ -24,10 +24,12 @@ def output(*arguments):
                 raise
 
 
-def selection():
+def selection(family="iphone"):
     runtimes = json.loads(output("xcrun", "simctl", "list", "runtimes", "--json"))["runtimes"]
     types = json.loads(output("xcrun", "simctl", "list", "devicetypes", "--json"))["devicetypes"]
-    preferred = ["iPhone 17 Pro", "iPhone 16 Pro", "iPhone 15 Pro", "iPhone 14 Pro"]
+    preferred = (["iPhone 17 Pro", "iPhone 16 Pro", "iPhone 15 Pro", "iPhone 14 Pro"] if family == "iphone"
+                 else ["iPad Pro 13-inch (M5)", "iPad Pro 13-inch (M4)", "iPad Air 13-inch (M3)"])
+    prefix = "iPhone " if family == "iphone" else "iPad "
     choices = []
     for runtime in runtimes:
         version = tuple(int(part) for part in runtime["version"].split("."))
@@ -36,7 +38,7 @@ def selection():
         supported = {item["identifier"] for item in runtime.get("supportedDeviceTypes", [])}
         encoded_version = sum(part << shift for part, shift in zip((version + (0, 0))[:3], (16, 8, 0)))
         for device in types:
-            if not device["name"].startswith("iPhone "):
+            if not device["name"].startswith(prefix):
                 continue
             if supported:
                 if device["identifier"] not in supported:
@@ -46,7 +48,7 @@ def selection():
             rank = preferred.index(device["name"]) if device["name"] in preferred else len(preferred)
             choices.append(((rank, tuple(-part for part in version), device["name"]), runtime, device))
     if not choices:
-        raise RuntimeError("No installed, compatible iPhone runtime supports the Teams fixture (iOS 17 or later).")
+        raise RuntimeError(f"No installed, compatible {family} runtime supports the Teams fixture (iOS 17 or later).")
     _, runtime, device = min(choices, key=lambda choice: choice[0])
     return {"runtime": runtime["identifier"], "version": runtime["version"], "type": device["identifier"], "name": device["name"]}
 
@@ -54,11 +56,12 @@ def selection():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--select-only", action="store_true", help="Report a compatible installed runtime without creating or changing a device.")
+    parser.add_argument("--device-family", choices=["iphone", "ipad"], default="iphone", help="Run the same production Teams views on a phone or tablet.")
     parser.add_argument("--only-test", action="append", default=[], help="Run a named XCTest method for a focused local check; omit for the full CI suite.")
     args = parser.parse_args()
     if len(set(args.only_test)) != len(args.only_test) or any(not name.startswith("test") or not name.isalnum() for name in args.only_test):
         parser.error("Use distinct XCTest method names beginning with test.")
-    selected = selection()
+    selected = selection(args.device_family)
     if args.select_only:
         print(json.dumps(selected))
         return 0
@@ -91,7 +94,7 @@ def main():
             return result.returncode
         summary = json.loads(output("xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(bundle), "--compact"))
         (result_root / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-        required = len(args.only_test) if args.only_test else 15
+        required = len(args.only_test) if args.only_test else 16
         if summary.get("result") != "Passed" or summary.get("passedTests", 0) < required or summary.get("skippedTests", 0):
             raise RuntimeError("Teams UI checks did not run and pass every required scenario.")
         print(f"Teams UI: {summary['passedTests']} passed. Results: {bundle}")

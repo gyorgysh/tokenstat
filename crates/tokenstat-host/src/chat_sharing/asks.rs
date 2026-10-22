@@ -748,6 +748,7 @@ impl Store {
         id: &str,
         fence: &runs::Fence,
         started_proven_gone: bool,
+        release_writer: impl FnOnce() -> Result<(), DispatchError>,
     ) -> Result<runs::State, DispatchError> {
         self.source_locked(workspace, id, false, |mut index, chat, bytes| {
             if chat.team_run_fence.as_ref() != Some(fence) {
@@ -759,6 +760,9 @@ impl Store {
                 .recover_unresolved_run(fence, started_proven_gone, now_ms())
                 .map_err(|_| changed())?;
             writer::save(&directory.join(writer::JOURNAL), &journal)?;
+            // Keep the chat fenced until both durable cleanup steps succeed.
+            // Retrying a terminal journal is safe after a failed claim write.
+            release_writer()?;
             index
                 .conversations
                 .iter_mut()

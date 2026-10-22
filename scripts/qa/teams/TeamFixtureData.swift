@@ -2,7 +2,7 @@
 import Foundation
 
 enum TeamFixtureData {
-    enum State: String { case ready, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer, draftOffline }
+    enum State: String { case ready, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer, draftOffline, askUncertain }
     static let state: State = {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--fixture-state"), args.indices.contains(index + 1) else { return .ready }
@@ -39,7 +39,7 @@ enum TeamFixtureData {
                 return .object(["shares":.array([.object(["id":.string("share_"+String(repeating:"a",count:32)),"checkoutId":checkout,"revision":.int(1),"createdAt":.string(timestamp),"title":.string("Quarterly totals"),"backend":.string("codex")])]),"nextCursor":.null])
             }
             if case let .string(method)? = fields["method"], let share = target["share"] {
-                if method == "team.chat.details" { return .object(["chat":.object(["id":share,"checkoutId":checkout,"title":.string("Quarterly totals"),"backend":.string("codex"),"historyTrimmed":.bool(false),"allowsAgentRuns":.bool(false),"allowsComments":.bool(state == .comment || state == .commentUncertain)])]) }
+                if method == "team.chat.details" { return .object(["chat":.object(["id":share,"checkoutId":checkout,"title":.string("Quarterly totals"),"backend":.string("codex"),"historyTrimmed":.bool(false),"allowsAgentRuns":.bool(state == .askUncertain),"allowsComments":.bool(state == .comment || state == .commentUncertain)])]) }
                 if method == "team.chat.events" { return .object(["shareId":share,"events":.array(chatEvents + (await TeamFixtureComments.shared.events())),"nextCursor":.null,"firstCursor":.null,"lastCursor":.null,"hasMore":.bool(false),"historyTrimmed":.bool(false),"asOfMs":.int(1792500000000)]) }
                 if method == "team.chat.receipt" { return await TeamFixtureComments.shared.receipt(params) }
             }
@@ -51,7 +51,10 @@ enum TeamFixtureData {
         case .commentSend:
             guard state == .comment || state == .commentUncertain else { throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.") }
             return try await TeamFixtureComments.shared.send(params, uncertain: state == .commentUncertain)
-        case .checkoutPublish, .checkoutWithdraw, .ask, .lanesSet, .lanesCatchUp: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
+        case .ask:
+            guard state == .askUncertain else { throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.") }
+            return try await TeamFixtureAsks.shared.call(params)
+        case .checkoutPublish, .checkoutWithdraw, .lanesSet, .lanesCatchUp: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
         case .lanesGet: return .object(["settings": .null])
         case .directory:
             if await TeamFixtureComments.shared.accessRemoved { throw TeamRequestFailure(code: "forbidden", message: "Access to this fictional repository was removed.") }

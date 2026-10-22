@@ -16,6 +16,9 @@ struct TeamAskBar: View {
     @State private var stopping = false
     @State private var error: String?
     @State private var watcher: Task<Void, Never>?
+    // Keep the exact reviewed request until its reply is known. A fresh
+    // review or id after a lost reply could pay for the same work twice.
+    @State private var attempt: [String: JSONValue]?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -35,10 +38,10 @@ struct TeamAskBar: View {
                         .font(Theme.body).textFieldStyle(.plain).lineLimit(1...4)
                         .padding(Theme.Space.m).background(Theme.controlSeat, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
-                        .disabled(busy).accessibilityIdentifier("team.ask.text")
+                        .disabled(busy || attempt != nil).accessibilityIdentifier("team.ask.text")
                     Button(L10n.text("common.teams.ask"), .run) { Task { await ask() } }
                         .buttonStyle(TeamButtonStyle(primary: true))
-                        .disabled(busy || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.utf16.count > 8000)
+                        .disabled(busy || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.utf8.count > 8192)
                         .accessibilityIdentifier("team.ask.send")
                 }
                 Text(L10n.text("common.teams.ask_detail", computer)).font(Theme.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -59,17 +62,25 @@ struct TeamAskBar: View {
         busy = true; error = nil
         defer { busy = false }
         do {
-            let review: TeamAskReview = try await call("team.chat.ask.review", [:])
-            if !review.agentRuns { error = L10n.text("common.teams.agent_runs_off", computer); return }
-            let sent: TeamAskStarted = try await call("team.chat.ask", [
-                "text": .string(question), "review": .string(review.review),
-                "clientMessageId": .string(UUID().uuidString.lowercased()),
-                "clientMessageCreatedAtMs": .int(Int64(Date().timeIntervalSince1970 * 1000)),
-            ])
+            if attempt == nil {
+                let review: TeamAskReview = try await call("team.chat.ask.review", [:])
+                if !review.agentRuns { error = L10n.text("common.teams.agent_runs_off", computer); return }
+                attempt = [
+                    "text": .string(question), "review": .string(review.review),
+                    "clientMessageId": .string(UUID().uuidString.lowercased()),
+                    "clientMessageCreatedAtMs": .int(Int64(Date().timeIntervalSince1970 * 1000)),
+                ]
+            }
+            guard let attempt else { return }
+            let sent: TeamAskStarted = try await call("team.chat.ask", attempt)
+            self.attempt = nil
             text = ""
             refresh()
             if sent.state == "running", let running = sent.fence { fence = running; watch(running) }
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        } catch is CancellationError {} catch {
+            if let failure = error as? TeamRequestFailure, ["team_run_review_changed", "invalid_ask"].contains(failure.code) { attempt = nil }
+            self.error = error.localizedDescription
+        }
     }
 
     private func watch(_ running: JSONValue) {

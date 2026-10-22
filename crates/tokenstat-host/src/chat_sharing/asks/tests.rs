@@ -122,6 +122,43 @@ fn failed(value: Result<AskPreparation, DispatchError>) -> DispatchError {
 }
 
 #[test]
+fn interrupted_recovery_keeps_the_chat_fenced_and_can_finish_after_restart() {
+    let f = Fixture::new();
+    let actor = principal("fixture-person", 'a', 'b');
+    let input = f.input(&actor, "ask-recovery");
+    let mut owned = new(f.prepare(&actor, &input).unwrap());
+    owned.claim_writer().unwrap();
+    let fence = owned.binding.fence.clone();
+    drop(owned);
+    let error = f
+        .store
+        .recover_orphaned_run(&f.chat.workspace_id, &f.chat.id, &fence, false, || {
+            Err(DispatchError::new("fixture_claim_write_failed", "fixture"))
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "fixture_claim_write_failed");
+    assert_eq!(f.chat().team_run_fence, Some(fence.clone()));
+    assert!(tokenstat_workspace::writer::Lease::acquire(&f.folder).is_err());
+    let store = Store::load_at(f.store.root.clone());
+    assert_eq!(
+        store
+            .recover_orphaned_run(&f.chat.workspace_id, &f.chat.id, &fence, false, || {
+                tokenstat_workspace::writer::clear_orphaned_run(fence.incarnation())
+                    .map_err(|_| unavailable())
+            },)
+            .unwrap(),
+        runs::State::NotStarted
+    );
+    assert!(f.chat().team_run_fence.is_none());
+    assert!(tokenstat_workspace::writer::Lease::acquire(&f.folder).is_ok());
+    assert_eq!(
+        existing(f.prepare(&actor, &input).unwrap())["receipt"]["state"],
+        "notStarted"
+    );
+    assert_eq!(f.history().events.len(), 1);
+}
+
+#[test]
 fn an_ask_has_one_canonical_author_and_retry_keeps_original_device_grant_and_fences() {
     let f = Fixture::new();
     let actor = principal("fixture-person", 'a', 'b');

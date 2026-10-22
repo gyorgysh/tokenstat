@@ -11,7 +11,7 @@
 use super::git_command;
 use std::{
     fs::OpenOptions,
-    io::Read,
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
@@ -48,6 +48,13 @@ pub enum Landing {
     },
 }
 
+/// The host revalidates permission at each effect, and owns the process tree
+/// for checks. Keeping that control here also covers a retried push.
+pub enum Control<'a> {
+    Guard,
+    Check(&'a Path, &'a [String]),
+}
+
 /// Every lane git command runs with hooks and fsmonitor off. A lane holds
 /// files an agent wrote, and neither may make git run them.
 fn lane_git(dir: &Path) -> Command {
@@ -70,7 +77,12 @@ fn run(dir: &Path, args: &[&str]) -> Result<String, String> {
     if output.status.success() {
         Ok(text)
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        // These errors can appear in a shared chat. Git's stderr may contain
+        // an owner's credential-bearing remote URL or local configuration.
+        Err(format!(
+            "Git could not complete {}.",
+            args.first().copied().unwrap_or("the operation")
+        ))
     }
 }
 
@@ -219,7 +231,7 @@ pub fn finish_rebase(lane: &Path) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
         let _ = run(lane, &["rebase", "--abort"]);
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err("The rebase could not finish.".into());
     }
     Ok(())
 }
@@ -265,7 +277,11 @@ fn check(lane: &Path, command: &[String]) -> Result<(), String> {
         }
     };
     let mut output = Vec::new();
-    let _ = std::fs::File::open(&log).and_then(|mut file| file.read_to_end(&mut output));
+    let _ = std::fs::File::open(&log).and_then(|mut file| {
+        let length = file.metadata()?.len();
+        file.seek(SeekFrom::Start(length.saturating_sub(OUTPUT_TAIL as u64)))?;
+        file.take(OUTPUT_TAIL as u64).read_to_end(&mut output)
+    });
     let _ = std::fs::remove_file(&log);
     match status {
         Some(status) if status.success() => Ok(()),
@@ -304,7 +320,31 @@ fn land_with(
     check_command: &[String],
     push: bool,
 ) -> Landing {
+    land_controlled(
+        lane,
+        target,
+        remote,
+        check_command,
+        push,
+        &mut |step| match step {
+            Control::Guard => Ok(()),
+            Control::Check(lane, command) => check(lane, command),
+        },
+    )
+}
+
+pub fn land_controlled(
+    lane: &Path,
+    target: &str,
+    remote: Option<&str>,
+    check_command: &[String],
+    push: bool,
+    control: &mut impl FnMut(Control<'_>) -> Result<(), String>,
+) -> Landing {
     for _ in 0..PUSH_ATTEMPTS {
+        if let Err(message) = control(Control::Guard) {
+            return Landing::Blocked { message };
+        }
         match refresh(lane, target, remote) {
             Landing::Nothing => {}
             other => return other,
@@ -315,8 +355,11 @@ fn land_with(
         if ahead == "0" {
             return Landing::Nothing;
         }
-        if let Err(output) = check(lane, check_command) {
+        if let Err(output) = control(Control::Check(lane, check_command)) {
             return Landing::CheckFailed { output };
+        }
+        if let Err(message) = control(Control::Guard) {
+            return Landing::Blocked { message };
         }
         let commit = match run(lane, &["rev-parse", "HEAD"]) {
             Ok(commit) => commit,
@@ -407,9 +450,12 @@ pub fn escaping_link(lane: &Path) -> Result<Option<PathBuf>, String> {
 }
 
 /// Files the lane changed since it was cut, committed or not. Read only.
-pub fn changed_files(lane: &Path) -> Result<Vec<String>, String> {
-    let base = run(lane, &["merge-base", "HEAD", "@{upstream}"])
-        .or_else(|_| run(lane, &["rev-parse", "HEAD"]))?;
+pub fn changed_files(lane: &Path, target: Option<&str>) -> Result<Vec<String>, String> {
+    let base = run(
+        lane,
+        &["merge-base", "HEAD", target.unwrap_or("@{upstream}")],
+    )
+    .or_else(|_| run(lane, &["rev-parse", "HEAD"]))?;
     let mut files: Vec<String> = run(lane, &["diff", "--name-only", &base])?
         .lines()
         .chain(run(lane, &["ls-files", "--others", "--exclude-standard"])?.lines())
@@ -450,7 +496,7 @@ pub fn catch_up(dir: &Path, target: &str, remote: &str) -> CatchUp {
     if run(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap_or_default() != target {
         return CatchUp::OtherBranch;
     }
-    if !run(dir, &["status", "--porcelain", "--untracked-files=no"])
+    if !run(dir, &["status", "--porcelain", "--untracked-files=normal"])
         .is_ok_and(|status| status.is_empty())
     {
         return CatchUp::Dirty;
@@ -462,7 +508,10 @@ pub fn catch_up(dir: &Path, target: &str, remote: &str) -> CatchUp {
     if run(dir, &["merge-base", "--is-ancestor", "HEAD", &theirs]).is_err() {
         return CatchUp::Diverged;
     }
-    match run(dir, &["merge", "--ff-only", "-q", &theirs]) {
+    match run(
+        dir,
+        &["merge", "--ff-only", "--no-overwrite-ignore", "-q", &theirs],
+    ) {
         Ok(_) => CatchUp::Updated,
         Err(message) => CatchUp::Failed(message),
     }

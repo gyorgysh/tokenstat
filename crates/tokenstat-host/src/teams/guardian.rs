@@ -526,6 +526,51 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             };
             let may_land =
                 !stop_waiting && authority.renew().is_ok() && source.ensure_current().is_ok();
+            let mut cancelled = !may_land;
+            let mut unproven_check = false;
+            let mut renew_check = Instant::now() + Duration::from_secs(10);
+            let mut allowed = || -> Result<(), String> {
+                cancelled |= match control.try_recv() {
+                    Ok(Ok(Control::Stop { fence })) => fence == prepared.binding().fence,
+                    Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => true,
+                    Err(mpsc::TryRecvError::Empty) => false,
+                };
+                if !cancelled && Instant::now() >= renew_check {
+                    cancelled = authority.renew().is_err() || sdk.renew(&authority).is_err();
+                    renew_check = Instant::now() + Duration::from_secs(10);
+                }
+                cancelled |= !authority
+                    .remaining()
+                    .is_ok_and(|left| left >= team_process::BIRTH)
+                    || source.ensure_current().is_err();
+                if cancelled {
+                    Err("The run was stopped or lost its permission before landing.".into())
+                } else {
+                    Ok(())
+                }
+            };
+            let mut landing_control =
+                |step: tokenstat_workspace::gitwrite::lane::Control<'_>| match step {
+                    tokenstat_workspace::gitwrite::lane::Control::Guard => allowed(),
+                    tokenstat_workspace::gitwrite::lane::Control::Check(folder, command) => {
+                        match super::lane_check::run(
+                            &helper,
+                            folder,
+                            command,
+                            &mut allowed,
+                            |group| birth(group, false),
+                        ) {
+                            Ok(result) => result,
+                            Err(error) => {
+                                if fixture_enabled() {
+                                    eprintln!("Fixture check cleanup: {error}");
+                                }
+                                unproven_check = true;
+                                Err("The check process needs recovery on this computer.".into())
+                            }
+                        }
+                    }
+                };
             let landing = if !may_land {
                 lane.keep();
                 super::lanes::abandon(lane);
@@ -533,9 +578,9 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                     message: "The run was stopped or lost its permission before landing.".into(),
                 }
             } else if attempt == 0 {
-                super::lanes::finish(lane, settings, &message)
+                super::lanes::finish(lane, settings, &message, &mut landing_control)
             } else {
-                super::lanes::finish_fix(lane, settings, &message)
+                super::lanes::finish_fix(lane, settings, &message, &mut landing_control)
             };
             if matches!(landing, Landing::Landed { .. }) {
                 // Members' hosts catch up from this one bit. A failed report
@@ -550,7 +595,11 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                 && matches!(landing, Landing::Ready { .. })
             {
                 Some(super::lanes::open_pull(
-                    lane, settings, &message, &workspace,
+                    lane,
+                    settings,
+                    &message,
+                    &workspace,
+                    &mut landing_control,
                 ))
             } else {
                 None
@@ -560,10 +609,17 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                     landing,
                     Landing::Landed { .. } | Landing::Ready { .. } | Landing::Nothing
                 ) {
-                super::lanes::next_step(lane, settings, landing, &message)
+                super::lanes::next_step(lane, settings, landing, &message, &mut landing_control)
             } else {
                 super::lanes::Next::Done(landing)
             };
+            if unproven_check {
+                lane.keep();
+                return Err(DispatchError::new(
+                    "team_run_recovery_required",
+                    "The check process needs recovery on its publishing computer.",
+                ));
+            }
             // No further agent without a live, renewed authority.
             let renewed = authority.renew().is_ok();
             let next = match next {
@@ -585,15 +641,25 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                     Some(instruction),
                 ),
             };
-            let posted = output.note(&note, |batch, events| {
-                chats
-                    .append_owned_output(source.target(), &prepared, batch, events, || {
-                        authority.ensure_live().map_err(api_error)?;
-                        source.ensure_current()
-                    })
-                    .map_err(|_| io::Error::other("Team output could not be verified."))
-            });
+            let posted = if !renewed {
+                Ok(())
+            } else {
+                output.note(&note, |batch, events| {
+                    chats
+                        .append_owned_output(source.target(), &prepared, batch, events, || {
+                            authority.ensure_live().map_err(api_error)?;
+                            source.ensure_current()
+                        })
+                        .map_err(|_| io::Error::other("Team output could not be verified."))
+                })
+            };
             let Some(instruction) = instruction else {
+                let terminal = if cancelled {
+                    chats.transition_owned_run(source.target(), &prepared, State::Stopping)?;
+                    State::Stopped
+                } else {
+                    terminal
+                };
                 sdk.retire();
                 return Ok((terminal, proof, final_output.and(posted.map_err(map_io))));
             };
@@ -705,6 +771,9 @@ pub(super) fn run(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    if fixture_enabled() && std::env::var_os("TOKENSTAT_TEAMS_KEEP_FIXTURE").is_some() {
+        command.stderr(Stdio::inherit());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -759,5 +828,6 @@ pub(super) fn run(
     if !status.success() {
         return Err(unavailable());
     }
-    Ok(response["result"].clone())
+    let result = response["result"].clone();
+    Ok(super::runs::resume(principal, &result).unwrap_or(result))
 }

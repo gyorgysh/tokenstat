@@ -15,6 +15,8 @@ mod directory;
 mod guardian;
 mod ingress;
 #[cfg(feature = "local-host")]
+mod lane_check;
+#[cfg(feature = "local-host")]
 mod lanes;
 #[cfg(feature = "local-host")]
 mod local_sharing;

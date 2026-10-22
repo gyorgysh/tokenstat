@@ -160,19 +160,21 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         // Without a record the agent was never born, which the journal
         // confirms: only a Reserved run can be closed without proof.
         let state = chats
-            .recover_orphaned_run(&input.workspace_id, &input.id, &fence, gone)
-            .map_err(|_| {
+            .recover_orphaned_run(&input.workspace_id, &input.id, &fence, gone, || {
+                tokenstat_workspace::writer::clear_orphaned_run(fence.incarnation()).map_err(|_| {
+                    DispatchError::new(
+                        "team_run_recovery_required",
+                        "The project could not be released. Try again.",
+                    )
+                })
+            })
+            .map_err(|error| {
+                if error.code == "team_run_recovery_required" { return error; }
                 DispatchError::new(
                     "team_run_unproven",
                     "tokenstat cannot prove this agent stopped. Restart the computer, then try again.",
                 )
             })?;
-        tokenstat_workspace::writer::clear_orphaned_run(fence.incarnation()).map_err(|_| {
-            DispatchError::new(
-                "team_run_recovery_required",
-                "The chat is released, but its project could not be. Try again.",
-            )
-        })?;
         forget(&fence);
         Ok(json!({"recovered":true,"state":state}))
     })())

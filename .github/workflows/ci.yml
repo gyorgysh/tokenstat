@@ -433,23 +433,27 @@ jobs:
           dotnet run --project scripts/tests/windows-host/WindowsHostTests.csproj -- --hostd "$PWD/target/debug/tokenstat-hostd.exe"
 
   teams-ui:
-    name: teams native UI
+    name: teams native UI (${{ matrix.device }})
     runs-on: macos-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [iphone, ipad]
     steps:
       - uses: actions/checkout@v7
 
       - name: Install the fixture project generator
         run: brew install xcodegen
 
-      - name: Test Teams forms on a disposable iPhone simulator
-        run: python3 scripts/run-team-ui-tests.py
+      - name: Test Teams forms on a disposable simulator
+        run: python3 scripts/run-team-ui-tests.py --device-family ${{ matrix.device }}
 
       - name: Keep fictional UI results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: teams-native-ui
+          name: teams-native-ui-${{ matrix.device }}
           path: |
             target/teams-ui-ci/*/Tests.xcresult
             target/teams-ui-ci/*/summary.json

@@ -45,8 +45,8 @@ resources resolve relative to that directory. Generated projects and binaries
 are ignored. Run the fixture on a separate Simulator device selected by its
 explicit identifier.
 
-CI runs `python3 scripts/run-team-ui-tests.py`. It creates a new compatible
-iPhone Simulator, verifies all 15 scenarios, and removes only that device.
+CI runs `python3 scripts/run-team-ui-tests.py` for each device family. It creates a new compatible
+iPhone or iPad Simulator, verifies all 16 scenarios, and removes only that device.
 `--select-only` reports an installed runtime without changing any device.
 Use `--only-test testCommentPostsWithVerifiedAuthor` for a focused local run.
 Omit that option for the complete CI check.
@@ -77,3 +77,11 @@ with `-destination 'platform=iOS Simulator,id=YOUR_QA_DEVICE_ID'` and run `test`
 with `-parallel-testing-enabled NO`. Tests check default repository access,
 write refusal, device consent, exact invitation access, expiry, larger text and recovery states. Screenshots are
 stored as XCTest attachments in the result bundle.
+
+Use `--device-family ipad` for the tablet fixture. The `askUncertain` scenario loses a fictional accepted Ask reply, then requires an exact retry and exposes Stop for that same run. It never launches a host or agent.
+
+For a focused lane regression, pass `--lanes-only` after both binary paths.
+This explicitly skips the guardian/lease lifecycle suite and reports a filtered
+result; omit the filter for release verification.
+`TOKENSTAT_TEAMS_KEEP_FIXTURE=1` retains the disposable fixture and its stderr
+logs for diagnosis. Remove that retained directory after inspection.

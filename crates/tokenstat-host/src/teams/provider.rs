@@ -3,18 +3,18 @@
 //! The agent command for one Team run.
 //!
 //! A teammate's Ask drives this process with the publisher's OS account, and
-//! whatever it can read can end up in the shared chat. So the first version
-//! gives it nothing to read but the Team tools: Claude starts with no
-//! built-in tools, no settings sources and only the scoped MCP bridge. The
-//! frozen conversation pages through `team_context`, never stdin.
+//! whatever it can read can end up in the shared chat. In the default mode,
+//! Claude has only the scoped Team tools. With lanes enabled by the owner,
+//! it also has file tools restricted to its lane, and no shell. Neither mode
+//! loads personal settings. The frozen conversation pages through
+//! `team_context`, never stdin.
 //!
 //! Claude gets a current access token in its environment and nothing that
 //! could renew it. No file in the run home is a credential or a link to one.
 //! The scoped SDK token is named by variable in the config, never written.
 //!
 //! Codex is refused: its login is a file holding a refresh token, and there
-//! is no way yet to hand it only a short-lived token. Reading the checkout is
-//! also not offered until reads can be confined to it.
+//! is no way yet to hand it only a short-lived token.
 
 use super::run_home::RunHome;
 use crate::{error::DispatchError, team_process::Program};

@@ -321,6 +321,15 @@ impl Journal {
     ) -> Result<runs::State, &'static str> {
         use runs::State;
         let ledger = self.runs.as_mut().ok_or("Run reservation is missing")?;
+        // A crash can follow the durable terminal write but precede release
+        // of the project claim or canonical fence. Finish that same cleanup.
+        if let Some(record) = ledger
+            .records()
+            .find(|record| &record.binding().fence == fence)
+            && record.state().terminal()
+        {
+            return Ok(record.state());
+        }
         let record = ledger.unresolved().ok_or("No run needs recovery")?;
         if &record.binding().fence != fence {
             return Err("A different run holds this chat");

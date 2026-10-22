@@ -113,6 +113,23 @@ final class TeamFixtureUITests: XCTestCase {
     func testSharedHistoryAndExplicitChatConsent() { sharedChatScenario(largeText: false) }
     func testSharedHistoryWithLargeText() { sharedChatScenario(largeText: true) }
     func testCommentPostsWithVerifiedAuthor() { commentScenario(uncertain: false, largeText: false) }
+    func testUncertainAskRetriesTheSameRequestAndRecoversStop() {
+        let app = launch("askUncertain")
+        openSharedChat(app)
+        let input = app.descendants(matching: .any)["team.ask.text"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.tap(); input.typeText("A fictional Ask")
+        let send = app.buttons["team.ask.send"]
+        send.tap()
+        XCTAssertTrue(app.staticTexts["The fictional Ask reply was interrupted after acceptance."].waitForExistence(timeout: 5))
+        XCTAssertFalse(input.isEnabled)
+        send.tap()
+        let stop = app.buttons["team.ask.stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.tap()
+        XCTAssertTrue(send.waitForExistence(timeout: 10))
+        capture(app, "Lost Ask reply recovered without another run")
+    }
     func testUncertainCommentSurvivesNavigationAndChecksReceiptWithLargeText() { commentScenario(uncertain: true, largeText: true) }
     func testViewerDoesNotHaveACommentComposer() {
         let app = launch("commentViewer")

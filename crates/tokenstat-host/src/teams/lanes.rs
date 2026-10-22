@@ -152,6 +152,10 @@ impl Drop for Lane {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct About {
     branch: String,
+    /// The target ref stays useful after committing, including in repositories
+    /// that disable Git's automatic upstream setup for new branches.
+    #[serde(default)]
+    base: Option<String>,
     ask: String,
     asked_by: Value,
     started_at_ms: i64,
@@ -213,6 +217,7 @@ pub(super) fn open(
     }
     let about = About {
         branch: opened.branch.clone(),
+        base: Some(base),
         ask: ask
             .lines()
             .next()
@@ -268,7 +273,7 @@ pub(super) fn list(checkout: &str, share: Option<&str>) -> Result<Value, Dispatc
             // Read from the lane's own record: taking its lock here could make
             // a new Ask's own lock fail.
             let running = about.status.as_deref() == Some("running");
-            let files = lane::changed_files(&path).unwrap_or_default();
+            let files = lane::changed_files(&path, about.base.as_deref()).unwrap_or_default();
             lanes.push((about, running, files));
         }
     }
@@ -293,13 +298,23 @@ pub(super) fn list(checkout: &str, share: Option<&str>) -> Result<Value, Dispatc
 
 /// Commit, check and land one finished lane. One landing at a time per
 /// checkout on this computer, so each lands onto the one before it.
-pub(super) fn finish(lane: &mut Lane, settings: &Settings, message: &str) -> Landing {
-    settle(lane, settings, message, false)
+pub(super) fn finish(
+    lane: &mut Lane,
+    settings: &Settings,
+    message: &str,
+    control: &mut impl FnMut(lane::Control<'_>) -> Result<(), String>,
+) -> Landing {
+    settle(lane, settings, message, false, control)
 }
 
 /// Land again after the agent worked on a conflict or a failed check.
-pub(super) fn finish_fix(lane: &mut Lane, settings: &Settings, message: &str) -> Landing {
-    settle(lane, settings, message, true)
+pub(super) fn finish_fix(
+    lane: &mut Lane,
+    settings: &Settings,
+    message: &str,
+    control: &mut impl FnMut(lane::Control<'_>) -> Result<(), String>,
+) -> Landing {
+    settle(lane, settings, message, true, control)
 }
 
 /// One landing at a time per checkout on this computer, across processes.
@@ -317,7 +332,13 @@ fn landing_lock(lane: &Path) -> Option<fs::File> {
     Some(file)
 }
 
-fn settle(lane: &mut Lane, settings: &Settings, message: &str, after_fix: bool) -> Landing {
+fn settle(
+    lane: &mut Lane,
+    settings: &Settings,
+    message: &str,
+    after_fix: bool,
+    control: &mut impl FnMut(lane::Control<'_>) -> Result<(), String>,
+) -> Landing {
     let lock = landing_lock(&lane.path);
     if lock.is_none() {
         lane.keep();
@@ -332,6 +353,10 @@ fn settle(lane: &mut Lane, settings: &Settings, message: &str, after_fix: bool) 
         return Landing::Blocked {
             message: "The lane's git link was changed.".into(),
         };
+    }
+    if let Err(message) = control(lane::Control::Guard) {
+        lane.keep();
+        return Landing::Blocked { message };
     }
     if lane.rebasing {
         lane.rebasing = false;
@@ -348,21 +373,14 @@ fn settle(lane: &mut Lane, settings: &Settings, message: &str, after_fix: bool) 
             return Landing::Blocked { message };
         }
     }
-    let landing = if settings.review {
-        lane::prepare(
-            &lane.path,
-            &settings.target,
-            settings.remote.as_deref(),
-            &settings.check,
-        )
-    } else {
-        lane::land(
-            &lane.path,
-            &settings.target,
-            settings.remote.as_deref(),
-            &settings.check,
-        )
-    };
+    let landing = lane::land_controlled(
+        &lane.path,
+        &settings.target,
+        settings.remote.as_deref(),
+        &settings.check,
+        !settings.review,
+        control,
+    );
     // A lane kept by an earlier attempt is done once its work landed.
     lane.keep = !matches!(landing, Landing::Landed { .. });
     mark(&lane.path, matches!(landing, Landing::Ready { .. }));
@@ -383,7 +401,12 @@ pub(super) fn next_step(
     settings: &Settings,
     landing: Landing,
     message: &str,
+    control: &mut impl FnMut(lane::Control<'_>) -> Result<(), String>,
 ) -> Next {
+    if let Err(message) = control(lane::Control::Guard) {
+        lane.keep();
+        return Next::Done(Landing::Blocked { message });
+    }
     match landing {
         Landing::Conflict { .. } => {
             match lane::start_rebase(&lane.path, &settings.target, settings.remote.as_deref()) {
@@ -405,7 +428,7 @@ pub(super) fn next_step(
                     ))
                 }
                 // The target moved again and the conflict went with it.
-                Ok(_) => Next::Done(finish_fix(lane, settings, message)),
+                Ok(_) => Next::Done(finish_fix(lane, settings, message, control)),
                 Err(message) => Next::Done(Landing::Blocked { message }),
             }
         }
@@ -455,10 +478,12 @@ pub(crate) fn caught_up(repository: &str) {
         {
             continue;
         }
-        record_catch_up(
-            &row.id,
-            &lane::catch_up(&row.folder.canonical, &settings.target, remote),
-        );
+        if !settings.review {
+            record_catch_up(
+                &row.id,
+                &lane::catch_up(&row.folder.canonical, &settings.target, remote),
+            );
+        }
         let Ok(kept) = fs::read_dir(lane::root(&data, &row.id)) else {
             continue;
         };
@@ -480,8 +505,13 @@ pub(crate) fn caught_up(repository: &str) {
                 continue;
             }
             // A lease held means an agent is working in that lane right now.
-            if let Ok(_lease) = tokenstat_workspace::writer::Lease::acquire_lane(&path) {
-                let _ = lane::refresh(&path, &settings.target, Some(remote));
+            if let Ok(_lease) = tokenstat_workspace::writer::Lease::acquire_lane(&path)
+                && !matches!(
+                    lane::refresh(&path, &settings.target, Some(remote)),
+                    Landing::Nothing
+                )
+            {
+                mark(&path, false);
             }
         }
     }
@@ -544,7 +574,8 @@ pub(super) fn land_ready(
             "Only the person who asked, a maintainer or the publisher can land this work.",
         ));
     }
-    let _lease = tokenstat_workspace::writer::Lease::acquire_lane(&path).map_err(|_| {
+    super::lane_check::recover_manual(&path).map_err(|_| DispatchError::new("team_lane_busy", "This lane's previous check needs recovery. Restart the publishing computer before trying again."))?;
+    let mut lease = tokenstat_workspace::writer::Lease::acquire_lane(&path).map_err(|_| {
         DispatchError::new("team_lane_busy", "An agent is still working in this lane.")
     })?;
     if lane::pointer(&path).ok().as_deref() != Some(about.pointer.as_str())
@@ -567,19 +598,65 @@ pub(super) fn land_ready(
         rebasing: false,
         keep: true,
     };
-    let landing = lane::land(
+    let source = super::scoped_source::Source::capture(principal)?;
+    let client = principal.account_client()?.clone();
+    // A long check outlives the viewer's short connection ticket. The host
+    // renews its own authority, just as it does during an agent's landing.
+    let mut authority = client
+        .admit_host_run_authority(
+            &format!("runlease_{:032x}", rand::random::<u128>()),
+            principal.run_ticket()?,
+        )
+        .map_err(super::api_error)?;
+    let mut renew = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut guard = || {
+        if std::time::Instant::now() >= renew {
+            authority
+                .renew()
+                .map_err(|_| "Permission to land this work ended.".to_string())?;
+            renew = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        }
+        if !authority
+            .remaining()
+            .is_ok_and(|left| left >= crate::team_process::BIRTH)
+        {
+            return Err("Permission to land this work ended.".to_string());
+        }
+        source.ensure_current().map_err(|_| {
+            "This project or chat is no longer shared from this folder.".to_string()
+        })?;
+        Ok(())
+    };
+    let helper = std::env::current_exe().map_err(|_| unavailable())?;
+    let landing = lane::land_controlled(
         &path,
         &settings.target,
         settings.remote.as_deref(),
         &settings.check,
+        true,
+        &mut |step| match step {
+            lane::Control::Guard => guard(),
+            lane::Control::Check(folder, command) => {
+                if command.is_empty() {
+                    return guard();
+                }
+                let mut record = super::lane_check::Manual::begin(folder, &mut lease)
+                    .map_err(|_| "The check's writer claim could not be saved.".to_string())?;
+                let outcome = super::lane_check::run(&helper, folder, command, &mut guard, |anchor| record.birth(folder, anchor))
+                    .map_err(|_| "The check process could not be verified. Restart this computer before trying again.".to_string())?;
+                record.complete(folder, &mut lease).map_err(|_| {
+                    "The check's writer claim could not be released. Try again.".to_string()
+                })?;
+                outcome
+            }
+        },
     );
+    let _ = authority.retire();
     let landed = matches!(landing, Landing::Landed { .. });
     let message = describe(&landing, &lane, &settings);
     if landed {
         lane.keep = false;
-        if let Ok(client) = principal.account_client() {
-            let _ = client.checkout_moved(&value.organization_id, &value.checkout_id);
-        }
+        let _ = client.checkout_moved(&value.organization_id, &value.checkout_id);
     } else {
         mark(&path, false);
     }
@@ -726,6 +803,7 @@ pub(super) fn discard(
             "An agent is still working in this lane. Stop it first.",
         ));
     }
+    super::lane_check::recover_manual(&path).map_err(|_| DispatchError::new("team_lane_busy", "This lane's previous check needs recovery. Restart the publishing computer before trying again."))?;
     let _lease = tokenstat_workspace::writer::Lease::acquire_lane(&path)
         .map_err(|_| DispatchError::new("team_lane_busy", "This lane is in use right now."))?;
     // Git runs inside the lane only while its pointer is still tokenstat's.
@@ -753,7 +831,11 @@ pub(super) fn open_pull(
     settings: &Settings,
     title: &str,
     workspace: &str,
+    control: &mut impl FnMut(lane::Control<'_>) -> Result<(), String>,
 ) -> String {
+    if let Err(message) = control(lane::Control::Guard) {
+        return message;
+    }
     let Some(remote) = settings.remote.as_deref() else {
         return format!(
             "Ready, but a pull request needs a remote. It is kept on branch {}.",
@@ -767,6 +849,9 @@ pub(super) fn open_pull(
         );
     }
     let body = "Opened by tokenstat from a shared Team chat. The work was committed, rebased and checked in its own lane.";
+    if let Err(message) = control(lane::Control::Guard) {
+        return message;
+    }
     match crate::pulls::open_for_lane(workspace, &lane.branch, &settings.target, title, body) {
         Ok(url) => {
             lane.keep = false;
