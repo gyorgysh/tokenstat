@@ -101,9 +101,15 @@ struct TeamRepositoryRow: View {
                 Label(L10n.text("common.teams.lane_overlap", overlapping.joined(separator: ", ")), systemImage: "exclamationmark.triangle")
                     .font(Theme.caption).foregroundStyle(TeamColors.warning)
             }
-            if lane.state == "ready", let share = lane.share {
-                Button(L10n.text("common.teams.land"), .merge) { Task { await land(lane, share: share, checkout: checkout) } }
-                    .buttonStyle(TeamButtonStyle(primary: true)).disabled(landing != nil)
+            if lane.state != "running", let share = lane.share {
+                HStack(spacing: Theme.Space.s) {
+                    if lane.state == "ready" {
+                        Button(L10n.text("common.teams.land"), .merge) { Task { await act("team.lanes.land", lane, share: share, checkout: checkout) } }
+                            .buttonStyle(TeamButtonStyle(primary: true)).disabled(landing != nil)
+                    }
+                    Button(L10n.text("common.teams.discard"), .delete, role: .destructive) { Task { await act("team.lanes.discard", lane, share: share, checkout: checkout) } }
+                        .buttonStyle(TeamButtonStyle()).disabled(landing != nil)
+                }
             }
         }
         .padding(Theme.Space.s)
@@ -111,16 +117,16 @@ struct TeamRepositoryRow: View {
         .background(Theme.controlSeat, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private func land(_ lane: TeamLane, share: String, checkout: TeamCheckout) async {
+    private func act(_ method: String, _ lane: TeamLane, share: String, checkout: TeamCheckout) async {
         guard landing == nil else { return }
         landing = lane.branch; landMessage = nil
         defer { landing = nil }
         let target: JSONValue = .object(["organization": .string(repository.organizationId), "repository": .string(repository.id),
                                          "checkout": .string(checkout.id), "share": .string(share)])
         do {
-            let result: TeamLandResult = try await store.read(.ask, fields: ["target": target, "method": .string("team.lanes.land"),
+            let result: TeamLandResult = try await store.read(.ask, fields: ["target": target, "method": .string(method),
                 "params": .object(["branch": .string(lane.branch)])], context: context)
-            landMessage = result.message
+            landMessage = result.message ?? (result.discarded == true ? L10n.text("common.teams.lane_discarded") : nil)
         } catch is CancellationError {} catch { landMessage = error.localizedDescription }
         await load()
     }
@@ -163,5 +169,5 @@ struct TeamLane: Codable, Sendable, Hashable {
     let branch: String; let ask: String; let askedBy: Person; let startedAtMs: Int64
     let state: String; let files: [String]; let overlaps: [String]; var share: String? = nil
 }
-struct TeamLandResult: Codable, Sendable { let landed: Bool; let message: String }
+struct TeamLandResult: Codable, Sendable { let landed: Bool?; let message: String?; let discarded: Bool? }
 struct TeamLanes: Codable, Sendable { let lanes: [TeamLane] }

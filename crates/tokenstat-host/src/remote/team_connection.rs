@@ -229,6 +229,8 @@ pub(crate) enum AskMethod {
     Status,
     #[serde(rename = "team.lanes.land")]
     Land,
+    #[serde(rename = "team.lanes.discard")]
+    Discard,
 }
 impl AskMethod {
     pub(crate) fn wire(self) -> &'static str {
@@ -238,6 +240,7 @@ impl AskMethod {
             Self::Stop => "team.chat.ask.stop",
             Self::Status => "team.chat.ask.status",
             Self::Land => "team.lanes.land",
+            Self::Discard => "team.lanes.discard",
         }
     }
 }

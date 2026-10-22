@@ -611,6 +611,81 @@ pub(crate) fn caught_up_since_last_seen(client: &tokenstat_sync::teams::TeamClie
     }
 }
 
+/// Drop a lane that is not running: its worktree and branch go, nothing
+/// lands. Same people as Land, through the same verified Run connection.
+pub(super) fn discard(
+    principal: &super::AuthorizedTeamPrincipal,
+    params: &str,
+) -> Result<Value, DispatchError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct DiscardInput {
+        branch: String,
+    }
+    principal.run_ticket()?;
+    if params.len() > 1024 {
+        return Err(invalid());
+    }
+    let input: DiscardInput = serde_json::from_str(params).map_err(|_| invalid())?;
+    let value = principal.value();
+    super::publications::Store::current_for(principal)?;
+    let parent = lane::root(
+        &tokenstat_paths::data_dir().ok_or_else(unavailable)?,
+        &value.checkout_id,
+    );
+    let found = fs::read_dir(&parent)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .find_map(|path| {
+            let about =
+                serde_json::from_slice::<About>(&fs::read(path.with_extension("json")).ok()?)
+                    .ok()?;
+            (about.branch == input.branch).then_some((path, about))
+        });
+    let Some((path, about)) = found else {
+        return Ok(json!({"discarded":false}));
+    };
+    let asker = about
+        .asked_by
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if about.share != value.share_id
+        || !(value.person.id == asker
+            || value.person.id == value.publisher_id
+            || value.role == tokenstat_sync::teams::RepositoryRole::Maintainer)
+    {
+        return Err(DispatchError::new(
+            "team_land_forbidden",
+            "Only the person who asked, a maintainer or the publisher can discard this work.",
+        ));
+    }
+    if about.status.as_deref() == Some("running") {
+        return Err(DispatchError::new(
+            "team_lane_busy",
+            "An agent is still working in this lane. Stop it first.",
+        ));
+    }
+    let _lease = tokenstat_workspace::writer::Lease::acquire_lane(&path)
+        .map_err(|_| DispatchError::new("team_lane_busy", "This lane is in use right now."))?;
+    lane::abort_rebase(&path);
+    drop(_lease);
+    let removed = Lane {
+        path,
+        branch: about.branch,
+        repository: about.repository,
+        pointer: about.pointer,
+        rebasing: false,
+        keep: false,
+    };
+    drop(removed);
+    Ok(json!({"discarded":true}))
+}
+
 /// What the shared chat reads after a run, in plain words.
 /// The run ended without its work landing. A rebase stopped for the agent
 /// is given up, so the lane keeps its own commits and nothing half done.

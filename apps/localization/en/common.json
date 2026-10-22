@@ -531,6 +531,8 @@
   "common.teams.workflow_review_detail": "Each Ask runs in its own copy of the project. When the agent finishes, tokenstat commits, rebases and checks the work, then it waits. The person who asked, a maintainer or you land it with one click. Your own folder is never changed.",
   "common.teams.lane_ready": "Ready to land, asked by {0}, {1} files changed",
   "common.teams.land": "Land",
+  "common.teams.discard": "Discard",
+  "common.teams.lane_discarded": "Discarded. Nothing from this work was landed.",
   "common.teams.repository_name": "Repository name",
   "common.teams.retry_detail": "Check your connection and try again.",
   "common.teams.review_invitation": "Review invitation",
