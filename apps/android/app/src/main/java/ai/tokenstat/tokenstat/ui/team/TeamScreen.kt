@@ -92,12 +92,16 @@ private sealed interface Phase {
 /// and choosing how its work lands happen on the computer that owns it.
 @Composable
 fun TeamScreen(account: JsonObject?) {
-    val calls = remember(account) { TeamCalls(account) }
+    // The account object is refreshed often. Only a different login or
+    // session starts the screen over.
+    val owner = WatchingOwner.from(account)
+    val identity = owner?.let { it.scope.toString() + "|" + it.receipt }
+    val calls = remember(identity) { TeamCalls(account) }
     val scope = rememberCoroutineScope()
-    var phase by remember(account) { mutableStateOf<Phase>(Phase.Loading) }
-    var organizations by remember(account) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var organization by remember(account) { mutableStateOf<JsonObject?>(null) }
-    var chat by remember(account) { mutableStateOf<ChatTarget?>(null) }
+    var phase by remember(identity) { mutableStateOf<Phase>(Phase.Loading) }
+    var organizations by remember(identity) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var organization by remember(identity) { mutableStateOf<JsonObject?>(null) }
+    var chat by remember(identity) { mutableStateOf<ChatTarget?>(null) }
 
     suspend fun load() {
         phase = Phase.Loading
@@ -118,7 +122,7 @@ fun TeamScreen(account: JsonObject?) {
             Phase.Failed(error.message ?: L10n.text("common.teams.load_failed"))
         }
     }
-    LaunchedEffect(account) { load() }
+    LaunchedEffect(identity) { load() }
 
     val current = chat
     if (current != null) {
