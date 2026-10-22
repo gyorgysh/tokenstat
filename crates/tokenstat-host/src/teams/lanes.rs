@@ -295,21 +295,23 @@ pub(super) fn finish_fix(lane: &mut Lane, settings: &Settings, message: &str) ->
     settle(lane, settings, message, true)
 }
 
+/// One landing at a time per checkout on this computer, across processes.
+fn landing_lock(lane: &Path) -> Option<fs::File> {
+    let path = root()
+        .ok()?
+        .join(format!("{}.landing", lane.parent()?.file_name()?.to_str()?));
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)
+        .ok()?;
+    file.lock().ok()?;
+    Some(file)
+}
+
 fn settle(lane: &mut Lane, settings: &Settings, message: &str, after_fix: bool) -> Landing {
-    let lock = (|| {
-        let path = root().ok()?.join(format!(
-            "{}.landing",
-            lane.path.parent()?.file_name()?.to_str()?
-        ));
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(path)
-            .ok()?;
-        file.lock().ok()?;
-        Some(file)
-    })();
+    let lock = landing_lock(&lane.path);
     if lock.is_none() {
         lane.keep();
         return Landing::Blocked {
@@ -480,7 +482,10 @@ pub(super) fn land_ready(
     }
     let input: LandInput = serde_json::from_str(params).map_err(|_| invalid())?;
     let value = principal.value();
-    let settings = settings(&value.checkout_id).ok_or_else(unavailable)?;
+    super::publications::Store::current_for(principal)?;
+    let settings = settings(&value.checkout_id)
+        .filter(|settings| settings.review)
+        .ok_or_else(unavailable)?;
     let parent = lane::root(
         &tokenstat_paths::data_dir().ok_or_else(unavailable)?,
         &value.checkout_id,
@@ -498,7 +503,8 @@ pub(super) fn land_ready(
                     .ok()?;
             (about.branch == input.branch).then_some((path, about))
         });
-    let Some((path, about)) = found else {
+    let Some((path, about)) = found.filter(|(_, about)| about.status.as_deref() == Some("ready"))
+    else {
         return Ok(json!({"landed":false,"message":"This work is no longer waiting."}));
     };
     let asker = about
@@ -519,12 +525,18 @@ pub(super) fn land_ready(
     let _lease = tokenstat_workspace::writer::Lease::acquire_lane(&path).map_err(|_| {
         DispatchError::new("team_lane_busy", "An agent is still working in this lane.")
     })?;
-    if lane::pointer(&path).ok().as_deref() != Some(about.pointer.as_str()) {
+    if lane::pointer(&path).ok().as_deref() != Some(about.pointer.as_str())
+        || lane::rebase_in_progress(&path)
+        || !matches!(lane::escaping_link(&path), Ok(None))
+    {
         return Err(DispatchError::new(
             "team_lane_changed",
-            "This lane's git link was changed.",
+            "This lane changed since it was ready. Ask the agent again.",
         ));
     }
+    let _landing = landing_lock(&path)
+        .ok_or_else(|| DispatchError::new("team_lane_busy", "Another landing is still running."))?;
+    principal.ensure_live()?;
     let mut lane = Lane {
         path: path.clone(),
         branch: about.branch.clone(),

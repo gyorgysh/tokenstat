@@ -111,29 +111,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                         "This action is not available through a Team connection.",
                     ));
                 }
-                let owner = super::publications::Owner {
-                    issuer: principal.issuer().into(),
-                    publisher_id: scope.publisher_id.clone(),
-                    host_key: scope.host_key.clone(),
-                };
-                let row = super::publications::Store::capture()?.resolve(
-                    &owner,
-                    &scope.organization_id,
-                    &scope.repository_id,
-                    &scope.checkout_id,
-                )?;
-                let workspace = crate::workspaces::get(&row.workspace_id).map_err(|_| {
-                    DispatchError::new(
-                        "checkout_not_shared",
-                        "This checkout is no longer registered on this computer.",
-                    )
-                })?;
-                if super::publications::Folder::capture(&workspace.path)? != row.folder {
-                    return Err(DispatchError::new(
-                        "checkout_changed",
-                        "This checkout changed. Ask its publisher to review sharing.",
-                    ));
-                }
+                super::publications::Store::current_for(&principal)?;
                 let result = super::lanes::list(&scope.checkout_id, scope.share_id.as_deref())?;
                 principal.ensure_live()?;
                 return Ok(result);

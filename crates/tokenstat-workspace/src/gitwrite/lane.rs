@@ -183,6 +183,22 @@ pub fn start_rebase(
     Ok(files)
 }
 
+/// Whether a rebase stopped part way in this lane.
+pub fn rebase_in_progress(lane: &Path) -> bool {
+    ["rebase-merge", "rebase-apply"].iter().any(|name| {
+        run(lane, &["rev-parse", "--git-path", name])
+            .map(|path| {
+                let path = Path::new(&path);
+                if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    lane.join(path)
+                }
+            })
+            .is_ok_and(|path| path.exists())
+    })
+}
+
 /// Give up a rebase started by `start_rebase`; the lane keeps its own work.
 pub fn abort_rebase(lane: &Path) {
     let _ = run(lane, &["rebase", "--abort"]);

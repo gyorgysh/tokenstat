@@ -277,6 +277,37 @@ impl Store {
                 .collect())
         })
     }
+    /// The principal's own publication, with its folder unchanged on this
+    /// computer. Every Team read or action on a checkout passes this first.
+    pub(super) fn current_for(
+        principal: &super::AuthorizedTeamPrincipal,
+    ) -> Result<Checkout, DispatchError> {
+        let scope = principal.value();
+        let owner = Owner {
+            issuer: principal.issuer().into(),
+            publisher_id: scope.publisher_id.clone(),
+            host_key: scope.host_key.clone(),
+        };
+        let row = Self::capture()?.resolve(
+            &owner,
+            &scope.organization_id,
+            &scope.repository_id,
+            &scope.checkout_id,
+        )?;
+        let workspace = crate::workspaces::get(&row.workspace_id).map_err(|_| {
+            DispatchError::new(
+                "checkout_not_shared",
+                "This checkout is no longer registered on this computer.",
+            )
+        })?;
+        if Folder::capture(&workspace.path)? != row.folder {
+            return Err(DispatchError::new(
+                "checkout_changed",
+                "This checkout changed. Ask its publisher to review sharing.",
+            ));
+        }
+        Ok(row)
+    }
     pub(super) fn has_active_key(&self, key: &str) -> Result<bool, DispatchError> {
         if !self
             .root
