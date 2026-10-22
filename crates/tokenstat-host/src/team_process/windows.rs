@@ -69,6 +69,26 @@ unsafe extern "system" {
     fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
     fn IsProcessInJob(process: Handle, job: Handle, result: *mut i32) -> i32;
     fn TerminateJobObject(job: Handle, code: u32) -> i32;
+    fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+    fn GetCurrentProcess() -> Handle;
+    fn GetProcessTimes(
+        process: Handle,
+        creation: *mut u64,
+        exit: *mut u64,
+        kernel: *mut u64,
+        user: *mut u64,
+    ) -> i32;
+    fn GetExitCodeProcess(process: Handle, code: *mut u32) -> i32;
+}
+const QUERY_LIMITED: u32 = 0x1000;
+const INVALID_PARAMETER: i32 = 87;
+const STILL_ACTIVE: u32 = 259;
+
+fn started(process: Handle) -> Option<u64> {
+    let (mut creation, mut exit, mut kernel, mut user) = (0u64, 0u64, 0u64, 0u64);
+    // SAFETY: four valid out-pointers to FILETIME-sized integers.
+    let ok = unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) };
+    (ok != 0 && creation != 0).then_some(creation)
 }
 fn error() -> io::Error {
     io::Error::last_os_error()
@@ -79,10 +99,35 @@ pub(super) fn configure(command: &mut Command) {
 pub(super) fn check_anchor() -> io::Result<()> {
     Ok(())
 }
-/// No proof yet on Windows: a crashed run stays fenced until the Job
-/// ownership is verified on a real Windows runner.
-pub(super) fn group_gone(_group: u32) -> bool {
-    false
+pub(super) fn run_owner(_anchor: u32) -> (u32, u64) {
+    // SAFETY: the pseudo handle for this process needs no closing.
+    let born = started(unsafe { GetCurrentProcess() }).unwrap_or(0);
+    (std::process::id(), born)
+}
+/// The guardian is gone when its pid no longer exists, has exited, or now
+/// names a process started at another time. Anything unclear keeps the run
+/// fenced. The job's kill-on-close limit ended every process in it.
+pub(super) fn run_owner_gone(pid: u32, born: u64) -> bool {
+    if pid == 0 || born == 0 {
+        return false;
+    }
+    // SAFETY: OpenProcess returns null or a handle we own and close below.
+    let raw = unsafe { OpenProcess(QUERY_LIMITED, 0, pid) };
+    if raw.is_null() {
+        return io::Error::last_os_error().raw_os_error() == Some(INVALID_PARAMETER);
+    }
+    // SAFETY: a non-null handle from OpenProcess, closed when dropped.
+    let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
+    match started(handle.as_raw_handle()) {
+        Some(creation) if creation != born => true,
+        Some(_) => {
+            let mut code = 0u32;
+            // SAFETY: valid handle and out-pointer.
+            let ok = unsafe { GetExitCodeProcess(handle.as_raw_handle(), &mut code) };
+            ok != 0 && code != STILL_ACTIVE
+        }
+        None => false,
+    }
 }
 pub(super) fn stop_self() -> io::Result<()> {
     Ok(())

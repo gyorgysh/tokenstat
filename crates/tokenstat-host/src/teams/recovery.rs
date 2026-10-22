@@ -27,6 +27,9 @@ struct Record {
     chat: String,
     boot: Option<String>,
     group: u32,
+    /// The owner's start time where the platform needs one (Windows).
+    #[serde(default)]
+    born: u64,
 }
 
 fn directory() -> io::Result<PathBuf> {
@@ -40,7 +43,12 @@ fn file(directory: &Path, fence: &Fence) -> PathBuf {
 }
 
 /// Written before birth. If this fails, the agent is not started.
-pub(super) fn remember(fence: &Fence, workspace: &str, chat: &str, group: u32) -> io::Result<()> {
+pub(super) fn remember(fence: &Fence, workspace: &str, chat: &str, anchor: u32) -> io::Result<()> {
+    let (group, born) = if anchor == 0 {
+        (0, 0)
+    } else {
+        team_process::run_owner(anchor)
+    };
     use std::io::Write;
     let directory = directory()?;
     fs::create_dir_all(&directory)?;
@@ -56,6 +64,7 @@ pub(super) fn remember(fence: &Fence, workspace: &str, chat: &str, group: u32) -
         chat: chat.into(),
         boot: team_process::boot_identity(),
         group,
+        born,
     };
     let bytes = serde_json::to_vec(&record).map_err(io::Error::other)?;
     let path = file(&directory, fence);
@@ -93,7 +102,7 @@ fn read(fence: &Fence) -> Option<Record> {
 fn proven_gone(record: &Record, current_boot: Option<&str>) -> bool {
     let restarted =
         matches!((record.boot.as_deref(), current_boot), (Some(then), Some(now)) if then != now);
-    restarted || team_process::group_gone(record.group)
+    restarted || team_process::run_owner_gone(record.group, record.born)
 }
 
 #[derive(Deserialize)]
@@ -181,6 +190,7 @@ mod tests {
             chat: "chat".into(),
             boot: boot.map(str::to_string),
             group,
+            born: 0,
         }
     }
 
@@ -218,7 +228,7 @@ mod tests {
         let pid = child.id();
         child.wait().unwrap();
         // Its id may be reused by now; then it reads as alive, which is safe.
-        if team_process::group_gone(pid) {
+        if team_process::run_owner_gone(pid, 0) {
             assert!(proven_gone(&record(Some("1.0"), pid), Some("1.0")));
         }
     }

@@ -250,10 +250,17 @@ pub fn anchor_main() -> io::Result<()> {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
-/// True only when no process is left in `group` or with its leader's id.
-/// A reused id reads as alive, which keeps a run fenced: the safe answer.
-pub(crate) fn group_gone(group: u32) -> bool {
-    os::group_gone(group)
+/// What a recovery record names as the owner of a run's processes, given
+/// the anchor's pid. On unix it is the anchor's session and group. On
+/// Windows it is this guardian with its start time: its job is killed when
+/// the guardian's last handle closes, so the guardian gone means the run gone.
+pub(crate) fn run_owner(anchor: u32) -> (u32, u64) {
+    os::run_owner(anchor)
+}
+
+/// Whether the owner recorded by `run_owner` is proven gone.
+pub(crate) fn run_owner_gone(id: u32, born: u64) -> bool {
+    os::run_owner_gone(id, born)
 }
 
 /// This boot of this computer. A run recorded under another boot cannot

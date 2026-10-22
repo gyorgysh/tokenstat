@@ -26,6 +26,8 @@ pub(super) fn check_anchor() -> io::Result<()> {
     }
     Ok(())
 }
+/// True only when no process is left in `group` or with its leader's id.
+/// A reused id reads as alive, which keeps a run fenced: the safe answer.
 pub(super) fn group_gone(group: u32) -> bool {
     let Ok(group) = i32::try_from(group) else {
         return false;
@@ -108,6 +110,12 @@ fn session_gone(session: i32) -> bool {
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn session_gone(_session: i32) -> bool {
     false
+}
+pub(super) fn run_owner(anchor: u32) -> (u32, u64) {
+    (anchor, 0)
+}
+pub(super) fn run_owner_gone(id: u32, _born: u64) -> bool {
+    group_gone(id)
 }
 pub(super) fn stop_self() -> io::Result<()> {
     check_anchor()?;
