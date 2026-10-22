@@ -129,6 +129,16 @@ impl AuthorizedTeamPrincipal {
     /// A directory principal or caller-supplied actor/grant is insufficient.
     #[cfg(feature = "local-host")]
     pub(crate) fn run_ticket(&self) -> Result<&VerifiedTeamTicket, DispatchError> {
+        self.run_claims(true)
+    }
+    /// The same Run proof, issued for the checkout rather than one share:
+    /// all it can do is start a new shared chat there.
+    #[cfg(feature = "local-host")]
+    pub(crate) fn new_chat_ticket(&self) -> Result<&VerifiedTeamTicket, DispatchError> {
+        self.run_claims(false)
+    }
+    #[cfg(feature = "local-host")]
+    fn run_claims(&self, shared: bool) -> Result<&VerifiedTeamTicket, DispatchError> {
         self.ensure_account_current()?;
         let ticket = self.ticket.as_ref().ok_or_else(expired)?;
         let c = ticket.claims();
@@ -149,7 +159,7 @@ impl AuthorizedTeamPrincipal {
             || c.publisher != p.publisher_id
             || c.share != p.share_id
             || c.grant != p.grant_id
-            || c.share.is_none()
+            || c.share.is_none() == shared
             || c.grant.is_none()
         {
             return Err(expired());
@@ -531,6 +541,8 @@ mod tests {
         // local expiry is moved so the retained binding can be exercised.
         captured.expires_at = Time::now().wall + 60;
         assert!(captured.run_ticket().is_ok());
+        // A share-scoped Run proof cannot start a new chat.
+        assert!(captured.new_chat_ticket().is_err());
         for field in 0..9 {
             let mut changed = captured.clone();
             match field {

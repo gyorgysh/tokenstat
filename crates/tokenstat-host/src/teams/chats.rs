@@ -266,111 +266,7 @@ pub(super) fn perform(
                 "audience":"currentAndFutureRepositoryMembers","allowsAgentRuns":false}),
             )
         }
-        Request::Publish(input) => {
-            let request = Target {
-                organization: input.organization,
-                repository: input.repository,
-                checkout: input.checkout,
-                conversation: input.conversation,
-            };
-            let (binding, checkout, repository, cloud_revision) =
-                review_context(owner, client, &request)?;
-            let store = Store::capture()?;
-            let target = target(&binding, &request);
-            // Repeating an accepted publication settles its original receipt;
-            // later shared messages must not turn it into a new publication.
-            if let Some(previous) = store.chat_request(&target, &input.request_id)?
-                && previous.phase == Phase::Active
-            {
-                if previous.conversation_id != request.conversation {
-                    return Err(changed());
-                }
-                crate::chat::shared().shared_history(
-                    &checkout.workspace_id,
-                    &previous.conversation_id,
-                    &previous.id,
-                    &previous.preview,
-                )?;
-                let current = client
-                    .chat_publication(&request.organization, &request.checkout, &previous.id)
-                    .map_err(api_error)?
-                    .share;
-                if current.id != previous.id
-                    || current.checkout_id != previous.checkout_id
-                    || Some(current.revision) != previous.cloud_revision
-                {
-                    return Err(changed());
-                }
-                return Ok(
-                    json!({"publication":publication_dto(&store.resolve_chat(&target,&previous.id)?)}),
-                );
-            }
-            let review = finish_review(
-                owner,
-                &request,
-                binding.clone(),
-                checkout,
-                repository,
-                cloud_revision,
-            )?;
-            if review.preview != input.preview {
-                return Err(DispatchError::new(
-                    "chat_history_changed",
-                    "This chat changed after its sharing preview. Review the history again.",
-                ));
-            }
-            let prepared = store.prepare_chat_at_revision(
-                &target,
-                &request.conversation,
-                &input.request_id,
-                &review.history.fingerprint,
-                review.history.source_revision,
-            )?;
-            let chats = crate::chat::shared();
-            if let Err(error) = chats.freeze_sharing_if_current(
-                &review.checkout.workspace_id,
-                &request.conversation,
-                &prepared.id,
-                &review.history.fingerprint,
-                review.history.source_revision,
-                || {
-                    let row = store
-                        .chat_request(&target, &input.request_id)?
-                        .ok_or_else(changed)?;
-                    if row.id != prepared.id
-                        || row.conversation_id != request.conversation
-                        || row.preview != review.history.fingerprint
-                        || row.source_revision != Some(review.history.source_revision)
-                        || row.phase == Phase::Withdrawn
-                    {
-                        return Err(changed());
-                    }
-                    Ok(())
-                },
-            ) {
-                if matches!(
-                    error.code.as_str(),
-                    "chat_history_changed" | "chat_already_shared" | "chat_running"
-                ) {
-                    let _ = store.withdraw_chat(&target, &prepared.id, prepared.revision);
-                }
-                return Err(error);
-            }
-            owner.ensure_current().map_err(super::changed)?;
-            let published = client
-                .publish_chat(&request.organization, &request.checkout, &prepared.id, true)
-                .map_err(api_error)?
-                .share;
-            if published.id != prepared.id
-                || published.checkout_id != prepared.checkout_id
-                || published.revision == 0
-            {
-                return Err(api_error(TeamError::InvalidResponse));
-            }
-            owner.ensure_current().map_err(super::changed)?;
-            store.activate_chat(&target, &prepared.id, prepared.revision, published.revision)?;
-            Ok(json!({"publication":publication_dto(&store.resolve_chat(&target,&prepared.id)?)}))
-        }
+        Request::Publish(input) => publish(owner, client, input),
         Request::Withdraw(request) => {
             let binding = sharing::local_binding(owner, client)?;
             let target = ChatTarget {
@@ -432,6 +328,182 @@ pub(super) fn perform(
                 }
             }
             Ok(json!({"withdrawn":true,"accountCleanupPending":true}))
+        }
+    }
+}
+
+/// Share one local chat with the repository, from a reviewed preview.
+fn publish(
+    owner: &AccountSnapshot,
+    client: &TeamClient,
+    input: Publish,
+) -> Result<Value, DispatchError> {
+    let request = Target {
+        organization: input.organization,
+        repository: input.repository,
+        checkout: input.checkout,
+        conversation: input.conversation,
+    };
+    let (binding, checkout, repository, cloud_revision) = review_context(owner, client, &request)?;
+    let store = Store::capture()?;
+    let target = target(&binding, &request);
+    // Repeating an accepted publication settles its original receipt;
+    // later shared messages must not turn it into a new publication.
+    if let Some(previous) = store.chat_request(&target, &input.request_id)?
+        && previous.phase == Phase::Active
+    {
+        if previous.conversation_id != request.conversation {
+            return Err(changed());
+        }
+        crate::chat::shared().shared_history(
+            &checkout.workspace_id,
+            &previous.conversation_id,
+            &previous.id,
+            &previous.preview,
+        )?;
+        let current = client
+            .chat_publication(&request.organization, &request.checkout, &previous.id)
+            .map_err(api_error)?
+            .share;
+        if current.id != previous.id
+            || current.checkout_id != previous.checkout_id
+            || Some(current.revision) != previous.cloud_revision
+        {
+            return Err(changed());
+        }
+        return Ok(
+            json!({"publication":publication_dto(&store.resolve_chat(&target,&previous.id)?)}),
+        );
+    }
+    let review = finish_review(
+        owner,
+        &request,
+        binding.clone(),
+        checkout,
+        repository,
+        cloud_revision,
+    )?;
+    if review.preview != input.preview {
+        return Err(DispatchError::new(
+            "chat_history_changed",
+            "This chat changed after its sharing preview. Review the history again.",
+        ));
+    }
+    let prepared = store.prepare_chat_at_revision(
+        &target,
+        &request.conversation,
+        &input.request_id,
+        &review.history.fingerprint,
+        review.history.source_revision,
+    )?;
+    let chats = crate::chat::shared();
+    if let Err(error) = chats.freeze_sharing_if_current(
+        &review.checkout.workspace_id,
+        &request.conversation,
+        &prepared.id,
+        &review.history.fingerprint,
+        review.history.source_revision,
+        || {
+            let row = store
+                .chat_request(&target, &input.request_id)?
+                .ok_or_else(changed)?;
+            if row.id != prepared.id
+                || row.conversation_id != request.conversation
+                || row.preview != review.history.fingerprint
+                || row.source_revision != Some(review.history.source_revision)
+                || row.phase == Phase::Withdrawn
+            {
+                return Err(changed());
+            }
+            Ok(())
+        },
+    ) {
+        if matches!(
+            error.code.as_str(),
+            "chat_history_changed" | "chat_already_shared" | "chat_running"
+        ) {
+            let _ = store.withdraw_chat(&target, &prepared.id, prepared.revision);
+        }
+        return Err(error);
+    }
+    owner.ensure_current().map_err(super::changed)?;
+    let published = client
+        .publish_chat(&request.organization, &request.checkout, &prepared.id, true)
+        .map_err(api_error)?
+        .share;
+    if published.id != prepared.id
+        || published.checkout_id != prepared.checkout_id
+        || published.revision == 0
+    {
+        return Err(api_error(TeamError::InvalidResponse));
+    }
+    owner.ensure_current().map_err(super::changed)?;
+    store.activate_chat(&target, &prepared.id, prepared.revision, published.revision)?;
+    Ok(json!({"publication":publication_dto(&store.resolve_chat(&target,&prepared.id)?)}))
+}
+
+/// A member with permission to run agents here starts a fresh chat on this
+/// computer. It is created empty, with no persona, and shared with the
+/// repository like any other, so the Ask that follows is about nothing the
+/// publisher had not already chosen to share.
+pub(super) fn start_for_member(
+    owner: &AccountSnapshot,
+    client: &TeamClient,
+    organization: &str,
+    repository: &str,
+    checkout: &str,
+    title: &str,
+    request_id: &str,
+) -> Result<Value, DispatchError> {
+    identifiers([organization, repository, checkout])?;
+    let source = Target {
+        organization: organization.into(),
+        repository: repository.into(),
+        checkout: checkout.into(),
+        conversation: String::new(),
+    };
+    let (binding, local, _, _) = review_context(owner, client, &source)?;
+    let store = Store::capture()?;
+    // The same request asked again settles to the chat it already made.
+    if let Some(previous) = store.chat_request(&target(&binding, &source), request_id)?
+        && previous.phase == Phase::Active
+    {
+        return Ok(json!({"share":previous.id}));
+    }
+    let chats = crate::chat::shared();
+    let chat = chats
+        .create(crate::chat::Create {
+            workspace_id: local.workspace_id.clone(),
+            title: Some(title.into()),
+            backend: "claude".into(),
+            persona_id: Some(String::new()),
+            ..Default::default()
+        })
+        .map_err(|_| changed())?;
+    let request = Target {
+        conversation: chat.id.clone(),
+        ..source
+    };
+    let shared = review(owner, client, &request).and_then(|review| {
+        publish(
+            owner,
+            client,
+            Publish {
+                organization: request.organization.clone(),
+                repository: request.repository.clone(),
+                checkout: request.checkout.clone(),
+                conversation: chat.id.clone(),
+                preview: review.preview,
+                request_id: request_id.into(),
+                confirm_history: true,
+            },
+        )
+    });
+    match shared {
+        Ok(value) => Ok(json!({"share":value["publication"]["id"]})),
+        Err(error) => {
+            let _ = chats.remove(&chat.id);
+            Err(error)
         }
     }
 }

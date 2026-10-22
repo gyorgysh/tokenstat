@@ -134,12 +134,18 @@ pub(super) struct AskRequest {
 }
 impl AskRequest {
     pub(super) fn validate(mut self) -> Result<Self, DispatchError> {
-        if self.target.share.is_none() {
+        // A new chat is asked of the checkout. Everything else names a share.
+        let new = self.method == TeamAskMethod::New;
+        if self.target.share.is_none() != new {
             return Err(api_error(TeamError::InvalidRequest));
         }
         Request {
             target: self.target.clone(),
-            method: TeamReadMethod::ChatDetails,
+            method: if new {
+                TeamReadMethod::ChatCatalog
+            } else {
+                TeamReadMethod::ChatDetails
+            },
             params: TeamReadParams::default(),
         }
         .validate()?;

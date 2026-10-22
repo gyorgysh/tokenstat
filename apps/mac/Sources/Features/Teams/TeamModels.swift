@@ -212,6 +212,7 @@ struct TeamSharedChat: Codable, Identifiable, Hashable, Sendable {
     var backend: String? = nil
 }
 struct TeamSharedChats: Decodable, Sendable { let shares: [TeamSharedChat]; let nextOffset: Int? }
+struct TeamNewChat: Decodable, Sendable { let share: String }
 struct TeamChatCatalog: Decodable, Sendable { let shares: [TeamSharedChat]; let nextCursor: String? }
 struct TeamChatSummary: Codable, Identifiable, Sendable {
     let id: String; let checkoutId: String; let title: String; let backend: String

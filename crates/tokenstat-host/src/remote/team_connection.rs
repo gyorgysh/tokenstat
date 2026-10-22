@@ -231,6 +231,10 @@ pub(crate) enum AskMethod {
     Land,
     #[serde(rename = "team.lanes.discard")]
     Discard,
+    /// Start a fresh shared chat on the publishing computer. The only Ask
+    /// method sent without a share, because the share does not exist yet.
+    #[serde(rename = "team.chat.new")]
+    New,
 }
 impl AskMethod {
     pub(crate) fn wire(self) -> &'static str {
@@ -241,6 +245,7 @@ impl AskMethod {
             Self::Status => "team.chat.ask.status",
             Self::Land => "team.lanes.land",
             Self::Discard => "team.lanes.discard",
+            Self::New => "team.chat.new",
         }
     }
 }
@@ -331,7 +336,7 @@ impl Link {
             Purpose::Run => vec![TeamCapability::Read, TeamCapability::Run],
         };
         if request.capabilities != expected
-            || matches!(purpose, Purpose::Comment | Purpose::Run) && request.share_id.is_none()
+            || matches!(purpose, Purpose::Comment) && request.share_id.is_none()
         {
             return Err(api_error(TeamError::InvalidRequest));
         }
@@ -423,7 +428,13 @@ impl Link {
             && protocol["protocolVersion"]
                 .as_str()
                 .and_then(|v| v.parse::<u32>().ok())
-                .is_none_or(|v| v < 47)
+                .is_none_or(|v| {
+                    v < if link.request.share_id.is_some() {
+                        47
+                    } else {
+                        48
+                    }
+                })
         {
             return Err(DispatchError::new(
                 "team_host_update_required",
@@ -610,8 +621,9 @@ impl Link {
         params: &Value,
     ) -> Result<Value, DispatchError> {
         self.ensure_current()?;
+        // A new chat has no share yet. Every other Ask is about one share.
         if self.request.capabilities != [TeamCapability::Read, TeamCapability::Run]
-            || self.request.share_id.is_none()
+            || self.request.share_id.is_none() != (method == AskMethod::New)
         {
             return Err(api_error(TeamError::InvalidRequest));
         }

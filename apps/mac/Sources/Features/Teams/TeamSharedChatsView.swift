@@ -24,6 +24,10 @@ struct TeamSharedChatsView: View {
     @State private var error: String?
     @State private var shareSheet = false
     @State private var localCheckoutIds: Set<String> = []
+    @State private var newTitle = ""
+    // Kept per title so a retry after a lost reply settles to the same chat.
+    @State private var newRequest: (title: String, id: String)?
+    @State private var starting = false
     private var isCurrent: Bool { store.mutationContext == context && store.phase == .ready }
     private var availableRepositories: [TeamRepository] { repositories.filter { $0.role != nil } }
     private var repository: TeamRepository? { availableRepositories.first { $0.id == store.selectedRepositoryId } }
@@ -108,6 +112,9 @@ struct TeamSharedChatsView: View {
                             }.buttonStyle(.plain).accessibilityIdentifier("team.chats.open.\(share.id)")
                         }
                         if sharesNext != nil || sharesCursor != nil { Button(L10n.text("common.teams.load_more"), .more) { Task { await loadShares(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading) }
+                        if let role = repository?.role, role != .viewer {
+                            newChat(checkout)
+                        }
                         if store.capabilities?.canPublishChats == true, localCheckoutIds.contains(checkout.id) {
                             Button(L10n.text("common.teams.share_chat"), .connect) { shareSheet = true }.buttonStyle(TeamButtonStyle(primary: true)).accessibilityIdentifier("team.chats.share")
                         }
@@ -123,6 +130,38 @@ struct TeamSharedChatsView: View {
                 store.selectedRepositoryId = availableRepositories[0].id
             }
         }
+    }
+    /// A member starts an empty shared chat on that computer and asks its
+    /// agent there, without waiting for the owner to share one.
+    private func newChat(_ checkout: TeamCheckout) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text(L10n.text("common.teams.new_chat_title")).font(Theme.callout.weight(.semibold))
+            HStack(spacing: Theme.Space.s) {
+                TextField(L10n.text("common.teams.new_chat_placeholder"), text: $newTitle).textFieldStyle(ThemedFieldStyle())
+                    .onSubmit { Task { await startChat(checkout) } }
+                Button(L10n.text("common.teams.new_chat"), .create) { Task { await startChat(checkout) } }
+                    .buttonStyle(TeamButtonStyle(primary: true))
+                    .disabled(starting || newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("team.chats.new")
+            }
+            Text(L10n.text("common.teams.new_chat_detail", computerName(checkout))).font(Theme.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }.padding(Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading).background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
+    }
+    private func startChat(_ checkout: TeamCheckout) async {
+        let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, !starting, let repository else { return }
+        let request: (title: String, id: String) = newRequest?.title == title ? newRequest! : (title, "new-" + UUID().uuidString.lowercased())
+        newRequest = request; starting = true; error = nil
+        defer { starting = false }
+        do {
+            let target: JSONValue = .object(["organization":.string(repository.organizationId),"repository":.string(repository.id),"checkout":.string(checkout.id)])
+            let result: TeamNewChat = try await store.read(.ask, fields: ["target":target,"method":.string("team.chat.new"),
+                "params":.object(["title":.string(title),"requestId":.string(request.id)])], context: context)
+            newTitle = ""; newRequest = nil
+            await loadShares(more: false)
+            selected = shares.first { $0.id == result.share }
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
     private func computerName(_ row: TeamCheckout) -> String {
         [row.deviceName ?? L10n.text("common.teams.computer"), row.publisher?.name].compactMap { $0 }.joined(separator: " · ")

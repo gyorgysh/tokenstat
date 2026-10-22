@@ -27,6 +27,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                 | "team.chat.ask.status"
                 | "team.lanes.land"
                 | "team.lanes.discard"
+                | "team.chat.new"
         ) {
             #[cfg(feature = "local-host")]
             return match method {
@@ -35,6 +36,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                 "team.chat.ask.status" => super::runs::status(&principal, params),
                 "team.lanes.land" => super::lanes::land_ready(&principal, params),
                 "team.lanes.discard" => super::lanes::discard(&principal, params),
+                "team.chat.new" => super::scoped_runs::new_chat(&principal, params),
                 _ => super::scoped_runs::send(&principal, params),
             };
             #[cfg(not(feature = "local-host"))]

@@ -63,6 +63,66 @@ pub(super) fn send(
     input.validate()?;
     super::guardian::run(principal, &input)
 }
+/// Start an empty shared chat on this checkout for the member, so a person
+/// can Ask without waiting for the publisher to share a chat first.
+pub(super) fn new_chat(
+    principal: &AuthorizedTeamPrincipal,
+    params: &str,
+) -> Result<Value, DispatchError> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Input {
+        title: String,
+        request_id: String,
+    }
+    if !execution_ready() {
+        return Err(DispatchError::new(
+            "team_agent_runs_unavailable",
+            "Agent runs are not available in shared chats yet.",
+        ));
+    }
+    if params.len() > 2048 {
+        return Err(invalid());
+    }
+    let input: Input = serde_json::from_str(params).map_err(|_| invalid())?;
+    let title = input.title.trim();
+    if title.is_empty()
+        || title.chars().count() > 120
+        || title.chars().any(char::is_control)
+        || !crate::chat_receipts::valid_id(&input.request_id)
+    {
+        return Err(invalid());
+    }
+    principal.new_chat_ticket()?;
+    let scope = principal.value();
+    let owner = crate::account_session::AccountSnapshot::capture().map_err(|_| unavailable())?;
+    let client = super::client(&owner)?;
+    // Only the computer that published this checkout makes chats for it.
+    let binding = super::sharing::local_binding(&owner, &client)?;
+    if binding.issuer != principal.issuer()
+        || binding.publisher_id != scope.publisher_id
+        || binding.host_key != scope.host_key
+    {
+        return Err(unavailable());
+    }
+    let result = super::chats::start_for_member(
+        &owner,
+        &client,
+        &scope.organization_id,
+        &scope.repository_id,
+        &scope.checkout_id,
+        title,
+        &input.request_id,
+    )?;
+    principal.ensure_account_current()?;
+    Ok(result)
+}
+fn unavailable() -> DispatchError {
+    DispatchError::new(
+        "team_host_unavailable",
+        "The publishing computer cannot start a chat right now.",
+    )
+}
 fn invalid() -> DispatchError {
     DispatchError::new(
         "invalid_ask",
