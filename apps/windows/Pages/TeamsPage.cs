@@ -19,6 +19,14 @@ internal sealed class TeamsPage : Page
     private JsonObject? _scope;
     private string? _session;
     private JsonObject? _organization;
+    // Bumped by every redraw, so a load or a watch that outlived its screen
+    // stops instead of drawing over the one now shown.
+    private int _view;
+    // A result to show once the reload after Land or Discard has drawn.
+    private string? _flash;
+    // One id per comment text: a retry after an unknown result is the same
+    // message, so the host keeps one copy.
+    private (string Text, string Id, long CreatedAtMs)? _commentAttempt;
 
     public TeamsPage()
     {
@@ -47,6 +55,7 @@ internal sealed class TeamsPage : Page
 
     private void Reset(string title)
     {
+        _view++;
         _body.Children.Clear();
         _body.Children.Add(new TextBlock { Text = title, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
     }
@@ -124,6 +133,8 @@ internal sealed class TeamsPage : Page
     {
         var orgId = Format.Text(organization, "id");
         Reset(Format.Text(organization, "name"));
+        var view = _view;
+        if (_flash is { } flash) { _flash = null; Note(flash); }
         if (canSwitch)
             _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.organizations"), ActionIcon.Back, async (_, _) => { _organization = null; await LoadAsync(); }));
         var repositories = (await CallAsync("teams.directory", new JsonObject
@@ -132,7 +143,11 @@ internal sealed class TeamsPage : Page
         }))["repositories"] as JsonArray;
         var rows = repositories?.OfType<JsonObject>().ToList() ?? [];
         if (rows.Count == 0) { Note(L10n.Text("common.teams.no_repositories")); Note(L10n.Text("common.teams.no_repositories_member")); return; }
-        foreach (var repo in rows) await AddRepositoryAsync(orgId, repo);
+        foreach (var repo in rows)
+        {
+            if (_view != view) return;
+            await AddRepositoryAsync(orgId, repo);
+        }
     }
 
     private async Task AddRepositoryAsync(string orgId, JsonObject repo)
@@ -208,7 +223,7 @@ internal sealed class TeamsPage : Page
         // Compared across every computer's lanes, as on the Mac and Android.
         var overlapping = all.Where(other => Format.Text(other, "branch") != Format.Text(lane, "branch")
                 && ((other["files"] as JsonArray)?.Any(f => files.Contains(f?.ToString() ?? "")) ?? false))
-            .Select(other => Format.Text(other, "ask")).ToList();
+            .Select(other => Format.Text(other, "ask") is { Length: > 0 } text ? text : Format.Text(other, "branch")).ToList();
         if (overlapping.Count > 0)
             row.Children.Add(new TextBlock { Text = L10n.Text("common.teams.lane_overlap", string.Join(", ", overlapping)), Foreground = Theme.Brush(static () => Theme.Warning), TextWrapping = TextWrapping.Wrap });
         var share = Format.Text(lane, "share");
@@ -224,9 +239,9 @@ internal sealed class TeamsPage : Page
                     var result = await CallAsync("teams.ask", new JsonObject { ["target"] = where.DeepClone(), ["method"] = method, ["params"] = new JsonObject { ["branch"] = branch } });
                     var message = Format.Text(result, "message");
                     if (message.Length == 0 && Format.Flag(result, "discarded")) message = L10n.Text("common.teams.lane_discarded");
-                    if (message.Length > 0) Note(message);
+                    if (message.Length > 0) _flash = message;
                 }
-                catch (Exception error) { Note(error.Message, true); }
+                catch (Exception error) { _flash = error.Message; }
                 await LoadAsync();
             }
             if (state == "ready") actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.land"), ActionIcon.Merge, async (_, _) => await Act("team.lanes.land")));
@@ -262,9 +277,14 @@ internal sealed class TeamsPage : Page
         {
             var box = new TextBox { PlaceholderText = L10n.Text("common.teams.comment_placeholder"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
             _body.Children.Add(box);
-            _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.comment"), ActionIcon.Comment, async (_, _) =>
+            Button? send = null;
+            send = ActionIconGlyph.Button(L10n.Text("common.teams.comment"), ActionIcon.Comment, async (_, _) =>
             {
-                if (string.IsNullOrWhiteSpace(box.Text)) return;
+                var text = box.Text.Trim();
+                if (text.Length == 0) return;
+                if (_commentAttempt is not { } attempt || attempt.Text != text)
+                    _commentAttempt = attempt = (text, Guid.NewGuid().ToString(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                send!.IsEnabled = false;
                 try
                 {
                     await CallAsync("teams.comment.send", new JsonObject
@@ -272,14 +292,15 @@ internal sealed class TeamsPage : Page
                         ["target"] = target.DeepClone(),
                         ["input"] = new JsonObject
                         {
-                            ["text"] = box.Text.Trim(), ["clientMessageId"] = Guid.NewGuid().ToString(),
-                            ["clientMessageCreatedAtMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                            ["text"] = text, ["clientMessageId"] = attempt.Id, ["clientMessageCreatedAtMs"] = attempt.CreatedAtMs,
                         },
                     });
+                    _commentAttempt = null;
                     await ShowChatAsync(target, title, computer);
                 }
-                catch (Exception error) { Note(error.Message, true); }
-            }));
+                catch (Exception error) { Note(error.Message, true); send.IsEnabled = true; }
+            });
+            _body.Children.Add(send);
         }
         if (Format.Flag(chat, "allowsAgentRuns"))
         {
@@ -325,8 +346,9 @@ internal sealed class TeamsPage : Page
                 try { await CallAsync("teams.ask", new JsonObject { ["target"] = target.DeepClone(), ["method"] = "team.chat.ask.stop", ["params"] = new JsonObject { ["fence"] = fence.DeepClone() } }); }
                 catch (Exception error) { Note(error.Message, true); }
             }));
+            var view = _view;
             await Task.Delay(3000);
-            if (!IsLoaded) return;
+            if (!IsLoaded || _view != view) return;
             try
             {
                 var status = await CallAsync("teams.ask", new JsonObject { ["target"] = target.DeepClone(), ["method"] = "team.chat.ask.status", ["params"] = new JsonObject { ["fence"] = fence.DeepClone() } });

@@ -195,6 +195,8 @@ private fun AuthorizeCard(calls: TeamCalls, onDone: () -> Unit) {
     }
 }
 
+private data class CommentAttempt(val text: String, val id: String, val createdAtMs: Long)
+
 data class ChatTarget(val target: JsonObject, val title: String, val computer: String)
 
 @Composable
@@ -351,6 +353,9 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Uni
     var allowsComments by remember(chat) { mutableStateOf(false) }
     var allowsAgentRuns by remember(chat) { mutableStateOf(false) }
     var comment by remember(chat) { mutableStateOf("") }
+    // One id per comment text: a retry after an unknown result is the same
+    // message, so the host keeps one copy.
+    var commentAttempt by remember(chat) { mutableStateOf<CommentAttempt?>(null) }
     var ask by remember(chat) { mutableStateOf("") }
     var fence by remember(chat) { mutableStateOf<JsonElement?>(null) }
     var error by remember(chat) { mutableStateOf<String?>(null) }
@@ -409,14 +414,17 @@ private fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, onBack: () -> Uni
                 scope.launch {
                     busy = true
                     try {
+                        val text = comment.trim()
+                        val attempt = commentAttempt?.takeIf { it.text == text }
+                            ?: CommentAttempt(text, UUID.randomUUID().toString(), System.currentTimeMillis()).also { commentAttempt = it }
                         calls.call("teams.comment.send", buildJsonObject {
                             put("target", chat.target)
                             put("input", buildJsonObject {
-                                put("text", comment.trim()); put("clientMessageId", UUID.randomUUID().toString())
-                                put("clientMessageCreatedAtMs", System.currentTimeMillis())
+                                put("text", text); put("clientMessageId", attempt.id)
+                                put("clientMessageCreatedAtMs", attempt.createdAtMs)
                             })
                         })
-                        comment = ""
+                        comment = ""; commentAttempt = null
                         load()
                     } catch (cancelled: CancellationException) {
                         throw cancelled
