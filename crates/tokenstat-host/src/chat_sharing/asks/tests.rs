@@ -81,8 +81,7 @@ impl Fixture {
             self.target(),
             actor,
             input,
-            &self.folder,
-            &self.checkout,
+            (&self.folder, &self.checkout, None),
             || Ok(()),
         )
     }
@@ -285,7 +284,7 @@ fn interrupted_admission_never_replays_a_missing_or_written_ask() {
             f.target(),
             &actor,
             &input,
-            (&f.folder, &f.checkout),
+            (&f.folder, &f.checkout, None),
             || Ok(()),
             |step| {
                 if std::mem::discriminant(&step) == stage {
@@ -302,8 +301,7 @@ fn interrupted_admission_never_replays_a_missing_or_written_ask() {
             f.target(),
             &actor,
             &input,
-            &f.folder,
-            &f.checkout,
+            (&f.folder, &f.checkout, None),
             || Ok(()),
         );
         if matches!(stop, Step::Fenced) {
@@ -519,8 +517,7 @@ fn authorization_retired_after_reservation_cannot_append_on_retry() {
         f.target(),
         &actor,
         &input,
-        &f.folder,
-        &f.checkout,
+        (&f.folder, &f.checkout, None),
         || {
             if calls.fetch_add(1, Ordering::SeqCst) >= 2 {
                 Err(DispatchError::new("fixture_access_removed", "fixture"))

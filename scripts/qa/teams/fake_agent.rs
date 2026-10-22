@@ -129,7 +129,11 @@ fn main() {
     }
     let child = command.spawn().unwrap();
     fs::write(&state, format!("{} {}", std::process::id(), child.id())).unwrap();
-    if mode == "finish" {
+    if mode == "edit" {
+        // A lane agent's whole job: change a file in its own folder.
+        fs::write("lane-edit.txt", "Fictional lane change\n").unwrap();
+    }
+    if mode == "finish" || mode == "edit" {
         return;
     }
     #[cfg(unix)]

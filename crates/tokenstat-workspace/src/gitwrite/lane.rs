@@ -82,6 +82,11 @@ pub fn create(
     .map(|_| ())
 }
 
+/// Bring the remote target up to date before cutting a lane from it.
+pub fn fetch(repository: &Path, remote: &str, target: &str) -> Result<(), String> {
+    run(repository, &["fetch", "-q", remote, target]).map(|_| ())
+}
+
 /// Remove a lane and its branch. The branch may already be landed.
 pub fn remove(repository: &Path, lane: &Path, branch: &str) -> Result<(), String> {
     let path = lane.to_str().ok_or("The lane path is not valid text.")?;

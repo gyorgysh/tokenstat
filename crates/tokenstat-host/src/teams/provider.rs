@@ -30,6 +30,8 @@ const SERVER: &str = "tokenstat_team";
 const SDK_VARS: [&str; 2] = ["TOKENSTAT_TEAM_SDK_ADDRESS", "TOKENSTAT_TEAM_SDK_TOKEN"];
 const PROMPT: &str = "You are answering an Ask in a shared Team chat. Call the team_context tool first. When its result includes nextCursor, call it again with that cursor until you have read every page. The original Ask is on every page. Answer that Ask for the people in this chat from that conversation. You have no file or shell access in this run.";
 
+const LANE_PROMPT: &str = "You are doing work asked for in a shared Team chat. Call the team_context tool first. When its result includes nextCursor, call it again with that cursor until you have read every page. The original Ask is on every page. Make the change it asks for by editing files in this folder, which is your own copy of the project on a fresh branch. You can read and edit files only inside this folder and cannot run commands. Do not commit: tokenstat commits your work, checks it and lands it after you finish. End with a short summary of what you changed.";
+
 /// Only Claude Code can answer an Ask for now.
 pub(super) fn supported(backend: &str) -> Result<(), DispatchError> {
     if backend == "claude" {
@@ -122,14 +124,18 @@ pub(super) fn configure(
     program: &mut Program,
     helper: &Path,
     token: String,
+    lane: bool,
 ) -> io::Result<()> {
     program.input = home.file("input");
     program.output = home.file("output");
     program.errors = home.file("errors");
-    write_new(&program.input, PROMPT.as_bytes())?;
+    write_new(
+        &program.input,
+        if lane { LANE_PROMPT } else { PROMPT }.as_bytes(),
+    )?;
     let config = home.file("mcp.json");
     write_new(&config, claude_mcp(helper).to_string().as_bytes())?;
-    program.args = claude_args(&config);
+    program.args = claude_args(&config, lane);
     program.env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token);
     Ok(())
 }
@@ -160,7 +166,18 @@ fn claude_mcp(helper: &Path) -> serde_json::Value {
     }}})
 }
 
-fn claude_args(config: &Path) -> Vec<String> {
+/// A lane agent edits files inside its own lane and nothing else: path rules
+/// confine every file tool to the working folder, and it has no shell.
+/// tokenstat commits, checks and lands the work afterwards.
+const LANE_TOOLS: [&str; 5] = [
+    "Read(./**)",
+    "Edit(./**)",
+    "Glob(./**)",
+    "Grep(./**)",
+    "mcp__tokenstat_team",
+];
+
+fn claude_args(config: &Path, lane: bool) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p",
         "--output-format",
@@ -171,18 +188,24 @@ fn claude_args(config: &Path) -> Vec<String> {
         "--setting-sources",
         "",
         "--disable-slash-commands",
-        // No built-in tools. Read, Grep and Glob accept paths outside the
-        // checkout, and Bash reads anything.
-        "--tools",
-        "",
-        "--allowedTools",
-        "mcp__tokenstat_team",
         "--strict-mcp-config",
         "--mcp-config",
     ]
     .map(str::to_string)
     .into();
     args.push(config.to_string_lossy().into_owned());
+    if lane {
+        args.extend([
+            "--tools".into(),
+            "Read,Edit,Write,Glob,Grep".into(),
+            "--allowedTools".into(),
+        ]);
+        args.extend(LANE_TOOLS.map(str::to_string));
+    } else {
+        // No built-in tools. Read, Grep and Glob accept paths outside the
+        // checkout, and Bash reads anything.
+        args.extend(["--tools", "", "--allowedTools", "mcp__tokenstat_team"].map(str::to_string));
+    }
     args
 }
 
@@ -250,7 +273,7 @@ mod tests {
     fn claude_has_only_team_tools_and_no_credential_on_disk() {
         let (_scratch, _checkout, home, mut program) = prepared();
         let helper = Path::new("/opt/tokenstat/tokenstat-hostd");
-        configure(&home, &mut program, helper, ACCESS.into()).unwrap();
+        configure(&home, &mut program, helper, ACCESS.into(), false).unwrap();
         assert_eq!(program.env["CLAUDE_CODE_OAUTH_TOKEN"], ACCESS);
         assert!(!program.args.iter().any(|a| a.contains("skip-permissions")));
         let at = |flag: &str| program.args.iter().position(|a| a == flag).unwrap() + 1;
@@ -287,6 +310,35 @@ mod tests {
             .collect();
         names.sort();
         assert_eq!(names, ["input", "mcp.json"]);
+    }
+
+    #[test]
+    fn a_lane_agent_edits_only_inside_its_lane_and_has_no_shell() {
+        let (_scratch, _checkout, home, mut program) = prepared();
+        configure(
+            &home,
+            &mut program,
+            Path::new("/opt/hostd"),
+            ACCESS.into(),
+            true,
+        )
+        .unwrap();
+        let at = |flag: &str| program.args.iter().position(|a| a == flag).unwrap() + 1;
+        assert_eq!(program.args[at("--tools")], "Read,Edit,Write,Glob,Grep");
+        assert!(
+            !program
+                .args
+                .iter()
+                .any(|a| a.contains("Bash") || a.contains("skip-permissions"))
+        );
+        let allowed = &program.args[at("--allowedTools")..];
+        assert_eq!(allowed, LANE_TOOLS.map(str::to_string));
+        assert!(
+            allowed
+                .iter()
+                .all(|rule| rule.ends_with("(./**)") || rule == "mcp__tokenstat_team")
+        );
+        assert_eq!(fs::read_to_string(&program.input).unwrap(), LANE_PROMPT);
     }
 
     #[cfg(unix)]

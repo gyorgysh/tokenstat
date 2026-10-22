@@ -315,29 +315,23 @@ impl Store {
         target: SharedSource<'_>,
         principal: &AuthorizedTeamPrincipal,
         input: &AskInput,
-        folder: &Path,
-        checkout: &str,
+        checkout: (&Path, &str, Option<&Path>),
         current: impl FnMut() -> Result<(), DispatchError>,
     ) -> Result<AskPreparation, DispatchError> {
-        self.prepare_team_ask_steps(
-            target,
-            principal,
-            input,
-            (folder, checkout),
-            current,
-            |_| Ok(()),
-        )
+        self.prepare_team_ask_steps(target, principal, input, checkout, current, |_| Ok(()))
     }
     fn prepare_team_ask_steps(
         &self,
         target: SharedSource<'_>,
         principal: &AuthorizedTeamPrincipal,
         input: &AskInput,
-        checkout: (&Path, &str),
+        checkout: (&Path, &str, Option<&Path>),
         mut current: impl FnMut() -> Result<(), DispatchError>,
         mut checkpoint: impl FnMut(Step) -> Result<(), DispatchError>,
     ) -> Result<AskPreparation, DispatchError> {
-        let (folder, checkout) = checkout;
+        // The review is of the publisher's checkout. A lane only changes
+        // which folder the run writes in, and it never fences the checkout.
+        let (folder, checkout, lane) = checkout;
         input.validate()?;
         let (scope, actor) = scope(principal)?;
         let request_digest = input.digest()?;
@@ -375,7 +369,11 @@ impl Store {
             return Ok(AskPreparation::Existing(value));
         }
         // No canonical/index lock spans filesystem writer acquisition or HTTP.
-        let writer = tokenstat_workspace::writer::Lease::acquire(folder).map_err(|e| {
+        let writer = match lane {
+            Some(lane) => tokenstat_workspace::writer::Lease::acquire_lane(lane),
+            None => tokenstat_workspace::writer::Lease::acquire(folder),
+        }
+        .map_err(|e| {
             if e == tokenstat_workspace::writer::Error::RecoveryRequired {
                 super::run_recovery_required()
             } else {

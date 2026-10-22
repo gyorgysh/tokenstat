@@ -98,4 +98,18 @@ impl Output {
         }
         Ok(())
     }
+    /// One line from tokenstat itself after the agent's own output, such as
+    /// what happened when its work was landed.
+    pub fn note(
+        &mut self,
+        text: &str,
+        mut append: impl FnMut(u32, Vec<Event>) -> io::Result<()>,
+    ) -> io::Result<()> {
+        append(self.batch, vec![Event::Text { delta: text.into() }])?;
+        self.batch = self
+            .batch
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("Too many output batches."))?;
+        Ok(())
+    }
 }

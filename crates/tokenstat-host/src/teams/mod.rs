@@ -15,6 +15,8 @@ mod directory;
 mod guardian;
 mod ingress;
 #[cfg(feature = "local-host")]
+mod lanes;
+#[cfg(feature = "local-host")]
 mod local_sharing;
 #[cfg(feature = "local-host")]
 mod provider;
@@ -129,7 +131,9 @@ pub(crate) fn local_sharing_call(
 ) -> Option<Result<Value, DispatchError>> {
     #[cfg(feature = "local-host")]
     {
-        local_sharing::call(method, params).or_else(|| recovery::call(method, params))
+        local_sharing::call(method, params)
+            .or_else(|| recovery::call(method, params))
+            .or_else(|| lanes::call(method, params))
     }
     #[cfg(not(feature = "local-host"))]
     {

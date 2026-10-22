@@ -183,12 +183,30 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     if let Some(program) = &init.program {
         fixture_program(program, &source, &init.issuer)?;
     }
+    // With lanes on, the run works in its own worktree and never in the
+    // publisher's folder. A refused or failed Ask drops the lane again.
+    let lane_settings = super::lanes::settings(&principal.value().checkout_id);
+    let mut lane = match &lane_settings {
+        Some(settings) => Some(super::lanes::open(
+            &source.checkout.folder.canonical,
+            &principal.value().checkout_id,
+            settings,
+        )?),
+        None => None,
+    };
+    let work_folder = match &lane {
+        Some(lane) => lane.path.canonicalize().map_err(map_io)?,
+        None => source.checkout.folder.canonical.clone(),
+    };
     let mut prepared = match chats.prepare_team_ask(
         source.target(),
         &principal,
         &input,
-        &source.checkout.folder.canonical,
-        &checkout,
+        (
+            &source.checkout.folder.canonical,
+            &checkout,
+            lane.as_ref().map(|lane| lane.path.as_path()),
+        ),
         || source.ensure_current(),
     )? {
         AskPreparation::Existing(receipt) => {
@@ -205,12 +223,15 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         None => (|| {
             super::provider::supported(prepared.backend())?;
             let token = super::provider::access_token()?;
-            let program = super::provider::program(&source.checkout.folder.canonical)?;
+            let program = super::provider::program(&work_folder)?;
             Ok((Some(token), program))
         })(),
     };
     let (provider, mut program) = match launch {
-        Ok(launch) => launch,
+        Ok((provider, mut program)) => {
+            program.folder.clone_from(&work_folder);
+            (provider, program)
+        }
         Err(error) => {
             let _ = chats.refuse_prepared_ask(source.target(), *prepared);
             return Err(error);
@@ -287,7 +308,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         &tokenstat_paths::data_dir()
             .ok_or_else(unavailable)?
             .join("team-run-homes"),
-        &source.checkout.folder.canonical,
+        &work_folder,
         &program,
     ) {
         Ok(home) => home,
@@ -301,7 +322,8 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     program.env.clone_from(&run_home.env);
     sdk.configure(&mut program);
     if let Some(token) = provider
-        && let Err(error) = super::provider::configure(&run_home, &mut program, &helper, token)
+        && let Err(error) =
+            super::provider::configure(&run_home, &mut program, &helper, token, lane.is_some())
     {
         let _ = authority.retire();
         let _ = chats.refuse_prepared_ask(source.target(), *prepared);
@@ -464,6 +486,29 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             return Err(error);
         }
     };
+    if terminal == State::Succeeded
+        && let (Some(lane), Some(settings)) = (lane.as_mut(), lane_settings.as_ref())
+    {
+        let message = input
+            .text
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(200)
+            .collect::<String>();
+        let landing = super::lanes::finish(lane, settings, &message);
+        let note = super::lanes::describe(&landing, lane, settings);
+        let _ = authority.renew();
+        let _ = output.note(&note, |batch, events| {
+            chats
+                .append_owned_output(source.target(), &prepared, batch, events, || {
+                    authority.ensure_live().map_err(api_error)?;
+                    source.ensure_current()
+                })
+                .map_err(|_| io::Error::other("Team output could not be verified."))
+        });
+    }
     let result = chats.complete_owned_run(source.target(), *prepared, proof, terminal);
     if result.is_ok() {
         super::recovery::forget(&fence);
