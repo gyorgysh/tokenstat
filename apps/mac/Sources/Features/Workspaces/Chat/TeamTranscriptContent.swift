@@ -122,18 +122,17 @@ enum TeamFilePreview {
         return UIImage(data: file.data).map(Image.init(uiImage:))
         #endif
     }
-    /// Extensions macOS can launch or follow straight from Finder. A saved
-    /// file never keeps one of these as its last extension.
-    private static let launching: Set<String> = [
-        "app", "command", "tool", "sh", "zsh", "bash", "csh", "terminal", "workflow", "action", "scpt", "scptd",
-        "applescript", "pkg", "mpkg", "dmg", "jar", "webloc", "inetloc", "fileloc", "url", "html", "htm", "xhtml",
-        "svg", "shtml", "plugin", "prefpane", "kext", "bundle", "framework", "dylib", "osax", "saver", "widget",
-        "mobileconfig", "configprofile", "py", "rb", "pl", "js", "jxa", "jse", "vbs", "ps1", "bat", "cmd", "exe",
+    /// Plain data a saved file may keep as its extension. Anything else,
+    /// including every type that can launch or be followed from Finder,
+    /// gets .download added, so an unknown kind is never trusted.
+    private static let plainData: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "heic", "webp", "tif", "tiff", "bmp",
+        "txt", "md", "markdown", "csv", "tsv", "json", "log", "pdf", "yaml", "yml", "toml", "diff", "patch",
     ]
 
     /// The name as sent by another computer, made safe to show and to save:
     /// no control or direction characters, no path, no leading dot, bounded,
-    /// and never ending in an extension that launches.
+    /// and ending in a plain data extension or in .download.
     static func safeName(_ raw: String) -> String {
         var name = String(String.UnicodeScalarView(raw.unicodeScalars.filter { scalar in
             !(scalar.properties.generalCategory == .control || scalar.properties.generalCategory == .format
@@ -145,7 +144,7 @@ enum TeamFilePreview {
             name = String(name.prefix(100)) + (ext.isEmpty || ext.count > 10 ? "" : "." + ext)
         }
         if name.isEmpty { name = "file" }
-        if launching.contains((name as NSString).pathExtension.lowercased()) { name += ".download" }
+        if !plainData.contains((name as NSString).pathExtension.lowercased()) { name += ".download" }
         return name
     }
 
