@@ -54,7 +54,10 @@ struct TeamSharedChatReader: View {
                             }
                             if summary.historyTrimmed { TeamNotice(message: L10n.text("common.teams.shared_history_trimmed")) }
                             if windowed { TeamNotice(message: L10n.text("common.teams.shared_history_window")) }
-                            if let renderedHistory { transcript(renderedHistory).environment(\.teamAvatarOwner, context.owner) }
+                            if let renderedHistory {
+                                transcript(renderedHistory).environment(\.teamAvatarOwner, context.owner)
+                                    .environment(\.teamAttachmentLoader, { id in try await attachment(id) })
+                            }
                             if events.isEmpty && !loading { Text(L10n.text("common.teams.no_chat_messages")).font(Theme.body).foregroundStyle(.secondary) }
                             Color.clear.frame(height: 1).id("team-history-end")
                         }.frame(maxWidth: 1000).frame(maxWidth: .infinity).padding(Theme.Space.l)
@@ -132,6 +135,18 @@ struct TeamSharedChatReader: View {
                 .environment(\.compactActions, textSize.isAccessibilitySize)
                 .frame(minWidth: 44, minHeight: 44)
         }
+    }
+    private func attachment(_ id: String) async throws -> Data {
+        let reply: TeamAttachmentReply
+        do {
+            reply = try await store.read(.connectionCall, fields: fields("team.chat.attachment", params: ["attachment":.string(id)]), context: context)
+        } catch let failure as TeamRequestFailure where ["team_method_required", "unknown_method"].contains(failure.code) {
+            throw TeamRequestFailure(code: failure.code, message: L10n.text("common.teams.file_needs_update"))
+        }
+        guard reply.shareId == share.id, reply.attachment.id == id, let data = Data(base64Encoded: reply.data) else {
+            throw TeamRequestFailure(code: "invalid_response", message: L10n.text("common.teams.file_unavailable"))
+        }
+        return data
     }
     private func fields(_ method: String, params: [String: JSONValue] = [:]) -> [String: JSONValue] {
         ["target":.object(["organization":.string(repository.organizationId),"repository":.string(repository.id),"checkout":.string(checkout.id),"share":.string(share.id)]),"method":.string(method),"params":.object(params)]

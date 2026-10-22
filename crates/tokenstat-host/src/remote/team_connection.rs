@@ -69,6 +69,9 @@ pub(crate) enum ReadMethod {
     ChatReceipt,
     #[serde(rename = "team.lanes")]
     Lanes,
+    /// One file the shared history shows, from the publishing computer.
+    #[serde(rename = "team.chat.attachment")]
+    ChatAttachment,
 }
 impl ReadMethod {
     pub(crate) fn wire(self) -> &'static str {
@@ -80,6 +83,7 @@ impl ReadMethod {
             Self::ChatEvents => "team.chat.events",
             Self::ChatReceipt => "team.chat.receipt",
             Self::Lanes => "team.lanes",
+            Self::ChatAttachment => "team.chat.attachment",
         }
     }
 }
@@ -95,6 +99,8 @@ pub(crate) struct ReadParams {
     pub(crate) direction: Option<PageDirection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) client_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) attachment: Option<String>,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -104,7 +110,9 @@ pub(crate) enum PageDirection {
 }
 impl ReadParams {
     pub(crate) fn validate(&self, method: ReadMethod, share: Option<&str>) -> bool {
-        if method != ReadMethod::ChatReceipt && self.client_message_id.is_some() {
+        if method != ReadMethod::ChatReceipt && self.client_message_id.is_some()
+            || method != ReadMethod::ChatAttachment && self.attachment.is_some()
+        {
             return false;
         }
         match method {
@@ -129,6 +137,19 @@ impl ReadParams {
                 share.is_some()
                     && self.limit.is_none_or(|limit| (1..=100).contains(&limit))
                     && self.after(share.unwrap_or_default()).is_ok()
+            }
+            ReadMethod::ChatAttachment => {
+                share.is_some()
+                    && self.cursor.is_none()
+                    && self.limit.is_none()
+                    && self.direction.is_none()
+                    && self.attachment.as_deref().is_some_and(|id| {
+                        !id.is_empty()
+                            && id.len() <= 128
+                            && id.bytes().all(|b| {
+                                b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')
+                            })
+                    })
             }
             ReadMethod::ChatReceipt => {
                 share.is_some()
@@ -765,6 +786,20 @@ mod tests {
         params.direction = None;
         params.limit = Some(101);
         assert!(!params.validate(ReadMethod::ChatCatalog, None));
+    }
+
+    #[test]
+    fn attachment_reads_name_one_shared_file() {
+        let file = |id: &str| ReadParams {
+            attachment: Some(id.into()),
+            ..ReadParams::default()
+        };
+        assert!(file("att_1.png").validate(ReadMethod::ChatAttachment, Some("share_fixture")));
+        assert!(!file("att_1.png").validate(ReadMethod::ChatAttachment, None));
+        assert!(!file("../secret").validate(ReadMethod::ChatAttachment, Some("share_fixture")));
+        assert!(!file("").validate(ReadMethod::ChatAttachment, Some("share_fixture")));
+        assert!(!file("att_1").validate(ReadMethod::ChatEvents, Some("share_fixture")));
+        assert!(!ReadParams::default().validate(ReadMethod::ChatAttachment, Some("share_fixture")));
     }
     #[test]
     fn replies_cannot_cross_request_ids_or_inject_unbounded_server_messages() {

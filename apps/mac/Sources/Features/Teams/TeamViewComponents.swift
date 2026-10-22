@@ -11,11 +11,19 @@ struct TeamChatReadingKey: PreferenceKey {
 }
 
 private struct TeamAvatarOwnerKey: EnvironmentKey { static let defaultValue: TeamAccountOwner? = nil }
+typealias TeamAttachmentLoader = @MainActor @Sendable (String) async throws -> Data
+private struct TeamAttachmentLoaderKey: EnvironmentKey { static let defaultValue: TeamAttachmentLoader? = nil }
 private struct TeamCommentStorageKey: EnvironmentKey { static let defaultValue = TeamCommentDraftStore.shared }
 extension EnvironmentValues {
     var teamCommentDraftStorage: TeamCommentDraftStore {
         get { self[TeamCommentStorageKey.self] }
         set { self[TeamCommentStorageKey.self] = newValue }
+    }
+    /// Fetches one file the shared history shows from the publishing computer.
+    /// Nil outside a Team reader, where attachments are not reachable.
+    var teamAttachmentLoader: TeamAttachmentLoader? {
+        get { self[TeamAttachmentLoaderKey.self] }
+        set { self[TeamAttachmentLoaderKey.self] = newValue }
     }
     var teamAvatarOwner: TeamAccountOwner? {
         get { self[TeamAvatarOwnerKey.self] }

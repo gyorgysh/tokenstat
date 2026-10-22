@@ -20,6 +20,8 @@ use std::{
 use tokenstat_sync::teams::{Page, RepositoryRole, TeamCapability, TeamClient};
 
 const PAGE_TARGET: usize = 512 * 1024;
+/// Base64 of this fits one Team response with room to spare.
+const ATTACHMENT_LIMIT: u64 = 5 * 1024 * 1024;
 
 pub(super) fn call(
     principal: &AuthorizedTeamPrincipal,
@@ -113,6 +115,55 @@ pub(super) fn call(
             );
             (viewed.binding, body)
         }
+        TeamReadMethod::ChatAttachment => {
+            let wanted = params.attachment.as_deref().ok_or_else(changed)?;
+            let history = chats.shared_history(
+                &checkout.workspace_id,
+                &row.conversation_id,
+                &row.id,
+                &row.preview,
+            )?;
+            let marker = history.binding.clone().ok_or_else(changed)?;
+            if marker.source_revision != row.source_revision {
+                return Err(changed());
+            }
+            // Only a file the shared history shows. An id from anywhere else
+            // in this chat, or in another chat, is not reachable from here.
+            let shown = history.events.iter().find(|event| {
+                event["event"]["kind"] == "attachment" && event["event"]["id"] == wanted
+            });
+            let Some(shown) = shown else {
+                return Err(DispatchError::new(
+                    "attachment_not_shared",
+                    "This file is not part of the shared chat.",
+                ));
+            };
+            if shown["event"]["size"]
+                .as_u64()
+                .is_none_or(|size| size > ATTACHMENT_LIMIT)
+            {
+                return Err(too_large());
+            }
+            let data = chats
+                .attachment_data(&row.conversation_id, wanted)
+                .map_err(|_| {
+                    DispatchError::new(
+                        "attachment_unavailable",
+                        "This file is no longer on the publishing computer.",
+                    )
+                })?;
+            if data
+                .attachment
+                .size
+                .is_none_or(|size| size > ATTACHMENT_LIMIT)
+            {
+                return Err(too_large());
+            }
+            (
+                marker,
+                json!({"shareId":share,"attachment":data.attachment,"data":data.data}),
+            )
+        }
         _ => return Err(changed()),
     };
     // A local withdrawal or folder replacement that raced the bounded read
@@ -187,6 +238,13 @@ fn former_authors(event: &mut Value, current: &HashSet<String>) {
             former(initiator);
         }
     }
+}
+
+fn too_large() -> DispatchError {
+    DispatchError::new(
+        "attachment_too_large",
+        "This file is too large to open from another computer.",
+    )
 }
 
 fn changed() -> DispatchError {
@@ -295,6 +353,7 @@ mod tests {
             limit: Some(1),
             direction: None,
             client_message_id: None,
+            attachment: None,
         };
         assert!(page("share_other", events.clone(), false, &params).is_err());
         let last = page("share_one", events.clone(), false, &params).unwrap();
@@ -310,6 +369,7 @@ mod tests {
                     limit: None,
                     direction: None,
                     client_message_id: None,
+                    attachment: None,
                 }
             )
             .is_err()
@@ -326,6 +386,7 @@ mod tests {
                 limit: Some(2),
                 direction: Some(TeamPageDirection::Older),
                 client_message_id: None,
+                attachment: None,
                 cursor: None,
             },
         )
@@ -340,6 +401,7 @@ mod tests {
                 limit: Some(2),
                 direction: Some(TeamPageDirection::Older),
                 client_message_id: None,
+                attachment: None,
                 cursor: Some(first["nextCursor"].as_str().unwrap().into()),
             },
         )

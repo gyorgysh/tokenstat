@@ -172,6 +172,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("Fixture history is too large".into());
             }
             std::fs::write(directory.join("events.ndjson"), history)?;
+            // Optional chat files, stored where chat attachments live.
+            if let Some(files) = input["params"]["files"].as_object() {
+                for (file, body) in files {
+                    let name = body["name"].as_str().ok_or("Missing fixture file name")?;
+                    let text = body["text"].as_str().ok_or("Missing fixture file text")?;
+                    if [file.as_str(), name].iter().any(|part| {
+                        part.is_empty()
+                            || !part.bytes().all(|b| {
+                                b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')
+                            })
+                            || part.starts_with('.')
+                    }) {
+                        return Err("Invalid fixture file".into());
+                    }
+                    let folder = directory.join("files").join(file);
+                    std::fs::create_dir_all(&folder)?;
+                    std::fs::write(folder.join(name), text)?;
+                }
+            }
             let path = data.join("chat/conversations.json");
             let mut index: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
             let chat = index["conversations"]

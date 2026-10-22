@@ -12,6 +12,10 @@ struct TeamTranscriptContent: View {
     @State private var readyRenderId: UUID?
     @State private var error: String?
     @Environment(\.teamAvatarOwner) private var owner
+    @Environment(\.teamAttachmentLoader) private var loadAttachment
+    @State private var files: [String: Data] = [:]
+    @State private var fetching: String?
+    @State private var fileError: String?
     var body: some View {
         LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
             if let error { TeamNotice(message: error, warning: true) }
@@ -32,7 +36,26 @@ struct TeamTranscriptContent: View {
                     }
                 }
                 if case let .attachment(file) = row.kind {
-                    Label(file.name, systemImage: "paperclip").font(Theme.callout).foregroundStyle(.secondary)
+                    if let data = files[file.id] {
+                        ChatEventRow(item: row, defaultAgentName: label(history.backend), agentLabel: label, attachmentData: data,
+                                     isPending: false, resolve: { _, _ in }, canAnswerQuestions: false)
+                    } else {
+                        // Fetched on request: a file comes from the publishing
+                        // computer, and only when someone wants to see it.
+                        Button {
+                            Task { await fetch(file.id) }
+                        } label: {
+                            HStack(spacing: Theme.Space.s) {
+                                Image(systemName: "paperclip").accessibilityHidden(true)
+                                Text(file.name).lineLimit(1)
+                                if fetching == file.id { ProgressView().controlSize(.mini).accessibilityHidden(true) }
+                            }.font(Theme.callout)
+                        }
+                        .buttonStyle(.plain).foregroundStyle(loadAttachment == nil ? Color.secondary : TeamColors.action)
+                        .disabled(loadAttachment == nil || fetching != nil)
+                        .accessibilityHint(L10n.text("common.teams.open_file"))
+                        if let fileError, fetching == nil { Text(fileError).font(Theme.caption).foregroundStyle(TeamColors.warning) }
+                    }
                 } else {
                     ChatEventRow(item: row, defaultAgentName: label(history.backend), agentLabel: label, attachmentData: nil,
                                  isPending: false, resolve: { _, _ in }, canAnswerQuestions: false)
@@ -59,6 +82,12 @@ struct TeamTranscriptContent: View {
                 rows = []; people = [:]; asks = []; former = []; readyRenderId = history.renderId; self.error = L10n.text("common.teams.history_cannot_display")
             }
         }
+    }
+    private func fetch(_ id: String) async {
+        guard let loadAttachment, fetching == nil else { return }
+        fetching = id; fileError = nil
+        defer { fetching = nil }
+        do { files[id] = try await loadAttachment(id) } catch is CancellationError {} catch { fileError = error.localizedDescription }
     }
     private func label(_ backend: String) -> String {
         switch backend {

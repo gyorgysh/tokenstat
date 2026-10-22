@@ -137,7 +137,9 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         }
         if matches!(
             operation,
-            TeamReadMethod::ChatDetails | TeamReadMethod::ChatEvents
+            TeamReadMethod::ChatDetails
+                | TeamReadMethod::ChatEvents
+                | TeamReadMethod::ChatAttachment
         ) {
             #[cfg(feature = "local-host")]
             return super::scoped_chats::call(&principal, operation, &body);
