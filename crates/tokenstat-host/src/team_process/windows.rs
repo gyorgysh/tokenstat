@@ -229,7 +229,7 @@ mod tests {
         started(handle.as_raw_handle()).unwrap()
     }
 
-    fn until(what: &str, done: impl Fn() -> bool) {
+    fn until(what: &str, mut done: impl FnMut() -> bool) {
         let deadline = Instant::now() + Duration::from_secs(20);
         while !done() {
             assert!(Instant::now() < deadline, "{what}");
