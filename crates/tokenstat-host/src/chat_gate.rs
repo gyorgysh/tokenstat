@@ -800,12 +800,23 @@ mod tests {
         std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let line = hook_command(&helper, "claude", "pre");
-        let status = Command::new("/bin/sh")
-            .arg("-c")
-            .arg(&line)
-            .status()
-            .expect("the hook line must be runnable by a shell");
-        assert!(status.success(), "hook line did not run: {line}");
+        // Another test thread can fork while this script is still open for
+        // writing, and Linux then refuses to run it for a moment ("text file
+        // busy"). A few tries separate that race from a real failure.
+        let mut status = None;
+        for _ in 0..10 {
+            let ran = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&line)
+                .status()
+                .expect("the hook line must be runnable by a shell");
+            if ran.success() {
+                status = Some(ran);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(status.is_some(), "hook line did not run: {line}");
         assert_eq!(std::fs::read_to_string(&marker).unwrap(), "hook claude pre");
     }
 
