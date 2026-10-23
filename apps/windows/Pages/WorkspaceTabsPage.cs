@@ -30,6 +30,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
 
     public WorkspaceTabsPage(string workspaceId, Func<WorkspaceSection, Page> create)
     {
+        TraceManagedDispatch();
         TraceMount("constructing");
         WorkspaceId = workspaceId;
         _tabsMount = new TabViewMount(_tabs);
@@ -257,6 +258,36 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     /// tab: an empty native TabView can load before its documents are added.
     /// </summary>
     private bool MustDefer => !_tabsMount.IsReady || _tabsMount.HasPending;
+
+    private static int _dispatchTraceAttached;
+    private static void TraceManagedDispatch()
+    {
+        if (Environment.GetEnvironmentVariable("CI") != "true"
+            || Environment.GetEnvironmentVariable("TOKENSTAT_UI_STARTUP_TRACE") != "1"
+            || Interlocked.Exchange(ref _dispatchTraceAttached, 1) != 0) return;
+        var thread = Environment.CurrentManagedThreadId;
+        var remaining = 64;
+        var writing = false;
+        AppDomain.CurrentDomain.FirstChanceException += (_, args) =>
+        {
+            if (Environment.CurrentManagedThreadId != thread || writing || remaining == 0) return;
+            writing = true;
+            try
+            {
+                // Dispatcher callbacks can fail outside XAML's unhandled event.
+                // Keep only structural metadata from this disposable CI window.
+                var frames = new System.Diagnostics.StackTrace(args.Exception, false).GetFrames()
+                    .Select(frame => frame.GetMethod())
+                    .Where(method => method?.DeclaringType?.Namespace is { } ns && (ns == "Tokenstat" || ns.StartsWith("Tokenstat.", StringComparison.Ordinal)))
+                    .Take(12).Select(method => $"{method!.DeclaringType!.Name}.{method.Name}").ToArray();
+                if (frames.Length == 0) return;
+                remaining--;
+                Program.LogStartup($"Workbench managed exception: type={args.Exception.GetType().Name}; HRESULT=0x{args.Exception.HResult:x8}; frames={string.Join(" > ", frames)}");
+            }
+            catch { /* Diagnostics must preserve the original exception. */ }
+            finally { writing = false; }
+        };
+    }
 
     private static void TraceMount(string stage)
     {
