@@ -47,4 +47,19 @@ private struct ChartQABody: View {
 }
 
 // The fixture provides the app type scale without loading the production application.
-enum Theme { static var callout: Font { .custom("Manrope", size: 12) } }
+enum Theme {
+    static var callout: Font { .custom("Manrope", size: 12) }
+    static var panel: Color {
+        #if os(macOS)
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(srgbRed: 16 / 255, green: 14 / 255, blue: 26 / 255, alpha: 1) : .white
+        })
+        #else
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 16 / 255, green: 14 / 255, blue: 26 / 255, alpha: 1) : .white
+        })
+        #endif
+    }
+}

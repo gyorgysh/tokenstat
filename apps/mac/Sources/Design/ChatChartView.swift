@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct ChatChartView: View {
     let source: String
     var pending = false
+    @Environment(\.self) private var environment
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var height: CGFloat = 430
@@ -26,9 +27,10 @@ struct ChatChartView: View {
             } else if source.utf8.count > 256 * 1024 {
                 Text(L10n.text("common.chart.too_large")).font(Theme.callout).padding(16)
             } else {
-                ChartWebView(source: source, dark: colorScheme == .dark, reduceMotion: reduceMotion,
+                ChartWebView(source: source, dark: colorScheme == .dark, panel: Theme.panel.resolve(in: environment), reduceMotion: reduceMotion,
                              height: $height, onExport: export, onError: { failure = $0 })
                     .frame(height: height)
+                    .background(Theme.panel)
                     .accessibilityIdentifier("chat.chart")
             }
         }
@@ -67,6 +69,7 @@ private typealias ChartRepresentable = UIViewRepresentable
 private struct ChartWebView: ChartRepresentable {
     let source: String
     let dark: Bool
+    let panel: Color.Resolved
     let reduceMotion: Bool
     @Binding var height: CGFloat
     let onExport: (String, Data) -> Void
@@ -97,8 +100,10 @@ private struct ChartWebView: ChartRepresentable {
         configuration.websiteDataStore = .nonPersistent()
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         configuration.userContentController.add(coordinator, name: "chart")
+        configuration.userContentController.addUserScript(WKUserScript(source: themeBootstrap, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = coordinator
+        applyNativeAppearance(view)
         #if os(iOS)
         view.isOpaque = false
         view.backgroundColor = .clear
@@ -118,6 +123,39 @@ private struct ChartWebView: ChartRepresentable {
         return view
     }
 
+    private func applyNativeAppearance(_ view: WKWebView) {
+        #if os(macOS)
+        view.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        view.underPageBackgroundColor = NSColor(srgbRed: Double(panel.red), green: Double(panel.green), blue: Double(panel.blue), alpha: Double(panel.opacity))
+        #else
+        view.overrideUserInterfaceStyle = dark ? .dark : .light
+        view.underPageBackgroundColor = UIColor(red: CGFloat(panel.red), green: CGFloat(panel.green), blue: CGFloat(panel.blue), alpha: CGFloat(panel.opacity))
+        #endif
+    }
+
+    private var themeBootstrap: String {
+        let scheme = dark ? "dark" : "light"
+        let background = "rgba(\(Int((panel.red * 255).rounded())),\(Int((panel.green * 255).rounded())),\(Int((panel.blue * 255).rounded())),\(panel.opacity))"
+        // The runtime waits for its font and its first render. Establish the
+        // app's appearance before HTML/CSS can paint a default light surface.
+        return """
+        (() => {
+            const apply = () => {
+                const root = document.documentElement;
+                if (!root) return false;
+                root.dataset.theme = '\(scheme)';
+                root.style.colorScheme = '\(scheme)';
+                root.style.backgroundColor = '\(background)';
+                return true;
+            };
+            if (!apply()) {
+                const observer = new MutationObserver(() => { if (apply()) observer.disconnect(); });
+                observer.observe(document, { childList: true });
+            }
+        })();
+        """
+    }
+
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var owner: ChartWebView
         weak var webView: WKWebView?
@@ -126,7 +164,18 @@ private struct ChartWebView: ChartRepresentable {
         private var rendered = ""
         fileprivate var stopped = false
         init(_ owner: ChartWebView) { self.owner = owner }
-        func update(_ owner: ChartWebView) { self.owner = owner; render() }
+        func update(_ owner: ChartWebView) {
+            let appearanceChanged = self.owner.dark != owner.dark || self.owner.panel != owner.panel
+            self.owner = owner
+            if appearanceChanged, let webView {
+                owner.applyNativeAppearance(webView)
+                let controller = webView.configuration.userContentController
+                controller.removeAllUserScripts()
+                controller.addUserScript(WKUserScript(source: owner.themeBootstrap, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+                webView.evaluateJavaScript(owner.themeBootstrap, completionHandler: nil)
+            }
+            render()
+        }
         func dispose() {
             stopped = true
             if let webView { unmount(webView) }
@@ -141,6 +190,12 @@ private struct ChartWebView: ChartRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard !stopped, self.webView === webView else { return }
             loaded = true; render()
+        }
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            guard !stopped, self.webView === webView else { return }
+            // A scheme change can race a navigation that already captured its
+            // document-start scripts. Reapply the latest owner at commit too.
+            webView.evaluateJavaScript(owner.themeBootstrap, completionHandler: nil)
         }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
