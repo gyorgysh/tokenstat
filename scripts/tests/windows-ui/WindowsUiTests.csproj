@@ -19,6 +19,11 @@
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+<Compile Include="../windows-chat/TeamSharedFileTests.cs" Link="TeamSharedFileTests.cs" />
+
+<Compile Include="../../../apps/windows/Pages/TeamSharedFile.cs" Link="TeamSharedFile.cs" />
+<Compile Include="../../../apps/windows/Pages/TeamsPage.Files.cs" Link="TeamsPage.Files.cs" />
+
 <Compile Include="../../../apps/windows/Pages/TeamFolderShareModel.cs" Link="TeamFolderShareModel.cs" />
 <Compile Include="../../../apps/windows/Pages/TeamsPage.Projects.cs" Link="TeamsPage.Projects.cs" />
 

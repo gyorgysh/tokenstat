@@ -47,6 +47,9 @@ namespace Tokenstat
         internal static Action<Tokenstat.Navigation.DesktopOpenRequest>? OpenDesktopAction { get; set; }
         internal static FixtureHost Host { get; } = new();
         internal static void NotifyTeamProjectsChanged() { }
+        internal static event Action? AccountChanged;
+        internal static long AccountGeneration { get; private set; }
+        internal static void NotifyAccountChanged() { AccountGeneration++; AccountChanged?.Invoke(); }
     }
     internal sealed class FixtureHost
     {

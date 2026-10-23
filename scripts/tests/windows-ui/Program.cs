@@ -128,12 +128,14 @@ public sealed partial class SmokeApp : Application
             {
                 await TeamCommentTests.RunAsync();
                 await TeamAskTests.RunAsync();
+                await TeamSharedFileTests.RunAsync();
                 Program.Log("PASS: Teams comments persist exact attempts and protect local recovery on Windows");
                 TeamTranscriptSmoke.Run(body);
                 await TeamsPageSmoke.RunAsync(body);
                 await TeamManagementSmoke.RunAsync(body);
                 await TeamPublisherSmoke.RunAsync(body);
                 await TeamFolderShareSmoke.RunAsync(body);
+                await TeamSharedFileSmoke.RunAsync(body);
                 PersonaSceneSmoke.Run();
                 await ChatChartSmoke.Run(body);
                 await HeatmapResizeSmoke.Run(body);

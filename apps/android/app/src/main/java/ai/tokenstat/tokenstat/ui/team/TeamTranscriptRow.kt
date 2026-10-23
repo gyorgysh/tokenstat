@@ -5,6 +5,8 @@ import ai.tokenstat.tokenstat.ui.components.*
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.workspace.MarkdownText
+import ai.tokenstat.tokenstat.ui.marks.Avatar
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
@@ -12,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
@@ -36,7 +39,12 @@ internal fun teamAuthorLabel(author: TeamAuthor): String = when (author.kind) {
     val colors = LocalTsColors.current
     var expanded by remember(block.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        block.author?.let { Text(teamAuthorLabel(it), style = TsType.caption, color = colors.textSecondary) }
+        block.author?.let { author ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (author.name.isNotBlank() && !author.formerInitiator) Box(Modifier.clearAndSetSemantics {}) { Avatar(name = author.name, size = 24, decorative = true) }
+                Text(teamAuthorLabel(author), style = TsType.caption, color = colors.textSecondary)
+            }
+        }
         when (block.kind) {
             TeamBlockKind.File -> block.file?.let { SharedFile(it, fetch) }
             TeamBlockKind.User -> TeamLiteralText(block.text)

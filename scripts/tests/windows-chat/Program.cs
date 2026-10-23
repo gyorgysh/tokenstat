@@ -11,6 +11,7 @@ await TeamAskTests.RunAsync();
 await TeamManagementTests.RunAsync();
 await TeamPublisherTests.RunAsync();
 await TeamFolderShareTests.RunAsync();
+await TeamSharedFileTests.RunAsync();
 var latestTeamHistory = new TeamHistoryWindow([new JsonObject { ["seq"] = 3 }, new JsonObject { ["seq"] = 4 }]);
 var earlierTeamHistory = latestTeamHistory.Merge([new JsonObject { ["seq"] = 1 }, new JsonObject { ["seq"] = 2 }], true);
 Check(earlierTeamHistory.Events.Select(row => row["seq"]!.GetValue<int>()).SequenceEqual(new[] { 1, 2, 3, 4 }), "Team history prepends earlier events without reversing either page");

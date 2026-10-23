@@ -88,7 +88,7 @@ internal sealed partial class TeamsPage
             await model.CheckAsync();
             if (!IsLoaded || _view != view) return;
             if (model.Error == "run_status_unconfirmed") continue;
-            if (canRefresh() && _body.Children.OfType<TextBox>().All(input => input.Text.Length == 0))
+            if (_fileOperations == 0 && canRefresh() && _body.Children.OfType<TextBox>().All(input => input.Text.Length == 0))
             {
                 await ShowChatAsync(target, title, computer); return;
             }

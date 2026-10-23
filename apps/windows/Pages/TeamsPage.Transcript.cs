@@ -22,7 +22,21 @@ internal sealed partial class TeamsPage
     private UIElement TranscriptRow(JsonObject target, TeamBlock block)
     {
         var panel = new StackPanel { Spacing = Theme.SpaceS, Margin = new Thickness(0, 4, 0, 4) };
-        if (block.Author is { } author) panel.Children.Add(new TextBlock { Text = AuthorLabel(author), FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
+        if (block.Author is { } author)
+        {
+            var heading = new Grid { ColumnSpacing = Theme.SpaceS };
+            heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            heading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            if (author.Name.Length > 0 && !author.FormerInitiator)
+            {
+                var picture = new PersonPicture { DisplayName = author.Name, Width = 24, Height = 24 };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(picture, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+                heading.Children.Add(picture);
+            }
+            var label = new TextBlock { Text = AuthorLabel(author), FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(label, 1); heading.Children.Add(label);
+            panel.Children.Add(heading);
+        }
         switch (block.Kind)
         {
             case TeamBlockKind.File:

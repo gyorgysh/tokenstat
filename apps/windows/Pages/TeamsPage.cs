@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -30,7 +29,7 @@ internal sealed partial class TeamsPage : Page
     // A result to show once the reload after Land or Discard has drawn.
     private string? _flash;
     private TeamCommentModel? _currentComment;
-    private bool CommentIdle => _currentComment is not { } comment || !comment.Busy && comment.Text.Length == 0 && comment.RecoveredText is null;
+    private bool CommentIdle => _fileOperations == 0 && (_currentComment is not { } comment || !comment.Busy && comment.Text.Length == 0 && comment.RecoveredText is null);
     private string? _person;
     private bool _canPublish;
     private JsonObject? _folderShareRequest;
@@ -42,6 +41,7 @@ internal sealed partial class TeamsPage : Page
     private readonly Dictionary<string, (string Title, string Id)> _newChatRequests = new();
     private readonly Dictionary<TeamCommentTarget, TeamAskModel> _asks = new();
     private readonly TeamAskRecoveryStore _askStorage;
+    private readonly Func<TeamSharedFileData, Func<bool>, Task>? _saveFile;
     private string? _historyTarget;
     private TeamHistoryWindow _history = new([]);
     private bool _readingEarlier;
@@ -50,14 +50,21 @@ internal sealed partial class TeamsPage : Page
 
     public TeamsPage() : this(null) { }
     internal TeamsPage(Func<string, JsonObject?, Task<JsonNode>>? call, TeamAskRecoveryStore? askStorage = null,
-        JsonObject? folder = null, JsonObject? initialProject = null, bool sharedProjects = false)
+        JsonObject? folder = null, JsonObject? initialProject = null, bool sharedProjects = false,
+        Func<TeamSharedFileData, Func<bool>, Task>? saveFile = null)
     {
+        _saveFile = saveFile;
         _folderShareRequest = (JsonObject?)folder?.DeepClone(); _initialProject = (JsonObject?)initialProject?.DeepClone(); _startSharedProjects = sharedProjects;
         _askStorage = askStorage ?? TeamAskRecoveryStore.Shared;
         _call = call ?? ((method, fields) => AppServices.Host.CallAsync(method, fields));
         Content = new ScrollViewer { Content = _body };
-        Loaded += async (_, _) => await LoadAsync();
-        Unloaded += (_, _) => _view++;
+        Loaded += async (_, _) => { AppServices.AccountChanged += OnTeamAccountChanged; await LoadAsync(); };
+        Unloaded += (_, _) => { AppServices.AccountChanged -= OnTeamAccountChanged; _view++; };
+    }
+    private void OnTeamAccountChanged()
+    {
+        Interlocked.Increment(ref _view);
+        DispatcherQueue.TryEnqueue(async () => { if (IsLoaded) await LoadAsync(); });
     }
 
     /// Every Team call carries the signed-in account's receipt. The host drops
@@ -565,76 +572,6 @@ internal sealed partial class TeamsPage : Page
                 return;
             }
         }
-    }
-
-    /// A file the shared history shows. Images open inline on request. Nothing
-    /// is handed to another app: the file comes from someone else's computer
-    /// and its name comes from an agent's output.
-    private UIElement SharedFile(JsonObject target, JsonObject file)
-    {
-        var view = _view;
-        var panel = new StackPanel { Spacing = Theme.SpaceXs };
-        var id = Format.Text(file, "id");
-        var name = new string(Format.Text(file, "name").Where(c => !char.IsControl(c)
-            && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format).ToArray());
-        if (name.Length == 0) name = L10n.Text("common.teams.shared_file");
-        panel.Children.Add(new TextBlock { Text = name, TextTrimming = TextTrimming.CharacterEllipsis });
-        var key = Format.Text(target, "share") + "/" + id;
-        if (_openedImages.TryGetValue(key, out var opened))
-        {
-            panel.Children.Add(new Image { Source = opened, MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left });
-            return panel;
-        }
-        Button? open = null;
-        open = ActionIconGlyph.Button(L10n.Text("common.teams.open_file_action"), ActionIcon.Download, async (_, _) =>
-        {
-            open!.IsEnabled = false;
-            try
-            {
-                var reply = await CallAsync("teams.connection.call", new JsonObject
-                {
-                    ["target"] = target.DeepClone(), ["method"] = "team.chat.attachment", ["params"] = new JsonObject { ["attachment"] = id },
-                });
-                if (!IsLoaded || _view != view) return;
-                var media = Format.Text(reply["attachment"], "mediaType");
-                if (media.StartsWith("image/", StringComparison.Ordinal) && media != "image/svg+xml")
-                {
-                    var data = Format.Text(reply, "data");
-                    if (data.Length > 8 * 1024 * 1024) throw new InvalidOperationException(L10n.Text("common.teams.file_unavailable"));
-                    var bytes = await Task.Run(() => Convert.FromBase64String(data));
-                    using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
-                    await stream.WriteAsync(bytes.AsBuffer());
-                    stream.Seek(0);
-                    // A small file can still describe a huge bitmap. Read its
-                    // real size first, refuse extremes, and only scale down.
-                    var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(stream);
-                    uint width = decoder.PixelWidth, height = decoder.PixelHeight;
-                    if (width == 0 || height == 0 || (ulong)width * height > 100_000_000UL || Math.Max(width, height) / Math.Min(width, height) > 50)
-                        throw new InvalidOperationException(L10n.Text("common.teams.file_unavailable"));
-                    stream.Seek(0);
-                    var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
-                    if (width >= height) bitmap.DecodePixelWidth = (int)Math.Min(width, 2048u);
-                    else bitmap.DecodePixelHeight = (int)Math.Min(height, 2048u);
-                    await bitmap.SetSourceAsync(stream);
-                    if (!IsLoaded || _view != view) return;
-                    if (_openedImages.Count >= 16) _openedImages.Clear();
-                    _openedImages[key] = bitmap;
-                    panel.Children.Remove(open);
-                    panel.Children.Add(new Image { Source = bitmap, MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left });
-                }
-                else
-                {
-                    panel.Children.Add(new TextBlock { Text = L10n.Text("common.teams.file_on_computer"), Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
-                }
-            }
-            catch (Exception error)
-            {
-                panel.Children.Add(new TextBlock { Text = error.Message, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
-                open.IsEnabled = true;
-            }
-        });
-        panel.Children.Add(open);
-        return panel;
     }
 
 }

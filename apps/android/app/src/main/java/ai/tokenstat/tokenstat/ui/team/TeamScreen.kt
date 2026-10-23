@@ -34,7 +34,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -159,7 +158,7 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
                             val exact = details["organization"] as? JsonObject ?: error("Invalid Team")
                             require(exact.str("id") == selected); exact
                         } catch (failure: CoreFailure) {
-                            if (failure.code in setOf("not_found", "forbidden", "organization_paused", "patron_required")) page.rows.singleOrNull()?.takeIf { page.next == null } else throw failure
+                            if (failure.code in setOf("not_found", "forbidden", "organization_paused", "patron_required")) null else throw failure
                         }
                     } else page.rows.singleOrNull()?.takeIf { page.next == null }
                     Phase.Ready
@@ -557,69 +556,6 @@ private fun LaneRow(lane: JsonObject, all: List<JsonObject>, busy: Boolean, onLa
     }
 }
 
-/// A file the shared history shows. Images open inline on request. Nothing
-/// is handed to another app, because the file comes from someone else's
-/// computer and its name comes from an agent's output.
-@Composable
-internal fun SharedFile(file: JsonObject, fetch: suspend (String) -> JsonObject) {
-    val colors = LocalTsColors.current
-    val scope = rememberCoroutineScope()
-    val id = file.str("id") ?: return
-    val name = file.str("name").orEmpty().filter { Character.getType(it) != Character.FORMAT.toInt() && !it.isISOControl() }
-        .ifBlank { L10n.text("common.teams.shared_file") }
-    var image by remember(id) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    var note by remember(id) { mutableStateOf<String?>(null) }
-    var busy by remember(id) { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(name, color = colors.textPrimary, maxLines = 1)
-        val shown = image
-        if (shown != null) {
-            androidx.compose.foundation.Image(shown, contentDescription = name, modifier = Modifier.fillMaxWidth())
-        } else {
-            TsSecondaryButton(L10n.text("common.teams.open_file_action"), enabled = !busy, icon = ActionIcon.Download.vector, onClick = {
-                scope.launch {
-                    busy = true
-                    try {
-                        val reply = fetch(id)
-                        val media = (reply["attachment"] as? JsonObject)?.str("mediaType").orEmpty()
-                        if (media.startsWith("image/") && media != "image/svg+xml") {
-                            val data = reply.str("data").orEmpty()
-                            if (data.length > 8 * 1024 * 1024) throw IllegalStateException(L10n.text("common.teams.file_unavailable"))
-                            // Decoding is off the main thread: a 5 MB file is
-                            // enough to stall the Team tab.
-                            image = withContext(Dispatchers.Default) { decodeBounded(data) }
-                            if (image == null) note = L10n.text("common.teams.file_unavailable")
-                        } else {
-                            note = L10n.text("common.teams.file_on_computer")
-                        }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (failure: Throwable) {
-                        note = failure.message
-                    } finally {
-                        busy = false
-                    }
-                }
-            })
-        }
-        note?.let { Text(it, color = colors.textSecondary) }
-    }
-}
-
-/// A small file can still describe a huge bitmap. Refuse extremes and
-/// decode the larger side at no more than 2048 pixels.
-private fun decodeBounded(data: String): androidx.compose.ui.graphics.ImageBitmap? {
-    val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
-    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    val (w, h) = bounds.outWidth.toLong() to bounds.outHeight.toLong()
-    if (w <= 0 || h <= 0 || w * h > 100_000_000L || maxOf(w, h) / minOf(w, h) > 50) return null
-    var sample = 1
-    while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) sample *= 2
-    val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-    return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
-}
-
 /// One shared chat: its history as text, a comment box, and Ask with Stop.
 @Composable
 internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: TeamCommentDraftStore, askStorage: TeamAskRecoveryStore? = null, onBack: () -> Unit) {
@@ -732,7 +668,11 @@ internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Te
                     icon = ActionIcon.History.vector, onClick = { scope.launch { load(earlier = true) } })
             }
             items(blocks, key = { it.id }) { block ->
-                TeamTranscriptRow(block) { id -> read("team.chat.attachment", buildJsonObject { put("attachment", id) }) }
+                TeamTranscriptRow(block) { id ->
+                    val reply = read("team.chat.attachment", buildJsonObject { put("attachment", id) })
+                    require(reply.teamString("shareId") == chat.target.teamString("share"))
+                    reply
+                }
             }
         }
         if (allowsComments && commentModel != null) TeamCommentComposer(commentModel, onPosted = {
