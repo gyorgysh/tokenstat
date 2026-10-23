@@ -29,11 +29,13 @@ $previousAgent = Join-Path $env:RUNNER_TEMP 'codex.cmd.before-ui-smoke'
 $hadAgent = Test-Path -LiteralPath $agentFile
 if ($hadAgent) { Copy-Item -LiteralPath $agentFile -Destination $previousAgent -Force }
 $originalPath = $env:PATH
+$originalTrace = $env:TOKENSTAT_UI_STARTUP_TRACE
 $started = Get-Date
 $process = $null
 try {
     [System.IO.File]::WriteAllText($agentFile, "@echo off`r`necho UI startup fixture cannot run an agent. 1>&2`r`nexit /b 64`r`n")
     $env:PATH = "$agentBin;$originalPath"
+    $env:TOKENSTAT_UI_STARTUP_TRACE = '1'
     $process = Start-Process -FilePath $app.FullName -WorkingDirectory $app.DirectoryName -PassThru
     for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 500
@@ -395,6 +397,7 @@ try {
     Write-Output 'PASS: production chats retain drafts, expand history, keep New chat drafts without ghost conversations, and explicitly open one empty chat without sending'
 } finally {
     $env:PATH = $originalPath
+    $env:TOKENSTAT_UI_STARTUP_TRACE = $originalTrace
     if ($hadAgent) { Move-Item -LiteralPath $previousAgent -Destination $agentFile -Force }
     elseif (Test-Path -LiteralPath $agentFile) { Remove-Item -LiteralPath $agentFile -Force }
     Get-ChildItem "$env:LOCALAPPDATA/tokenstat/logs" -Filter '*.log' -ErrorAction SilentlyContinue |

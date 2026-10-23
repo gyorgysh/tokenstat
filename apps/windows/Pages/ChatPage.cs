@@ -784,6 +784,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void PaintConversation()
     {
+        TraceComposition("detaching");
         _composerDock.Child = null;
         _composerWell.Children.Clear();
         _composerRow.Children.Clear();
@@ -804,16 +805,26 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             _titleBox.Text = Format.Text(_openChat, "title", L10n.Text("windows.chatpage.new_chat.db18382a"));
         }
+        var readOnly = SharedSource;
+        if (_titleBox.IsReadOnly != readOnly) _titleBox.IsReadOnly = readOnly;
         _root.Children.Add(_titleBox);
-        _titleBox.IsReadOnly = SharedSource;
+        TraceComposition("title mounted");
 
         _transcript.Children.Clear();
         RebuildTranscript(full: true);
         _root.Children.Add(_transcript);
+        TraceComposition("transcript mounted");
         RefreshCost();
         // Usage remains in the inspector; the transcript contains messages only.
         _composerDock.Visibility = Visibility.Visible;
         _composerDock.Child = Composer();
+        TraceComposition("composer mounted");
+    }
+
+    private void TraceComposition(string stage)
+    {
+        if (Environment.GetEnvironmentVariable("TOKENSTAT_UI_STARTUP_TRACE") == "1")
+            Program.LogStartup($"Chat layout: {stage}; shared={SharedSource}");
     }
 
     private UIElement SetupCard(bool inspector = false)
@@ -1732,7 +1743,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _composerContext.Children.Clear();
         var context = _composerContext = new StackPanel { Spacing = Theme.SpaceS };
         if (SharedSource) context.Children.Add(SharedSourceNotice());
-        _draft.PlaceholderText = L10n.Text(SharedSource ? "common.teams.private_draft_placeholder" : "windows.chatpage.ask_about_this_folder.33b8b41b");
+        var placeholder = L10n.Text(SharedSource ? "common.teams.private_draft_placeholder" : "windows.chatpage.ask_about_this_folder.33b8b41b");
+        if (_draft.PlaceholderText != placeholder) _draft.PlaceholderText = placeholder;
+        TraceComposition("composer context prepared");
         RenderGitStrip();
         context.Children.Add(_gitStrip);
         if (_setupExpanded && !SharedSource)
@@ -1758,6 +1771,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RenderActivitySummary();
         well.Children.Add(_activitySummaryHost);
         well.Children.Add(_draft);
+        TraceComposition("draft mounted");
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
         context.Children.Add(_commandScroll);
