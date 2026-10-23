@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 
 namespace NativeUiTests;
 
@@ -91,5 +93,45 @@ internal static class SidebarAdaptiveSmoke
             Program.Log("PASS: native sidebar threshold growth, shrink and resize preserve expanded/minimal modes");
         }
         finally { host.Children.Remove(view); }
+        await RemovedItems(host);
+    }
+
+    // Matches microsoft/microsoft-ui-xaml#12235: removed XAML items must not
+    // receive SplitView callbacks after reference-tracker GC disconnects them.
+    private static async Task RemovedItems(StackPanel host)
+    {
+        var view = new NavigationView { Width = 900, Height = 300, PaneDisplayMode = NavigationViewPaneDisplayMode.Left, IsPaneOpen = true };
+        var parent = new NavigationViewItem { Content = "Fictional changing project", IsExpanded = true };
+        view.MenuItems.Add(parent);
+        host.Children.Add(view);
+        try
+        {
+            for (var cycle = 0; cycle < 40; cycle++)
+            {
+                ReplaceChildren(parent, cycle * 2, 6);
+                parent.IsExpanded = true;
+                host.UpdateLayout();
+                await Task.Delay(20);
+                ReplaceChildren(parent, cycle * 2 + 1, 1);
+                GC.Collect();
+                view.IsPaneOpen = false;
+                view.IsPaneOpen = true;
+                view.PaneDisplayMode = NavigationViewPaneDisplayMode.Top;
+                view.PaneDisplayMode = NavigationViewPaneDisplayMode.Left;
+                view.CompactPaneLength = 48 + cycle % 2;
+                host.UpdateLayout();
+                await Task.Delay(20);
+            }
+            Program.Log("PASS: removed sidebar items survive GC before pane, display-mode and compact-width changes");
+        }
+        finally { host.Children.Remove(view); }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ReplaceChildren(NavigationViewItem parent, int generation, int count)
+    {
+        var desired = Enumerable.Range(0, count).Select(index => new NavigationViewItem
+            { Tag = $"lifetime:{generation}:{index}", Content = $"Fictional chat {index}" }).ToArray();
+        NavigationRows.Reconcile(parent.MenuItems, desired, "lifetime:", 0);
     }
 }
