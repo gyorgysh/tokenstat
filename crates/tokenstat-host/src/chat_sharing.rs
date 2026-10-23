@@ -63,6 +63,18 @@ pub(crate) struct EventPage {
     pub binding: Binding,
 }
 
+/// Approved metadata and reachable files, without expanding archived output.
+/// Agent output cannot introduce attachment references; those stay in the
+/// bounded, verified inline history approved when the chat was shared.
+#[derive(Debug)]
+pub(crate) struct SharedChatIndex {
+    pub title: String,
+    pub backend: String,
+    pub history_trimmed: bool,
+    pub binding: Binding,
+    pub files: std::collections::HashMap<String, u64>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct History {
@@ -426,6 +438,46 @@ impl Store {
                 &directory,
                 true,
             )
+        })
+    }
+
+    pub(crate) fn shared_chat_index(
+        &self,
+        workspace: &str,
+        id: &str,
+        share: &str,
+        expected: &str,
+    ) -> Result<SharedChatIndex, DispatchError> {
+        self.source_locked(workspace, id, false, |_, chat, bytes| {
+            let directory = safe_join(&self.root, id).map_err(|_| invalid())?;
+            let journal = writer::load(&directory, chat, bytes)?;
+            let history = shared_project(
+                chat,
+                bytes,
+                share,
+                expected,
+                journal.as_ref(),
+                &directory,
+                false,
+            )?;
+            let files = history
+                .events
+                .iter()
+                .filter(|event| event["event"]["kind"] == "attachment")
+                .filter_map(|event| {
+                    Some((
+                        event["event"]["id"].as_str()?.to_owned(),
+                        event["event"]["size"].as_u64().unwrap_or(u64::MAX),
+                    ))
+                })
+                .collect();
+            Ok(SharedChatIndex {
+                title: history.title,
+                backend: history.backend,
+                history_trimmed: history.history_trimmed,
+                binding: history.binding.ok_or_else(paused)?,
+                files,
+            })
         })
     }
 

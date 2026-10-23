@@ -22,7 +22,19 @@ pub(super) struct Fixture {
 }
 impl Fixture {
     pub(super) fn new() -> Self {
+        Self::with_source(&[])
+    }
+    pub(super) fn with_source(events: &[Value]) -> Self {
         let (root, store, chat) = super::super::tests::fixture();
+        if !events.is_empty() {
+            let directory = store.root.join(&chat.id);
+            fs::create_dir(&directory).unwrap();
+            let bytes = events
+                .iter()
+                .map(|event| event.to_string() + "\n")
+                .collect::<String>();
+            fs::write(directory.join("events.ndjson"), bytes).unwrap();
+        }
         let preview = store
             .sharing_history(&chat.workspace_id, &chat.id)
             .unwrap()

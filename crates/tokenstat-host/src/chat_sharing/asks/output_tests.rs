@@ -341,3 +341,128 @@ fn a_page_reads_only_the_payloads_it_shows() {
             .is_err()
     );
 }
+
+#[test]
+fn metadata_and_approved_files_remain_bounded_above_the_full_history_limit() {
+    let f = Fixture::with_source(&[serde_json::json!({
+        "kind":"agent","backend":"codex","at_ms":1,
+        "event":{"kind":"attachment","id":"file_fixture","name":"Report.txt","mediaType":"text/plain","size":23}
+    })]);
+    let prepared = setup(&f);
+    let share = format!("share_{}", "a".repeat(32));
+    let mut large = false;
+    for batch in 0..128 {
+        let mut events = vec![Event::Text {
+            delta: "x".repeat(384 * 1024),
+        }];
+        if batch == 0 {
+            // New agent output cannot make another attachment reachable.
+            events.push(Event::Attachment {
+                id: "not_approved".into(),
+                name: "Private.txt".into(),
+                media_type: Some("text/plain".into()),
+                size: 99,
+                call_id: None,
+            });
+        }
+        f.store
+            .append_owned_output(f.target(), &prepared, batch, events, || Ok(()))
+            .unwrap();
+        let chain = fs::read_to_string(output_file(&f, true)).unwrap();
+        let bytes: u64 = chain
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<serde_json::Value>(line).unwrap()["bytes"]
+                    .as_u64()
+                    .unwrap()
+            })
+            .sum();
+        if bytes > 32 * 1024 * 1024 {
+            large = true;
+            break;
+        }
+    }
+    assert!(
+        large,
+        "The fixture must exceed the full-history expansion bound."
+    );
+    assert_eq!(
+        f.store
+            .shared_history(&f.chat.workspace_id, &f.chat.id, &share, &f.preview)
+            .err()
+            .unwrap()
+            .code,
+        "team_history_limit"
+    );
+    let index = f
+        .store
+        .shared_chat_index(&f.chat.workspace_id, &f.chat.id, &share, &f.preview)
+        .unwrap();
+    assert_eq!(index.title, "Shared review");
+    assert_eq!(index.backend, "codex");
+    assert!(!index.history_trimmed);
+    assert_eq!(index.binding.id, share);
+    assert_eq!(
+        index.files,
+        std::collections::HashMap::from([("file_fixture".into(), 23)])
+    );
+    assert!(
+        f.store
+            .shared_chat_index(&f.chat.workspace_id, &f.chat.id, &share, &"00".repeat(32))
+            .is_err()
+    );
+
+    // Metadata/file discovery validates the sealed chain, without opening an
+    // unrelated archived payload. Reading that payload still verifies bytes.
+    let chain = fs::read_to_string(output_file(&f, true)).unwrap();
+    let first: serde_json::Value = serde_json::from_str(chain.lines().next().unwrap()).unwrap();
+    let path = f
+        .store
+        .root
+        .join(&f.chat.id)
+        .join("team-output")
+        .join(first["digest"].as_str().unwrap());
+    let mut bytes = fs::read(&path).unwrap();
+    bytes[0] ^= 0xff;
+    fs::write(&path, bytes).unwrap();
+    let index = f
+        .store
+        .shared_chat_index(&f.chat.workspace_id, &f.chat.id, &share, &f.preview)
+        .unwrap();
+    assert_eq!(index.files.get("file_fixture"), Some(&23));
+    assert!(!index.files.contains_key("not_approved"));
+    assert!(
+        f.store
+            .shared_event_page(
+                &f.chat.workspace_id,
+                &f.chat.id,
+                &share,
+                &f.preview,
+                &crate::chat::sharing::PageRequest {
+                    after: None,
+                    older: false,
+                    limit: 100,
+                    budget: 512 * 1024
+                }
+            )
+            .is_err()
+    );
+    // Avoiding old payload reads must not skip authentication of the chain
+    // that declares which payloads belong to this shared conversation.
+    let digest = first["digest"].as_str().unwrap();
+    let replacement = format!(
+        "{}{}",
+        if digest.starts_with('0') { '1' } else { '0' },
+        &digest[1..]
+    );
+    fs::write(
+        output_file(&f, true),
+        chain.replacen(digest, &replacement, 1),
+    )
+    .unwrap();
+    assert!(
+        f.store
+            .shared_chat_index(&f.chat.workspace_id, &f.chat.id, &share, &f.preview)
+            .is_err()
+    );
+}

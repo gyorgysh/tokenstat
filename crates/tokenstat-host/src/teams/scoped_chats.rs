@@ -74,13 +74,13 @@ pub(super) fn call(
     let chats = crate::chat::shared();
     let (marker, result) = match method {
         TeamReadMethod::ChatDetails => {
-            let history = chats.shared_history(
+            let history = chats.shared_chat_index(
                 &checkout.workspace_id,
                 &row.conversation_id,
                 &row.id,
                 &row.preview,
             )?;
-            let marker = history.binding.clone().ok_or_else(changed)?;
+            let marker = history.binding;
             if marker.source_revision != row.source_revision {
                 return Err(changed());
             }
@@ -128,32 +128,22 @@ pub(super) fn call(
             let wanted = params.attachment.as_deref().ok_or_else(changed)?;
             // Only a file the shared history shows. An id from anywhere else
             // in this chat, or in another chat, is not reachable from here.
-            // The shown files are read once per shared revision, not on
-            // every click, because that means projecting the whole history.
+            // The bounded file index is cached per shared revision. Archived
+            // agent output cannot add files and is never expanded here.
             let (marker, size) = match shown_file(&row, wanted) {
                 Some(found) => found,
                 None => {
-                    let history = chats.shared_history(
+                    let history = chats.shared_chat_index(
                         &checkout.workspace_id,
                         &row.conversation_id,
                         &row.id,
                         &row.preview,
                     )?;
-                    let marker = history.binding.clone().ok_or_else(changed)?;
+                    let marker = history.binding;
                     if marker.source_revision != row.source_revision {
                         return Err(changed());
                     }
-                    let files: HashMap<String, u64> = history
-                        .events
-                        .iter()
-                        .filter(|event| event["event"]["kind"] == "attachment")
-                        .filter_map(|event| {
-                            Some((
-                                event["event"]["id"].as_str()?.to_string(),
-                                event["event"]["size"].as_u64().unwrap_or(u64::MAX),
-                            ))
-                        })
-                        .collect();
+                    let files = history.files;
                     let size = files.get(wanted).copied();
                     remember_files(&row, marker.clone(), files);
                     let Some(size) = size else {
