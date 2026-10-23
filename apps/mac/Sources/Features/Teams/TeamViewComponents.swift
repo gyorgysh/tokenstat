@@ -17,7 +17,12 @@ struct TeamAttachmentFile: Sendable { let name: String; let mediaType: String?; 
 typealias TeamAttachmentLoader = @MainActor @Sendable (String) async throws -> TeamAttachmentFile
 private struct TeamAttachmentLoaderKey: EnvironmentKey { static let defaultValue: TeamAttachmentLoader? = nil }
 private struct TeamCommentStorageKey: EnvironmentKey { static let defaultValue = TeamCommentDraftStore.shared }
+private struct TeamAskStorageKey: EnvironmentKey { static let defaultValue = TeamAskRecoveryStore.shared }
 extension EnvironmentValues {
+    var teamAskRecoveryStorage: TeamAskRecoveryStore {
+        get { self[TeamAskStorageKey.self] }
+        set { self[TeamAskStorageKey.self] = newValue }
+    }
     var teamCommentDraftStorage: TeamCommentDraftStore {
         get { self[TeamCommentStorageKey.self] }
         set { self[TeamCommentStorageKey.self] = newValue }

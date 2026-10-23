@@ -8,6 +8,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../apps/windows/Pages/TeamCommentDraftStore.cs" Link="TeamCommentDraftStore.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamAskRecovery.cs" Link="TeamAskRecovery.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamAskModel.cs" Link="TeamAskModel.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamCommentModel.cs" Link="TeamCommentModel.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamTranscript.cs" Link="TeamTranscript.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamDirectoryPage.cs" Link="TeamDirectoryPage.cs" />

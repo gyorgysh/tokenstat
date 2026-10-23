@@ -88,7 +88,10 @@ final class TeamFixtureUITests: XCTestCase {
         XCTAssertFalse(app.buttons["team.project.picker"].exists, "The selected folder had to be chosen again")
         let submit = app.buttons["team.editor.submit"]
         XCTAssertFalse(submit.isEnabled)
-        reveal(confirm, in: app); confirm.tap()
+        reveal(confirm, in: app)
+        // A labelled SwiftUI switch can expose the entire text row as its
+        // frame on iOS26. Tap the visible switch at the row's trailing edge.
+        confirm.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: submit)
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
         capture(app, "Folder sharing reviews team and people")
@@ -192,9 +195,16 @@ final class TeamFixtureUITests: XCTestCase {
         send.tap()
         XCTAssertTrue(app.staticTexts["The fictional Ask reply was interrupted after acceptance."].waitForExistence(timeout: 5))
         XCTAssertFalse(input.isEnabled)
+        app.buttons["team.chat.back"].tap()
+        openSharedChat(app)
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertFalse(input.isEnabled, "Reopening forgot the uncertain Ask")
         send.tap()
         let stop = app.buttons["team.ask.stop"]
         XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        app.buttons["team.chat.back"].tap()
+        openSharedChat(app)
+        XCTAssertTrue(stop.waitForExistence(timeout: 5), "Reopening lost the original Stop control")
         stop.tap()
         XCTAssertTrue(send.waitForExistence(timeout: 10))
         capture(app, "Lost Ask reply recovered without another run")

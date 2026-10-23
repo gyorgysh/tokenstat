@@ -24,7 +24,7 @@ def output(*arguments):
                 raise
 
 
-def selection(family="iphone"):
+def selection(family="iphone", ios_version=None):
     runtimes = json.loads(output("xcrun", "simctl", "list", "runtimes", "--json"))["runtimes"]
     types = json.loads(output("xcrun", "simctl", "list", "devicetypes", "--json"))["devicetypes"]
     preferred = (["iPhone 17 Pro", "iPhone 16 Pro", "iPhone 15 Pro", "iPhone 14 Pro"] if family == "iphone"
@@ -33,6 +33,8 @@ def selection(family="iphone"):
     choices = []
     for runtime in runtimes:
         version = tuple(int(part) for part in runtime["version"].split("."))
+        if ios_version and runtime["version"] != ios_version:
+            continue
         if not runtime.get("isAvailable") or ".iOS-" not in runtime["identifier"] or version < (17,):
             continue
         supported = {item["identifier"] for item in runtime.get("supportedDeviceTypes", [])}
@@ -58,10 +60,11 @@ def main():
     parser.add_argument("--select-only", action="store_true", help="Report a compatible installed runtime without creating or changing a device.")
     parser.add_argument("--device-family", choices=["iphone", "ipad"], default="iphone", help="Run the same production Teams views on a phone or tablet.")
     parser.add_argument("--only-test", action="append", default=[], help="Run a named XCTest method for a focused local check; omit for the full CI suite.")
+    parser.add_argument("--ios-version", help="Use this installed iOS runtime version for a targeted compatibility check.")
     args = parser.parse_args()
     if len(set(args.only_test)) != len(args.only_test) or any(not name.startswith("test") or not name.isalnum() for name in args.only_test):
         parser.error("Use distinct XCTest method names beginning with test.")
-    selected = selection(args.device_family)
+    selected = selection(args.device_family, args.ios_version)
     if args.select_only:
         print(json.dumps(selected))
         return 0

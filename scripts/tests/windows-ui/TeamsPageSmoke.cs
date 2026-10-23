@@ -18,66 +18,70 @@ namespace NativeUiTests
         internal static async Task RunAsync(StackPanel body)
         {
             var target = new JsonObject { ["organization"] = "org-fixture", ["repository"] = "repo-fixture", ["checkout"] = "checkout-fixture", ["share"] = "share-fixture" };
-            var fence = new JsonObject { ["fixture"] = "exact-original-fence" };
+            var fence = new JsonObject { ["runId"] = "run_" + new string('a', 32), ["incarnation"] = new string('b', 64) };
+            var root = Path.Combine(Path.GetTempPath(), "teams-ui-asks-" + Guid.NewGuid().ToString("N"));
+            var binding = new TeamCommentTarget("https://fixture.invalid", "person-fixture", "org-fixture", "repo-fixture", "checkout-fixture", "share-fixture", new('a', 64));
+            var recovery = new TeamAskRecoveryStore(root);
+            recovery.Replace(binding, new(new JsonObject { ["text"] = "Fictional Ask", ["review"] = new string('c', 64),
+                ["clientMessageId"] = Guid.NewGuid().ToString(), ["clientMessageCreatedAtMs"] = 1L }, fence), null);
             JsonNode? stopped = null;
-            var calls = 0;
-            var statusReads = 0;
-            var stopAttempts = 0;
+            var calls = 0; var statusReads = 0; var stopAttempts = 0;
             Task<JsonNode> Host(string method, JsonObject? fields)
             {
-                if (method == "account.status") return Task.FromResult<JsonNode>(new JsonObject());
-                if (Format.Text(fields, "method") == "team.chat.details")
-                {
-                    calls++;
-                    throw new Tokenstat.Host.HostException("team_connection_unavailable", "Fictional history read failure");
-                }
+                if (method == "account.status") return Task.FromResult<JsonNode>(new JsonObject {
+                    ["signedIn"] = true, ["host"] = "https://fixture.invalid", ["handle"] = "fictional", ["accountId"] = "person-fixture", ["accountSession"] = "fictional-session",
+                });
+                if (method == "teams.capabilities") return Task.FromResult<JsonNode>(new JsonObject { ["enabled"] = true, ["ready"] = true, ["actorId"] = "person-fixture" });
+                if (method == "teams.directory") return Task.FromResult<JsonNode>(new JsonObject { ["organizations"] = new JsonArray(), ["nextOffset"] = null });
+                if (Format.Text(fields, "method") == "team.chat.details") { calls++; throw new Tokenstat.Host.HostException("team_connection_unavailable", "Fictional history read failure"); }
                 if (Format.Text(fields, "method") == "team.chat.ask.stop")
                 {
                     if (++stopAttempts == 1) throw new Tokenstat.Host.HostException("team_connection_unavailable", "Fictional Stop request failed");
                     stopped = fields?["params"]?["fence"]?.DeepClone();
-                    return Task.FromResult<JsonNode>(new JsonObject());
+                    return Task.FromResult<JsonNode>(new JsonObject { ["stopping"] = true });
                 }
-                if (Format.Text(fields, "method") == "team.chat.ask.status")
-                {
-                    statusReads++;
-                    return Task.FromResult<JsonNode>(new JsonObject());
-                }
+                if (Format.Text(fields, "method") == "team.chat.ask.status") { statusReads++; return Task.FromResult<JsonNode>(new JsonObject()); }
                 throw new Exception("Unexpected fictional host call");
             }
-            var page = new TeamsPage(Host);
-            body.Children.Add(page); body.UpdateLayout();
-            var deadline = DateTime.UtcNow.AddSeconds(3);
-            while (!page.IsLoaded && DateTime.UtcNow < deadline) await Task.Delay(20);
-            if (!page.IsLoaded) throw new Exception("Teams fixture did not load");
-            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
-            var runs = (Dictionary<string, JsonNode>)typeof(TeamsPage).GetField("_activeRuns", flags)!.GetValue(page)!;
-            runs[target.ToJsonString()] = fence;
-            var show = (Task<bool>)typeof(TeamsPage).GetMethod("ShowChatAsync", flags)!.Invoke(page, [target, "Fictional chat", "Fictional computer", null])!;
-            if (await show || calls != 1) throw new Exception("Teams fixture did not exercise the history read failure");
-            deadline = DateTime.UtcNow.AddSeconds(7);
-            while (statusReads == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
-            if (statusReads == 0 || runs.Count != 1) throw new Exception("An unconfirmed status discarded the known run");
-            page.UpdateLayout();
-            static IEnumerable<Button> Buttons(DependencyObject root)
+            static IEnumerable<DependencyObject> Descendants(DependencyObject root)
             {
-                if (root is Button button) yield return button;
+                yield return root;
                 for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-                    foreach (var child in Buttons(VisualTreeHelper.GetChild(root, i))) yield return child;
+                    foreach (var child in Descendants(VisualTreeHelper.GetChild(root, i))) yield return child;
             }
-            var stop = Buttons(page).SingleOrDefault(b => AutomationProperties.GetName(b) == L10n.Text("common.teams.stop_agent"));
-            if (stop is null || !stop.IsEnabled) throw new Exception("History failure hid the known Stop control");
-            var invoke = new ButtonAutomationPeer(stop).GetPattern(PatternInterface.Invoke) as IInvokeProvider;
-            if (invoke is null) throw new Exception("Stop has no accessible invoke action");
-            invoke.Invoke();
-            deadline = DateTime.UtcNow.AddSeconds(3);
-            while (stopAttempts == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
-            if (stopAttempts != 1 || !stop.IsEnabled) throw new Exception("Failed Stop could not be retried");
-            invoke.Invoke();
-            deadline = DateTime.UtcNow.AddSeconds(3);
-            while (stopped is null && DateTime.UtcNow < deadline) await Task.Delay(20);
-            if (!JsonNode.DeepEquals(fence, stopped)) throw new Exception("Stop lost the original run fence");
-            body.Children.Remove(page);
-            Program.Log("PASS: the production Teams reader preserves accessible Stop through malformed status and a history read failure");
+            async Task<TeamsPage> Open()
+            {
+                var page = new TeamsPage(Host, new TeamAskRecoveryStore(root)); body.Children.Add(page); body.UpdateLayout();
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                while (!Descendants(page).OfType<TextBlock>().Any(text => text.Text == L10n.Text("common.teams.no_organizations")) && DateTime.UtcNow < deadline) { page.UpdateLayout(); await Task.Delay(20); }
+                const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                var hosts = (Dictionary<string, string>)typeof(TeamsPage).GetField("_checkoutHosts", flags)!.GetValue(page)!;
+                var checkout = (JsonObject)target.DeepClone(); checkout.Remove("share"); hosts[checkout.ToJsonString()] = binding.Host;
+                var show = (Task<bool>)typeof(TeamsPage).GetMethod("ShowChatAsync", flags)!.Invoke(page, [target, "Fictional chat", "Fictional computer", null])!;
+                if (await show) throw new Exception("Teams fixture did not exercise the history read failure");
+                page.UpdateLayout(); return page;
+            }
+            TeamsPage? mounted = null;
+            try
+            {
+                mounted = await Open();
+                var deadline = DateTime.UtcNow.AddSeconds(7);
+                while (statusReads == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+                if (statusReads == 0 || recovery.Load(binding)?.Record.Fence is null) throw new Exception("An unconfirmed status discarded the saved run");
+                body.Children.Remove(mounted); mounted = await Open();
+                if (calls != 2) throw new Exception("Reopening did not restore the production reader");
+                var stop = Descendants(mounted).OfType<Button>().SingleOrDefault(button => AutomationProperties.GetName(button) == L10n.Text("common.teams.stop_agent"));
+                if (stop is null || !stop.IsEnabled || stop.Visibility != Visibility.Visible) throw new Exception("Reopening or history failure hid the saved Stop control");
+                var invoke = new ButtonAutomationPeer(stop).GetPattern(PatternInterface.Invoke) as IInvokeProvider ?? throw new Exception("Stop has no accessible invoke action");
+                invoke.Invoke(); deadline = DateTime.UtcNow.AddSeconds(3);
+                while ((stopAttempts == 0 || !stop.IsEnabled) && DateTime.UtcNow < deadline) await Task.Delay(20);
+                if (stopAttempts != 1 || !stop.IsEnabled) throw new Exception("Failed Stop could not be retried");
+                invoke.Invoke(); deadline = DateTime.UtcNow.AddSeconds(3);
+                while (stopped is null && DateTime.UtcNow < deadline) await Task.Delay(20);
+                if (!JsonNode.DeepEquals(fence, stopped)) throw new Exception("Stop lost the original saved run fence");
+            }
+            finally { if (mounted is not null) body.Children.Remove(mounted); if (Directory.Exists(root)) Directory.Delete(root, true); }
+            Program.Log("PASS: production Teams restores accessible Stop from disk through page recreation, malformed status and history failure");
             await DirectoryAsync(body);
         }
 

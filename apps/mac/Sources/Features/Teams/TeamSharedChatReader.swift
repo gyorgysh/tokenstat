@@ -24,6 +24,7 @@ struct TeamSharedChatReader: View {
     @State private var pendingComment = false
     @State private var loadedEarlier = false
     @Environment(\.teamCommentDraftStorage) private var commentStorage
+    @Environment(\.teamAskRecoveryStorage) private var askStorage
     @Environment(\.dynamicTypeSize) private var textSize
     private var isCurrent: Bool {
         store.mutationContext == context && store.phase == .ready && context.organizationId == repository.organizationId
@@ -86,9 +87,9 @@ struct TeamSharedChatReader: View {
                 if summary?.allowsComments != true, !pendingComment {
                     Text(L10n.text("common.teams.shared_read_only")).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                if let summary, let person = store.capabilities?.actorId, isCurrent {
+                if let person = store.capabilities?.actorId, isCurrent {
                     let target = TeamCommentTarget(origin: context.owner.scope.origin, person: person, organization: repository.organizationId, repository: repository.id, checkout: checkout.id, share: share.id, host: checkout.hostKey)
-                    TeamCommentComposer(store: store, context: context, target: target, allowsComments: summary.allowsComments == true, storage: commentStorage, location: TeamCommentLocation(organization: store.selectedOrganization?.name ?? "", repository: repository.name, chat: summary.title, computer: checkout.deviceName ?? ""), presentationChanged: { focused, pending in
+                    TeamCommentComposer(store: store, context: context, target: target, allowsComments: summary?.allowsComments == true, storage: commentStorage, location: TeamCommentLocation(organization: store.selectedOrganization?.name ?? "", repository: repository.name, chat: summary?.title ?? share.title ?? L10n.text("common.teams.shared_chat"), computer: checkout.deviceName ?? ""), presentationChanged: { focused, pending in
                         #if os(iOS)
                         editingComment = focused
                         #endif
@@ -96,11 +97,12 @@ struct TeamSharedChatReader: View {
                     }) {
                         if loading { reloadAfterRead = true } else { Task { await load(earlier: false) } }
                     }.id(target)
-                    if summary.allowsAgentRuns {
-                        TeamAskBar(store: store, context: context, target: ["target": fields("team.chat.details")["target"] ?? .null], computer: checkout.deviceName ?? L10n.text("common.teams.computer")) {
+                    TeamAskBar(store: store, context: context, target: target, computer: checkout.deviceName ?? L10n.text("common.teams.computer"),
+                        allowsAgentRuns: summary?.allowsAgentRuns == true, storage: askStorage,
+                        location: TeamCommentLocation(organization: store.selectedOrganization?.name ?? "", repository: repository.name, chat: summary?.title ?? share.title ?? L10n.text("common.teams.shared_chat"), computer: checkout.deviceName ?? "")) {
                             if loading { reloadAfterRead = true } else { Task { await load(earlier: false) } }
-                        }.id(share.id)
-                    }
+                        }.id(target)
+
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(Theme.Space.m).background(Theme.panel)
         }

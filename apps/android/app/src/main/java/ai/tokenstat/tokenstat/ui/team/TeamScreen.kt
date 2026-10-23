@@ -36,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -556,8 +558,10 @@ private fun decodeBounded(data: String): androidx.compose.ui.graphics.ImageBitma
 
 /// One shared chat: its history as text, a comment box, and Ask with Stop.
 @Composable
-internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: TeamCommentDraftStore, onBack: () -> Unit) {
+internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: TeamCommentDraftStore, askStorage: TeamAskRecoveryStore? = null, onBack: () -> Unit) {
     val colors = LocalTsColors.current
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
     var history by remember(chat) { mutableStateOf(TeamHistoryWindow(emptyList())) }
     var blocks by remember(chat) { mutableStateOf<List<TeamBlock>>(emptyList()) }
@@ -570,11 +574,18 @@ internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Te
     val commentTarget = remember(calls, chat) { calls.commentTarget(chat) }
     val commentModel = remember(calls, chat) { commentTarget?.let { TeamCommentModel(draftStorage, it,
         chat.title.take(160) + " · " + chat.computer.take(160), calls::call) } }
-    var ask by remember(chat) { mutableStateOf("") }
-    var askAttempt by remember(chat) { mutableStateOf<JsonObject?>(null) }
-    var fence by remember(chat) { mutableStateOf<JsonElement?>(null) }
+    val appFiles = LocalContext.current.filesDir
+    val recoveryStorage = remember(askStorage, appFiles) { askStorage ?: TeamAskRecoveryStore(java.io.File(appFiles, "team-ask-recovery")) }
+    val askModel = remember(calls, chat, recoveryStorage) { commentTarget?.let { TeamAskModel(recoveryStorage, it,
+        chat.title.take(160) + " · " + chat.computer.take(160)) { method, params ->
+            try { calls.call("teams.ask", buildJsonObject { put("target", chat.target); put("method", method); put("params", params) }) }
+            catch (failure: CoreFailure) {
+                if (method == "team.chat.ask" && failure.code in setOf("team_run_review_changed", "invalid_ask")) throw TeamAskNotAccepted(failure.message ?: "")
+                throw failure
+            }
+        } } }
+    val fence = askModel?.fence
     var error by remember(chat) { mutableStateOf<String?>(null) }
-    var busy by remember(chat) { mutableStateOf(false) }
 
     suspend fun read(method: String, params: JsonObject = buildJsonObject {}): JsonObject =
         calls.call("teams.connection.call", buildJsonObject {
@@ -621,30 +632,25 @@ internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Te
             loading = false
         }
     }
-    suspend fun askCall(method: String, params: JsonObject): JsonObject =
-        calls.call("teams.ask", buildJsonObject { put("target", chat.target); put("method", method); put("params", params) })
+    LaunchedEffect(askModel) { askModel?.restore() }
 
-    LaunchedEffect(chat) {
+    LaunchedEffect(calls, chat) {
         load()
         // New comments and agent output appear while the chat is open.
         // Paused while someone is typing, and while an Ask is watched below.
         while (true) {
             delay(10_000)
-            if (!busy && fence == null && !loadedEarlier && commentModel?.text.isNullOrBlank() && ask.isBlank()) load()
+            if (askModel?.busy != true && askModel?.fence == null && !loadedEarlier && commentModel?.text.isNullOrBlank() && askModel?.text.isNullOrBlank()) load()
         }
     }
-    LaunchedEffect(fence) {
-        val running = fence ?: return@LaunchedEffect
-        while (true) {
+    LaunchedEffect(askModel, fence) {
+        val model = askModel ?: return@LaunchedEffect
+        if (model.fence == null) return@LaunchedEffect
+        while (model.fence != null) {
             delay(3000)
+            model.check()
             if (!loadedEarlier) load()
-            val status = runCatching { askCall("team.chat.ask.status", buildJsonObject { put("fence", running) }) }.getOrNull()
-            val confirmed = (status?.get("running") as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
-            if (confirmed == false) break
-            if (status != null && confirmed == null) error = L10n.text("common.teams.run_status_unconfirmed")
         }
-        fence = null
-        if (!loadedEarlier) load()
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -668,52 +674,31 @@ internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Te
         if (allowsComments && commentModel != null) TeamCommentComposer(commentModel, onPosted = {
             if (!loadedEarlier) load()
         })
-        if (allowsAgentRuns || fence != null) {
-            val running = fence
-            if (running != null) {
-                Text(L10n.text("common.teams.agent_working", chat.computer), color = colors.textSecondary)
-                TsSecondaryButton(L10n.text("common.teams.stop_agent"), icon = ActionIcon.Stop.vector, onClick = {
-                    scope.launch {
-                        try { askCall("team.chat.ask.stop", buildJsonObject { put("fence", running) }) }
-                        catch (cancelled: CancellationException) { throw cancelled }
-                        catch (failure: Throwable) { error = failure.message }
-                    }
-                })
-            } else {
-                OutlinedTextField(ask, { ask = it }, Modifier.fillMaxWidth(), enabled = !busy && askAttempt == null,
-                    placeholder = { Text(L10n.text("common.teams.ask_placeholder")) })
-                TsAccentButton(L10n.text("common.teams.ask"), enabled = ask.isNotBlank() && !busy, icon = ActionIcon.Run.vector, onClick = {
-                    scope.launch {
-                        busy = true
-                        try {
-                            if (askAttempt == null) {
-                                val review = askCall("team.chat.ask.review", buildJsonObject {})
-                                if (!review.bool("agentRuns")) {
-                                    error = L10n.text("common.teams.agent_runs_off", chat.computer)
-                                    return@launch
-                                }
-                                askAttempt = buildJsonObject {
-                                    put("text", ask.trim()); put("review", review.str("review") ?: "")
-                                    put("clientMessageId", UUID.randomUUID().toString())
-                                    put("clientMessageCreatedAtMs", System.currentTimeMillis())
-                                }
-                            }
-                            val sent = askCall("team.chat.ask", askAttempt ?: return@launch)
-                            ask = ""; askAttempt = null
-                            if (sent.str("state") == "running") fence = sent["fence"]
-                            load()
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (failure: Throwable) {
-                            if (failure is CoreFailure && failure.code in setOf("team_run_review_changed", "invalid_ask")) askAttempt = null
-                            error = failure.message
-                        } finally {
-                            busy = false
-                        }
-                    }
-                })
-                Text(L10n.text("common.teams.ask_detail", chat.computer), color = colors.textSecondary)
+        askModel?.let { model ->
+            model.error?.let { Text(askMessage(it, chat.computer), color = colors.danger) }
+            if (model.fence == null && model.error != null) TsSecondaryButton(L10n.text("common.teams.load_saved_ask"), enabled = !model.busy,
+                icon = ActionIcon.Refresh.vector, onClick = { scope.launch { model.restore(force = true) } })
+            if (allowsAgentRuns || model.pending || model.fence != null) {
+                if (model.fence != null) {
+                    Text(L10n.text(if (model.stopping) "common.teams.agent_stopping" else "common.teams.agent_working", chat.computer), color = colors.textSecondary)
+                    TsSecondaryButton(L10n.text("common.teams.stop_agent"), enabled = !model.stopping, icon = ActionIcon.Stop.vector,
+                        onClick = { scope.launch { model.stop() } })
+                } else {
+                    OutlinedTextField(model.text, { if (!model.pending) model.text = it }, Modifier.fillMaxWidth(), enabled = model.loaded && !model.busy && !model.pending,
+                        placeholder = { Text(L10n.text("common.teams.ask_placeholder")) })
+                    TsAccentButton(L10n.text(if (model.pending) "common.teams.retry_same_ask" else "common.teams.ask"), enabled = model.canAsk, icon = ActionIcon.Run.vector,
+                        onClick = { focus.clearFocus(); keyboard?.hide(); scope.launch { model.ask(); load() } })
+                    Text(L10n.text("common.teams.ask_detail", chat.computer), color = colors.textSecondary)
+                }
             }
         }
     }
+}
+
+private fun askMessage(value: String, computer: String): String = when (value) {
+    "ask_save_failed" -> L10n.text("common.teams.ask_save_failed")
+    "ask_unconfirmed" -> L10n.text("common.teams.ask_unconfirmed")
+    "run_status_unconfirmed" -> L10n.text("common.teams.run_status_unconfirmed")
+    "agent_runs_off" -> L10n.text("common.teams.agent_runs_off", computer)
+    else -> value
 }

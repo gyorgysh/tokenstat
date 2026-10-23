@@ -36,10 +36,8 @@ internal sealed partial class TeamsPage : Page
     private readonly Dictionary<string, string> _checkoutHosts = new();
     private readonly Dictionary<string, string> _newChatWriting = new();
     private readonly Dictionary<string, (string Title, string Id)> _newChatRequests = new();
-    private readonly Dictionary<string, JsonObject> _askAttempts = new();
-    private readonly Dictionary<string, string> _askWriting = new();
-    private readonly Dictionary<string, JsonNode> _activeRuns = new();
-    private readonly HashSet<string> _stoppingRuns = new();
+    private readonly Dictionary<TeamCommentTarget, TeamAskModel> _asks = new();
+    private readonly TeamAskRecoveryStore _askStorage;
     private string? _historyTarget;
     private TeamHistoryWindow _history = new([]);
     private bool _readingEarlier;
@@ -47,8 +45,9 @@ internal sealed partial class TeamsPage : Page
     private readonly Dictionary<string, Microsoft.UI.Xaml.Media.Imaging.BitmapImage> _openedImages = new();
 
     public TeamsPage() : this(null) { }
-    internal TeamsPage(Func<string, JsonObject?, Task<JsonNode>>? call)
+    internal TeamsPage(Func<string, JsonObject?, Task<JsonNode>>? call, TeamAskRecoveryStore? askStorage = null)
     {
+        _askStorage = askStorage ?? TeamAskRecoveryStore.Shared;
         _call = call ?? ((method, fields) => AppServices.Host.CallAsync(method, fields));
         Content = new ScrollViewer { Content = _body };
         Loaded += async (_, _) => await LoadAsync();
@@ -102,8 +101,7 @@ internal sealed partial class TeamsPage : Page
             {
                 _organization = null;
                 _organizations = []; _organizationsNext = null;
-                _comments.Clear(); _checkoutHosts.Clear(); _newChatWriting.Clear(); _newChatRequests.Clear(); _askAttempts.Clear(); _openedImages.Clear(); _flash = null;
-                _askWriting.Clear(); _activeRuns.Clear(); _stoppingRuns.Clear();
+                _comments.Clear(); _checkoutHosts.Clear(); _newChatWriting.Clear(); _newChatRequests.Clear(); _asks.Clear(); _openedImages.Clear(); _flash = null;
                 _historyTarget = null; _history = new([]); _readingEarlier = false;
             }
             _scope = scope; _session = session;
@@ -480,7 +478,11 @@ internal sealed partial class TeamsPage : Page
         var previous = _historyTarget == targetKey ? _history : new TeamHistoryWindow([]);
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => await LoadAsync()));
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => await ShowChatAsync(target, title, computer)));
-        if (_activeRuns.TryGetValue(targetKey, out var active)) AddActiveRunControls(target, active, title, computer, view, () => !loading && !_readingEarlier && CommentIdle);
+        var askModel = await AskModelAsync(target);
+        if (!IsLoaded || _view != view) return false;
+        (StackPanel Panel, Action<bool> Allow)? askControls = askModel is null ? null : AskControls(askModel, target, title, computer, view);
+        if (askControls is { } initial) _body.Children.Add(initial.Panel);
+        if (askModel?.Fence is not null) _ = WatchAskAsync(askModel, target, title, computer, view, () => !loading && !_readingEarlier && CommentIdle);
         JsonNode details, page;
         List<TeamBlock> transcript;
         try
@@ -518,94 +520,25 @@ internal sealed partial class TeamsPage : Page
         var chat = details["chat"];
         if (Format.Flag(chat, "allowsComments")) await AddCommentComposerAsync(target, title, computer, view);
         if (!IsLoaded || _view != view) return false;
-        if (!_activeRuns.ContainsKey(targetKey) && Format.Flag(chat, "allowsAgentRuns"))
+        if (askControls is { } controls)
         {
-            var ask = new TextBox { PlaceholderText = L10n.Text("common.teams.ask_placeholder"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
-            ask.Text = _askWriting.GetValueOrDefault(targetKey) ?? "";
-            if (_askAttempts.TryGetValue(targetKey, out var pendingAsk)) { ask.Text = Format.Text(pendingAsk, "text"); ask.IsReadOnly = true; }
-            ask.TextChanged += (_, _) => { if (_view == view) _askWriting[targetKey] = ask.Text; };
-            _body.Children.Add(ask);
-            Button? askButton = null;
-            askButton = ActionIconGlyph.Button(L10n.Text("common.teams.ask"), ActionIcon.Run, async (_, _) =>
-            {
-                if (string.IsNullOrWhiteSpace(ask.Text)) return;
-                askButton!.IsEnabled = false; ask.IsReadOnly = true;
-                try
-                {
-                    if (!_askAttempts.TryGetValue(targetKey, out var attempt))
-                    {
-                        var review = await CallAsync("teams.ask", new JsonObject { ["target"] = target.DeepClone(), ["method"] = "team.chat.ask.review", ["params"] = new JsonObject() });
-                        if (!IsLoaded || _view != view) return;
-                        if (!Format.Flag(review, "agentRuns")) { Note(L10n.Text("common.teams.agent_runs_off", computer), true); return; }
-                        _askAttempts[targetKey] = attempt = new JsonObject
-                        {
-                            ["text"] = ask.Text.Trim(), ["review"] = Format.Text(review, "review"),
-                            ["clientMessageId"] = Guid.NewGuid().ToString(),
-                            ["clientMessageCreatedAtMs"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                        };
-                    }
-                    var sent = await CallAsync("teams.ask", new JsonObject
-                    {
-                        ["target"] = target.DeepClone(), ["method"] = "team.chat.ask",
-                        ["params"] = attempt.DeepClone(),
-                    });
-                    if (!IsLoaded || _view != view) return;
-                    _askAttempts.Remove(targetKey);
-                    _askWriting.Remove(targetKey);
-                    if (Format.Text(sent, "state") == "running" && sent["fence"] is JsonNode fence) _activeRuns[targetKey] = fence.DeepClone();
-                    await ShowChatAsync(target, title, computer);
-                }
-                catch (Exception error)
-                {
-                    if (!IsLoaded || _view != view) return;
-                    if (error is HostException { Code: "team_run_review_changed" or "invalid_ask" }) _askAttempts.Remove(targetKey);
-                    Note(error.Message, true);
-                }
-                finally
-                {
-                    askButton.IsEnabled = true;
-                    ask.IsReadOnly = _askAttempts.ContainsKey(targetKey);
-                }
-            });
-            _body.Children.Add(askButton);
-            Note(L10n.Text("common.teams.ask_detail", computer));
+            _body.Children.Remove(controls.Panel); _body.Children.Add(controls.Panel);
+            controls.Allow(Format.Flag(chat, "allowsAgentRuns"));
         }
         loading = false;
-        if (!_readingEarlier && !_activeRuns.ContainsKey(targetKey)) _ = KeepCurrentAsync(target, title, computer, view, _body.Children.OfType<TextBox>().ToList());
+        if (!_readingEarlier && askModel?.Fence is null) _ = KeepCurrentAsync(target, title, computer, view, _body.Children.OfType<TextBox>().ToList(), askModel);
         return true;
-    }
-
-    private void AddActiveRunControls(JsonObject target, JsonNode running, string title, string computer, int view, Func<bool> canRefresh)
-    {
-        var targetKey = target.ToJsonString();
-        var status = new TextBlock { Text = _stoppingRuns.Contains(targetKey) ? L10n.Text("common.teams.agent_stopping") : L10n.Text("common.teams.agent_working", computer), TextWrapping = TextWrapping.Wrap };
-        _body.Children.Add(status);
-        Button? stop = null;
-        stop = ActionIconGlyph.Button(L10n.Text("common.teams.stop_agent"), ActionIcon.Stop, async (_, _) =>
-        {
-            stop!.IsEnabled = false; _stoppingRuns.Add(targetKey);
-            status.Text = L10n.Text("common.teams.agent_stopping");
-            try { await CallAsync("teams.ask", new JsonObject { ["target"] = target.DeepClone(), ["method"] = "team.chat.ask.stop", ["params"] = new JsonObject { ["fence"] = running.DeepClone() } }); }
-            catch (Exception error)
-            {
-                if (!IsLoaded || _view != view) return;
-                _stoppingRuns.Remove(targetKey); stop.IsEnabled = true; status.Text = error.Message;
-            }
-        });
-        stop.IsEnabled = !_stoppingRuns.Contains(targetKey);
-        _body.Children.Add(stop);
-        _ = WatchAsync(target, running, title, computer, view, status, stop, canRefresh);
     }
 
     /// New comments and agent output appear while the chat is open. Stops
     /// when another screen is drawn, and waits while someone is typing.
-    private async Task KeepCurrentAsync(JsonObject target, string title, string computer, int view, List<TextBox> inputs)
+    private async Task KeepCurrentAsync(JsonObject target, string title, string computer, int view, List<TextBox> inputs, TeamAskModel? ask)
     {
         while (true)
         {
             await Task.Delay(10_000);
             if (!IsLoaded || _view != view) return;
-            if (CommentIdle && inputs.All(box => box.Text.Length == 0))
+            if (CommentIdle && (ask is null || !ask.Busy && !ask.Pending && ask.Text.Length == 0) && inputs.All(box => box.Text.Length == 0))
             {
                 await ShowChatAsync(target, title, computer);
                 return;
@@ -683,44 +616,4 @@ internal sealed partial class TeamsPage : Page
         return panel;
     }
 
-    /// Refresh while the agent works, with Stop, until the host says it ended.
-    private async Task WatchAsync(JsonObject target, JsonNode fence, string title, string computer, int view, TextBlock status, Button stop, Func<bool> canRefresh)
-    {
-        var key = target.ToJsonString();
-        while (true)
-        {
-            await Task.Delay(3000);
-            if (!IsLoaded || _view != view) return;
-            try
-            {
-                var reply = await CallAsync("teams.ask", new JsonObject { ["target"] = target.DeepClone(), ["method"] = "team.chat.ask.status", ["params"] = new JsonObject { ["fence"] = fence.DeepClone() } });
-                if (!IsLoaded || _view != view) return;
-                if (reply["running"] is not JsonValue value || !value.TryGetValue<bool>(out var running))
-                {
-                    status.Text = L10n.Text("common.teams.run_status_unconfirmed");
-                    continue;
-                }
-                if (!running)
-                {
-                    _activeRuns.Remove(key); _stoppingRuns.Remove(key);
-                    if (!canRefresh()) { status.Text = L10n.Text("common.done"); stop.IsEnabled = false; return; }
-                    await ShowChatAsync(target, title, computer);
-                    return;
-                }
-                status.Text = _stoppingRuns.Contains(key) ? L10n.Text("common.teams.agent_stopping") : L10n.Text("common.teams.agent_working", computer);
-                // Paging back and writing both keep the mounted controls. A
-                // status check never throws away the reader's place or text.
-                if (canRefresh() && _body.Children.OfType<TextBox>().All(box => box.Text.Length == 0))
-                {
-                    await ShowChatAsync(target, title, computer);
-                    return;
-                }
-            }
-            catch (Exception error)
-            {
-                if (!IsLoaded || _view != view) return;
-                status.Text = error.Message;
-            }
-        }
-    }
 }

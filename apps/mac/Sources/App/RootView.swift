@@ -495,7 +495,7 @@ struct RootView: View {
     #endif
 
     /// Splash or chrome, plus window geometry and the pointer peeks.
-    private var sizedWindow: some View {
+    private var windowLayout: some View {
         // Mount the chrome after the host is ready; the window keeps its
         // traffic lights while the splash is visible.
         ZStack {
@@ -566,8 +566,11 @@ struct RootView: View {
         // Where the pointer is decides both peeks, and it is asked rather
         // than waited for. See `watchPointer`.
         .task { await watchPointer() }
-        // A pending auto-hide outlives the window it was scheduled for; drop it
-        // when the view goes away.
+    }
+
+    /// Lifetime observers and modal presentations share the same shell.
+    private var sizedWindow: some View {
+        windowLayout
         .onAppear {
             connectivity.start()
             connection.attach(connectivity)

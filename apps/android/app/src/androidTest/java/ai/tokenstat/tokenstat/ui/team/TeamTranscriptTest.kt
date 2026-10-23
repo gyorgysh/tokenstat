@@ -16,6 +16,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -37,8 +40,11 @@ class TeamTranscriptTest {
     @Test fun knownStopSurvivesMalformedStatusAndAHistoryReadFailure() {
         val account = buildJsonObject { put("signedIn", true); put("host", "https://fixture.invalid"); put("handle", "fixture"); put("accountId", "person-fixture"); put("accountSession", "fictional-session") }
         val target = buildJsonObject { put("organization", "org-fixture"); put("repository", "repo-fixture"); put("checkout", "checkout-fixture"); put("share", "share-fixture") }
-        val fence = buildJsonObject { put("fixture", "exact-original-fence") }
+        val fence = buildJsonObject { put("runId", "run_" + "a".repeat(32)); put("incarnation", "b".repeat(64)) }
         var failed = false
+        var visible by mutableStateOf(true)
+        var original: JsonObject? = null
+        var reviews = 0
         var stopped: JsonElement? = null
         var stopAttempts = 0
         val statusReads = java.util.concurrent.atomic.AtomicInteger()
@@ -49,8 +55,13 @@ class TeamTranscriptTest {
                     buildJsonObject { put("chat", buildJsonObject { put("id", "share-fixture"); put("checkoutId", "checkout-fixture"); put("backend", "claude"); put("allowsAgentRuns", true) }) }
                 }
                 "team.chat.events" -> buildJsonObject { put("shareId", "share-fixture"); put("events", JsonArray(emptyList())); put("hasMore", false) }
-                "team.chat.ask.review" -> buildJsonObject { put("agentRuns", true); put("review", "fictional-review") }
-                "team.chat.ask" -> buildJsonObject { put("state", "running"); put("fence", fence) }
+                "team.chat.ask.review" -> { reviews++; buildJsonObject { put("agentRuns", true); put("review", "c".repeat(64)) } }
+                "team.chat.ask" -> {
+                    val input = body["params"]!!.jsonObject
+                    if (original == null) { original = input; throw CoreFailure("delivery_unknown", "Fictional Ask reply lost") }
+                    assertEquals(original, input)
+                    buildJsonObject { put("state", "running"); put("fence", fence) }
+                }
                 "team.chat.ask.status" -> { statusReads.incrementAndGet(); buildJsonObject {} }
                 "team.chat.ask.stop" -> {
                     if (++stopAttempts == 1) throw CoreFailure("team_connection_unavailable", "Fictional Stop request failed")
@@ -65,7 +76,8 @@ class TeamTranscriptTest {
                 TsTheme(DarkColors) {
                     MaterialTheme(colorScheme = DarkColors.toColorScheme(), typography = TsType.typography) {
                         Surface(Modifier.fillMaxSize().safeDrawingPadding()) {
-                            TeamChatReader(calls, ChatTarget(target, "Fictional chat", "Fictional computer", "fictional-host"), TeamCommentDraftStore(folder)) {}
+                            if (visible) TeamChatReader(calls, ChatTarget(target, "Fictional chat", "Fictional computer", "fictional-host"), TeamCommentDraftStore(folder), TeamAskRecoveryStore(java.io.File(folder, "asks"))) { visible = false }
+                            else androidx.compose.material3.Button(onClick = { visible = true }) { androidx.compose.material3.Text("Reopen fictional chat") }
                         }
                     }
                 }
@@ -73,6 +85,17 @@ class TeamTranscriptTest {
             compose.waitUntil(5_000) { compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNode(hasSetTextAction()).performTextInput("Fictional question")
             compose.onNodeWithText(L10n.text("common.teams.ask"), useUnmergedTree = true).performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("Fictional Ask reply lost").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Fictional Ask reply lost").assertIsDisplayed()
+            compose.onNodeWithText(L10n.text("common.back")).performClick()
+            compose.onNodeWithText("Reopen fictional chat").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText(L10n.text("common.teams.retry_same_ask")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Fictional question").assertIsNotEnabled()
+            compose.onNodeWithText(L10n.text("common.teams.retry_same_ask")).performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText(L10n.text("common.teams.stop_agent")).fetchSemanticsNodes().isNotEmpty() }
+            compose.runOnIdle { assertEquals(1, reviews) }
+            compose.onNodeWithText(L10n.text("common.back")).performClick()
+            compose.onNodeWithText("Reopen fictional chat").performClick()
             compose.waitUntil(5_000) { compose.onAllNodesWithText(L10n.text("common.teams.stop_agent")).fetchSemanticsNodes().isNotEmpty() }
             compose.waitUntil(7_000) { statusReads.get() > 0 }
             compose.onNodeWithText(L10n.text("common.teams.stop_agent")).assertIsDisplayed()
