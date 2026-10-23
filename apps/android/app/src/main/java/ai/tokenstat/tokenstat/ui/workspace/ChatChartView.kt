@@ -19,6 +19,8 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
@@ -30,9 +32,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +58,9 @@ internal fun ChatChartView(source: String, pending: Boolean = false) {
     val scope = rememberCoroutineScope()
     val colors = LocalTsColors.current
     val dark = colors.background.luminance() < 0.5f
+    val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     var height by remember(source) { mutableStateOf(430f) }
+    var visible by remember { mutableStateOf(false) }
     var failure by remember(source) { mutableStateOf<String?>(null) }
     var exported by remember { mutableStateOf<ChartExport?>(null) }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -76,29 +85,36 @@ internal fun ChatChartView(source: String, pending: Boolean = false) {
     } else if (failure != null) {
         Text(L10n.text("common.chart.unavailable") + ": " + failure, modifier = Modifier.padding(16.dp), color = colors.textSecondary)
     } else {
-        AndroidView(
-            factory = { ChartWebSurface(it) },
-            modifier = Modifier.fillMaxWidth().height(height.dp),
-            onReset = null,
-            onRelease = { it.shutdown() },
-            update = { view ->
-                view.onHeight = { height = it }
-                view.onError = { failure = it }
-                view.onExport = { file ->
-                    if (exported == null) {
-                        exported = file
-                        try {
-                            save.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                                addCategory(Intent.CATEGORY_OPENABLE)
-                                type = file.mime
-                                putExtra(Intent.EXTRA_TITLE, "chart." + file.format)
-                            })
-                        } catch (error: Exception) { exported = null; failure = error.localizedMessage }
+        // Keep every chart's place in the reply while only visible charts own
+        // a browser. Clipped bounds include the transcript's scroll viewport.
+        Box(Modifier.fillMaxWidth().height(height.dp).onGloballyPositioned { coordinates ->
+            val bounds = coordinates.boundsInWindow()
+            visible = bounds.width > 0 && bounds.height > 0
+        }) {
+            if (visible && lifecycle.isAtLeast(Lifecycle.State.STARTED)) AndroidView(
+                factory = { ChartWebSurface(it) },
+                modifier = Modifier.fillMaxSize(),
+                onReset = null,
+                onRelease = { it.shutdown() },
+                update = { view ->
+                    view.onHeight = { height = it }
+                    view.onError = { failure = it }
+                    view.onExport = { file ->
+                        if (exported == null) {
+                            exported = file
+                            try {
+                                save.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                    addCategory(Intent.CATEGORY_OPENABLE)
+                                    type = file.mime
+                                    putExtra(Intent.EXTRA_TITLE, "chart." + file.format)
+                                })
+                            } catch (error: Exception) { exported = null; failure = error.localizedMessage }
+                        }
                     }
-                }
-                view.render(source, dark)
-            },
-        )
+                    view.render(source, dark)
+                },
+            )
+        }
     }
 }
 
@@ -165,6 +181,8 @@ internal class ChartWebSurface(context: Context) : WebView(context) {
     fun shutdown() {
         if (stopped) return
         stopped = true
+        onHeight = {}; onError = {}; onExport = {}
+        script = ""; rendered = ""
         main.removeCallbacksAndMessages(null)
         stopLoading()
         removeJavascriptInterface("TokenstatChartHost")

@@ -26,16 +26,16 @@ class ChartFenceTest {
         assertEquals(2, codes("```tokenstat-chart\n$json\n```\n\nAfter\n\n```tokenstat-chart\n$json\n```").size)
     }
 
-    @Test fun excessChartsKeepAllDataWithoutMountingMoreBrowsers() {
+    @Test fun everyChartFenceKeepsItsChartSemanticsAndCompleteData() {
         val complete = "```tokenstat-chart\n$json\n```"
         val blocks = codes(List(200) { complete }.joinToString("\n\n"))
         assertEquals(200, blocks.size)
-        assertEquals(4, blocks.count { it.chart })
+        assertEquals(200, blocks.count { it.chart })
         assertTrue(blocks.all { it.code.trimEnd() == json })
-        assertTrue(blocks.drop(4).none { it.chart || it.pending })
+        assertTrue(blocks.none { it.pending })
         val unfinished = codes(List(4) { complete }.joinToString("\n\n") + "\n\n```tokenstat-chart\n$json").last()
-        assertFalse(unfinished.chart)
-        assertFalse(unfinished.pending)
+        assertTrue(unfinished.chart)
+        assertTrue(unfinished.pending)
         assertEquals(json, unfinished.code.trimEnd())
     }
 }

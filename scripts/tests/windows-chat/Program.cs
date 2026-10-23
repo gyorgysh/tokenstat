@@ -5,7 +5,7 @@ using Tokenstat.Pages;
 static JsonNode Json(string text) => JsonNode.Parse(text)!;
 static void Check(bool answer, string message) { if (!answer) throw new Exception(message); }
 TeamTranscriptTests.Run();
-ChartRenderBudgetTests.Run();
+ChartViewportTests.Run();
 TeamPageTests.Run();
 await TeamCommentTests.RunAsync();
 await TeamAskTests.RunAsync();

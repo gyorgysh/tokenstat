@@ -8,6 +8,7 @@ using Microsoft.Web.WebView2.Core;
 using Tokenstat.Design;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Pickers;
+using Windows.Foundation;
 
 namespace Tokenstat.Pages;
 
@@ -22,18 +23,71 @@ internal sealed class ChatChartView : Grid
     private int _epoch;
     private bool _loaded;
     private bool _exporting;
+    private Rect? _viewport;
+    private bool _inViewport;
+    private bool _visibilityScheduled;
+    private bool _failed;
+    private readonly List<(UIElement Owner, long Token)> _visibilityOwners = new();
+    private XamlRoot? _root;
 
     public ChatChartView(string source, bool pending = false)
     {
         _source = source;
         _pending = pending;
         MinHeight = 60;
+        Height = 430;
         HorizontalAlignment = HorizontalAlignment.Stretch;
-        Loaded += async (_, _) => await StartAsync();
-        Unloaded += (_, _) => Close();
+        Loaded += (_, _) => { ObserveVisibility(); RefreshViewport(); };
+        Unloaded += (_, _) => { StopObservingVisibility(); _viewport = null; _inViewport = false; _failed = false; Close(); };
+        EffectiveViewportChanged += (_, args) => { _viewport = args.EffectiveViewport; RefreshViewport(); };
+        SizeChanged += (_, _) => RefreshViewport();
         ActualThemeChanged += async (_, _) => { if (_loaded) await RenderAsync(_epoch); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(this, "chat.chart");
     }
+
+    private void ObserveVisibility()
+    {
+        StopObservingVisibility();
+        // Collapsed ancestors do not receive viewport notifications. Observe
+        // those transitions too, so a folded transcript releases its browser.
+        for (DependencyObject? node = this; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+            if (node is UIElement element)
+                _visibilityOwners.Add((element, element.RegisterPropertyChangedCallback(VisibilityProperty, (_, _) => RefreshViewport())));
+        _root = XamlRoot;
+        if (_root is not null) _root.Changed += RootChanged;
+    }
+
+    private void StopObservingVisibility()
+    {
+        foreach (var (owner, token) in _visibilityOwners) owner.UnregisterPropertyChangedCallback(VisibilityProperty, token);
+        _visibilityOwners.Clear();
+        if (_root is not null) _root.Changed -= RootChanged;
+        _root = null;
+    }
+
+    private void RootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => RefreshViewport();
+
+    private void RefreshViewport()
+    {
+        var visible = IsLoaded && _root?.IsHostVisible == true
+            && _visibilityOwners.All(entry => entry.Owner.Visibility == Visibility.Visible)
+            && _viewport is { } viewport && ChartViewport.Intersects(
+            ActualWidth, ActualHeight, viewport.X, viewport.Y, viewport.Width, viewport.Height);
+        if (_inViewport == visible) return;
+        _inViewport = visible;
+        if (_visibilityScheduled) return;
+        _visibilityScheduled = true;
+        // Viewport notifications run during layout. Change native browser
+        // children on a later turn, using the latest visibility and lifetime.
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, async () =>
+        {
+            _visibilityScheduled = false;
+            if (_inViewport && IsLoaded) await StartAsync();
+            else if (_web is not null) Close();
+        })) _visibilityScheduled = false;
+    }
+
+    private bool Current(int epoch) => epoch == _epoch && IsLoaded && _inViewport;
 
     private static Task<CoreWebView2Environment> EnvironmentAsync()
     {
@@ -49,6 +103,7 @@ internal sealed class ChatChartView : Grid
 
     private void ShowError(string message)
     {
+        _failed = true;
         Close();
         Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Margin = new Thickness(12) });
         Height = double.NaN;
@@ -56,19 +111,20 @@ internal sealed class ChatChartView : Grid
 
     private async Task StartAsync()
     {
-        if (_web is not null) return;
+        if (_web is not null || _failed || !IsLoaded || !_inViewport) return;
         if (_pending) { ShowError(L10n.Text("common.chart.loading")); return; }
         if (Encoding.UTF8.GetByteCount(_source) > 256 * 1024) { ShowError(L10n.Text("common.chart.too_large")); return; }
         var epoch = ++_epoch;
         var web = new WebView2 { HorizontalAlignment = HorizontalAlignment.Stretch, DefaultBackgroundColor = Microsoft.UI.Colors.Transparent };
         _web = web;
-        Children.Clear(); Children.Add(web); Height = 430;
+        if (double.IsNaN(Height)) Height = 430;
+        Children.Clear(); Children.Add(web);
         try
         {
             var environment = await EnvironmentAsync();
-            if (epoch != _epoch) return;
+            if (!Current(epoch)) { if (ReferenceEquals(_web, web)) Close(); return; }
             await web.EnsureCoreWebView2Async(environment);
-            if (epoch != _epoch) { web.Close(); return; }
+            if (!Current(epoch)) { if (ReferenceEquals(_web, web)) Close(); return; }
             var core = web.CoreWebView2;
             core.SetVirtualHostNameToFolderMapping("charts.tokenstat.invalid", Path.Combine(AppContext.BaseDirectory, "Assets", "Charts"), CoreWebView2HostResourceAccessKind.Deny);
             core.Settings.AreDevToolsEnabled = false;
@@ -86,15 +142,15 @@ internal sealed class ChatChartView : Grid
             core.DownloadStarting += (_, e) => e.Cancel = true;
             core.NavigationCompleted += async (_, e) =>
             {
-                if (epoch != _epoch || e.NavigationId != pageNavigation) return;
+                if (!Current(epoch) || e.NavigationId != pageNavigation) return;
                 if (!e.IsSuccess) { ShowError(L10n.Text("common.chart.resources_missing")); return; }
                 _loaded = true;
                 await RenderAsync(epoch);
             };
-            core.ProcessFailed += (_, _) => { if (epoch == _epoch) ShowError(L10n.Text("common.chart.unavailable")); };
+            core.ProcessFailed += (_, _) => { if (Current(epoch)) ShowError(L10n.Text("common.chart.unavailable")); };
             core.WebMessageReceived += async (_, e) =>
             {
-                if (epoch != _epoch || e.Source != PageUri || e.WebMessageAsJson.Length > 12 * 1024 * 1024) return;
+                if (!Current(epoch) || e.Source != PageUri || e.WebMessageAsJson.Length > 12 * 1024 * 1024) return;
                 try
                 {
                     using var document = JsonDocument.Parse(e.WebMessageAsJson);
@@ -111,23 +167,23 @@ internal sealed class ChatChartView : Grid
                     else if (type == "export") await ExportAsync(message);
                 }
                 catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or KeyNotFoundException or ArgumentException)
-                { if (epoch == _epoch) ShowError(L10n.Text("common.chart.unavailable") + ": " + error.Message); }
+                { if (Current(epoch)) ShowError(L10n.Text("common.chart.unavailable") + ": " + error.Message); }
             };
             core.Navigate(PageUri);
         }
         catch (Exception error)
-        { if (epoch == _epoch) { Close(); ShowError(L10n.Text("common.chart.unavailable") + ": " + error.Message); } }
+        { if (Current(epoch)) ShowError(L10n.Text("common.chart.unavailable") + ": " + error.Message); }
     }
 
     private async Task RenderAsync(int epoch)
     {
-        if (epoch != _epoch || !_loaded || _web?.CoreWebView2 is not { } core) return;
+        if (!Current(epoch) || !_loaded || _web?.CoreWebView2 is not { } core) return;
         var settings = JsonSerializer.Serialize(new { dark = ActualTheme == ElementTheme.Dark,
             locale = CultureInfo.CurrentCulture.Name, reducedMotion = !new Windows.UI.ViewManagement.UISettings().AnimationsEnabled,
             strings = ChartWords.All });
         var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(_source));
         try { await core.ExecuteScriptAsync($"window.TokenstatChart.render(new TextDecoder().decode(Uint8Array.from(atob('{encoded}'), c => c.charCodeAt(0))), {settings});"); }
-        catch (Exception error) { if (epoch == _epoch) ShowError(error.Message); }
+        catch (Exception error) { if (Current(epoch)) ShowError(error.Message); }
     }
 
     private async Task ExportAsync(JsonElement message)

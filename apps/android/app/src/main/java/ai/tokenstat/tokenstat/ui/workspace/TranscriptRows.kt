@@ -990,8 +990,6 @@ internal fun parseMarkdown(text: String): List<MdBlock> {
     val paragraph = StringBuilder()
     var fence: StringBuilder? = null
     var chartFence = false
-    // Each chart mounts a native WebView; excess fences remain ordinary code.
-    var chartCount = 0
     var fenceChar = '`'
     var fenceLength = 3
     var number = 0
@@ -1033,8 +1031,7 @@ internal fun parseMarkdown(text: String): List<MdBlock> {
             fence = StringBuilder()
             fenceChar = marker!!
             fenceLength = marks
-            chartFence = fenceLine.drop(marks).trim() == "tokenstat-chart" && chartCount < 4
-            if (chartFence) chartCount++
+            chartFence = fenceLine.drop(marks).trim() == "tokenstat-chart"
             continue
         }
         val stripped = line.trimStart()

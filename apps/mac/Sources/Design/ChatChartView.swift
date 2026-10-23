@@ -74,14 +74,23 @@ private struct ChartWebView: ChartRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     #if os(macOS)
-    func makeNSView(context: Context) -> WKWebView { makeView(context.coordinator) }
-    func updateNSView(_ view: WKWebView, context: Context) { context.coordinator.update(self) }
-    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) { coordinator.dispose() }
+    func makeNSView(context: Context) -> ChartViewportView { makeViewport(context.coordinator) }
+    func updateNSView(_ view: ChartViewportView, context: Context) { context.coordinator.update(self); view.scheduleVisibilityUpdate() }
+    static func dismantleNSView(_ view: ChartViewportView, coordinator: Coordinator) { view.shutdown(); coordinator.dispose() }
     #else
-    func makeUIView(context: Context) -> WKWebView { makeView(context.coordinator) }
-    func updateUIView(_ view: WKWebView, context: Context) { context.coordinator.update(self) }
-    static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) { coordinator.dispose() }
+    func makeUIView(context: Context) -> ChartViewportView { makeViewport(context.coordinator) }
+    func updateUIView(_ view: ChartViewportView, context: Context) { context.coordinator.update(self); view.scheduleVisibilityUpdate() }
+    static func dismantleUIView(_ view: ChartViewportView, coordinator: Coordinator) { view.shutdown(); coordinator.dispose() }
     #endif
+
+    private func makeViewport(_ coordinator: Coordinator) -> ChartViewportView {
+        let view = ChartViewportView()
+        view.makeContent = { [weak coordinator] in coordinator.map { $0.owner.makeView($0) } }
+        view.releaseContent = { [weak coordinator] view in
+            if let browser = view as? WKWebView { coordinator?.unmount(browser) }
+        }
+        return view
+    }
 
     private func makeView(_ coordinator: Coordinator) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -98,7 +107,10 @@ private struct ChartWebView: ChartRepresentable {
         coordinator.webView = view
         guard let directory = Bundle.main.url(forResource: "runtime", withExtension: nil),
               FileManager.default.fileExists(atPath: directory.appendingPathComponent("index.html").path) else {
-            DispatchQueue.main.async { onError(L10n.text("common.chart.resources_missing")) }
+            DispatchQueue.main.async { [weak coordinator, weak view] in
+                guard let coordinator, !coordinator.stopped, let view, coordinator.webView === view else { return }
+                coordinator.owner.onError(L10n.text("common.chart.resources_missing"))
+            }
             return view
         }
         coordinator.pageURL = directory.appendingPathComponent("index.html")
@@ -112,28 +124,36 @@ private struct ChartWebView: ChartRepresentable {
         var pageURL: URL?
         private var loaded = false
         private var rendered = ""
-        private var stopped = false
+        fileprivate var stopped = false
         init(_ owner: ChartWebView) { self.owner = owner }
         func update(_ owner: ChartWebView) { self.owner = owner; render() }
         func dispose() {
-            stopped = true; loaded = false
-            webView?.stopLoading()
-            webView?.configuration.userContentController.removeScriptMessageHandler(forName: "chart")
-            webView?.navigationDelegate = nil
+            stopped = true
+            if let webView { unmount(webView) }
         }
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded = true; render() }
+        func unmount(_ browser: WKWebView) {
+            guard webView === browser else { return }
+            loaded = false; rendered = ""; pageURL = nil; webView = nil
+            browser.stopLoading()
+            browser.configuration.userContentController.removeScriptMessageHandler(forName: "chart")
+            browser.navigationDelegate = nil
+        }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard !stopped, self.webView === webView else { return }
+            loaded = true; render()
+        }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            decisionHandler(navigationAction.targetFrame?.isMainFrame == true && navigationAction.request.url == pageURL ? .allow : .cancel)
+            decisionHandler(!stopped && self.webView === webView && navigationAction.targetFrame?.isMainFrame == true && navigationAction.request.url == pageURL ? .allow : .cancel)
         }
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            if !stopped { owner.onError(error.localizedDescription) }
+            if !stopped, self.webView === webView { owner.onError(error.localizedDescription) }
         }
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            if !stopped { owner.onError(error.localizedDescription) }
+            if !stopped, self.webView === webView { owner.onError(error.localizedDescription) }
         }
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            if !stopped { owner.onError(L10n.text("common.chart.unavailable")) }
+            if !stopped, self.webView === webView { owner.onError(L10n.text("common.chart.unavailable")) }
         }
         private func render() {
             guard loaded, !stopped, let webView, owner.source.utf8.count <= 256 * 1024 else { return }
@@ -146,8 +166,9 @@ private struct ChartWebView: ChartRepresentable {
             guard revision != rendered else { return }
             rendered = revision
             let script = "window.TokenstatChart.render(new TextDecoder().decode(Uint8Array.from(atob('\(payload)'), c => c.charCodeAt(0))), \(settingsText));"
-            webView.evaluateJavaScript(script) { [weak self] _, error in
-                if let error, self?.stopped == false { self?.owner.onError(error.localizedDescription) }
+            webView.evaluateJavaScript(script) { [weak self, weak webView] _, error in
+                guard let self, !self.stopped, let webView, self.webView === webView else { return }
+                if let error { self.owner.onError(error.localizedDescription) }
             }
         }
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -157,8 +178,8 @@ private struct ChartWebView: ChartRepresentable {
             switch type {
             case "height":
                 if let value = body["height"] as? Double, value.isFinite, (180...2200).contains(value) {
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self, !self.stopped else { return }; self.owner.height = CGFloat(value)
+                    DispatchQueue.main.async { [weak self, weak browser = message.webView] in
+                        guard let self, !self.stopped, let browser, self.webView === browser else { return }; self.owner.height = CGFloat(value)
                     }
                 }
             case "copy":

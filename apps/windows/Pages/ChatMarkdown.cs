@@ -28,9 +28,8 @@ namespace Tokenstat.Pages;
 /// does not make requests. Code blocks are drawn by the caller so they keep
 /// the chat's own copy menu and horizontal scrolling.
 /// </summary>
-internal sealed class ChatMarkdown(bool allowDesktopActions, ChartRenderBudget? chartBudget)
+internal sealed class ChatMarkdown(bool allowDesktopActions)
 {
-    private readonly ChartRenderBudget _charts = new(shared: chartBudget);
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .DisableHtml()
         .UseTaskLists()
@@ -41,8 +40,8 @@ internal sealed class ChatMarkdown(bool allowDesktopActions, ChartRenderBudget? 
 
     private const double BodySize = 14;
 
-    public static UIElement Create(string text, Func<string, UIElement> codeBlock, bool allowDesktopActions = true, ChartRenderBudget? chartBudget = null) =>
-        new ChatMarkdown(allowDesktopActions, chartBudget).Render(text, codeBlock);
+    public static UIElement Create(string text, Func<string, UIElement> codeBlock, bool allowDesktopActions = true) =>
+        new ChatMarkdown(allowDesktopActions).Render(text, codeBlock);
 
     private UIElement Render(string text, Func<string, UIElement> codeBlock)
     {
@@ -91,7 +90,7 @@ internal sealed class ChatMarkdown(bool allowDesktopActions, ChartRenderBudget? 
                 case Table table:
                     panel.Children.Add(TableGrid(table, codeBlock));
                     break;
-                case FencedCodeBlock chart when chart.Info == "tokenstat-chart" && _charts.TryTake():
+                case FencedCodeBlock chart when chart.Info == "tokenstat-chart":
                     panel.Children.Add(new ChatChartView(chart.Lines.ToString(), chart.ClosingFencedCharCount < chart.OpeningFencedCharCount));
                     break;
                 case CodeBlock code:

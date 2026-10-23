@@ -4,6 +4,10 @@ package ai.tokenstat.tokenstat.ui.workspace
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.ScrollState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
@@ -58,5 +62,42 @@ class ChatChartTest {
         assertEquals("true", js("location.href==='https://charts.tokenstat.invalid/index.html'"))
         compose.runOnIdle { surface.shutdown() }
         // Late bridge messages and pending callbacks must be harmless after release.
+    }
+
+    @Test fun scrollingKeepsLaterChartsAndReleasesOffscreenBrowsers() {
+        lateinit var scroll: ScrollState
+        compose.setContent {
+            scroll = rememberScrollState()
+            Column(Modifier.height(480.dp).verticalScroll(scroll)) {
+                repeat(12) { ChatChartView(source) }
+            }
+        }
+        fun browsers(): List<ChartWebSurface> {
+            fun collect(view: android.view.View): List<ChartWebSurface> = when (view) {
+                is ChartWebSurface -> listOf(view)
+                is android.view.ViewGroup -> (0 until view.childCount).flatMap { collect(view.getChildAt(it)) }
+                else -> emptyList()
+            }
+            var result = emptyList<ChartWebSurface>()
+            compose.runOnIdle { result = collect(compose.activity.window.decorView) }
+            return result
+        }
+        compose.waitUntil(20_000) { browsers().isNotEmpty() }
+        val first = browsers()
+        assertTrue("Only visible charts own browsers", first.size <= 3)
+        compose.runOnIdle { scroll.dispatchRawDelta(scroll.maxValue.toFloat()) }
+        compose.waitUntil(20_000) {
+            val visible = browsers()
+            visible.isNotEmpty() && visible.none { it in first }
+        }
+        val last = browsers()
+        assertTrue("Later charts still mount", last.size <= 3)
+        compose.runOnIdle { assertTrue(first.none { it.isAttachedToWindow }) }
+        compose.runOnIdle { scroll.dispatchRawDelta(-scroll.maxValue.toFloat()) }
+        compose.waitUntil(20_000) {
+            val visible = browsers()
+            visible.isNotEmpty() && visible.none { it in first || it in last }
+        }
+        compose.runOnIdle { assertTrue(last.none { it.isAttachedToWindow }) }
     }
 }

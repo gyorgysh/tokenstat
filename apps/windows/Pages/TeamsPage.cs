@@ -546,8 +546,7 @@ internal sealed partial class TeamsPage : Page
                 async (_, _) => await ShowChatAsync(target, title, computer, next)));
         }
         if (_history.Truncated) Note(L10n.Text("common.teams.shared_history_window"));
-        var charts = new ChartRenderBudget(ChartRenderBudget.PerTranscript);
-        foreach (var block in transcript) _body.Children.Add(TranscriptRow(target, block, charts));
+        foreach (var block in transcript) _body.Children.Add(TranscriptRow(target, block));
         var chat = details["chat"];
         if (Format.Flag(chat, "allowsComments")) await AddCommentComposerAsync(target, title, computer, view);
         if (!IsLoaded || _view != view) return false;

@@ -13,9 +13,10 @@ namespace NativeUiTests
         {
             using var examples = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "chart-examples.json")));
             var source = examples.RootElement[0].GetRawText();
-            CheckBudgets(source);
+            CheckPreservation(source);
             var chart = new ChatChartView(source) { Width = 640 };
-            body.Children.Insert(0, chart);
+            var scroll = new ScrollViewer { Content = chart, Height = 700 };
+            body.Children.Insert(0, scroll);
             body.UpdateLayout();
             async Task<WebView2> Ready()
             {
@@ -46,16 +47,17 @@ namespace NativeUiTests
             web.CoreWebView2.Navigate("https://invalid.example/blocked");
             await Task.Delay(150);
             if (web.CoreWebView2.Source != "https://charts.tokenstat.invalid/index.html") throw new Exception("Chart navigation escaped its bundled page");
-            body.Children.Remove(chart);
+            scroll.Content = null;
             await Task.Delay(100);
-            body.Children.Insert(0, chart);
+            scroll.Content = chart;
             body.UpdateLayout();
             await Ready();
-            body.Children.Remove(chart);
+            body.Children.Remove(scroll);
+            await CheckViewportAsync(body, source);
             Program.Log("PASS: offline native charts render all families, inspect values, open data, resize, block navigation and remount cleanly");
         }
 
-        private static void CheckBudgets(string source)
+        private static void CheckPreservation(string source)
         {
             var fence = "```tokenstat-chart\n" + source + "\n```";
             static int Charts(UIElement element) => element switch {
@@ -67,16 +69,83 @@ namespace NativeUiTests
             var fallback = new List<string>();
             UIElement Code(string text) { fallback.Add(text); return new TextBlock { Text = text }; }
             var many = string.Join("\n\n", Enumerable.Repeat(fence, 200));
-            if (Charts(ChatMarkdown.Create(many, Code)) != 4 || fallback.Count != 196 || fallback.Any(text => text != source))
-                throw new Exception("Markdown failed to bound chart browsers while preserving the full JSON");
+            if (Charts(ChatMarkdown.Create(many, Code)) != 200 || fallback.Count != 0)
+                throw new Exception("Markdown changed later chart fences into raw JSON");
             fallback.Clear();
             var quoted = string.Join("\n", fence.Split('\n').Select(line => "> " + line));
-            if (Charts(ChatMarkdown.Create(string.Join("\n\n", Enumerable.Repeat(quoted, 200)), Code)) != 4 || fallback.Count != 196)
-                throw new Exception("Nested Markdown bypassed the reply's chart browser limit");
-            var transcript = new ChartRenderBudget(ChartRenderBudget.PerTranscript);
-            var count = Enumerable.Range(0, 100).Sum(_ => Charts(ChatMarkdown.Create(fence, Code, chartBudget: transcript)));
-            if (count != 8) throw new Exception("Shared history exceeded its aggregate chart browser limit");
-            Program.Log("PASS: chart browsers are bounded per message and transcript, including nested Markdown, without losing JSON");
+            if (Charts(ChatMarkdown.Create(string.Join("\n\n", Enumerable.Repeat(quoted, 200)), Code)) != 200 || fallback.Count != 0)
+                throw new Exception("Nested Markdown changed later chart fences into raw JSON");
+            Program.Log("PASS: all 200 chart fences, including nested Markdown, remain charts");
+        }
+
+        private static async Task CheckViewportAsync(StackPanel body, string source)
+        {
+            var charts = Enumerable.Range(0, 12).Select(_ => new ChatChartView(source)).ToArray();
+            var stack = new StackPanel { Spacing = 8 };
+            foreach (var chart in charts) stack.Children.Add(chart);
+            var scroll = new ScrollViewer { Content = stack, Width = 640, Height = 480 };
+            async Task Until(Func<bool> condition)
+            {
+                for (var attempt = 0; attempt < 400; attempt++)
+                {
+                    body.UpdateLayout();
+                    if (condition()) return;
+                    await Task.Delay(50);
+                }
+                throw new Exception("Chart viewport did not settle");
+            }
+            static WebView2? Browser(ChatChartView chart) => chart.Children.OfType<WebView2>().FirstOrDefault();
+            async Task Ready(ChatChartView chart)
+            {
+                for (var attempt = 0; attempt < 400; attempt++)
+                {
+                    if (Browser(chart) is { CoreWebView2: not null } web)
+                    {
+                        try { if (await web.ExecuteScriptAsync("!!window.TokenstatChart?.inspect().valid") == "true") return; }
+                        catch { }
+                    }
+                    await Task.Delay(50);
+                }
+                throw new Exception("Visible chart failed to render after viewport mounting");
+            }
+            try
+            {
+                body.Children.Insert(0, scroll);
+                await Until(() => Browser(charts[0])?.CoreWebView2 is not null);
+                await Ready(charts[0]);
+                var original = Browser(charts[0]);
+                if (charts.Count(chart => Browser(chart) is not null) > 3 || Browser(charts[^1]) is not null)
+                    throw new Exception("Offscreen charts eagerly created native browsers");
+                var height = JsonSerializer.Deserialize<double>(await original!.ExecuteScriptAsync(
+                    "Math.min(2200,Math.max(180,Math.ceil(document.getElementById('root').getBoundingClientRect().height)))"));
+                await Until(() => charts[0].Height == height);
+                scroll.ChangeView(null, scroll.ExtentHeight - scroll.ViewportHeight, null, true);
+                await Until(() => Browser(charts[0]) is null && Browser(charts[^1])?.CoreWebView2 is not null);
+                await Ready(charts[^1]);
+                if (charts[0].Height != height || charts.Count(chart => Browser(chart) is not null) > 3)
+                    throw new Exception("Offscreen charts lost their measured space or retained their browsers");
+                scroll.ChangeView(null, 0, null, true);
+                await Until(() => Browser(charts[^1]) is null && Browser(charts[0])?.CoreWebView2 is not null);
+                await Ready(charts[0]);
+                if (ReferenceEquals(original, Browser(charts[0]))) throw new Exception("A released chart reused its closed browser");
+                // Rapid moves can overlap environment creation and native
+                // initialization. Only the final viewport may retain browsers.
+                for (var index = 0; index < 4; index++)
+                {
+                    scroll.ChangeView(null, scroll.ExtentHeight - scroll.ViewportHeight, null, true);
+                    body.UpdateLayout();
+                    scroll.ChangeView(null, 0, null, true);
+                    body.UpdateLayout();
+                }
+                await Until(() => Browser(charts[0])?.CoreWebView2 is not null && Browser(charts[^1]) is null);
+                stack.Visibility = Visibility.Collapsed;
+                await Until(() => charts.All(chart => Browser(chart) is null));
+                stack.Visibility = Visibility.Visible;
+                await Until(() => Browser(charts[0])?.CoreWebView2 is not null);
+                await Ready(charts[0]);
+                Program.Log("PASS: scrolling mounts later charts, releases offscreen browsers, preserves height and remounts safely");
+            }
+            finally { body.Children.Remove(scroll); }
         }
     }
 }

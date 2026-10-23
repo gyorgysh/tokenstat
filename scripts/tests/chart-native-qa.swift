@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Standalone fixture app. Compile with production ChatChartView.swift and L10n.swift.
+// Standalone fixture app. Compile with production ChatChartView.swift, ChartViewport.swift and L10n.swift.
 import SwiftUI
 import WebKit
 
@@ -11,6 +11,7 @@ import WebKit
 private struct ChartQABody: View {
     @State private var kind = 0
     @State private var dark = false
+    @State private var many = false
     private let examples: [[String: Any]] = {
         guard let file = Bundle.main.url(forResource: "examples", withExtension: "json"),
               let data = try? Data(contentsOf: file),
@@ -31,8 +32,16 @@ private struct ChartQABody: View {
                     }
                 }.frame(maxWidth: 250)
                 Toggle("Dark", isOn: $dark)
+                Toggle("12 charts", isOn: $many)
             }.padding(12)
-            ScrollView { ChatChartView(source: source).padding(16) }
+            ScrollView {
+                VStack {
+                    ForEach(0..<(many ? 12 : 1), id: \.self) { index in
+                        Text("Chart \(index + 1)")
+                        ChatChartView(source: source)
+                    }
+                }.padding(16)
+            }
         }.preferredColorScheme(dark ? .dark : .light)
     }
 }

@@ -35,14 +35,14 @@ enum TeamScopeMenuItems {
     static func make(store: TeamStore, manage: @escaping () -> Void) -> [NativeMenuItem] {
         var items: [NativeMenuItem] = [
             .heading(L10n.text("common.teams.scope")),
-            NativeMenuItem(L10n.text("common.teams.personal"), icon: .account, isSelected: store.selectedOrganizationId == nil) { store.select(nil) },
+            NativeMenuItem(L10n.text("common.teams.personal"), icon: .account, isSelected: store.selectedOrganizationId == nil) { store.select(nil); manage() },
         ]
         if store.phase == .ready {
             items += store.organizations.map { organization in
-                NativeMenuItem(organization.name, icon: .team, isSelected: store.selectedOrganizationId == organization.id) { store.select(organization) }
+                NativeMenuItem(organization.name, icon: .team, isSelected: store.selectedOrganizationId == organization.id) { store.select(organization); manage() }
             }
             if let selected = store.selectedOrganization, !store.organizations.contains(where: { $0.id == selected.id }) {
-                items.append(NativeMenuItem(selected.name, icon: .team, isSelected: true) { store.select(selected) })
+                items.append(NativeMenuItem(selected.name, icon: .team, isSelected: true) { store.select(selected); manage() })
             }
         }
         items += [.separator, NativeMenuItem(L10n.text("common.teams.manage_teams"), icon: .team, action: manage), .separator]

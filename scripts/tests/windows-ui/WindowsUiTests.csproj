@@ -34,7 +34,7 @@
 <Compile Include="../../../apps/windows/Pages/TeamsPage.PublisherSettings.cs" Link="TeamsPage.PublisherSettings.cs" />
 
     <Compile Include="../../../apps/windows/Pages/ChatMarkdown.cs" Link="ChatMarkdown.cs" />
-    <Compile Include="../../../apps/windows/Pages/ChartRenderBudget.cs" Link="ChartRenderBudget.cs" />
+    <Compile Include="../../../apps/windows/Pages/ChartViewport.cs" Link="ChartViewport.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamsPage.cs" Link="TeamsPage.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamsPage.Management.cs" Link="TeamsPage.Management.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamManagementModel.cs" Link="TeamManagementModel.cs" />
