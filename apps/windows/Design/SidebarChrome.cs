@@ -10,6 +10,9 @@ namespace Tokenstat.Design;
 /// <summary>Shared sidebar and rail metrics, independent of native template defaults.</summary>
 internal static class SidebarChrome
 {
+    // The app supplies the sink so shared control fixtures need no app entry point.
+    internal static Action<string>? ThresholdFailure { get; set; }
+
     /// <summary>Keep adaptive navigation between expanded and minimal modes.</summary>
     public static void SetAdaptiveThreshold(NavigationView view, double width)
     {
@@ -45,7 +48,7 @@ internal static class SidebarChrome
                 var loaded = false;
                 var actual = double.NaN;
                 try { loaded = view.IsLoaded; actual = view.ActualWidth; } catch { }
-                Program.LogStartup($"Sidebar threshold failure: stage={stage}; loaded={loaded}; actual={actual}; expanded={expanded}; compact={compact}; next={width}; HRESULT=0x{error.HResult:x8}");
+                try { ThresholdFailure?.Invoke($"Sidebar threshold failure: stage={stage}; loaded={loaded}; actual={actual}; expanded={expanded}; compact={compact}; next={width}; HRESULT=0x{error.HResult:x8}"); } catch { }
             }
             throw;
         }

@@ -145,6 +145,8 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        if (Environment.GetEnvironmentVariable("CI") == "true" && Environment.GetEnvironmentVariable("TOKENSTAT_UI_STARTUP_TRACE") == "1")
+            SidebarChrome.ThresholdFailure = Program.LogStartup;
         Title = L10n.Text("windows.mainwindow_xaml.tokenstat.63d30539");
         TryExtendIntoTitleBar();
         TrySize();
