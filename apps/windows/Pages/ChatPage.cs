@@ -183,7 +183,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
         Loaded += async (_, _) =>
         {
+            TraceComposition("loaded");
             AttachInspectionWindow();
+            TraceComposition("inspection attached");
             AppServices.AccountChanged -= ImagesAccountChanged;
             AppServices.AccountChanged += ImagesAccountChanged;
             RemoteWorkspaces.Changed -= ImagesPeerChanged;
@@ -400,6 +402,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task ShowListAsync()
     {
+        TraceComposition("list resetting");
         RememberDraft();
         _poll?.Cancel();
         var generation = ++_openGeneration;
@@ -420,19 +423,25 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Clear();
         var header = ListHeader();
         _root.Children.Add(header);
+        TraceComposition("list header mounted");
         // The archive is a new reading destination; retain drafts, but start
         // at its header rather than the previous transcript scroll offset.
         _scroll?.ChangeView(null, 0, null, true);
+        TraceComposition("list scroll reset");
         var skeleton = Motion.SkeletonCard();
         _root.Children.Add(skeleton);
+        TraceComposition("list skeleton mounted");
         _folderName = await FolderNameAsync();
         if (generation != _openGeneration || !IsLoaded) return;
+        TraceComposition("list folder loaded");
         RaiseToolbarChanged();
         RenderInspector();
+        TraceComposition("list inspector mounted");
         try
         {
             await RefreshCatalogAsync();
             if (generation != _openGeneration || !IsLoaded) return;
+            TraceComposition("list catalog loaded");
             RenderInspector();
             _root.Children.Remove(skeleton);
             _listReady = true;
