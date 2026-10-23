@@ -8047,6 +8047,15 @@ mod tests {
                 }
                 if outcome.is_some() {
                     manager.kill(&process.id).unwrap();
+                    // Windows termination can be accepted before its retained
+                    // process handle signals exit. Prove the fixture is gone
+                    // before asserting a definite refusal for the next input.
+                    let until = Instant::now() + Duration::from_secs(5);
+                    while manager.info(&process.id).unwrap().alive {
+                        assert!(Instant::now() < until, "The killed fixture did not exit");
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    assert!(manager.info(&process.id).unwrap().exit_code.is_some());
                     // A phone can still display a running, steer-capable
                     // snapshot after the CLI has exited. This refusal must
                     // prove that no input or receipt was accepted, so the

@@ -26,6 +26,16 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(AndroidJUnit4::class)
 class TeamAskRecoveryListTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    private fun clickReadyAction(key: String) {
+        val label = L10n.text(key)
+        // Disk restoration can outlive Compose's current frame. At large
+        // text sizes, reveal the child before finding its merged button.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText(label, useUnmergedTree = true).fetchSemanticsNodes().size == 1
+        }
+        compose.onNodeWithText(label, useUnmergedTree = true).performScrollTo()
+        compose.onNodeWithText(label).assertIsEnabled().performClick()
+    }
     @Test fun unreachableProjectsKeepTheOriginalRequestAndStopAndNeverCrossAccounts() {
         val root = java.io.File(compose.activity.cacheDir, "ask-list-" + UUID.randomUUID())
         val storage = TeamAskRecoveryStore(root)
@@ -50,10 +60,10 @@ class TeamAskRecoveryListTest {
             } } } }
             compose.waitUntil(5_000) { compose.onAllNodesWithText("Fictional saved request").fetchSemanticsNodes().isNotEmpty() }
             assertTrue(observed.isEmpty())
-            compose.onNodeWithText(L10n.text("common.teams.recover_ask")).performScrollTo().performClick()
-            compose.onNodeWithText(L10n.text("common.teams.retry_same_ask")).performScrollTo().performClick()
+            clickReadyAction("common.teams.recover_ask")
+            clickReadyAction("common.teams.retry_same_ask")
             compose.waitUntil(5_000) { storage.load(target)?.record?.fence == fence }
-            compose.onNodeWithText(L10n.text("common.teams.stop_agent")).performScrollTo().assertIsEnabled().performClick()
+            clickReadyAction("common.teams.stop_agent")
             compose.waitUntil(5_000) { observed.size == 2 }
             assertEquals(input, storage.load(target)!!.record.input)
             compose.runOnIdle { person.value = "person-two" }

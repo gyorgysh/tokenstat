@@ -372,6 +372,7 @@ jobs:
           cache-on-failure: true
 
       - name: Build
+        id: rust_build
         run: cargo build --workspace --all-features --locked
 
       - uses: actions/setup-python@v7
@@ -410,17 +411,17 @@ jobs:
         run: python3 scripts/tests/client-150-compat.py
 
       - uses: actions/setup-dotnet@v6
-        if: runner.os == 'Windows'
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.rust_build.outcome == 'success' }}
         with:
           dotnet-version: '8.0.x'
 
       - name: Compile the native Windows UI
         id: windows_ui_compile
-        if: runner.os == 'Windows'
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.rust_build.outcome == 'success' }}
         run: dotnet build apps/windows/Tokenstat.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64
 
       - name: Native Windows charts, editor and H.264 playback regressions
-        if: runner.os == 'Windows'
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.windows_ui_compile.outcome == 'success' }}
         shell: pwsh
         env:
           TOKENSTAT_SCREEN_FIXTURE: ${{ runner.temp }}/tokenstat-screen-fixture
