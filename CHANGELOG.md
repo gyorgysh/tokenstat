@@ -36,6 +36,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Windows has native organization, member, invitation and project-access management, an incoming invitation inbox, and ownership recovery for paused teams.
 - Windows can review and publish local checkouts and selected chat history, configure work lanes and checks, and approve agent access for one teammate's device at a time.
 - Windows project folders have Share/Open actions and a shared badge. A Shared projects entry finds teammates' projects across teams; new sharing reviews the selected teammates and keeps existing private chats separate.
+- Android's Shared projects browser finds assigned projects across teams, retains later pages through offline retries, and opens chats from all teammates. Team selection stays available when more teams exist on another page.
 - Retrying a Team Ask after a lost reply keeps the original request and recovers Stop for the same run. Apple, Android and Windows clients retain that request and run through navigation and app restarts. Windows rejects replies from a screen that has already closed.
 - Stop remains available when shared history or the agent's status cannot be confirmed. Android also reports failed Stop requests so they can be retried.
 - Read-only repository members are no longer offered Ask in shared chats.

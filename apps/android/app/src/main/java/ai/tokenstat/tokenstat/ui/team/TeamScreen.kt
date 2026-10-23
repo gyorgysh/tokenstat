@@ -134,6 +134,9 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
     var management by remember(identity) { mutableStateOf<JsonObject?>(null) }
     var creatingOrganization by remember(identity) { mutableStateOf(false) }
     var showingInbox by remember(identity) { mutableStateOf(false) }
+    var showingProjects by remember(identity) { mutableStateOf(false) }
+    var project by remember(identity) { mutableStateOf<JsonObject?>(null) }
+    val projects = remember(calls) { TeamProjectsModel(calls) }
     val context = LocalContext.current.applicationContext
     val draftStorage = remember(context) { TeamCommentDraftStore.shared(java.io.File(context.filesDir, "team-comment-drafts")) }
 
@@ -156,9 +159,9 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
                             val exact = details["organization"] as? JsonObject ?: error("Invalid Team")
                             require(exact.str("id") == selected); exact
                         } catch (failure: CoreFailure) {
-                            if (failure.code in setOf("not_found", "forbidden", "organization_paused", "patron_required")) page.rows.singleOrNull() else throw failure
+                            if (failure.code in setOf("not_found", "forbidden", "organization_paused", "patron_required")) page.rows.singleOrNull()?.takeIf { page.next == null } else throw failure
                         }
-                    } else page.rows.singleOrNull()
+                    } else page.rows.singleOrNull()?.takeIf { page.next == null }
                     Phase.Ready
                 }
             }
@@ -213,6 +216,23 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
         TeamChatReader(calls, current, draftStorage, onBack = { chat = null })
         return
     }
+    project?.let { selected ->
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TsSecondaryButton(L10n.text("common.teams.shared_projects"), icon = ActionIcon.Back.vector, onClick = { project = null })
+            Text(selected.teamString("name").orEmpty(), style = TsType.cardTitle)
+            Text(L10n.text("common.teams.all_teammates"), style = TsType.body)
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { key(identity, selected.teamString("organizationId"), selected.teamString("id")) {
+                    RepositoryCard(calls, selected.teamString("organizationId")!!, selected, onOpenChat = { chat = it })
+                } }
+            }
+        }
+        return
+    }
+    if (showingProjects) {
+        TeamProjectsScreen(projects, onBack = { showingProjects = false }, onOpen = { project = it })
+        return
+    }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(L10n.text("common.teams.title"), style = TsType.cardTitle,
             color = LocalTsColors.current.textPrimary, modifier = Modifier.padding(top = 16.dp))
@@ -227,6 +247,7 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
             })
             Phase.Ready -> {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TsSecondaryButton(L10n.text("common.teams.shared_projects"), icon = ActionIcon.Connect.vector, onClick = { showingProjects = true })
                     TsSecondaryButton(L10n.text("common.teams.invitations_for_you"), icon = ActionIcon.Send.vector, onClick = { showingInbox = true })
                     TsSecondaryButton(L10n.text("common.teams.create_organization"), icon = ActionIcon.Create.vector, onClick = { creatingOrganization = true })
                     TsSecondaryButton(L10n.text("common.refresh"), icon = ActionIcon.Refresh.vector, onClick = { scope.launch { load() } })

@@ -46,6 +46,7 @@ for chart_attempt in $(seq 1 120); do
       ai.tokenstat.tokenstat.ui.team.TeamDirectoryTest \
       ai.tokenstat.tokenstat.ui.team.TeamManagementTest \
       ai.tokenstat.tokenstat.ui.team.TeamLifecycleTest \
+      ai.tokenstat.tokenstat.ui.team.TeamProjectsTest \
       ai.tokenstat.tokenstat.ui.team.TeamTranscriptTest; do
       ANDROID_SERIAL="$chart_serial" gradle -p apps/android connectedDebugAndroidTest "-Pandroid.testInstrumentationRunnerArguments.class=$chart_suite"
       chart_reports="target/chart-android-ci/$chart_suite"
