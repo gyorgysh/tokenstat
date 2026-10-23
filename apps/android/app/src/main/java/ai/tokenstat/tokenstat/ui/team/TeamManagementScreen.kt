@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
 private fun managementFailure(failure: Exception) = if (failure is CoreFailure) failure.message else L10n.text("common.teams.load_failed")
-private fun roleLabel(role: String?): String = when (role) {
+internal fun teamRoleLabel(role: String?): String = when (role) {
     "owner" -> L10n.text("common.teams.owner")
     "admin" -> L10n.text("common.teams.admin")
     "member" -> L10n.text("common.teams.member")
@@ -49,9 +49,9 @@ private val teamIdentifierKeyboard = KeyboardOptions(capitalization = KeyboardCa
 @Composable private fun RolePicker(value: String?, choices: List<String?>, enabled: Boolean, onChange: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TsSecondaryButton(roleLabel(value), enabled = enabled, icon = ActionIcon.Disclosure.vector, onClick = { open = true })
+        TsSecondaryButton(teamRoleLabel(value), enabled = enabled, icon = ActionIcon.Disclosure.vector, onClick = { open = true })
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            choices.forEach { choice -> DropdownMenuItem(text = { Text(roleLabel(choice)) }, onClick = { open = false; onChange(choice) }) }
+            choices.forEach { choice -> DropdownMenuItem(text = { Text(teamRoleLabel(choice)) }, onClick = { open = false; onChange(choice) }) }
         }
     }
 }
@@ -64,12 +64,13 @@ private sealed interface ManagementEdit {
     data class Access(val repository: JsonObject, val member: JsonObject) : ManagementEdit
 }
 
-@Composable internal fun TeamManagementScreen(calls: TeamCalls, initial: JsonObject, onBack: (JsonObject) -> Unit) {
+@Composable internal fun TeamManagementScreen(calls: TeamCalls, initial: JsonObject, onGone: () -> Unit = {}, onBack: (JsonObject) -> Unit) {
     val model = remember(calls, initial.teamString("id")) { TeamManagementModel(calls, initial) }
     val scope = rememberCoroutineScope()
     val colors = LocalTsColors.current
     var section by remember(model) { mutableStateOf("members") }
     var edit by remember(model) { mutableStateOf<ManagementEdit?>(null) }
+    var lifecycle by remember(model) { mutableStateOf<TeamLifecycleEdit?>(null) }
     var accessRepository by remember(model) { mutableStateOf<JsonObject?>(null) }
     var accessMembers by remember(model) { mutableStateOf(TeamManagementPage()) }
     var accessBusy by remember(model) { mutableStateOf(false) }
@@ -103,10 +104,11 @@ private sealed interface ManagementEdit {
                 TsSecondaryButton(L10n.text("common.teams.members"), enabled = !model.busy, icon = ActionIcon.Profile.vector, onClick = { section = "members" })
                 TsSecondaryButton(L10n.text("common.teams.repositories"), enabled = !model.busy, icon = ActionIcon.Source.vector, onClick = { section = "repositories" })
                 if (model.manager) TsSecondaryButton(L10n.text("common.teams.invitations"), enabled = !model.busy, icon = ActionIcon.Send.vector, onClick = { section = "invitations" })
-                if (model.manager) TsSecondaryButton(L10n.text("common.teams.rename_organization"), enabled = !model.busy, icon = ActionIcon.Edit.vector, onClick = { edit = ManagementEdit.Rename })
+                TsSecondaryButton(L10n.text("common.settings"), enabled = !model.busy, icon = ActionIcon.Settings.vector, onClick = { section = "settings" })
                 TsSecondaryButton(L10n.text("common.refresh"), enabled = !model.busy, icon = ActionIcon.Refresh.vector, onClick = { scope.launch { model.refresh(section) } })
             }
         }
+        if (access == null) item { TeamOwnershipNotice(calls, model) { lifecycle = it } }
         if (access == null && model.manager && section in setOf("members", "invitations")) item {
             TsAccentButton(L10n.text("common.teams.invite_member"), enabled = !model.busy, icon = ActionIcon.Create.vector, onClick = {
                 scope.launch { if (!model.repositories.loaded) model.refresh("repositories"); if (model.repositories.loaded && model.manager) edit = ManagementEdit.Invite }
@@ -115,7 +117,7 @@ private sealed interface ManagementEdit {
         if (access != null) {
             item { Text(L10n.text("common.teams.execution_separate"), color = colors.textSecondary) }
             items(accessMembers.rows, key = { it.teamString("id")!! }) { member ->
-                TsCard(title = member.teamString("name").orEmpty(), subtitle = roleLabel(member.teamString("role"))) {
+                TsCard(title = member.teamString("name").orEmpty(), subtitle = teamRoleLabel(member.teamString("role"))) {
                     if (member["eligible"] != JsonPrimitive(true)) Text(L10n.text("common.teams.needs_patron"), color = colors.textSecondary)
                     TsSecondaryButton(L10n.text("common.teams.manage_access"), enabled = !model.busy && !accessBusy && model.active,
                         icon = ActionIcon.Security.vector, onClick = { edit = ManagementEdit.Access(access, member) })
@@ -128,7 +130,7 @@ private sealed interface ManagementEdit {
         } else when (section) {
             "members" -> {
                 items(model.members.rows, key = { it.teamString("id")!! }) { member ->
-                    TsCard(title = member.teamString("name").orEmpty(), subtitle = roleLabel(member.teamString("role"))) {
+                    TsCard(title = member.teamString("name").orEmpty(), subtitle = teamRoleLabel(member.teamString("role"))) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Avatar(name = member.teamString("name").orEmpty(), decorative = true)
                             member.teamString("handle")?.let { Text("@$it", color = colors.textSecondary) }
@@ -143,14 +145,22 @@ private sealed interface ManagementEdit {
                 }
             }
             "repositories" -> items(model.repositories.rows, key = { it.teamString("id")!! }) { repository ->
-                TsCard(title = repository.teamString("name").orEmpty(), subtitle = roleLabel(repository.teamString("role"))) {
+                TsCard(title = repository.teamString("name").orEmpty(), subtitle = teamRoleLabel(repository.teamString("role"))) {
                     if (model.manager || repository.teamString("role") == "maintainer") TsSecondaryButton(L10n.text("common.teams.repository_access"), enabled = !model.busy,
                         icon = ActionIcon.Security.vector, onClick = { accessRepository = repository; accessMembers = TeamManagementPage(); scope.launch { loadAccess(repository, false) } })
                 }
             }
+            "settings" -> item {
+                if (model.manager) TsSecondaryButton(L10n.text("common.teams.rename_organization"), enabled = !model.busy, icon = ActionIcon.Edit.vector, onClick = { edit = ManagementEdit.Rename })
+                TeamLifecycleSettings(model) { selected ->
+                    if (selected is TeamLifecycleEdit.Transfer && !model.members.loaded) scope.launch {
+                        model.refresh("members"); if (model.currentOwner) lifecycle = TeamLifecycleEdit.Transfer(model.organization)
+                    } else lifecycle = selected
+                }
+            }
             "invitations" -> items(model.invitations.rows, key = { it.teamString("id")!! }) { invitation ->
                 TsCard(title = (invitation["recipient"] as? JsonObject)?.teamString("name") ?: L10n.text("common.teams.member"), subtitle = invitationLabel(invitation.teamString("state"))) {
-                    Text(roleLabel(invitation.teamString("role")), color = colors.textSecondary)
+                    Text(teamRoleLabel(invitation.teamString("role")), color = colors.textSecondary)
                     if (model.manager && invitation.teamString("state") in setOf("pending", "expired")) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TsSecondaryButton(L10n.text("common.teams.new_invitation_link"), enabled = !model.busy, icon = ActionIcon.Refresh.vector, onClick = { edit = ManagementEdit.Invitation(invitation, true) })
                         if (invitation.teamString("state") == "pending") TsDangerButton(L10n.text("common.teams.revoke_invitation"), enabled = !model.busy, icon = ActionIcon.Revoke.vector, onClick = { edit = ManagementEdit.Invitation(invitation, false) })
@@ -158,7 +168,7 @@ private sealed interface ManagementEdit {
                 }
             }
         }
-        if (access == null) {
+        if (access == null && section != "settings") {
             val page = when (section) { "members" -> model.members; "repositories" -> model.repositories; else -> model.invitations }
             if (page.loaded && page.rows.isEmpty() && model.error == null && !model.busy) item {
                 if (section == "invitations") Text(L10n.text("common.teams.no_invitations"), color = colors.textSecondary)
@@ -172,6 +182,11 @@ private sealed interface ManagementEdit {
                     icon = ActionIcon.More.vector, onClick = { scope.launch { model.refresh(section, page.loaded && page.next != null) } })
             }
         }
+    }
+    lifecycle?.let { selected ->
+        key(selected) { TeamLifecycleDialog(calls, model, selected, onDismiss = { lifecycle = null }, onDone = {
+            lifecycle = null; scope.launch { model.refresh(section) }
+        }, onGone = onGone) }
     }
     edit?.let { selected ->
         key(selected) {

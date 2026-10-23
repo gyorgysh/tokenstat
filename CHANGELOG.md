@@ -32,6 +32,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Teams browsers on Android and Windows can load more computers and shared chats, with retry controls for unreachable computers. Overlap summaries identify which computers are included.
 - Pending Team comments on Android and Windows survive navigation and app restarts. Explicit retries retain the original words and message ID; delayed receipts preserve newer drafts.
 - Manage teams directly on Android: create and rename organizations, review members and roles, create or revoke invitations, and change project access. New invitations start without project or agent access.
+- Android shows incoming invitations and reviews their project access before joining. Owners can transfer or delete a paused team, and members can leave without using the website.
 - Retrying a Team Ask after a lost reply keeps the original request and recovers Stop for the same run. Apple, Android and Windows clients retain that request and run through navigation and app restarts. Windows rejects replies from a screen that has already closed.
 - Stop remains available when shared history or the agent's status cannot be confirmed. Android also reports failed Stop requests so they can be retried.
 - Read-only repository members are no longer offered Ask in shared chats.

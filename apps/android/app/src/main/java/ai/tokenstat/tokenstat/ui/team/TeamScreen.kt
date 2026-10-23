@@ -16,6 +16,7 @@ import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -132,6 +133,7 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
     var drafts by remember(identity) { mutableStateOf(false) }
     var management by remember(identity) { mutableStateOf<JsonObject?>(null) }
     var creatingOrganization by remember(identity) { mutableStateOf(false) }
+    var showingInbox by remember(identity) { mutableStateOf(false) }
     val context = LocalContext.current.applicationContext
     val draftStorage = remember(context) { TeamCommentDraftStore.shared(java.io.File(context.filesDir, "team-comment-drafts")) }
 
@@ -147,8 +149,16 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
                     val page = TeamDirectoryPage.read(calls.directory("organizations.list"), "organizations", 0)
                     organizations = page.rows; organizationsNext = page.next; organizationsError = null
                     val selected = organization?.str("id")
-                    organization = page.rows.firstOrNull { it.str("id") == selected }
-                        ?: if (page.next != null) organization else page.rows.singleOrNull()
+                    val listed = page.rows.firstOrNull { it.str("id") == selected }
+                    organization = if (listed != null) listed else if (selected != null && page.next != null) {
+                        try {
+                            val details = calls.call("teams.directory", buildJsonObject { put("operation", "organizations.get"); put("organization", selected) })
+                            val exact = details["organization"] as? JsonObject ?: error("Invalid Team")
+                            require(exact.str("id") == selected); exact
+                        } catch (failure: CoreFailure) {
+                            if (failure.code in setOf("not_found", "forbidden", "organization_paused", "patron_required")) page.rows.singleOrNull() else throw failure
+                        }
+                    } else page.rows.singleOrNull()
                     Phase.Ready
                 }
             }
@@ -176,11 +186,22 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
     LaunchedEffect(identity) { load() }
 
     management?.let { selected ->
-        key(identity, selected.str("id")) { TeamManagementScreen(calls, selected) { updated ->
+        key(identity, selected.str("id")) { TeamManagementScreen(calls, selected, onGone = {
+            management = null; organization = null
+            organizations = organizations.filterNot { it.str("id") == selected.str("id") }
+            scope.launch { load() }
+        }) { updated ->
             management = null
             organization = updated
             organizations = organizations.map { if (it.str("id") == updated.str("id")) updated else it }
+            scope.launch { load() }
         } }
+        return
+    }
+    if (showingInbox) {
+        key(identity) { TeamInboxScreen(calls, onBack = { showingInbox = false }, onJoined = { joined ->
+            showingInbox = false; organization = joined; scope.launch { load() }
+        }) }
         return
     }
     if (drafts) {
@@ -205,7 +226,11 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
                 TsAccentButton(L10n.text("common.retry"), onClick = { scope.launch { load() } }, icon = ActionIcon.Refresh.vector)
             })
             Phase.Ready -> {
-                TsSecondaryButton(L10n.text("common.teams.create_organization"), icon = ActionIcon.Create.vector, onClick = { creatingOrganization = true })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TsSecondaryButton(L10n.text("common.teams.invitations_for_you"), icon = ActionIcon.Send.vector, onClick = { showingInbox = true })
+                    TsSecondaryButton(L10n.text("common.teams.create_organization"), icon = ActionIcon.Create.vector, onClick = { creatingOrganization = true })
+                    TsSecondaryButton(L10n.text("common.refresh"), icon = ActionIcon.Refresh.vector, onClick = { scope.launch { load() } })
+                }
                 val org = organization
                 if (org == null) {
                     if (organizations.isEmpty() && organizationsNext == null) {

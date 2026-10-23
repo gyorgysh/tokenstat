@@ -26,6 +26,7 @@ internal class TeamManagementModel(private val calls: TeamCalls, initial: JsonOb
     val organizationId = initial.teamString("id") ?: error("Missing Team")
     var organization by mutableStateOf(initial); private set
     var verified by mutableStateOf(false); private set
+    var ownershipRequest by mutableStateOf<JsonObject?>(null); private set
     var members by mutableStateOf(TeamManagementPage()); private set
     var repositories by mutableStateOf(TeamManagementPage()); private set
     var invitations by mutableStateOf(TeamManagementPage()); private set
@@ -35,6 +36,7 @@ internal class TeamManagementModel(private val calls: TeamCalls, initial: JsonOb
     val active get() = verified && organization.teamString("state") == "active" && organization["eligible"] == JsonPrimitive(true)
     val manager get() = active && role in setOf("owner", "admin")
     val owner get() = active && role == "owner"
+    val currentOwner get() = verified && role == "owner"
 
     private suspend fun request(operation: String, fields: JsonObject = buildJsonObject {}): JsonObject = calls.call("teams.directory", buildJsonObject {
         put("operation", operation); put("organization", organizationId)
@@ -46,10 +48,12 @@ internal class TeamManagementModel(private val calls: TeamCalls, initial: JsonOb
         try {
             if (!more) {
                 verified = false
-                val fresh = request("organizations.get")["organization"] as? JsonObject ?: error("Missing Team")
+                val details = request("organizations.get")
+                val fresh = details["organization"] as? JsonObject ?: error("Missing Team")
                 require(fresh.teamString("id") == organizationId)
                 fresh.teamRevision()
-                organization = fresh; verified = true
+                organization = fresh; ownershipRequest = details["ownershipRequest"]?.takeUnless { it == JsonNull }?.jsonObject; verified = true
+                if (!manager) invitations = TeamManagementPage(loaded = true)
             }
             val old = when (section) { "members" -> members; "repositories" -> repositories; "invitations" -> invitations; else -> return }
             if (section == "invitations" && !manager) return
@@ -91,11 +95,41 @@ internal class TeamManagementModel(private val calls: TeamCalls, initial: JsonOb
         require(role == null || role in setOf("viewer", "contributor", "maintainer")); person(member)
         return buildJsonObject { put("role", role?.let(::JsonPrimitive) ?: JsonNull); put("expectedRevision", member.teamRevision()) }
     }
+    private fun originalOrganization(expected: JsonObject) {
+        require(verified && expected.teamString("id") == organizationId && expected.teamRevision() == organization.teamRevision())
+    }
+    fun transfer(member: JsonObject, expected: JsonObject): JsonObject {
+        originalOrganization(expected)
+        require(currentOwner && person(member) != organization.teamString("ownerId") && member["ownershipEligible"] == JsonPrimitive(true))
+        return buildJsonObject { put("userId", person(member)); put("expectedRevision", expected.teamRevision()) }
+    }
+    fun deleteOrganization(confirmation: String, expected: JsonObject): JsonObject {
+        originalOrganization(expected)
+        require(currentOwner && confirmation == expected.teamString("name"))
+        return buildJsonObject { put("confirmName", confirmation); put("expectedRevision", expected.teamRevision()) }
+    }
+    fun leave(expected: JsonObject): JsonObject {
+        originalOrganization(expected)
+        require(role in setOf("member", "admin") && calls.person?.isNotBlank() == true)
+        val revision = (expected["membershipRevision"] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull ?: error("Missing membership revision")
+        require(revision > 0 && expected["membershipRevision"] == organization["membershipRevision"])
+        return buildJsonObject { put("expectedRevision", revision) }
+    }
+    fun ownershipDecision(reviewed: JsonObject, cancelling: Boolean): JsonObject {
+        require(verified && reviewed == ownershipRequest && reviewed.teamString("requestId")?.isNotBlank() == true)
+        if (cancelling) require(currentOwner && reviewed.teamString("fromUserId") == calls.person)
+        else require(reviewed.teamString("toUserId") == calls.person && reviewed["current"] == JsonPrimitive(true))
+        return buildJsonObject { put("requestId", reviewed.teamString("requestId")); put("expectedRevision", reviewed.teamRevision()) }
+    }
     suspend fun mutate(operation: String, input: JsonObject, user: String? = null, repository: String? = null, invitation: String? = null): JsonObject {
         check(!busy && verified)
-        require(operation in setOf("organizations.rename", "members.role", "members.remove", "invitations.create", "invitations.renew", "invitations.revoke", "repositories.access"))
+        require(operation in setOf("organizations.rename", "members.role", "members.remove", "invitations.create", "invitations.renew", "invitations.revoke", "repositories.access", "organizations.delete", "ownership.request", "ownership.accept", "ownership.cancel"))
         when (operation) {
             "members.role" -> require(owner)
+            "members.remove" -> if (user == calls.person) require(verified && role in setOf("member", "admin")) else require(manager)
+            "organizations.delete", "ownership.request" -> require(currentOwner)
+            "ownership.accept" -> { ownershipDecision(ownershipRequest ?: error("Missing request"), false) }
+            "ownership.cancel" -> { ownershipDecision(ownershipRequest ?: error("Missing request"), true) }
             "repositories.access" -> require(active && (manager || repositories.rows.any { it.teamString("id") == repository && it.teamString("role") == "maintainer" }))
             else -> require(manager)
         }

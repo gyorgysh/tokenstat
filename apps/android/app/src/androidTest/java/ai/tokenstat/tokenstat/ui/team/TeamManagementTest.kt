@@ -136,7 +136,7 @@ class TeamManagementTest {
                 "organizations.get" -> buildJsonObject { put("organization", created!!) }
                 "organizations.rename" -> {
                     writes += fields
-                    created = JsonObject(created!! + mapOf("name" to fields["input"]!!.jsonObject["name"]!!, "revision" to JsonPrimitive(2L)))
+                    created = JsonObject(checkNotNull(created) + mapOf("name" to fields["input"]!!.jsonObject["name"]!!, "revision" to JsonPrimitive(2L)))
                     buildJsonObject { put("organization", created!!) }
                 }
                 "members.list" -> page("members", listOf(person("self", "Fictional owner", "owner", 1)))
@@ -150,6 +150,7 @@ class TeamManagementTest {
         compose.onNodeWithTag("team.management.slug").assertTextContains("fictional-studio")
         dialogButton(L10n.text("common.teams.create_organization")).assertIsEnabled().performClick()
         ready(L10n.text("common.teams.manage_teams")); button(L10n.text("common.teams.manage_teams")).performClick()
+        ready(L10n.text("common.settings")); button(L10n.text("common.settings")).performClick()
         ready(L10n.text("common.teams.rename_organization")); button(L10n.text("common.teams.rename_organization")).performClick()
         dialogButton(L10n.text("common.save")).assertIsNotEnabled()
         compose.onNodeWithTag("team.management.name").performTextReplacement("Renamed fictional studio")

@@ -414,6 +414,7 @@
   "common.teams.find_member": "Find a member",
   "common.teams.handle_detail": "Use the handle shown in their tokenstat account. An invitation belongs to that account.",
   "common.teams.handle_placeholder": "@handle",
+  "common.teams.invitations_for_you": "Invitations for you",
   "common.teams.inbox_detail": "Review invitations sent to this account.",
   "common.teams.invalid_link": "The account server returned an invalid link. Refresh and try again.",
   "common.teams.invitation_admin": "Invitations are managed by admins",
