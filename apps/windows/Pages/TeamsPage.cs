@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 using System.Text.Json.Nodes;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Tokenstat.Design;
@@ -26,6 +27,8 @@ internal sealed partial class TeamsPage : Page
     // Bumped by every redraw, so a load or a watch that outlived its screen
     // stops instead of drawing over the one now shown.
     private int _view;
+    private int _attachmentRevision;
+    private bool _attached;
     // A result to show once the reload after Land or Discard has drawn.
     private string? _flash;
     private TeamCommentModel? _currentComment;
@@ -60,8 +63,33 @@ internal sealed partial class TeamsPage : Page
         _askStorage = askStorage ?? TeamAskRecoveryStore.Shared;
         _call = call ?? ((method, fields) => AppServices.Host.CallAsync(method, fields));
         Content = new ScrollViewer { Content = _body };
-        Loaded += async (_, _) => { AppServices.AccountChanged += OnTeamAccountChanged; await LoadAsync(); };
-        Unloaded += (_, _) => { AppServices.AccountChanged -= OnTeamAccountChanged; _view++; };
+        Loaded += (_, _) => ReconcileAttachment();
+        Unloaded += (_, _) => ReconcileAttachment();
+    }
+    private void ReconcileAttachment()
+    {
+        var revision = ++_attachmentRevision;
+        // WinUI may finish an old Unloaded after the page has reattached.
+        // Settle the current tree before starting a load or retiring its watch.
+        if (!DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, async () =>
+        {
+            if (revision != _attachmentRevision) return;
+            if (IsLoaded && Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(this) is not null)
+            {
+                if (_attached) return;
+                _attached = true;
+                AppServices.AccountChanged += OnTeamAccountChanged;
+                await LoadAsync();
+            }
+            else Detach();
+        })) Detach();
+    }
+    private void Detach()
+    {
+        if (!_attached) return;
+        _attached = false;
+        AppServices.AccountChanged -= OnTeamAccountChanged;
+        _view++;
     }
     private void OnTeamAccountChanged()
     {

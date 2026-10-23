@@ -54,6 +54,8 @@ namespace NativeUiTests
                 var page = new TeamsPage(Host, new TeamAskRecoveryStore(root)); body.Children.Add(page); body.UpdateLayout();
                 var deadline = DateTime.UtcNow.AddSeconds(5);
                 while (!Descendants(page).OfType<TextBlock>().Any(text => text.Text == L10n.Text("common.teams.no_organizations")) && DateTime.UtcNow < deadline) { page.UpdateLayout(); await Task.Delay(20); }
+                if (!Descendants(page).OfType<TextBlock>().Any(text => text.Text == L10n.Text("common.teams.no_organizations")))
+                    throw new Exception($"Teams directory did not initialize (loaded={page.IsLoaded}, size={page.ActualWidth}x{page.ActualHeight}, text={string.Join(" | ", Descendants(page).OfType<TextBlock>().Select(text => text.Text))})");
                 const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
                 var hosts = (Dictionary<string, string>)typeof(TeamsPage).GetField("_checkoutHosts", flags)!.GetValue(page)!;
                 var checkout = (JsonObject)target.DeepClone(); checkout.Remove("share"); hosts[checkout.ToJsonString()] = binding.Host;
@@ -65,9 +67,14 @@ namespace NativeUiTests
             try
             {
                 mounted = await Open();
+                // A same-turn move can report the old Unloaded after Loaded.
+                // Keep the current reader and its saved-run watch attached.
+                body.Children.Remove(mounted); body.Children.Add(mounted); body.UpdateLayout();
                 var deadline = DateTime.UtcNow.AddSeconds(7);
-                while (statusReads == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
-                if (statusReads == 0 || recovery.Load(binding)?.Record.Fence is null) throw new Exception("An unconfirmed status discarded the saved run");
+                while (!Descendants(mounted).OfType<TextBlock>().Any(text => text.Text == L10n.Text("common.teams.run_status_unconfirmed")) && DateTime.UtcNow < deadline) { mounted.UpdateLayout(); await Task.Delay(20); }
+                if (statusReads == 0) throw new Exception($"The saved-run watch did not check status after page reattachment (loaded={mounted.IsLoaded}, historyReads={calls}, text={string.Join(" | ", Descendants(mounted).OfType<TextBlock>().Select(text => text.Text))})");
+                if (!Descendants(mounted).OfType<TextBlock>().Any(text => text.Text == L10n.Text("common.teams.run_status_unconfirmed"))) throw new Exception("Malformed run status was not shown by the current reader");
+                if (recovery.Load(binding)?.Record.Fence is null) throw new Exception("An unconfirmed status discarded the saved run");
                 body.Children.Remove(mounted); mounted = await Open();
                 if (calls != 2) throw new Exception("Reopening did not restore the production reader");
                 var stop = Descendants(mounted).OfType<Button>().SingleOrDefault(button => AutomationProperties.GetName(button) == L10n.Text("common.teams.stop_agent"));
