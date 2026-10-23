@@ -656,7 +656,9 @@ impl Store {
                 checkpoint(Step::Reserved)?;
                 principal.ensure_account_current()?;
                 current()?;
-                writer.ensure_current().map_err(|_| changed())?;
+                // A durable reservation already exists. This is no longer a
+                // definite refusal: clients must retain its original identity.
+                writer.ensure_current().map_err(|_| super::run_recovery_required())?;
                 let mut canonical = bytes.to_vec();
                 canonical.extend_from_slice(&encoded);
                 replace_chat_file(&directory.join("events.ndjson"), &canonical)

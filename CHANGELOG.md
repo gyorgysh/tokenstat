@@ -28,6 +28,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
+- A Team Ask whose reviewed chat or checkout changed now offers a fresh review instead of incorrectly requesting run recovery. Interrupted recorded requests retain their original recovery identity.
 - Update cryptographic dependencies to address the constant-time mask and integer comparison issues in RUSTSEC-2026-0385.
 - Windows sidebar sizing keeps expanded and minimal modes while chat companion widths change, avoiding a temporary icon-only pane.
 - The Mac project Share/Open button appears only while hovering over its row. Team sections stay inside Team instead of repeating in the project sidebar; Shared projects remains available inside Team.

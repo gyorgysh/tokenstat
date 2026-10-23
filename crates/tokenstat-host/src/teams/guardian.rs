@@ -247,11 +247,18 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
             lane.as_ref().map(|lane| lane.path.as_path()),
         ),
         || source.ensure_current(),
-    )? {
-        AskPreparation::Existing(receipt) => {
+    ) {
+        Err(error) if error.code == "team_run_review_changed" => {
+            // This code is emitted only before admission becomes durable.
+            // Do not turn a stale review into an uncertain lost response.
+            drop(lane);
+            return event(json!({"event":"rejected","code":"team_run_review_changed"}));
+        }
+        Err(error) => return Err(error),
+        Ok(AskPreparation::Existing(receipt)) => {
             return event(json!({"event":"finished","result":receipt}));
         }
-        AskPreparation::New(prepared) => prepared,
+        Ok(AskPreparation::New(prepared)) => prepared,
     };
     let fixture = init.program.is_some();
     // A real agent reads the frozen context through the scoped SDK and needs
@@ -862,7 +869,8 @@ pub(super) fn run(
         return Ok(json!({"state":"running","runId":response["runId"],"fence":response["fence"]}));
     }
     drop(parent.input.take());
-    if response["event"] != "finished" {
+    let review_changed = response == json!({"event":"rejected","code":"team_run_review_changed"});
+    if response["event"] != "finished" && !review_changed {
         return Err(unavailable());
     }
     let status = parent
@@ -874,6 +882,12 @@ pub(super) fn run(
     parent.child.take();
     if !status.success() {
         return Err(unavailable());
+    }
+    if review_changed {
+        return Err(DispatchError::new(
+            "team_run_review_changed",
+            "The shared conversation or checkout changed. Review it before asking the agent.",
+        ));
     }
     let result = response["result"].clone();
     Ok(super::runs::resume(principal, &result).unwrap_or(result))

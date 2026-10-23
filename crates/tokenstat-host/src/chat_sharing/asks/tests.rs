@@ -368,6 +368,37 @@ fn stale_review_and_busy_writer_leave_no_intent_or_canonical_fence() {
 }
 
 #[test]
+fn changed_writer_after_reservation_requires_recovery_and_preserves_the_request() {
+    let f = Fixture::new();
+    let actor = principal("fixture-person", 'a', 'b');
+    let input = f.input(&actor, "ask-reserved-writer-change");
+    let error = failed(f.store.prepare_team_ask_steps(
+        f.target(),
+        &actor,
+        &input,
+        (&f.folder, &f.checkout, None),
+        || Ok(()),
+        |step| {
+            if matches!(step, Step::Reserved) {
+                fs::write(f.folder.join(".git"), "broken repository metadata\n").unwrap();
+            }
+            Ok(())
+        },
+    ));
+    assert_eq!(error.code, "team_run_recovery_required");
+    let fence = f.chat().team_run_fence.unwrap();
+    assert!(f.history().events.is_empty());
+    let receipt = existing(f.prepare(&actor, &input).unwrap());
+    assert_eq!(receipt["receipt"]["state"], "reserved");
+    assert_eq!(
+        receipt["receipt"]["clientMessageId"],
+        input.client_message_id
+    );
+    assert_eq!(receipt["receipt"]["runId"], fence.run_id());
+    assert_eq!(f.chat().team_run_fence, Some(fence));
+}
+
+#[test]
 fn interrupted_admission_never_replays_a_missing_or_written_ask() {
     for stop in [Step::Fenced, Step::Reserved, Step::Canonical, Step::Proven] {
         let f = Fixture::new();
