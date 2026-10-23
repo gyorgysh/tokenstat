@@ -950,14 +950,30 @@ mod tests {
         let (_root, home, program) =
             configured_auth("claude", BTreeMap::new(), "./nested/auth".into());
         #[cfg(target_os = "macos")]
-        let selector = "./nested/auth".to_string();
+        assert_eq!(
+            program.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"],
+            "./nested/auth"
+        );
         #[cfg(not(target_os = "macos"))]
-        let selector = _root
-            .path()
-            .join("checkout/nested/auth")
-            .display()
-            .to_string();
-        assert_eq!(program.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"], selector);
+        {
+            let selector = Path::new(&program.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]);
+            let expected = _root.path().join("checkout/nested/auth");
+            assert!(selector.is_absolute());
+            assert!(selector.components().eq(expected.components()));
+            // Dot components are equivalent for file storage. Their raw
+            // spelling is significant only to the macOS keychain selector.
+            assert!(
+                _root
+                    .path()
+                    .join("checkout/./nested/auth")
+                    .components()
+                    .eq(expected.components())
+            );
+            assert_eq!(
+                fs::read_to_string(selector.join(".credentials.json")).unwrap(),
+                "fictional Claude login"
+            );
+        }
         #[cfg(target_os = "macos")]
         {
             let directory = home.file("home/nested/auth");
