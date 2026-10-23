@@ -189,7 +189,7 @@ public sealed partial class MainWindow : Window
         // NavigationView's native ContentPresenter does not template-bind
         // content alignment. Without this the entire workbench is measured
         // at its desired height (a WebView has no useful desired height).
-        _nav.Loaded += (_, _) => StretchNavigationContent();
+        _nav.Loaded += (_, _) => { StretchNavigationContent(); SyncInspectorFit(); };
         _nav.ActualThemeChanged += (_, _) => StretchNavigationContent();
         _nav.IsSettingsVisible = false;
         _nav.OpenPaneLength = ShellWidths.Shared.Sidebar;
@@ -198,6 +198,7 @@ public sealed partial class MainWindow : Window
         // The shell already reserves AppTitleBar's caption row.
         _nav.IsTitleBarAutoPaddingEnabled = false;
         _nav.PaneDisplayMode = NavigationViewPaneDisplayMode.Auto;
+        SidebarChrome.SetAdaptiveThreshold(_nav, ShellWidths.Shared.Sidebar + ShellWidths.ContentMinimum);
         _nav.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
         _nav.Background = new SolidColorBrush(Colors.Transparent);
         _nav.Resources["NavigationViewDefaultPaneBackground"] = _chromeSidebar;
@@ -1255,7 +1256,24 @@ public sealed partial class MainWindow : Window
     /// Hide the inspector on narrow windows without spending the user's choice:
     /// the toggle preference stands, so widening brings the column back.
     /// </summary>
+    private bool _inspectorFitQueued;
     private void SyncInspectorFit()
+    {
+        if (_inspectorFitQueued) return;
+        _inspectorFitQueued = true;
+        // Toolbar and size callbacks can arrive during native initialization.
+        // Apply their latest measurements after the loaded layout has settled.
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            try
+            {
+                if (_nav.IsLoaded && _nav.XamlRoot is not null) ApplyInspectorFit();
+            }
+            finally { _inspectorFitQueued = false; }
+        })) _inspectorFitQueued = false;
+    }
+
+    private void ApplyInspectorFit()
     {
         var companionWidth = _inspectorHost.IsOpen && _inspectorHost.MinimumInspectorWidth > ShellWidths.Minimum
             ? Math.Max(_inspectorHost.MinimumInspectorWidth, ShellWidths.Shared.Inspector) + 6 : 0;

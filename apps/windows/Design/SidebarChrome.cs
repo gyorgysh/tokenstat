@@ -16,15 +16,38 @@ internal static class SidebarChrome
         // The shell has no icon-only pane. Updating Expanded first while
         // growing briefly enters Compact before the second setter runs.
         // Overlap the thresholds during the update, then leave them equal.
-        if (width > view.ExpandedModeThresholdWidth)
+        var expanded = double.NaN;
+        var compact = double.NaN;
+        var stage = "read thresholds";
+        try
         {
-            if (view.CompactModeThresholdWidth != width) view.CompactModeThresholdWidth = width;
-            if (view.ExpandedModeThresholdWidth != width) view.ExpandedModeThresholdWidth = width;
+            expanded = view.ExpandedModeThresholdWidth;
+            compact = view.CompactModeThresholdWidth;
+            if (width > expanded)
+            {
+                stage = "grow compact";
+                if (compact != width) view.CompactModeThresholdWidth = width;
+                stage = "grow expanded";
+                if (expanded != width) view.ExpandedModeThresholdWidth = width;
+            }
+            else
+            {
+                stage = "shrink expanded";
+                if (expanded != width) view.ExpandedModeThresholdWidth = width;
+                stage = "shrink compact";
+                if (compact != width) view.CompactModeThresholdWidth = width;
+            }
         }
-        else
+        catch (Exception error)
         {
-            if (view.ExpandedModeThresholdWidth != width) view.ExpandedModeThresholdWidth = width;
-            if (view.CompactModeThresholdWidth != width) view.CompactModeThresholdWidth = width;
+            if (Environment.GetEnvironmentVariable("CI") == "true" && Environment.GetEnvironmentVariable("TOKENSTAT_UI_STARTUP_TRACE") == "1")
+            {
+                var loaded = false;
+                var actual = double.NaN;
+                try { loaded = view.IsLoaded; actual = view.ActualWidth; } catch { }
+                Program.LogStartup($"Sidebar threshold failure: stage={stage}; loaded={loaded}; actual={actual}; expanded={expanded}; compact={compact}; next={width}; HRESULT=0x{error.HResult:x8}");
+            }
+            throw;
         }
     }
 

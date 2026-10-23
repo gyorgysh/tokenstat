@@ -12,7 +12,11 @@ if ($AppPath) {
     $app = Get-ChildItem "$PSScriptRoot/../../../apps/windows/bin" -Filter Tokenstat.exe -Recurse |
         Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
     if (!$app) { throw 'Build the Windows application before running this test.' }
-    Copy-Item "$PSScriptRoot/../../../target/debug/tokenstat-hostd.exe" $app.DirectoryName -Force
+    $helperSource = "$PSScriptRoot/../../../target/debug/tokenstat-hostd.exe"
+    $helperTarget = Join-Path $app.DirectoryName 'tokenstat-hostd.exe'
+    $copyHelper = !(Test-Path -LiteralPath $helperTarget)
+    if (!$copyHelper) { $copyHelper = (Get-FileHash -LiteralPath $helperSource).Hash -ne (Get-FileHash -LiteralPath $helperTarget).Hash }
+    if ($copyHelper) { Copy-Item -LiteralPath $helperSource -Destination $helperTarget -Force }
 }
 if (!(Test-Path -LiteralPath (Join-Path $app.DirectoryName 'tokenstat-hostd.exe') -PathType Leaf)) {
     throw 'The application folder is missing its host helper.'
