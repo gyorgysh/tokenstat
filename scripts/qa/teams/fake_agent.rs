@@ -194,6 +194,11 @@ fn main() {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    #[cfg(unix)]
+    if mode == "separate-group" {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -251,7 +256,7 @@ fn main() {
         git(&other, &["push", "-q", "origin", "main"]);
         fs::write("shared.txt", "agent\n").unwrap();
     }
-    if mode == "finish" || mode == "edit" || mode == "conflict" {
+    if mode == "finish" || mode == "edit" || mode == "conflict" || mode == "separate-group" {
         return;
     }
     #[cfg(unix)]

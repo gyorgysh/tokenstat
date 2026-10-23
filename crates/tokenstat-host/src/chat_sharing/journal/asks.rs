@@ -371,12 +371,32 @@ impl Journal {
             .records()
             .find(|record| &record.binding().fence == fence)
             .ok_or("Run reservation is missing")?;
-        if !record.state().terminal()
-            || ledger.unresolved().is_some()
-            || record.canonical().is_none()
-            || self.pending.is_some()
-            || self.pending_ask.is_some()
-        {
+        if !record.state().terminal() || ledger.unresolved().is_some() || self.pending.is_some() {
+            return Err("This run still needs recovery");
+        }
+        if record.canonical().is_none() {
+            // An admission can stop after its reservation was made durable but
+            // before the human row was written. No backend can be born then.
+            // Retire only that exact unwritten prefix; never replay the Ask or
+            // require a nonexistent canonical row before releasing its fence.
+            if record.state() != runs::State::NotStarted
+                || self.pending_agent.is_some()
+                || self.pending_segments.is_some()
+            {
+                return Err("This run still needs recovery");
+            }
+            if let Some(pending) = &self.pending_ask {
+                if &pending.fence != fence
+                    || pending.before_bytes != bytes.len() as u64
+                    || pending.before_digest != digest(bytes)
+                {
+                    return Err("The unwritten Ask could not be verified");
+                }
+                self.pending_ask = None;
+            }
+            return Ok(());
+        }
+        if self.pending_ask.is_some() {
             return Err("This run still needs recovery");
         }
         let scope = record.request().scope.clone();

@@ -487,7 +487,7 @@ pub enum CatchUp {
 /// a fast-forward only, only on the target branch, only with nothing
 /// uncommitted. Hooks stay off, so a landed hook script never runs from a sync.
 pub fn catch_up(dir: &Path, target: &str, remote: &str) -> CatchUp {
-    let Ok(_writer) = crate::writer::Lease::acquire(dir) else {
+    let Ok(writer) = crate::writer::Lease::acquire(dir) else {
         return CatchUp::Busy;
     };
     if let Err(message) = run(dir, &["fetch", "-q", remote, target]) {
@@ -507,6 +507,11 @@ pub fn catch_up(dir: &Path, target: &str, remote: &str) -> CatchUp {
     }
     if run(dir, &["merge-base", "--is-ancestor", "HEAD", &theirs]).is_err() {
         return CatchUp::Diverged;
+    }
+    // Fetch can wait on another computer. Do not apply its result to a
+    // replacement folder or Git directory that appeared at this path meanwhile.
+    if let Err(error) = writer.ensure_current() {
+        return CatchUp::Failed(error.to_string());
     }
     match run(
         dir,

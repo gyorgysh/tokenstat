@@ -595,7 +595,9 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
             };
             if terminal != State::Succeeded || final_output.is_err() {
                 // A fix attempt that did not finish leaves no half rebase.
-                super::lanes::abandon(lane);
+                if terminal != State::NotStarted {
+                    super::lanes::abandon(lane);
+                }
                 sdk.retire();
                 return Ok((terminal, proof, final_output));
             }

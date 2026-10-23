@@ -329,6 +329,7 @@ pub(crate) struct PreparedAsk {
     request: runs::Request,
     binding: runs::Binding,
     context: AskContext,
+    launch_worktree: tokenstat_workspace::git::CheckoutReview,
     _runner: RunnerLease,
     writer: tokenstat_workspace::writer::Lease,
     claimed: bool,
@@ -423,6 +424,16 @@ impl Store {
                 &directory,
                 false,
             )?;
+            // Authentication and cloud admission happen after reservation.
+            // The managed writer lease does not prevent an external Git client
+            // changing the reviewed branch/HEAD/status during that interval.
+            let worktree = tokenstat_workspace::git::checkout_review(prepared.writer.folder())
+                .map_err(|_| unavailable())?;
+            if worktree != prepared.launch_worktree {
+                // Admission is already durable: this is an uncertain existing
+                // attempt, not the definite pre-reservation stale-review code.
+                return Err(unavailable());
+            }
             prepared.ensure_writer_current()
         })
     }
@@ -564,6 +575,15 @@ impl Store {
                 if reviewed.digest != input.review {
                     return Err(changed());
                 }
+                // A lane owns its isolated execution snapshot. The publisher's
+                // checkout may advance while another lane runs, without changing
+                // this lane or the frozen Ask that was already admitted.
+                let launch_worktree = if lane.is_some() {
+                    tokenstat_workspace::git::checkout_review(writer.folder())
+                        .map_err(|_| checkout_unread())?
+                } else {
+                    reviewed.worktree.clone()
+                };
                 crate::chat_receipts::validate_created_at(
                     Some(input.client_message_created_at_ms),
                     now_ms(),
@@ -677,6 +697,7 @@ impl Store {
                         message:json!({"kind":"user","text":input.text,"mode":"ask","author":{"kind":"person","id":actor.id,"name":actor.name,"handle":actor.handle,"avatar":actor.avatar}}),
                         worktree: reviewed.worktree,
                     },
+                    launch_worktree,
                     _runner: runner,
                     writer,
                     claimed:false,

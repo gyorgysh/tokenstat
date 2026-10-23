@@ -745,3 +745,168 @@ fn a_dirty_checkout_changes_the_review_and_blocks_the_old_one() {
     );
     f.store.refuse_prepared_ask(f.target(), owned).unwrap();
 }
+
+#[test]
+fn git_state_changed_after_admission_cannot_pass_the_first_birth_check() {
+    for launching in [false, true] {
+        let f = Fixture::new();
+        let actor = principal("fixture-person", 'a', 'b');
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&f.folder)
+                .args([
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "-c",
+                    "commit.gpgSign=false",
+                ])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-q", "-b", "shared"]);
+        git(&["commit", "--allow-empty", "-qm", "Initial"]);
+        let input = f.input(&actor, "ask-one");
+        let owned = new(f.prepare(&actor, &input).unwrap());
+        if launching {
+            f.store
+                .transition_owned_run(f.target(), &owned, runs::State::Launching)
+                .unwrap();
+        }
+        let changed = || {
+            git(&["checkout", "-q", "-b", "external-change"]);
+            Ok(())
+        };
+        let result = if launching {
+            f.store.ensure_launching_ask(f.target(), &owned, changed)
+        } else {
+            f.store.ensure_prepared_ask(f.target(), &owned, changed)
+        };
+        assert_eq!(result.unwrap_err().code, "team_run_unavailable");
+        assert!(f.chat().team_run_fence.is_some());
+        let receipt = existing(f.prepare(&actor, &input).unwrap());
+        assert_eq!(
+            receipt["receipt"]["state"],
+            if launching { "launching" } else { "reserved" }
+        );
+    }
+}
+
+#[test]
+fn an_unwritten_reserved_ask_can_be_recovered_without_replaying_it() {
+    let f = Fixture::new();
+    let actor = principal("fixture-person", 'a', 'b');
+    let input = f.input(&actor, "unwritten-reserved");
+    assert_eq!(
+        failed(f.store.prepare_team_ask_steps(
+            f.target(),
+            &actor,
+            &input,
+            (&f.folder, &f.checkout, None),
+            || Ok(()),
+            |step| if matches!(step, Step::Reserved) {
+                Err(unavailable())
+            } else {
+                Ok(())
+            },
+        ))
+        .code,
+        "team_run_unavailable"
+    );
+    let fence = f.chat().team_run_fence.unwrap();
+    // A failed writer-release step happens after the recovered receipt has
+    // been persisted. The same source fence must survive and remain retryable.
+    assert_eq!(
+        f.store
+            .recover_orphaned_run(&f.chat.workspace_id, &f.chat.id, &fence, false, || {
+                Err(DispatchError::new("fixture_release_failed", "fixture"))
+            })
+            .unwrap_err()
+            .code,
+        "fixture_release_failed"
+    );
+    assert_eq!(f.chat().team_run_fence, Some(fence.clone()));
+    let store = Store::load_at(f.store.root.clone());
+    assert_eq!(
+        store
+            .recover_orphaned_run(&f.chat.workspace_id, &f.chat.id, &fence, false, || Ok(()))
+            .unwrap(),
+        runs::State::NotStarted
+    );
+    assert!(f.chat().team_run_fence.is_none());
+    assert!(f.history().events.is_empty());
+    assert_eq!(
+        existing(f.prepare(&actor, &input).unwrap())["receipt"]["state"],
+        "notStarted"
+    );
+    let next = new(f
+        .prepare(&actor, &f.input(&actor, "fresh-after-recovery"))
+        .unwrap());
+    f.store.refuse_prepared_ask(f.target(), next).unwrap();
+}
+
+#[test]
+fn an_admitted_lane_keeps_its_git_snapshot_when_the_publisher_advances() {
+    let f = Fixture::new();
+    let actor = principal("fixture-person", 'a', 'b');
+    let git = |folder: &Path, args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(folder)
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgSign=false",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&f.folder, &["init", "-q", "-b", "shared"]);
+    git(&f.folder, &["commit", "--allow-empty", "-qm", "Initial"]);
+    let lane = f.root.path().join("lane");
+    tokenstat_workspace::gitwrite::lane::create(&f.folder, &lane, "team/owned-lane", "shared")
+        .unwrap();
+    let input = f.input(&actor, "lane-snapshot");
+    let owned = new(f
+        .store
+        .prepare_team_ask(
+            f.target(),
+            &actor,
+            &input,
+            (&f.folder, &f.checkout, Some(&lane)),
+            || Ok(()),
+        )
+        .unwrap());
+    git(
+        &f.folder,
+        &["commit", "--allow-empty", "-qm", "Another lane landed"],
+    );
+    f.store
+        .ensure_prepared_ask(f.target(), &owned, || Ok(()))
+        .unwrap();
+    git(&lane, &["checkout", "-q", "-b", "external-lane-change"]);
+    assert_eq!(
+        f.store
+            .ensure_prepared_ask(f.target(), &owned, || Ok(()))
+            .unwrap_err()
+            .code,
+        "team_run_unavailable"
+    );
+}

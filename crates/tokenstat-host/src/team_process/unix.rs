@@ -243,8 +243,34 @@ fn signal_members(group: i32) -> io::Result<()> {
     Ok(())
 }
 #[cfg(target_os = "macos")]
-fn no_live_members(group: i32) -> io::Result<bool> {
-    for pid in group_pids(group)? {
+fn no_live_members(session: i32) -> io::Result<bool> {
+    // A descendant can create a process group for ordinary job control while
+    // remaining in our anchor's session. The original group being empty is
+    // not proof that such a child stopped. Unknown session membership keeps
+    // the writer fence instead of completing a run too early.
+    let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
+    if count <= 0 {
+        return Err(super::invalid());
+    }
+    let mut pids = vec![0 as libc::pid_t; count as usize * 2 + 64];
+    let bytes = i32::try_from(pids.len() * std::mem::size_of::<libc::pid_t>())
+        .map_err(|_| super::invalid())?;
+    let found = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), bytes) };
+    if found <= 0 || found as usize >= pids.len() {
+        return Err(super::invalid());
+    }
+    for pid in pids.into_iter().take(found as usize).filter(|pid| *pid > 0) {
+        let owner = unsafe { libc::getsid(pid) };
+        if owner < 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                continue;
+            }
+            return Err(error);
+        }
+        if owner != session {
+            continue;
+        }
         let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
         let count = unsafe {
             libc::proc_pidinfo(
@@ -261,14 +287,14 @@ fn no_live_members(group: i32) -> io::Result<bool> {
         if count != std::mem::size_of_val(&info) as i32 {
             return Err(super::invalid());
         }
-        if info.pbi_pgid == group as u32 && info.pbi_status != 5 {
+        if info.pbi_status != 5 {
             return Ok(false);
         }
     }
     Ok(true)
 }
 #[cfg(target_os = "linux")]
-fn no_live_members(group: i32) -> io::Result<bool> {
+fn no_live_members(session: i32) -> io::Result<bool> {
     for entry in std::fs::read_dir("/proc")? {
         let entry = entry?;
         if entry
@@ -283,15 +309,15 @@ fn no_live_members(group: i32) -> io::Result<bool> {
             .to_string_lossy()
             .parse::<i32>()
             .map_err(|_| super::invalid())?;
-        let actual = unsafe { libc::getpgid(pid) };
-        if actual < 0 {
+        let owner = unsafe { libc::getsid(pid) };
+        if owner < 0 {
             let error = io::Error::last_os_error();
             if error.raw_os_error() == Some(libc::ESRCH) {
                 continue;
             }
             return Err(error);
         }
-        if actual != group {
+        if owner != session {
             continue;
         }
         let raw = match std::fs::read_to_string(entry.path().join("stat")) {
@@ -309,8 +335,8 @@ fn no_live_members(group: i32) -> io::Result<bool> {
         if fields.len() != 4 {
             return Err(super::invalid());
         }
-        let pgid = fields[2].parse::<i32>().map_err(|_| super::invalid())?;
-        if pgid == group && fields[0] != "Z" && fields[0] != "X" {
+        let owner = fields[3].parse::<i32>().map_err(|_| super::invalid())?;
+        if owner == session && fields[0] != "Z" && fields[0] != "X" {
             return Ok(false);
         }
     }

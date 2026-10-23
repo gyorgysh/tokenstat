@@ -181,3 +181,38 @@ fn a_definite_backend_spawn_failure_remains_distinct_from_process_completion() {
     assert!(!root.path().join("processes").exists());
     let _proof = process.stop().unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn a_descendant_in_another_group_cannot_prove_run_completion() {
+    let root = tempfile::tempdir().unwrap();
+    let mut process = Owned::start(
+        Path::new(env!("CARGO_BIN_EXE_tokenstat-hostd")),
+        program(root.path(), "separate-group"),
+        |_| Ok(()),
+    )
+    .unwrap();
+    wait(|| matches!(process.poll().unwrap(), Poll::Exited(Some(0))));
+    let leaf = root.path().join("processes.leaf");
+    wait(|| !beat(&leaf).is_empty());
+    let pids = fs::read_to_string(root.path().join("processes")).unwrap();
+    let leaf_pid = pids
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .parse::<i32>()
+        .unwrap();
+    // Keep the fixture alive until the completion check, then always clean it
+    // up before asserting so a failing implementation leaves no child behind.
+    let stopped = process.stop();
+    let before = beat(&leaf);
+    std::thread::sleep(Duration::from_millis(100));
+    let survived = beat(&leaf) != before;
+    // SAFETY: this PID names the still-running, infinite fixture leaf above.
+    unsafe {
+        libc::kill(leaf_pid, libc::SIGKILL);
+    }
+    assert!(stopped.is_err(), "a live descendant was reported completed");
+    assert!(survived, "fixture did not exercise the other process group");
+    let _proof = process.stop().unwrap();
+}

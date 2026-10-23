@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 use tokenstat_workspace::gitwrite::lane::{self, Landing};
@@ -75,34 +76,156 @@ fn invalid() -> DispatchError {
     DispatchError::new("invalid_request", "Check the lane settings and try again.")
 }
 
-fn load() -> File {
-    root()
-        .ok()
-        .and_then(|root| fs::read(root.join("settings.json")).ok())
-        .filter(|bytes| bytes.len() <= 256 * 1024)
-        .and_then(|bytes| serde_json::from_slice::<File>(&bytes).ok())
-        .filter(|file| file.version == 1)
-        .unwrap_or(File {
-            version: 1,
-            ..File::default()
-        })
+const SETTINGS_MAX_BYTES: u64 = 256 * 1024;
+
+fn settings_storage() -> DispatchError {
+    DispatchError::new(
+        "team_lanes_storage",
+        "Lane settings could not be read or saved. Check their storage and try again.",
+    )
 }
 
-fn save(file: &File) -> Result<(), DispatchError> {
-    let root = root()?;
-    fs::create_dir_all(&root).map_err(|_| unavailable())?;
+fn load() -> Result<File, DispatchError> {
+    load_at(&root()?)
+}
+
+fn load_at(root: &Path) -> Result<File, DispatchError> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x00200000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    let file = match options.open(root.join("settings.json")) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(File {
+                version: 1,
+                ..File::default()
+            });
+        }
+        Err(_) => return Err(settings_storage()),
+    };
+    let metadata = file.metadata().map_err(|_| settings_storage())?;
+    if !metadata.is_file() || metadata.len() > SETTINGS_MAX_BYTES {
+        return Err(settings_storage());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err(settings_storage());
+        }
+    }
+    let mut bytes = Vec::new();
+    file.take(SETTINGS_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| settings_storage())?;
+    if bytes.len() as u64 > SETTINGS_MAX_BYTES {
+        return Err(settings_storage());
+    }
+    let file: File = serde_json::from_slice(&bytes).map_err(|_| settings_storage())?;
+    if file.version != 1
+        || file
+            .checkouts
+            .iter()
+            .any(|(checkout, settings)| !valid_checkout(checkout) || !validate(settings))
+    {
+        return Err(settings_storage());
+    }
+    Ok(file)
+}
+
+fn update_settings_at(
+    root: &Path,
+    checkout: String,
+    settings: Settings,
+) -> Result<File, DispatchError> {
+    let mut directory = fs::DirBuilder::new();
+    directory.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        directory.mode(0o700);
+    }
+    directory.create(root).map_err(|_| settings_storage())?;
+    let metadata = fs::symlink_metadata(root).map_err(|_| settings_storage())?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(settings_storage());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).map_err(|_| unavailable())?;
+        fs::set_permissions(root, fs::Permissions::from_mode(0o700))
+            .map_err(|_| settings_storage())?;
     }
-    let staged = root.join("settings.json.tmp");
-    fs::write(
-        &staged,
-        serde_json::to_vec(file).map_err(|_| unavailable())?,
-    )
-    .map_err(|_| unavailable())?;
-    fs::rename(staged, root.join("settings.json")).map_err(|_| unavailable())
+    let started = std::time::Instant::now();
+    let _lease = loop {
+        if let Some(lease) =
+            crate::chat_receipts::OwnerLease::try_acquire(&root.join("settings.lock"))
+                .map_err(|_| settings_storage())?
+        {
+            break lease;
+        }
+        if started.elapsed() >= std::time::Duration::from_secs(2) {
+            return Err(DispatchError::new(
+                "team_lanes_busy",
+                "Another lane settings change is being saved. Try again shortly.",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    };
+    // Reload after acquiring the cross-process lease: independent checkout
+    // saves must preserve one another's entries and any unreadable old state.
+    let mut file = load_at(root)?;
+    file.checkouts.insert(checkout, settings);
+    let bytes = serde_json::to_vec(&file).map_err(|_| settings_storage())?;
+    if bytes.len() as u64 > SETTINGS_MAX_BYTES {
+        return Err(settings_storage());
+    }
+    let mut staged = tempfile::Builder::new()
+        .prefix(".settings-")
+        .tempfile_in(root)
+        .map_err(|_| settings_storage())?;
+    staged
+        .write_all(&bytes)
+        .and_then(|()| staged.as_file().sync_all())
+        .map_err(|_| settings_storage())?;
+    for attempt in 0..=50 {
+        match staged.persist(root.join("settings.json")) {
+            Ok(_) => {
+                #[cfg(unix)]
+                fs::File::open(root)
+                    .and_then(|directory| directory.sync_all())
+                    .map_err(|_| settings_storage())?;
+                return Ok(file);
+            }
+            Err(error)
+                if cfg!(windows)
+                    && error.error.kind() == std::io::ErrorKind::PermissionDenied
+                    && attempt < 50 =>
+            {
+                staged = error.file;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(_) => return Err(settings_storage()),
+        }
+    }
+    Err(settings_storage())
+}
+
+fn valid_checkout(checkout: &str) -> bool {
+    !checkout.is_empty()
+        && checkout.len() <= 128
+        && checkout
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 fn valid_name(value: &str) -> bool {
@@ -134,14 +257,15 @@ pub(super) fn settings(checkout: &str) -> Option<Settings> {
 
 fn checkout_settings(checkout: &str) -> Option<Settings> {
     load()
+        .ok()?
         .checkouts
         .get(checkout)
         .filter(|s| validate(s))
         .cloned()
 }
 
-/// A lane for one run. Removed on drop unless kept, so a refused or failed
-/// Ask never leaves a worktree behind.
+/// A lane for one run. Removed on drop unless kept, so a preflight refusal
+/// never leaves a worktree behind. Started work is kept when it cannot land.
 pub(super) struct Lane {
     pub path: PathBuf,
     pub branch: String,
@@ -337,18 +461,52 @@ pub(super) fn finish_fix(
 }
 
 /// One landing at a time per checkout on this computer, across processes.
-fn landing_lock(lane: &Path) -> Option<fs::File> {
-    let path = root()
-        .ok()?
-        .join(format!("{}.landing", lane.parent()?.file_name()?.to_str()?));
+struct LandingLock(fs::File);
+impl Drop for LandingLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+fn landing_lock(lane: &Path) -> Option<LandingLock> {
+    landing_lock_at(&root().ok()?, lane).ok().flatten()
+}
+fn landing_lock_at(root: &Path, lane: &Path) -> std::io::Result<Option<LandingLock>> {
+    let checkout = lane
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| std::io::Error::other("The landing directory is invalid."))?;
+    let path = root.join(format!("{checkout}.landing"));
     let file = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
-        .open(path)
-        .ok()?;
-    file.lock().ok()?;
-    Some(file)
+        .open(path)?;
+    // Never wait behind another landing's potentially twenty-minute check:
+    // this guardian must keep observing Stop and authority expiry.
+    match file.try_lock() {
+        Ok(()) => Ok(Some(LandingLock(file))),
+        Err(fs::TryLockError::WouldBlock) => Ok(None),
+        Err(fs::TryLockError::Error(error)) => Err(error),
+    }
+}
+
+fn landing_lock_controlled(
+    root: &Path,
+    path: &Path,
+    control: &mut impl FnMut(lane::Control<'_>) -> Result<(), String>,
+) -> Result<LandingLock, String> {
+    // Preserve automatic landing order while other lanes run their checks.
+    // The waiting guardian still renews its lease and observes Stop or expiry.
+    loop {
+        control(lane::Control::Guard)?;
+        match landing_lock_at(root, path) {
+            Ok(Some(lock)) => return Ok(lock),
+            Ok(None) => {}
+            Err(_) => return Err("The landing lock is unavailable.".into()),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 fn settle(
@@ -358,13 +516,16 @@ fn settle(
     after_fix: bool,
     control: &mut impl FnMut(lane::Control<'_>) -> Result<(), String>,
 ) -> Landing {
-    let lock = landing_lock(&lane.path);
-    if lock.is_none() {
-        lane.keep();
-        return Landing::Blocked {
-            message: "Another landing could not be waited for.".into(),
-        };
-    }
+    let lock = root()
+        .map_err(|_| "The landing directory is unavailable.".to_string())
+        .and_then(|root| landing_lock_controlled(&root, &lane.path, control));
+    let _lock = match lock {
+        Ok(lock) => lock,
+        Err(message) => {
+            lane.keep();
+            return Landing::Blocked { message };
+        }
+    };
     // The agent could edit files in the lane. Its git pointer must still be
     // the one tokenstat created, or git would follow the agent's choice.
     if lane::pointer(&lane.path).ok().as_deref() != Some(lane.pointer.as_str()) {
@@ -901,6 +1062,7 @@ pub(super) fn open_pull(
 /// The run ended without its work landing. A rebase stopped for the agent
 /// is given up, so the lane keeps its own commits and nothing half done.
 pub(super) fn abandon(lane: &mut Lane) {
+    lane.keep();
     if lane.rebasing {
         lane.rebasing = false;
         lane::abort_rebase(&lane.path);
@@ -986,19 +1148,24 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             object.remove("_accountSession");
         }
         let input: Input = serde_json::from_value(body).map_err(|_| invalid())?;
-        if input.checkout.is_empty()
-            || input.checkout.len() > 128
-            || !input
-                .checkout
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-        {
+        if !valid_checkout(&input.checkout) {
             return Err(invalid());
         }
-        let mut file = load();
+        let file = if method == "teams.lanes.set" {
+            let settings = input.settings.ok_or_else(invalid)?;
+            if !validate(&settings) {
+                return Err(invalid());
+            }
+            update_settings_at(&root()?, input.checkout.clone(), settings)?
+        } else {
+            load()?
+        };
         if method == "teams.lanes.catchUp" {
             // The owner asked to try again now, on this computer only.
-            let settings = checkout_settings(&input.checkout).ok_or_else(unavailable)?;
+            let settings = file
+                .checkouts
+                .get(&input.checkout)
+                .ok_or_else(unavailable)?;
             let remote = settings.remote.as_deref().ok_or_else(invalid)?;
             let row = super::publications::Store::capture()?
                 .active_checkout(&input.checkout)?
@@ -1011,14 +1178,6 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                 &input.checkout,
                 &lane::catch_up(&row.folder.canonical, &settings.target, remote),
             );
-        }
-        if method == "teams.lanes.set" {
-            let settings = input.settings.ok_or_else(invalid)?;
-            if !validate(&settings) {
-                return Err(invalid());
-            }
-            file.checkouts.insert(input.checkout.clone(), settings);
-            save(&file)?;
         }
         Ok(
             json!({"settings": file.checkouts.get(&input.checkout), "catchUp": catch_up_note(&input.checkout), "supportsCheckoutUpdates": true}),
@@ -1041,6 +1200,247 @@ mod tests {
             pull_request: false,
             update_checkout: false,
         }
+    }
+
+    #[test]
+    fn unreadable_existing_settings_are_reported_and_preserved() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("settings.json");
+        assert!(load_at(root.path()).unwrap().checkouts.is_empty());
+        let cases = [
+            b"{broken settings".to_vec(),
+            br#"{"version":2,"checkouts":{}}"#.to_vec(),
+            br#"{"version":1,"checkouts":{"existing":{"enabled":true,"target":"-unsafe"}}}"#
+                .to_vec(),
+            vec![b' '; SETTINGS_MAX_BYTES as usize + 1],
+        ];
+        for bytes in cases {
+            fs::write(&path, &bytes).unwrap();
+            assert_eq!(
+                load_at(root.path()).err().unwrap().code,
+                "team_lanes_storage"
+            );
+            assert_eq!(
+                update_settings_at(root.path(), "new".into(), settings("main", None, &[]))
+                    .err()
+                    .unwrap()
+                    .code,
+                "team_lanes_storage"
+            );
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+        }
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(load_at(root.path()).is_err());
+        assert!(
+            update_settings_at(root.path(), "new".into(), settings("main", None, &[])).is_err()
+        );
+        assert!(path.is_dir());
+    }
+
+    // A separate process uses the same transaction as a native host or daemon.
+    #[test]
+    fn settings_update_child() {
+        let Some(root) = std::env::var_os("TOKENSTAT_TEST_LANE_SETTINGS_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let checkout = std::env::var("TOKENSTAT_TEST_LANE_SETTINGS_CHECKOUT").unwrap();
+        fs::write(root.join(format!("{checkout}.ready")), []).unwrap();
+        let started = std::time::Instant::now();
+        while !root.join("settings.start").exists() {
+            assert!(started.elapsed() < std::time::Duration::from_secs(15));
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        for index in 0..10 {
+            update_settings_at(
+                &root,
+                format!("{checkout}-{index}"),
+                settings("main", None, &[]),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn concurrent_checkout_updates_preserve_each_other_across_processes() {
+        use std::process::{Command, Stdio};
+        let root = tempfile::tempdir().unwrap();
+        let lease =
+            crate::chat_receipts::OwnerLease::try_acquire(&root.path().join("settings.lock"))
+                .unwrap()
+                .unwrap();
+        let children = ["first", "second"].map(|checkout| {
+            Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "teams::lanes::tests::settings_update_child"])
+                .env("TOKENSTAT_TEST_LANE_SETTINGS_ROOT", root.path())
+                .env("TOKENSTAT_TEST_LANE_SETTINGS_CHECKOUT", checkout)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let ready = || {
+            ["first", "second"]
+                .iter()
+                .all(|checkout| root.path().join(format!("{checkout}.ready")).exists())
+        };
+        while !ready() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let both_ready = ready();
+        // The children must reload this entry after they acquire the lease,
+        // even though their requests began before it was saved.
+        let existing = File {
+            version: 1,
+            checkouts: BTreeMap::from([("existing".into(), settings("main", None, &[]))]),
+        };
+        fs::write(
+            root.path().join("settings.json"),
+            serde_json::to_vec(&existing).unwrap(),
+        )
+        .unwrap();
+        fs::write(root.path().join("settings.start"), []).unwrap();
+        drop(lease);
+        // Always release the parent lock and reap children before assertions.
+        let outputs = children.map(|child| child.wait_with_output().unwrap());
+        for output in outputs {
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        assert!(both_ready);
+        let file = load_at(root.path()).unwrap();
+        assert_eq!(file.checkouts.len(), 21);
+        assert!(file.checkouts.contains_key("existing"));
+        for checkout in ["first", "second"] {
+            for index in 0..10 {
+                assert!(file.checkouts.contains_key(&format!("{checkout}-{index}")));
+            }
+        }
+    }
+
+    #[test]
+    fn another_landing_is_refused_without_waiting_for_its_check() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("checkout/lane");
+        let first = landing_lock_at(root.path(), &path).unwrap().unwrap();
+        let (sender, result) = std::sync::mpsc::channel();
+        let directory = root.path().to_path_buf();
+        let worker_path = path.clone();
+        let worker = std::thread::spawn(move || {
+            let acquired = landing_lock_at(&directory, &worker_path).unwrap().is_some();
+            let _ = sender.send(acquired);
+        });
+        let contended = result.recv_timeout(std::time::Duration::from_secs(2));
+        // Release and join before asserting: a regressed blocking acquire
+        // must fail the test instead of hanging the whole test runner.
+        drop(first);
+        worker.join().unwrap();
+        assert!(matches!(contended, Ok(false)));
+        assert!(landing_lock_at(root.path(), &path).unwrap().is_some());
+    }
+
+    #[test]
+    fn automatic_landing_waits_for_another_check_with_live_guards() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("checkout/lane");
+        let first = landing_lock_at(root.path(), &path).unwrap().unwrap();
+        let holder = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            drop(first);
+        });
+        let mut guards = 0;
+        let acquired = landing_lock_controlled(root.path(), &path, &mut |_| {
+            guards += 1;
+            Ok(())
+        });
+        holder.join().unwrap();
+        assert!(acquired.is_ok());
+        assert!(guards > 1, "waiting must keep checking the run's authority");
+    }
+
+    #[test]
+    fn automatic_landing_observes_stop_before_the_other_lock_is_released() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("checkout/lane");
+        let first = landing_lock_at(root.path(), &path).unwrap().unwrap();
+        let (sender, result) = std::sync::mpsc::channel();
+        let directory = root.path().to_path_buf();
+        let worker = std::thread::spawn(move || {
+            let mut checks = 0;
+            let error = landing_lock_controlled(&directory, &path, &mut |_| {
+                checks += 1;
+                if checks > 1 {
+                    Err("Stopped or access expired".into())
+                } else {
+                    Ok(())
+                }
+            })
+            .err();
+            let _ = sender.send(error);
+        });
+        let stopped = result.recv_timeout(std::time::Duration::from_secs(1));
+        drop(first);
+        worker.join().unwrap();
+        assert_eq!(
+            stopped.unwrap().as_deref(),
+            Some("Stopped or access expired")
+        );
+    }
+
+    #[test]
+    fn abandoning_started_work_retains_its_changes_and_branch() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = root.path().join("repository");
+        fs::create_dir(&repository).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args([
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "-c",
+                    "commit.gpgSign=false",
+                ])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["commit", "--allow-empty", "-qm", "Initial"]);
+        let path = root.path().join("lane");
+        let branch = "team/retained";
+        lane::create(&repository, &path, branch, "main").unwrap();
+        let mut opened = Lane {
+            pointer: lane::pointer(&path).unwrap(),
+            path: path.clone(),
+            branch: branch.into(),
+            repository: repository.clone(),
+            rebasing: false,
+            keep: false,
+        };
+        fs::write(path.join("unfinished.txt"), "unfinished agent work").unwrap();
+        abandon(&mut opened);
+        drop(opened);
+        assert_eq!(
+            fs::read_to_string(path.join("unfinished.txt")).unwrap(),
+            "unfinished agent work"
+        );
+        assert_eq!(git(&["branch", "--list", branch]), format!("+ {branch}"));
     }
 
     #[test]
