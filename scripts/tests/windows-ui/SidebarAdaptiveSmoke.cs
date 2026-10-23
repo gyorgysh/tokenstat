@@ -10,7 +10,23 @@ internal static class SidebarAdaptiveSmoke
     {
         var view = new NavigationView { Width = 900, Height = 180, CompactPaneLength = 0,
             PaneDisplayMode = NavigationViewPaneDisplayMode.Auto, IsPaneToggleButtonVisible = false };
-        view.MenuItems.Add(new NavigationViewItem { Content = "Fictional project" });
+        var project = new NavigationViewItem { Content = "Fictional project", IsExpanded = true };
+        for (var i = 0; i < 13; i++) project.MenuItems.Add(new NavigationViewItem { Content = "Fictional chat " + i });
+        view.MenuItems.Add(project);
+        view.PaneHeader = new TextBlock { Text = "Fictional header" };
+        view.PaneFooter = new TextBlock { Text = "Fictional account" };
+        var insideNativeCallback = false;
+        var paneUpdates = 0;
+        view.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) => insideNativeCallback = true);
+        SidebarChrome.FollowPaneState(view, () =>
+        {
+            if (insideNativeCallback) throw new Exception("Pane content changed inside the native pane callback");
+            paneUpdates++;
+            project.IsExpanded = view.IsPaneOpen;
+            view.PaneHeader = view.IsPaneOpen ? new TextBlock { Text = "Fictional refreshed header" } : null;
+            view.PaneFooter = view.IsPaneOpen ? new TextBlock { Text = "Fictional refreshed account" } : null;
+        });
+        view.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) => insideNativeCallback = false);
         SidebarChrome.SetAdaptiveThreshold(view, 692);
         var modes = new List<NavigationViewDisplayMode>();
         view.DisplayModeChanged += (_, args) => modes.Add(args.DisplayMode);
@@ -44,6 +60,8 @@ internal static class SidebarAdaptiveSmoke
             view.Width = 1200;
             await Settle(NavigationViewDisplayMode.Expanded);
             if (modes.Contains(NavigationViewDisplayMode.Compact)) throw new Exception("Sidebar resizing entered compact mode");
+            for (var i = 0; i < 100 && paneUpdates == 0; i++) await Task.Delay(20);
+            if (paneUpdates == 0) throw new Exception("Sidebar pane content never followed its open state");
             Program.Log("PASS: native sidebar threshold growth, shrink and resize preserve expanded/minimal modes");
         }
         finally { host.Children.Remove(view); }

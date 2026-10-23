@@ -124,13 +124,6 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private void PaneStateChanged()
-    {
-        SyncPaneChrome();
-        // Do not mutate IsExpanded inside the IsPaneOpen callback.
-        DispatcherQueue.TryEnqueue(ApplyCompactExpansion);
-    }
-
     private void ApplyCompactExpansion()
     {
         RestoreSidebarLayout(() =>
@@ -313,9 +306,7 @@ public sealed partial class MainWindow : Window
         _inspectorHost.WidthChanged += SyncInspectorFit;
         // Keep the titlebar split on the pane edge when the pane collapses to
         // its compact width. Native adaptive mode floats it on narrow windows.
-        _nav.RegisterPropertyChangedCallback(
-            NavigationView.IsPaneOpenProperty,
-            (_, _) => PaneStateChanged());
+        SidebarChrome.FollowPaneState(_nav, ApplyCompactExpansion);
 
         AppServices.OpenTerminal = (workspaceId, sessionId) =>
         {

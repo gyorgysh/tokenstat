@@ -13,6 +13,24 @@ internal static class SidebarChrome
     // The app supplies the sink so shared control fixtures need no app entry point.
     internal static Action<string>? ThresholdFailure { get; set; }
 
+    /// <summary>Update app-owned pane content after the native transition returns.</summary>
+    public static void FollowPaneState(NavigationView view, Action update)
+    {
+        var pending = false;
+        view.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) =>
+        {
+            if (pending) return;
+            pending = true;
+            // Header/footer replacement and hierarchy expansion can rebuild the
+            // pane. They must not reenter SplitView's property transition.
+            if (!view.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                pending = false;
+                update();
+            })) pending = false;
+        });
+    }
+
     /// <summary>Keep adaptive navigation between expanded and minimal modes.</summary>
     public static void SetAdaptiveThreshold(NavigationView view, double width)
     {
