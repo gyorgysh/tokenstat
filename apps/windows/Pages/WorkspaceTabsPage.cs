@@ -276,10 +276,13 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
             {
                 // Dispatcher callbacks can fail outside XAML's unhandled event.
                 // Keep only structural metadata from this disposable CI window.
-                var frames = new System.Diagnostics.StackTrace(args.Exception, false).GetFrames()
+                // Before unwind, Exception.StackTrace may contain only the
+                // external throw site. The current stack retains our caller.
+                var frames = new System.Diagnostics.StackTrace(false).GetFrames()
                     .Select(frame => frame.GetMethod())
                     .Where(method => method?.DeclaringType?.Namespace is { } ns && (ns == "Tokenstat" || ns.StartsWith("Tokenstat.", StringComparison.Ordinal)))
-                    .Take(12).Select(method => $"{method!.DeclaringType!.Name}.{method.Name}").ToArray();
+                    .Where(method => !method!.Name.Contains("TraceManagedDispatch", StringComparison.Ordinal))
+                    .Take(12).Select(method => $"{method!.DeclaringType!.FullName}.{method.Name}").ToArray();
                 if (frames.Length == 0) return;
                 remaining--;
                 Program.LogStartup($"Workbench managed exception: type={args.Exception.GetType().Name}; HRESULT=0x{args.Exception.HResult:x8}; frames={string.Join(" > ", frames)}");
