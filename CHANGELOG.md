@@ -24,7 +24,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Recover your saved Team comment drafts when a computer is offline or access changes. Drafts retain their chat and computer labels, with copy and reviewed removal actions that work at larger text sizes.
 - Agent turns and Git/editor actions report when a checkout is already in use, including linked checkouts. Independent clones can run at the same time.
 - Teams reading and comments on Android and Windows, with Markdown, offline charts, read-only tool details, shared files, earlier-history paging, saved local comment drafts, delivery checks and periodic chat refresh. Comments show author initials and agent replies identify the teammate who asked. Images open inside the app; shared files can be saved on every platform, with quarantine marks on Mac and Internet-zone marks on Windows.
-- In development builds, Ask and Stop in shared Claude Code chats, separate work lanes, checked automatic landing or review, pull requests, overlap warnings and automatic checkout catch-up. Agent execution remains disabled in release builds while release verification is completed.
+- In development builds, Ask and Stop in shared Claude Code chats, separate work lanes, checked automatic landing or review, pull requests, overlap warnings and automatic checkout catch-up. Owners can also opt into clean-checkout updates when working manually or using review. Agent execution remains disabled in release builds while release verification is completed.
 
 ### Fixed
 
@@ -32,6 +32,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - On the publishing computer, its signed-in owner can start an empty shared chat without first granting agent execution. This does not start an agent or grant another device access.
 - Long shared chats can open their details and approved files without loading the entire conversation. Development agent runs read the full approved history in pages, excluding later discussion. Publication retries also work after a chat grows.
 - Recovering a stopped Team agent clears the chat's running state after writer cleanup succeeds, so another Ask can start.
+- Project workflow settings keep mode names readable on phones and tablets. Checkout updates preserve local and ignored files and offer an explicit retry when blocked.
 - Terminal status now follows process exit. Closing output no longer marks a running process as stopped, and failed stops remain available for recovery.
 - Teams browsers on Android and Windows can load more computers and shared chats, with retry controls for unreachable computers. Overlap summaries identify which computers are included.
 - Pending Team comments on Android and Windows survive navigation and app restarts. Explicit retries retain the original words and message ID; delayed receipts preserve newer drafts.

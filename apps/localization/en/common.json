@@ -733,5 +733,9 @@
   "common.teams.project_already_exists": "This team already has a project named {0}. Add this folder to it, or choose another name.",
   "common.teams.use_existing_project": "Use {0}",
   "common.teams.choose_another_project_name": "Choose another name",
-  "common.teams.project_existing_access": "This folder will use the project’s existing access. Existing private chats are excluded."
+  "common.teams.project_existing_access": "This folder will use the project’s existing access. Existing private chats are excluded.",
+  "common.teams.checkout_updates": "Keep this checkout up to date",
+  "common.teams.checkout_updates_detail": "After a teammate's work lands, fetch and fast-forward this folder when it is clean and on the target branch. Uncommitted and ignored files are kept.",
+  "common.teams.workflow_manual_updates_detail": "Agents asked from a shared chat only read. People manage branches and pull requests. This clean checkout keeps up with teammates' finished work.",
+  "common.teams.workflow_review_updates_detail": "Each Ask runs in its own copy of the project. When the agent finishes, tokenstat commits, rebases and checks the work, then waits for someone to land it. This clean checkout keeps up when work lands."
 }

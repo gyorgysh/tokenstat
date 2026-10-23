@@ -62,7 +62,7 @@ enum TeamFixtureData {
             guard state == .askUncertain else { throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.") }
             return try await TeamFixtureAsks.shared.call(params)
         case .checkoutPublish, .checkoutWithdraw, .lanesSet, .lanesCatchUp: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
-        case .lanesGet: return .object(["settings": .null])
+        case .lanesGet: return .object(["settings": .null, "supportsCheckoutUpdates": .bool(true)])
         case .directory:
             if await TeamFixtureComments.shared.accessRemoved { throw TeamRequestFailure(code: "forbidden", message: "Access to this fictional repository was removed.") }
             guard case let .object(fields) = params, case let .string(operation)? = fields["operation"] else { throw TeamRequestFailure(code: "fixture_request", message: "Choose a fixture action.") }

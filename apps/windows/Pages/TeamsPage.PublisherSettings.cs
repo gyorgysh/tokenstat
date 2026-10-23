@@ -33,24 +33,38 @@ internal sealed partial class TeamsPage
         var check = new TextBox { Header = L10n.Text("common.teams.check_command"), Text = settings?["check"] is JsonArray args ? string.Join(" ", args.Select(arg => arg?.GetValue<string>())) : "", IsSpellCheckEnabled = false };
         var acknowledge = new CheckBox { Content = L10n.Text("common.teams.check_confirm"), IsChecked = Flag(settings, "checkRunsChangedCode") };
         var pullRequest = new CheckBox { Content = L10n.Text("common.teams.open_pull_request"), IsChecked = Flag(settings, "pullRequest") };
+        var supportsUpdates = Flag(result, "supportsCheckoutUpdates");
+        var updateCheckout = new CheckBox { Content = L10n.Text("common.teams.checkout_updates"), IsChecked = Flag(settings, "updateCheckout") };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(updateCheckout, "team.workflow.update-checkout");
         var fields = new StackPanel { Spacing = Theme.SpaceM }; fields.Children.Add(mode);
         var description = TeamText(""); fields.Children.Add(description);
-        var inputs = new StackPanel { Spacing = Theme.SpaceM }; inputs.Children.Add(target); inputs.Children.Add(remote); inputs.Children.Add(check);
+        fields.Children.Add(updateCheckout);
+        var updateDetail = TeamText(L10n.Text("common.teams.checkout_updates_detail")); fields.Children.Add(updateDetail);
+        var checkoutInputs = new StackPanel { Spacing = Theme.SpaceM }; checkoutInputs.Children.Add(target); checkoutInputs.Children.Add(remote); fields.Children.Add(checkoutInputs);
+        var inputs = new StackPanel { Spacing = Theme.SpaceM }; inputs.Children.Add(check);
         inputs.Children.Add(TeamText(L10n.Text("common.teams.check_warning"))); inputs.Children.Add(acknowledge); inputs.Children.Add(pullRequest);
         inputs.Children.Add(TeamText(L10n.Text("common.teams.open_pull_request_detail"))); fields.Children.Add(inputs);
         void Describe()
         {
-            description.Text = L10n.Text(mode.SelectedIndex == 2 ? "common.teams.workflow_lanes_detail" : mode.SelectedIndex == 1 ? "common.teams.workflow_review_detail" : "common.teams.workflow_manual_detail");
+            var updates = supportsUpdates && mode.SelectedIndex != 2 && updateCheckout.IsChecked == true;
+            description.Text = L10n.Text(mode.SelectedIndex == 2 ? "common.teams.workflow_lanes_detail"
+                : mode.SelectedIndex == 1 ? (updates ? "common.teams.workflow_review_updates_detail" : "common.teams.workflow_review_detail")
+                : (updates ? "common.teams.workflow_manual_updates_detail" : "common.teams.workflow_manual_detail"));
+            updateCheckout.Visibility = updateDetail.Visibility = supportsUpdates && mode.SelectedIndex != 2 ? Visibility.Visible : Visibility.Collapsed;
+            checkoutInputs.Visibility = mode.SelectedIndex != 0 || updates ? Visibility.Visible : Visibility.Collapsed;
             inputs.Visibility = mode.SelectedIndex == 0 ? Visibility.Collapsed : Visibility.Visible;
             pullRequest.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
         }
-        mode.SelectionChanged += (_, _) => Describe(); check.TextChanged += (_, _) => acknowledge.IsChecked = false; Describe();
+        mode.SelectionChanged += (_, _) => Describe(); updateCheckout.Checked += (_, _) => Describe(); updateCheckout.Unchecked += (_, _) => Describe(); check.TextChanged += (_, _) => acknowledge.IsChecked = false; Describe();
         // This editor shares the settings page's navigation but does not redraw
         // it until all fields have been assembled from the successful read.
-        TeamEditor(L10n.Text("common.teams.workflow"), fields, L10n.Text("common.save"), () => target.Text.Trim().Length > 0 && (mode.SelectedIndex == 0 || check.Text.Trim().Length == 0 || acknowledge.IsChecked == true), async () => {
+        TeamEditor(L10n.Text("common.teams.workflow"), fields, L10n.Text("common.save"), () => target.Text.Trim().Length > 0
+            && (!supportsUpdates || mode.SelectedIndex == 2 || updateCheckout.IsChecked != true || remote.Text.Trim().Length > 0)
+            && (mode.SelectedIndex == 0 || check.Text.Trim().Length == 0 || acknowledge.IsChecked == true), async () => {
             var value = new JsonObject { ["enabled"] = mode.SelectedIndex != 0, ["target"] = target.Text.Trim(), ["review"] = mode.SelectedIndex == 1, ["pullRequest"] = mode.SelectedIndex == 1 && pullRequest.IsChecked == true,
-                ["check"] = new JsonArray(check.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(arg => (JsonNode)JsonValue.Create(arg)!).ToArray()), ["checkRunsChangedCode"] = check.Text.Trim().Length > 0 && acknowledge.IsChecked == true };
+                ["check"] = new JsonArray((mode.SelectedIndex == 0 ? [] : check.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Select(arg => (JsonNode)JsonValue.Create(arg)!).ToArray()), ["checkRunsChangedCode"] = mode.SelectedIndex != 0 && check.Text.Trim().Length > 0 && acknowledge.IsChecked == true };
             if (remote.Text.Trim().Length > 0) value["remote"] = remote.Text.Trim();
+            if (supportsUpdates) value["updateCheckout"] = mode.SelectedIndex != 2 && updateCheckout.IsChecked == true;
             return await model.Call("teams.lanes.set", new() { ["checkout"] = checkout, ["settings"] = value });
         }, back, _ => ShowTeamPublisherSettingsAsync(model, repository, publication, back));
         var editorView = _view;

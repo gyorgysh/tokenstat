@@ -41,6 +41,7 @@ internal static class TeamPublisherSmoke
         var repo = new JsonObject { ["id"] = "repo", ["name"] = "Fictional project", ["organizationId"] = "org", ["role"] = "maintainer" };
         var publication = new JsonObject { ["id"] = "checkout", ["organizationId"] = "org", ["repositoryId"] = "repo", ["workspaceId"] = "folder", ["phase"] = "active", ["revision"] = 5L, ["accountCleanupPending"] = false };
         var checkoutShared = false; var chatShared = false; var publishAttempts = new List<JsonObject>(); var writes = new List<JsonObject>(); var granted = false;
+        JsonObject? laneSettings = null;
         Task<JsonNode> Host(string method, JsonObject? fields)
         {
             if (method == "account.status") return Task.FromResult<JsonNode>(new JsonObject { ["signedIn"] = true, ["host"] = "https://fixture.invalid", ["handle"] = "fictional", ["accountId"] = "owner", ["accountSession"] = "fictional-session" });
@@ -70,8 +71,8 @@ internal static class TeamPublisherSmoke
                 case "teams.chat.preview": result = new JsonObject { ["repository"] = repo.DeepClone(), ["conversation"] = "chat", ["checkoutId"] = "checkout", ["audience"] = "currentAndFutureRepositoryMembers", ["allowsAgentRuns"] = false, ["preview"] = new string('b', 64),
                     ["history"] = JsonNode.Parse("""{"events":[{"seq":1,"kind":"user","text":"Private fictional history"}]}""") }; break;
                 case "teams.chat.publish": writes.Add((JsonObject)fields!.DeepClone()); chatShared = true; result = new JsonObject { ["publication"] = new JsonObject { ["id"] = "share", ["checkoutId"] = "checkout" } }; break;
-                case "teams.lanes.get": result = new JsonObject { ["settings"] = null }; break;
-                case "teams.lanes.set": writes.Add((JsonObject)fields!.DeepClone()); result = new JsonObject { ["settings"] = fields["settings"]!.DeepClone() }; break;
+                case "teams.lanes.get": result = new JsonObject { ["settings"] = laneSettings?.DeepClone(), ["supportsCheckoutUpdates"] = true }; break;
+                case "teams.lanes.set": writes.Add((JsonObject)fields!.DeepClone()); laneSettings = (JsonObject)fields["settings"]!.DeepClone(); result = new JsonObject { ["settings"] = laneSettings.DeepClone() }; break;
                 default: throw new Exception("Unexpected fictional publisher call");
             }
             return Task.FromResult(result);
@@ -100,7 +101,7 @@ internal static class TeamPublisherSmoke
             await Click(page, L10n.Text("common.back"));
             await Click(page, L10n.Text("common.teams.project_settings"));
             await Wait(page, () => Descendants(page).OfType<ComboBox>().Any(), "Workflow settings missing");
-            Descendants(page).OfType<ComboBox>().Single().SelectedIndex = 2;
+            var workflow = Descendants(page).OfType<ComboBox>().Single(); workflow.SelectedIndex = 2;
             var check = Descendants(page).OfType<TextBox>().Single(text => (string?)text.Header == L10n.Text("common.teams.check_command")); check.Text = "fictional-check --test";
             // WinUI dispatches programmatic TextChanged/SelectionChanged after
             // the property setters return, as separate routed UI events.
@@ -110,6 +111,20 @@ internal static class TeamPublisherSmoke
             await Wait(page, () => Find(page, L10n.Text("common.save"))!.IsEnabled, "Reviewed changed-code check could not be saved");
             await Click(page, L10n.Text("common.save"));
             await Wait(page, () => writes.Any(row => row["settings"] is not null), "Workflow setting not saved");
+            await Wait(page, () => Descendants(page).OfType<ComboBox>().Any(box => !ReferenceEquals(box, workflow)), "Saved workflow did not reload");
+            Descendants(page).OfType<ComboBox>().Single().SelectedIndex = 0;
+            CheckBox? Updates() => Descendants(page).OfType<CheckBox>().SingleOrDefault(box => AutomationProperties.GetAutomationId(box) == "team.workflow.update-checkout");
+            await Wait(page, () => Updates() is { Visibility: Visibility.Visible }, "Manual checkout opt-in missing");
+            var unreviewedUpdates = Updates()!;
+            if (unreviewedUpdates.IsChecked == true) throw new Exception("Manual checkout updates were enabled without consent");
+            unreviewedUpdates.IsChecked = true;
+            await Click(page, L10n.Text("common.save"));
+            await Wait(page, () => laneSettings is not null && !Flag(laneSettings, "enabled") && Flag(laneSettings, "updateCheckout"), "Manual checkout opt-in was not saved separately from agent lanes");
+            await Wait(page, () => Updates() is { IsChecked: true } box && !ReferenceEquals(box, unreviewedUpdates), "Checkout opt-in did not survive reload");
+            var enabledUpdates = Updates()!; enabledUpdates.IsChecked = false;
+            await Click(page, L10n.Text("common.save"));
+            await Wait(page, () => !Flag(laneSettings, "updateCheckout"), "Checkout updates could not be turned off");
+            await Wait(page, () => Updates() is { IsChecked: false } box && !ReferenceEquals(box, enabledUpdates), "Disabled checkout updates did not reload");
             await Click(page, L10n.Text("common.teams.agent_runs"));
             await Click(page, L10n.Text("common.teams.add_agent_grant"));
             await Click(page, "Fictional teammate");

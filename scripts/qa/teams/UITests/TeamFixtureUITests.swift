@@ -77,6 +77,28 @@ final class TeamFixtureUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Quarterly totals"].waitForExistence(timeout: 5))
         capture(app, "Shared project opens all teammates")
     }
+    func testCheckoutUpdatesAreOptionalAndExplainCleanFolderOnly() {
+        let app = launch()
+        app.buttons["Fixture"].tap(); app.buttons["Team chats"].tap()
+        let repository = app.buttons["team.chats.repository"]
+        XCTAssertTrue(repository.waitForExistence(timeout: 5))
+        repository.tap(); app.buttons["Website"].firstMatch.tap()
+        let settings = app.buttons["Project collaboration"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10)); reveal(settings, in: app); settings.tap()
+        let updates = app.switches["team.workflow.update-checkout"]
+        XCTAssertTrue(updates.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["team.workflow.mode"].label.contains("Branches and pull requests"))
+        XCTAssertEqual(updates.value as? String, "0")
+        reveal(updates, in: app)
+        updates.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        XCTAssertEqual(updates.value as? String, "1")
+        XCTAssertTrue(app.textFields["Target branch"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Uncommitted and ignored files are kept")).firstMatch.exists)
+        let save = app.buttons["Save"]
+        reveal(save, in: app); save.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
+        capture(app, "Explicit clean checkout update opt-in")
+    }
     func testFolderShareStartsWithChosenFolderAndReviewsTeamAccess() {
         let app = launch()
         XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))

@@ -37,6 +37,20 @@ pub(super) struct Settings {
     /// for Land, for repositories where changes go through review.
     #[serde(default)]
     pub pull_request: bool,
+    /// The owner also permits clean target-checkout updates in Manual or
+    /// Review mode. Omitting false preserves the older settings format.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub update_checkout: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+impl Settings {
+    fn updates_checkout(&self) -> bool {
+        (self.enabled && !self.review) || self.update_checkout
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -104,6 +118,7 @@ fn valid_name(value: &str) -> bool {
 fn validate(settings: &Settings) -> bool {
     valid_name(&settings.target)
         && settings.remote.as_deref().is_none_or(valid_name)
+        && (!settings.update_checkout || settings.remote.is_some())
         && (settings.check.is_empty() || settings.check_runs_changed_code)
         && settings.check.len() <= 64
         && settings
@@ -114,10 +129,14 @@ fn validate(settings: &Settings) -> bool {
 
 /// Lane settings for a checkout, only when lanes are on.
 pub(super) fn settings(checkout: &str) -> Option<Settings> {
+    checkout_settings(checkout).filter(|s| s.enabled)
+}
+
+fn checkout_settings(checkout: &str) -> Option<Settings> {
     load()
         .checkouts
         .get(checkout)
-        .filter(|s| s.enabled && validate(s))
+        .filter(|s| validate(s))
         .cloned()
 }
 
@@ -461,7 +480,7 @@ pub(crate) fn caught_up(repository: &str) {
         return;
     };
     for row in rows {
-        let Some(settings) = settings(&row.id) else {
+        let Some(settings) = checkout_settings(&row.id) else {
             continue;
         };
         let Some(remote) = settings.remote.as_deref() else {
@@ -478,11 +497,21 @@ pub(crate) fn caught_up(repository: &str) {
         {
             continue;
         }
-        if !settings.review {
+        if settings.updates_checkout() {
             record_catch_up(
                 &row.id,
                 &lane::catch_up(&row.folder.canonical, &settings.target, remote),
             );
+        } else {
+            record_catch_up_note(
+                &row.id,
+                Some("New work landed in this project. Update this checkout when you are ready."),
+            );
+        }
+        // Manual mode's opt-in covers the target checkout only. It must not
+        // resume automatic changes to lanes left from an earlier workflow.
+        if !settings.enabled {
+            continue;
         }
         let Ok(kept) = fs::read_dir(lane::root(&data, &row.id)) else {
             continue;
@@ -678,10 +707,14 @@ fn record_catch_up(checkout: &str, outcome: &lane::CatchUp) {
         lane::CatchUp::Busy => {
             Some("Another change was being written in this folder, so it was not updated.")
         }
-        lane::CatchUp::Failed(_) => {
-            Some("Fetching the target failed, so this folder was not updated.")
-        }
+        lane::CatchUp::Failed(_) => Some(
+            "This folder was not updated. Check the remote and any local or ignored files before trying again.",
+        ),
     };
+    record_catch_up_note(checkout, note);
+}
+
+fn record_catch_up_note(checkout: &str, note: Option<&str>) {
     let Ok(root) = root() else {
         return;
     };
@@ -965,11 +998,15 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         let mut file = load();
         if method == "teams.lanes.catchUp" {
             // The owner asked to try again now, on this computer only.
-            let settings = settings(&input.checkout).ok_or_else(unavailable)?;
+            let settings = checkout_settings(&input.checkout).ok_or_else(unavailable)?;
             let remote = settings.remote.as_deref().ok_or_else(invalid)?;
             let row = super::publications::Store::capture()?
                 .active_checkout(&input.checkout)?
                 .ok_or_else(unavailable)?;
+            let workspace = crate::workspaces::get(&row.workspace_id)?;
+            if super::publications::Folder::capture(&workspace.path)? != row.folder {
+                return Err(unavailable());
+            }
             record_catch_up(
                 &input.checkout,
                 &lane::catch_up(&row.folder.canonical, &settings.target, remote),
@@ -984,7 +1021,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             save(&file)?;
         }
         Ok(
-            json!({"settings": file.checkouts.get(&input.checkout), "catchUp": catch_up_note(&input.checkout)}),
+            json!({"settings": file.checkouts.get(&input.checkout), "catchUp": catch_up_note(&input.checkout), "supportsCheckoutUpdates": true}),
         )
     })())
 }
@@ -1002,7 +1039,33 @@ mod tests {
             check_runs_changed_code: true,
             review: false,
             pull_request: false,
+            update_checkout: false,
         }
+    }
+
+    #[test]
+    fn checkout_updates_preserve_old_defaults_and_need_explicit_opt_in() {
+        let legacy = r#"{"enabled":true,"target":"main","remote":"origin","review":true}"#;
+        let mut value: Settings = serde_json::from_str(legacy).unwrap();
+        assert!(!value.updates_checkout());
+        assert!(
+            serde_json::to_value(&value)
+                .unwrap()
+                .get("updateCheckout")
+                .is_none()
+        );
+        value.update_checkout = true;
+        assert!(value.updates_checkout());
+        assert!(validate(&value));
+        value.enabled = false;
+        assert!(value.updates_checkout());
+        value.remote = None;
+        assert!(!validate(&value));
+        value.update_checkout = false;
+        assert!(!value.updates_checkout());
+        value.enabled = true;
+        value.review = false;
+        assert!(value.updates_checkout());
     }
 
     #[test]

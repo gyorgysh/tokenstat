@@ -412,7 +412,7 @@ fn tool(name: &str, description: &str, chart: bool) -> Value {
 }
 fn tools() -> Vec<Value> {
     vec![
-        json!({"name":"team_context","description":"Read one page of the accepted shared context and the original Ask. Pass the previous nextCursor to continue. Omit it for the first page.","inputSchema":{"type":"object","properties":{"cursor":{"type":"string","pattern":"^(0|[1-9][0-9]{0,9})$"}},"additionalProperties":false}}),
+        json!({"name":"team_context","description":"Read one page of the accepted shared context and the original Ask. Pass the previous nextCursor to continue. Omit it for the first page.","inputSchema":{"type":"object","properties":{"cursor":{"type":"string","pattern":"^(0|[1-9][0-9]{0,19})$"}},"additionalProperties":false}}),
         tool("team_run_status", "Read this run's status.", false),
         tool("chart_schema", "Read the portable chart schema.", false),
         tool(

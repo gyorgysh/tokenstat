@@ -62,6 +62,7 @@ fn check_sdk(helper: &str, state: &std::path::Path) {
     assert!(reply.contains("Fictional supervised Ask"));
     assert!(!reply.contains("PRIVATE_FIXTURE"));
     assert!(reply.contains("chart_create"));
+    assert!(reply.contains("[0-9]{0,19}"));
     assert!(reply.contains("This tool is unavailable in a Team run."));
     assert!(reply.contains("This method is unavailable in a Team run."));
     assert!(reply.contains("This tool accepts no target or arguments."));
@@ -103,6 +104,10 @@ fn read_large_context(helper: &str, state: &std::path::Path) {
         // escapes its quotes and therefore cannot match this fixture parser.
         let next = reply.split_once("\"nextCursor\":\"").map(|(_, rest)| {
             let value = rest.split_once('"').unwrap().0;
+            assert!(
+                value.len() > 10,
+                "The fixture must exercise a large canonical sequence."
+            );
             assert!(value.bytes().all(|byte| byte.is_ascii_digit()));
             value.parse::<u64>().unwrap()
         });

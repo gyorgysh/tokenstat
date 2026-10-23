@@ -49,6 +49,7 @@ enum RemoteHostFeature: Hashable {
     case teamCheckouts
     case teamConnections
     case teamChatSharing
+    case teamCheckoutUpdates
 
     var title: String {
         switch self {
@@ -83,7 +84,7 @@ enum RemoteHostFeature: Hashable {
         case .liveActivities, .terminalLiveActivities, .workOverview: "Live Activities"
         case .commitAvatars: "Author pictures"
         case .teamChats, .teamSessions, .teamChatSharing: L10n.text("common.teams.chats")
-        case .teamCheckouts, .teamConnections: L10n.text("common.teams.checkouts")
+        case .teamCheckouts, .teamConnections, .teamCheckoutUpdates: L10n.text("common.teams.checkouts")
         }
     }
 
@@ -160,6 +161,7 @@ enum RemoteHostFeature: Hashable {
         case .teamCheckouts: 40
         case .teamConnections: 41
         case .teamChatSharing: 42
+        case .teamCheckoutUpdates: 49
         }
     }
 
@@ -196,7 +198,7 @@ enum RemoteHostFeature: Hashable {
         case .liveActivities, .terminalLiveActivities, .workOverview: "waveform"
         case .commitAvatars: "person.crop.circle"
         case .chatRecovery: "arrow.clockwise"
-        case .teamChats, .teamSessions, .teamCheckouts, .teamConnections, .teamChatSharing: "person.2"
+        case .teamChats, .teamSessions, .teamCheckouts, .teamConnections, .teamChatSharing, .teamCheckoutUpdates: "person.2"
         }
     }
 
