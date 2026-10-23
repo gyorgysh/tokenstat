@@ -30,6 +30,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
 
     public WorkspaceTabsPage(string workspaceId, Func<WorkspaceSection, Page> create)
     {
+        TraceMount("constructing");
         WorkspaceId = workspaceId;
         _tabsMount = new TabViewMount(_tabs);
         _terminalController = new(workspaceId);
@@ -87,6 +88,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         };
         Content = _tabs;
         Open(WorkspaceSection.Launcher);
+        TraceMount("constructed");
     }
 
     public void Open(WorkspaceSection section)
@@ -251,10 +253,16 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
 
     /// <summary>
     /// Adding to the TabView now would fail: it is not loaded yet, or earlier
-    /// work is still queued and must keep its order. The first tab is part of
-    /// construction and is exempt.
+    /// work is still queued and must keep its order. This includes the first
+    /// tab: an empty native TabView can load before its documents are added.
     /// </summary>
-    private bool MustDefer => (!_tabsMount.IsReady || _tabsMount.HasPending) && _tabs.TabItems.Count > 0;
+    private bool MustDefer => !_tabsMount.IsReady || _tabsMount.HasPending;
+
+    private static void TraceMount(string stage)
+    {
+        if (Environment.GetEnvironmentVariable("TOKENSTAT_UI_STARTUP_TRACE") == "1")
+            Program.LogStartup("Workbench mount: " + stage);
+    }
 
     private void OpenSurface(string key, string label, Func<Page> create, bool closable = true)
     {
@@ -263,6 +271,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
             WhenLoaded(() => OpenSurface(key, label, create, closable));
             return;
         }
+        TraceMount("opening " + key);
         var tab = _tabStrip.Open(key, label, () => create(), closable);
         if (tab.IconSource is null && !key.StartsWith("terminal:"))
         {
@@ -278,6 +287,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
             }
         }
         RefreshChrome();
+        TraceMount("opened " + key);
     }
 
     private object? ActiveSource => _tabs.SelectedItem is TabViewItem item
