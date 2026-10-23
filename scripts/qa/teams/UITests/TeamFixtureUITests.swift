@@ -62,7 +62,9 @@ final class TeamFixtureUITests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.buttons["Fixture"].waitForExistence(timeout: 15))
         app.buttons["Fixture"].tap(); app.buttons["Personal"].tap()
-        app.buttons["Fixture"].tap(); app.buttons["Shared projects"].tap()
+        let projects = app.buttons["team.projects.open"]
+        XCTAssertTrue(projects.waitForExistence(timeout: 10))
+        projects.tap()
         let project = app.buttons["team.project.open.repo_fixture"]
         XCTAssertTrue(project.waitForExistence(timeout: 5))
         app.buttons["Fixture"].tap(); app.buttons["Refresh shared projects"].tap()
