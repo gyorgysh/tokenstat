@@ -382,18 +382,24 @@ try {
     Write-Output 'PASS: warm protocol actions select inspector, browser, changes and an exact terminal without duplicate windows or shell replay'
     if (!$process.CloseMainWindow() -or !$process.WaitForExit(15000)) { throw 'The app did not close before cold protocol activation' }
     $process.Dispose()
-    Open-DesktopAction 'changes'
-    $process = $null
-    for ($attempt = 0; $attempt -lt 80; $attempt++) {
-        $process = Get-Process Tokenstat -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-        if ($process) { break }
-        Start-Sleep -Milliseconds 250
+    for ($cold = 1; $cold -le 3; $cold++) {
+        if ($cold -gt 1) {
+            if (!$process.CloseMainWindow() -or !$process.WaitForExit(15000)) { throw 'The cold-started app did not close' }
+            $process.Dispose()
+        }
+        Open-DesktopAction 'changes'
+        $process = $null
+        for ($attempt = 0; $attempt -lt 80; $attempt++) {
+            $process = Get-Process Tokenstat -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+            if ($process) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        if (!$process) { throw 'Cold desktop protocol activation did not open the application' }
+        Wait-ForDesktopTool 'changes'
+        $trace = Get-Content "$env:LOCALAPPDATA/tokenstat/logs/startup.log" | Where-Object { $_ -match "pid=$($process.Id) " }
+        if ($trace -match 'Chat open failed|Chat (composer|inspector) construction failed|[Uu]nhandled exception') { throw 'Production chat or sidebar raised a XAML exception' }
+        Write-Output "PASS: cold protocol activation $cold of 3 waits for the project inventory and opens Changes"
     }
-    if (!$process) { throw 'Cold desktop protocol activation did not open the application' }
-    Wait-ForDesktopTool 'changes'
-    Write-Output 'PASS: cold protocol activation waits for the project inventory and opens its changes pane'
-    $trace = Get-Content "$env:LOCALAPPDATA/tokenstat/logs/startup.log" | Where-Object { $_ -match "pid=$($process.Id) " }
-    if ($trace -match 'Chat open failed|Chat (composer|inspector) construction failed|[Uu]nhandled exception') { throw 'Production chat or sidebar raised a XAML exception' }
     Write-Output 'PASS: production chats retain drafts, expand history, keep New chat drafts without ghost conversations, and explicitly open one empty chat without sending'
 } finally {
     $env:PATH = $originalPath

@@ -17,6 +17,16 @@ internal static class TabViewMountSmoke
         var loads = 0;
         var unloads = 0;
         var ready = 0;
+        var work = new List<int>();
+        var betweenActions = false;
+        mount.Enqueue(() => {
+            work.Add(1);
+            view.DispatcherQueue.TryEnqueue(() => betweenActions = true);
+        });
+        mount.Enqueue(() => {
+            if (!betweenActions) throw new Exception("Queued tab actions ran in one native layout turn");
+            work.Add(2);
+        });
         view.Loaded += (_, _) =>
         {
             loads++;
@@ -49,14 +59,22 @@ internal static class TabViewMountSmoke
         {
             host.Children.Add(view);
             await Settle(() => mount.IsReady && ready == 1 && view.TabItems.Count == 4);
+            await Settle(() => work.Count == 2);
+            if (!work.SequenceEqual(new[] { 1, 2 })) throw new Exception("Deferred tab actions lost their order");
             var selected = view.SelectedItem;
             host.Children.Remove(view);
             await Settle(() => !view.IsLoaded && !mount.IsReady);
+            mount.Enqueue(() => work.Add(3));
+            await Task.Delay(50);
+            if (work.Count != 2) throw new Exception("Deferred tab work ran while unloaded");
             host.Children.Add(view);
-            await Settle(() => mount.IsReady && ready == 2);
+            await Settle(() => mount.IsReady && ready == 2 && work.Count == 3);
             if (view.TabItems.Count != 4 || !ReferenceEquals(view.SelectedItem, selected))
                 throw new Exception("Remounting the workbench duplicated tabs or lost its selected native surface");
+            var abandoned = false;
+            mount.Enqueue(() => throw new Exception("Disposed tab work ran"), () => abandoned = true);
             mount.Dispose();
+            if (!abandoned) throw new Exception("Disposed tab work was not retired");
             host.Children.Remove(view);
             await Settle(() => !view.IsLoaded);
             host.Children.Add(view);
