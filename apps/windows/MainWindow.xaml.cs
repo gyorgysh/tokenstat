@@ -105,8 +105,11 @@ public sealed partial class MainWindow : Window
         finally { _sidebarRestoreDepth--; }
     }
 
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<NavigationViewItem, object> _trackedSidebarRows = new();
     private void TrackSidebarExpansion(NavigationViewItem row)
     {
+        if (_trackedSidebarRows.TryGetValue(row, out _)) return;
+        _trackedSidebarRows.Add(row, new object());
         var window = new WeakReference<MainWindow>(this);
         row.RegisterPropertyChangedCallback(NavigationViewItem.IsExpandedProperty, (owner, _) =>
         {
@@ -628,7 +631,13 @@ public sealed partial class MainWindow : Window
     /// Add project row stays under the folders. The servers block follows
     /// the saved section order even while no servers are connected.
     /// </summary>
-    private void RebuildFolderItems() => RestoreSidebarLayout(RebuildFolderItemsCore);
+    private void RebuildFolderItems()
+    {
+        var suppressed = _suppressNav;
+        _suppressNav = true;
+        try { RestoreSidebarLayout(RebuildFolderItemsCore); }
+        finally { _suppressNav = suppressed; }
+    }
 
     private void RebuildFolderItemsCore()
     {
@@ -647,6 +656,8 @@ public sealed partial class MainWindow : Window
             }
             keep.Add(item);
         }
+        foreach (var removed in _nav.MenuItems.OfType<NavigationViewItem>().Where(row => !keep.Contains(row) && !ReferenceEquals(row, _sshGroup)).ToArray())
+            NavigationRows.Retire(_nav, removed);
         _nav.MenuItems.Clear();
         foreach (var item in keep)
         {
@@ -660,7 +671,7 @@ public sealed partial class MainWindow : Window
             {
                 continue;
             }
-            _nav.MenuItems.Add(FolderParent(id, name, remote: false, Format.Text(folder, "path"), folder?["git"]));
+            _nav.MenuItems.Add(NavigationRows.Reuse(_nav, FolderParent(id, name, remote: false, Format.Text(folder, "path"), folder?["git"])));
         }
         foreach (var peer in RemoteWorkspaces.CachedFolders().GroupBy(folder => folder.PeerKey))
         {
@@ -676,21 +687,21 @@ public sealed partial class MainWindow : Window
             ToolTipService.SetToolTip(machine, peer.First().MachineLabel);
             foreach (var folder in peer)
                 machine.MenuItems.Add(FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git));
-            _nav.MenuItems.Add(machine);
+            _nav.MenuItems.Add(NavigationRows.Reuse(_nav, machine));
         }
         if (_localFolders.Count == 0 && RemoteWorkspaces.CachedFolders().Count == 0)
         {
             var add = Buttons.Primary(L10n.Text("common.add_project"), ActionIcon.Create, async (_, _) => await AddWorkspaceAsync());
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "projects.firstAdd");
-            _nav.MenuItems.Add(new NavigationViewItem { Content = EmptyState.FirstProject(add, compact: true),
-                Tag = "workspaces:empty", SelectsOnInvoked = false, IsTabStop = false });
+            _nav.MenuItems.Add(NavigationRows.Reuse(_nav, new NavigationViewItem { Content = EmptyState.FirstProject(add, compact: true),
+                Tag = "workspaces:empty", SelectsOnInvoked = false, IsTabStop = false }));
         }
         else
         {
             var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6,
                 Children = { new Viewbox { Width = 12, Height = 12, Child = ActionIcon.Create.Icon() },
                     new TextBlock { Text = L10n.Text("common.add_project"), FontSize = 12, Opacity = 0.7 } } };
-            _nav.MenuItems.Add(new NavigationViewItem { Content = label, Tag = "workspaces:add" });
+            _nav.MenuItems.Add(NavigationRows.Reuse(_nav, new NavigationViewItem { Content = label, Tag = "workspaces:add" }));
         }
         _nav.MenuItems.Add(_sshGroup);
         UpdateProjectsHeader();
@@ -700,6 +711,7 @@ public sealed partial class MainWindow : Window
         RebuildSidebarLive();
         foreach (var item in NavItems(_nav.MenuItems))
         {
+            TrackSidebarExpansion(item);
             if (item.MenuItems.Count > 0 && item.Tag is string tag)
             {
                 item.IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:" + tag, true);
@@ -730,6 +742,7 @@ public sealed partial class MainWindow : Window
             ToolTipService.SetToolTip(parent, path);
         }
         var menu = ContextMenus.Menu(parent);
+        NavigationViewItem CurrentParent() => FindNavItem("ws:" + id + ":Launcher") ?? parent;
         var shared = !remote && _teamFolderLinks.TryGetValue(id, out var publications) && publications.Count > 0;
         if (!remote) ContextMenus.Add(menu, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), () => OpenTeamFolder(id, name, path));
         if (shared) ContextMenus.Add(menu, L10n.Text("common.teams.share_project"), () => OpenTeamFolder(id, name, path, shareNew: true));
@@ -746,7 +759,7 @@ public sealed partial class MainWindow : Window
             var input = new TextBox { Text = name };
             var dialog = new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.rename_folder.7249f19c"), Content = input, PrimaryButtonText = L10n.Text("common.save"), CloseButtonText = L10n.Text("common.cancel"), DefaultButton = ContentDialogButton.Primary };
             input.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = input.Text.Trim().Length > 0;
-            if (await Chrome.ShowDialog(parent, dialog) != ContentDialogResult.Primary || input.Text.Trim().Length == 0) return;
+            if (await Chrome.ShowDialog(CurrentParent(), dialog) != ContentDialogResult.Primary || input.Text.Trim().Length == 0) return;
             await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.rename", new JsonObject { ["id"] = id, ["name"] = input.Text.Trim() });
             var memory = await BrowserProjectMemory.ForAsync(id);
             if (memory is not null) PinnedWorkStore.Shared.Rename(memory.Owner, "", input.Text.Trim());
@@ -758,7 +771,7 @@ public sealed partial class MainWindow : Window
         if (Format.Flag(git, "isRepo"))
             ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.worktrees.c336cb52"), async () =>
             {
-                var created = await ProjectWorktreeDialog.ShowAsync(parent, id, name, path);
+                var created = await ProjectWorktreeDialog.ShowAsync(CurrentParent(), id, name, path);
                 if (created is null) return;
                 if (remote) await RemoteWorkspaces.SweepAsync();
                 await TryLoadFoldersAsync(refresh: true);
@@ -768,20 +781,21 @@ public sealed partial class MainWindow : Window
             ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.reveal_in_file_explorer.b46c90d0"), async () =>
             {
                 try { await Windows.System.Launcher.LaunchFolderAsync(await Windows.Storage.StorageFolder.GetFolderFromPathAsync(path)); }
-                catch (Exception ex) { await Chrome.ShowDialog(parent, new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.could_not_open_folder.8f6c587f"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
+                catch (Exception ex) { await Chrome.ShowDialog(CurrentParent(), new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.could_not_open_folder.8f6c587f"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
             });
         if (RemoteWorkspaces.TrySplit(id, out var peer, out _))
             ContextMenus.Add(menu, L10n.Text("windows.mainwindow_xaml.disconnect_from_this_computer.4ce30719"), () => RemoteWorkspaces.Disconnect(peer));
         ContextMenus.Add(menu, L10n.Text("windows.mainwindow_xaml.expand_collapse"), () =>
         {
-            var expanded = !parent.IsExpanded;
+            var current = CurrentParent();
+            var expanded = !current.IsExpanded;
             SidebarPreferences.Shared.RememberExpansion("row:ws:" + id + ":Launcher", expanded);
-            parent.IsExpanded = expanded;
+            current.IsExpanded = expanded;
         });
         ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.remove_from_tokenstat.195e6064"), async () =>
         {
             var confirm = new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.remove_this_folder.5937b581"), Content = L10n.Text("windows.mainwindow_xaml.the_folder_and_its_files_stay_on_disk.c089e1af"), PrimaryButtonText = L10n.Text("common.remove"), CloseButtonText = L10n.Text("windows.mainwindow_xaml.keep_it.fdce5da2"), DefaultButton = ContentDialogButton.Close };
-            if (await Chrome.ShowDialog(parent, confirm) != ContentDialogResult.Primary) return;
+            if (await Chrome.ShowDialog(CurrentParent(), confirm) != ContentDialogResult.Primary) return;
             try
             {
                 await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.remove", new JsonObject { ["id"] = id });
@@ -790,7 +804,7 @@ public sealed partial class MainWindow : Window
                 if (remote) RemoteWorkspaces.ProjectChanged(id);
                 await TryLoadFoldersAsync(refresh: true);
             }
-            catch (Exception ex) { await Chrome.ShowDialog(parent, new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.could_not_remove_folder.36080129"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
+            catch (Exception ex) { await Chrome.ShowDialog(CurrentParent(), new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.could_not_remove_folder.36080129"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
         });
         var label = (UIElement)parent.Content;
         parent.Content = null;
@@ -1956,7 +1970,7 @@ public sealed partial class MainWindow : Window
                     }
                     RestoreSidebarLayout(() =>
                     {
-                        NavigationRows.Reconcile(sshGroup.MenuItems, wanted, "sshterm:");
+                        NavigationRows.Reconcile(sshGroup.MenuItems, wanted, "sshterm:", owner: _nav);
                         if (sshGroup.Visibility == Visibility.Collapsed && wanted.Count > 0)
                             sshGroup.IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:ssh:" + SSHSection.Hosts, true);
                         sshGroup.Visibility = wanted.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -2106,7 +2120,7 @@ public sealed partial class MainWindow : Window
                 ContextMenus.Add(menu, L10n.Text("windows.terminalpane.open_in_split"), () => AppServices.OpenTerminalSplit?.Invoke(folderId, id));
                 desiredSessions.Add(row);
             }
-            NavigationRows.Reconcile(parent.MenuItems, desiredSessions, SidebarLive.SessionPrefix, 0);
+            NavigationRows.Reconcile(parent.MenuItems, desiredSessions, SidebarLive.SessionPrefix, 0, _nav);
             var desiredChats = new List<NavigationViewItem>();
             if (chatsByFolder.TryGetValue(folderId, out var chats) && chats.Count > 0)
             {
@@ -2138,7 +2152,7 @@ public sealed partial class MainWindow : Window
             }
             // "wschat" covers the chat rows and their Show more and See all
             // rows, which share the prefix.
-            NavigationRows.Reconcile(parent.MenuItems, desiredChats, "wschat", desiredSessions.Count);
+            NavigationRows.Reconcile(parent.MenuItems, desiredChats, "wschat", desiredSessions.Count, _nav);
             SidebarChrome.AlignProject(parent);
             // A new folder initially loads without history. Expand when its
             // first children arrive, after WinUI has recognised the hierarchy.

@@ -108,11 +108,11 @@ internal static class SidebarAdaptiveSmoke
         {
             for (var cycle = 0; cycle < 40; cycle++)
             {
-                ReplaceChildren(parent, cycle * 2, 6);
+                ReplaceChildren(view, parent, cycle * 2, 6);
                 parent.IsExpanded = true;
                 host.UpdateLayout();
                 await Task.Delay(20);
-                ReplaceChildren(parent, cycle * 2 + 1, 1);
+                ReplaceChildren(view, parent, cycle * 2 + 1, 1);
                 GC.Collect();
                 view.IsPaneOpen = false;
                 view.IsPaneOpen = true;
@@ -121,6 +121,41 @@ internal static class SidebarAdaptiveSmoke
                 view.CompactPaneLength = 48 + cycle % 2;
                 host.UpdateLayout();
                 await Task.Delay(20);
+                if (NavigationRows.RetiredCount(view) + parent.MenuItems.Count > 6)
+                    throw new Exception("Retired sidebar containers accumulated across refreshes");
+                if (parent.MenuItems.OfType<NavigationViewItem>().Any(row => row.Tag is not string tag || !tag.StartsWith($"lifetime:{cycle * 2 + 1}:")))
+                    throw new Exception("Reused sidebar containers kept stale identities");
+                // Folder refresh replaces the whole group, not only its leaves.
+                // Reuse a former leaf as a project and a former project as a
+                // leaf, keeping current controls, selection and bindings.
+                view.MenuItems.Remove(parent);
+                NavigationRows.Retire(view, parent);
+                var freshProject = new NavigationViewItem { Tag = "project:current", IsExpanded = true };
+                var action = new Button { Content = "Fictional current project action" };
+                SidebarChrome.RevealActions(freshProject, action);
+                var heading = SidebarChrome.ProjectContent(freshProject, new TextBlock { Text = "Fictional current project" }, false, action);
+                freshProject.Content = heading;
+                freshProject.MenuItems.Add(new NavigationViewItem { Tag = "current:chat", Content = "Fictional current chat" });
+                parent = NavigationRows.Reuse(view, freshProject);
+                view.MenuItems.Add(parent);
+                view.IsPaneOpen = true;
+                host.UpdateLayout();
+                await Task.Delay(20);
+                parent.IsExpanded = false;
+                var chevron = (FontIcon)((Button)heading.Children[0]).Content;
+                if (chevron.Glyph != "\uE76C") throw new Exception("A reused project disclosure still targets its discarded candidate");
+                ContextMenus.Invoke((Button)heading.Children[0]);
+                await Task.Delay(20);
+                if (!parent.IsExpanded) throw new Exception("A reused project disclosure invokes its discarded candidate");
+                view.SelectedItem = parent.MenuItems[0];
+                if (!action.Focus(FocusState.Keyboard)) throw new Exception("A reused project's current action could not receive focus");
+                await Task.Delay(20);
+                if (action.Opacity != 1) throw new Exception("A reused project did not reveal its current focused action");
+                GC.Collect();
+                view.IsPaneOpen = false;
+                view.IsPaneOpen = true;
+                if (NavigationRows.RetiredCount(view) + parent.MenuItems.Count + 1 > 7)
+                    throw new Exception("Retired project trees accumulated across refreshes");
             }
             Program.Log("PASS: removed sidebar items survive GC before pane, display-mode and compact-width changes");
         }
@@ -128,10 +163,10 @@ internal static class SidebarAdaptiveSmoke
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ReplaceChildren(NavigationViewItem parent, int generation, int count)
+    private static void ReplaceChildren(NavigationView view, NavigationViewItem parent, int generation, int count)
     {
         var desired = Enumerable.Range(0, count).Select(index => new NavigationViewItem
             { Tag = $"lifetime:{generation}:{index}", Content = $"Fictional chat {index}" }).ToArray();
-        NavigationRows.Reconcile(parent.MenuItems, desired, "lifetime:", 0);
+        NavigationRows.Reconcile(parent.MenuItems, desired, "lifetime:", 0, view);
     }
 }

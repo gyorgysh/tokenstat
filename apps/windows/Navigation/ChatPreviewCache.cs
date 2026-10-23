@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 using System.Text.Json.Nodes;
+using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml;
 
 namespace Tokenstat.Navigation;
@@ -10,26 +11,53 @@ internal static class ChatPreviewCache
     private static readonly ChatPreviewStore Store = new();
     private static readonly HashSet<(string Workspace, string Chat)> Reading = new();
 
-    static ChatPreviewCache() { AppServices.AccountChanged += Store.Clear; }
+    private sealed class Binding
+    {
+        internal string? Workspace;
+        internal string? Chat;
+        internal CancellationTokenSource? Hover;
+        internal void Cancel() { Hover?.Cancel(); Hover?.Dispose(); Hover = null; }
+    }
+    private static readonly ConditionalWeakTable<FrameworkElement, Binding> Bindings = new();
+
+    static ChatPreviewCache()
+    {
+        AppServices.AccountChanged += Store.Clear;
+        NavigationRows.Retiring += row =>
+        {
+            if (!Bindings.TryGetValue(row, out var binding)) return;
+            binding.Cancel(); binding.Workspace = null; binding.Chat = null;
+        };
+        NavigationRows.Reconciled += (fresh, retained) =>
+        {
+            if (Bindings.TryGetValue(fresh, out var binding) && binding.Workspace is { } workspace && binding.Chat is { } chat)
+                Attach(retained, workspace, chat);
+        };
+    }
 
     public static void Attach(FrameworkElement row, string workspace, string chat)
     {
-        CancellationTokenSource? hover = null;
-        void Cancel() { hover?.Cancel(); hover?.Dispose(); hover = null; }
-        row.PointerEntered += async (_, _) =>
+        var binding = Bindings.GetValue(row, owner =>
         {
-            Cancel();
-            hover = new CancellationTokenSource();
-            var token = hover.Token;
-            try
+            var state = new Binding();
+            owner.PointerEntered += async (_, _) =>
             {
-                await Task.Delay(180, token);
-                await WarmAsync(workspace, chat, token);
-            }
-            catch (OperationCanceledException) { }
-        };
-        row.PointerExited += (_, _) => Cancel();
-        row.Unloaded += (_, _) => Cancel();
+                state.Cancel();
+                if (state.Workspace is not { } currentWorkspace || state.Chat is not { } currentChat) return;
+                state.Hover = new CancellationTokenSource();
+                var token = state.Hover.Token;
+                try
+                {
+                    await Task.Delay(180, token);
+                    await WarmAsync(currentWorkspace, currentChat, token);
+                }
+                catch (OperationCanceledException) { }
+            };
+            owner.PointerExited += (_, _) => state.Cancel();
+            owner.Unloaded += (_, _) => state.Cancel();
+            return state;
+        });
+        binding.Cancel(); binding.Workspace = workspace; binding.Chat = chat;
     }
 
     public static JsonNode? Take(string workspace, string chat) => Store.Take(workspace, chat);

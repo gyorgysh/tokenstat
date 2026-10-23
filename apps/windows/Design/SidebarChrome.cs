@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Tokenstat.Navigation;
 
 namespace Tokenstat.Design;
 
@@ -13,6 +14,45 @@ internal static class SidebarChrome
 {
     private sealed class ProjectAlignment { internal bool Pending; }
     private static readonly ConditionalWeakTable<NavigationViewItem, ProjectAlignment> ProjectAlignments = new();
+    private sealed class ProjectBinding { internal FontIcon? Chevron; }
+    private static readonly ConditionalWeakTable<NavigationViewItem, ProjectBinding> ProjectBindings = new();
+    private sealed class ActionBinding { internal Control[] Actions = []; internal bool Pointer; internal bool Focused; }
+    private static readonly ConditionalWeakTable<Control, ActionBinding> ActionBindings = new();
+
+    static SidebarChrome()
+    {
+        NavigationRows.Retiring += row =>
+        {
+            if (ProjectBindings.TryGetValue(row, out var project)) project.Chevron = null;
+            if (ActionBindings.TryGetValue(row, out var actions)) { actions.Actions = []; actions.Pointer = false; actions.Focused = false; }
+        };
+        NavigationRows.Reconciled += (fresh, retained) =>
+        {
+            if (ProjectBindings.TryGetValue(fresh, out var project)) BindProject(retained, project.Chevron);
+            if (ActionBindings.TryGetValue(fresh, out var actions)) RevealActions(retained, actions.Actions);
+        };
+    }
+
+    private static void BindProject(NavigationViewItem row, FontIcon? chevron)
+    {
+        var state = ProjectBindings.GetValue(row, owner =>
+        {
+            var binding = new ProjectBinding();
+            void Paint()
+            {
+                if (binding.Chevron is not { } mark) return;
+                mark.Glyph = owner.IsExpanded ? "\uE70D" : "\uE76C";
+                AlignProject(owner);
+            }
+            owner.RegisterPropertyChangedCallback(NavigationViewItem.IsExpandedProperty, (_, _) => Paint());
+            owner.Loaded += (_, _) => Paint();
+            return binding;
+        });
+        state.Chevron = chevron;
+        if (chevron is not null) chevron.Glyph = row.IsExpanded ? "\uE70D" : "\uE76C";
+        AlignProject(row);
+    }
+
     // The app supplies the sink so shared control fixtures need no app entry point.
     internal static Action<string>? ThresholdFailure { get; set; }
 
@@ -99,16 +139,15 @@ internal static class SidebarChrome
             Padding = new Thickness(0), BorderThickness = new Thickness(0),
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
         };
-        void Paint()
+        AutomationProperties.SetName(expand, L10n.Text("windows.mainwindow_xaml.expand_collapse"));
+        // Content can move to a reused native container. Resolve its current
+        // owner rather than capturing the discarded, unmounted candidate.
+        expand.Click += (_, _) =>
         {
-            chevron.Glyph = row.IsExpanded ? "\uE70D" : "\uE76C";
-            AutomationProperties.SetName(expand, L10n.Text("windows.mainwindow_xaml.expand_collapse"));
-            AlignProject(row);
-        }
-        expand.Click += (_, _) => row.IsExpanded = !row.IsExpanded;
-        row.RegisterPropertyChangedCallback(NavigationViewItem.IsExpandedProperty, (_, _) => Paint());
-        row.Loaded += (_, _) => Paint();
-        Paint();
+            for (DependencyObject? owner = grid; owner is not null; owner = VisualTreeHelper.GetParent(owner))
+                if (owner is NavigationViewItem current) { current.IsExpanded = !current.IsExpanded; break; }
+        };
+        BindProject(row, chevron);
         grid.Children.Add(expand);
         var folderMark = new Grid(); folderMark.Children.Add(new SymbolIcon { Symbol = remote ? Symbol.Globe : Symbol.Folder });
         if (shared) folderMark.Children.Add(new Viewbox { Width = 10, Height = 10, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Child = new SymbolIcon { Symbol = Symbol.Contact } });
@@ -194,28 +233,30 @@ internal static class SidebarChrome
     /// <summary>Keep row actions visible while the pointer or keyboard focus is inside.</summary>
     public static void RevealActions(Control row, params Control[] actions)
     {
-        bool pointer = false;
-        bool focused = false;
-        void Paint()
+        var state = ActionBindings.GetValue(row, owner =>
         {
-            foreach (var action in actions) action.Opacity = pointer || focused ? 1 : 0;
-        }
-        void RefreshFocus()
-        {
-            focused = false;
-            if (row.XamlRoot is not null)
-                for (var current = FocusManager.GetFocusedElement(row.XamlRoot) as DependencyObject;
-                    current is not null; current = VisualTreeHelper.GetParent(current))
-                    if (ReferenceEquals(current, row)) { focused = true; break; }
-            Paint();
-        }
-        row.PointerEntered += (_, _) => { pointer = true; Paint(); };
-        row.PointerExited += (_, _) => { pointer = false; RefreshFocus(); };
-        row.GotFocus += (_, _) => { focused = true; Paint(); };
-        // LostFocus bubbles while moving between children of the same row.
-        // Inspect the settled focus so the next action remains visible.
-        row.LostFocus += (_, _) => row.DispatcherQueue.TryEnqueue(RefreshFocus);
-        Paint();
+            var binding = new ActionBinding();
+            void Paint()
+            {
+                foreach (var action in binding.Actions) action.Opacity = binding.Pointer || binding.Focused ? 1 : 0;
+            }
+            void RefreshFocus()
+            {
+                binding.Focused = false;
+                if (owner.XamlRoot is not null)
+                    for (var current = FocusManager.GetFocusedElement(owner.XamlRoot) as DependencyObject;
+                        current is not null; current = VisualTreeHelper.GetParent(current))
+                        if (ReferenceEquals(current, owner)) { binding.Focused = true; break; }
+                Paint();
+            }
+            owner.PointerEntered += (_, _) => { binding.Pointer = true; Paint(); };
+            owner.PointerExited += (_, _) => { binding.Pointer = false; RefreshFocus(); };
+            owner.GotFocus += (_, _) => { binding.Focused = true; Paint(); };
+            owner.LostFocus += (_, _) => owner.DispatcherQueue.TryEnqueue(RefreshFocus);
+            return binding;
+        });
+        state.Actions = actions;
+        foreach (var action in state.Actions) action.Opacity = state.Pointer || state.Focused ? 1 : 0;
     }
 
     public static Button RailButton(IconElement icon, string label, RoutedEventHandler click)

@@ -25,6 +25,15 @@ internal sealed class SidebarHoverPresenter
         AppServices.AccountChanged += () =>
         { var previous = _active; previous?._row.DispatcherQueue.TryEnqueue(() => previous.Close()); };
         NavigationRows.Reconciled += (from, to) => Transfer(from, to);
+        NavigationRows.Retiring += row =>
+        {
+            if (Presenters.TryGetValue(row, out var presenter))
+            {
+                presenter.Close();
+                presenter._enabled = false;
+                presenter._content = static _ => Task.FromResult<FrameworkElement>(new Grid());
+            }
+        };
     }
 
     private readonly FrameworkElement _row;
@@ -36,13 +45,14 @@ internal sealed class SidebarHoverPresenter
     private SidebarHoverState _state = new();
     private HoverRect? _cardBounds;
     private bool _explicitOpen;
+    private bool _enabled = true;
     private readonly PointerEventHandler _pressed;
     private readonly PointerEventHandler _wheel;
     private readonly KeyEventHandler _key;
 
     public static void Attach(FrameworkElement row, Func<CancellationToken, Task<FrameworkElement>> content, bool explicitOpen = false)
     {
-        if (Presenters.TryGetValue(row, out var presenter)) { presenter._content = content; presenter._explicitOpen = explicitOpen; }
+        if (Presenters.TryGetValue(row, out var presenter)) { presenter._content = content; presenter._explicitOpen = explicitOpen; presenter._enabled = true; }
         else Presenters.Add(row, new SidebarHoverPresenter(row, content, explicitOpen));
     }
     public static void Transfer(FrameworkElement from, FrameworkElement to)
@@ -104,7 +114,7 @@ internal sealed class SidebarHoverPresenter
 
     private void Begin()
     {
-        if (_popup is not null) return;
+        if (!_enabled || _popup is not null) return;
         CancelPending();
         _pending = new CancellationTokenSource();
         _ = ShowAsync(_pending.Token);
