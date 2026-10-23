@@ -291,6 +291,16 @@ final class TeamStore {
         await bind(to: owner, refresh: true)
         await refreshSelected()
     }
+    /// Recovery is scoped to the saved person's original resource, independent
+    /// of the currently selected project or an unavailable directory. The host
+    /// still checks current authority. This path cannot request a new review.
+    func recoverAsk(origin: String, person: String, target: JSONValue, owner: TeamAccountOwner, method: String, input: [String: JSONValue]) async throws -> JSONValue {
+        guard self.owner == owner, localDraftPersonId == person, owner.scope.origin == origin,
+              ["team.chat.ask", "team.chat.ask.status", "team.chat.ask.stop"].contains(method) else { throw CancellationError() }
+        let result: JSONValue = try await api.request(.ask, ["target": target, "method": .string(method), "params": .object(input)], owner: owner)
+        guard self.owner == owner, localDraftPersonId == person else { throw CancellationError() }
+        return result
+    }
     func loadMoreOrganizations() async {
         guard let owner, let offset = organizationsNextOffset, !isRefreshing else { return }
         let revision = loadRevision; isRefreshing = true

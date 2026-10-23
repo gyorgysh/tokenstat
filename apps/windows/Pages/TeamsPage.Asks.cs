@@ -16,7 +16,7 @@ internal sealed partial class TeamsPage
         "agent_runs_off" => L10n.Text("common.teams.agent_runs_off", computer),
         _ => value,
     };
-    private async Task<TeamAskModel?> AskModelAsync(JsonObject target)
+    private async Task<TeamAskModel?> AskModelAsync(JsonObject target, string title, string computer)
     {
         var checkout = (JsonObject)target.DeepClone(); checkout.Remove("share");
         var host = _checkoutHosts.GetValueOrDefault(checkout.ToJsonString());
@@ -35,7 +35,10 @@ internal sealed partial class TeamsPage
                 }); }
                 catch (HostException failure) when (method == "team.chat.ask" && failure.Code is "team_run_review_changed" or "invalid_ask") { throw new TeamAskNotAccepted(failure.Message); }
             }
-            _asks[binding] = model = new(_askStorage, binding, "", Current, BoundCall);
+            static string Label(string value) => string.Concat(value.EnumerateRunes().Take(160)
+                .Where(r => System.Text.Rune.GetUnicodeCategory(r) != System.Globalization.UnicodeCategory.Format)
+                .Select(r => System.Text.Rune.IsControl(r) ? " " : r.ToString()));
+            _asks[binding] = model = new(_askStorage, binding, Label(title) + " · " + Label(computer), Current, BoundCall);
         }
         await model.RestoreAsync(); return model;
     }

@@ -56,16 +56,33 @@ enum TeamAskRecoveryFailure: LocalizedError {
 actor TeamAskRecoveryStore {
     static let shared = TeamAskRecoveryStore()
     struct Snapshot: Sendable { let saved: TeamCommentDraft; let record: TeamAskRecord }
+    struct Entry: Identifiable, Sendable { let id: String; let target: TeamCommentTarget; let snapshot: Snapshot }
+    struct Page: Sendable { let entries: [Entry]; let next: String?; let unreadable: Bool }
     private let files: TeamCommentDraftStore
     init(directory: URL? = nil) {
         files = TeamCommentDraftStore(directory: directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("tokenstat-team-asks", isDirectory: true))
     }
     func load(_ target: TeamCommentTarget) async throws -> Snapshot? {
         guard let saved = try await files.load(target) else { return nil }
+        return try Self.decode(saved)
+    }
+    private static func decode(_ saved: TeamCommentDraft) throws -> Snapshot {
         guard saved.attempt == nil else { throw TeamAskRecoveryFailure.unavailable }
         let record = try JSONDecoder().decode(TeamAskRecord.self, from: Data(saved.text.utf8))
         try record.validate()
         return Snapshot(saved: saved, record: record)
+    }
+    func list(origin: String, person: String, after: String? = nil) async throws -> Page {
+        let page = try await files.list(origin: origin, person: person, after: after)
+        var entries: [Entry] = [], unreadable = page.unreadable
+        for entry in page.entries {
+            do {
+                guard let saved = entry.draft else { throw TeamAskRecoveryFailure.unavailable }
+                entries.append(Entry(id: entry.id, target: entry.target, snapshot: try Self.decode(saved)))
+                if entry.unsaved != nil { unreadable = true }
+            } catch { unreadable = true }
+        }
+        return Page(entries: entries, next: page.next, unreadable: unreadable)
     }
     func replace(_ target: TeamCommentTarget, record: TeamAskRecord?, expected: Snapshot?, location: TeamCommentLocation? = nil) async throws -> Snapshot? {
         try record?.validate()

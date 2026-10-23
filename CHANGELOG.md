@@ -39,6 +39,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Android's Shared projects browser finds assigned projects across teams, retains later pages through offline retries, and opens chats from all teammates. Team selection stays available when more teams exist on another page.
 - Retrying a Team Ask after a lost reply keeps the original request and recovers Stop for the same run. Apple, Android and Windows clients retain that request and run through navigation and app restarts. Windows rejects replies from a screen that has already closed.
 - Stop remains available when shared history or the agent's status cannot be confirmed. Android also reports failed Stop requests so they can be retried.
+- Saved agent requests can be found outside their original project on Apple, Android and Windows, including during directory outages. Recover the original request or Stop without creating another attempt; unreadable saved requests remain on the device.
 - Read-only repository members are no longer offered Ask in shared chats.
 - Repository checks run under process supervision and recheck permission before landing. Stopped checks cannot push, interrupted recovery can be retried, and automatic catch-up preserves untracked and ignored files.
 

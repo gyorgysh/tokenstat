@@ -71,7 +71,25 @@ internal static class TeamAskTests
             Check(!refused.Pending && refused.Text == "Keep the refused words" && new TeamAskRecoveryStore(root).Load(refusedTarget) is null, "A definite validation refusal trapped the Ask");
             var wrongReceipt = new JsonObject { ["receipt"] = new JsonObject { ["shareId"] = "other-share", ["clientMessageId"] = original!["clientMessageId"]!.DeepClone(), ["state"] = "succeeded", ["runId"] = fence["runId"]!.DeepClone() } };
             Check(!new TeamAskRecord(original!).Terminal(wrongReceipt, target.Share), "A different chat's receipt retired saved work");
-            Console.WriteLine("Team Ask durable recovery: original requests, Stop, CAS, account scope and corruption pass.");
+            var discovery = new TeamAskRecoveryStore(Path.Combine(root, "discovery"));
+            var record = new TeamAskRecord((JsonObject)original!.DeepClone(), fence);
+            for (var n = 0; n < 45; n++) discovery.Replace(target with { Share = "share-" + n }, record, null, "Fictional project " + n);
+            discovery.Replace(target with { Person = "foreign-person" }, record, null, "Foreign request");
+            discovery.Replace(target with { Origin = "https://another.example.test" }, record, null, "Foreign origin");
+            var malformed = target with { Share = "malformed" };
+            var files = new TeamCommentDraftStore(Path.Combine(root, "discovery")); files.Save(malformed, "{}", null, "Unreadable request");
+            var entries = new List<TeamAskRecoveryStore.Entry>(); string? cursor = null; var unreadable = false;
+            do
+            {
+                var page = discovery.List(target.Origin, target.Person, cursor);
+                Check(page.Entries.Count <= 40, "Ask discovery opened an unbounded page");
+                entries.AddRange(page.Entries); cursor = page.Next; unreadable |= page.Unreadable;
+            } while (cursor is not null);
+            Check(entries.Count == 45 && entries.Select(e => e.Target).Distinct().Count() == 45
+                && entries.All(e => e.Target.Person == target.Person && e.Target.Origin == target.Origin && JsonNode.DeepEquals(e.Snapshot.Record.Fence, fence)), "Ask discovery crossed people/origins, lost a fence or skipped a page");
+            Check(unreadable && files.Load(malformed)!.Text == "{}", "Malformed Ask discovery silently removed recovery");
+            Check(discovery.List(target.Origin, "foreign-person").Entries.Single().Snapshot.Saved.Label == "Foreign request", "Other account's recovery was removed");
+            Console.WriteLine("Team Ask durable recovery: original requests, Stop, CAS, account scope, bounded discovery and corruption pass.");
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

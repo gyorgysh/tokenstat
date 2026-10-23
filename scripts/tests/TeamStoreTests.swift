@@ -69,6 +69,7 @@ private actor Fixture {
                 "phase": .string("active"), "revision": .int(1), "accountCleanupPending": .bool(false)])
             return .object(["publications": .array([row]), "nextOffset": later ? .null : .int(100)])
         case "members.remove": return .object(["removed":.bool(true)])
+        case "teams.ask": return params
         default: fatalError("Unexpected fixture operation: \(operation)")
         }
     }
@@ -101,6 +102,7 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         try await authorizationRevokedDuringWrite()
         try await authorityLossRetiresPendingReadsAndOldForms()
         try await offlineDraftOwnership()
+        try await savedAskWithoutDirectory()
         await sharedProjectDiscovery()
         await lateSharedProjectAccountResponse()
         await staleSharedProjectNavigation()
@@ -163,6 +165,32 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         await fixture.release(key, value: .object(["repositories": .array([]), "nextOffset": .null]))
         let opened = await pending.value
         check(!opened && store.selectedOrganizationId == "org_a" && store.focusedProject == nil, "A slow folder lookup replaced the user's later team selection")
+    }
+    @MainActor static func savedAskWithoutDirectory() async throws {
+        let fixture = Fixture(), store = TeamStore(api: await fixture.api())
+        let account = TeamAccountOwner(scope: owner("alpha").scope, generation: 1, session: "fixture-alpha", personId: "fixture-owner")
+        await fixture.fail("capabilities", code: "teams_unreachable")
+        await store.bind(to: account)
+        check(store.phase == .failed && store.localDraftPersonId == "fixture-owner", "Outage hid local Ask recovery")
+        let target = JSONValue.object(["organization":.string("org_removed"), "repository":.string("repo_removed"), "checkout":.string("checkout_original"), "share":.string("share_original")])
+        let input: [String: JSONValue] = ["fence":.object(["runId":.string("run_original"), "incarnation":.string("original")])]
+        let response = try await store.recoverAsk(origin: account.scope.origin, person: "fixture-owner", target: target, owner: account, method: "team.chat.ask.status", input: input)
+        check(response == .object(["target":target, "method":.string("team.chat.ask.status"), "params":.object(input)]), "Global recovery changed original resource or fence")
+        let before = await fixture.calls.count
+        for (origin, person, method) in [(account.scope.origin, "other-person", "team.chat.ask"), ("https://other.example.test", "fixture-owner", "team.chat.ask"), (account.scope.origin, "fixture-owner", "team.chat.ask.review")] {
+            do {
+                _ = try await store.recoverAsk(origin: origin, person: person, target: target, owner: account, method: method, input: input)
+                preconditionFailure("Recovery crossed accounts or requested a new review")
+            } catch is CancellationError { }
+        }
+        let after = await fixture.calls.count
+        check(before == after, "Invalid recovery made a host request")
+        await fixture.delay("alpha|teams.ask|")
+        let pending = Task { try await store.recoverAsk(origin: account.scope.origin, person: "fixture-owner", target: target, owner: account, method: "team.chat.ask.status", input: input) }
+        await waitFor("alpha|teams.ask|", fixture: fixture)
+        await store.bind(to: owner("beta"))
+        await fixture.release("alpha|teams.ask|", value: .object(["running":.bool(false)]))
+        do { _ = try await pending.value; preconditionFailure("An old login's recovered result reached the new account") } catch is CancellationError { }
     }
     @MainActor static func offlineDraftOwnership() async throws {
         let fixture = Fixture(), store = TeamStore(api: await fixture.api())

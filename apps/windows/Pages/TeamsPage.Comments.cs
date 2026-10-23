@@ -26,6 +26,8 @@ internal sealed partial class TeamsPage
         if (origin.Length == 0 || string.IsNullOrEmpty(person)) return;
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.comment_drafts"), ActionIcon.History,
             async (_, _) => await ShowDraftsAsync(origin, person)));
+        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.saved_asks"), ActionIcon.Restore,
+            async (_, _) => await ShowSavedAsksAsync(origin, person)));
     }
     private async Task AddCommentComposerAsync(JsonObject target, string title, string computer, int view)
     {

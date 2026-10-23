@@ -82,6 +82,9 @@ def main():
         uuid.UUID(created)
         owned_device = created
         subprocess.run(["xcrun", "simctl", "boot", owned_device], check=True, timeout=60)
+        # A boot request returns before SpringBoard and app launch services
+        # are ready. Wait for this owned device instead of racing first launch.
+        subprocess.run(["xcrun", "simctl", "bootstatus", owned_device, "-b"], check=True, timeout=240)
         subprocess.run(["xcodegen", "generate", "--spec", "scripts/qa/teams/project.yml"], cwd=ROOT, check=True, timeout=60)
         print(f"Testing fictional Teams views on {selected['name']} / iOS {selected['version']}", flush=True)
         with (result_root / "build.log").open("w") as log:
@@ -89,7 +92,7 @@ def main():
                 "xcodebuild", "-project", "scripts/qa/teams/TeamUIFixture.xcodeproj", "-scheme", "TeamUIFixture",
                 "-configuration", "Debug", "-destination", "platform=iOS Simulator,id=" + owned_device,
                 "-derivedDataPath", str(result_root / "DerivedData"), "-resultBundlePath", str(bundle),
-                "-parallel-testing-enabled", "NO", "CODE_SIGNING_ALLOWED=NO", "test",
+                "-parallel-testing-enabled", "NO", "-jobs", "2", "CODE_SIGNING_ALLOWED=NO", "test",
                 *["-only-testing:TeamFixtureUITests/TeamFixtureUITests/" + name for name in args.only_test],
             ], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=1800)
         if result.returncode:
@@ -97,7 +100,7 @@ def main():
             return result.returncode
         summary = json.loads(output("xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(bundle), "--compact"))
         (result_root / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-        required = len(args.only_test) if args.only_test else 16
+        required = len(args.only_test) if args.only_test else 20
         if summary.get("result") != "Passed" or summary.get("passedTests", 0) < required or summary.get("skippedTests", 0):
             raise RuntimeError("Teams UI checks did not run and pass every required scenario.")
         print(f"Teams UI: {summary['passedTests']} passed. Results: {bundle}")

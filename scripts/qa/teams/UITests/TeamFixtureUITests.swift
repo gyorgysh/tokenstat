@@ -209,6 +209,27 @@ final class TeamFixtureUITests: XCTestCase {
         XCTAssertTrue(send.waitForExistence(timeout: 10))
         capture(app, "Lost Ask reply recovered without another run")
     }
+    func testSavedAskRecoveryDoesNotRequireTheOriginalProject() {
+        let app = launch("askUncertain")
+        openSharedChat(app)
+        let input = app.descendants(matching: .any)["team.ask.text"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5)); input.tap(); input.typeText("A fictional recovery request")
+        app.buttons["team.ask.send"].tap()
+        XCTAssertTrue(app.staticTexts["The fictional Ask reply was interrupted after acceptance."].waitForExistence(timeout: 5))
+        app.buttons["team.chat.back"].tap()
+        app.buttons["Fixture"].tap(); app.buttons["Personal"].tap()
+        let saved = app.buttons["team.asks.open"]
+        XCTAssertTrue(saved.waitForExistence(timeout: 5)); saved.tap()
+        XCTAssertTrue(app.staticTexts["A fictional recovery request"].waitForExistence(timeout: 5))
+        let recover = app.buttons["Recover request"]
+        reveal(recover, in: app); recover.tap()
+        let retry = app.buttons["team.ask.send"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 5)); reveal(retry, in: app); retry.tap()
+        let stop = app.buttons["team.ask.stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5)); reveal(stop, in: app); stop.tap()
+        XCTAssertTrue(app.staticTexts["This request has no pending run."].waitForExistence(timeout: 10))
+        capture(app, "Saved request recovered outside its project")
+    }
     func testUncertainCommentSurvivesNavigationAndChecksReceiptWithLargeText() { commentScenario(uncertain: true, largeText: true) }
     func testViewerDoesNotHaveACommentComposer() {
         let app = launch("commentViewer")

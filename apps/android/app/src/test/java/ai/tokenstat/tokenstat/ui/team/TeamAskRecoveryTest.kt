@@ -11,6 +11,31 @@ import org.junit.Test
 class TeamAskRecoveryTest {
     private val target = TeamCommentTarget("https://fixture.invalid", "person-fixture", "org-fixture", "repo-fixture", "checkout-fixture", "share-fixture", "a".repeat(64))
     private val fence = buildJsonObject { put("runId", "run_" + "a".repeat(32)); put("incarnation", "b".repeat(64)) }
+    @Test fun localDiscoveryPagesOnlyThisAccountAndPreservesMalformedRequests() {
+        val root = Files.createTempDirectory("team-ask-list").toFile()
+        try {
+            val storage = TeamAskRecoveryStore(root)
+            val record = TeamAskRecord(buildJsonObject {
+                put("text", "Fictional request"); put("review", "c".repeat(64)); put("clientMessageId", java.util.UUID.randomUUID().toString()); put("clientMessageCreatedAtMs", 1)
+            }, fence)
+            repeat(45) { n -> storage.replace(target.copy(share = "share-$n"), record, null, "Fictional project $n") }
+            storage.replace(target.copy(person = "another-person"), record.copy(input = JsonObject(record.input + ("text" to JsonPrimitive("Foreign request")))), null)
+            storage.replace(target.copy(origin = "https://another.invalid"), record, null)
+            val malformed = target.copy(share = "malformed")
+            val files = TeamCommentDraftStore(root); files.save(malformed, "{}", null, "Unreadable request")
+            val entries = mutableListOf<TeamAskRecoveryStore.Entry>(); var cursor: String? = null; var unreadable = false
+            do {
+                val page = storage.list(target.origin, target.person, cursor)
+                assertTrue(page.entries.size <= 40)
+                entries += page.entries; unreadable = unreadable || page.unreadable; cursor = page.next
+            } while (cursor != null)
+            assertEquals(45, entries.size); assertEquals(45, entries.map { it.target }.toSet().size)
+            assertTrue(entries.all { it.target.origin == target.origin && it.target.person == target.person && it.snapshot.record.fence == fence })
+            assertTrue(entries.all { it.snapshot.saved.label.startsWith("Fictional project") })
+            assertTrue(unreadable); assertEquals("{}", files.load(malformed)!!.text)
+            assertEquals("Foreign request", storage.list(target.origin, "another-person").entries.single().snapshot.record.text)
+        } finally { root.deleteRecursively() }
+    }
     @Test fun lostReplyAndRunningControlSurviveNewStoresWithoutResendingOnRestore() = runTest {
         val root = Files.createTempDirectory("team-ask-recovery").toFile()
         try {

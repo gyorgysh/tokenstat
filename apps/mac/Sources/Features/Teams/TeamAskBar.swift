@@ -10,6 +10,11 @@ struct TeamAskBar: View {
     let allowsAgentRuns: Bool
     let refresh: () -> Void
 
+    init(model: TeamAskModel, computer: String, refresh: @escaping () -> Void) {
+        self.computer = computer; allowsAgentRuns = false; self.refresh = refresh
+        _model = State(initialValue: model)
+    }
+
     init(store: TeamStore, context: TeamMutationContext, target: TeamCommentTarget, computer: String, allowsAgentRuns: Bool,
          storage: TeamAskRecoveryStore, location: TeamCommentLocation, refresh: @escaping () -> Void) {
         self.computer = computer; self.allowsAgentRuns = allowsAgentRuns; self.refresh = refresh

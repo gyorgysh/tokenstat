@@ -11,7 +11,9 @@ struct TeamManagementView: View {
     @State private var selectedMemberId: String?
     @State private var readingSharedChat = false
     @State private var showingDrafts = false
+    @State private var showingSavedAsks = false
     @Environment(\.teamCommentDraftStorage) private var commentStorage
+    @Environment(\.teamAskRecoveryStorage) private var askStorage
     @Environment(\.dynamicTypeSize) private var textSize
     private var compactReader: Bool {
         #if os(iOS)
@@ -44,7 +46,7 @@ struct TeamManagementView: View {
         .background(Theme.background)
         .navigationTitle(store.selectedOrganization?.name ?? L10n.text("common.teams.title"))
         .onPreferenceChange(TeamChatReadingKey.self) { readingSharedChat = $0 }
-        .onChange(of: store.owner) { showingDrafts = false }
+        .onChange(of: store.owner) { showingDrafts = false; showingSavedAsks = false }
         #if os(iOS)
         .navigationBarTitleDisplayMode(compactReader ? .inline : .large)
         #endif
@@ -68,6 +70,17 @@ struct TeamManagementView: View {
                     #endif
             }
         }
+        .sheet(isPresented: $showingSavedAsks) {
+            if let owner = store.owner, let person = store.localDraftPersonId {
+                TeamAskRecoveryView(store: store, owner: owner, person: person, storage: askStorage)
+                    .dynamicTypeSize(textSize)
+                    #if os(macOS)
+                    .frame(width: 640, height: 620)
+                    #else
+                    .presentationDetents([.large]).presentationDragIndicator(.visible)
+                    #endif
+            }
+        }
         .onChange(of: store.selectionKey) { query = ""; sheet = nil }
         .onChange(of: store.phase) {
             if store.phase == .ready { if case .authorize? = sheet { sheet = nil } }
@@ -83,8 +96,12 @@ struct TeamManagementView: View {
         #endif
     }
     private var draftsButton: some View {
-        Button(L10n.text("common.teams.comment_drafts"), systemImage: "square.and.pencil") { showingDrafts = true }
-            .accessibilityIdentifier("team.drafts.open")
+        HStack(spacing: Theme.Space.s) {
+            Button(L10n.text("common.teams.comment_drafts"), systemImage: "square.and.pencil") { showingDrafts = true }
+                .accessibilityIdentifier("team.drafts.open")
+            Button(L10n.text("common.teams.saved_asks"), systemImage: "clock.arrow.circlepath") { showingSavedAsks = true }
+                .labelStyle(.iconOnly).accessibilityIdentifier("team.asks.open")
+        }
     }
     @ViewBuilder private var content: some View {
         switch store.phase {

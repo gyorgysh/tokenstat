@@ -102,8 +102,12 @@ internal static class TeamPublisherSmoke
             await Wait(page, () => Descendants(page).OfType<ComboBox>().Any(), "Workflow settings missing");
             Descendants(page).OfType<ComboBox>().Single().SelectedIndex = 2;
             var check = Descendants(page).OfType<TextBox>().Single(text => (string?)text.Header == L10n.Text("common.teams.check_command")); check.Text = "fictional-check --test";
+            // WinUI dispatches programmatic TextChanged/SelectionChanged after
+            // the property setters return, as separate routed UI events.
+            await Wait(page, () => !Find(page, L10n.Text("common.save"))!.IsEnabled, "Changed-code checks did not require disclosure after their edit event");
             if (Find(page, L10n.Text("common.save"))!.IsEnabled) throw new Exception("Checks on changed code skipped disclosure");
             Descendants(page).OfType<CheckBox>().Single(box => (string?)box.Content == L10n.Text("common.teams.check_confirm")).IsChecked = true;
+            await Wait(page, () => Find(page, L10n.Text("common.save"))!.IsEnabled, "Reviewed changed-code check could not be saved");
             await Click(page, L10n.Text("common.save"));
             await Wait(page, () => writes.Any(row => row["settings"] is not null), "Workflow setting not saved");
             await Click(page, L10n.Text("common.teams.agent_runs"));

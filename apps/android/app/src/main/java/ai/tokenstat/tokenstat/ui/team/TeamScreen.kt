@@ -130,6 +130,7 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
     var organization by remember(identity) { mutableStateOf<JsonObject?>(null) }
     var chat by remember(identity) { mutableStateOf<ChatTarget?>(null) }
     var drafts by remember(identity) { mutableStateOf(false) }
+    var savedAsks by remember(identity) { mutableStateOf(false) }
     var management by remember(identity) { mutableStateOf<JsonObject?>(null) }
     var creatingOrganization by remember(identity) { mutableStateOf(false) }
     var showingInbox by remember(identity) { mutableStateOf(false) }
@@ -138,6 +139,7 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
     val projects = remember(calls) { TeamProjectsModel(calls) }
     val context = LocalContext.current.applicationContext
     val draftStorage = remember(context) { TeamCommentDraftStore.shared(java.io.File(context.filesDir, "team-comment-drafts")) }
+    val askStorage = remember(context) { TeamAskRecoveryStore(java.io.File(context.filesDir, "team-ask-recovery")) }
 
     suspend fun load() {
         phase = Phase.Loading
@@ -210,6 +212,10 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
         TeamCommentRecoveryList(draftStorage, calls.origin, calls.person, onBack = { drafts = false })
         return
     }
+    if (savedAsks) {
+        key(identity) { TeamAskRecoveryList(askStorage, calls, onBack = { savedAsks = false }) }
+        return
+    }
     val current = chat
     if (current != null) {
         TeamChatReader(calls, current, draftStorage, onBack = { chat = null })
@@ -237,6 +243,8 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
             color = LocalTsColors.current.textPrimary, modifier = Modifier.padding(top = 16.dp))
         if (calls.origin != null && calls.person != null) TsSecondaryButton(L10n.text("common.teams.comment_drafts"),
             icon = ActionIcon.History.vector, onClick = { drafts = true })
+        if (calls.origin != null && calls.person != null) TsSecondaryButton(L10n.text("common.teams.saved_asks"),
+            icon = ActionIcon.Restore.vector, onClick = { savedAsks = true })
         when (val state = phase) {
             Phase.Loading -> CircularProgressIndicator()
             Phase.Unavailable -> EmptyState(title = L10n.text("common.teams.load_failed"), message = L10n.text("common.teams.retry_detail"))
@@ -699,7 +707,7 @@ internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Te
     }
 }
 
-private fun askMessage(value: String, computer: String): String = when (value) {
+internal fun askMessage(value: String, computer: String): String = when (value) {
     "ask_save_failed" -> L10n.text("common.teams.ask_save_failed")
     "ask_unconfirmed" -> L10n.text("common.teams.ask_unconfirmed")
     "run_status_unconfirmed" -> L10n.text("common.teams.run_status_unconfirmed")

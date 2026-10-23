@@ -45,6 +45,7 @@
     <Compile Include="../../../apps/windows/Pages/TeamAskRecovery.cs" Link="TeamAskRecovery.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamAskModel.cs" Link="TeamAskModel.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamsPage.Asks.cs" Link="TeamsPage.Asks.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamsPage.AskRecovery.cs" Link="TeamsPage.AskRecovery.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamCommentModel.cs" Link="TeamCommentModel.cs" />
     <Compile Include="../windows-chat/TeamCommentTests.cs" Link="TeamCommentTests.cs" />
     <Compile Include="../windows-chat/TeamAskTests.cs" Link="TeamAskTests.cs" />

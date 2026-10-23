@@ -506,7 +506,7 @@ internal sealed partial class TeamsPage : Page
         var previous = _historyTarget == targetKey ? _history : new TeamHistoryWindow([]);
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => await LoadAsync()));
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => await ShowChatAsync(target, title, computer)));
-        var askModel = await AskModelAsync(target);
+        var askModel = await AskModelAsync(target, title, computer);
         if (!IsLoaded || _view != view) return false;
         (StackPanel Panel, Action<bool> Allow)? askControls = askModel is null ? null : AskControls(askModel, target, title, computer, view);
         if (askControls is { } initial) _body.Children.Add(initial.Panel);

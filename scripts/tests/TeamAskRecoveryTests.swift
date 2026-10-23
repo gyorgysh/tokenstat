@@ -109,6 +109,32 @@ import Foundation
         let record = try TeamAskRecord(input: refusedAPI.first!)
         let otherReceipt = JSONValue.object(["receipt": .object(["shareId": .string("other-share"), "clientMessageId": record.input["clientMessageId"]!, "state": .string("succeeded"), "runId": .string("run_" + String(repeating: "a", count: 32))])])
         expect(!record.terminal(otherReceipt, share: refusedAPI.target.share), "A different chat's receipt retired the Ask")
-        print("Team Ask durable recovery tests passed")
+        let discoveryRoot = root.appendingPathComponent("discovery")
+        let discovery = TeamAskRecoveryStore(directory: discoveryRoot)
+        func discoveryTarget(_ share: String, person: String? = nil, origin: String? = nil) -> TeamCommentTarget {
+            .init(origin: origin ?? api.target.origin, person: person ?? api.target.person, organization: api.target.organization,
+                  repository: api.target.repository, checkout: api.target.checkout, share: share, host: api.target.host)
+        }
+        let runningRecord = try TeamAskRecord(input: record.input, fence: api.running)
+        for n in 0..<45 {
+            _ = try await discovery.replace(discoveryTarget("share-\(n)"), record: runningRecord, expected: nil,
+                location: TeamCommentLocation(organization: "Example team", repository: "Example project", chat: "Fictional request \(n)", computer: "Example computer"))
+        }
+        _ = try await discovery.replace(discoveryTarget("foreign", person: "foreign-person"), record: runningRecord, expected: nil)
+        _ = try await discovery.replace(discoveryTarget("foreign", origin: "https://another.example.test"), record: runningRecord, expected: nil)
+        let malformed = discoveryTarget("malformed"), discoveryFiles = TeamCommentDraftStore(directory: discoveryRoot)
+        _ = try await discoveryFiles.save(malformed, text: "{}", expected: nil)
+        var entries: [TeamAskRecoveryStore.Entry] = [], cursor: String?, unreadable = false
+        repeat {
+            let page = try await discovery.list(origin: api.target.origin, person: api.target.person, after: cursor)
+            expect(page.entries.count <= 40, "Ask discovery opened an unbounded page")
+            entries += page.entries; cursor = page.next; unreadable = unreadable || page.unreadable
+        } while cursor != nil
+        expect(entries.count == 45 && Set(entries.map(\.target)).count == 45, "Ask discovery skipped or duplicated a page")
+        expect(entries.allSatisfy { $0.target.origin == api.target.origin && $0.target.person == api.target.person && $0.snapshot.record.fence == api.running }, "Ask discovery crossed accounts or lost Stop")
+        let retainedMalformed = try await discoveryFiles.load(malformed)
+        expect(unreadable && retainedMalformed?.text == "{}", "Malformed discovery removed saved work")
+        expect(try await discovery.list(origin: api.target.origin, person: "foreign-person").entries.count == 1, "Foreign recovery was removed")
+        print("Team Ask durable recovery and bounded account-local discovery tests passed")
     }
 }

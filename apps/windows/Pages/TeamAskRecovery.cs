@@ -33,17 +33,38 @@ internal sealed class TeamAskRecoveryStore(string directory)
 {
     internal static readonly TeamAskRecoveryStore Shared = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "team-asks"));
     internal sealed record Snapshot(TeamCommentDraft Saved, TeamAskRecord Record);
+    internal sealed record Entry(TeamCommentTarget Target, Snapshot Snapshot);
+    internal sealed record Page(IReadOnlyList<Entry> Entries, string? Next, bool Unreadable);
     private readonly TeamCommentDraftStore _files = new(directory);
     internal Snapshot? Load(TeamCommentTarget target)
     {
         var saved = _files.Load(target);
-        if (saved is null) return null;
+        return saved is null ? null : Decode(saved);
+    }
+    private static Snapshot Decode(TeamCommentDraft saved)
+    {
         if (saved.Attempt is not null) throw new InvalidDataException("ask_save_failed");
         var value = JsonNode.Parse(saved.Text) as JsonObject ?? throw new InvalidDataException("ask_save_failed");
         if (value["version"]?.GetValue<int>() != 1 || value["input"] is not JsonObject input || value["fence"] is not null and not JsonObject)
             throw new InvalidDataException("ask_save_failed");
         var record = new TeamAskRecord(input, value["fence"] as JsonObject); record.Validate();
         return new(saved, record);
+    }
+    internal Page List(string origin, string person, string? after = null)
+    {
+        var page = _files.List(origin, person, after);
+        var entries = new List<Entry>(); var unreadable = page.Unreadable;
+        foreach (var entry in page.Entries)
+        {
+            try
+            {
+                if (entry.Draft is not { } draft) throw new InvalidDataException();
+                entries.Add(new(entry.Target, Decode(draft)));
+                unreadable |= entry.Unsaved is not null;
+            }
+            catch { unreadable = true; }
+        }
+        return new(entries, page.Next, unreadable);
     }
     internal Snapshot? Replace(TeamCommentTarget target, TeamAskRecord? record, Snapshot? expected, string label = "")
     {

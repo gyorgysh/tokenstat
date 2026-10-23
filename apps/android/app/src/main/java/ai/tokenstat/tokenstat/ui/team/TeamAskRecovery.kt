@@ -32,15 +32,32 @@ internal data class TeamAskRecord(val input: JsonObject, val fence: JsonObject? 
  * never enter the Comment queue and are never replayed just by opening a chat. */
 internal class TeamAskRecoveryStore(directory: File) {
     data class Snapshot(val saved: TeamCommentDraft, val record: TeamAskRecord)
+    data class Entry(val target: TeamCommentTarget, val snapshot: Snapshot)
+    data class Page(val entries: List<Entry>, val next: String?, val unreadable: Boolean)
     private val files = TeamCommentDraftStore(directory)
     fun load(target: TeamCommentTarget): Snapshot? {
         val saved = files.load(target) ?: return null
+        return decode(saved)
+    }
+    private fun decode(saved: TeamCommentDraft): Snapshot {
         require(saved.attempt == null)
         val value = Json.parseToJsonElement(saved.text).jsonObject
         require(value["version"] == JsonPrimitive(1))
         val record = TeamAskRecord(value["input"]!!.jsonObject, value["fence"]?.takeUnless { it == JsonNull }?.jsonObject)
         record.validate()
         return Snapshot(saved, record)
+    }
+    fun list(origin: String, person: String, after: String? = null): Page {
+        val page = files.list(origin, person, after)
+        var unreadable = page.unreadable
+        val entries = page.entries.mapNotNull { entry ->
+            try {
+                val saved = entry.draft ?: error("ask_save_failed")
+                if (entry.unsaved != null) unreadable = true
+                Entry(entry.target, decode(saved))
+            } catch (_: Exception) { unreadable = true; null }
+        }
+        return Page(entries, page.next, unreadable)
     }
     fun replace(target: TeamCommentTarget, record: TeamAskRecord?, expected: Snapshot?, label: String = ""): Snapshot? {
         record?.validate()

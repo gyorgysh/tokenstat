@@ -132,6 +132,7 @@ public sealed partial class SmokeApp : Application
                 Program.Log("PASS: Teams comments persist exact attempts and protect local recovery on Windows");
                 TeamTranscriptSmoke.Run(body);
                 await TeamsPageSmoke.RunAsync(body);
+                await TeamAskDiscoverySmoke.RunAsync(body);
                 await TeamManagementSmoke.RunAsync(body);
                 await TeamPublisherSmoke.RunAsync(body);
                 await TeamFolderShareSmoke.RunAsync(body);
