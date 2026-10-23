@@ -69,30 +69,13 @@ pub(super) fn new_chat(
     principal: &AuthorizedTeamPrincipal,
     params: &str,
 ) -> Result<Value, DispatchError> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Input {
-        title: String,
-        request_id: String,
-    }
     if !execution_ready() {
         return Err(DispatchError::new(
             "team_agent_runs_unavailable",
             "Agent runs are not available in shared chats yet.",
         ));
     }
-    if params.len() > 2048 {
-        return Err(invalid());
-    }
-    let input: Input = serde_json::from_str(params).map_err(|_| invalid())?;
-    let title = input.title.trim();
-    if title.is_empty()
-        || title.chars().count() > 120
-        || title.chars().any(char::is_control)
-        || !crate::chat_receipts::valid_id(&input.request_id)
-    {
-        return Err(invalid());
-    }
+    let input = super::chats::new_chat_input(params)?;
     principal.new_chat_ticket()?;
     let scope = principal.value();
     let owner = crate::account_session::AccountSnapshot::capture().map_err(|_| unavailable())?;
@@ -112,7 +95,7 @@ pub(super) fn new_chat(
             organization: &scope.organization_id,
             repository: &scope.repository_id,
             checkout: &scope.checkout_id,
-            title,
+            title: &input.title,
             request_id: &input.request_id,
             person: &scope.person.id,
         },
@@ -146,6 +129,12 @@ mod tests {
         })).unwrap());
         assert_eq!(
             send(&p, "{}").unwrap_err().code,
+            "team_agent_runs_unavailable"
+        );
+        assert_eq!(
+            new_chat(&p, r#"{"title":"Fictional","requestId":"new-fixture"}"#)
+                .unwrap_err()
+                .code,
             "team_agent_runs_unavailable"
         );
     }

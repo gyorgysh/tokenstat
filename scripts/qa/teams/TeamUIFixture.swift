@@ -40,7 +40,7 @@ import AppKit
                 Text("Example repositories").font(Theme.callout).foregroundStyle(.secondary).padding(Theme.Space.m)
                 Label("Website", systemImage: "folder").font(Theme.body).padding(Theme.Space.m)
                 Label("iOS app", systemImage: "folder").font(Theme.body).padding(Theme.Space.m)
-                TeamSidebarLinks(store: store, isTeamSelected: true, open: { store.show($0) }, openProjects: { store.showProjects() })
+                TeamSidebarLinks(store: store, isTeamSelected: true, open: { store.show($0) })
                 Spacer()
                 ZStack {
                     HStack { Text("Example owner"); Spacer(); Image(systemName: "chevron.up.chevron.down") }.font(Theme.body).padding(Theme.Space.m)

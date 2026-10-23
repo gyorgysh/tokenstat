@@ -169,6 +169,20 @@ pub(super) fn ask(
     owner
         .ensure_current()
         .map_err(|_| api_error(TeamError::AccountChanged))?;
+    #[cfg(feature = "local-host")]
+    if request.method == TeamAskMethod::New
+        && let Some(value) = super::chats::start_for_owner(
+            owner,
+            &client,
+            &request.target.organization,
+            &request.target.repository,
+            &request.target.checkout,
+            &serde_json::to_string(&request.params)
+                .map_err(|_| api_error(TeamError::InvalidRequest))?,
+        )?
+    {
+        return Ok(value);
+    }
     let identity = tokenstat_identity::MachineIdentity::load()
         .map_err(|_| ended())?
         .ok_or_else(ended)?;

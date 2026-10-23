@@ -358,9 +358,6 @@ struct ClientSidebarRoot: View {
                 TeamSidebarLinks(store: teams, isTeamSelected: navigation.destination == .team, open: { section in
                     teams.show(section); navigation.chooseNavigation(); navigation.restoredRoute = nil
                     navigation.destination = .team; navigation.folderID = nil
-                }, openProjects: {
-                    teams.showProjects(); navigation.chooseNavigation(); navigation.restoredRoute = nil
-                    navigation.destination = .team; navigation.folderID = nil
                 }).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
             }
         }

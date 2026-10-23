@@ -27,6 +27,7 @@ struct TeamManagementView: View {
         VStack(spacing: 0) {
             #if os(macOS)
             DetailChromeBar {
+                if store.phase == .ready && !store.browsingProjects { projectsButton }
                 if store.browsingProjects || store.section != .chats {
                     Button(L10n.text("common.refresh"), .refresh) { refresh() }
                         .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing)
@@ -89,11 +90,16 @@ struct TeamManagementView: View {
         #if !os(macOS)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                if store.phase == .ready && !store.browsingProjects { projectsButton.labelStyle(.iconOnly) }
                 if store.browsingProjects || store.section != .chats { Button(L10n.text("common.refresh"), systemImage: "arrow.clockwise") { refresh() }.disabled(store.isRefreshing) }
                 if store.localDraftPersonId != nil { draftsButton }
             }
         }
         #endif
+    }
+    private var projectsButton: some View {
+        Button(L10n.text("common.teams.shared_projects"), .team) { store.showProjects() }
+            .accessibilityIdentifier("team.projects.open")
     }
     private var draftsButton: some View {
         HStack(spacing: Theme.Space.s) {
@@ -117,6 +123,7 @@ struct TeamManagementView: View {
         case .authorization:
             EmptyState(symbol: "person.2", title: L10n.text("common.teams.enable_title"), message: L10n.text("common.teams.enable_detail")) {
                 Button(L10n.text("common.teams.enable_action"), .team) { sheet = .authorize }.buttonStyle(TeamButtonStyle(primary: true))
+                    .accessibilityIdentifier("team.authorization.open")
             }
         case .failed:
             EmptyState(symbol: "wifi.exclamationmark", title: L10n.text("common.teams.load_failed"), message: L10n.text("common.teams.retry_detail")) {

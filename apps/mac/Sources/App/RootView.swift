@@ -2352,9 +2352,6 @@ struct RootView: View {
                             if section == "projects" { projectsSection }
                             else if section == "servers" { liveServersSection }
                         }
-                        TeamSidebarLinks(store: teams, isTeamSelected: route.isGlobal(.team), open: { section in
-                            teams.show(section); navigate(to: .global(.team))
-                        }, openProjects: { teams.showProjects(); navigate(to: .global(.team)) })
                     }
                     .padding(.bottom, Theme.Space.m)
                 }
@@ -4843,9 +4840,9 @@ private struct WorkspaceRow: View {
                         .help(L10n.text(isShared ? "common.teams.open_shared_project" : "common.teams.share_project"))
                         .accessibilityLabel(L10n.text(isShared ? "common.teams.open_shared_project" : "common.teams.share_project"))
                         .accessibilityIdentifier("project.share.\(folder.id)")
-                        .opacity(isHovering || isShared ? 1 : 0)
-                        .allowsHitTesting(isHovering || isShared)
-                        .accessibilityHidden(!isHovering && !isShared)
+                        .opacity(isHovering ? 1 : 0)
+                        .allowsHitTesting(isHovering)
+                        .accessibilityHidden(!isHovering)
                 }
                 SidebarRowActions(name: folder.name, visible: isHovering,
                                   deleteTitle: L10n.text("apple.rootview.remove_project.704e7388"), delete: remove,

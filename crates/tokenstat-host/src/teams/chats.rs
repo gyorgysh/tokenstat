@@ -455,6 +455,65 @@ pub(super) struct NewChat<'a> {
     pub request_id: &'a str,
     pub person: &'a str,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct NewChatInput {
+    pub title: String,
+    pub request_id: String,
+}
+pub(super) fn new_chat_input(params: &str) -> Result<NewChatInput, DispatchError> {
+    if params.len() > 2048 {
+        return Err(invalid());
+    }
+    let mut input: NewChatInput = serde_json::from_str(params).map_err(|_| invalid())?;
+    input.title = input.title.trim().to_owned();
+    if input.title.is_empty()
+        || input.title.chars().count() > 120
+        || input.title.chars().any(char::is_control)
+        || !crate::chat_receipts::valid_id(&input.request_id)
+    {
+        return Err(invalid());
+    }
+    Ok(input)
+}
+
+/// An account-authenticated request made on the publishing computer may
+/// create an empty chat there. This neither starts an agent nor grants Run
+/// access to this device or anyone else. Other computers keep the Run proof
+/// requirement. The full publication/role/folder checks run again below.
+pub(super) fn start_for_owner(
+    owner: &AccountSnapshot,
+    client: &TeamClient,
+    organization: &str,
+    repository: &str,
+    checkout: &str,
+    params: &str,
+) -> Result<Option<Value>, DispatchError> {
+    let binding = sharing::local_binding(owner, client)?;
+    let store = Store::capture()?;
+    if !store.list(&binding)?.iter().any(|row| {
+        row.id == checkout
+            && row.organization_id == organization
+            && row.repository_id == repository
+            && row.phase == Phase::Active
+    }) {
+        return Ok(None);
+    }
+    let input = new_chat_input(params)?;
+    start_for_member(
+        owner,
+        client,
+        NewChat {
+            organization,
+            repository,
+            checkout,
+            title: &input.title,
+            request_id: &input.request_id,
+            person: &binding.publisher_id,
+        },
+    )
+    .map(Some)
+}
 pub(super) fn start_for_member(
     owner: &AccountSnapshot,
     client: &TeamClient,
@@ -556,6 +615,36 @@ fn admit_new_chat(person: &str, checkout: &str) -> Result<(), DispatchError> {
 
 #[cfg(test)]
 mod new_chat_tests {
+    #[test]
+    fn empty_chat_input_cannot_carry_a_private_source_or_agent_request() {
+        let valid =
+            serde_json::json!({"title":"  Fictional project chat  ","requestId":"new-fixture"});
+        let input = super::new_chat_input(&valid.to_string()).unwrap();
+        assert_eq!(input.title, "Fictional project chat");
+        assert_eq!(input.request_id, "new-fixture");
+        for field in [
+            "conversation",
+            "workspace",
+            "backend",
+            "text",
+            "person",
+            "grant",
+        ] {
+            let mut input = valid.clone();
+            input[field] = serde_json::json!("private-or-forged");
+            assert!(super::new_chat_input(&input.to_string()).is_err());
+        }
+        for title in [
+            "".to_owned(),
+            "  ".into(),
+            "chat\nprivate".into(),
+            "a".repeat(121),
+        ] {
+            let mut input = valid.clone();
+            input["title"] = serde_json::json!(title);
+            assert!(super::new_chat_input(&input.to_string()).is_err());
+        }
+    }
     #[test]
     fn new_chats_are_capped_per_person_and_checkout() {
         for _ in 0..10 {
