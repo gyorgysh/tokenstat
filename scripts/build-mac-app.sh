@@ -67,7 +67,18 @@ echo "Generating the Xcode project"
 (cd "$ROOT/apps/mac" && xcodegen > /dev/null)
 
 DERIVED="$ROOT/target/xcode-release"
-rm -rf "$DERIVED"
+BUILD_LOG="$ROOT/target/xcode-release.log"
+mkdir -p "$DERIVED"
+# Cargo and Xcode validate their inputs; retaining DerivedData allows local
+# rebuilds to reuse modules instead of discarding them before every invocation.
+# Keep -O release optimization, but compile Swift files in parallel instead of
+# optimizing all 600+ files as one module. Whole-module mode remains available
+# for profiling: TOKENSTAT_SWIFT_COMPILATION_MODE=wholemodule.
+SWIFT_MODE="${TOKENSTAT_SWIFT_COMPILATION_MODE:-incremental}"
+case "$SWIFT_MODE" in
+    incremental|wholemodule) ;;
+    *) echo "invalid TOKENSTAT_SWIFT_COMPILATION_MODE: $SWIFT_MODE" >&2; exit 2 ;;
+esac
 
 # Build only the architectures the Rust library actually has a slice for.
 #
@@ -97,20 +108,33 @@ esac
 # CODE_SIGNING_ALLOWED=NO keeps the identity out of the build matrix entirely.
 # The bundle is signed once, deep, in the publish job, which is also the only
 # place that can staple a notarization ticket to it.
-echo "Building Tokenstat.app $VERSION"
-xcodebuild \
+echo "Building Tokenstat.app $VERSION (Swift $SWIFT_MODE)"
+xcode_started=$SECONDS
+if ! xcodebuild \
     -project "$ROOT/apps/mac/Tokenstat.xcodeproj" \
     -scheme Tokenstat \
     -configuration Release \
     -destination 'generic/platform=macOS' \
     -derivedDataPath "$DERIVED" \
+    -showBuildTimingSummary \
+    SWIFT_COMPILATION_MODE="$SWIFT_MODE" \
     MARKETING_VERSION="$VERSION" \
     ARCHS="$ARCHS" \
     ONLY_ACTIVE_ARCH=NO \
     CODE_SIGNING_ALLOWED=NO \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGN_IDENTITY="" \
-    build > /dev/null
+    build > "$BUILD_LOG" 2>&1; then
+    tail -n 120 "$BUILD_LOG" >&2
+    echo "Full Xcode build log: $BUILD_LOG" >&2
+    exit 1
+fi
+sed -n '/^Build Timing Summary/,$p' "$BUILD_LOG"
+echo "Xcode build completed in $((SECONDS - xcode_started)) seconds"
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    printf 'Xcode (%s): %s seconds. Full diagnostics are in the Mac build log artifact.\n' \
+        "$SWIFT_MODE" "$((SECONDS - xcode_started))" >> "$GITHUB_STEP_SUMMARY"
+fi
 
 APP="$DERIVED/Build/Products/Release/Tokenstat.app"
 if [ ! -d "$APP" ]; then
@@ -125,22 +149,31 @@ fi
 # Universal, for the same reason the app is: the helper travels inside a bundle
 # that runs on both kinds of Mac, and a host binary that has no slice for the
 # machine it landed on cannot even be told apart from one that is missing.
-echo "Building bundled tokenstat-hostd ($ARCHS)"
-HOSTD_SLICES=()
-for pair in "aarch64-apple-darwin:arm64" "x86_64-apple-darwin:x86_64"; do
-    target="${pair%%:*}"
-    arch="${pair##*:}"
-    grep -qw "$arch" <<< "$ARCHS" || continue
-    cargo build --release --locked --target "$target" -p tokenstat-host --bin tokenstat-hostd
-    HOSTD_SLICES+=("$ROOT/target/$target/release/tokenstat-hostd")
-done
-lipo -create "${HOSTD_SLICES[@]}" -output "$APP/Contents/Resources/tokenstat-hostd"
-chmod 755 "$APP/Contents/Resources/tokenstat-hostd"
+# Release already builds both helpers in the CLI matrix. The publish job
+# embeds those exact binaries before signing; preview/local builds supply their
+# own helpers here. Remove any previous helper when deferring so the unsigned
+# intermediate bundle cannot silently carry one from an older local build.
+if [ "${TOKENSTAT_DEFER_HOSTD:-0}" = "1" ]; then
+    rm -f "$APP/Contents/Resources/tokenstat-hostd"
+    echo "Deferring bundled tokenstat-hostd to release assembly"
+else
+    echo "Building bundled tokenstat-hostd ($ARCHS)"
+    HOSTD_SLICES=()
+    for pair in "aarch64-apple-darwin:arm64" "x86_64-apple-darwin:x86_64"; do
+        target="${pair%%:*}"
+        arch="${pair##*:}"
+        grep -qw "$arch" <<< "$ARCHS" || continue
+        cargo build --release --locked --target "$target" -p tokenstat-host --bin tokenstat-hostd
+        HOSTD_SLICES+=("$ROOT/target/$target/release/tokenstat-hostd")
+    done
+    lipo -create "${HOSTD_SLICES[@]}" -output "$APP/Contents/Resources/tokenstat-hostd"
+    chmod 755 "$APP/Contents/Resources/tokenstat-hostd"
+fi
 
 # The permissive dependencies ask that their notices travel with the binary, and
 # a .app is a binary somebody receives. Inside Resources, so it cannot be
 # separated from the thing it describes.
-cargo run --release --locked -p xtask -- notices \
+cargo run --locked -p xtask -- notices \
     "$APP/Contents/Resources/THIRD-PARTY-NOTICES.md" tokenstat-cli
 
 mkdir -p "$OUT"

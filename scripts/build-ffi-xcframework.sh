@@ -76,7 +76,7 @@ build_group() {
             # This function is called in an && list, where Bash disables
             # errexit inside the entire function. Never package a stale archive
             # after a compiler failure.
-            cargo build --profile release-ffi -p tokenstat-ffi $features --target "$t" || exit $?
+            cargo build --locked --profile release-ffi -p tokenstat-ffi $features --target "$t" || exit $?
             built+=("target/$t/release-ffi/$LIB")
         else
             echo "  skipping $t (run: rustup target add $t)"

@@ -1,0 +1,36 @@
+# Workflow and shared script changes are deliberately conservative. Docs-only
+# changes still get all source checks, without rebuilding every native app.
+ci:
+  - '.github/workflows/**'
+  - '.github/ci-paths.yml'
+rust:
+  - 'Cargo.*'
+  - 'rust-toolchain*'
+  - 'rustfmt.toml'
+  - '.cargo/**'
+  - 'crates/**'
+  - 'xtask/**'
+  - 'fixtures/**'
+  # Embedded directly into tokenstat-core's validator and its tests.
+  - 'apps/charts/{schema,examples,invalid}.json'
+  - 'scripts/**'
+apple:
+  - 'apps/mac/**'
+  - 'apps/localization/**'
+  - 'scripts/**'
+windows:
+  - 'apps/windows/**'
+  - 'apps/localization/**'
+  - 'scripts/**'
+android:
+  - 'apps/android/**'
+  - 'apps/localization/**'
+  - 'scripts/**'
+charts:
+  - 'apps/charts/**'
+  - 'scripts/tests/*chart*'
+dependencies:
+  - '**/Cargo.toml'
+  - 'Cargo.lock'
+  - 'apps/charts/package*.json'
+  - '.github/workflows/**'

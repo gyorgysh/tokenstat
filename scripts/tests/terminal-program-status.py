@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 """Exercise production Mac attention transitions and Windows status labels."""
+import argparse
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--platform", choices=("all", "apple", "windows"), default="all")
+platform = parser.parse_args().platform
 
 root = Path(__file__).resolve().parents[2]
 mac = (root / "apps/mac/Sources/Features/Terminals/TerminalSession.swift").read_text()
@@ -144,23 +149,25 @@ static class Program {
 
 with tempfile.TemporaryDirectory(prefix="tokenstat-program-status-") as directory:
     work = Path(directory)
-    (work / "Fixture.swift").write_text(swift)
-    subprocess.run(["swiftc", "-parse-as-library", str(work / "Fixture.swift"), "-o", str(work / "swift-test")], check=True)
-    subprocess.run([str(work / "swift-test")], check=True)
-    (work / "Program.cs").write_text(csharp)
-    shutil.copy2(root / "apps/windows/Pages/Format.cs", work / "Format.cs")
-    (work / "StatusTests.csproj").write_text(
-        '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
-        '<TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings>'
-        '<Nullable>enable</Nullable></PropertyGroup></Project>'
-    )
-    dotnet = shutil.which("dotnet")
-    if dotnet is None:
-        cached = root / "target/review-dotnet/dotnet"
-        if cached.is_file():
-            dotnet = str(cached)
-    if dotnet is None:
-        raise SystemExit("dotnet is required to verify the Windows status presentation")
-    environment = os.environ.copy()
-    environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
-    subprocess.run([dotnet, "run", "--project", str(work / "StatusTests.csproj"), "-c", "Release"], env=environment, check=True)
+    if platform in ("all", "apple"):
+        (work / "Fixture.swift").write_text(swift)
+        subprocess.run(["swiftc", "-parse-as-library", str(work / "Fixture.swift"), "-o", str(work / "swift-test")], check=True)
+        subprocess.run([str(work / "swift-test")], check=True)
+    if platform in ("all", "windows"):
+        (work / "Program.cs").write_text(csharp)
+        shutil.copy2(root / "apps/windows/Pages/Format.cs", work / "Format.cs")
+        (work / "StatusTests.csproj").write_text(
+            '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
+            '<TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings>'
+            '<Nullable>enable</Nullable></PropertyGroup></Project>'
+        )
+        dotnet = shutil.which("dotnet")
+        if dotnet is None:
+            cached = root / "target/review-dotnet/dotnet"
+            if cached.is_file():
+                dotnet = str(cached)
+        if dotnet is None:
+            raise SystemExit("dotnet is required to verify the Windows status presentation")
+        environment = os.environ.copy()
+        environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
+        subprocess.run([dotnet, "run", "--project", str(work / "StatusTests.csproj"), "-c", "Release"], env=environment, check=True)

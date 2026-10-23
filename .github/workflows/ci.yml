@@ -5,9 +5,16 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      full:
+        description: Include device UI tests and release Android packaging
+        type: boolean
+        default: true
+  schedule:
+    - cron: '23 3 * * 1'
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'schedule' && 'scheduled' || github.event_name == 'workflow_dispatch' && 'manual' || 'automatic' }}
   cancel-in-progress: true
 
 env:
@@ -18,7 +25,96 @@ permissions:
   contents: read
 
 jobs:
+  checks:
+    name: source checks and changed components
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      full: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full) || steps.paths.outputs.ci == 'true' }}
+      rust: ${{ steps.paths.outputs.rust }}
+      apple: ${{ steps.paths.outputs.apple }}
+      windows: ${{ steps.paths.outputs.windows }}
+      android: ${{ steps.paths.outputs.android }}
+      charts: ${{ steps.paths.outputs.charts }}
+      dependencies: ${{ steps.paths.outputs.dependencies }}
+      test-os: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full) || steps.paths.outputs.ci == 'true' || steps.paths.outputs.rust == 'true') && '["ubuntu-24.04","macos-latest","windows-latest"]' || steps.paths.outputs.charts == 'true' && '["ubuntu-24.04","windows-latest"]' || '["windows-latest"]' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@15192bc058cc28a13dbf6cde61f19e18988b7af6 # v3
+        id: paths
+        with:
+          filters: .github/ci-paths.yml
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Mobile terminal scroll regressions
+        if: ${{ !cancelled() }}
+        run: |
+          node scripts/tests/TerminalScrollTests.cjs
+          node scripts/tests/OpenCodeGateTests.mjs
+
+      - name: No generated file may be tracked
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-no-artifacts.sh
+      - name: Check resource keys and translation placeholders
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_localization*.py'
+          python3 scripts/check-localization.py
+      - name: Every content button carries a vocabulary glyph
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-action-icons.sh
+      - name: Every control takes its colour from the theme
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-accent-colour.sh
+      - name: Adjacent headers share one optical baseline
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-chrome-bars.sh
+      - name: Mac task sheets share one modal surface
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-mac-sheet-surfaces.sh
+      - name: Every font comes from the type scale
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-fonts.sh
+      - name: Every bridge model spells its ids the way the host does
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-bridge-keys.sh
+      - name: The sample reaches nothing outside itself
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-sample-offline.sh
+
+      - name: Home recent places never contact a machine
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-home-account-plane.sh
+      - name: The Windows zip runs with nothing installed
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-windows-packaging.sh
+      - name: The host pipe times out without ReadTimeout
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-windows-pipe.sh
+      - name: Custom installer paths remain literal
+        if: ${{ !cancelled() }}
+        run: python3 scripts/tests/test_install_scripts.py
+      - name: Mac disk image failures preserve previous artifacts
+        if: ${{ !cancelled() }}
+        run: python3 scripts/tests/test_mac_dmg.py
+      - name: Mac app assembly reuses helpers and preserves failed builds
+        if: ${{ !cancelled() }}
+        run: python3 scripts/tests/test_mac_build.py
+      - name: Failed replacements preserve the installed pair
+        if: ${{ !cancelled() }}
+        run: bash scripts/tests/install-release-pair.sh
+      - name: Failed service stops preserve host binaries
+        if: ${{ !cancelled() }}
+        run: bash scripts/tests/uninstall-host.sh
+
   chat-charts:
+    needs: checks
+    if: needs.checks.outputs.full == 'true' || needs.checks.outputs.charts == 'true'
     name: interactive chat charts
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -36,6 +132,7 @@ jobs:
           git diff --exit-code -- apps/charts/runtime/
       - run: npm --prefix apps/charts test
       - run: npm --prefix apps/charts audit --audit-level=high
+        if: needs.checks.outputs.full == 'true' || needs.checks.outputs.dependencies == 'true'
       - name: Use the public Ubuntu archive for browser prerequisites
         run: |
           sudo python3 - <<'PY'
@@ -62,6 +159,8 @@ jobs:
           path: target/charts-review/browser/**
 
   lint:
+    needs: checks
+    if: needs.checks.outputs.full == 'true' || needs.checks.outputs.rust == 'true'
     name: fmt and clippy
     runs-on: ubuntu-24.04
     steps:
@@ -73,6 +172,8 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -89,193 +190,27 @@ jobs:
           cargo clippy -p tokenstat-host --no-default-features --all-targets -- -D warnings
           cargo clippy -p tokenstat-ffi --no-default-features --all-targets -- -D warnings
 
-  # Separate job rather than a step in `lint`, so a formatting failure never
-  # hides a breach of the privacy guarantee, and so the red check names the
-  # thing that actually broke.
-  no-network:
-    name: privacy boundary
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: 1.99.0
-
-      - uses: Swatinem/rust-cache@v2
-
       - name: Core and MCP must not reach the network
+        if: ${{ !cancelled() }}
         run: bash scripts/check-no-network.sh
 
-  # Everything here is shipped only by pueev OU, which works because pueev owns
-  # all of it. A third party copyleft dependency would quietly end that.
-  dep-licences:
-    name: dependency licences
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: 1.99.0
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: No dependency may block shipping tokenstat
+      - name: Dependency licences
+        if: ${{ !cancelled() }}
         run: |
           python3 scripts/tests/test_licence_rules.py
           bash scripts/check-dep-licences.sh
 
-  # .gitignore is not enough on its own: a commit built at an older revision
-  # uses that revision's rules, which is how a 30 MB static library once got in.
-  no-artifacts:
-    name: no build artifacts
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: No generated file may be tracked
-        run: bash scripts/check-no-artifacts.sh
-
-  localization:
-    name: native language catalogs
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - name: Check resource keys and translation placeholders
-        run: |
-          python3 -m unittest discover -s scripts/tests -p 'test_localization*.py'
-          python3 scripts/check-localization.py
-
-  # Same job shape as the other source-text gates: a formatting failure must
-  # not hide a bare button, and the red check should name the rule.
-  action-icons:
-    name: action icons
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Every content button carries a vocabulary glyph
-        run: bash scripts/check-action-icons.sh
-
-  # Its own job for the same reason: a bare button and a system-blue control
-  # are two different rules, and one red check should name one of them.
-  accent-colour:
-    name: accent colour
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Every control takes its colour from the theme
-        run: bash scripts/check-accent-colour.sh
-
-  chrome-bars:
-    name: chrome bars
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Adjacent headers share one optical baseline
-        run: bash scripts/check-chrome-bars.sh
-
-  sheet-surfaces:
-    name: sheet surfaces
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Mac task sheets share one modal surface
-        run: bash scripts/check-mac-sheet-surfaces.sh
-
-  # And again: a control in the wrong typeface is a third rule, and three
-  # rules sharing one red check is one check that says nothing.
-  fonts:
-    name: fonts
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Every font comes from the type scale
-        run: bash scripts/check-fonts.sh
-
-  # Its own job again: this one is a protocol mismatch between two languages,
-  # not a style rule, and it fails silently at runtime rather than loudly at
-  # build time. A red check with its own name is the only warning there is.
-  bridge-keys:
-    name: bridge keys
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Every bridge model spells its ids the way the host does
-        run: bash scripts/check-bridge-keys.sh
-
-  sample-offline:
-    name: sample stays local
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: The sample reaches nothing outside itself
-        run: bash scripts/check-sample-offline.sh
-
-      - name: Home recent places never contact a machine
-        run: bash scripts/check-home-account-plane.sh
-
-  # Its own job again: this one is a packaging mismatch between two MSBuild
-  # properties, not a style rule, and it fails silently at build time and
-  # loudly on somebody else's machine, as a runtime install prompt. A red
-  # check with its own name is the only warning there is.
-  windows-packaging:
-    name: windows packaging
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: The Windows zip runs with nothing installed
-        run: bash scripts/check-windows-packaging.sh
-
-  # Its own job for the same reason: this one is a transport mismatch between
-  # .NET and the host protocol, not a packaging rule, and it fails silently
-  # at runtime as a version mismatch that restarts a healthy helper. A red
-  # check with its own name is the only warning there is.
-  windows-pipe:
-    name: windows pipe timeouts
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: The host pipe times out without ReadTimeout
-        run: bash scripts/check-windows-pipe.sh
-
-  installer-tests:
-    name: installer rollback
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - name: Custom installer paths remain literal
-        run: python3 scripts/tests/test_install_scripts.py
-      - name: Mac disk image failures preserve previous artifacts
-        run: python3 scripts/tests/test_mac_dmg.py
-      - name: Failed replacements preserve the installed pair
-        run: bash scripts/tests/install-release-pair.sh
-      - name: Failed service stops preserve host binaries
-        run: bash scripts/tests/uninstall-host.sh
-
-  # The client's state, without a simulator. These are plain executables that
-  # compile a handful of real sources with their own stubs, so they run in
-  # seconds and catch the class of bug an Xcode build cannot see: a draft that
-  # would resume into the wrong account, or a failure that sends somebody to
-  # the wrong screen. macOS because they need swiftc.
+  # The client's state, without a simulator. Standalone executables compile
+  # real sources with their own stubs and catch bugs an Xcode build cannot:
+  # a draft resuming into the wrong account or a failure opening the wrong
+  # screen. macOS because they need swiftc.
   swift-tests:
+    needs: checks
+    if: needs.checks.outputs.full == 'true' || needs.checks.outputs.apple == 'true'
     name: swift state tests
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '8.0.x'
 
       - name: Run the standalone client tests
         run: bash scripts/run-swift-tests.sh
@@ -312,25 +247,17 @@ jobs:
           python3 scripts/tests/chat-recovery-cache.py
           python3 scripts/tests/screen-viewer-lifecycle.py
           python3 scripts/tests/terminal-final-output.py
-          python3 scripts/tests/terminal-program-status.py
+          python3 scripts/tests/terminal-program-status.py --platform apple
           python3 scripts/tests/live-work-compatibility.py
 
       - name: Validate Apple widget signing rules
         run: |
           python3 scripts/test_sign_mac_app.py
-          python3 scripts/tests/test_install_scripts.py
           python3 scripts/tests/AppleWidgetSigningTests.py
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-
-      - name: Mobile terminal scroll regressions
-        run: |
-          node scripts/tests/TerminalScrollTests.cjs
-          node scripts/tests/OpenCodeGateTests.mjs
-
   windows-state-tests:
+    needs: checks
+    if: needs.checks.outputs.full == 'true' || needs.checks.outputs.windows == 'true'
     name: windows state tests
     runs-on: ubuntu-24.04
     steps:
@@ -340,6 +267,8 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Run portable client state regressions
         run: bash scripts/run-windows-state-tests.sh
+      - name: Terminal program status presentation
+        run: python3 scripts/tests/terminal-program-status.py --platform windows
       - name: Check independent Windows chat loading
         run: |
           python3 scripts/check-windows-chat-loading.py
@@ -351,6 +280,8 @@ jobs:
           python3 scripts/check-windows-chat-projection.py
 
   test:
+    needs: checks
+    if: needs.checks.outputs.full == 'true' || needs.checks.outputs.rust == 'true' || needs.checks.outputs.windows == 'true' || needs.checks.outputs.charts == 'true'
     name: test ${{ matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.os == 'windows-latest' && '-D warnings -C target-feature=+crt-static' || '-D warnings' }}
@@ -358,7 +289,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
+        os: ${{ fromJSON(needs.checks.outputs.test-os) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -370,10 +301,11 @@ jobs:
         with:
           key: ${{ matrix.os }}
           cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         id: rust_build
-        run: cargo build --workspace --all-features --locked
+        run: cargo build -p tokenstat-cli -p tokenstat-host --bins --all-features --locked
 
       - uses: actions/setup-python@v7
         with:
@@ -394,12 +326,22 @@ jobs:
           ./scripts/stage-windows-conpty.ps1 -Out target/debug
 
       - name: Test
+        if: needs.checks.outputs.full == 'true' || needs.checks.outputs.rust == 'true'
         env:
           TOKENSTAT_SCREEN_FIXTURE: ${{ runner.temp }}/tokenstat-screen-fixture
           TOKENSTAT_TEST_CONPTY_PROGRAM_STATUS: ${{ runner.os == 'Windows' && '1' || '' }}
         run: cargo test --workspace --all-features --locked
 
+      # Windows UI playback consumes frames produced by this Rust test. A UI-only
+      # change skips the workspace suite, but must still generate that fixture.
+      - name: Generate native H.264 frames for Windows UI changes
+        if: runner.os == 'Windows' && needs.checks.outputs.full != 'true' && needs.checks.outputs.rust != 'true'
+        env:
+          TOKENSTAT_SCREEN_FIXTURE: ${{ runner.temp }}/tokenstat-screen-fixture
+        run: cargo test --locked -p tokenstat-host --lib windows_screen::tests::native_encoder_produces_an_independent_annex_b_frame -- --exact
+
       - name: Test without the local half
+        if: runner.os == 'Linux' && (needs.checks.outputs.full == 'true' || needs.checks.outputs.rust == 'true')
         run: cargo test -p tokenstat-host -p tokenstat-ffi --no-default-features --locked
 
       - name: Live chat routing regressions
@@ -407,7 +349,7 @@ jobs:
         run: python3 scripts/tests/chat-routing-e2e.py
 
       - name: 1.5.0 client wire compatibility
-        if: runner.os != 'Windows'
+        if: runner.os == 'Linux' && (needs.checks.outputs.full == 'true' || needs.checks.outputs.rust == 'true')
         run: python3 scripts/tests/client-150-compat.py
 
       - uses: actions/setup-dotnet@v6
@@ -457,6 +399,8 @@ jobs:
           dotnet run --project scripts/tests/windows-host/WindowsHostTests.csproj -- --hostd "$PWD/target/debug/tokenstat-hostd.exe"
 
   teams-ui:
+    needs: checks
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
     name: teams native UI (${{ matrix.device }})
     runs-on: macos-latest
     timeout-minutes: 40
@@ -486,7 +430,11 @@ jobs:
           if-no-files-found: ignore
 
   mac-client:
+    needs: checks
+    if: needs.checks.outputs.full == 'true' || needs.checks.outputs.rust == 'true' || needs.checks.outputs.apple == 'true' || needs.checks.outputs.charts == 'true'
     name: mac client
+    env:
+      RUSTFLAGS: ''
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -498,7 +446,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: mac-client
+          shared-key: mac-app
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build the macOS FFI
         run: scripts/build-ffi-xcframework.sh macos
@@ -520,7 +469,11 @@ jobs:
 
   # Compile the shared Rust layer and the iOS app on both simulator architectures.
   apple-client:
+    needs: checks
+    if: needs.checks.outputs.full == 'true' || needs.checks.outputs.rust == 'true' || needs.checks.outputs.apple == 'true' || needs.checks.outputs.charts == 'true'
     name: ios client
+    env:
+      RUSTFLAGS: ''
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -537,7 +490,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ios
+          shared-key: ios-client
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Simulator slices only. The app links whatever the xcframework holds, and
       # building the macOS slices as well would double this job to prove
@@ -562,7 +516,11 @@ jobs:
             build
 
   android-client:
+    needs: checks
+    if: needs.checks.outputs.full == 'true' || needs.checks.outputs.rust == 'true' || needs.checks.outputs.android == 'true' || needs.checks.outputs.charts == 'true'
     name: android client
+    env:
+      RUSTFLAGS: ''
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -582,7 +540,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: android
+          shared-key: android-client
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the Rust Android driver
         run: cargo install cargo-ndk --locked
@@ -597,21 +556,27 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.16248370"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
 
-      - name: Unit tests, instrumentation test APK, and release bundle
-        run: gradle -p apps/android testDebugUnitTest lintDebug lintRelease assembleDebugAndroidTest bundleRelease
+      - name: Unit tests, debug lint and APK
+        run: gradle -p apps/android testDebugUnitTest lintDebug assembleDebug
+
+      - name: Instrumentation test APK, release lint and bundle
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
+        run: gradle -p apps/android lintRelease assembleDebugAndroidTest bundleRelease
 
       - name: Enable KVM for the isolated chart emulator
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
       - name: Native Android charts and Teams recovery and paging
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
         timeout-minutes: 12
         run: bash scripts/tests/run-chart-android.sh
 
       - name: Keep native chart and Teams test reports
-        if: always()
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)) }}
         uses: actions/upload-artifact@v7
         with:
           name: android-chart-tests
@@ -621,12 +586,14 @@ jobs:
             target/chart-android-ci/**
 
       - name: Verify native symbols are embedded
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
         run: |
           python3 scripts/android-bundle-symbols.py \
             apps/android/app/build/outputs/bundle/release/app-release.aab \
             apps/android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
 
       - name: Keep native debug symbols with the bundle
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
         uses: actions/upload-artifact@v7
         with:
           name: tokenstat-android
@@ -636,6 +603,8 @@ jobs:
             apps/android/app/build/outputs/mapping/release/**
 
   audit:
+    needs: checks
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full) || needs.checks.outputs.dependencies == 'true'
     name: dependency audit
     runs-on: ubuntu-24.04
     # rustsec/audit-check posts a check run; default workflow perms are read-only.

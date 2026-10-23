@@ -108,8 +108,8 @@ codegen-units = 1
 strip = "symbols"
 panic = "abort"
 
-# Static library for the Apple app. Differs from `release` in two ways, both
-# forced by handing the archive to a toolchain that is not this one:
+# Static library for the Apple app. LTO and stripping differ from `release`
+# because the archive is handed to a toolchain that is not this one:
 #
 # - No LTO. Thin LTO leaves LLVM metadata in the objects, and Rust's LLVM runs
 #   ahead of the one inside Xcode, so Apple's tools reject the archive with
@@ -120,3 +120,6 @@ panic = "abort"
 inherits = "release"
 lto = false
 strip = "none"
+# With no LTO, inheriting release's single codegen unit serializes the large
+# host crate for each Apple slice. Use Cargo's normal release parallelism.
+codegen-units = 16

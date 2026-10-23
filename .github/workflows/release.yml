@@ -117,7 +117,7 @@ jobs:
       # GB of it and were evicting the caches on `main` that do get reused.
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release-${{ matrix.target }}
+          shared-key: cli-${{ matrix.target }}
           save-if: false
 
       - name: Build
@@ -147,10 +147,10 @@ jobs:
           cp README.md LICENSE "dist/${name}/" 2>/dev/null || cp README.md "dist/${name}/"
           # The permissive dependencies ask that their notices travel with the
           # binary. Generated here rather than tracked, see xtask/src/notices.rs.
-          cargo run --release --locked -p xtask -- notices \
+          cargo run --locked -p xtask -- notices \
             "dist/${name}/THIRD-PARTY-NOTICES.md" tokenstat-cli
           if [ "${{ runner.os }}" != "Windows" ]; then
-            cargo run --release --locked -p xtask -- notices \
+            cargo run --locked -p xtask -- notices \
               "dist/${name}/HOST-THIRD-PARTY-NOTICES.md" tokenstat-host
           fi
           cd dist
@@ -175,13 +175,17 @@ jobs:
             dist/${{ steps.package.outputs.asset }}
             dist/${{ steps.package.outputs.asset }}.sha256
           retention-days: 7
+          compression-level: 0
 
   # The Mac app, unsigned. The Developer ID identity lives on the release
   # environment and the build matrix cannot reach it, so this produces the
   # bundle and `publish` signs, notarizes and wraps it in a disk image.
   app:
     name: build the mac app
+    timeout-minutes: 90
     needs: verify
+    env:
+      RUSTFLAGS: ''
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -195,7 +199,7 @@ jobs:
       # Restore only, for the reason above the build matrix's cache step.
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release-app
+          shared-key: mac-app
           save-if: false
 
       - name: Install xcodegen
@@ -204,7 +208,18 @@ jobs:
       - name: Build Tokenstat.app
         env:
           VERSION: ${{ needs.verify.outputs.version }}
+          # publish embeds the helpers already built by the CLI matrix.
+          TOKENSTAT_DEFER_HOSTD: '1'
         run: scripts/build-mac-app.sh "$VERSION" dist
+
+      - name: Keep Mac build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mac-build-log
+          path: target/xcode-release.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       # ditto rather than upload-artifact over the bundle directly: the action
       # does not preserve the symlinks inside a .app, and a bundle that lost
@@ -217,6 +232,7 @@ jobs:
           name: release-mac-app
           path: dist/Tokenstat-app-unsigned.zip
           retention-days: 7
+          compression-level: 0
 
   windows-app:
     name: build the windows app
@@ -232,7 +248,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release-windows-app
+          shared-key: windows-app
           save-if: false
 
       - uses: actions/setup-dotnet@v6
@@ -274,6 +290,7 @@ jobs:
             dist/${{ steps.package.outputs.setup }}
             dist/${{ steps.package.outputs.setup }}.sha256
           retention-days: 7
+          compression-level: 0
 
   publish:
     name: publish github release
@@ -432,6 +449,8 @@ jobs:
               echo "no Tokenstat.app in dist/Tokenstat-app-unsigned.zip" >&2
               exit 1
             fi
+            # Reuse the same-commit helpers already built by the CLI matrix.
+            scripts/embed-mac-hostd.sh "${app}" dist "${VERSION}"
             # Reject stale app/widget profiles before submitting CLI binaries
             # to the notarization service.
             python3 scripts/sign-mac-app.py "${app}" --identity "${IDENTITY}" --check-only

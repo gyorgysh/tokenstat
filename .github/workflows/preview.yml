@@ -7,6 +7,7 @@ name: preview
 #
 # Trigger:
 #   Actions → Preview → Run workflow, or add the `preview` label to a PR.
+# Label builds package the two desktop apps; other platforms are explicit dispatches.
 # Rebuilding a labeled PR after new commits: re-run the workflow or toggle
 # the label. `synchronize` is not a trigger, so ordinary PR pushes do not
 # pay for app packaging.
@@ -20,13 +21,14 @@ on:
       platforms:
         description: Which artifacts to build
         type: choice
-        options: [all, windows, mac, android, cli, hostd]
-        default: all
+        options: [desktop, all, windows, mac, android, cli, hostd]
+        default: desktop
   pull_request:
     types: [labeled]
 
 concurrency:
-  group: preview-${{ github.workflow }}-${{ github.ref }}
+  # An unrelated label event must not cancel a requested preview.
+  group: preview-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && github.event.label.name != 'preview' && github.run_id || 'requested' }}
   cancel-in-progress: true
 
 permissions:
@@ -40,7 +42,7 @@ jobs:
     name: version
     if: >
       github.event_name == 'workflow_dispatch' ||
-      contains(github.event.pull_request.labels.*.name, 'preview')
+      github.event.label.name == 'preview'
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -65,9 +67,11 @@ jobs:
     if: >
       (github.event_name == 'workflow_dispatch' &&
         (github.event.inputs.platforms == 'all' ||
+         github.event.inputs.platforms == 'desktop' ||
          github.event.inputs.platforms == 'windows')) ||
       (github.event_name == 'pull_request' &&
         contains(github.event.pull_request.labels.*.name, 'preview'))
+    timeout-minutes: 30
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -78,7 +82,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: preview-windows
+          shared-key: windows-app
           # Main-branch runs save so the next dispatch restores warm.
           # Label runs on PRs stay restore-only, like the release caches.
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -145,6 +149,7 @@ jobs:
             dist/${{ steps.package.outputs.setup }}.sha256
             dist/SHA256SUMS
           retention-days: 14
+          compression-level: 0
 
   mac:
     name: mac app
@@ -152,9 +157,13 @@ jobs:
     if: >
       (github.event_name == 'workflow_dispatch' &&
         (github.event.inputs.platforms == 'all' ||
+         github.event.inputs.platforms == 'desktop' ||
          github.event.inputs.platforms == 'mac')) ||
       (github.event_name == 'pull_request' &&
         contains(github.event.pull_request.labels.*.name, 'preview'))
+    timeout-minutes: 90
+    env:
+      RUSTFLAGS: ''
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -166,10 +175,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: preview-mac
-          # Main-branch runs save so the next dispatch restores warm.
-          # Label runs on PRs stay restore-only, like the release caches.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: mac-app
+          # CI on main writes the complete target set. Preview only restores
+          # so a single-architecture build cannot seed an incomplete cache.
+          save-if: false
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -181,6 +190,15 @@ jobs:
           # on the zip name and PREVIEW.txt, not in About.
           base="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
           scripts/build-mac-app.sh "$base" dist
+
+      - name: Keep Mac build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-mac-build-log-${{ github.run_number }}
+          path: target/xcode-release.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Archive the bundle
         env:
@@ -203,6 +221,7 @@ jobs:
             dist/${{ steps.package.outputs.asset }}
             dist/${{ steps.package.outputs.asset }}.sha256
           retention-days: 14
+          compression-level: 0
 
   android:
     name: android apk
@@ -210,9 +229,10 @@ jobs:
     if: >
       (github.event_name == 'workflow_dispatch' &&
         (github.event.inputs.platforms == 'all' ||
-         github.event.inputs.platforms == 'android')) ||
-      (github.event_name == 'pull_request' &&
-        contains(github.event.pull_request.labels.*.name, 'preview'))
+         github.event.inputs.platforms == 'android'))
+    timeout-minutes: 30
+    env:
+      RUSTFLAGS: ''
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -229,10 +249,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: preview-android
-          # Main-branch runs save so the next dispatch restores warm.
-          # Label runs on PRs stay restore-only, like the release caches.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: android-client
+          # CI on main writes the complete target set. Preview only restores
+          # so a single-architecture build cannot seed an incomplete cache.
+          save-if: false
 
       - name: Install the Rust Android driver
         run: cargo install cargo-ndk --locked
@@ -269,6 +289,7 @@ jobs:
             dist/${{ steps.package.outputs.asset }}
             dist/${{ steps.package.outputs.asset }}.sha256
           retention-days: 14
+          compression-level: 0
 
   cli:
     name: cli ${{ matrix.target }}
@@ -276,9 +297,8 @@ jobs:
     if: >
       (github.event_name == 'workflow_dispatch' &&
         (github.event.inputs.platforms == 'all' ||
-         github.event.inputs.platforms == 'cli')) ||
-      (github.event_name == 'pull_request' &&
-        contains(github.event.pull_request.labels.*.name, 'preview'))
+         github.event.inputs.platforms == 'cli'))
+    timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -306,7 +326,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: preview-cli-${{ matrix.target }}
+          shared-key: cli-${{ matrix.target }}
           # Main-branch runs save so the next dispatch restores warm.
           # Label runs on PRs stay restore-only, like the release caches.
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -330,7 +350,7 @@ jobs:
             cp "target/${TARGET}/release/tokenstat" "dist/${name}/"
           fi
           cp README.md LICENSE "dist/${name}/" 2>/dev/null || cp README.md "dist/${name}/"
-          cargo run --release --locked -p xtask -- notices \
+          cargo run --locked -p xtask -- notices \
             "dist/${name}/THIRD-PARTY-NOTICES.md" tokenstat-cli
           printf '%s\n' "$VERSION" > "dist/${name}/PREVIEW.txt"
           cd dist
@@ -355,6 +375,7 @@ jobs:
             dist/${{ steps.package.outputs.asset }}
             dist/${{ steps.package.outputs.asset }}.sha256
           retention-days: 14
+          compression-level: 0
 
   hostd:
     # Preview only: x86_64 Linux. No aarch64 target (unlike release) to keep
@@ -364,9 +385,8 @@ jobs:
     if: >
       (github.event_name == 'workflow_dispatch' &&
         (github.event.inputs.platforms == 'all' ||
-         github.event.inputs.platforms == 'hostd')) ||
-      (github.event_name == 'pull_request' &&
-        contains(github.event.pull_request.labels.*.name, 'preview'))
+         github.event.inputs.platforms == 'hostd'))
+    timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -384,7 +404,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: preview-hostd-${{ matrix.target }}
+          shared-key: hostd-${{ matrix.target }}
           # Main-branch runs save so the next dispatch restores warm.
           # Label runs on PRs stay restore-only, like the release caches.
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -404,7 +424,7 @@ jobs:
           mkdir -p "dist/${name}"
           cp "target/${TARGET}/release/tokenstat-hostd" "dist/${name}/"
           cp README.md LICENSE "dist/${name}/" 2>/dev/null || cp README.md "dist/${name}/"
-          cargo run --release --locked -p xtask -- notices \
+          cargo run --locked -p xtask -- notices \
             "dist/${name}/HOST-THIRD-PARTY-NOTICES.md" tokenstat-host
           printf '%s\n' "$VERSION" > "dist/${name}/PREVIEW.txt"
           cd dist
@@ -420,3 +440,4 @@ jobs:
             dist/${{ steps.package.outputs.asset }}
             dist/${{ steps.package.outputs.asset }}.sha256
           retention-days: 14
+          compression-level: 0
