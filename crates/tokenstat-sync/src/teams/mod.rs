@@ -161,6 +161,16 @@ impl TeamClient {
         body: Option<Value>,
         page: Option<Page>,
     ) -> Result<T, TeamError> {
+        self.request_query(method, segments, body, page, None)
+    }
+    fn request_query<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        segments: &[&str],
+        body: Option<Value>,
+        page: Option<Page>,
+        query: Option<(&str, &str)>,
+    ) -> Result<T, TeamError> {
         self.ensure_current()?;
         let mut url = Url::parse(self.origin()).map_err(|_| TeamError::InvalidRequest)?;
         {
@@ -185,6 +195,9 @@ impl TeamClient {
             url.query_pairs_mut()
                 .append_pair("limit", &page.limit.to_string())
                 .append_pair("offset", &page.offset.to_string());
+        }
+        if let Some((key, value)) = query {
+            url.query_pairs_mut().append_pair(key, value);
         }
         let mut authorization =
             HeaderValue::from_str(&format!("Bearer {}", self.authentication.bearer.as_str()))
@@ -497,7 +510,56 @@ impl TeamClient {
     /// How often each repository this person can read has moved, for a
     /// host catching up after being offline.
     pub fn my_moves(&self) -> Result<Value, TeamError> {
-        self.request(Method::GET, &["teams", "moves"], None, None)
+        let mut moves = Vec::new();
+        let mut after = String::new();
+        // The server returns up to 1,000 rows per page. Bound requests as well
+        // as rows so a stream of tiny pages cannot monopolize host catch-up.
+        for _ in 0..128 {
+            let page: Value = self.request_query(
+                Method::GET,
+                &["teams", "moves"],
+                None,
+                None,
+                (!after.is_empty()).then_some(("after", after.as_str())),
+            )?;
+            let rows = page["moves"].as_array().ok_or(TeamError::InvalidResponse)?;
+            if rows.len() > 1000 || moves.len() + rows.len() > 100_000 {
+                return Err(TeamError::InvalidResponse);
+            }
+            let mut last = after.clone();
+            for row in rows {
+                let id = row["repositoryId"]
+                    .as_str()
+                    .ok_or(TeamError::InvalidResponse)?;
+                let sequence = row["sequence"]
+                    .as_u64()
+                    .filter(|sequence| *sequence > 0)
+                    .ok_or(TeamError::InvalidResponse)?;
+                if !id.strip_prefix("repo_").is_some_and(|suffix| {
+                    suffix.len() == 32
+                        && suffix
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                }) || id <= last.as_str()
+                {
+                    return Err(TeamError::InvalidResponse);
+                }
+                last = id.into();
+                // Keep only the bounded protocol metadata. Unknown response
+                // fields must not accumulate up to a megabyte for every row.
+                moves.push(json!({"repositoryId": id, "sequence": sequence}));
+            }
+            match page.get("nextCursor") {
+                None | Some(Value::Null) => return Ok(json!({ "moves": moves })),
+                Some(Value::String(cursor))
+                    if !rows.is_empty() && cursor == &last && cursor > &after =>
+                {
+                    after = cursor.clone();
+                }
+                _ => return Err(TeamError::InvalidResponse),
+            }
+        }
+        Err(TeamError::InvalidResponse)
     }
     pub fn withdraw_checkout(
         &self,

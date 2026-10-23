@@ -647,6 +647,9 @@ fn new_chat_conversation(
         if previous.phase != Phase::Prepared {
             return Err(changed());
         }
+        // The original attempt may have been created by another native or
+        // daemon instance after this process loaded its conversation cache.
+        chats.refresh_index().map_err(DispatchError::from)?;
         let chat = chats
             .list(workspace)
             .into_iter()
@@ -795,7 +798,7 @@ mod new_chat_tests {
 
     #[test]
     fn retrying_a_prepared_new_chat_reuses_its_source_without_another_admission() {
-        let (_root, chats, original) = saved_empty_chat();
+        let (root, chats, original) = saved_empty_chat();
         let mut previous = super::ChatShare {
             id: format!("share_{}", "ab".repeat(16)),
             checkout_id: "checkout".into(),
@@ -823,6 +826,33 @@ mod new_chat_tests {
             assert!(!created);
         }
         assert_eq!(chats.list("workspace").len(), 1);
+        // Another native/daemon instance may have cached the index before
+        // the original creator saved this source. Its retry must reload it.
+        let stale = crate::chat::Store::at(root.path().join("chats"));
+        assert!(stale.list("workspace").is_empty());
+        let (retried, created) = super::new_chat_conversation(
+            &stale,
+            "workspace",
+            "Retry title",
+            Some(&previous),
+            &|| Ok(()),
+            || panic!("a retry cannot spend another admission slot"),
+        )
+        .unwrap();
+        assert_eq!(retried.id, original.id);
+        assert!(!created);
+        // A cached matching source cannot substitute for an unreadable index.
+        std::fs::write(root.path().join("chats/conversations.json"), b"{damaged").unwrap();
+        let error = super::new_chat_conversation(
+            &stale,
+            "workspace",
+            "Retry title",
+            Some(&previous),
+            &|| Ok(()),
+            || panic!("a retry cannot spend another admission slot"),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, crate::error::CALL_FAILED);
         previous.phase = super::Phase::Withdrawn;
         assert!(
             super::new_chat_conversation(

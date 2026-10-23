@@ -70,6 +70,92 @@ fn capabilities() -> Value {
 }
 
 #[test]
+fn move_catch_up_collects_every_page_and_rejects_nonadvancing_cursors() {
+    let first = format!("repo_{:032x}", 1);
+    let last = format!("repo_{:032x}", 1000);
+    let tail = format!("repo_{:032x}", 1001);
+    let rows: Vec<Value> = (1..=1000)
+        .map(|i| json!({"repositoryId": format!("repo_{i:032x}"), "sequence": 1}))
+        .collect();
+    let (client, wire) = fixture_replies(
+        vec![
+            response(json!({"moves": rows, "nextCursor": last})),
+            response(json!({"moves": [{"repositoryId": tail, "sequence": 2}], "nextCursor": null})),
+        ],
+        false,
+    );
+    let result = client.my_moves().unwrap();
+    assert_eq!(result["moves"].as_array().unwrap().len(), 1001);
+    assert_eq!(result["moves"][1000]["repositoryId"], tail);
+    assert!(
+        wire.requests.lock().unwrap()[1]
+            .1
+            .ends_with(&format!("?after={last}"))
+    );
+    // Older account servers omit the cursor on their single page.
+    let (client, _) = fixture(
+        response(json!({"moves": [{"repositoryId": first, "sequence": 1}]})),
+        false,
+    );
+    assert_eq!(
+        client.my_moves().unwrap()["moves"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    for page in [
+        json!({"moves": [], "nextCursor": first}),
+        json!({"moves": [{"repositoryId": first, "sequence": 1}], "nextCursor": "../private"}),
+        json!({"moves": [{"repositoryId": first, "sequence": 0}]}),
+    ] {
+        let (client, _) = fixture(response(page), false);
+        assert_eq!(client.my_moves(), Err(TeamError::InvalidResponse));
+    }
+    let (client, _) = fixture_replies(
+        vec![
+            response(
+                json!({"moves": [{"repositoryId": first, "sequence": 1}], "nextCursor": first}),
+            ),
+            response(
+                json!({"moves": [{"repositoryId": first, "sequence": 2}], "nextCursor": first}),
+            ),
+        ],
+        false,
+    );
+    assert_eq!(client.my_moves(), Err(TeamError::InvalidResponse));
+}
+
+#[test]
+fn move_catch_up_bounds_requests_and_retains_only_protocol_metadata() {
+    let replies = (1..=129)
+        .map(|index| {
+            let id = format!("repo_{index:032x}");
+            response(json!({
+                "moves": [{"repositoryId": id, "sequence": 1}],
+                "nextCursor": if index == 129 { Value::Null } else { json!(id) },
+            }))
+        })
+        .collect();
+    let (client, wire) = fixture_replies(replies, false);
+    assert_eq!(client.my_moves(), Err(TeamError::InvalidResponse));
+    assert!(wire.requests.lock().unwrap().len() < 129);
+
+    let id = format!("repo_{:032x}", 1);
+    let (client, _) = fixture(
+        response(json!({"moves": [{
+            "repositoryId": id, "sequence": 42, "extra": "x".repeat(256 * 1024)
+        }]})),
+        false,
+    );
+    assert_eq!(
+        client.my_moves().unwrap(),
+        json!({"moves": [{"repositoryId": id, "sequence": 42}]}),
+        "large unknown fields must not accumulate across pages"
+    );
+}
+
+#[test]
 fn host_execution_proves_the_actual_identity_for_one_exact_reviewed_write() {
     let v: Value = serde_json::from_str(include_str!(
         "../../../../fixtures/teams/host-proof-v1.json"

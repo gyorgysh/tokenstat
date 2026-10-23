@@ -251,17 +251,20 @@ fn validate(settings: &Settings) -> bool {
 }
 
 /// Lane settings for a checkout, only when lanes are on.
-pub(super) fn settings(checkout: &str) -> Option<Settings> {
-    checkout_settings(checkout).filter(|s| s.enabled)
+pub(super) fn settings(checkout: &str) -> Result<Option<Settings>, DispatchError> {
+    settings_at(&root()?, checkout)
 }
 
-fn checkout_settings(checkout: &str) -> Option<Settings> {
-    load()
-        .ok()?
-        .checkouts
-        .get(checkout)
-        .filter(|s| validate(s))
-        .cloned()
+fn settings_at(root: &Path, checkout: &str) -> Result<Option<Settings>, DispatchError> {
+    Ok(checkout_settings_at(root, checkout)?.filter(|settings| settings.enabled))
+}
+
+fn checkout_settings(checkout: &str) -> Result<Option<Settings>, DispatchError> {
+    checkout_settings_at(&root()?, checkout)
+}
+
+fn checkout_settings_at(root: &Path, checkout: &str) -> Result<Option<Settings>, DispatchError> {
+    Ok(load_at(root)?.checkouts.get(checkout).cloned())
 }
 
 /// A lane for one run. Removed on drop unless kept, so a preflight refusal
@@ -641,7 +644,7 @@ pub(crate) fn caught_up(repository: &str) {
         return;
     };
     for row in rows {
-        let Some(settings) = checkout_settings(&row.id) else {
+        let Ok(Some(settings)) = checkout_settings(&row.id) else {
             continue;
         };
         let Some(remote) = settings.remote.as_deref() else {
@@ -725,7 +728,7 @@ pub(super) fn land_ready(
     let input: LandInput = serde_json::from_str(params).map_err(|_| invalid())?;
     let value = principal.value();
     super::publications::Store::current_for(principal)?;
-    let settings = settings(&value.checkout_id)
+    let settings = settings(&value.checkout_id)?
         .filter(|settings| settings.review)
         .ok_or_else(unavailable)?;
     let parent = lane::root(
@@ -917,7 +920,7 @@ pub(crate) fn caught_up_since_last_seen(client: &tokenstat_sync::teams::TeamClie
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default();
     let mut changed = false;
-    for row in moves["moves"].as_array().into_iter().flatten().take(1000) {
+    for row in moves["moves"].as_array().into_iter().flatten() {
         let (Some(repository), Some(sequence)) =
             (row["repositoryId"].as_str(), row["sequence"].as_u64())
         else {
@@ -1236,6 +1239,32 @@ mod tests {
             update_settings_at(root.path(), "new".into(), settings("main", None, &[])).is_err()
         );
         assert!(path.is_dir());
+    }
+
+    #[test]
+    fn unreadable_execution_settings_never_fall_back_to_manual_mode() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(settings_at(root.path(), "checkout").unwrap().is_none());
+        let mut reviewed = settings("main", None, &[]);
+        reviewed.review = true;
+        update_settings_at(root.path(), "checkout".into(), reviewed.clone()).unwrap();
+        assert_eq!(
+            settings_at(root.path(), "checkout").unwrap(),
+            Some(reviewed)
+        );
+        let mut manual = settings("main", None, &[]);
+        manual.enabled = false;
+        update_settings_at(root.path(), "checkout".into(), manual).unwrap();
+        assert!(settings_at(root.path(), "checkout").unwrap().is_none());
+        // Both Ask admission and manual landing use this fallible lookup. A
+        // storage error cannot be mistaken for the explicit Manual setting.
+        fs::write(root.path().join("settings.json"), b"{broken settings").unwrap();
+        for checkout in ["checkout", "unknown-checkout"] {
+            assert_eq!(
+                settings_at(root.path(), checkout).unwrap_err().code,
+                "team_lanes_storage"
+            );
+        }
     }
 
     // A separate process uses the same transaction as a native host or daemon.

@@ -225,7 +225,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
     // With lanes on, the run works in its own worktree and never in the
     // publisher's folder. A refused or failed Ask drops the lane again.
     *stage = "lane";
-    let lane_settings = super::lanes::settings(&principal.value().checkout_id);
+    let lane_settings = super::lanes::settings(&principal.value().checkout_id)?;
     let mut lane = match &lane_settings {
         Some(settings) => Some(super::lanes::open(
             &source.checkout.folder.canonical,
