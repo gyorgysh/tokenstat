@@ -40,6 +40,12 @@ enum TeamHostMethod: String, Sendable {
     case chatPublish = "teams.chat.publish"
     case chatList = "teams.chat.list"
     case chatWithdraw = "teams.chat.withdraw"
+    case chatSharingRead = "teams.chatSharing.read"
+    case chatSharingBegin = "teams.chatSharing.begin"
+    case chatSharingPreview = "teams.chatSharing.preview"
+    case chatSharingPublish = "teams.chatSharing.publish"
+    case chatSharingSkip = "teams.chatSharing.skip"
+    case chatSharingDiscard = "teams.chatSharing.discard"
 }
 struct TeamAPI: Sendable {
     let send: @Sendable (TeamHostMethod, JSONValue, TeamAccountOwner) async throws -> JSONValue
@@ -55,6 +61,7 @@ struct TeamCapabilities: Decodable, Sendable {
     var canConnectCheckouts = false
     var canPublishChats = false
     var canResumeProjectSharing = false
+    var canReviewChatSelection = false
     var actorId: String?
     var enabled: Bool
     var ready: Bool
@@ -67,7 +74,7 @@ struct TeamCapabilities: Decodable, Sendable {
         self.needsDeviceRegistration = needsDeviceRegistration
         self.authorizationRequired = authorizationRequired; self.version = version
     }
-    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats, canResumeProjectSharing }
+    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats, canResumeProjectSharing, canReviewChatSelection }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         actorId = try c.decodeIfPresent(String.self, forKey: .actorId)
@@ -75,6 +82,7 @@ struct TeamCapabilities: Decodable, Sendable {
         canConnectCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canConnectCheckouts) ?? false
         canPublishChats = try c.decodeIfPresent(Bool.self, forKey: .canPublishChats) ?? false
         canResumeProjectSharing = try c.decodeIfPresent(Bool.self, forKey: .canResumeProjectSharing) ?? false
+        canReviewChatSelection = try c.decodeIfPresent(Bool.self, forKey: .canReviewChatSelection) ?? false
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         ready = try c.decodeIfPresent(Bool.self, forKey: .ready) ?? false
         needsDeviceRegistration = try c.decodeIfPresent(Bool.self, forKey: .needsDeviceRegistration) ?? false

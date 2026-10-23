@@ -131,6 +131,7 @@ internal sealed partial class TeamsPage : Page
             _person = actor;
             _canPublish = Format.Flag(capabilities, "canPublishCheckouts");
             _canResumeSharing = Format.Flag(capabilities, "canResumeProjectSharing");
+            _canReviewChatSelection = Format.Flag(capabilities, "canReviewChatSelection");
             var page = TeamDirectoryPage.Read(await CallAsync("teams.directory", new JsonObject { ["operation"] = "organizations.list", ["page"] = Page100() }), "organizations", 0);
             if (!IsLoaded || _view != view) return;
             _organizations = page.Rows; _organizationsNext = page.Next;

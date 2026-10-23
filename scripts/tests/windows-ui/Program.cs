@@ -137,6 +137,7 @@ public sealed partial class SmokeApp : Application
                 await ChatLocalSharingSmoke.RunAsync(body);
                 await TeamManagementSmoke.RunAsync(body);
                 await TeamPublisherSmoke.RunAsync(body);
+                await TeamChatSelectionSmoke.RunAsync(body);
                 await TeamFolderShareSmoke.RunAsync(body);
                 await TeamSharedFileSmoke.RunAsync(body);
                 PersonaSceneSmoke.Run();

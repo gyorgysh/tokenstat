@@ -144,6 +144,43 @@ final class TeamFixtureUITests: XCTestCase {
         submit.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
     }
+    func testSelectedPrivateChatsResumeAndEachNeedsFreshConfirmation() {
+        let app = launch("chatSelection")
+        openSharedChat(app); app.buttons["team.chat.back"].tap()
+        func openReview() {
+            let share = app.buttons["team.chats.share"]
+            XCTAssertTrue(share.waitForExistence(timeout: 5)); reveal(share, in: app); share.tap()
+        }
+        func confirmHistory() {
+            let confirm = app.switches["team.chat.selection.confirm"]
+            XCTAssertTrue(confirm.waitForExistence(timeout: 5)); XCTAssertEqual(confirm.value as? String, "0")
+            let publish = app.buttons["team.chat.selection.publish"]; XCTAssertFalse(publish.isEnabled)
+            reveal(confirm, in: app); confirm.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            XCTAssertTrue(publish.isEnabled)
+        }
+        openReview()
+        let begin = app.buttons["team.chat.selection.begin"]
+        XCTAssertTrue(begin.waitForExistence(timeout: 5)); XCTAssertFalse(begin.isEnabled)
+        for id in ["chat_fixture", "chat_second"] {
+            let option = app.switches["team.chat.selection.option." + id]
+            XCTAssertTrue(option.waitForExistence(timeout: 5)); reveal(option, in: app)
+            option.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(begin.isEnabled); reveal(begin, in: app); begin.tap()
+        let first = app.buttons["team.chat.selection.review.chat_fixture"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        app.buttons["team.chat.selection.close"].tap(); openReview()
+        XCTAssertTrue(first.waitForExistence(timeout: 5)); XCTAssertFalse(app.buttons["team.chat.selection.begin"].exists)
+        reveal(first, in: app); first.tap(); confirmHistory()
+        app.buttons["team.chat.selection.close"].tap()
+        app.buttons["team.chat.selection.close"].tap(); openReview()
+        XCTAssertTrue(first.waitForExistence(timeout: 5)); reveal(first, in: app); first.tap(); confirmHistory()
+        app.buttons["team.chat.selection.publish"].tap()
+        XCTAssertTrue(app.staticTexts["Next quarter"].waitForExistence(timeout: 5)); confirmHistory()
+        app.buttons["team.chat.selection.publish"].tap()
+        XCTAssertTrue(app.staticTexts["Your chat review is finished."].waitForExistence(timeout: 5))
+        capture(app, "Selected private chats require separate current history consent")
+    }
     func testSavedSharingNeedsAnExplicitProjectAndFreshConfirmation() {
         let app = launch("sharingUnknown", largeText: true)
         app.buttons["Fixture"].tap(); app.buttons["Share Client"].tap()

@@ -134,6 +134,8 @@ struct Index {
     chats: Vec<ChatShare>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     project_setups: Vec<super::project_setup::Record>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    chat_reviews: Vec<super::chat_review::Record>,
 }
 impl Default for Index {
     fn default() -> Self {
@@ -142,6 +144,7 @@ impl Default for Index {
             checkouts: Vec::new(),
             chats: Vec::new(),
             project_setups: Vec::new(),
+            chat_reviews: Vec::new(),
         }
     }
 }
@@ -186,6 +189,26 @@ impl Store {
                 unavailable(
                     "sharing_busy",
                     "This sharing setup is already being resumed. Try again shortly.",
+                )
+            })
+    }
+    pub(super) fn chat_reviews<T>(
+        &self,
+        operation: impl FnOnce(&mut Vec<super::chat_review::Record>) -> Result<T, DispatchError>,
+    ) -> Result<T, DispatchError> {
+        self.transaction(|index| operation(&mut index.chat_reviews))
+    }
+    pub(super) fn chat_review_lease(&self, id: &str) -> Result<OwnerLease, DispatchError> {
+        if !super::chat_review::valid_id(id) {
+            return Err(storage());
+        }
+        private_directory(&self.root)?;
+        OwnerLease::try_acquire(&self.root.join(format!("{id}.lock")))
+            .map_err(|_| storage())?
+            .ok_or_else(|| {
+                unavailable(
+                    "sharing_busy",
+                    "This chat selection is being shared. Try again shortly.",
                 )
             })
     }
@@ -747,6 +770,7 @@ fn load(path: &Path) -> Result<Index, DispatchError> {
     }
     chats::validate(&index)?;
     super::project_setup::validate(&index.project_setups)?;
+    super::chat_review::validate(&index.chat_reviews)?;
     Ok(index)
 }
 fn save(root: &Path, destination: &Path, index: &Index) -> Result<(), DispatchError> {

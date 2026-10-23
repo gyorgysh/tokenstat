@@ -28,6 +28,8 @@
 <Compile Include="../../../apps/windows/Pages/TeamsPage.Projects.cs" Link="TeamsPage.Projects.cs" />
 
 <Compile Include="../../../apps/windows/Pages/TeamPublisherModel.cs" Link="TeamPublisherModel.cs" />
+<Compile Include="../../../apps/windows/Pages/TeamChatSelectionModel.cs" Link="TeamChatSelectionModel.cs" />
+<Compile Include="../../../apps/windows/Pages/TeamsPage.ChatSelection.cs" Link="TeamsPage.ChatSelection.cs" />
 <Compile Include="../../../apps/windows/Pages/TeamsPage.Publishing.cs" Link="TeamsPage.Publishing.cs" />
 <Compile Include="../../../apps/windows/Pages/TeamsPage.PublisherSettings.cs" Link="TeamsPage.PublisherSettings.cs" />
 

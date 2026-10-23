@@ -74,7 +74,7 @@ internal sealed partial class TeamsPage
             _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh, async (_, _) => { if (IsLoaded && _view == view) await ReviewTeamCheckoutAsync(model, repository, workspace, back); }));
         }
     }
-    private async Task ShowTeamLocalChatsAsync(TeamPublisherModel model, JsonObject repository, JsonObject publication, Func<Task> back,
+    private async Task ShowTeamSingleChatsAsync(TeamPublisherModel model, JsonObject repository, JsonObject publication, Func<Task> back,
         TeamManagementRows? priorOptions = null, TeamManagementRows? priorShares = null, bool moreOptions = false, bool moreShares = false)
     {
         var checkout = Text(publication, "id"); Reset(L10n.Text("common.teams.share_chat")); var view = _view;
@@ -84,7 +84,7 @@ internal sealed partial class TeamsPage
         if (!IsLoaded || _view != view) return;
         if (priorShares is null || moreShares) try { var page = await model.Chats(checkout, true, moreShares ? shares.Next ?? 0 : 0); shares = new(TeamCatalogPage.Append(shares.Rows, page.Rows), page.Next, true); } catch (Exception e) { shareError = TeamError(e); }
         if (!IsLoaded || _view != view) return;
-        Task Reload() => ShowTeamLocalChatsAsync(model, repository, publication, back);
+        Task Reload() => ShowTeamSingleChatsAsync(model, repository, publication, back);
         Note(L10n.Text("common.teams.project_chats_private"));
         if (optionError is not null) Note(optionError, true); if (shareError is not null) Note(shareError, true);
         foreach (var chat in options.Rows.Where(row => !Flag(row, "shared")))
@@ -95,7 +95,7 @@ internal sealed partial class TeamsPage
             })); _body.Children.Add(card);
         }
         if (options.Next is not null || optionError is not null) _body.Children.Add(ActionIconGlyph.Button(L10n.Text(optionError is null ? "common.teams.load_more" : "common.retry"), ActionIcon.More, async (_, _) => {
-            if (IsLoaded && _view == view) await ShowTeamLocalChatsAsync(model, repository, publication, back, options.Next is not null ? options : null, shares, moreOptions: options.Next is not null);
+            if (IsLoaded && _view == view) await ShowTeamSingleChatsAsync(model, repository, publication, back, options.Next is not null ? options : null, shares, moreOptions: options.Next is not null);
         }));
         if (options.Loaded && options.Rows.Count == 0) Note(L10n.Text("common.teams.no_local_chats"));
         Note(L10n.Text("common.teams.your_shared_chats"));
@@ -110,7 +110,7 @@ internal sealed partial class TeamsPage
             })); _body.Children.Add(card);
         }
         if (shares.Next is not null || shareError is not null) _body.Children.Add(ActionIconGlyph.Button(L10n.Text(shareError is null ? "common.teams.load_more" : "common.retry"), ActionIcon.More, async (_, _) => {
-            if (IsLoaded && _view == view) await ShowTeamLocalChatsAsync(model, repository, publication, back, options, shares.Next is not null ? shares : null, moreShares: shares.Next is not null);
+            if (IsLoaded && _view == view) await ShowTeamSingleChatsAsync(model, repository, publication, back, options, shares.Next is not null ? shares : null, moreShares: shares.Next is not null);
         }));
     }
     private async Task ReviewTeamChatAsync(TeamPublisherModel model, JsonObject repository, string checkout, JsonObject chat, Func<Task> back)

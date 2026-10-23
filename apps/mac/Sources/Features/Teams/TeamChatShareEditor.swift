@@ -20,10 +20,17 @@ struct TeamChatShareEditor: View {
     @State private var saving = false
     @State private var error: String?
     @State private var requestId = UUID().uuidString
+    @State private var managingSharedChats = false
     private var isCurrent: Bool { store.mutationContext == context && store.phase == .ready }
     private var target: [String: JSONValue] { ["organization":.string(repository.organizationId),"repository":.string(repository.id),"checkout":.string(checkout.id)] }
 
     var body: some View {
+        if store.capabilities?.canReviewChatSelection == true && !managingSharedChats {
+            TeamChatReviewEditor(store: store, context: context, repository: repository, checkout: checkout, transcript: transcript,
+                manageSharedChats: { managingSharedChats = true })
+        } else { singleChatEditor }
+    }
+    private var singleChatEditor: some View {
         ThemedSheet(title: L10n.text("common.teams.share_chat"), subtitle: repository.name, icon: .comment, scrolls: true, onClose: { if !saving { dismiss() } }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let error { TeamNotice(message: error, warning: true) }

@@ -10,6 +10,7 @@ await TeamCommentTests.RunAsync();
 await TeamAskTests.RunAsync();
 await TeamManagementTests.RunAsync();
 await TeamPublisherTests.RunAsync();
+await TeamChatSelectionTests.RunAsync();
 await TeamFolderShareTests.RunAsync();
 await TeamSharedFileTests.RunAsync();
 await ChatLocalSharingTests.RunAsync();

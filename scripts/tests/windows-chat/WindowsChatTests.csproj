@@ -10,6 +10,7 @@
 <Compile Include="../../../apps/windows/Pages/TeamSharedFile.cs" Link="TeamSharedFile.cs" />
 <Compile Include="../../../apps/windows/Pages/TeamFolderShareModel.cs" Link="TeamFolderShareModel.cs" />
 <Compile Include="../../../apps/windows/Pages/TeamPublisherModel.cs" Link="TeamPublisherModel.cs" />
+<Compile Include="../../../apps/windows/Pages/TeamChatSelectionModel.cs" Link="TeamChatSelectionModel.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamManagementModel.cs" Link="TeamManagementModel.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamInboxModel.cs" Link="TeamInboxModel.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamCommentDraftStore.cs" Link="TeamCommentDraftStore.cs" />

@@ -154,6 +154,21 @@ fn review(
     let (binding, local, repository, cloud_revision) = review_context(owner, client, request)?;
     finish_review(owner, request, binding, local, repository, cloud_revision)
 }
+pub(super) fn local_checkout(
+    owner: &AccountSnapshot,
+    client: &TeamClient,
+    organization: &str,
+    repository: &str,
+    checkout: &str,
+) -> Result<publications::Checkout, DispatchError> {
+    let target = Target {
+        organization: organization.into(),
+        repository: repository.into(),
+        checkout: checkout.into(),
+        conversation: String::new(),
+    };
+    Ok(review_context(owner, client, &target)?.1)
+}
 fn review_context(
     owner: &AccountSnapshot,
     client: &TeamClient,

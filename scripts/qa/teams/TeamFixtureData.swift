@@ -9,8 +9,41 @@ actor TeamFixtureProjects {
     func discardSetup() { setupDiscarded = true }
 }
 
+actor TeamFixtureChatSelection {
+    static let shared = TeamFixtureChatSelection()
+    private var selection: [String: JSONValue]?
+    private let titles = ["chat_fixture": "Quarterly totals", "chat_second": "Next quarter"]
+    func call(_ method: TeamHostMethod, _ params: JSONValue) throws -> JSONValue {
+        guard case let .object(fields) = params else { throw CancellationError() }
+        if method == .chatSharingRead { return .object(["selection": selection.map(JSONValue.object) ?? .null]) }
+        if method == .chatSharingBegin {
+            guard fields["confirmSelection"] == .bool(true), case let .array(chats)? = fields["conversations"], !chats.isEmpty else { throw CancellationError() }
+            let items = chats.compactMap { value -> JSONValue? in
+                guard case let .string(id) = value, let title = titles[id] else { return nil }
+                return .object(["conversation":.string(id),"title":.string(title),"available":.bool(true),"shared":.bool(false),"skipped":.bool(false)])
+            }
+            selection = ["id":.string("review_" + String(repeating: "a", count: 32)),"organizationId":.string("org_fixture"),"repositoryId":.string("repo_fixture"),
+                "checkoutId":.string("checkout_" + String(repeating: "a", count: 32)),"items":.array(items),"complete":.bool(false),"discarded":.bool(false),"allowsAgentRuns":.bool(false)]
+        } else if method == .chatSharingPreview {
+            guard let selection, case let .string(id)? = fields["conversation"], let title = titles[id] else { throw CancellationError() }
+            return .object(["selection":.object(selection),"preview":try TeamFixtureData.chatReview(id, title)])
+        } else if method == .chatSharingPublish || method == .chatSharingSkip {
+            guard fields[method == .chatSharingPublish ? "confirmHistory" : "confirmSkip"] == .bool(true), let id = fields["conversation"], case let .array(items)? = selection?["items"] else { throw CancellationError() }
+            let updated = items.map { value -> JSONValue in
+                guard case var .object(item) = value, item["conversation"] == id else { return value }
+                item[method == .chatSharingPublish ? "shared" : "skipped"] = .bool(true); return .object(item)
+            }
+            selection?["items"] = .array(updated)
+            selection?["complete"] = .bool(updated.allSatisfy { if case let .object(item) = $0 { return item["shared"] == .bool(true) || item["skipped"] == .bool(true) }; return false })
+        } else if method == .chatSharingDiscard {
+            guard fields["confirmDiscard"] == .bool(true) else { throw CancellationError() }; selection = nil
+        }
+        return .object(["selection":selection.map(JSONValue.object) ?? .null])
+    }
+}
+
 enum TeamFixtureData {
-    enum State: String { case ready, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer, draftOffline, askUncertain, sharingUnknown, sharingUnavailable }
+    enum State: String { case ready, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer, draftOffline, askUncertain, sharingUnknown, sharingUnavailable, chatSelection }
     static let state: State = {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--fixture-state"), args.indices.contains(index + 1) else { return .ready }
@@ -26,11 +59,14 @@ enum TeamFixtureData {
         TeamMember(id: "fixture-downgraded", name: "山田 太郎", handle: "example-taro", avatar: nil, role: .member, revision: 1, eligible: false, ownershipEligible: false, joinedAt: timestamp)]
     static func json<T: Encodable>(_ value: T) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value)) }
     static let chatEvents: [JSONValue] = [.object(["kind":.string("user"),"text":.string("Compare the fictional quarterly totals."),"seq":.int(0),"atMs":.int(1)]),.object(["kind":.string("agent"),"backend":.string("codex"),"seq":.int(100),"atMs":.int(2),"event":.object(["kind":.string("text"),"delta":.string("The fictional total increased from 24 to 42.")])])]
+    static func chatReview(_ id: String, _ title: String) throws -> JSONValue {
+        .object(["conversation":.string(id),"checkoutId":.string("checkout_"+String(repeating:"a",count:32)),"repository":try json(repository),"deviceName":.string("Example Mac"),"preview":.string(String(repeating:"ab",count:32)),"audience":.string("currentAndFutureRepositoryMembers"),"allowsAgentRuns":.bool(false),"history":try json(TeamChatHistory(title:title,backend:"codex",historyTrimmed:false,events:chatEvents))])
+    }
     static let api = TeamAPI { method, params, _ in
         switch method {
         case .capabilities:
             if state == .failure || state == .draftOffline { throw TeamRequestFailure(code: "teams_unreachable", message: "The fictional account server is unavailable.") }
-            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canResumeProjectSharing":.bool(state == .sharingUnknown || state == .sharingUnavailable),"canPublishCheckouts":.bool(true),"canConnectCheckouts":.bool(true),"canPublishChats":.bool(true)])
+            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canReviewChatSelection":.bool(state == .chatSelection),"canResumeProjectSharing":.bool(state == .sharingUnknown || state == .sharingUnavailable),"canPublishCheckouts":.bool(true),"canConnectCheckouts":.bool(true),"canPublishChats":.bool(true)])
         case .authorizationPreview: return .object(["deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .prepareAuthorization: return .object(["authorizationURL":.string("https://accounts.example.test/settings/teams/devices/fixture"),"deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .checkoutOptions: return .object(["deviceName":.string("Example Mac"),"workspaces":.array([try json(TeamLocalWorkspace(id: "/example/Website", name: "Website", path: "/example/Website")),try json(TeamLocalWorkspace(id: "/example/Feature checkout", name: "Website feature", path: "/example/Feature checkout"))]),"nextOffset":.null])
@@ -53,7 +89,9 @@ enum TeamFixtureData {
                 if method == "team.chat.receipt" { return await TeamFixtureComments.shared.receipt(params) }
             }
             return .object(["checkoutId":checkout,"organizationId":organization,"repositoryId":repository,"state":.string("available")])
-        case .chatOptions: return .object(["chats":.array([try json(TeamLocalChat(id:"chat_fixture",title:"Quarterly totals",backend:"codex",shared:false))]),"nextOffset":.null])
+        case .chatOptions:
+            if state == .chatSelection { return .object(["chats":.array([try json(TeamLocalChat(id:"chat_fixture",title:"Quarterly totals",backend:"codex",shared:false)),try json(TeamLocalChat(id:"chat_second",title:"Next quarter",backend:"codex",shared:false))]),"nextOffset":.null]) }
+            return .object(["chats":.array([try json(TeamLocalChat(id:"chat_fixture",title:"Quarterly totals",backend:"codex",shared:false))]),"nextOffset":.null])
         case .chatPreview: return .object(["conversation":.string("chat_fixture"),"checkoutId":.string("checkout_"+String(repeating:"a",count:32)),"repository":try json(repository),"deviceName":.string("Example Mac"),"preview":.string(String(repeating:"ab",count:32)),"audience":.string("currentAndFutureRepositoryMembers"),"allowsAgentRuns":.bool(false),"history":try json(TeamChatHistory(title:"Quarterly totals",backend:"codex",historyTrimmed:false,events:chatEvents))])
         case .chatList: return .object(["publications":.array([]),"nextOffset":.null])
         case .chatPublish, .chatWithdraw: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
@@ -64,6 +102,12 @@ enum TeamFixtureData {
             guard state == .askUncertain else { throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.") }
             return try await TeamFixtureAsks.shared.call(params)
         case .checkoutPublish, .checkoutWithdraw, .lanesSet, .lanesCatchUp, .projectSharingBegin, .projectSharingResume: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
+        case .chatSharingRead, .chatSharingBegin, .chatSharingPreview, .chatSharingPublish, .chatSharingSkip, .chatSharingDiscard:
+            guard state == .chatSelection else {
+                if method == .chatSharingRead { return .object(["selection":.null]) }
+                throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only.")
+            }
+            return try await TeamFixtureChatSelection.shared.call(method, params)
         case .projectSharingDiscard:
             guard state == .sharingUnavailable, case let .object(fields) = params, fields["confirmDiscard"] == .bool(true) else { throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.") }
             await TeamFixtureProjects.shared.discardSetup()

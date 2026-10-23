@@ -8,6 +8,8 @@ mod authorization;
 #[cfg(feature = "local-host")]
 mod catalog;
 #[cfg(feature = "local-host")]
+mod chat_review;
+#[cfg(feature = "local-host")]
 mod chats;
 mod connections;
 mod directory;
@@ -260,6 +262,10 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             #[cfg(feature = "local-host")]
             directory::Request::Chat(request) => chats::perform(&owner, &client, request),
             #[cfg(feature = "local-host")]
+            directory::Request::ChatReview(request) => {
+                chat_review::perform(&owner, &client, request)
+            }
+            #[cfg(feature = "local-host")]
             directory::Request::ProjectSetup(request) => {
                 project_setup::perform(&owner, &client, request)
             }
@@ -308,6 +314,7 @@ fn capabilities(client: &TeamClient) -> Result<Value, DispatchError> {
             value["canConnectCheckouts"] = json!(can_connect);
             value["canPublishChats"] = json!(can_publish_chats);
             value["canResumeProjectSharing"] = json!(can_publish);
+            value["canReviewChatSelection"] = json!(can_publish_chats);
             Ok(value)
         }
         Err(TeamError::Rejected { code, .. }) if code == "device_required" => Ok(

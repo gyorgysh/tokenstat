@@ -22,11 +22,15 @@ pub(super) enum Request {
     Chat(super::chats::Request),
     #[cfg(feature = "local-host")]
     ProjectSetup(super::project_setup::Request),
+    #[cfg(feature = "local-host")]
+    ChatReview(super::chat_review::Request),
 }
 pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError> {
     let invalid =
         || DispatchError::new("invalid_request", "Check the Teams request and try again.");
-    let max_bytes = if method.starts_with("teams.projectSharing.") {
+    let max_bytes = if method.starts_with("teams.projectSharing.")
+        || method.starts_with("teams.chatSharing.")
+    {
         256 * 1024
     } else {
         16 * 1024
@@ -39,6 +43,10 @@ pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError
     // These are verified by AccountSnapshot before any network operation.
     object.remove("_accountScope");
     object.remove("_accountSession");
+    #[cfg(feature = "local-host")]
+    if let Some(request) = super::chat_review::parse(method, Value::Object(object.clone())) {
+        return request.map(Request::ChatReview);
+    }
     #[cfg(feature = "local-host")]
     if let Some(request) = super::project_setup::parse(method, Value::Object(object.clone())) {
         return request.map(Request::ProjectSetup);
