@@ -36,6 +36,22 @@ jobs:
           git diff --exit-code -- apps/charts/runtime/
       - run: npm --prefix apps/charts test
       - run: npm --prefix apps/charts audit --audit-level=high
+      - name: Use the public Ubuntu archive for browser prerequisites
+        run: |
+          sudo python3 - <<'PY'
+          from pathlib import Path
+          sources = [Path('/etc/apt/sources.list')]
+          sources += list(Path('/etc/apt/sources.list.d').glob('*.list'))
+          sources += list(Path('/etc/apt/sources.list.d').glob('*.sources'))
+          for source in sources:
+              if not source.exists():
+                  continue
+              original = source.read_text()
+              updated = original.replace('http://azure.archive.ubuntu.com/ubuntu', 'https://archive.ubuntu.com/ubuntu')
+              updated = updated.replace('https://azure.archive.ubuntu.com/ubuntu', 'https://archive.ubuntu.com/ubuntu')
+              if updated != original:
+                  source.write_text(updated)
+          PY
       - run: apps/charts/node_modules/.bin/playwright install --with-deps chromium webkit
       - run: node apps/charts/tests/browser.mjs
       - name: Keep chart visual checks
