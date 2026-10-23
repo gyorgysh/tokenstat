@@ -25,6 +25,10 @@ enum TeamHostMethod: String, Sendable {
     case checkoutPublish = "teams.checkout.publish"
     case checkoutList = "teams.checkout.list"
     case checkoutWithdraw = "teams.checkout.withdraw"
+    case projectSharingRead = "teams.projectSharing.read"
+    case projectSharingBegin = "teams.projectSharing.begin"
+    case projectSharingResume = "teams.projectSharing.resume"
+    case projectSharingDiscard = "teams.projectSharing.discard"
     case connectionCall = "teams.connection.call"
     case commentSend = "teams.comment.send"
     case ask = "teams.ask"
@@ -50,6 +54,7 @@ struct TeamCapabilities: Decodable, Sendable {
     var canPublishCheckouts = false
     var canConnectCheckouts = false
     var canPublishChats = false
+    var canResumeProjectSharing = false
     var actorId: String?
     var enabled: Bool
     var ready: Bool
@@ -62,13 +67,14 @@ struct TeamCapabilities: Decodable, Sendable {
         self.needsDeviceRegistration = needsDeviceRegistration
         self.authorizationRequired = authorizationRequired; self.version = version
     }
-    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats }
+    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats, canResumeProjectSharing }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         actorId = try c.decodeIfPresent(String.self, forKey: .actorId)
         canPublishCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canPublishCheckouts) ?? false
         canConnectCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canConnectCheckouts) ?? false
         canPublishChats = try c.decodeIfPresent(Bool.self, forKey: .canPublishChats) ?? false
+        canResumeProjectSharing = try c.decodeIfPresent(Bool.self, forKey: .canResumeProjectSharing) ?? false
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         ready = try c.decodeIfPresent(Bool.self, forKey: .ready) ?? false
         needsDeviceRegistration = try c.decodeIfPresent(Bool.self, forKey: .needsDeviceRegistration) ?? false

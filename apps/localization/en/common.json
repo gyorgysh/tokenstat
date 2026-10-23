@@ -737,5 +737,11 @@
   "common.teams.checkout_updates": "Keep this checkout up to date",
   "common.teams.checkout_updates_detail": "After a teammate's work lands, fetch and fast-forward this folder when it is clean and on the target branch. Uncommitted and ignored files are kept.",
   "common.teams.workflow_manual_updates_detail": "Agents asked from a shared chat only read. People manage branches and pull requests. This clean checkout keeps up with teammates' finished work.",
-  "common.teams.workflow_review_updates_detail": "Each Ask runs in its own copy of the project. When the agent finishes, tokenstat commits, rebases and checks the work, then waits for someone to land it. This clean checkout keeps up when work lands."
+  "common.teams.workflow_review_updates_detail": "Each Ask runs in its own copy of the project. When the agent finishes, tokenstat commits, rebases and checks the work, then waits for someone to land it. This clean checkout keeps up when work lands.",
+  "common.teams.project_setup_discard_detail": "This stops the saved setup. Any project and teammate access already created will remain. Existing private chats stay private.",
+  "common.teams.project_setup_saved": "Your sharing choices were saved. Review them and confirm to continue.",
+  "common.teams.project_setup_start_over": "Review new sharing choices",
+  "common.teams.project_setup_unknown": "The project may already have been created. Choose the existing project to finish sharing this folder.",
+  "common.teams.project_setup_resume": "Resume project sharing",
+  "common.teams.project_setup_team_unavailable": "The saved setup’s team is no longer available. Stop this setup to review new sharing choices."
 }

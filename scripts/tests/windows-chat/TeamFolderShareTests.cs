@@ -58,6 +58,40 @@ internal static class TeamFolderShareTests
         await Refuses(() => existing.Share()); Check(createCount == 1, "Same-named project was silently reused or duplicated");
         existing.ChooseExisting("created"); await existing.Share();
         Check(createCount == 1 && writes.Count == 1, "Explicit existing project changed its member access");
+        JsonObject? saved = new() { ["id"] = "setup_original", ["organizationId"] = "org", ["workspaceId"] = "folder", ["name"] = "Original review",
+            ["memberIds"] = new JsonArray("mate"), ["role"] = "viewer", ["phase"] = "creating", ["needsRepositoryChoice"] = true,
+            ["sharesExistingChats"] = false, ["allowsAgentRuns"] = false };
+        var setupWrites = new List<(string Method, JsonObject Fields)>();
+        Task<JsonNode> DurableHost(string method, JsonObject? fields)
+        {
+            Check(Text(fields, "_accountSession") == "session", "Saved sharing lost its account binding");
+            if (method == "teams.projectSharing.read") return Task.FromResult<JsonNode>(new JsonObject { ["setup"] = saved?.DeepClone() });
+            if (method == "teams.directory") return Task.FromResult<JsonNode>(Text(fields, "operation") switch {
+                "organizations.get" => new JsonObject { ["organization"] = org.DeepClone() },
+                "repositories.list" => Page("repositories", repo),
+                "members.list" => Page("members", new JsonObject { ["id"] = "mate", ["eligible"] = true }, new JsonObject { ["id"] = "future", ["eligible"] = true }),
+                _ => throw new Exception("A saved review performed an unexpected directory mutation"),
+            });
+            setupWrites.Add((method, (JsonObject)fields!.DeepClone()));
+            if (method == "teams.projectSharing.resume")
+            {
+                Check(Text(fields, "setup") == "setup_original" && Flag(fields, "confirmSharing"), "Saved sharing replaced its original setup or consent");
+                Check(Text(fields, "repository") == "created", "Unknown creation did not require an explicit existing project");
+                return Task.FromResult<JsonNode>(new JsonObject { ["setup"] = saved?.DeepClone(), ["repository"] = repo.DeepClone(),
+                    ["publication"] = new JsonObject { ["id"] = "checkout", ["organizationId"] = "org", ["repositoryId"] = "created", ["workspaceId"] = "folder", ["phase"] = "active" } });
+            }
+            throw new Exception("Saved sharing unexpectedly began another setup");
+        }
+        var durableClient = new TeamDirectoryClient(new() { ["origin"] = "https://fixture.invalid" }, "session", "owner", DurableHost);
+        var recovered = new TeamFolderShareModel(durableClient, workspace, org, durable: true); await recovered.Load();
+        Check(recovered.Locked && recovered.NeedsRepositoryChoice && !recovered.CanShare && recovered.Included.SetEquals(["mate"])
+            && recovered.AccessRole == "viewer" && setupWrites.Count == 0, "Restoring setup changed its people, access, selection or sent a write");
+        var reopened = new TeamFolderShareModel(durableClient, workspace, org, durable: true); await reopened.Load();
+        Check(reopened.Included.SetEquals(["mate"]) && setupWrites.Count == 0, "A new form expanded its saved audience");
+        reopened.ChooseExisting("created"); Check(reopened.CanShare, "Explicit project selection could not resume the saved review");
+        await reopened.Share();
+        Check(setupWrites.Count == 1 && setupWrites[0].Method == "teams.projectSharing.resume" && setupWrites[0].Fields["memberIds"] is null,
+            "A restored review recreated the project or resubmitted mutable teammate choices");
         Console.WriteLine("Windows folder sharing: reviewed eligible people only, original partial-setup retry, no future grants, no revoked access restoration and explicit existing-project selection pass.");
     }
 }

@@ -36,6 +36,37 @@ fn active(store: &Store, folder: &Folder) -> Checkout {
         .unwrap()
 }
 #[test]
+fn sharing_setup_cannot_create_a_new_project_for_an_already_published_folder() {
+    let (_root, store, folder) = setup();
+    let active = active(&store, &folder);
+    assert!(
+        store
+            .ensure_setup_target(&owner(), &folder, "org_fixture", Some("repo_fixture"))
+            .is_ok()
+    );
+    for (organization, repository) in [
+        ("org_fixture", None),
+        ("org_fixture", Some("another_repo")),
+        ("another_org", Some("repo_fixture")),
+    ] {
+        assert_eq!(
+            store
+                .ensure_setup_target(&owner(), &folder, organization, repository)
+                .unwrap_err()
+                .code,
+            "checkout_already_shared"
+        );
+    }
+    store
+        .withdraw(&owner(), &active.id, active.revision)
+        .unwrap();
+    assert!(
+        store
+            .ensure_setup_target(&owner(), &folder, "another_org", None)
+            .is_ok()
+    );
+}
+#[test]
 fn only_an_active_publication_for_the_same_owner_and_key_can_restore_reach() {
     let (_root, store, folder) = setup();
     assert!(!store.has_active_key(&owner().host_key).unwrap());

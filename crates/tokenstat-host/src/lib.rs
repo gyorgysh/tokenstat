@@ -280,4 +280,4 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 42 adds reviewed shared-chat publication and private-send fences.
 /// Version 43 adds local sharing inspection and recovery without an account.
 /// Version 45 binds execution authority to a non-reused host-approved grant.
-pub const PROTOCOL_VERSION: &str = "49";
+pub const PROTOCOL_VERSION: &str = "50";

@@ -4,11 +4,13 @@ import Foundation
 actor TeamFixtureProjects {
     static let shared = TeamFixtureProjects()
     private(set) var hasNewProject = false
+    private(set) var setupDiscarded = false
     func addProject() { hasNewProject = true }
+    func discardSetup() { setupDiscarded = true }
 }
 
 enum TeamFixtureData {
-    enum State: String { case ready, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer, draftOffline, askUncertain }
+    enum State: String { case ready, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer, draftOffline, askUncertain, sharingUnknown, sharingUnavailable }
     static let state: State = {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--fixture-state"), args.indices.contains(index + 1) else { return .ready }
@@ -28,7 +30,7 @@ enum TeamFixtureData {
         switch method {
         case .capabilities:
             if state == .failure || state == .draftOffline { throw TeamRequestFailure(code: "teams_unreachable", message: "The fictional account server is unavailable.") }
-            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canPublishCheckouts":.bool(true),"canConnectCheckouts":.bool(true),"canPublishChats":.bool(true)])
+            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canResumeProjectSharing":.bool(state == .sharingUnknown || state == .sharingUnavailable),"canPublishCheckouts":.bool(true),"canConnectCheckouts":.bool(true),"canPublishChats":.bool(true)])
         case .authorizationPreview: return .object(["deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .prepareAuthorization: return .object(["authorizationURL":.string("https://accounts.example.test/settings/teams/devices/fixture"),"deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .checkoutOptions: return .object(["deviceName":.string("Example Mac"),"workspaces":.array([try json(TeamLocalWorkspace(id: "/example/Website", name: "Website", path: "/example/Website")),try json(TeamLocalWorkspace(id: "/example/Feature checkout", name: "Website feature", path: "/example/Feature checkout"))]),"nextOffset":.null])
@@ -61,13 +63,23 @@ enum TeamFixtureData {
         case .ask:
             guard state == .askUncertain else { throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.") }
             return try await TeamFixtureAsks.shared.call(params)
-        case .checkoutPublish, .checkoutWithdraw, .lanesSet, .lanesCatchUp: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
+        case .checkoutPublish, .checkoutWithdraw, .lanesSet, .lanesCatchUp, .projectSharingBegin, .projectSharingResume: throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.")
+        case .projectSharingDiscard:
+            guard state == .sharingUnavailable, case let .object(fields) = params, fields["confirmDiscard"] == .bool(true) else { throw TeamRequestFailure(code: "fixture_read_only", message: "This fixture is read-only. No account changes were sent.") }
+            await TeamFixtureProjects.shared.discardSetup()
+            return .object(["setup": .null])
+        case .projectSharingRead:
+            guard state == .sharingUnknown || state == .sharingUnavailable, case let .object(fields) = params, let workspace = fields["workspace"] else { return .object(["setup": .null]) }
+            if await TeamFixtureProjects.shared.setupDiscarded { return .object(["setup": .null]) }
+            return .object(["setup": .object(["id": .string("setup_" + String(repeating: "a", count: 32)), "organizationId": .string(organization.id),
+                "workspaceId": workspace, "name": .string("Client"), "repositoryId": .null, "memberIds": .array([.string(member.id)]),
+                "role": .string("viewer"), "phase": .string("creating"), "needsRepositoryChoice": .bool(true), "sharesExistingChats": .bool(false), "allowsAgentRuns": .bool(false)])])
         case .lanesGet: return .object(["settings": .null, "supportsCheckoutUpdates": .bool(true)])
         case .directory:
             if await TeamFixtureComments.shared.accessRemoved { throw TeamRequestFailure(code: "forbidden", message: "Access to this fictional repository was removed.") }
             guard case let .object(fields) = params, case let .string(operation)? = fields["operation"] else { throw TeamRequestFailure(code: "fixture_request", message: "Choose a fixture action.") }
             switch operation {
-            case "organizations.list": return .object(["organizations":.array(state == .empty ? [] : [try json(organization)]),"nextOffset":.null])
+            case "organizations.list": return .object(["organizations":.array(state == .empty || state == .sharingUnavailable ? [] : [try json(organization)]),"nextOffset":.null])
             case "organizations.get": return .object(["organization":try json(organization),"ownershipRequest":.null])
             case "members.list": return .object(["members":.array(try members.map { try json($0) }),"nextOffset":.null])
             case "repositories.list":

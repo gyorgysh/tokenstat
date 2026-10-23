@@ -21,6 +21,8 @@ mod lanes;
 #[cfg(feature = "local-host")]
 mod local_sharing;
 #[cfg(feature = "local-host")]
+mod project_setup;
+#[cfg(feature = "local-host")]
 mod provider;
 #[cfg(feature = "local-host")]
 mod publications;
@@ -257,6 +259,10 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             directory::Request::Sharing(request) => sharing::perform(&owner, &client, request),
             #[cfg(feature = "local-host")]
             directory::Request::Chat(request) => chats::perform(&owner, &client, request),
+            #[cfg(feature = "local-host")]
+            directory::Request::ProjectSetup(request) => {
+                project_setup::perform(&owner, &client, request)
+            }
         };
         owner.ensure_current().map_err(changed)?;
         client.ensure_current().map_err(api_error)?;
@@ -301,6 +307,7 @@ fn capabilities(client: &TeamClient) -> Result<Value, DispatchError> {
             value["canPublishCheckouts"] = json!(can_publish);
             value["canConnectCheckouts"] = json!(can_connect);
             value["canPublishChats"] = json!(can_publish_chats);
+            value["canResumeProjectSharing"] = json!(can_publish);
             Ok(value)
         }
         Err(TeamError::Rejected { code, .. }) if code == "device_required" => Ok(

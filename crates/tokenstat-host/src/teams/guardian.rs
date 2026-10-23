@@ -75,12 +75,28 @@ impl Drop for Parent {
     }
 }
 fn unavailable() -> DispatchError {
+    if fixture_enabled() && std::env::var_os("TOKENSTAT_TEAMS_KEEP_FIXTURE").is_some() {
+        // Stack frames contain no request arguments or process memory. Keep
+        // failure provenance inside the explicitly retained disposable test.
+        let trace = std::backtrace::Backtrace::force_capture().to_string();
+        eprintln!(
+            "Team fixture refusal:\n{}",
+            trace.lines().take(24).collect::<Vec<_>>().join("\n")
+        );
+    }
     DispatchError::new(
         "team_run_recovery_required",
         "This Team run needs recovery on its publishing computer.",
     )
 }
-fn map_io(_: io::Error) -> DispatchError {
+fn map_io(error: io::Error) -> DispatchError {
+    if fixture_enabled() && std::env::var_os("TOKENSTAT_TEAMS_KEEP_FIXTURE").is_some() {
+        eprintln!(
+            "Team fixture I/O: {:?}, OS code {:?}",
+            error.kind(),
+            error.raw_os_error()
+        );
+    }
     unavailable()
 }
 fn event(value: Value) -> Result<(), DispatchError> {

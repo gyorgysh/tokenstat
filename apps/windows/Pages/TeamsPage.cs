@@ -130,6 +130,7 @@ internal sealed partial class TeamsPage : Page
             if (actor.Length == 0 || !string.IsNullOrEmpty(_person) && _person != actor) throw new HostException("account_changed", L10n.Text("common.teams.account_changed"));
             _person = actor;
             _canPublish = Format.Flag(capabilities, "canPublishCheckouts");
+            _canResumeSharing = Format.Flag(capabilities, "canResumeProjectSharing");
             var page = TeamDirectoryPage.Read(await CallAsync("teams.directory", new JsonObject { ["operation"] = "organizations.list", ["page"] = Page100() }), "organizations", 0);
             if (!IsLoaded || _view != view) return;
             _organizations = page.Rows; _organizationsNext = page.Next;

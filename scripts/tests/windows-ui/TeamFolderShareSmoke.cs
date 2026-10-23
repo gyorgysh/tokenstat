@@ -36,25 +36,43 @@ internal static class TeamFolderShareSmoke
     private static JsonObject Page(string key, params JsonObject[] rows) => new() { [key] = new JsonArray(rows.Select(row => row.DeepClone()).ToArray()), ["nextOffset"] = null };
     internal static async Task RunAsync(StackPanel body)
     {
-        await ShareAsync(body, false); await ShareAsync(body, true);
+        await ShareAsync(body, false); await ShareAsync(body, true); await ShareAsync(body, true, recovery: true);
+        await ShareAsync(body, true, recovery: true, unavailable: true);
         Program.Log("PASS: Windows selected-folder form reviews eligible teammates and consent, explicitly chooses existing projects and opens all-teammate project discovery");
     }
-    private static async Task ShareAsync(StackPanel body, bool existing)
+    private static async Task ShareAsync(StackPanel body, bool existing, bool recovery = false, bool unavailable = false)
     {
         var org = new JsonObject { ["id"] = "org", ["name"] = "Fictional team", ["role"] = "owner", ["state"] = "active", ["eligible"] = true };
         var repo = new JsonObject { ["id"] = "repo", ["name"] = "Fictional folder", ["organizationId"] = "org", ["role"] = "maintainer" };
         var workspace = new JsonObject { ["id"] = "folder", ["name"] = "Fictional folder", ["path"] = "fictional/folder" };
         var member = new JsonObject { ["id"] = "mate", ["name"] = "Reviewed fictional teammate", ["eligible"] = true, ["role"] = null, ["revision"] = 0L };
-        var created = existing; var published = false; var writes = new List<JsonObject>();
+        var created = existing; var published = false; var stoppedSetup = false; var writes = new List<JsonObject>();
         Task<JsonNode> Host(string method, JsonObject? fields)
         {
             if (method == "account.status") return Task.FromResult<JsonNode>(new JsonObject { ["signedIn"] = true, ["host"] = "https://fixture.invalid", ["handle"] = "fictional", ["accountId"] = "owner", ["accountSession"] = "fictional-session" });
             if (Text(fields, "_accountSession") != "fictional-session") throw new Exception("Project form lost its reviewed account");
             var publication = new JsonObject { ["id"] = "checkout", ["organizationId"] = "org", ["repositoryId"] = "repo", ["workspaceId"] = "folder", ["phase"] = "active", ["accountCleanupPending"] = false };
             JsonNode result;
-            if (method == "teams.capabilities") result = new JsonObject { ["enabled"] = true, ["ready"] = true, ["actorId"] = "owner", ["canPublishCheckouts"] = true };
+            if (method == "teams.capabilities") result = new JsonObject { ["enabled"] = true, ["ready"] = true, ["actorId"] = "owner", ["canPublishCheckouts"] = true, ["canResumeProjectSharing"] = recovery };
+            else if (method == "teams.projectSharing.read" && stoppedSetup) result = new JsonObject { ["setup"] = null };
+            else if (method == "teams.projectSharing.discard" && unavailable)
+            {
+                if (!Flag(fields, "confirmDiscard") || Text(fields, "setup") != "setup_original") throw new Exception("Unavailable setup stopped without its review");
+                writes.Add((JsonObject)fields!.DeepClone()); stoppedSetup = true; result = new JsonObject { ["setup"] = null };
+            }
+            else if (method == "teams.projectSharing.read" && recovery) result = new JsonObject { ["setup"] = new JsonObject {
+                ["id"] = "setup_original", ["organizationId"] = "org", ["workspaceId"] = "folder", ["name"] = "Fictional folder",
+                ["memberIds"] = new JsonArray("mate"), ["role"] = "viewer", ["phase"] = "creating", ["needsRepositoryChoice"] = true,
+                ["sharesExistingChats"] = false, ["allowsAgentRuns"] = false }, ["workspace"] = workspace.DeepClone() };
+            else if (method == "teams.projectSharing.resume" && recovery)
+            {
+                if (Text(fields, "setup") != "setup_original" || Text(fields, "repository") != "repo" || !Flag(fields, "confirmSharing"))
+                    throw new Exception("Restored project bypassed its original setup, explicit selection or fresh consent");
+                writes.Add((JsonObject)fields!.DeepClone()); published = true;
+                result = new JsonObject { ["repository"] = repo.DeepClone(), ["publication"] = publication };
+            }
             else if (method == "teams.directory") result = Text(fields, "operation") switch {
-                "organizations.list" => Page("organizations", org), "organizations.get" => new JsonObject { ["organization"] = org.DeepClone() },
+                "organizations.list" => unavailable ? Page("organizations") : Page("organizations", org), "organizations.get" => new JsonObject { ["organization"] = org.DeepClone() },
                 "repositories.list" => created ? Page("repositories", repo) : Page("repositories"), "repositories.get" => new JsonObject { ["repository"] = repo.DeepClone() },
                 "members.list" => Page("members", member, new JsonObject { ["id"] = "ineligible", ["name"] = "Ineligible fictional teammate", ["eligible"] = false }),
                 "repositories.create" => Create(), "repositories.members" => Page("members", member), "repositories.access" => Grant(),
@@ -71,10 +89,34 @@ internal static class TeamFolderShareSmoke
         var page = new TeamsPage(Host, folder: workspace); body.Children.Add(page); body.UpdateLayout();
         try
         {
-            await Wait(page, () => Descendants(page).OfType<ComboBox>().Any(), "Folder did not open team selection");
-            Descendants(page).OfType<ComboBox>().Single().SelectedIndex = 1;
+            if (unavailable)
+            {
+                await Wait(page, () => Shows(page, L10n.Text("common.teams.project_setup_team_unavailable")), "Unavailable setup was hidden behind team selection");
+                await Click(page, L10n.Text("common.teams.project_setup_start_over"));
+                var review = Descendants(page).OfType<CheckBox>().Single(box => (string?)box.Content == L10n.Text("common.teams.confirm_understood"));
+                if (review.IsChecked == true || Find(page, L10n.Text("common.teams.project_setup_start_over"))!.IsEnabled || writes.Count != 0)
+                    throw new Exception("Unavailable setup bypassed fresh confirmation");
+                review.IsChecked = true; await Click(page, L10n.Text("common.teams.project_setup_start_over"));
+                await Wait(page, () => stoppedSetup && !Shows(page, L10n.Text("common.teams.project_setup_team_unavailable")), "Discard did not reopen fresh sharing choices");
+                if (writes.Count != 1 || created != existing || published) throw new Exception("Discard changed a project or publication");
+                return;
+            }
+            if (!recovery)
+            {
+                await Wait(page, () => Descendants(page).OfType<ComboBox>().Any(), "Folder did not open team selection");
+                Descendants(page).OfType<ComboBox>().Single().SelectedIndex = 1;
+            }
             await Wait(page, () => Descendants(page).OfType<TextBox>().Any(), "Selected team did not load the single sharing form");
-            if (existing)
+            if (recovery)
+            {
+                if (!Shows(page, L10n.Text("common.teams.project_setup_unknown")) || Find(page, L10n.Text("common.teams.share_project"))!.IsEnabled || writes.Count > 0)
+                    throw new Exception("Saved sharing resumed without a fresh project choice");
+                var mate = Descendants(page).OfType<CheckBox>().Single(box => (string?)box.Content == "Reviewed fictional teammate");
+                if (mate.IsChecked != true || mate.IsEnabled) throw new Exception("Restoring the native form lost or unlocked its saved audience");
+                Descendants(page).OfType<ComboBox>().Single(box => (string?)box.Header == L10n.Text("common.teams.project_details")).SelectedIndex = 1;
+                await Wait(page, () => Descendants(page).OfType<CheckBox>().Any(box => (string?)box.Content == L10n.Text("common.teams.confirm_understood")), "Restored sharing lost its confirmation");
+            }
+            else if (existing)
             {
                 if (Find(page, L10n.Text("common.teams.share_project"))!.IsEnabled || published || writes.Count > 0) throw new Exception("Same-named project silently linked the folder");
                 await Click(page, L10n.Text("common.teams.use_existing_project", "Fictional folder"));

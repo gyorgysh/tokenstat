@@ -33,10 +33,16 @@ struct TeamProjectShareEditor: View {
     @State private var membersLoaded = false
     @State private var accessRole: TeamRepositoryRole = .contributor
     @State private var detailsExpanded = false
+    @State private var setup: TeamProjectSetup?
+    @State private var setupChecked = false
+    @State private var initialized = false
+    @State private var confirmsDiscard = false
     @FocusState private var nameFocused: Bool
     @Environment(\.dismiss) private var dismiss
 
     private var canCreate: Bool { organization?.role.canManage == true && organization?.isActive == true }
+    private var durable: Bool { store.capabilities?.canResumeProjectSharing == true }
+    private var locked: Bool { setup != nil || created != nil }
     private var projectChoices: [TeamRepository] {
         guard store.mutationContext == context else { return [] }
         let current = store.directory?.repositories.repositories.filter { $0.organizationId == context.organizationId } ?? []
@@ -56,6 +62,10 @@ struct TeamProjectShareEditor: View {
     }
     private var valid: Bool {
         guard workspace != nil, confirmed else { return false }
+        if durable {
+            guard setupChecked else { return false }
+            if let setup { return !setup.needsRepositoryChoice || repositoryId.flatMap { id in shareable.first { $0.id == id } } != nil }
+        }
         if let repositoryId { return shareable.contains { $0.id == repositoryId } }
         return canCreate && membersLoaded && (created?.name == trimmedName || matchingProject == nil) && !trimmedName.isEmpty && trimmedName.utf16.count <= 80
     }
@@ -70,7 +80,7 @@ struct TeamProjectShareEditor: View {
               TeamPickerField(title: L10n.text("common.teams.project"), selection: $workspaceId) {
                 Text(L10n.text("common.teams.choose_project")).tag(Optional<String>.none)
                 ForEach(workspaces) { workspace in Text(workspace.name).tag(Optional(workspace.id)) }
-            }.disabled(loading || saving || created != nil).accessibilityIdentifier("team.project.picker")
+            }.disabled(loading || saving || locked).accessibilityIdentifier("team.project.picker")
             }
             if initialWorkspace == nil, let workspace {
                 Text(workspace.path).font(Theme.mono(12)).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -80,7 +90,20 @@ struct TeamProjectShareEditor: View {
             }
             if loading { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
             if !loading && workspaces.isEmpty { TeamNotice(message: L10n.text("common.teams.no_local_checkouts")) }
-            if initialWorkspace == nil || !canCreate { targetFields }
+            if let setup {
+                TeamNotice(message: setup.needsRepositoryChoice ? L10n.text("common.teams.project_setup_unknown") : L10n.text("common.teams.project_setup_saved"), warning: true)
+                if setup.needsRepositoryChoice {
+                    TeamPickerField(title: L10n.text("common.teams.shared_as"), selection: $repositoryId) {
+                        Text(L10n.text("common.teams.choose_project")).tag(Optional<String>.none)
+                        ForEach(shareable) { repository in Text(repository.name).tag(Optional(repository.id)) }
+                    }.disabled(saving).accessibilityIdentifier("team.project.recovery.repository")
+                    if store.directory?.repositories.nextOffset != nil {
+                        Button(L10n.text("common.teams.load_more"), .more) { Task { await store.loadMore(.repositories) } }.buttonStyle(TeamButtonStyle()).disabled(saving)
+                    }
+                } else { Text(setup.name).font(Theme.headline) }
+                Button(L10n.text("common.teams.project_setup_start_over"), .refresh) { confirmsDiscard = true }
+                    .buttonStyle(TeamButtonStyle()).disabled(saving).accessibilityIdentifier("team.project.recovery.discard")
+            } else if initialWorkspace == nil || !canCreate { targetFields }
             else {
                 DisclosureGroup(L10n.text("common.teams.project_details"), isExpanded: $detailsExpanded) {
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -99,7 +122,7 @@ struct TeamProjectShareEditor: View {
                         .buttonStyle(TeamButtonStyle())
                 }
             }
-            if repositoryId == nil && canCreate {
+            if (repositoryId == nil || setup != nil) && canCreate {
                 if created != nil && !saving { TeamNotice(message: L10n.text("common.teams.project_setup_partial"), warning: true) }
                 Text(L10n.text("common.teams.project_access_review")).font(Theme.callout).foregroundStyle(.secondary)
                 if !membersLoaded { ProgressView().controlSize(.small) }
@@ -115,13 +138,13 @@ struct TeamProjectShareEditor: View {
                             TeamPersonLabel(id: member.id, name: member.name, handle: member.handle, avatar: member.avatar, owner: context.owner)
                             if !member.eligible { Text(L10n.text("common.teams.needs_patron")).font(Theme.callout).foregroundStyle(.secondary) }
                         }
-                    }.toggleStyle(.checkboxForTeam).disabled(saving || created != nil || !member.eligible)
+                    }.toggleStyle(.checkboxForTeam).disabled(saving || locked || !member.eligible)
                 }
                 if !members.isEmpty {
                     TeamPickerField(title: L10n.text("common.teams.access_level"), selection: $accessRole) {
                         Text(L10n.text("common.teams.project_collaborate")).tag(TeamRepositoryRole.contributor)
                         Text(L10n.text("common.teams.project_read_comment")).tag(TeamRepositoryRole.viewer)
-                    }.disabled(saving || created != nil)
+                    }.disabled(saving || locked)
                 }
             } else if repositoryId == nil {
                 TeamNotice(message: L10n.text("common.teams.share_project_existing_only"))
@@ -141,6 +164,9 @@ struct TeamProjectShareEditor: View {
                 Toggle(L10n.text("common.teams.checkout_share_confirm", targetName), isOn: $confirmed)
                     .toggleStyle(.checkboxForTeam).accessibilityIdentifier("team.project.confirm")
             }
+            if durable && !setupChecked && error != nil {
+                Button(L10n.text("common.retry"), .refresh) { Task { await restoreSetup() } }.buttonStyle(TeamButtonStyle())
+            }
         }
         .task {
             if !canCreate { repositoryId = shareable.first?.id }
@@ -150,16 +176,23 @@ struct TeamProjectShareEditor: View {
             } else {
                 await load(more: false)
             }
+            await restoreSetup()
             if canCreate { await loadMembers() }
+            initialized = true
         }
         .onChange(of: workspaceId) { _, _ in
             confirmed = false
             if !nameEdited { newName = workspace?.name ?? "" }
+            if initialized { Task { await restoreSetup() } }
         }
         .onChange(of: repositoryId) { _, _ in confirmed = false }
         .onChange(of: accessRole) { _, _ in confirmed = false }
-        .onChange(of: saving) { _, value in onStateChange?(value, created != nil) }
+        .onChange(of: saving) { _, value in onStateChange?(value, locked) }
+        .onChange(of: setup?.id) { _, _ in onStateChange?(saving, locked) }
         .interactiveDismissDisabled(saving)
+        .confirmationDialog(L10n.text("common.teams.project_setup_start_over"), isPresented: $confirmsDiscard, titleVisibility: .visible) {
+            Button(L10n.text("common.teams.project_setup_start_over"), role: .destructive) { Task { await discardSetup() } }
+        } message: { Text(L10n.text("common.teams.project_setup_discard_detail")) }
     }
 
     private var targetFields: some View {
@@ -191,7 +224,8 @@ struct TeamProjectShareEditor: View {
                 offset = next
             }
             members = rows.filter { $0.id != store.capabilities?.actorId }
-            includedMembers = Set(members.filter(\.eligible).map(\.id)); membersLoaded = true
+            if setup == nil { includedMembers = Set(members.filter(\.eligible).map(\.id)) }
+            membersLoaded = true
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 
@@ -230,6 +264,10 @@ struct TeamProjectShareEditor: View {
         Task {
             defer { saving = false }
             do {
+                if durable {
+                    try await shareDurably(workspaceId: workspaceId, organizationId: organizationId)
+                    return
+                }
                 // A new repository exists from here on. If sharing then fails,
                 // it stays listed and the project can be shared into it again.
                 let repository: TeamRepository
@@ -261,6 +299,66 @@ struct TeamProjectShareEditor: View {
                 }
             }
         }
+    }
+
+    private func restoreSetup() async {
+        guard durable else { setupChecked = true; return }
+        guard let workspaceId, let organizationId = context.organizationId else { return }
+        setupChecked = false
+        do {
+            let result: TeamProjectSetupResult = try await store.read(.projectSharingRead,
+                fields: ["workspace": .string(workspaceId), "organization": .string(organizationId)], context: context)
+            guard self.workspaceId == workspaceId else { return }
+            if let next = result.setup {
+                guard next.workspaceId == workspaceId, next.organizationId == organizationId,
+                    !next.sharesExistingChats, !next.allowsAgentRuns else { throw CancellationError() }
+                setup = next; newName = next.name; includedMembers = Set(next.memberIds); accessRole = next.role
+                repositoryId = nil; confirmed = false
+            } else { setup = nil }
+            setupChecked = true
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+
+    private func shareDurably(workspaceId: String, organizationId: String) async throws {
+        do {
+            if setup == nil {
+                var fields: [String: JSONValue] = ["organization": .string(organizationId), "workspace": .string(workspaceId),
+                    "name": .string(targetName), "memberIds": .array(repositoryId == nil ? includedMembers.sorted().map(JSONValue.string) : []),
+                    "role": .string(accessRole.rawValue), "requestId": .string(requestId), "confirmSharing": .bool(true)]
+                if let repositoryId { fields["repository"] = .string(repositoryId) }
+                let result: TeamProjectSetupResult = try await store.perform(.projectSharingBegin, fields: fields, context: context)
+                guard let saved = result.setup, saved.organizationId == organizationId, saved.workspaceId == workspaceId else { throw CancellationError() }
+                setup = saved
+            }
+            guard let setup else { throw CancellationError() }
+            var fields: [String: JSONValue] = ["setup": .string(setup.id), "confirmSharing": .bool(true)]
+            if setup.needsRepositoryChoice, let repositoryId { fields["repository"] = .string(repositoryId) }
+            let result: TeamProjectSetupResult = try await store.perform(.projectSharingResume, fields: fields, context: context)
+            guard let repository = result.repository, let publication = result.publication,
+                repository.organizationId == organizationId, publication.workspaceId == workspaceId,
+                publication.repositoryId == repository.id, publication.phase == "active" else {
+                await restoreSetup(); return
+            }
+            await store.reloadAfterChange()
+            guard store.mutationContext == context else { return }
+            if let onShared { onShared(repository, publication) } else { dismiss() }
+        } catch {
+            let original = error
+            await store.reloadAfterChange()
+            await restoreSetup()
+            throw original
+        }
+    }
+
+    private func discardSetup() async {
+        guard let setup, !saving else { return }
+        saving = true; defer { saving = false }
+        do {
+            let _: TeamProjectSetupResult = try await store.perform(.projectSharingDiscard,
+                fields: ["setup": .string(setup.id), "confirmDiscard": .bool(true)], context: context)
+            self.setup = nil; created = nil; repositoryId = nil; requestId = UUID().uuidString; confirmed = false
+            await store.reloadAfterChange(); await restoreSetup(); await loadMembers()
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 }
 

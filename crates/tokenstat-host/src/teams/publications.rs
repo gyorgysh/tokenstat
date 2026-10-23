@@ -98,7 +98,7 @@ impl Folder {
         }
         Ok(())
     }
-    fn physical_match(&self, other: &Self) -> bool {
+    pub(super) fn physical_match(&self, other: &Self) -> bool {
         self.volume == other.volume && self.file == other.file && self.created == other.created
     }
 }
@@ -132,6 +132,8 @@ struct Index {
     checkouts: Vec<Checkout>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     chats: Vec<ChatShare>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    project_setups: Vec<super::project_setup::Record>,
 }
 impl Default for Index {
     fn default() -> Self {
@@ -139,6 +141,7 @@ impl Default for Index {
             version: 1,
             checkouts: Vec::new(),
             chats: Vec::new(),
+            project_setups: Vec::new(),
         }
     }
 }
@@ -147,6 +150,45 @@ pub(super) struct Store {
     root: PathBuf,
 }
 impl Store {
+    pub(super) fn ensure_setup_target(
+        &self,
+        owner: &Owner,
+        folder: &Folder,
+        organization: &str,
+        repository: Option<&str>,
+    ) -> Result<(), DispatchError> {
+        self.read(|index| {
+            if index.checkouts.iter().any(|r| r.phase != Phase::Withdrawn && r.folder.physical_match(folder)
+                && (r.owner != *owner || r.folder.canonical != folder.canonical || r.organization_id != organization || repository != Some(r.repository_id.as_str()))) {
+                return Err(unavailable("checkout_already_shared", "This folder is already shared. Open its project, or stop its current sharing before choosing another project."));
+            }
+            Ok(())
+        })
+    }
+    #[cfg(test)]
+    pub(super) fn test_store(root: PathBuf) -> Self {
+        Self { root }
+    }
+    pub(super) fn project_setups<T>(
+        &self,
+        operation: impl FnOnce(&mut Vec<super::project_setup::Record>) -> Result<T, DispatchError>,
+    ) -> Result<T, DispatchError> {
+        self.transaction(|index| operation(&mut index.project_setups))
+    }
+    pub(super) fn project_setup_lease(&self, id: &str) -> Result<OwnerLease, DispatchError> {
+        if !super::project_setup::valid_id(id) {
+            return Err(storage());
+        }
+        private_directory(&self.root)?;
+        OwnerLease::try_acquire(&self.root.join(format!("{id}.lock")))
+            .map_err(|_| storage())?
+            .ok_or_else(|| {
+                unavailable(
+                    "sharing_busy",
+                    "This sharing setup is already being resumed. Try again shortly.",
+                )
+            })
+    }
     pub(super) fn capture() -> Result<Self, DispatchError> {
         Ok(Self {
             root: tokenstat_paths::data_dir()
@@ -704,6 +746,7 @@ fn load(path: &Path) -> Result<Index, DispatchError> {
         return Err(storage());
     }
     chats::validate(&index)?;
+    super::project_setup::validate(&index.project_setups)?;
     Ok(index)
 }
 fn save(root: &Path, destination: &Path, index: &Index) -> Result<(), DispatchError> {

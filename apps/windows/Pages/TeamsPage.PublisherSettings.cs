@@ -68,6 +68,23 @@ internal sealed partial class TeamsPage
             return await model.Call("teams.lanes.set", new() { ["checkout"] = checkout, ["settings"] = value });
         }, back, _ => ShowTeamPublisherSettingsAsync(model, repository, publication, back));
         var editorView = _view;
+        if (_canResumeSharing && Text(publication, "workspaceId").Length > 0)
+        {
+            try
+            {
+                var pending = await model.Call("teams.projectSharing.read", new() { ["organization"] = model.Organization, ["workspace"] = Text(publication, "workspaceId") });
+                if (!IsLoaded || _view != editorView) return;
+                if (pending["setup"] is JsonObject && pending["workspace"] is JsonObject workspace)
+                    _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.project_setup_resume"), ActionIcon.Connect, async (_, _) => {
+                        if (!IsLoaded || _view != editorView) return;
+                        try {
+                            var details = await model.Directory("organizations.get", new() { ["organization"] = model.Organization });
+                            if (IsLoaded && _view == editorView) await ShowFolderShareAsync(DirectoryClient(), workspace, details["organization"]!.AsObject());
+                        } catch (Exception error) { if (IsLoaded && _view == editorView) Note(TeamError(error), true); }
+                    }));
+            }
+            catch (Exception error) { if (IsLoaded && _view == editorView) Note(TeamError(error), true); }
+        }
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.agent_runs"), ActionIcon.Run, async (_, _) => { if (IsLoaded && _view == editorView) await ShowTeamAgentGrantsAsync(model, repository, publication, back); }));
         if (Text(result, "catchUp").Length > 0)
         {

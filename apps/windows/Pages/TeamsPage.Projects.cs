@@ -9,6 +9,7 @@ namespace Tokenstat.Pages;
 
 internal sealed partial class TeamsPage
 {
+    private bool _canResumeSharing;
     private async Task ShowFocusedTeamProjectAsync(JsonObject repository)
     {
         Reset(L10n.Text("common.teams.shared_projects")); var view = _view;
@@ -102,7 +103,9 @@ internal sealed partial class TeamsPage
     {
         Reset(L10n.Text("common.teams.share_project")); var view = _view;
         if (!_canPublish) { Note(L10n.Text("common.teams.publish_on_computer")); AddTeamDirectoryActions(); return; }
-        _body.Children.Add(TeamText(Text(workspace, "name"))); _body.Children.Add(FolderTeamPicker(client, workspace, organization is null ? null : Text(organization, "id"), false));
+        _body.Children.Add(TeamText(Text(workspace, "name")));
+        var teamSelector = FolderTeamPicker(client, workspace, organization is null ? null : Text(organization, "id"), false);
+        _body.Children.Add(teamSelector);
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Dismiss, async (_, _) => { if (IsLoaded && _view == view) { _folderShareRequest = null; await LoadAsync(); } }));
         if (_organizationsNext is { } offset) _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.more_organizations"), ActionIcon.More, async (_, _) => {
             if (!IsLoaded || _view != view) return;
@@ -110,8 +113,47 @@ internal sealed partial class TeamsPage
                 if (!IsLoaded || _view != view) return; _organizations = TeamCatalogPage.Append(_organizations, page.Rows); _organizationsNext = page.Next; await ShowFolderShareAsync(client, workspace, organization); }
             catch (Exception error) { if (IsLoaded && _view == view) Note(TeamError(error), true); }
         }));
+        if (organization is null && _canResumeSharing)
+        {
+            try
+            {
+                var pending = (await client.Call("teams.projectSharing.read", new() { ["workspace"] = Text(workspace, "id") }))["setup"] as JsonObject;
+                if (!IsLoaded || _view != view) return;
+                if (pending is not null)
+                {
+                    var orgId = Text(pending, "organizationId"); var pages = 0;
+                    while (!_organizations.Any(row => Text(row, "id") == orgId) && _organizationsNext is { } next && pages++ < 50)
+                    {
+                        var page = TeamDirectoryPage.Read(await client.Request("organizations.list", new() { ["page"] = Page100(next) }), "organizations", next);
+                        if (!IsLoaded || _view != view) return;
+                        _organizations = TeamCatalogPage.Append(_organizations, page.Rows); _organizationsNext = page.Next;
+                    }
+                    var original = _organizations.SingleOrDefault(row => Text(row, "id") == orgId);
+                    if (original is not null && Text(original, "state") == "active" && Flag(original, "eligible"))
+                    { await ShowFolderShareAsync(client, workspace, original); return; }
+                    Require(_organizationsNext is null || original is not null);
+                    teamSelector.IsEnabled = false;
+                    Note(L10n.Text("common.teams.project_setup_team_unavailable"), true);
+                    _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.project_setup_start_over"), ActionIcon.Refresh, (_, _) => {
+                        if (!IsLoaded || _view != view) return;
+                        var review = TeamCard(Text(workspace, "name"), L10n.Text("common.teams.project_setup_discard_detail"));
+                        TeamEditor(L10n.Text("common.teams.project_setup_start_over"), review, L10n.Text("common.teams.project_setup_start_over"), () => true,
+                            () => client.Call("teams.projectSharing.discard", new() { ["setup"] = Text(pending, "id"), ["confirmDiscard"] = true }),
+                            () => ShowFolderShareAsync(client, workspace), _ => ShowFolderShareAsync(client, workspace), confirmation: true);
+                    }));
+                    return;
+                }
+            }
+            catch (Exception error)
+            {
+                if (!IsLoaded || _view != view) return;
+                teamSelector.IsEnabled = false; Note(TeamError(error), true);
+                _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh, async (_, _) => { if (IsLoaded && _view == view) await ShowFolderShareAsync(client, workspace); }));
+                return;
+            }
+        }
         if (organization is null) { Note(L10n.Text("common.teams.choose_team")); return; }
-        try { var model = new TeamFolderShareModel(client, workspace, organization); await model.Load(); if (IsLoaded && _view == view) DrawFolderShare(client, model); }
+        try { var model = new TeamFolderShareModel(client, workspace, organization, _canResumeSharing); await model.Load(); if (IsLoaded && _view == view) DrawFolderShare(client, model); }
         catch (Exception error)
         {
             if (!IsLoaded || _view != view) return; Note(TeamError(error), true);
@@ -132,17 +174,17 @@ internal sealed partial class TeamsPage
             catch (Exception failure) { if (IsLoaded && _view == nextView) DrawFolderShare(client, model, TeamError(failure)); }
         }));
         var name = new TextBox { Header = L10n.Text("common.teams.repository_name"), Text = model.Name, IsEnabled = !model.Locked, MaxLength = 80 };
-        var choices = new ComboBox { Header = L10n.Text("common.teams.project_details"), IsEnabled = !model.Locked, HorizontalAlignment = HorizontalAlignment.Stretch };
-        choices.Items.Add(new ComboBoxItem { Content = L10n.Text(model.CanCreate ? "common.teams.new_repository" : "common.teams.choose_repository"), Tag = "" });
+        var choices = new ComboBox { Header = L10n.Text("common.teams.project_details"), IsEnabled = !model.Locked || model.NeedsRepositoryChoice, HorizontalAlignment = HorizontalAlignment.Stretch };
+        choices.Items.Add(new ComboBoxItem { Content = L10n.Text(model.CanCreate && !model.NeedsRepositoryChoice ? "common.teams.new_repository" : "common.teams.choose_repository"), Tag = "" });
         foreach (var repo in model.Repositories.Rows.Where(repo => Text(repo, "role") is "contributor" or "maintainer")) choices.Items.Add(new ComboBoxItem { Content = Text(repo, "name"), Tag = Text(repo, "id") });
         choices.SelectedIndex = model.Existing is null ? 0 : choices.Items.OfType<ComboBoxItem>().ToList().FindIndex(item => (string?)item.Tag == Text(model.Existing, "id"));
-        choices.SelectionChanged += (_, _) => { if (!model.Locked && IsLoaded && _view == nextView) { var id = (choices.SelectedItem as ComboBoxItem)?.Tag as string; model.ChooseExisting(string.IsNullOrEmpty(id) ? null : id); DrawFolderShare(client, model); } };
+        choices.SelectionChanged += (_, _) => { if ((!model.Locked || model.NeedsRepositoryChoice) && IsLoaded && _view == nextView) { var id = (choices.SelectedItem as ComboBoxItem)?.Tag as string; model.ChooseExisting(string.IsNullOrEmpty(id) ? null : id); DrawFolderShare(client, model); } };
         fields.Children.Add(choices);
-        if (model.Repositories.Next is not null && !model.Locked) fields.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.load_more"), ActionIcon.More, async (_, _) => {
+        if (model.Repositories.Next is not null && (!model.Locked || model.NeedsRepositoryChoice)) fields.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.load_more"), ActionIcon.More, async (_, _) => {
             if (!IsLoaded || _view != nextView) return;
             try { await model.LoadRepositories(true); if (IsLoaded && _view == nextView) DrawFolderShare(client, model); } catch (Exception failure) { if (IsLoaded && _view == nextView) DrawFolderShare(client, model, TeamError(failure)); }
         }));
-        if (model.Existing is null && model.CanCreate)
+        if ((model.Existing is null || model.SavedSetup is not null) && model.CanCreate)
         {
             fields.Children.Add(name); name.TextChanged += (_, _) => { if (!model.Locked) model.Name = name.Text; };
             if (model.Collision is { } collision && !model.Locked)
@@ -164,12 +206,24 @@ internal sealed partial class TeamsPage
         }
         else fields.Children.Add(TeamText(L10n.Text(model.Existing is null ? "common.teams.no_repositories_member" : "common.teams.project_existing_access")));
         if (model.Created is not null) fields.Children.Add(TeamText(L10n.Text("common.teams.project_setup_partial")));
+        if (model.SavedSetup is not null)
+        {
+            fields.Children.Add(TeamText(model.NeedsRepositoryChoice ? L10n.Text("common.teams.project_setup_unknown") : L10n.Text("common.teams.project_setup_saved")));
+            fields.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.project_setup_start_over"), ActionIcon.Refresh, (_, _) => {
+                if (!IsLoaded || _view != nextView) return;
+                var review = TeamCard(L10n.Text("common.teams.project_setup_start_over"), L10n.Text("common.teams.project_setup_discard_detail"));
+                TeamEditor(L10n.Text("common.teams.project_setup_start_over"), review, L10n.Text("common.teams.project_setup_start_over"), () => true,
+                    async () => { await model.DiscardSetup(); return new JsonObject(); },
+                    () => { DrawFolderShare(client, model); return Task.CompletedTask; },
+                    _ => { DrawFolderShare(client, model); return Task.CompletedTask; }, confirmation: true);
+            }));
+        }
         if (error is not null) fields.Children.Add(TeamText(error));
         if (model.Members.Next is not null && !model.Locked) fields.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.load_more"), ActionIcon.More, async (_, _) => {
             if (!IsLoaded || _view != nextView) return;
             try { await model.LoadMembers(true); if (IsLoaded && _view == nextView) DrawFolderShare(client, model); } catch (Exception failure) { if (IsLoaded && _view == nextView) DrawFolderShare(client, model, TeamError(failure)); }
         }));
-        TeamEditor(L10n.Text("common.teams.share_project"), fields, L10n.Text("common.teams.share_project"), () => model.Verified && (model.Existing is not null || model.CanCreate && ValidName(name.Text) && (model.Locked || model.Collision is null)), async () => {
+        TeamEditor(L10n.Text("common.teams.share_project"), fields, L10n.Text("common.teams.share_project"), () => model.CanShare, async () => {
             try { var result = await model.Share(); return new JsonObject { ["repository"] = result.Repository.DeepClone(), ["publication"] = result.Publication.DeepClone() }; }
             catch (Exception failure) {
                 if (failure is Tokenstat.Host.HostException { Code: "repository_exists" }) try { await model.LoadRepositories(); } catch { }

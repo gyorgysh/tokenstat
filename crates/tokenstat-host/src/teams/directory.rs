@@ -20,11 +20,18 @@ pub(super) enum Request {
     Sharing(super::sharing::Request),
     #[cfg(feature = "local-host")]
     Chat(super::chats::Request),
+    #[cfg(feature = "local-host")]
+    ProjectSetup(super::project_setup::Request),
 }
 pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError> {
     let invalid =
         || DispatchError::new("invalid_request", "Check the Teams request and try again.");
-    if params.len() > 16 * 1024 {
+    let max_bytes = if method.starts_with("teams.projectSharing.") {
+        256 * 1024
+    } else {
+        16 * 1024
+    };
+    if params.len() > max_bytes {
         return Err(invalid());
     }
     let mut body: Value = serde_json::from_str(params).map_err(|_| invalid())?;
@@ -32,6 +39,10 @@ pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError
     // These are verified by AccountSnapshot before any network operation.
     object.remove("_accountScope");
     object.remove("_accountSession");
+    #[cfg(feature = "local-host")]
+    if let Some(request) = super::project_setup::parse(method, Value::Object(object.clone())) {
+        return request.map(Request::ProjectSetup);
+    }
     #[cfg(feature = "local-host")]
     if let Some(request) = super::chats::parse(method, Value::Object(object.clone())) {
         return request.map(Request::Chat);

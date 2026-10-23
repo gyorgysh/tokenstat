@@ -144,6 +144,44 @@ final class TeamFixtureUITests: XCTestCase {
         submit.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
     }
+    func testSavedSharingNeedsAnExplicitProjectAndFreshConfirmation() {
+        let app = launch("sharingUnknown", largeText: true)
+        app.buttons["Fixture"].tap(); app.buttons["Share Client"].tap()
+        let team = app.buttons["team.project.team"]
+        let project = app.buttons["team.project.recovery.repository"]
+        XCTAssertTrue(project.waitForExistence(timeout: 10))
+        XCTAssertTrue(team.label.contains("Example Studio")); XCTAssertFalse(team.isEnabled)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "project may already have been created")).firstMatch.exists)
+        let submit = app.buttons["team.editor.submit"]
+        XCTAssertFalse(submit.isEnabled)
+        project.tap(); app.buttons["Website"].firstMatch.tap()
+        let confirm = app.switches["team.project.confirm"]
+        XCTAssertEqual(confirm.value as? String, "0")
+        XCTAssertFalse(submit.isEnabled)
+        reveal(confirm, in: app)
+        confirm.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: submit)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
+        capture(app, "Saved sharing preserves choices and asks for a fresh review")
+        submit.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(submit.isEnabled)
+    }
+    func testSavedSharingCanBeStoppedWhenItsTeamIsUnavailable() {
+        let app = launch("sharingUnavailable")
+        XCTAssertTrue(app.staticTexts["No organizations yet"].waitForExistence(timeout: 15))
+        app.buttons["Fixture"].tap(); app.buttons["Share Client"].tap()
+        let discard = app.buttons["team.project.recovery.unavailable-discard"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["team.project.team"].isEnabled)
+        discard.tap()
+        let confirm = app.sheets.buttons["Review new sharing choices"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: discard)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed)
+        XCTAssertTrue(app.buttons["team.project.team"].isEnabled)
+        capture(app, "Unavailable team setup can be stopped after a review")
+    }
     func testAuthorizationRequiresConsentWithLargeText() {
         let app = launch("authorization", largeText: true)
         let setup = app.buttons["team.authorization.open"]
