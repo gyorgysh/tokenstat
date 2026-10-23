@@ -61,11 +61,10 @@ fn refuse_profile_connection_overrides(config: &Path, folder: &Path) -> io::Resu
 fn refuse_connection_overrides(paths: &[PathBuf]) -> io::Result<()> {
     use std::io::Read;
     for path in paths {
-        match fs::symlink_metadata(path) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(_) => return Err(unavailable()),
-            Ok(metadata) if metadata.is_file() => {}
-            Ok(_) => return Err(unavailable()),
+        match super::startup_source_metadata(path) {
+            Ok(None) => continue,
+            Ok(Some(metadata)) if metadata.is_file() => {}
+            _ => return Err(unavailable()),
         }
         let mut options = fs::OpenOptions::new();
         options.read(true);
@@ -402,10 +401,10 @@ fn system_paths() -> Vec<PathBuf> {
 
 fn refuse_sources(paths: &[PathBuf]) -> io::Result<()> {
     for path in paths {
-        match fs::symlink_metadata(path) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        match super::startup_source_metadata(path) {
+            Ok(None) => {}
             Err(_) => return Err(unavailable()),
-            Ok(_) => return Err(managed()),
+            Ok(Some(_)) => return Err(managed()),
         }
     }
     Ok(())

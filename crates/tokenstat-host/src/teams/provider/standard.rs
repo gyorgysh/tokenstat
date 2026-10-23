@@ -121,14 +121,14 @@ fn grok_machine_settings(cli_home: &Path) -> [PathBuf; 2] {
 
 fn refuse_grok_machine_settings(paths: &[PathBuf]) -> io::Result<()> {
     for path in paths {
-        match fs::symlink_metadata(path) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        match super::startup_source_metadata(path) {
+            Ok(None) => {}
             Err(_) => {
                 return Err(io::Error::other(
                     "Grok machine-wide startup settings could not be checked for this isolated Team run.",
                 ));
             }
-            Ok(_) => {
+            Ok(Some(_)) => {
                 return Err(io::Error::other(
                     "Grok machine-wide startup settings can load plugins or hooks before Team tool guards. This configuration cannot be isolated for a Team run.",
                 ));
@@ -732,10 +732,11 @@ mod tests {
                             .unwrap();
                     // A Gemini key in the shell must not switch an OAuth CLI.
                     assert_eq!(settings, "{}");
-                    assert!(
-                        program.env["GOOGLE_APPLICATION_CREDENTIALS"].ends_with(
-                            "native/.config/gcloud/application_default_credentials.json"
-                        )
+                    assert_eq!(
+                        Path::new(&program.env["GOOGLE_APPLICATION_CREDENTIALS"]),
+                        _root
+                            .path()
+                            .join("native/.config/gcloud/application_default_credentials.json")
                     );
                     assert!(
                         fs::read_to_string(home.file("home/.agents/hooks.json"))

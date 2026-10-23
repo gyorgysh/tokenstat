@@ -314,6 +314,34 @@ fn native_home_from_env(
         .ok_or_else(|| io::Error::other("The CLI sign-in location is unavailable."))
 }
 
+/// Windows can report NotFound for a child of a regular file. Only treat a
+/// startup source as absent after its nearest existing ancestor is proven to
+/// be a directory; unreadable or dangling ancestors remain unknown/refused.
+fn startup_source_metadata(path: &Path) -> io::Result<Option<fs::Metadata>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            for ancestor in path.ancestors().skip(1) {
+                match fs::symlink_metadata(ancestor) {
+                    Ok(_) => {
+                        if fs::metadata(ancestor)?.is_dir() {
+                            return Ok(None);
+                        }
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotADirectory,
+                            "A startup settings ancestor is not a directory.",
+                        ));
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Adapters route capability variables through native stdio inheritance or
 /// environment interpolation. Inference/keyring overrides are always empty.
 fn mcp_server(helper: &Path) -> serde_json::Value {
@@ -913,6 +941,34 @@ mod tests {
     }
 
     #[test]
+    fn missing_startup_sources_require_a_directory_ancestor_on_every_platform() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(
+            startup_source_metadata(&root.path().join("missing/deep/settings"))
+                .unwrap()
+                .is_none()
+        );
+        let file = root.path().join("regular-file");
+        fs::write(&file, "metadata only").unwrap();
+        assert!(startup_source_metadata(&file).unwrap().is_some());
+        assert!(startup_source_metadata(&file.join("settings")).is_err());
+        assert!(startup_source_metadata(&file.join("missing/deep/settings")).is_err());
+        #[cfg(unix)]
+        {
+            let link = root.path().join("directory-link");
+            std::os::unix::fs::symlink(root.path(), &link).unwrap();
+            assert!(
+                startup_source_metadata(&link.join("missing/settings"))
+                    .unwrap()
+                    .is_none()
+            );
+            let dangling = root.path().join("dangling");
+            std::os::unix::fs::symlink(root.path().join("no-target"), &dangling).unwrap();
+            assert!(startup_source_metadata(&dangling.join("settings")).is_err());
+        }
+    }
+
+    #[test]
     fn native_home_matches_windows_profile_and_unix_login_home() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("shell-home");
@@ -1175,14 +1231,17 @@ mod tests {
         fs::create_dir(&credentials).unwrap();
         fs::write(credentials.join("auth.json"), "fictional Codex login").unwrap();
         let native_home = root.path().join("native-home");
-        let claude_file =
-            if !claude_selector.is_empty() && Path::new(&claude_selector).is_relative() {
-                checkout
-                    .join(claude_selector.nfc().collect::<String>())
-                    .join(".credentials.json")
+        let claude_file = if claude_selector.is_empty() {
+            native_home.join(".claude/.credentials.json")
+        } else {
+            let selector = PathBuf::from(claude_selector.nfc().collect::<String>());
+            if selector.is_absolute() {
+                selector
             } else {
-                native_home.join(".claude/.credentials.json")
-            };
+                checkout.join(selector)
+            }
+            .join(".credentials.json")
+        };
         fs::create_dir_all(claude_file.parent().unwrap()).unwrap();
         fs::write(&claude_file, "fictional Claude login").unwrap();
         let mut program = Program {
@@ -1312,12 +1371,12 @@ mod tests {
                 "https://claude-gateway.invalid".into(),
             ),
         ]);
+        let native = tempfile::tempdir().unwrap();
+        let selector = native.path().join("custom-claude-auth");
+        assert!(selector.is_absolute());
         for backend in ["codex", "claude"] {
-            let (_root, home, program) = configured_auth(
-                backend,
-                values.clone(),
-                "/fictional/custom-claude-auth".into(),
-            );
+            let (_root, home, program) =
+                configured_auth(backend, values.clone(), selector.display().to_string());
             let wanted: &[&str] = if backend == "codex" {
                 &CODEX_AUTH_ENV
             } else {
@@ -1336,8 +1395,12 @@ mod tests {
             }
             let configuration = if backend == "claude" {
                 assert_eq!(
-                    program.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"],
-                    "/fictional/custom-claude-auth"
+                    Path::new(&program.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"]),
+                    selector
+                );
+                assert_eq!(
+                    fs::read_to_string(selector.join(".credentials.json")).unwrap(),
+                    "fictional Claude login"
                 );
                 fs::read_to_string(home.file("mcp.json")).unwrap()
             } else {
