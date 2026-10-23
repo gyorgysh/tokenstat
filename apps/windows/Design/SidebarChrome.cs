@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -10,6 +11,8 @@ namespace Tokenstat.Design;
 /// <summary>Shared sidebar and rail metrics, independent of native template defaults.</summary>
 internal static class SidebarChrome
 {
+    private sealed class ProjectAlignment { internal bool Pending; }
+    private static readonly ConditionalWeakTable<NavigationViewItem, ProjectAlignment> ProjectAlignments = new();
     // The app supplies the sink so shared control fixtures need no app entry point.
     internal static Action<string>? ThresholdFailure { get; set; }
 
@@ -129,8 +132,17 @@ internal static class SidebarChrome
     // hierarchy and keyboard navigation remain owned by NavigationView.
     public static void AlignProject(NavigationViewItem row)
     {
-        row.ApplyTemplate();
-        Visit(row);
+        if (!row.IsLoaded) return;
+        var alignment = ProjectAlignments.GetValue(row, static _ => new ProjectAlignment());
+        if (alignment.Pending) return;
+        alignment.Pending = true;
+        // Native item state changes can replace the presenter style. Do not
+        // force its template, or edit its parts, inside that transition.
+        if (!row.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            alignment.Pending = false;
+            if (row.IsLoaded) Visit(row);
+        })) alignment.Pending = false;
         static void Visit(DependencyObject parent)
         {
             for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)

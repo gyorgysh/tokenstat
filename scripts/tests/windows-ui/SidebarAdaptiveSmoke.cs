@@ -12,6 +12,10 @@ internal static class SidebarAdaptiveSmoke
             PaneDisplayMode = NavigationViewPaneDisplayMode.Auto, IsPaneToggleButtonVisible = false };
         var project = new NavigationViewItem { Content = "Fictional project", IsExpanded = true };
         for (var i = 0; i < 13; i++) project.MenuItems.Add(new NavigationViewItem { Content = "Fictional chat " + i });
+        project.Content = SidebarChrome.ProjectContent(project, new TextBlock { Text = "Fictional project" }, false,
+            new Button { Content = "Fictional action" });
+        SidebarChrome.AlignProject(project); // Unmounted rows must not force a native template.
+        var selectedChat = project.MenuItems[1];
         view.MenuItems.Add(project);
         view.PaneHeader = new TextBlock { Text = "Fictional header" };
         view.PaneFooter = new TextBlock { Text = "Fictional account" };
@@ -44,6 +48,7 @@ internal static class SidebarAdaptiveSmoke
         try
         {
             await Settle(NavigationViewDisplayMode.Expanded);
+            view.SelectedItem = selectedChat;
             modes.Clear();
             // A chat adds its companion width. Returning to an ordinary page
             // removes it while the window remains between the two thresholds.
@@ -62,6 +67,7 @@ internal static class SidebarAdaptiveSmoke
             if (modes.Contains(NavigationViewDisplayMode.Compact)) throw new Exception("Sidebar resizing entered compact mode");
             for (var i = 0; i < 100 && paneUpdates == 0; i++) await Task.Delay(20);
             if (paneUpdates == 0) throw new Exception("Sidebar pane content never followed its open state");
+            if (!ReferenceEquals(view.SelectedItem, selectedChat)) throw new Exception("Sidebar layout lost the selected chat");
             Program.Log("PASS: native sidebar threshold growth, shrink and resize preserve expanded/minimal modes");
         }
         finally { host.Children.Remove(view); }
