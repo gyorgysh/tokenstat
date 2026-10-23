@@ -290,10 +290,27 @@ fn native_env(name: &str) -> Option<String> {
 }
 
 fn native_home() -> io::Result<PathBuf> {
-    native_env("HOME")
-        .filter(|path| Path::new(path).is_absolute())
+    native_home_from_env(cfg!(windows), native_env, tokenstat_paths::home_dir)
+}
+
+fn native_home_from_env(
+    windows: bool,
+    env: impl Fn(&str) -> Option<String>,
+    fallback: impl FnOnce() -> Option<PathBuf>,
+) -> io::Result<PathBuf> {
+    // Native Windows CLIs use the platform profile, even when Git Bash sets
+    // a different HOME. Preserve Unix login-shell HOME and the paths crate's
+    // platform fallback order without changing explicit backend selectors.
+    let keys: &[&str] = if windows {
+        &["USERPROFILE", "HOME"]
+    } else {
+        &["HOME"]
+    };
+    keys.iter()
+        .filter_map(|key| env(key))
         .map(PathBuf::from)
-        .or_else(tokenstat_paths::home_dir)
+        .find(|path| path.is_absolute())
+        .or_else(fallback)
         .ok_or_else(|| io::Error::other("The CLI sign-in location is unavailable."))
 }
 
@@ -319,11 +336,7 @@ impl Auth {
             Some(login) => login.vars.get(name).cloned(),
             None => std::env::var(name).ok(),
         };
-        let home = env("HOME")
-            .filter(|path| Path::new(path).is_absolute())
-            .map(PathBuf::from)
-            .or_else(tokenstat_paths::home_dir)
-            .ok_or_else(|| io::Error::other("The CLI sign-in location is unavailable."))?;
+        let home = native_home_from_env(cfg!(windows), env, tokenstat_paths::home_dir)?;
         let codex = env("CODEX_HOME")
             .filter(|path| !path.is_empty())
             .map(PathBuf::from)
@@ -897,6 +910,66 @@ mod tests {
         }
         assert_eq!(executable("cursor"), Some("cursor-agent"));
         assert_eq!(default_choice(|_| true), "codex");
+    }
+
+    #[test]
+    fn native_home_matches_windows_profile_and_unix_login_home() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("shell-home");
+        let profile = root.path().join("windows-profile");
+        let fallback = root.path().join("os-profile");
+        let mut env = BTreeMap::from([
+            ("HOME", home.display().to_string()),
+            ("USERPROFILE", profile.display().to_string()),
+        ]);
+        for (windows, expected) in [(true, &profile), (false, &home)] {
+            assert_eq!(
+                native_home_from_env(windows, |key| env.get(key).cloned(), || None).unwrap(),
+                *expected
+            );
+        }
+        env.remove("USERPROFILE");
+        assert_eq!(
+            native_home_from_env(true, |key| env.get(key).cloned(), || None).unwrap(),
+            home
+        );
+        env.insert("USERPROFILE", "relative-profile".into());
+        assert_eq!(
+            native_home_from_env(true, |key| env.get(key).cloned(), || None).unwrap(),
+            home
+        );
+        env.insert("HOME", "relative-home".into());
+        for windows in [false, true] {
+            assert_eq!(
+                native_home_from_env(
+                    windows,
+                    |key| env.get(key).cloned(),
+                    || Some(fallback.clone())
+                )
+                .unwrap(),
+                fallback
+            );
+            assert_eq!(
+                native_home_from_env(windows, |_| None, || Some(fallback.clone())).unwrap(),
+                fallback
+            );
+            assert!(native_home_from_env(windows, |_| None, || None).is_err());
+        }
+        env.insert("USERPROFILE", profile.display().to_string());
+        env.remove("HOME");
+        assert_eq!(
+            native_home_from_env(true, |key| env.get(key).cloned(), || None).unwrap(),
+            profile
+        );
+        assert_eq!(
+            native_home_from_env(
+                false,
+                |key| env.get(key).cloned(),
+                || Some(fallback.clone())
+            )
+            .unwrap(),
+            fallback
+        );
     }
 
     #[test]
