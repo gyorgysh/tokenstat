@@ -32,6 +32,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - On the publishing computer, its signed-in owner can start an empty shared chat without first granting agent execution. This does not start an agent or grant another device access.
 - Long shared chats can open their details and approved files without loading the entire conversation. Development agent runs read the full approved history in pages, excluding later discussion. Publication retries also work after a chat grows.
 - Recovering a stopped Team agent clears the chat's running state after writer cleanup succeeds, so another Ask can start.
+- Interrupted Team output no longer blocks the next Ask after verified run cleanup. Written replies are preserved, while incomplete or changed output keeps the chat fenced for recovery.
 - Project workflow settings keep mode names readable on phones and tablets. Checkout updates preserve local and ignored files and offer an explicit retry when blocked.
 - Terminal status now follows process exit. Closing output no longer marks a running process as stopped, and failed stops remain available for recovery.
 - Teams browsers on Android and Windows can load more computers and shared chats, with retry controls for unreachable computers. Overlap summaries identify which computers are included.

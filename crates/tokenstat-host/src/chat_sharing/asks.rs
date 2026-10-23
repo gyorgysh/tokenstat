@@ -796,6 +796,15 @@ impl Store {
                 journal
                     .transition_run(&prepared.request, &prepared.binding.fence, next, now_ms())
                     .map_err(|_| unavailable())?;
+                if next.terminal() {
+                    journal
+                        .retire_terminal_output(
+                            &prepared.binding.fence,
+                            bytes,
+                            &journal::read_chain(&directory)?,
+                        )
+                        .map_err(|_| unavailable())?;
+                }
                 writer::save(&directory.join(writer::JOURNAL), &journal)?;
                 let source = index
                     .conversations
@@ -909,6 +918,9 @@ impl Store {
             let state = journal
                 .recover_unresolved_run(fence, started_proven_gone, now_ms())
                 .map_err(|_| changed())?;
+            journal
+                .retire_terminal_output(fence, bytes, &journal::read_chain(&directory)?)
+                .map_err(|_| unavailable())?;
             writer::save(&directory.join(writer::JOURNAL), &journal)?;
             // Keep the chat fenced until both durable cleanup steps succeed.
             // Retrying a terminal journal is safe after a failed claim write.

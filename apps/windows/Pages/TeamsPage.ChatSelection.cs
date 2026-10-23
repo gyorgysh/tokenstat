@@ -80,9 +80,10 @@ internal sealed partial class TeamsPage
     }
     private async Task ReviewSelectedTeamChatAsync(TeamChatSelectionModel model, JsonObject repository, string conversation, Func<Task> back)
     {
-        Reset(L10n.Text("common.teams.review_sharing")); var view = _view;
+        Reset(L10n.Text("common.teams.review_sharing")); var view = _view; var stage = "preview";
         try {
             var review = await model.Preview(conversation); if (!IsLoaded || _view != view) return;
+            stage = "transcript";
             var fields = TeamCard(Text(review.Preview["history"], "title"), L10n.Text("common.teams.share_chat_audience", Text(repository, "name")));
             fields.Children.Add(TeamText(L10n.Text("common.teams.share_chat_contents")));
             fields.Children.Add(TeamText(L10n.Text("common.teams.history_preview")));
@@ -91,9 +92,12 @@ internal sealed partial class TeamsPage
                 if (block.Kind == TeamBlockKind.File) fields.Children.Add(TeamText(Text(block.File, "name")));
                 else fields.Children.Add(TranscriptRow(new(), block));
             }
+            stage = "consent";
             TeamEditor(L10n.Text("common.teams.share_chat"), fields, L10n.Text("common.teams.share_chat"), () => true,
                 async () => { await model.Publish(review); return new JsonObject(); }, back, _ => back(), confirmation: true);
         } catch (Exception error) {
+            if (Environment.GetEnvironmentVariable("TOKENSTAT_SCREEN_FIXTURE") is not null)
+                Console.Error.WriteLine($"Team history fixture phase={stage}; type={error.GetType().Name}; HRESULT=0x{error.HResult:x8}");
             if (!IsLoaded || _view != view) return; Note(TeamError(error), true);
             _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await back(); }));
         }

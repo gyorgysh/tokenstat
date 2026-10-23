@@ -415,6 +415,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Compile the native Windows UI
+        id: windows_ui_compile
         if: runner.os == 'Windows'
         run: dotnet build apps/windows/Tokenstat.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64
 
@@ -436,7 +437,7 @@ jobs:
           exit $result
 
       - name: Production Windows application startup
-        if: runner.os == 'Windows'
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.windows_ui_compile.outcome == 'success' }}
         timeout-minutes: 3
         run: ./scripts/tests/windows-ui/startup.ps1
 

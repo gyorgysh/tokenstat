@@ -4,6 +4,7 @@
 //! the sole exception; readers may settle written rows, never replay output.
 
 use super::*;
+use crate::chat_receipts::team_runs as runs;
 use crate::transcript::Event;
 
 const BATCH_BYTES: usize = 512 * 1024;
@@ -171,6 +172,31 @@ pub(super) fn batch_bytes(rows: &[AgentRecord]) -> Result<Vec<u8>, &'static str>
     Ok(bytes)
 }
 impl Journal {
+    pub(super) fn retire_unwritten_agent(
+        &mut self,
+        scope: &runs::Scope,
+        run_id: &str,
+        bytes: &[u8],
+    ) -> Result<(), &'static str> {
+        let Some(pending) = &self.pending_agent else {
+            return Ok(());
+        };
+        if pending.before_bytes != bytes.len() as u64
+            || pending.before_digest != digest(bytes)
+            || pending.rows.iter().any(|row| {
+                row.origin.run_id != run_id
+                    || row.origin.scope.issuer != scope.issuer
+                    || row.origin.scope.organization != scope.organization
+                    || row.origin.scope.repository != scope.repository
+                    || row.origin.scope.checkout != scope.checkout
+                    || row.origin.scope.share != scope.share
+            })
+        {
+            return Err("Output changed during recovery");
+        }
+        self.pending_agent = None;
+        Ok(())
+    }
     pub fn agent_recorded(&self, key: &str, request_digest: &str) -> Result<bool, &'static str> {
         if let Some(proof) = self.agent.get(key) {
             if proof.request_digest != request_digest {
@@ -299,5 +325,69 @@ impl Journal {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_output_retirement_requires_the_original_run_and_exact_prefix() {
+        let scope = Scope {
+            issuer: "https://fixture.invalid".into(),
+            organization: "org".into(),
+            repository: "repo".into(),
+            checkout: "checkout".into(),
+            share: format!("share_{}", "a".repeat(32)),
+        };
+        let run = format!("run_{}", "b".repeat(32));
+        let run_scope = runs::Scope {
+            issuer: scope.issuer.clone(),
+            organization: scope.organization.clone(),
+            repository: scope.repository.clone(),
+            checkout: scope.checkout.clone(),
+            share: scope.share.clone(),
+        };
+        let row = AgentRecord::new(
+            1,
+            Event::Text {
+                delta: "Unwritten output".into(),
+            },
+            1,
+            "claude".into(),
+            scope,
+            Actor {
+                id: "person".into(),
+                device: "c".repeat(64),
+                name: "Example".into(),
+                handle: Some("example".into()),
+                avatar: None,
+            },
+            run.clone(),
+            0,
+            0,
+        );
+        for mismatch in 0..3 {
+            let mut journal = Journal::new(Source {
+                conversation: "chat".into(),
+                workspace: "workspace".into(),
+                created_at_ms: 1,
+            });
+            journal.pending_agent = Some(PendingAgent {
+                rows: vec![row.clone()],
+                request_digest: "d".repeat(64),
+                before_bytes: 0,
+                before_digest: digest(b""),
+            });
+            let result = journal.retire_unwritten_agent(
+                &run_scope,
+                if mismatch == 1 { "different-run" } else { &run },
+                if mismatch == 2 { b"changed" } else { b"" },
+            );
+            assert_eq!(result.is_ok(), mismatch == 0);
+            assert_eq!(journal.pending_agent.is_none(), mismatch == 0);
+            assert!(journal.agent.is_empty());
+        }
     }
 }

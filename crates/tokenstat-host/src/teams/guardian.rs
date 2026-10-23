@@ -159,6 +159,19 @@ fn fixture_program(program: &Program, source: &Source, issuer: &str) -> Result<(
 }
 
 pub(crate) fn main() -> Result<(), DispatchError> {
+    let mut stage = "bootstrap";
+    let result = main_inner(&mut stage);
+    if let Err(error) = &result
+        && fixture_enabled()
+        && std::env::var_os("TOKENSTAT_TEAMS_KEEP_FIXTURE").is_some()
+    {
+        // Static phase and public error code only. Never include request text,
+        // authority values or the error message in the diagnostic fixture log.
+        eprintln!("Team fixture guardian stage={stage}; code={}", error.code);
+    }
+    result
+}
+fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
     let mut reader = BufReader::new(io::stdin());
     let init: Init = team_process::receive(&mut reader).map_err(map_io)?;
     let owner = AccountSnapshot::capture().map_err(|_| unavailable())?;
@@ -178,6 +191,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     let device =
         tokenstat_identity::public_key_from_hex(&init.device_key).map_err(|_| unavailable())?;
     let ticket = TeamTicket::try_from(init.ticket).map_err(|_| unavailable())?;
+    *stage = "ticket";
     let principal = AuthorizedTeamPrincipal::guardian(&client, &ticket, device, init.publisher)?;
     let source = Source::capture(&principal)?;
     let checkout = checkout_digest(&source)?;
@@ -205,6 +219,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     }
     // With lanes on, the run works in its own worktree and never in the
     // publisher's folder. A refused or failed Ask drops the lane again.
+    *stage = "lane";
     let lane_settings = super::lanes::settings(&principal.value().checkout_id);
     let mut lane = match &lane_settings {
         Some(settings) => Some(super::lanes::open(
@@ -221,6 +236,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         Some(lane) => lane.path.canonicalize().map_err(map_io)?,
         None => source.checkout.folder.canonical.clone(),
     };
+    *stage = "prepare-ask";
     let mut prepared = match chats.prepare_team_ask(
         source.target(),
         &principal,
@@ -241,6 +257,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
     // A real agent reads the frozen context through the scoped SDK and needs
     // its own sign-in. Both are settled before the run's authority is
     // admitted: a keychain prompt or a login shell must not spend its lease.
+    *stage = "provider";
     let launch = match init.program {
         Some(program) => Ok((None, program)),
         None => (|| {
@@ -261,6 +278,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         }
     };
     // No canonical/index/transcript lock is held across account HTTP.
+    *stage = "authority";
     let admission = (|| {
         principal.ensure_account_current()?;
         source.ensure_current()?;
@@ -292,6 +310,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         use std::os::unix::fs::OpenOptionsExt;
         raw.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
+    *stage = "context";
     let context_written = (|| {
         if !fixture {
             return Ok(());
@@ -314,6 +333,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         let _ = chats.refuse_prepared_ask(source.target(), *prepared);
         return Err(error);
     }
+    *stage = "sdk";
     let sdk = (|| {
         let current = owner.clone();
         let sdk_source = Source::capture(&principal)?;
@@ -334,6 +354,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
             return Err(error);
         }
     };
+    *stage = "run-home";
     let run_home = match super::run_home::prepare(
         &tokenstat_paths::data_dir()
             .ok_or_else(unavailable)?
@@ -360,6 +381,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         return Err(map_io(error));
     }
     let mut output = output::Output::new(&program.output, prepared.backend());
+    *stage = "writer-claim";
     prepared.claim_writer()?;
     let fence = prepared.binding().fence.clone();
     let (workspace, chat) = (
@@ -393,6 +415,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         }
         Ok(())
     };
+    *stage = "process-birth";
     let process = Owned::start(&helper, program, |group| {
         birth(group, true)?;
         if authority
@@ -426,6 +449,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
                 }
             }
         });
+    *stage = "run-loop";
     let execution = (|| {
         control_thread.map_err(map_io)?;
         let mut renew = Instant::now() + Duration::from_secs(10);

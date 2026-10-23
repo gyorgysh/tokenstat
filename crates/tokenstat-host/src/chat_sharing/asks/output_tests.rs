@@ -535,3 +535,161 @@ fn metadata_and_approved_files_remain_bounded_above_the_full_history_limit() {
             .is_err()
     );
 }
+
+#[test]
+fn terminal_cleanup_retires_only_unwritten_output_and_preserves_written_batches() {
+    for written in [false, true] {
+        for orphaned in [false, true] {
+            let f = Fixture::new();
+            let prepared = setup(&f);
+            f.store
+                .append_owned_output(
+                    f.target(),
+                    &prepared,
+                    0,
+                    vec![Event::Text {
+                        delta: "Earlier committed reply".into(),
+                    }],
+                    || Ok(()),
+                )
+                .unwrap();
+            let result = f.store.append_owned_output_at(
+                f.target(),
+                &prepared,
+                1,
+                words(),
+                || Ok(()),
+                |step| {
+                    if matches!(
+                        (written, step),
+                        (false, Step::Reserved) | (true, Step::Canonical)
+                    ) {
+                        Err(unavailable())
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert!(result.is_err());
+            let fence = prepared.binding.fence.clone();
+            if orphaned {
+                drop(prepared);
+                // A failed durable claim release must retain the source fence.
+                assert!(
+                    f.store
+                        .recover_orphaned_run(
+                            &f.chat.workspace_id,
+                            &f.chat.id,
+                            &fence,
+                            true,
+                            || Err(unavailable())
+                        )
+                        .is_err()
+                );
+                assert_eq!(f.chat().team_run_fence.as_ref(), Some(&fence));
+                assert!(f.chat().running);
+                assert_eq!(
+                    f.store
+                        .recover_orphaned_run(
+                            &f.chat.workspace_id,
+                            &f.chat.id,
+                            &fence,
+                            true,
+                            || Ok(())
+                        )
+                        .unwrap(),
+                    runs::State::Recovered
+                );
+            } else {
+                // Exercise the terminal transaction used by sealed process completion.
+                f.store
+                    .record_owned_run_state(f.target(), &prepared, runs::State::Succeeded)
+                    .unwrap();
+                drop(prepared);
+                assert_eq!(
+                    f.store
+                        .recover_orphaned_run(
+                            &f.chat.workspace_id,
+                            &f.chat.id,
+                            &fence,
+                            false,
+                            || Ok(())
+                        )
+                        .unwrap(),
+                    runs::State::Succeeded
+                );
+            }
+            let history = serde_json::to_string(&f.history().events).unwrap();
+            assert!(history.contains("Earlier committed reply"));
+            assert_eq!(history.contains("Reply with numbers"), written);
+            let journal: Value = serde_json::from_slice(&f.journal_bytes()).unwrap();
+            assert!(journal.get("pendingSegments").is_none_or(Value::is_null));
+            assert!(journal["segmentHead"].is_object());
+            assert!(!f.chat().running);
+            assert!(f.chat().team_run_fence.is_none());
+            let actor = principal("fixture_member", 'a', 'c');
+            let next = new(f
+                .prepare(&actor, &f.input(&actor, "after-output-recovery"))
+                .unwrap());
+            f.store.refuse_prepared_ask(f.target(), next).unwrap();
+        }
+    }
+}
+
+#[test]
+fn incomplete_output_and_unproven_processes_keep_recovery_fenced() {
+    for corrupt_chain in [false, true] {
+        let f = Fixture::new();
+        let prepared = setup(&f);
+        assert!(
+            f.store
+                .append_owned_output_at(
+                    f.target(),
+                    &prepared,
+                    0,
+                    words(),
+                    || Ok(()),
+                    |step| {
+                        if matches!(step, Step::Reserved) {
+                            Err(unavailable())
+                        } else {
+                            Ok(())
+                        }
+                    }
+                )
+                .is_err()
+        );
+        let fence = prepared.binding.fence.clone();
+        drop(prepared);
+        if corrupt_chain {
+            fs::write(
+                f.store
+                    .root
+                    .join(&f.chat.id)
+                    .join("team-output/chain.ndjson"),
+                b"partial output",
+            )
+            .unwrap();
+        }
+        let released = std::cell::Cell::new(false);
+        assert!(
+            f.store
+                .recover_orphaned_run(
+                    &f.chat.workspace_id,
+                    &f.chat.id,
+                    &fence,
+                    corrupt_chain,
+                    || {
+                        released.set(true);
+                        Ok(())
+                    }
+                )
+                .is_err()
+        );
+        assert!(!released.get());
+        assert_eq!(f.chat().team_run_fence.as_ref(), Some(&fence));
+        assert!(f.chat().running);
+        let journal: Value = serde_json::from_slice(&f.journal_bytes()).unwrap();
+        assert!(journal["pendingSegments"].is_object());
+    }
+}

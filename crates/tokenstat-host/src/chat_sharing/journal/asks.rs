@@ -357,6 +357,36 @@ impl Journal {
         }
         Ok(path[path.len() - 1])
     }
+    /// The caller holds the exact source fence and has proved this run's
+    /// processes gone. Preserve written output and retire only an exact,
+    /// unwritten intent before releasing either durable writer fence.
+    pub fn retire_terminal_output(
+        &mut self,
+        fence: &runs::Fence,
+        bytes: &[u8],
+        chain: &[u8],
+    ) -> Result<(), &'static str> {
+        let ledger = self.runs.as_ref().ok_or("Run reservation is missing")?;
+        let record = ledger
+            .records()
+            .find(|record| &record.binding().fence == fence)
+            .ok_or("Run reservation is missing")?;
+        if !record.state().terminal()
+            || ledger.unresolved().is_some()
+            || record.canonical().is_none()
+            || self.pending.is_some()
+            || self.pending_ask.is_some()
+        {
+            return Err("This run still needs recovery");
+        }
+        let scope = record.request().scope.clone();
+        self.observe_agent(bytes)?;
+        self.observe_chain(chain)?;
+        self.retire_unwritten_agent(&scope, fence.run_id(), bytes)?;
+        // Segment reservations are exclusive to the run behind the source
+        // fence. No later Ask can reserve output before this cleanup.
+        self.retire_unwritten_segments(chain)
+    }
     pub fn transition_run(
         &mut self,
         request: &runs::Request,

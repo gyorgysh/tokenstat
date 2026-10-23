@@ -23,7 +23,7 @@ internal static class TeamChatSelectionSmoke
     }
     private static async Task Wait(FrameworkElement root, Func<bool> ready) {
         for (var i = 0; i < 300 && !ready(); i++) { root.UpdateLayout(); await Task.Delay(20); }
-        if (!ready()) throw new Exception("Native chat selection did not reach its expected state");
+        if (!ready()) throw new Exception("Native chat selection did not reach its expected state: " + string.Join(" | ", Nodes(root).OfType<TextBlock>().Select(t => t.Text).Where(t => t.Length > 0).Take(16)));
     }
     private static Button? Button(DependencyObject root, string id) => Nodes(root).OfType<Button>().SingleOrDefault(b => AutomationProperties.GetAutomationId(b) == id);
     private static async Task Click(FrameworkElement root, string id) {
@@ -51,7 +51,7 @@ internal static class TeamChatSelectionSmoke
             }
             if (method == "teams.chatSharing.preview") {
                 var reply = Reply(); reply["preview"] = new JsonObject { ["conversation"] = Text(fields, "conversation"), ["checkoutId"] = "checkout", ["repository"] = repo.DeepClone(), ["preview"] = new string('a', 64),
-                    ["audience"] = "currentAndFutureRepositoryMembers", ["allowsAgentRuns"] = false, ["history"] = new JsonObject { ["title"] = Text(fields, "conversation"), ["backend"] = "codex", ["events"] = new JsonArray(new JsonObject { ["kind"] = "user", ["seq"] = 1L, ["text"] = "Fictional private history" }) } };
+                    ["audience"] = "currentAndFutureRepositoryMembers", ["allowsAgentRuns"] = false, ["history"] = new JsonObject { ["title"] = Text(fields, "conversation"), ["backend"] = "codex", ["events"] = new JsonArray(new JsonObject { ["kind"] = "user", ["seq"] = 1UL, ["text"] = "Fictional private history" }) } };
                 return Task.FromResult<JsonNode>(reply);
             }
             if (method == "teams.chatSharing.publish") {

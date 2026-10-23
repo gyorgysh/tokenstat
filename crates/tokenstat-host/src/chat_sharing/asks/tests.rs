@@ -110,7 +110,7 @@ impl Fixture {
     pub(super) fn journal_bytes(&self) -> Vec<u8> {
         fs::read(self.store.root.join(&self.chat.id).join(writer::JOURNAL)).unwrap()
     }
-    fn chat(&self) -> Conversation {
+    pub(super) fn chat(&self) -> Conversation {
         self.store.current_send_conversation(&self.chat.id).unwrap()
     }
 }

@@ -751,6 +751,16 @@ pub(crate) fn chain_usage(directory: &Path) -> Result<UsageTotals, String> {
 }
 
 impl Journal {
+    pub(super) fn retire_unwritten_segments(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
+        let Some(pending) = &self.pending_segments else {
+            return Ok(());
+        };
+        if bytes.len() as u64 != pending.before_bytes || digest(bytes) != pending.before_digest {
+            return Err("Output reference changed during recovery");
+        }
+        self.pending_segments = None;
+        Ok(())
+    }
     pub(crate) fn segment_head(&self) -> Option<&Head> {
         self.segment_head.as_ref()
     }
