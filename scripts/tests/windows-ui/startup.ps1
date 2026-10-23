@@ -312,7 +312,7 @@ try {
     [System.IO.File]::WriteAllText($reviewFile, "workbench-live-first`nworkbench-live-second`n")
     Wait-ForNativeName 'workbench-live-second' $textType | Out-Null
     Invoke-Control (Wait-ForNativeName 'Browser beside chat' $buttonType)
-    Invoke-Control (Wait-ForNativeName 'Changes' ([System.Windows.Automation.ControlType]::TabItem))
+    Invoke-Control (Wait-ForControl 'workbench.tool.changes')
     Wait-ForNativeName 'workbench-live-second' $textType | Out-Null
     Invoke-Control (Wait-ForNativeName 'Full diff' $buttonType)
     # Equal line counts must still refresh the actual text, without chat events.
