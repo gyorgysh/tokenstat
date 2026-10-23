@@ -13,7 +13,7 @@ mod journal;
 #[path = "chat_sharing/writer.rs"]
 mod writer;
 pub(crate) use crate::remote::TeamCommentInput as CommentInput;
-pub(crate) use asks::{AskInput, AskPreparation};
+pub(crate) use asks::{AskInput, AskPreparation, SdkContext};
 pub(crate) use journal::{PageRequest, chain_usage};
 
 #[cfg(test)]
@@ -419,6 +419,7 @@ impl Store {
 
     /// Guest reads verify the canonical conversion marker and approved bytes.
     /// They never borrow the physical owner's private-history preview path.
+    #[cfg(test)]
     pub(crate) fn shared_history(
         &self,
         workspace: &str,

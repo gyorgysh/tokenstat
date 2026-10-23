@@ -351,6 +351,7 @@ fn metadata_and_approved_files_remain_bounded_above_the_full_history_limit() {
     let prepared = setup(&f);
     let share = format!("share_{}", "a".repeat(32));
     let mut large = false;
+    let mut expected_text_bytes = 0;
     for batch in 0..128 {
         let mut events = vec![Event::Text {
             delta: "x".repeat(384 * 1024),
@@ -368,6 +369,7 @@ fn metadata_and_approved_files_remain_bounded_above_the_full_history_limit() {
         f.store
             .append_owned_output(f.target(), &prepared, batch, events, || Ok(()))
             .unwrap();
+        expected_text_bytes += 384 * 1024;
         let chain = fs::read_to_string(output_file(&f, true)).unwrap();
         let bytes: u64 = chain
             .lines()
@@ -412,6 +414,72 @@ fn metadata_and_approved_files_remain_bounded_above_the_full_history_limit() {
             .is_err()
     );
 
+    // No process exists in this storage fixture. Settle its recorded orphan,
+    // then admit a fresh Ask against the genuinely large authenticated archive.
+    let fence = prepared.binding().fence.clone();
+    drop(prepared);
+    f.store
+        .recover_orphaned_run(&f.chat.workspace_id, &f.chat.id, &fence, true, || Ok(()))
+        .unwrap();
+    let actor = principal("fixture_member", 'a', 'c');
+    let input = f.input(&actor, "large-context-attempt");
+    let approved = new(f.prepare(&actor, &input).unwrap());
+    let context = approved.context().sdk();
+    assert!(context.byte_bound().unwrap() > 32 * 1024 * 1024);
+    assert!(context.full_if_small(4 * 1024 * 1024).unwrap().is_none());
+    f.store
+        .team_comment(
+            f.target(),
+            &actor,
+            &CommentInput {
+                text: "FROZEN_CONTEXT_LATE_SENTINEL".into(),
+                client_message_id: "later-large-comment".into(),
+                client_message_created_at_ms: now_ms(),
+            },
+            || Ok(()),
+        )
+        .unwrap();
+    f.store
+        .ensure_prepared_ask(f.target(), &approved, || Ok(()))
+        .unwrap();
+    f.store
+        .transition_owned_run(f.target(), &approved, runs::State::Launching)
+        .unwrap();
+    f.store
+        .transition_owned_run(f.target(), &approved, runs::State::Running)
+        .unwrap();
+    f.store
+        .append_owned_output(
+            f.target(),
+            &approved,
+            0,
+            vec![Event::Text {
+                delta: "FROZEN_CONTEXT_LATE_SENTINEL".into(),
+            }],
+            || Ok(()),
+        )
+        .unwrap();
+    let mut after = None;
+    let mut count = 0;
+    let mut text_bytes = 0;
+    loop {
+        let (events, more) = context.page(after, 100, 256 * 1024).unwrap();
+        assert!(!events.is_empty());
+        for event in &events {
+            let seq = event["seq"].as_u64().unwrap();
+            assert!(after.is_none_or(|previous| seq > previous));
+            after = Some(seq);
+            count += 1;
+            text_bytes += event["event"]["delta"].as_str().map_or(0, str::len);
+            assert!(!event.to_string().contains("FROZEN_CONTEXT_LATE_SENTINEL"));
+        }
+        if !more {
+            break;
+        }
+    }
+    assert_eq!(count, context.count().unwrap());
+    assert_eq!(text_bytes, expected_text_bytes);
+    assert_eq!(context.metadata["message"]["text"], input.text);
     // Metadata/file discovery validates the sealed chain, without opening an
     // unrelated archived payload. Reading that payload still verifies bytes.
     let chain = fs::read_to_string(output_file(&f, true)).unwrap();
@@ -425,6 +493,7 @@ fn metadata_and_approved_files_remain_bounded_above_the_full_history_limit() {
     let mut bytes = fs::read(&path).unwrap();
     bytes[0] ^= 0xff;
     fs::write(&path, bytes).unwrap();
+    assert!(context.page(None, 100, 256 * 1024).is_err());
     let index = f
         .store
         .shared_chat_index(&f.chat.workspace_id, &f.chat.id, &share, &f.preview)

@@ -444,6 +444,64 @@ pub(crate) struct PageRequest {
     pub budget: usize,
 }
 
+/// An accepted chain prefix. Later appends are never consulted while an
+/// agent reads this snapshot; each requested payload still verifies its hash.
+pub(crate) struct Snapshot {
+    directory: PathBuf,
+    refs: Vec<Parsed>,
+    head: Option<Head>,
+}
+impl Snapshot {
+    pub(in crate::chat::sharing) fn capture(
+        directory: &Path,
+        chain: &[u8],
+        journal: Option<&Journal>,
+        inline: &[Value],
+    ) -> Result<Self, super::super::DispatchError> {
+        let refs = parsed(chain)?;
+        let head = head_of(&refs)?;
+        if head.as_ref() != journal.and_then(Journal::segment_head) {
+            return Err(paused());
+        }
+        let mut previous = None;
+        let mut at = 0;
+        for event in inline {
+            let seq = event["seq"].as_u64().ok_or_else(paused)?;
+            if previous.is_some_and(|last| seq <= last) {
+                return Err(paused());
+            }
+            previous = Some(seq);
+            while at < refs.len() && refs[at].seq < seq {
+                at += 1;
+            }
+            if refs.get(at).is_some_and(|row| row.reference.first <= seq) {
+                return Err(paused());
+            }
+        }
+        Ok(Self {
+            directory: directory.to_owned(),
+            refs,
+            head,
+        })
+    }
+    pub(crate) fn head(&self) -> Option<&Head> {
+        self.head.as_ref()
+    }
+    pub(crate) fn archived_bytes(&self) -> u64 {
+        self.head.as_ref().map_or(0, |head| head.bytes)
+    }
+    pub(crate) fn archived_rows(&self) -> u64 {
+        self.head.as_ref().map_or(0, |head| head.rows)
+    }
+    pub(crate) fn page(
+        &self,
+        inline: &[Value],
+        request: &PageRequest,
+    ) -> Result<Page, super::super::DispatchError> {
+        select_refs(&self.directory, &self.refs, inline, request)
+    }
+}
+
 pub(in crate::chat::sharing) fn select_page(
     directory: &Path,
     chain: &[u8],
@@ -462,6 +520,15 @@ pub(in crate::chat::sharing) fn select_page(
         None if chain.is_empty() => Vec::new(),
         None => return Err(paused()),
     };
+    select_refs(directory, &refs, inline, request)
+}
+
+fn select_refs(
+    directory: &Path,
+    refs: &[Parsed],
+    inline: &[Value],
+    request: &PageRequest,
+) -> Result<Page, super::super::DispatchError> {
     let latest = inline
         .last()
         .and_then(|event| event["seq"].as_u64())

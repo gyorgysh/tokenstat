@@ -22,8 +22,9 @@ const REQUEST: usize = 512 * 1024;
 // MCP text plus structuredContent can encode the same frozen JSON twice;
 // escaping the text copy needs additional headroom. The source stays bounded.
 const CONTEXT: usize = 4 * 1024 * 1024;
-// Ask review still materialises at most 32 MiB. A larger frozen snapshot is
-// served in pages so one MCP response stays inside the existing budget.
+// Legacy inline fixtures keep their original bound. Production snapshots
+// page their frozen authenticated archive without expanding it at startup.
+#[cfg(test)]
 const SNAPSHOT: usize = 32 * 1024 * 1024;
 const PAGE: usize = 256 * 1024;
 const RESPONSE: usize = 16 * 1024 * 1024;
@@ -70,6 +71,7 @@ struct Shared {
     token: [u8; 32],
     context: Value,
     context_bytes: usize,
+    frozen: Option<crate::chat::sharing::SdkContext>,
     run: String,
     gate: Mutex<Gate>,
     current: Box<dyn Fn() -> bool + Send + Sync>,
@@ -129,12 +131,31 @@ pub(crate) struct Service {
 impl Service {
     pub(crate) fn start(
         authority: &HostRunAuthority,
-        context: Value,
+        context: crate::chat::sharing::SdkContext,
         run: String,
         current: impl Fn() -> bool + Send + Sync + 'static,
     ) -> io::Result<Self> {
-        Self::bind(Budget::capture(authority)?, context, run, Box::new(current))
+        let bytes = context.byte_bound().map_err(|_| unavailable())?;
+        context.count().map_err(|_| unavailable())?;
+        let metadata = context.metadata.clone();
+        if !metadata.is_object()
+            || serde_json::to_vec(&metadata)
+                .map_err(|_| unavailable())?
+                .len()
+                > CONTEXT
+        {
+            return Err(unavailable());
+        }
+        Self::bind_context(
+            Budget::capture(authority)?,
+            metadata,
+            bytes,
+            Some(context),
+            run,
+            Box::new(current),
+        )
     }
+    #[cfg(test)]
     fn bind(
         budget: Budget,
         context: Value,
@@ -148,6 +169,16 @@ impl Service {
         {
             return Err(unavailable());
         }
+        Self::bind_context(budget, context, encoded.len(), None, run, current)
+    }
+    fn bind_context(
+        budget: Budget,
+        context: Value,
+        context_bytes: usize,
+        frozen: Option<crate::chat::sharing::SdkContext>,
+        run: String,
+        current: Box<dyn Fn() -> bool + Send + Sync>,
+    ) -> io::Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
         listener.set_nonblocking(true)?;
         let address = listener.local_addr()?;
@@ -156,7 +187,8 @@ impl Service {
         let shared = Arc::new(Shared {
             token,
             context,
-            context_bytes: encoded.len(),
+            context_bytes,
+            frozen,
             run,
             current,
             workers: AtomicUsize::new(0),
@@ -432,6 +464,9 @@ fn context_page(source: &Value, events: &[Value], total: usize, next: Option<Str
     Value::Object(object)
 }
 fn page_context(shared: &Shared, args: &Value) -> Result<Value, &'static str> {
+    if let Some(context) = &shared.frozen {
+        return page_frozen_context(context, args);
+    }
     let cursor = context_cursor(args)?;
     // The accepted context never changes. Measuring the full snapshot for
     // every page needlessly copies megabytes while a caller waits.
@@ -479,6 +514,65 @@ fn page_context(shared: &Shared, args: &Value) -> Result<Value, &'static str> {
         events.len(),
         next_cursor,
     ))
+}
+fn page_frozen_context(
+    context: &crate::chat::sharing::SdkContext,
+    args: &Value,
+) -> Result<Value, &'static str> {
+    let after = if empty(args) {
+        None
+    } else {
+        if !keys(args, &["cursor"]) {
+            return Err("This tool accepts no target or arguments.");
+        }
+        let text = args["cursor"]
+            .as_str()
+            .filter(|text| {
+                !text.is_empty()
+                    && text.len() <= 20
+                    && text.bytes().all(|b| b.is_ascii_digit())
+                    && !(text.starts_with('0') && *text != "0")
+            })
+            .ok_or("Provide a context cursor.")?;
+        Some(
+            text.parse::<u64>()
+                .map_err(|_| "Provide a context cursor.")?,
+        )
+    };
+    if after.is_none()
+        && let Some(value) = context
+            .full_if_small(CONTEXT)
+            .map_err(|_| "The frozen context is unavailable.")?
+    {
+        return Ok(value);
+    }
+    let count = context
+        .count()
+        .map_err(|_| "The frozen context is unavailable.")?;
+    let (events, more) = context
+        .page(after, 100, PAGE)
+        .map_err(|_| "The frozen context is unavailable.")?;
+    let next = if more {
+        Some(
+            events
+                .last()
+                .and_then(|event| event["seq"].as_u64())
+                .filter(|seq| after.is_none_or(|previous| *seq > previous))
+                .ok_or("The frozen context did not advance.")?
+                .to_string(),
+        )
+    } else {
+        None
+    };
+    let value = context_page(&context.metadata, &events, count, next);
+    if serde_json::to_vec(&value)
+        .map_err(|_| "The frozen context is unavailable.")?
+        .len()
+        > CONTEXT
+    {
+        return Err("This context page is too large.");
+    }
+    Ok(value)
 }
 fn content(data: Value) -> Value {
     json!({"content":[{"type":"text","text":data.to_string()}],"structuredContent":{"data":data}})

@@ -280,10 +280,17 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         if !fixture {
             return Ok(());
         }
-        use std::io::Write;
+        // Fixtures use the same SDK as a real provider. A large conversation
+        // must not become an oversized process stdin or consume its lease
+        // while expanding history before the backend is born.
+        let context = prepared.context().sdk();
+        let input = context.full_if_small(4 * 1024 * 1024)?.unwrap_or_else(|| {
+            let mut metadata = context.metadata;
+            metadata["contextViaSdk"] = json!(true);
+            metadata
+        });
         let mut file = raw.open(&program.input).map_err(map_io)?;
-        file.write_all(&serde_json::to_vec(prepared.context()).map_err(|_| unavailable())?)
-            .map_err(map_io)?;
+        serde_json::to_writer(&mut file, &input).map_err(|_| unavailable())?;
         file.sync_all().map_err(map_io)
     })();
     if let Err(error) = context_written {
@@ -297,7 +304,7 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         source.ensure_current()?;
         crate::team_sdk::Service::start(
             &authority,
-            serde_json::to_value(prepared.context()).map_err(|_| unavailable())?,
+            prepared.context().sdk(),
             prepared.binding().fence.run_id().into(),
             move || current.ensure_current().is_ok() && sdk_source.ensure_current().is_ok(),
         )

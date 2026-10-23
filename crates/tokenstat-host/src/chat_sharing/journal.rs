@@ -16,8 +16,8 @@ mod segments;
 pub(super) use asks::AskRecord;
 pub(in crate::chat::sharing) use segments::select_page;
 pub(crate) use segments::{
-    PageRequest, accept_chain, chain_usage, copy_tree, next_shared, prepare, project_chain,
-    read_chain, recorded,
+    PageRequest, Snapshot, accept_chain, chain_usage, copy_tree, next_shared, prepare,
+    project_chain, read_chain, recorded,
 };
 #[path = "journal/agent.rs"]
 mod agent;

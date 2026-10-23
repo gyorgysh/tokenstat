@@ -171,6 +171,51 @@ fn interrupted_recovery_keeps_the_chat_fenced_and_can_finish_after_restart() {
 }
 
 #[test]
+fn proven_recovery_clears_running_only_after_durable_writer_release() {
+    let f = Fixture::new();
+    let actor = principal("fixture-person", 'a', 'b');
+    let mut owned = new(f
+        .prepare(&actor, &f.input(&actor, "running-orphan"))
+        .unwrap());
+    owned.claim_writer().unwrap();
+    for state in [runs::State::Launching, runs::State::Running] {
+        f.store
+            .transition_owned_run(f.target(), &owned, state)
+            .unwrap();
+    }
+    let fence = owned.binding.fence.clone();
+    drop(owned);
+    assert!(f.chat().running);
+    // This storage fixture has no child. Process-proof acceptance is covered
+    // separately through the real guardian crash/recovery transport test.
+    assert!(
+        f.store
+            .recover_orphaned_run(&f.chat.workspace_id, &f.chat.id, &fence, true, || Err(
+                unavailable()
+            ),)
+            .is_err()
+    );
+    assert!(f.chat().running);
+    assert_eq!(f.chat().team_run_fence.as_ref(), Some(&fence));
+    assert!(tokenstat_workspace::writer::Lease::acquire(&f.folder).is_err());
+    assert_eq!(
+        f.store
+            .recover_orphaned_run(&f.chat.workspace_id, &f.chat.id, &fence, true, || {
+                tokenstat_workspace::writer::clear_orphaned_run(fence.incarnation())
+                    .map_err(|_| unavailable())
+            },)
+            .unwrap(),
+        runs::State::Recovered
+    );
+    assert!(!f.chat().running);
+    assert!(f.chat().team_run_fence.is_none());
+    let next = new(f
+        .prepare(&actor, &f.input(&actor, "after-recovery"))
+        .unwrap());
+    f.store.refuse_prepared_ask(f.target(), next).unwrap();
+}
+
+#[test]
 fn an_ask_has_one_canonical_author_and_retry_keeps_original_device_grant_and_fences() {
     let f = Fixture::new();
     let actor = principal("fixture-person", 'a', 'b');

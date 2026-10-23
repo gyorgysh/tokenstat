@@ -137,6 +137,7 @@ pub(crate) struct AskReview {
 
 fn review(
     history: &History,
+    archive: &journal::Snapshot,
     scope: &journal::Scope,
     checkout: &str,
     folder: &Path,
@@ -145,13 +146,14 @@ fn review(
         tokenstat_workspace::git::checkout_review(folder).map_err(|_| checkout_unread())?;
     Ok(AskReview {
         digest: hash(&(
-            "tokenstat/team-ask-review/v2",
+            "tokenstat/team-ask-review/v3",
             scope,
             checkout,
             &history.title,
             &history.backend,
             history.history_trimmed,
             &history.events,
+            archive.head(),
             &worktree,
         ))?,
         worktree,
@@ -167,16 +169,157 @@ pub(crate) enum AskPreparation {
     New(Box<PreparedAsk>),
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct AskContext {
     title: String,
     backend: String,
     history_trimmed: bool,
-    events: Vec<Value>,
+    events: std::sync::Arc<Vec<Value>>,
+    archive: std::sync::Arc<journal::Snapshot>,
     message: Value,
     /// The checkout state covered by this Ask's review.
     worktree: tokenstat_workspace::git::CheckoutReview,
+}
+
+/// The SDK receives approved inline rows and an immutable authenticated chain
+/// prefix, rather than materialising every archived reply before launch.
+pub(crate) struct SdkContext {
+    pub metadata: Value,
+    events: std::sync::Arc<Vec<Value>>,
+    archive: std::sync::Arc<journal::Snapshot>,
+}
+impl AskContext {
+    pub(crate) fn sdk(&self) -> SdkContext {
+        SdkContext {
+            metadata: json!({"title":self.title,"backend":self.backend,
+                "historyTrimmed":self.history_trimmed,"message":self.message,"worktree":self.worktree}),
+            events: self.events.clone(),
+            archive: self.archive.clone(),
+        }
+    }
+}
+impl SdkContext {
+    pub(crate) fn count(&self) -> Result<usize, DispatchError> {
+        usize::try_from(self.archive.archived_rows())
+            .ok()
+            .and_then(|count| count.checked_add(self.events.len()))
+            .ok_or_else(unavailable)
+    }
+    pub(crate) fn byte_bound(&self) -> Result<usize, DispatchError> {
+        let base = serde_json::to_vec(&self.metadata)
+            .map_err(|_| unavailable())?
+            .len();
+        let inline = serde_json::to_vec(&*self.events)
+            .map_err(|_| unavailable())?
+            .len();
+        usize::try_from(self.archive.archived_bytes())
+            .ok()
+            .and_then(|archived| {
+                archived
+                    .checked_add(base)?
+                    .checked_add(inline)?
+                    .checked_add(64)
+            })
+            .ok_or_else(unavailable)
+    }
+    pub(crate) fn page(
+        &self,
+        after: Option<u64>,
+        limit: usize,
+        budget: usize,
+    ) -> Result<(Vec<Value>, bool), DispatchError> {
+        let page = self.archive.page(
+            &self.events,
+            &PageRequest {
+                after,
+                older: false,
+                limit,
+                budget,
+            },
+        )?;
+        Ok((page.events, page.has_more))
+    }
+    pub(crate) fn full_if_small(&self, budget: usize) -> Result<Option<Value>, DispatchError> {
+        if self.byte_bound()? > budget {
+            return Ok(None);
+        }
+        let events = serde_json::to_value(ContextEvents {
+            events: &self.events,
+            archive: &self.archive,
+        })
+        .map_err(|_| unavailable())?;
+        let mut result = self.metadata.clone();
+        result
+            .as_object_mut()
+            .ok_or_else(unavailable)?
+            .insert("events".into(), events);
+        if serde_json::to_vec(&result)
+            .map_err(|_| unavailable())?
+            .len()
+            > budget
+        {
+            return Err(unavailable());
+        }
+        Ok(Some(result))
+    }
+}
+
+struct ContextEvents<'a> {
+    events: &'a [Value],
+    archive: &'a journal::Snapshot,
+}
+impl Serialize for ContextEvents<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{Error, SerializeSeq};
+        let mut out = serializer.serialize_seq(None)?;
+        let mut after = None;
+        loop {
+            let page = self
+                .archive
+                .page(
+                    self.events,
+                    &PageRequest {
+                        after,
+                        older: false,
+                        limit: 128,
+                        budget: 256 * 1024,
+                    },
+                )
+                .map_err(|_| S::Error::custom("The frozen context is unavailable."))?;
+            for event in &page.events {
+                out.serialize_element(event)?;
+            }
+            if !page.has_more {
+                break;
+            }
+            let next = page
+                .events
+                .last()
+                .and_then(|event| event["seq"].as_u64())
+                .filter(|next| after.is_none_or(|previous| *next > previous))
+                .ok_or_else(|| S::Error::custom("The frozen context did not advance."))?;
+            after = Some(next);
+        }
+        out.end()
+    }
+}
+impl Serialize for AskContext {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut out = serializer.serialize_struct("AskContext", 6)?;
+        out.serialize_field("title", &self.title)?;
+        out.serialize_field("backend", &self.backend)?;
+        out.serialize_field("historyTrimmed", &self.history_trimmed)?;
+        out.serialize_field(
+            "events",
+            &ContextEvents {
+                events: &self.events,
+                archive: &self.archive,
+            },
+        )?;
+        out.serialize_field("message", &self.message)?;
+        out.serialize_field("worktree", &self.worktree)?;
+        out.end()
+    }
 }
 
 /// No Clone/Serialize and no launch method. A future supervised runner takes
@@ -305,9 +448,15 @@ impl Store {
                 target.preview,
                 journal.as_ref(),
                 &directory,
-                true,
+                false,
             )?;
-            review(&history, &scope, checkout, folder)
+            let archive = journal::Snapshot::capture(
+                &directory,
+                &journal::read_chain(&directory)?,
+                journal.as_ref(),
+                &history.events,
+            )?;
+            review(&history, &archive, &scope, checkout, folder)
         })
     }
     pub(crate) fn prepare_team_ask(
@@ -409,8 +558,9 @@ impl Store {
                     .map_err(|_| unavailable())?
                     .ok_or_else(busy)?;
                 let history =
-                    shared_project(chat, bytes, &scope.share, target.preview, Some(&journal), &directory, true)?;
-                let reviewed = review(&history, &scope, checkout, folder)?;
+                    shared_project(chat, bytes, &scope.share, target.preview, Some(&journal), &directory, false)?;
+                let archive = std::sync::Arc::new(journal::Snapshot::capture(&directory, &journal::read_chain(&directory)?, Some(&journal), &history.events)?);
+                let reviewed = review(&history, &archive, &scope, checkout, folder)?;
                 if reviewed.digest != input.review {
                     return Err(changed());
                 }
@@ -521,7 +671,7 @@ impl Store {
                     request,
                     binding,
                     context: AskContext {
-                        title:history.title, backend:history.backend, history_trimmed:history.history_trimmed, events:history.events,
+                        title:history.title, backend:history.backend, history_trimmed:history.history_trimmed, events:std::sync::Arc::new(history.events), archive,
                         message:json!({"kind":"user","text":input.text,"mode":"ask","author":{"kind":"person","id":actor.id,"name":actor.name,"handle":actor.handle,"avatar":actor.avatar}}),
                         worktree: reviewed.worktree,
                     },
@@ -763,12 +913,13 @@ impl Store {
             // Keep the chat fenced until both durable cleanup steps succeed.
             // Retrying a terminal journal is safe after a failed claim write.
             release_writer()?;
-            index
+            let source = index
                 .conversations
                 .iter_mut()
                 .find(|c| c.id == id)
-                .ok_or_else(unavailable)?
-                .team_run_fence = None;
+                .ok_or_else(unavailable)?;
+            source.running = false;
+            source.team_run_fence = None;
             self.write_team_index(&index)?;
             Ok(state)
         })

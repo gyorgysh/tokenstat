@@ -355,7 +355,7 @@ fn publish(
         if previous.conversation_id != request.conversation {
             return Err(changed());
         }
-        crate::chat::shared().shared_history(
+        crate::chat::shared().shared_chat_index(
             &checkout.workspace_id,
             &previous.conversation_id,
             &previous.id,

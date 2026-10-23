@@ -78,6 +78,58 @@ fn check_sdk(helper: &str, state: &std::path::Path) {
     fs::write(state.with_extension("sdk"), "scoped MCP bridge verified").unwrap();
 }
 
+fn read_large_context(helper: &str, state: &std::path::Path) {
+    let mut cursor = None;
+    let mut pages = 0;
+    let mut markers = 0;
+    loop {
+        let arguments = cursor.as_ref().map_or("{}".to_owned(), |value| {
+            format!("{{\"cursor\":\"{value}\"}}")
+        });
+        let request = format!(
+            "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{{\"name\":\"team_context\",\"arguments\":{arguments}}}}}\n"
+        );
+        let result = sdk(helper, &request, false);
+        assert!(result.status.success());
+        let reply = String::from_utf8(result.stdout).unwrap();
+        assert!(reply.len() < 2 * 1024 * 1024);
+        assert!(reply.contains("Fictional supervised Ask"));
+        assert!(!reply.contains("FROZEN_CONTEXT_LATE_SENTINEL"));
+        assert!(!reply.contains("PRIVATE_FIXTURE"));
+        assert!(!reply.contains("\"isError\":true"));
+        markers += reply.matches("Fictional bounded archive ").count();
+        pages += 1;
+        // The structured copy has an unescaped cursor. The MCP text copy
+        // escapes its quotes and therefore cannot match this fixture parser.
+        let next = reply.split_once("\"nextCursor\":\"").map(|(_, rest)| {
+            let value = rest.split_once('"').unwrap().0;
+            assert!(value.bytes().all(|byte| byte.is_ascii_digit()));
+            value.parse::<u64>().unwrap()
+        });
+        if pages == 1 {
+            assert!(next.is_some());
+            fs::write(state.with_extension("page-first"), "ready").unwrap();
+            let start = std::time::Instant::now();
+            while !state.with_extension("continue").exists() {
+                assert!(start.elapsed() < Duration::from_secs(30));
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        let Some(next) = next else { break };
+        assert!(cursor.is_none_or(|previous| next > previous));
+        assert!(pages < 1024);
+        cursor = Some(next);
+    }
+    // Every synthetic response is present once in the text copy and once in
+    // structuredContent. No archived reply may disappear at the size limit.
+    assert_eq!(markers, 2 * 96);
+    fs::write(
+        state.with_extension("sdk-large"),
+        format!("{pages} {markers}"),
+    )
+    .unwrap();
+}
+
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     if args.get(1).is_some_and(|arg| arg == "leaf") {
@@ -98,8 +150,14 @@ fn main() {
         let shared = std::path::Path::new("shared.txt");
         assert!(fs::read_to_string(shared).unwrap().contains("<<<<<<<"));
         fs::write(shared, "teammate and agent\n").unwrap();
-        println!("{}", r#"{"type":"item.completed","item":{"id":"fixture-fix","type":"agent_message","text":"Fictional conflict resolved"}}"#);
-        println!("{}", r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#);
+        println!(
+            "{}",
+            r#"{"type":"item.completed","item":{"id":"fixture-fix","type":"agent_message","text":"Fictional conflict resolved"}}"#
+        );
+        println!(
+            "{}",
+            r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#
+        );
         return;
     }
     assert!(context.contains("Fictional supervised Ask"));
@@ -138,6 +196,21 @@ fn main() {
     }
     let child = command.spawn().unwrap();
     fs::write(&state, format!("{} {}", std::process::id(), child.id())).unwrap();
+    if mode == "long" {
+        let text = "x".repeat(384 * 1024);
+        // Stay below the production per-run raw-output cap. The transport
+        // fixture accumulates six separate accepted runs in this chat.
+        for index in 0..16 {
+            println!(
+                "{{\"type\":\"item.completed\",\"item\":{{\"id\":\"archive-{index}\",\"type\":\"agent_message\",\"text\":\"Fictional bounded archive {index} {text}\"}}}}"
+            );
+        }
+        return;
+    }
+    if mode == "read-large" {
+        read_large_context(args.get(3).expect("fixture SDK helper"), &state);
+        return;
+    }
     if mode == "edit" {
         // A lane agent's whole job: change a file in its own folder.
         let file = args.get(4).map_or("lane-edit.txt", String::as_str);
@@ -151,13 +224,23 @@ fn main() {
             let status = Command::new("git")
                 .arg("-C")
                 .arg(dir)
-                .args(["-c", "user.name=Teammate", "-c", "user.email=teammate@example.invalid", "-c", "commit.gpgSign=false"])
+                .args([
+                    "-c",
+                    "user.name=Teammate",
+                    "-c",
+                    "user.email=teammate@example.invalid",
+                    "-c",
+                    "commit.gpgSign=false",
+                ])
                 .args(list)
                 .status()
                 .unwrap();
             assert!(status.success());
         };
-        git(state.parent().unwrap(), &["clone", "-q", remote, other.to_str().unwrap()]);
+        git(
+            state.parent().unwrap(),
+            &["clone", "-q", remote, other.to_str().unwrap()],
+        );
         fs::write(other.join("shared.txt"), "teammate\n").unwrap();
         git(&other, &["commit", "-qam", "Teammate change"]);
         git(&other, &["push", "-q", "origin", "main"]);
