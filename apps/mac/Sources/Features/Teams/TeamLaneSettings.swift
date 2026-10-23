@@ -99,6 +99,7 @@ struct TeamLaneSettings: View {
             HStack(spacing: Theme.Space.s) {
                 Button(L10n.text("common.save"), .save) { Task { await save() } }
                     .buttonStyle(TeamButtonStyle(primary: true))
+                    .accessibilityIdentifier("team.workflow.save")
                     .disabled(!loaded || saving || !valid)
                 if saving { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
                 if saved { Text(L10n.text("common.teams.workflow_saved")).font(Theme.callout).foregroundStyle(.secondary) }

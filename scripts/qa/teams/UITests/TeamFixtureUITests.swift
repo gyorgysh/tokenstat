@@ -94,8 +94,9 @@ final class TeamFixtureUITests: XCTestCase {
         XCTAssertEqual(updates.value as? String, "1")
         XCTAssertTrue(app.textFields["Target branch"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Uncommitted and ignored files are kept")).firstMatch.exists)
-        let save = app.buttons["Save"]
-        reveal(save, in: app); save.tap()
+        let save = app.buttons["team.workflow.save"]
+        reveal(save, in: app, scroll: app.scrollViews.containing(.button, identifier: "team.workflow.save").firstMatch)
+        save.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
         capture(app, "Explicit clean checkout update opt-in")
     }
@@ -422,13 +423,24 @@ final class TeamFixtureUITests: XCTestCase {
         submit.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This fixture is read-only")).firstMatch.waitForExistence(timeout: 5))
     }
-    private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
-        let scroll = app.scrollViews.firstMatch
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, scroll chosenScroll: XCUIElement? = nil) {
+        let scroll = chosenScroll ?? app.scrollViews.firstMatch
         for _ in 0..<8 {
             if !element.exists { scroll.swipeUp(); continue }
             let center = CGPoint(x: element.frame.midX, y: element.frame.midY)
             if element.isHittable && scroll.frame.insetBy(dx: 0, dy: 8).contains(center) { return }
-            scroll.swipeUp()
+            // Dynamic content can move a control above the viewport after an
+            // earlier swipe. Recover in either direction instead of repeatedly
+            // scrolling farther away from it.
+            let upward = center.y >= scroll.frame.minY + 8
+            if chosenScroll != nil {
+                // A full-page swipe can skip a short form's button in both
+                // directions. Move a quarter viewport to bring it into view.
+                let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.65 : 0.35))
+                let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.4 : 0.6))
+                start.press(forDuration: 0.05, thenDragTo: end)
+            } else if upward { scroll.swipeUp() }
+            else { scroll.swipeDown() }
         }
         XCTAssertTrue(element.isHittable, "The control must be reachable with larger text")
     }

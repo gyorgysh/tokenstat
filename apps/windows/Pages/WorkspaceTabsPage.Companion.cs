@@ -11,11 +11,10 @@ internal sealed partial class WorkspaceTabsPage
 {
     private readonly Grid _inspectorTabs = new() { Margin = new Thickness(8) };
     private readonly Grid _companionHeader = new() { ColumnSpacing = 4 };
-    private readonly WorkspaceTabStrip _companionStrip = new();
+    private readonly SelectorBar _toolSelector = new();
     private readonly DesktopWorkbenchState _workbench = new();
-    private readonly Dictionary<DesktopWorkbenchTool, TabViewItem> _toolTabs = new();
+    private readonly Dictionary<DesktopWorkbenchTool, SelectorBarItem> _toolTabs = new();
     private bool _refreshingTools;
-    private TabViewMount? _toolMount;
     private BrowserPage? _companionBrowser;
     private WorkspaceTerminalPane? _companionTerminal;
     private Page? _companionChanges;
@@ -82,40 +81,26 @@ internal sealed partial class WorkspaceTabsPage
         _workbench.Open(DesktopWorkbenchTool.Inspector);
         _companionHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         _companionHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var tabs = _companionStrip.View;
-        _toolMount = new TabViewMount(tabs);
-        _toolMount.Ready += () => { if (ActivePage is ChatPage) RefreshChrome(); };
-        tabs.Height = 44;
-        tabs.IsAddTabButtonVisible = true;
-        tabs.AddTabButtonClick += (_, _) =>
+        _companionHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _toolSelector.HorizontalAlignment = HorizontalAlignment.Stretch;
+        _toolSelector.SelectionChanged += (_, _) =>
         {
-            var menu = new MenuFlyout();
-            foreach (var tool in Enum.GetValues<DesktopWorkbenchTool>())
-            {
-                var item = new MenuFlyoutItem { Text = ToolTitle(tool), Icon = ToolIcon(tool).Icon() };
-                item.Click += (_, _) => ShowCompanion(tool);
-                menu.Items.Add(item);
-            }
-            menu.ShowAt(tabs);
-        };
-        tabs.SelectionChanged += (_, _) =>
-        {
-            if (_refreshingTools || (tabs.SelectedItem as TabViewItem)?.Tag is not DesktopWorkbenchTool tool) return;
+            if (_refreshingTools || _toolSelector.SelectedItem?.Tag is not DesktopWorkbenchTool tool) return;
             _reviewEpoch.Advance();
             _workbench.Open(tool);
             RefreshChrome();
         };
-        tabs.TabCloseRequested += (_, e) =>
+        _companionHeader.Children.Add(_toolSelector);
+        var add = Buttons.ToolbarIcon(ActionIcon.Create, L10n.Text("common.add"), (_, _) => { });
+        var menu = new MenuFlyout();
+        foreach (var tool in Enum.GetValues<DesktopWorkbenchTool>())
         {
-            if (e.Item is not TabViewItem { Tag: DesktopWorkbenchTool tool }) return;
-            CloseCompanion(tool);
-        };
-        _companionStrip.CloseRequested = item =>
-        {
-            if (item.Tag is not DesktopWorkbenchTool tool) return;
-            CloseCompanion(tool);
-        };
-        _companionHeader.Children.Add(tabs);
+            var item = new MenuFlyoutItem { Text = ToolTitle(tool), Icon = ToolIcon(tool).Icon() };
+            item.Click += (_, _) => ShowCompanion(tool);
+            menu.Items.Add(item);
+        }
+        add.Flyout = menu;
+        Grid.SetColumn(add, 1); _companionHeader.Children.Add(add);
         var close = Buttons.ToolbarIcon(ActionIcon.Sidebar,
             L10n.Text("windows.workspacetabspage_companion.close_companion_pane.319641bf"), (_, _) =>
             {
@@ -123,7 +108,7 @@ internal sealed partial class WorkspaceTabsPage
                 _workbench.Hide();
                 DetailsDismissRequested?.Invoke();
             });
-        Grid.SetColumn(close, 1); _companionHeader.Children.Add(close);
+        Grid.SetColumn(close, 2); _companionHeader.Children.Add(close);
         _inspector.Children.Add(_companionHeader);
     }
     private void ShowCompanion(DesktopWorkbenchTool tool)
@@ -184,23 +169,22 @@ internal sealed partial class WorkspaceTabsPage
         _refreshingTools = true;
         try
         {
-            if (_toolMount?.IsReady == true)
+            foreach (var tool in _toolTabs.Keys.Except(_workbench.Tabs).ToArray())
             {
-                foreach (var tool in _toolTabs.Keys.Except(_workbench.Tabs).ToArray())
-                {
-                    _companionStrip.Forget(_toolTabs[tool]);
-                    _toolTabs.Remove(tool);
-                }
-                foreach (var tool in _workbench.Tabs)
-                {
-                    if (_toolTabs.ContainsKey(tool)) continue;
-                    var tab = _companionStrip.Open(tool.ToString(), ToolTitle(tool), () => new Grid());
-                    tab.Tag = tool;
-                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(tab, "workbench.tool." + tool.ToString().ToLowerInvariant());
-                    _toolTabs.Add(tool, tab);
-                }
-                _companionStrip.View.SelectedItem = _workbench.Selected is { } selected ? _toolTabs.GetValueOrDefault(selected) : null;
+                _toolSelector.Items.Remove(_toolTabs[tool]);
+                _toolTabs.Remove(tool);
             }
+            foreach (var tool in _workbench.Tabs)
+            {
+                if (_toolTabs.ContainsKey(tool)) continue;
+                var item = new SelectorBarItem { Text = ToolTitle(tool), Icon = ToolIcon(tool).Icon(), Tag = tool };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(item, "workbench.tool." + tool.ToString().ToLowerInvariant());
+                var menu = ContextMenus.Menu(item);
+                ContextMenus.Add(menu, L10n.Text("common.close"), () => CloseCompanion(tool));
+                _toolTabs.Add(tool, item);
+                _toolSelector.Items.Add(item);
+            }
+            _toolSelector.SelectedItem = _workbench.Selected is { } selected ? _toolTabs.GetValueOrDefault(selected) : null;
         }
         finally { _refreshingTools = false; }
         var inspector = _workbench.Selected == DesktopWorkbenchTool.Inspector;
