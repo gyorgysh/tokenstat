@@ -12,7 +12,8 @@
     let locale = "en",
         dark = false,
         expanded = false,
-        lastHeight = 0;
+        lastHeight = 0,
+        activePaintToken;
     let words = {},
         fontsReady = false,
         pendingRender = null,
@@ -89,7 +90,7 @@
         );
         if (height !== lastHeight) {
             lastHeight = height;
-            host({ type: "height", height });
+            host({ type: "height", height, paintToken: activePaintToken });
         }
     }
     function localized(value, decimals = 8) {
@@ -267,14 +268,14 @@
             splitLine: { lineStyle: { color: line } },
         };
     }
-    function options(reducedMotion) {
+    function options(reducedMotion, skipEntryAnimation = false) {
         const type = spec.type,
             palette = theme.series;
         const base = {
             color: palette,
             backgroundColor: "transparent",
             animation: !reducedMotion,
-            animationDuration: 250,
+            animationDuration: skipEntryAnimation ? 0 : 250,
             animationDurationUpdate: 180,
             textStyle: {
                 fontFamily:
@@ -609,6 +610,14 @@
         base.legend.data = ["pie", "donut", "funnel", "treemap"].includes(type)
             ? spec.categories
             : spec.series.map((s) => s.name);
+        if (skipEntryAnimation) {
+            // Pie and radar have series-specific animation defaults which
+            // override the global duration before the native first snapshot.
+            for (const series of base.series) {
+                series.animationDuration = 0;
+                series.animationDurationUpdate = 180;
+            }
+        }
         return base;
     }
     function table() {
@@ -886,6 +895,10 @@
             pendingRender = [input, settings];
             return;
         }
+        if (activePaintToken !== settings.paintToken) {
+            activePaintToken = settings.paintToken;
+            lastHeight = 0;
+        }
         words = settings.strings || {};
         dark =
             settings.dark ?? matchMedia("(prefers-color-scheme:dark)").matches;
@@ -932,6 +945,7 @@
                 options(
                     settings.reducedMotion ??
                         matchMedia("(prefers-reduced-motion:reduce)").matches,
+                    settings.skipEntryAnimation === true,
                 ),
             );
             chart.on("click", (event) => {
@@ -940,8 +954,8 @@
             });
             table();
             $("root").setAttribute("aria-busy", "false");
-            host({ type: "ready", version: 1 });
             measure();
+            host({ type: "ready", version: 1, paintToken: settings.paintToken });
         } catch (error) {
             if (chart) {
                 chart.dispose();
@@ -967,6 +981,7 @@
             $("root").setAttribute("aria-busy", "false");
             host({
                 type: "error",
+                paintToken: settings.paintToken,
                 message: String(error.message).slice(0, 400),
             });
             measure();

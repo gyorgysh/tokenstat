@@ -67,25 +67,33 @@ try {
                     await page.evaluate(() => document.fonts.ready);
                     await page.evaluate(() => {
                         window.exports = [];
+                        window.chartReady = [];
                         window.chrome = {
                             webview: {
                                 postMessage: (message) => {
                                     if (message.type === "export")
                                         window.exports.push(message);
+                                    if (message.type === "ready")
+                                        window.chartReady.push(message.paintToken);
                                 },
                             },
                         };
                     });
                     for (const dark of [false, true]) {
                         for (const spec of examples) {
+                            const paintToken = [name, width, dark, spec.type].join(":");
                             await page.evaluate(
-                                ({ spec, dark }) =>
+                                ({ spec, dark, paintToken }) =>
                                     window.TokenstatChart.render(spec, {
                                         dark,
+                                        paintToken,
                                         reducedMotion: true,
                                         locale: "en-US",
                                     }),
-                                { spec, dark },
+                                { spec, dark, paintToken },
+                            );
+                            await page.waitForFunction(
+                                (token) => window.chartReady.includes(token), paintToken,
                             );
                             assert.equal(
                                 await page.evaluate(
@@ -106,6 +114,7 @@ try {
                                         )
                                         .getOption();
                                 return {
+                                    entryDuration: option.animationDuration,
                                     panel: getComputedStyle(
                                         document.querySelector("main"),
                                     ).backgroundColor,
@@ -122,6 +131,7 @@ try {
                                         : undefined,
                                 };
                             });
+                            assert.equal(appearance.entryDuration, 250);
                             assert.equal(
                                 appearance.panel,
                                 dark ? "rgb(16, 14, 26)" : "rgb(255, 255, 255)",
@@ -716,6 +726,28 @@ try {
                         fractionalTick.includes("0.0001"),
                         "small nonzero axis ticks remain nonzero",
                     );
+                    const appleAnimation = await page.evaluate((spec) => {
+                        TokenstatChart.render(spec, { dark: true, reducedMotion: false, skipEntryAnimation: true });
+                        const option = TokenstatChartEngine.echarts.getInstanceByDom(document.querySelector("#plot")).getOption();
+                        return [option.animation, option.animationDuration, option.animationDurationUpdate];
+                    }, examples[0]);
+                    assert.deepEqual(appleAnimation, [true, 0, 180]);
+                    for (const spec of examples) {
+                        const nativePaint = await page.evaluate((spec) => {
+                            TokenstatChart.render(spec, { dark: true, reducedMotion: false, skipEntryAnimation: true });
+                            const chart = TokenstatChartEngine.echarts.getInstanceByDom(document.querySelector("#plot"));
+                            const option = chart.getOption();
+                            return {
+                                durations: option.series.map(series => [series.animationDuration, series.animationDurationUpdate]),
+                                sectors: chart.getZr().storage.getDisplayList().filter(mark => mark.type === "sector"
+                                    && mark.shape.r > 30 && Math.abs(mark.shape.endAngle - mark.shape.startAngle) > 0.1).length,
+                            };
+                        }, spec);
+                        assert.ok(nativePaint.durations.every(duration => duration[0] === 0 && duration[1] === 180),
+                            "native first paint must bypass per-series animation defaults: " + spec.type);
+                        if (["pie", "donut"].includes(spec.type)) assert.ok(nativePaint.sectors > 0,
+                            "native first snapshot must include real slices before an animation frame: " + spec.type);
+                    }
                     const hostile = structuredClone(examples[0]);
                     hostile.title =
                         '<img src="https://invalid.example/x" onerror="window.pwned=1">';

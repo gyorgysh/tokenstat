@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix="tokenstat-chart-appearance-") as direct
     });
 })();
 """)
-    subprocess.run(["swiftc", "-parse-as-library", "-swift-version", "5",
+    subprocess.run(["swiftc", "-parse-as-library", "-swift-version", "5", "-D", "DEBUG",
                     str(root / "apps/mac/Sources/Design/ChatChartView.swift"),
                     str(root / "apps/mac/Sources/Design/ChartViewport.swift"),
                     str(root / "apps/mac/Sources/Design/L10n.swift"),

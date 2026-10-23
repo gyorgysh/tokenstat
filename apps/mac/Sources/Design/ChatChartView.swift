@@ -2,6 +2,7 @@
 import SwiftUI
 import WebKit
 import UniformTypeIdentifiers
+import CryptoKit
 
 /// A chart is an offline document, with no access to a browser profile or host methods.
 struct ChatChartView: View {
@@ -88,14 +89,17 @@ private struct ChartWebView: ChartRepresentable {
 
     private func makeViewport(_ coordinator: Coordinator) -> ChartViewportView {
         let view = ChartViewportView()
-        view.makeContent = { [weak coordinator] in coordinator.map { $0.owner.makeView($0) } }
+        view.makeContent = { [weak coordinator, weak view] in
+            guard let coordinator, let view else { return nil }
+            return coordinator.owner.makeView(coordinator, size: view.bounds.size)
+        }
         view.releaseContent = { [weak coordinator] view in
-            if let browser = view as? WKWebView { coordinator?.unmount(browser) }
+            if let surface = view as? ChartSurfaceView { coordinator?.unmount(surface.browser) }
         }
         return view
     }
 
-    private func makeView(_ coordinator: Coordinator) -> WKWebView {
+    private func makeView(_ coordinator: Coordinator, size: CGSize) -> ChartSurfaceView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
@@ -109,18 +113,30 @@ private struct ChartWebView: ChartRepresentable {
         view.backgroundColor = .clear
         view.scrollView.isScrollEnabled = false
         #endif
+        let surface = ChartSurfaceView(browser: view, size: size)
+        surface.prepare(revision: previewRevision, key: previewKey(width: size.width), panel: panel)
         coordinator.webView = view
+        coordinator.surface = surface
         guard let directory = Bundle.main.url(forResource: "runtime", withExtension: nil),
               FileManager.default.fileExists(atPath: directory.appendingPathComponent("index.html").path) else {
             DispatchQueue.main.async { [weak coordinator, weak view] in
                 guard let coordinator, !coordinator.stopped, let view, coordinator.webView === view else { return }
                 coordinator.owner.onError(L10n.text("common.chart.resources_missing"))
             }
-            return view
+            return surface
         }
         coordinator.pageURL = directory.appendingPathComponent("index.html")
         view.loadFileURL(directory.appendingPathComponent("index.html"), allowingReadAccessTo: directory)
-        return view
+        return surface
+    }
+
+    private var previewRevision: String {
+        source + "\u{0}" + String(dark) + String(describing: panel) + String(reduceMotion) + Locale.current.identifier + String(describing: ChartWords.all.sorted { $0.key < $1.key })
+    }
+
+    fileprivate func previewKey(width: CGFloat) -> String {
+        SHA256.hash(data: Data((previewRevision + "\u{0}" + String(Int(width.rounded()))).utf8))
+            .map { String(format: "%02x", $0) }.joined()
     }
 
     private func applyNativeAppearance(_ view: WKWebView) {
@@ -159,6 +175,9 @@ private struct ChartWebView: ChartRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var owner: ChartWebView
         weak var webView: WKWebView?
+        fileprivate weak var surface: ChartSurfaceView?
+        private var capturing = false
+        private var pendingCapture = false
         var pageURL: URL?
         private var loaded = false
         private var rendered = ""
@@ -167,6 +186,9 @@ private struct ChartWebView: ChartRepresentable {
         func update(_ owner: ChartWebView) {
             let appearanceChanged = self.owner.dark != owner.dark || self.owner.panel != owner.panel
             self.owner = owner
+            if let surface {
+                surface.prepare(revision: owner.previewRevision, key: owner.previewKey(width: surface.bounds.width), panel: owner.panel)
+            }
             if appearanceChanged, let webView {
                 owner.applyNativeAppearance(webView)
                 let controller = webView.configuration.userContentController
@@ -182,7 +204,7 @@ private struct ChartWebView: ChartRepresentable {
         }
         func unmount(_ browser: WKWebView) {
             guard webView === browser else { return }
-            loaded = false; rendered = ""; pageURL = nil; webView = nil
+            loaded = false; rendered = ""; pageURL = nil; webView = nil; surface = nil; capturing = false; pendingCapture = false
             browser.stopLoading()
             browser.configuration.userContentController.removeScriptMessageHandler(forName: "chart")
             browser.navigationDelegate = nil
@@ -212,8 +234,8 @@ private struct ChartWebView: ChartRepresentable {
         }
         private func render() {
             guard loaded, !stopped, let webView, owner.source.utf8.count <= 256 * 1024 else { return }
-            let settings: [String: Any] = ["dark": owner.dark, "reducedMotion": owner.reduceMotion,
-                                          "locale": Locale.current.identifier.replacingOccurrences(of: "_", with: "-"), "strings": ChartWords.all]
+            let settings: [String: Any] = ["dark": owner.dark, "reducedMotion": owner.reduceMotion, "skipEntryAnimation": true,
+                                          "paintToken": owner.previewKey(width: 0), "locale": Locale.current.identifier.replacingOccurrences(of: "_", with: "-"), "strings": ChartWords.all]
             guard let json = try? JSONSerialization.data(withJSONObject: settings, options: [.sortedKeys]),
                   let settingsText = String(data: json, encoding: .utf8) else { return }
             let payload = Data(owner.source.utf8).base64EncodedString()
@@ -226,15 +248,61 @@ private struct ChartWebView: ChartRepresentable {
                 if let error { self.owner.onError(error.localizedDescription) }
             }
         }
+        private func capturePaint() {
+            guard loaded, !stopped, let webView, let surface, surface.isWaitingForPaint else { return }
+            guard !capturing else { pendingCapture = true; return }
+            capturing = true
+            pendingCapture = false
+            let revision = rendered
+            let key = owner.previewKey(width: webView.bounds.width)
+            let configuration = WKSnapshotConfiguration()
+            configuration.afterScreenUpdates = true
+            configuration.snapshotWidth = NSNumber(value: Double(min(webView.bounds.width, 900)))
+            webView.takeSnapshot(with: configuration) { [weak self, weak webView, weak surface] image, _ in
+                guard let self, !self.stopped, let webView, self.webView === webView,
+                      let surface, self.surface === surface else { return }
+                self.capturing = false
+                guard self.rendered == revision else {
+                    if self.pendingCapture { self.capturePaint() }
+                    return
+                }
+                guard let image else {
+                    #if DEBUG && os(macOS)
+                    ChartPaintDiagnostics.record(surface, event: "snapshot-error")
+                    #endif
+                    self.owner.onError(L10n.text("common.chart.unavailable"))
+                    return
+                }
+                ChartPreviewCache.store(image, key: key)
+                surface.reveal()
+                #if DEBUG && os(macOS)
+                ChartPaintDiagnostics.capture(surface, image: image, event: "painted")
+                #endif
+            }
+        }
+
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard !stopped, message.frameInfo.isMainFrame, message.webView === webView,
                   message.frameInfo.request.url == pageURL, let body = message.body as? [String: Any],
                   let type = body["type"] as? String else { return }
             switch type {
+            case "ready", "error":
+                if let token = body["paintToken"] as? String, token == owner.previewKey(width: 0) {
+                    #if DEBUG && os(macOS)
+                    if let surface { ChartPaintDiagnostics.record(surface, event: type) }
+                    #endif
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.owner.previewKey(width: 0) == token else { return }
+                        self.capturePaint()
+                    }
+                }
             case "height":
+                guard let token = body["paintToken"] as? String, token == owner.previewKey(width: 0) else { return }
                 if let value = body["height"] as? Double, value.isFinite, (180...2200).contains(value) {
                     DispatchQueue.main.async { [weak self, weak browser = message.webView] in
-                        guard let self, !self.stopped, let browser, self.webView === browser else { return }; self.owner.height = CGFloat(value)
+                        guard let self, !self.stopped, let browser, self.webView === browser,
+                              self.owner.previewKey(width: 0) == token else { return }
+                        self.owner.height = CGFloat(value)
                     }
                 }
             case "copy":
@@ -256,6 +324,209 @@ private struct ChartWebView: ChartRepresentable {
         }
     }
 }
+
+#if os(macOS)
+private typealias ChartPreviewImage = NSImage
+private final class ChartPreviewImageView: NSImageView {
+    var panelColor = NSColor.clear
+    override var isOpaque: Bool { panelColor.alphaComponent == 1 }
+    override func draw(_ dirtyRect: NSRect) {
+        panelColor.setFill(); bounds.fill()
+        super.draw(dirtyRect)
+    }
+}
+#else
+private typealias ChartPreviewImage = UIImage
+private typealias ChartPreviewImageView = UIImageView
+#endif
+
+private enum ChartPreviewCache {
+    private final class Entry: NSObject {
+        let image: ChartPreviewImage
+        init(_ image: ChartPreviewImage) { self.image = image }
+    }
+    private static let images: NSCache<NSString, Entry> = {
+        let cache = NSCache<NSString, Entry>()
+        cache.countLimit = 12
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
+    private static var costs: [String: Int] = [:]
+    private static var order: [String] = []
+    private static var bytes = 0
+    private static func remove(_ key: String) {
+        images.removeObject(forKey: key as NSString)
+        bytes -= costs.removeValue(forKey: key) ?? 0
+        order.removeAll { $0 == key }
+    }
+    #if DEBUG
+    static var statistics: (count: Int, bytes: Int) { (order.count, bytes) }
+    #endif
+    static func image(for key: String) -> ChartPreviewImage? {
+        guard let image = images.object(forKey: key as NSString)?.image else { remove(key); return nil }
+        order.removeAll { $0 == key }; order.append(key)
+        return image
+    }
+    static func store(_ image: ChartPreviewImage, key: String) {
+        #if os(macOS)
+        let pixels = image.representations.map { $0.pixelsWide * $0.pixelsHigh }.max() ?? 0
+        #else
+        let pixels = (image.cgImage?.width ?? 0) * (image.cgImage?.height ?? 0)
+        #endif
+        guard pixels > 0, pixels <= 2 * 1024 * 1024 else { return }
+        let cost = pixels * 4
+        remove(key)
+        while (bytes + cost > 32 * 1024 * 1024 || order.count >= 12), let oldest = order.first { remove(oldest) }
+        images.setObject(Entry(image), forKey: key as NSString, cost: cost)
+        costs[key] = cost; bytes += cost; order.append(key)
+    }
+}
+
+/// The browser's first native surface can paint before its document/runtime.
+/// Keep it behind an opaque native panel or the previous rendered preview.
+private final class ChartSurfaceView: ChartViewportContent {
+    let browser: WKWebView
+    private let preview = ChartPreviewImageView()
+    private var revision = ""
+    private(set) var isWaitingForPaint = true
+    #if os(macOS)
+    private var panelColor = NSColor.clear
+    override var isOpaque: Bool { panelColor.alphaComponent == 1 }
+    override func draw(_ dirtyRect: NSRect) { panelColor.setFill(); bounds.fill() }
+    #endif
+    #if DEBUG && os(macOS)
+    fileprivate let diagnosticID = UUID().uuidString
+    fileprivate var hasPreview: Bool { preview.image != nil }
+    fileprivate var diagnosticKey: String {
+        SHA256.hash(data: Data(revision.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+    #endif
+    init(browser: WKWebView, size: CGSize) {
+        self.browser = browser
+        super.init(frame: CGRect(origin: .zero, size: size))
+        #if os(macOS)
+        wantsLayer = true
+        preview.imageScaling = .scaleAxesIndependently
+        preview.wantsLayer = true
+        preview.setAccessibilityElement(false)
+        #else
+        preview.contentMode = .scaleToFill
+        preview.isAccessibilityElement = false
+        #endif
+        for child in [browser, preview] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(child)
+            NSLayoutConstraint.activate([
+                child.leadingAnchor.constraint(equalTo: leadingAnchor), child.trailingAnchor.constraint(equalTo: trailingAnchor),
+                child.topAnchor.constraint(equalTo: topAnchor), child.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+        }
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func prepare(revision: String, key: String, panel: Color.Resolved) {
+        guard revision != self.revision else { return }
+        self.revision = revision
+        isWaitingForPaint = true
+        preview.image = ChartPreviewCache.image(for: key)
+        preview.isHidden = false
+        #if os(macOS)
+        panelColor = NSColor(srgbRed: Double(panel.red), green: Double(panel.green), blue: Double(panel.blue), alpha: Double(panel.opacity))
+        layer?.backgroundColor = panelColor.cgColor
+        preview.panelColor = panelColor
+        preview.layer?.backgroundColor = panelColor.cgColor
+        preview.needsDisplay = true
+        needsDisplay = true
+        #else
+        backgroundColor = UIColor(red: CGFloat(panel.red), green: CGFloat(panel.green), blue: CGFloat(panel.blue), alpha: CGFloat(panel.opacity))
+        preview.backgroundColor = backgroundColor
+        preview.isOpaque = panel.opacity == 1
+        #endif
+        #if DEBUG && os(macOS)
+        DispatchQueue.main.async { [weak self] in
+            if let self, self.isWaitingForPaint { ChartPaintDiagnostics.capture(self, event: "covered") }
+        }
+        #endif
+    }
+    func reveal() {
+        isWaitingForPaint = false
+        preview.isHidden = true
+    }
+}
+
+#if DEBUG && os(macOS)
+/// Opt-in, bounded captures of this app's own chart views for local scroll QA.
+/// Does not use Screen Recording APIs, other windows, or default diagnostics.
+private enum ChartPaintDiagnostics {
+    private static var count = 0
+    private static var records = 0
+    private static let started = ProcessInfo.processInfo.systemUptime
+    private static var chartCounts: [String: Int] = [:]
+    private static func directory() -> URL? {
+        guard let path = ProcessInfo.processInfo.environment["TOKENSTAT_CHART_QA_DIR"],
+              path.hasPrefix("/tmp/tokenstat-chart-") else { return nil }
+        let target = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+        guard target.deletingLastPathComponent().path == "/tmp" else { return nil }
+        do {
+            try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let attributes = try FileManager.default.attributesOfItem(atPath: target.path)
+            guard attributes[.type] as? FileAttributeType == .typeDirectory else { return nil }
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: target.path)
+            return target
+        } catch { return nil }
+    }
+    static func record(_ surface: ChartSurfaceView, event: String, file: String? = nil) {
+        guard records < 96, let target = directory() else { return }
+        let entry: [String: Any] = ["seconds": max(0, ProcessInfo.processInfo.systemUptime - started),
+                                   "event": event, "chart": surface.diagnosticKey, "instance": surface.diagnosticID,
+                                   "covered": surface.isWaitingForPaint, "cachedPreview": surface.hasPreview,
+                                   "width": surface.bounds.width, "height": surface.bounds.height, "file": file ?? "",
+                                   "previewCacheBytes": ChartPreviewCache.statistics.bytes, "previewCacheCount": ChartPreviewCache.statistics.count]
+        guard var data = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else { return }
+        data.append(10)
+        let log = target.appendingPathComponent("events.jsonl")
+        do {
+            if !FileManager.default.fileExists(atPath: log.path) { try Data().write(to: log) }
+            let handle = try FileHandle(forWritingTo: log)
+            defer { try? handle.close() }
+            try handle.seekToEnd(); try handle.write(contentsOf: data)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: log.path)
+            records += 1
+        } catch { /* Diagnostic failures never affect a chart. */ }
+    }
+    static func capture(_ surface: ChartSurfaceView, image: NSImage? = nil, event: String) {
+        guard count < 24, let target = directory(), !surface.bounds.isEmpty else { return }
+        let key = surface.diagnosticKey
+        guard chartCounts[key, default: 0] < 4 else { return }
+        do {
+            let bitmap: NSBitmapImageRep?
+            if let image, let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                bitmap = NSBitmapImageRep(cgImage: cgImage)
+            } else {
+                bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)
+                if let bitmap { surface.cacheDisplay(in: surface.bounds, to: bitmap) }
+            }
+            guard let bitmap, let cgImage = bitmap.cgImage else { return }
+            let scale = min(1, 640 / CGFloat(bitmap.pixelsWide), 480 / CGFloat(bitmap.pixelsHigh))
+            let width = max(1, Int(CGFloat(bitmap.pixelsWide) * scale)), height = max(1, Int(CGFloat(bitmap.pixelsHigh) * scale))
+            guard let small = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                                              bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                              colorSpaceName: .deviceRGB, bytesPerRow: width * 4, bitsPerPixel: 32),
+                  let context = NSGraphicsContext(bitmapImageRep: small) else { return }
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            NSImage(cgImage: cgImage, size: .zero).draw(in: NSRect(x: 0, y: 0, width: width, height: height))
+            NSGraphicsContext.restoreGraphicsState()
+            guard let data = small.representation(using: .png, properties: [:]) else { return }
+            let name = String(format: "%03d-%@.png", count, event)
+            count += 1; chartCounts[key, default: 0] += 1
+            let file = target.appendingPathComponent(name)
+            try data.write(to: file, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+            record(surface, event: event + "-frame", file: name)
+        } catch { /* Diagnostic failures never affect a chart. */ }
+    }
+}
+#endif
 
 private enum ChartWords {
     static var all: [String: String] { [
