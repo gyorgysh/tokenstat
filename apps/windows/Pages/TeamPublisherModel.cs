@@ -18,6 +18,10 @@ internal sealed class TeamPublisherModel(TeamDirectoryClient client, JsonObject 
     private void BoundRepository(JsonNode? row) => Require(row is JsonObject && Text(row, "id") == Repository && Text(row, "organizationId") == Organization);
     internal Task<JsonNode> Call(string method, JsonObject? fields = null) => client.Call(method, fields);
     internal Task<JsonNode> Directory(string operation, JsonObject? fields = null) => client.Request(operation, fields);
+    // The text editor cannot express every argv boundary. Preserve an existing
+    // command exactly when saving an unrelated setting without editing it.
+    internal static string[] LaneCheckArguments(string text, IReadOnlyList<string> loaded) =>
+        text == string.Join(" ", loaded) ? loaded.ToArray() : text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
     internal async Task<TeamDirectoryPage> CheckoutOptions(int offset = 0) => TeamDirectoryPage.Read(await client.Call("teams.checkout.options", new() { ["page"] = new JsonObject { ["limit"] = 100, ["offset"] = offset } }), "workspaces", offset);
     internal async Task<TeamDirectoryPage> LocalCheckouts(int offset = 0)
     {

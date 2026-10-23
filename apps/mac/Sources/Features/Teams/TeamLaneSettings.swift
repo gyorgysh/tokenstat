@@ -13,11 +13,13 @@ struct TeamLaneSettings: View {
     @State private var target = "main"
     @State private var remote = "origin"
     @State private var check = ""
+    @State private var loadedCheck: [String] = []
     @State private var checkAcknowledged = false
     @State private var pullRequest = false
     @State private var updateCheckout = false
     @State private var supportsCheckoutUpdates = false
     @State private var loaded = false
+    @State private var loading = false
     @State private var saving = false
     @State private var saved = false
     @State private var error: String?
@@ -25,7 +27,7 @@ struct TeamLaneSettings: View {
     @State private var retrying = false
 
     private var checkArguments: [String] {
-        check.split(whereSeparator: \.isWhitespace).map(String.init)
+        TeamLaneCheck.arguments(check, loaded: loadedCheck)
     }
     private var valid: Bool {
         !target.trimmingCharacters(in: .whitespaces).isEmpty
@@ -37,6 +39,10 @@ struct TeamLaneSettings: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text(L10n.text("common.teams.workflow")).font(Theme.headline)
             if let error { TeamNotice(message: error, warning: true) }
+            if !loaded, error != nil {
+                Button(L10n.text("common.retry"), .refresh) { Task { await load() } }
+                    .buttonStyle(TeamButtonStyle()).disabled(loading)
+            }
             if let catchUp {
                 TeamNotice(message: catchUp, warning: true)
                 Button(L10n.text("common.teams.catch_up_again"), .refresh) { Task { await retry() } }
@@ -113,6 +119,9 @@ struct TeamLaneSettings: View {
     }
 
     private func load() async {
+        guard !loading else { return }
+        loading = true; error = nil
+        defer { loading = false }
         do {
             let result: TeamLaneSettingsResult = try await store.read(.lanesGet, fields: ["checkout": .string(checkoutId)], context: context)
             catchUp = result.catchUp
@@ -121,10 +130,10 @@ struct TeamLaneSettings: View {
                 mode = !settings.enabled ? .manual : settings.review == true ? .review : .automatic
                 target = settings.target; remote = settings.remote ?? ""; pullRequest = settings.pullRequest ?? false
                 updateCheckout = settings.updateCheckout ?? false
-                check = settings.check.joined(separator: " "); checkAcknowledged = settings.checkRunsChangedCode ?? false
+                loadedCheck = settings.check; check = settings.check.joined(separator: " "); checkAcknowledged = settings.checkRunsChangedCode ?? false
             }
             loaded = true
-        } catch is CancellationError {} catch { self.error = error.localizedDescription; loaded = true }
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 
     private func retry() async {
@@ -137,7 +146,7 @@ struct TeamLaneSettings: View {
     }
 
     private func save() async {
-        guard valid, !saving else { return }
+        guard loaded, valid, !saving else { return }
         saving = true; error = nil; saved = false
         defer { saving = false }
         let trimmedRemote = remote.trimmingCharacters(in: .whitespaces)

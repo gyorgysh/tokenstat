@@ -9,6 +9,12 @@ internal static class TeamPublisherTests
     {
         static void Check(bool value, string message) { if (!value) throw new Exception(message); }
         static async Task Refuses(Func<Task> run) { try { await run(); } catch (InvalidDataException) { return; } throw new Exception("Unsafe publication accepted"); }
+        string[] loadedCheck = ["sh", "-c", "cargo test", "", "folder with spaces"];
+        Check(TeamPublisherModel.LaneCheckArguments(string.Join(" ", loadedCheck), loadedCheck).SequenceEqual(loadedCheck),
+            "Saving another lane setting changed the loaded command's argument boundaries");
+        Check(TeamPublisherModel.LaneCheckArguments("cargo test --workspace", loadedCheck).SequenceEqual(new[] { "cargo", "test", "--workspace" }),
+            "An edited lane command did not use its new arguments");
+        Check(TeamPublisherModel.LaneCheckArguments("", loadedCheck).Length == 0, "Clearing the lane check preserved old arguments");
         var repo = new JsonObject { ["id"] = "repo", ["organizationId"] = "org", ["name"] = "Fictional project" };
         var writes = new List<JsonObject>(); var lost = true; var wrong = false; var history = false;
         Task<JsonNode> Host(string method, JsonObject? fields)

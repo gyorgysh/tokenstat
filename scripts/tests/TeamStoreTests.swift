@@ -109,7 +109,18 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         await projectCatalogRefresh()
         avatars()
         try messageAuthors()
+        newChatOutsideFirstCatalogPage()
         print("Team directory ownership, recovery, pagination and avatar tests passed")
+    }
+    static func newChatOutsideFirstCatalogPage() {
+        let firstPage = (0..<100).map { TeamSharedChat(id: "older-\($0)", checkoutId: "checkout_fixture", revision: 1, createdAt: "2026-01-01T00:00:00Z") }
+        let response = TeamNewChat(share: "newly_created")
+        check(!firstPage.contains { $0.id == response.share }, "Fixture must put the new chat beyond the first catalog page")
+        let selected = response.openingReference(checkout: "checkout_fixture", title: "Fictional new conversation")!
+        check(selected.id == response.share && selected.checkoutId == "checkout_fixture" && selected.title == "Fictional new conversation",
+              "A successful new chat must open its exact share even when the first catalog page does not contain it")
+        check(TeamNewChat(share: "").openingReference(checkout: "checkout_fixture", title: "Fictional") == nil,
+              "An empty creation result must not open a different chat")
     }
     @MainActor static func projectCatalogRefresh() async {
         let fixture = Fixture(), store = TeamStore(api: await fixture.api())

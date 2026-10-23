@@ -30,7 +30,8 @@ internal sealed partial class TeamsPage
         mode.SelectedIndex = !Flag(settings, "enabled") ? 0 : Flag(settings, "review") ? 1 : 2;
         var target = new TextBox { Header = L10n.Text("common.teams.target_branch"), Text = settings is null ? "main" : Text(settings, "target"), IsSpellCheckEnabled = false };
         var remote = new TextBox { Header = L10n.Text("common.teams.remote"), Text = settings is null ? "origin" : Text(settings, "remote"), IsSpellCheckEnabled = false };
-        var check = new TextBox { Header = L10n.Text("common.teams.check_command"), Text = settings?["check"] is JsonArray args ? string.Join(" ", args.Select(arg => arg?.GetValue<string>())) : "", IsSpellCheckEnabled = false };
+        var loadedCheck = settings?["check"] is JsonArray args ? args.Select(arg => arg!.GetValue<string>()).ToArray() : [];
+        var check = new TextBox { Header = L10n.Text("common.teams.check_command"), Text = string.Join(" ", loadedCheck), IsSpellCheckEnabled = false };
         var acknowledge = new CheckBox { Content = L10n.Text("common.teams.check_confirm"), IsChecked = Flag(settings, "checkRunsChangedCode") };
         var pullRequest = new CheckBox { Content = L10n.Text("common.teams.open_pull_request"), IsChecked = Flag(settings, "pullRequest") };
         var supportsUpdates = Flag(result, "supportsCheckoutUpdates");
@@ -62,7 +63,7 @@ internal sealed partial class TeamsPage
             && (!supportsUpdates || mode.SelectedIndex == 2 || updateCheckout.IsChecked != true || remote.Text.Trim().Length > 0)
             && (mode.SelectedIndex == 0 || check.Text.Trim().Length == 0 || acknowledge.IsChecked == true), async () => {
             var value = new JsonObject { ["enabled"] = mode.SelectedIndex != 0, ["target"] = target.Text.Trim(), ["review"] = mode.SelectedIndex == 1, ["pullRequest"] = mode.SelectedIndex == 1 && pullRequest.IsChecked == true,
-                ["check"] = new JsonArray((mode.SelectedIndex == 0 ? [] : check.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Select(arg => (JsonNode)JsonValue.Create(arg)!).ToArray()), ["checkRunsChangedCode"] = mode.SelectedIndex != 0 && check.Text.Trim().Length > 0 && acknowledge.IsChecked == true };
+                ["check"] = new JsonArray((mode.SelectedIndex == 0 ? [] : TeamPublisherModel.LaneCheckArguments(check.Text, loadedCheck)).Select(arg => (JsonNode)JsonValue.Create(arg)!).ToArray()), ["checkRunsChangedCode"] = mode.SelectedIndex != 0 && check.Text.Trim().Length > 0 && acknowledge.IsChecked == true };
             if (remote.Text.Trim().Length > 0) value["remote"] = remote.Text.Trim();
             if (supportsUpdates) value["updateCheckout"] = mode.SelectedIndex != 2 && updateCheckout.IsChecked == true;
             return await model.Call("teams.lanes.set", new() { ["checkout"] = checkout, ["settings"] = value });

@@ -17,8 +17,8 @@ struct TeamTranscriptContent: View {
     @Environment(\.teamAttachmentLoader) private var loadAttachment
     // An image is decoded once, when it arrives, and its bytes dropped.
     // Only a file that can be saved keeps its bytes.
-    @State private var images: [String: (name: String, image: CGImage)] = [:]
-    @State private var files: [String: TeamAttachmentFile] = [:]
+    @State private var images = TeamAttachmentCache<(name: String, image: CGImage)>(byteLimit: 48 * 1024 * 1024)
+    @State private var files = TeamAttachmentCache<TeamAttachmentFile>(byteLimit: 16 * 1024 * 1024)
     @State private var fetching: String?
     @State private var fileError: String?
     var body: some View {
@@ -94,9 +94,13 @@ struct TeamTranscriptContent: View {
                     return (ChatDisplayItem.coalesce(decoded, defaultBackend: backend, running: false), try TeamMessageAttribution.people(events), TeamMessageAttribution.asks(events), TeamMessageAttribution.former(events), try TeamMessageAttribution.agents(events))
                 }.value
                 try Task.checkCancellation()
+                let visible = Set(result.0.compactMap { row -> String? in
+                    if case let .attachment(file) = row.kind { return file.id }; return nil
+                })
+                images.retain(visible); files.retain(visible)
                 rows = result.0; people = result.1; asks = result.2; former = result.3; agents = result.4; readyRenderId = history.renderId; error = nil
             } catch is CancellationError {} catch {
-                rows = []; people = [:]; asks = []; former = []; agents = [:]; readyRenderId = history.renderId; self.error = L10n.text("common.teams.history_cannot_display")
+                rows = []; images.retain([]); files.retain([]); people = [:]; asks = []; former = []; agents = [:]; readyRenderId = history.renderId; self.error = L10n.text("common.teams.history_cannot_display")
             }
         }
     }
@@ -106,15 +110,23 @@ struct TeamTranscriptContent: View {
         defer { fetching = nil }
         do {
             let file = try await loadAttachment(id)
+            guard visibleAttachments.contains(id) else { return }
             if file.mediaType?.hasPrefix("image/") == true {
                 guard let image = await Task.detached(priority: .userInitiated, operation: { TeamFilePreview.image(file) }).value else {
                     fileError = L10n.text("common.teams.file_unavailable"); return
                 }
-                images[id] = (file.name, image)
+                guard visibleAttachments.contains(id) else { return }
+                let cost = image.bytesPerRow.multipliedReportingOverflow(by: image.height)
+                if cost.overflow || !images.insert((file.name, image), id: id, bytes: cost.partialValue) {
+                    fileError = L10n.text("common.teams.file_unavailable")
+                }
             } else {
-                files[id] = file
+                files.insert(file, id: id, bytes: file.data.count)
             }
         } catch is CancellationError {} catch { fileError = error.localizedDescription }
+    }
+    private var visibleAttachments: Set<String> {
+        Set(rows.compactMap { row in if case let .attachment(file) = row.kind { return file.id }; return nil })
     }
     private func attributedLabel(_ attribution: TeamAgentAttribution) -> String {
         L10n.text("common.teams.agent_asked_by", label(attribution.backend), attribution.name ?? L10n.text("common.teams.former_member"))
@@ -136,7 +148,7 @@ enum TeamFilePreview {
               let source = CGImageSourceCreateWithData(file.data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int, let height = properties[kCGImagePropertyPixelHeight] as? Int,
-              width > 0, height > 0, width * height <= 100_000_000, max(width, height) / min(width, height) <= 50 else { return nil }
+              width > 0, height > 0, width <= 100_000_000 / height, max(width, height) / min(width, height) <= 50 else { return nil }
         // A small file can still describe a huge bitmap. Decode a bounded
         // thumbnail, never the full image.
         let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2048,

@@ -206,9 +206,14 @@ struct TeamSharedChatsView: View {
             let target: JSONValue = .object(["organization":.string(repository.organizationId),"repository":.string(repository.id),"checkout":.string(checkout.id)])
             let result: TeamNewChat = try await store.read(.ask, fields: ["target":target,"method":.string("team.chat.new"),
                 "params":.object(["title":.string(title),"requestId":.string(request.id)])], context: context)
-            newTitle = ""; newRequest = nil
-            await loadShares(more: false)
-            selectedComputer = checkout; selected = shares.first { $0.id == result.share }
+            guard isCurrent, self.repository?.id == repository.id, checkoutId == checkout.id else { return }
+            guard let created = result.openingReference(checkout: checkout.id, title: title) else {
+                throw TeamRequestFailure(code: "invalid_response", message: L10n.text("common.teams.history_cannot_display"))
+            }
+            if newTitle.trimmingCharacters(in: .whitespacesAndNewlines) == title { newTitle = "" }
+            newRequest = nil
+            if !shares.contains(where: { $0.id == created.id }) { shares.insert(created, at: 0) }
+            selectedComputer = checkout; selected = created
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
     private func computerName(_ row: TeamCheckout) -> String {

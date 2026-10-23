@@ -145,7 +145,7 @@ struct TeamSharedChatReader: View {
         } catch let failure as TeamRequestFailure where ["team_method_required", "unknown_method"].contains(failure.code) {
             throw TeamRequestFailure(code: failure.code, message: L10n.text("common.teams.file_needs_update"))
         }
-        guard reply.shareId == share.id, reply.attachment.id == id, let data = Data(base64Encoded: reply.data) else {
+        guard reply.shareId == share.id, reply.attachment.id == id, let data = TeamAttachmentLimits.decode(reply.data, size: reply.attachment.size) else {
             throw TeamRequestFailure(code: "invalid_response", message: L10n.text("common.teams.file_unavailable"))
         }
         return TeamAttachmentFile(name: reply.attachment.name, mediaType: reply.attachment.mediaType, data: data)

@@ -226,7 +226,16 @@ struct TeamSharedChat: Codable, Identifiable, Hashable, Sendable {
     var backend: String? = nil
 }
 struct TeamSharedChats: Decodable, Sendable { let shares: [TeamSharedChat]; let nextOffset: Int? }
-struct TeamNewChat: Decodable, Sendable { let share: String }
+struct TeamNewChat: Decodable, Sendable {
+    let share: String
+    /// Opening the exact creation result must not depend on its position in
+    /// a paged catalog. The reader fetches authoritative details before use;
+    /// this reference carries no publication revision or creation-date claim.
+    func openingReference(checkout: String, title: String) -> TeamSharedChat? {
+        guard !share.isEmpty, !checkout.isEmpty else { return nil }
+        return TeamSharedChat(id: share, checkoutId: checkout, revision: 0, createdAt: "", title: title)
+    }
+}
 struct TeamAttachmentReply: Decodable, Sendable {
     struct File: Decodable, Sendable { let id: String; let name: String; let mediaType: String?; let size: Int64? }
     let shareId: String; let attachment: File; let data: String
