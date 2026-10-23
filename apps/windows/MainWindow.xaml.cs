@@ -247,6 +247,7 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(rail, 1);
         RootGrid.Children.Add(rail);
         _nav.MenuItems.Add(_workspacesHeader);
+        _nav.MenuItems.Add(new NavigationViewItem { Content = L10n.Text("common.teams.shared_projects"), Tag = "teams:projects", Icon = ActionIcon.Connect.Icon() });
         _nav.MenuItems.Add(new NavigationViewItem
         {
             Content = L10n.Text("windows.mainwindow_xaml.all_projects.4b87271b"),
@@ -431,6 +432,7 @@ public sealed partial class MainWindow : Window
         _sidebarPoll.Tick += (_, _) =>
         {
             _sidebarTick++;
+            if (_sidebarTick % 6 == 0) _ = RefreshTeamFolderLinksAsync();
             _ = RefreshSidebarLiveAsync(slow: _sidebarTick % 6 == 0);
         };
         _sidebarPoll.Start();
@@ -440,10 +442,12 @@ public sealed partial class MainWindow : Window
         });
         AppServices.AccountChanged += () => DispatcherQueue.TryEnqueue(() =>
         {
+            _ = RefreshTeamFolderLinksAsync(clear: true);
             foreach (var workbench in _workbenches.Values) workbench.ResetReviewScope();
             _ = RefreshSidebarLiveAsync(slow: true);
         });
         AppServices.ConversationsChanged += () => DispatcherQueue.TryEnqueue(() => _ = RefreshSidebarLiveAsync());
+        AppServices.TeamProjectsChanged += () => DispatcherQueue.TryEnqueue(() => _ = RefreshTeamFolderLinksAsync());
         AppServices.Update.Changed += () => DispatcherQueue.TryEnqueue(RefreshUpdateBadge);
     }
 
@@ -613,6 +617,7 @@ public sealed partial class MainWindow : Window
             _foldersLoaded = true;
             if (unchanged) return;
             _localFolders = array;
+            _ = RefreshTeamFolderLinksAsync();
             DispatcherQueue.TryEnqueue(() =>
             {
                 RebuildFolderItems();
@@ -731,6 +736,9 @@ public sealed partial class MainWindow : Window
             ToolTipService.SetToolTip(parent, path);
         }
         var menu = ContextMenus.Menu(parent);
+        var shared = !remote && _teamFolderLinks.TryGetValue(id, out var publications) && publications.Count > 0;
+        if (!remote) ContextMenus.Add(menu, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), () => OpenTeamFolder(id, name, path));
+        if (shared) ContextMenus.Add(menu, L10n.Text("common.teams.share_project"), () => OpenTeamFolder(id, name, path, shareNew: true));
         async Task NewChat()
         {
             // Finish the native row's selection before opening its action.
@@ -798,9 +806,15 @@ public sealed partial class MainWindow : Window
         more.Width = more.Height = 22;
         more.MinWidth = more.MinHeight = 0;
         more.Padding = new Thickness(0);
-        SidebarChrome.RevealActions(parent, compose, more);
-        parent.Content = SidebarChrome.ProjectContent(parent, label, remote, compose, more);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(parent, name);
+        if (!remote)
+        {
+            var share = Buttons.ToolbarIcon(ActionIcon.Connect, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), (_, _) => OpenTeamFolder(id, name, path));
+            share.Width = share.Height = 22;
+            if (shared) SidebarChrome.RevealActions(parent, compose, more); else SidebarChrome.RevealActions(parent, share, compose, more);
+            parent.Content = SidebarChrome.ProjectContent(parent, label, remote, shared, share, compose, more);
+        }
+        else { SidebarChrome.RevealActions(parent, compose, more); parent.Content = SidebarChrome.ProjectContent(parent, label, remote, compose, more); }
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(parent, shared ? name + " · " + L10n.Text("common.teams.checkout_shared") : name);
         return parent;
     }
 
@@ -1445,6 +1459,11 @@ public sealed partial class MainWindow : Window
             {
                 SetContent(Ssh(section), preserveSelection: true);
             }
+            return;
+        }
+        if (tag == "teams:projects")
+        {
+            SetContent(new TeamsPage(null, sharedProjects: true), preserveSelection: true);
             return;
         }
         if (tag == "workspaces:all")

@@ -12,7 +12,7 @@ internal static class RailPlaces
         if (route.StartsWith("ws:", StringComparison.Ordinal)
             || route.StartsWith("wsterm:", StringComparison.Ordinal)
             || route.StartsWith("wschat:", StringComparison.Ordinal)
-            || route == "workspaces:all") return RailPlace.Projects;
+            || route is "workspaces:all" or "teams:projects") return RailPlace.Projects;
         if (route.StartsWith("ssh:", StringComparison.Ordinal)
             || route.StartsWith("sshterm:", StringComparison.Ordinal)) return RailPlace.Ssh;
         return route switch

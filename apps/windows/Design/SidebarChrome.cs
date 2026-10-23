@@ -21,6 +21,8 @@ internal static class SidebarChrome
     }
 
     public static Grid ProjectContent(NavigationViewItem row, UIElement label, bool remote, params Control[] actions)
+        => ProjectContent(row, label, remote, false, actions);
+    public static Grid ProjectContent(NavigationViewItem row, UIElement label, bool remote, bool shared, params Control[] actions)
     {
         var grid = new Grid { ColumnSpacing = 6, MinHeight = 28 };
         foreach (var width in new[] { new GridLength(16), new GridLength(18), new GridLength(1, GridUnitType.Star) })
@@ -43,7 +45,9 @@ internal static class SidebarChrome
         row.Loaded += (_, _) => Paint();
         Paint();
         grid.Children.Add(expand);
-        var folder = new Viewbox { Width = 16, Height = 16, Child = new SymbolIcon { Symbol = remote ? Symbol.Globe : Symbol.Folder } };
+        var folderMark = new Grid(); folderMark.Children.Add(new SymbolIcon { Symbol = remote ? Symbol.Globe : Symbol.Folder });
+        if (shared) folderMark.Children.Add(new Viewbox { Width = 10, Height = 10, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Child = new SymbolIcon { Symbol = Symbol.Contact } });
+        var folder = new Viewbox { Width = 16, Height = 16, Child = folderMark };
         Grid.SetColumn(folder, 1);
         grid.Children.Add(folder);
         Grid.SetColumn((FrameworkElement)label, 2);

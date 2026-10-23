@@ -133,6 +133,7 @@ public sealed partial class SmokeApp : Application
                 await TeamsPageSmoke.RunAsync(body);
                 await TeamManagementSmoke.RunAsync(body);
                 await TeamPublisherSmoke.RunAsync(body);
+                await TeamFolderShareSmoke.RunAsync(body);
                 PersonaSceneSmoke.Run();
                 await ChatChartSmoke.Run(body);
                 await HeatmapResizeSmoke.Run(body);

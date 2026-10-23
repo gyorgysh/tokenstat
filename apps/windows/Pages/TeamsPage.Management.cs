@@ -36,6 +36,7 @@ internal sealed partial class TeamsPage
     {
         var client = DirectoryClient(); var view = _view;
         var actions = new FlowPanel { Spacing = Theme.SpaceS };
+        actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.shared_projects"), ActionIcon.Connect, async (_, _) => { if (IsLoaded && _view == view) await ShowAllTeamProjectsAsync(client); }));
         actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.invitations_for_you"), ActionIcon.Send, async (_, _) => {
             if (IsLoaded && _view == view) await ShowTeamInboxAsync(client, new(client));
         }));
@@ -52,6 +53,7 @@ internal sealed partial class TeamsPage
         Func<Task> back, Func<JsonNode, Task> done, bool confirmation = false, bool invitationLink = false, TeamDirectoryClient? client = null)
     {
         Reset(title); var view = _view; var sending = false;
+        Dictionary<Control, bool>? enabledInputs = null;
         _body.Children.Add(fields);
         CheckBox? confirm = null;
         if (confirmation) { confirm = new CheckBox { Content = L10n.Text("common.teams.confirm_understood") }; _body.Children.Add(confirm); }
@@ -59,7 +61,8 @@ internal sealed partial class TeamsPage
         Button? apply = null; Button? cancel = null;
         apply = ActionIconGlyph.Button(submit, ActionIcon.Approve, async (_, _) => {
             if (sending || !IsLoaded || _view != view || !ready() || confirm is not null && confirm.IsChecked != true) return;
-            sending = true; EnableTeamInputs(fields, false); apply!.IsEnabled = false; cancel!.IsEnabled = false; if (confirm is not null) confirm.IsEnabled = false;
+            sending = true; enabledInputs = TeamInputs(fields).ToDictionary(control => control, control => control.IsEnabled);
+            EnableTeamInputs(fields, false); apply!.IsEnabled = false; cancel!.IsEnabled = false; if (confirm is not null) confirm.IsEnabled = false;
             error.Text = "";
             try
             {
@@ -72,16 +75,17 @@ internal sealed partial class TeamsPage
             finally
             {
                 sending = false;
-                if (IsLoaded && _view == view) { EnableTeamInputs(fields, true); cancel.IsEnabled = true; if (confirm is not null) confirm.IsEnabled = true; Update(); }
+                if (IsLoaded && _view == view) { foreach (var input in enabledInputs!) input.Key.IsEnabled = input.Value; cancel.IsEnabled = true; if (confirm is not null) confirm.IsEnabled = true; Update(); }
             }
         });
         cancel = ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Dismiss, async (_, _) => { if (!sending && IsLoaded && _view == view) await back(); });
         void Update() { if (IsLoaded && _view == view) apply.IsEnabled = !sending && ready() && (confirm is null || confirm.IsChecked == true); }
         foreach (var input in TeamInputs(fields))
         {
-            if (input is TextBox text) text.TextChanged += (_, _) => Update();
-            if (input is ComboBox combo) combo.SelectionChanged += (_, _) => Update();
-            if (input is CheckBox check) { check.Checked += (_, _) => Update(); check.Unchecked += (_, _) => Update(); }
+            void Edited() { if (confirm is not null && !sending) confirm.IsChecked = false; Update(); }
+            if (input is TextBox text) text.TextChanged += (_, _) => Edited();
+            if (input is ComboBox combo) combo.SelectionChanged += (_, _) => Edited();
+            if (input is CheckBox check) { check.Checked += (_, _) => Edited(); check.Unchecked += (_, _) => Edited(); }
         }
         if (confirm is not null) { confirm.Checked += (_, _) => Update(); confirm.Unchecked += (_, _) => Update(); }
         _body.Children.Add(apply); _body.Children.Add(cancel); Update();

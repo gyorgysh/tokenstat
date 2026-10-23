@@ -33,6 +33,9 @@ internal sealed partial class TeamsPage : Page
     private bool CommentIdle => _currentComment is not { } comment || !comment.Busy && comment.Text.Length == 0 && comment.RecoveredText is null;
     private string? _person;
     private bool _canPublish;
+    private JsonObject? _folderShareRequest;
+    private JsonObject? _initialProject;
+    private bool _startSharedProjects;
     private readonly Dictionary<TeamCommentTarget, TeamCommentModel> _comments = new();
     private readonly Dictionary<string, string> _checkoutHosts = new();
     private readonly Dictionary<string, string> _newChatWriting = new();
@@ -46,8 +49,10 @@ internal sealed partial class TeamsPage : Page
     private readonly Dictionary<string, Microsoft.UI.Xaml.Media.Imaging.BitmapImage> _openedImages = new();
 
     public TeamsPage() : this(null) { }
-    internal TeamsPage(Func<string, JsonObject?, Task<JsonNode>>? call, TeamAskRecoveryStore? askStorage = null)
+    internal TeamsPage(Func<string, JsonObject?, Task<JsonNode>>? call, TeamAskRecoveryStore? askStorage = null,
+        JsonObject? folder = null, JsonObject? initialProject = null, bool sharedProjects = false)
     {
+        _folderShareRequest = (JsonObject?)folder?.DeepClone(); _initialProject = (JsonObject?)initialProject?.DeepClone(); _startSharedProjects = sharedProjects;
         _askStorage = askStorage ?? TeamAskRecoveryStore.Shared;
         _call = call ?? ((method, fields) => AppServices.Host.CallAsync(method, fields));
         Content = new ScrollViewer { Content = _body };
@@ -100,6 +105,7 @@ internal sealed partial class TeamsPage : Page
             var session = Format.Text(status, "accountSession");
             if (_scope?.ToJsonString() != scope?.ToJsonString() || _session != session)
             {
+                if (_scope is not null) _initialProject = null;
                 _organization = null;
                 _organizations = []; _organizationsNext = null;
                 _comments.Clear(); _checkoutHosts.Clear(); _newChatWriting.Clear(); _newChatRequests.Clear(); _asks.Clear(); _openedImages.Clear(); _flash = null;
@@ -120,6 +126,9 @@ internal sealed partial class TeamsPage : Page
             var page = TeamDirectoryPage.Read(await CallAsync("teams.directory", new JsonObject { ["operation"] = "organizations.list", ["page"] = Page100() }), "organizations", 0);
             if (!IsLoaded || _view != view) return;
             _organizations = page.Rows; _organizationsNext = page.Next;
+            if (_folderShareRequest is { } folder) { await ShowFolderShareAsync(DirectoryClient(), folder); return; }
+            if (_initialProject is { } project) { _initialProject = null; await ShowFocusedTeamProjectAsync(project); return; }
+            if (_startSharedProjects) { _startSharedProjects = false; await ShowAllTeamProjectsAsync(DirectoryClient()); return; }
             if (page.Rows.Count == 0 && page.Next is null)
             {
                 AddTeamDirectoryActions();

@@ -2,6 +2,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Tokenstat;
 using Tokenstat.Design;
 using Windows.Foundation;
 
@@ -168,6 +169,13 @@ internal static class ShellChromeSmoke
             var folderGlyph = heading.Children.OfType<Viewbox>().Single();
             if (folderGlyph.ActualWidth != 16 || folderGlyph.ActualHeight != 16)
                 throw new Exception("The project folder icon disappeared with the native compact pane disabled");
+            var sharedAction = ActionIconGlyph.Button(L10n.Text("common.teams.open_shared_project"), ActionIcon.Connect, (_, _) => { });
+            var sharedHeading = SidebarChrome.ProjectContent(projectRow, new TextBlock { Text = "Fictional shared project" }, false, true, sharedAction);
+            projectRow.Content = sharedHeading; host.UpdateLayout();
+            var sharedGlyph = sharedHeading.Children.OfType<Viewbox>().Single();
+            if (sharedGlyph.Child is not Grid mark || !mark.Children.OfType<Viewbox>().Any(badge => badge.Child is SymbolIcon { Symbol: Symbol.Contact })
+                || sharedAction.ActualWidth <= 0 || sharedAction.Opacity != 1)
+                throw new Exception("Shared folders lost their visible people badge or Open action");
             var footerGrid = (Grid)footer.Content;
             var links = footerGrid.Children.OfType<Button>().ToArray();
             if (links.Length != 2 || links.Any(link => link.ActualWidth <= 0))
