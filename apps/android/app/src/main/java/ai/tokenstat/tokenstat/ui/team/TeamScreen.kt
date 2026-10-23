@@ -130,6 +130,8 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
     var organization by remember(identity) { mutableStateOf<JsonObject?>(null) }
     var chat by remember(identity) { mutableStateOf<ChatTarget?>(null) }
     var drafts by remember(identity) { mutableStateOf(false) }
+    var management by remember(identity) { mutableStateOf<JsonObject?>(null) }
+    var creatingOrganization by remember(identity) { mutableStateOf(false) }
     val context = LocalContext.current.applicationContext
     val draftStorage = remember(context) { TeamCommentDraftStore.shared(java.io.File(context.filesDir, "team-comment-drafts")) }
 
@@ -173,6 +175,14 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
     }
     LaunchedEffect(identity) { load() }
 
+    management?.let { selected ->
+        key(identity, selected.str("id")) { TeamManagementScreen(calls, selected) { updated ->
+            management = null
+            organization = updated
+            organizations = organizations.map { if (it.str("id") == updated.str("id")) updated else it }
+        } }
+        return
+    }
     if (drafts) {
         TeamCommentRecoveryList(draftStorage, calls.origin, calls.person, onBack = { drafts = false })
         return
@@ -195,6 +205,7 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
                 TsAccentButton(L10n.text("common.retry"), onClick = { scope.launch { load() } }, icon = ActionIcon.Refresh.vector)
             })
             Phase.Ready -> {
+                TsSecondaryButton(L10n.text("common.teams.create_organization"), icon = ActionIcon.Create.vector, onClick = { creatingOrganization = true })
                 val org = organization
                 if (org == null) {
                     if (organizations.isEmpty() && organizationsNext == null) {
@@ -216,10 +227,17 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
                     if (organizations.size > 1 || organizationsNext != null) {
                         TsSecondaryButton(L10n.text("common.teams.organizations"), onClick = { organization = null }, icon = ActionIcon.Back.vector)
                     }
+                    TsSecondaryButton(L10n.text("common.teams.manage_teams"), icon = ActionIcon.Settings.vector, onClick = { management = org })
                     key(identity, org.str("id")) { Repositories(calls, org, onOpenChat = { chat = it }) }
                 }
             }
         }
+    }
+    if (creatingOrganization) key(identity) {
+        TeamOrganizationNameDialog(calls, onDismiss = { creatingOrganization = false }, onCreated = { created ->
+            creatingOrganization = false; organization = created
+            scope.launch { load() }
+        })
     }
 }
 
@@ -580,7 +598,7 @@ internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Te
         chat.title.take(160) + " · " + chat.computer.take(160)) { method, params ->
             try { calls.call("teams.ask", buildJsonObject { put("target", chat.target); put("method", method); put("params", params) }) }
             catch (failure: CoreFailure) {
-                if (method == "team.chat.ask" && failure.code in setOf("team_run_review_changed", "invalid_ask")) throw TeamAskNotAccepted(failure.message ?: "")
+                if (method == "team.chat.ask" && failure.code in setOf("team_run_review_changed", "invalid_ask")) throw TeamAskNotAccepted(failure.message)
                 throw failure
             }
         } } }

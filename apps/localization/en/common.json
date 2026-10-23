@@ -457,6 +457,7 @@
   "common.teams.no_organizations_detail": "Create an organization with Legend, or ask an owner or admin for an invitation.",
   "common.teams.no_repositories": "No team repositories yet",
   "common.teams.no_repositories_admin": "Share a project from this computer, then give members access.",
+  "common.teams.no_repositories_mobile": "Share a project from its publishing computer. Manage who has access here.",
   "common.teams.no_repositories_member": "Ask an owner, admin or repository maintainer to assign access.",
   "common.teams.organization": "Organization",
   "common.teams.organization_address": "Organization address",
