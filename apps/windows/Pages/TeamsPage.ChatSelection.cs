@@ -88,9 +88,10 @@ internal sealed partial class TeamsPage
             fields.Children.Add(TeamText(L10n.Text("common.teams.share_chat_contents")));
             fields.Children.Add(TeamText(L10n.Text("common.teams.history_preview")));
             if (Flag(review.Preview["history"], "historyTrimmed")) fields.Children.Add(TeamText(L10n.Text("common.teams.shared_history_trimmed")));
+            var charts = new ChartRenderBudget(ChartRenderBudget.PerTranscript);
             foreach (var block in TeamTranscript.Project(review.Preview["history"]!["events"]!.AsArray().OfType<JsonObject>(), Text(review.Preview["history"], "backend"))) {
                 if (block.Kind == TeamBlockKind.File) fields.Children.Add(TeamText(Text(block.File, "name")));
-                else fields.Children.Add(TranscriptRow(new(), block));
+                else fields.Children.Add(TranscriptRow(new(), block, charts));
             }
             stage = "consent";
             TeamEditor(L10n.Text("common.teams.share_chat"), fields, L10n.Text("common.teams.share_chat"), () => true,

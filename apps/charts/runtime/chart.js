@@ -15,7 +15,8 @@
         lastHeight = 0;
     let words = {},
         fontsReady = false,
-        pendingRender = null;
+        pendingRender = null,
+        theme;
     document.fonts
         .load("13px Manrope")
         .catch(() => [])
@@ -121,28 +122,23 @@
             return String(value);
         }
     }
-    function colors() {
-        return dark
-            ? [
-                  "#b69aea",
-                  "#64c8bf",
-                  "#e4b66d",
-                  "#e28b9e",
-                  "#85b9ef",
-                  "#c996d8",
-                  "#a6c883",
-                  "#cfa38a",
-              ]
-            : [
-                  "#7853b5",
-                  "#187f78",
-                  "#9d640d",
-                  "#b53b60",
-                  "#326ca9",
-                  "#9654a4",
-                  "#527b28",
-                  "#966646",
-              ];
+    function readTheme() {
+        const style = getComputedStyle(document.documentElement);
+        const color = (name) => style.getPropertyValue("--" + name).trim();
+        return {
+            background: color("bg"),
+            foreground: color("fg"),
+            muted: color("muted"),
+            border: color("line"),
+            soft: color("soft"),
+            accent: color("accent"),
+            zoomFill: color("zoom-fill"),
+            markText: color("mark-text"),
+            series: Array.from({ length: 8 }, (_, i) =>
+                color("series-" + (i + 1)),
+            ),
+            heat: Array.from({ length: 5 }, (_, i) => color("heat-" + (i + 1))),
+        };
     }
     function buildRows() {
         const type = spec.type;
@@ -255,8 +251,8 @@
         measure();
     }
     function axisBase() {
-        const line = dark ? "#41414f" : "#dedfe8",
-            muted = dark ? "#bbbaca" : "#656575";
+        const line = theme.border,
+            muted = theme.muted;
         return {
             nameTextStyle: { color: muted, fontSize: 12 },
             axisLabel: {
@@ -268,12 +264,12 @@
             },
             axisLine: { lineStyle: { color: line } },
             axisTick: { show: false },
-            splitLine: { lineStyle: { color: line, opacity: 0.5 } },
+            splitLine: { lineStyle: { color: line } },
         };
     }
     function options(reducedMotion) {
         const type = spec.type,
-            palette = colors();
+            palette = theme.series;
         const base = {
             color: palette,
             backgroundColor: "transparent",
@@ -283,7 +279,7 @@
             textStyle: {
                 fontFamily:
                     "Manrope, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
-                color: dark ? "#ededf4" : "#24232c",
+                color: theme.foreground,
             },
             aria: {
                 enabled: true,
@@ -294,10 +290,10 @@
                 trigger: "item",
                 confine: true,
                 renderMode: "richText",
-                backgroundColor: dark ? "#2c293a" : "#ffffff",
-                borderColor: dark ? "#555065" : "#dbd7e5",
+                backgroundColor: theme.background,
+                borderColor: theme.border,
                 textStyle: {
-                    color: dark ? "#f1eef7" : "#26222e",
+                    color: theme.foreground,
                     fontSize: 12,
                 },
                 formatter: (p) => {
@@ -311,12 +307,15 @@
                 left: 0,
                 right: 0,
                 textStyle: {
-                    color: dark ? "#d7d3e4" : "#514b5e",
+                    color: theme.muted,
                     fontSize: 12,
                 },
                 itemWidth: 12,
                 itemHeight: 8,
-                pageTextStyle: { color: dark ? "#d7d3e4" : "#514b5e" },
+                inactiveColor: theme.border,
+                pageIconColor: theme.accent,
+                pageIconInactiveColor: theme.border,
+                pageTextStyle: { color: theme.muted },
             },
             series: [],
         };
@@ -325,12 +324,19 @@
             data: s.data,
             label: {
                 show: spec.showLabels,
-                color: dark ? "#eeedf5" : "#28252e",
+                color: theme.foreground,
                 fontSize: 11,
             },
             emphasis: { focus: "none" },
             lineStyle: { width: 2, type: i >= 8 ? "dashed" : "solid" },
-            itemStyle: { borderRadius: type === "bar" ? 3 : 0 },
+            itemStyle:
+                type === "boxplot"
+                    ? {
+                          color: theme.soft,
+                          borderColor: palette[i % palette.length],
+                          borderWidth: 2,
+                      }
+                    : { borderRadius: type === "bar" ? 3 : 0 },
         }));
         if (["pie", "donut", "funnel", "treemap"].includes(type)) {
             const data = spec.categories.map((name, i) => ({
@@ -371,7 +377,7 @@
                         label: {
                             show: true,
                             position: "inside",
-                            color: dark ? "#1b1a25" : "#ffffff",
+                            color: theme.markText,
                             formatter: "{b}",
                             fontSize: 12,
                         },
@@ -394,7 +400,7 @@
                             show: true,
                             formatter: "{b}",
                             fontSize: 12,
-                            color: dark ? "#1b1a25" : "#ffffff",
+                            color: theme.markText,
                         },
                         itemStyle: { gapWidth: 3, borderWidth: 0 },
                     },
@@ -409,9 +415,10 @@
                 center: ["50%", "57%"],
                 radius: "64%",
                 axisName: { color: base.textStyle.color, fontSize: 11 },
+                axisLine: { lineStyle: { color: theme.border } },
                 splitArea: { show: false },
                 splitLine: {
-                    lineStyle: { color: dark ? "#44404f" : "#e3dfeb" },
+                    lineStyle: { color: theme.border },
                 },
             };
             base.series = [
@@ -505,9 +512,7 @@
                     text: [compact(max), compact(min)],
                     textStyle: { color: base.textStyle.color },
                     inRange: {
-                        color: dark
-                            ? ["#282238", "#76539f", "#d7b5ff"]
-                            : ["#eee6fa", "#9670c3", "#523076"],
+                        color: theme.heat,
                     },
                 };
                 base.grid.bottom = spec.xAxis.label ? 80 : 62;
@@ -570,11 +575,22 @@
                                 : 100,
                         brushSelect: false,
                         showDataShadow: false,
-                        borderColor: dark ? "#51475f" : "#ded7e9",
-                        fillerColor: dark
-                            ? "rgba(182,154,234,.17)"
-                            : "rgba(120,83,181,.13)",
-                        handleStyle: { color: palette[0] },
+                        borderColor: theme.border,
+                        backgroundColor: theme.background,
+                        fillerColor: theme.zoomFill,
+                        textStyle: { color: theme.muted },
+                        handleStyle: {
+                            color: theme.accent,
+                            borderColor: theme.accent,
+                        },
+                        moveHandleStyle: { color: theme.accent },
+                        emphasis: {
+                            handleStyle: {
+                                color: theme.accent,
+                                borderColor: theme.accent,
+                            },
+                            moveHandleStyle: { color: theme.accent },
+                        },
                     },
                     {
                         type: "inside",
@@ -709,7 +725,7 @@
             );
             try {
                 const option = options(true);
-                option.backgroundColor = dark ? "#1b1a25" : "#ffffff";
+                option.backgroundColor = theme.background;
                 option.title = {
                     text: title,
                     subtext: subtitle,
@@ -719,7 +735,7 @@
                         lineHeight: 24,
                     },
                     subtextStyle: {
-                        color: dark ? "#c1b9d0" : "#67606f",
+                        color: theme.muted,
                         fontSize: 12,
                         lineHeight: 18,
                     },
@@ -746,7 +762,7 @@
                             text: source,
                             fontFamily: "Manrope, sans-serif",
                             lineHeight: 17,
-                            fill: dark ? "#c1b9d0" : "#67606f",
+                            fill: theme.muted,
                             fontSize: 12,
                         },
                     },
@@ -882,29 +898,8 @@
         }
         document.documentElement.lang = locale;
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
-        const theme = dark
-            ? {
-                  "--bg": "#1b1a25",
-                  "--fg": "#ededf4",
-                  "--muted": "#b7b2c3",
-                  "--line": "#3d3749",
-                  "--soft": "#272330",
-                  "--accent": "#b69aea",
-                  "--focus": "#cbb0f4",
-              }
-            : {};
-        for (const key of [
-            "--bg",
-            "--fg",
-            "--muted",
-            "--line",
-            "--soft",
-            "--accent",
-            "--focus",
-        ])
-            document.documentElement.style.removeProperty(key);
-        for (const [key, value] of Object.entries(theme))
-            document.documentElement.style.setProperty(key, value);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        theme = readTheme();
         try {
             spec = TokenstatCharts.validate(input);
             buildRows();

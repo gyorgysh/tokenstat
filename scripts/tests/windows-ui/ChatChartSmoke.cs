@@ -13,6 +13,7 @@ namespace NativeUiTests
         {
             using var examples = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "chart-examples.json")));
             var source = examples.RootElement[0].GetRawText();
+            CheckBudgets(source);
             var chart = new ChatChartView(source) { Width = 640 };
             body.Children.Insert(0, chart);
             body.UpdateLayout();
@@ -52,6 +53,30 @@ namespace NativeUiTests
             await Ready();
             body.Children.Remove(chart);
             Program.Log("PASS: offline native charts render all families, inspect values, open data, resize, block navigation and remount cleanly");
+        }
+
+        private static void CheckBudgets(string source)
+        {
+            var fence = "```tokenstat-chart\n" + source + "\n```";
+            static int Charts(UIElement element) => element switch {
+                ChatChartView => 1,
+                Panel panel => panel.Children.Sum(Charts),
+                Border { Child: { } child } => Charts(child),
+                _ => 0,
+            };
+            var fallback = new List<string>();
+            UIElement Code(string text) { fallback.Add(text); return new TextBlock { Text = text }; }
+            var many = string.Join("\n\n", Enumerable.Repeat(fence, 200));
+            if (Charts(ChatMarkdown.Create(many, Code)) != 4 || fallback.Count != 196 || fallback.Any(text => text != source))
+                throw new Exception("Markdown failed to bound chart browsers while preserving the full JSON");
+            fallback.Clear();
+            var quoted = string.Join("\n", fence.Split('\n').Select(line => "> " + line));
+            if (Charts(ChatMarkdown.Create(string.Join("\n\n", Enumerable.Repeat(quoted, 200)), Code)) != 4 || fallback.Count != 196)
+                throw new Exception("Nested Markdown bypassed the reply's chart browser limit");
+            var transcript = new ChartRenderBudget(ChartRenderBudget.PerTranscript);
+            var count = Enumerable.Range(0, 100).Sum(_ => Charts(ChatMarkdown.Create(fence, Code, chartBudget: transcript)));
+            if (count != 8) throw new Exception("Shared history exceeded its aggregate chart browser limit");
+            Program.Log("PASS: chart browsers are bounded per message and transcript, including nested Markdown, without losing JSON");
         }
     }
 }

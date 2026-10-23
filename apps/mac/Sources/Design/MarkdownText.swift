@@ -1128,6 +1128,10 @@ private struct MarkdownParser {
     private let lines: [String]
     private var index = 0
     private var nextID = 0
+    // Each interactive chart owns a native browser. Keep a reply with many
+    // fences readable without mounting an unbounded number of browsers.
+    private static let chartLimit = 4
+    private var chartCount = 0
 
     init(_ markdown: String) {
         lines = MarkdownSanitizer.blocks(markdown)
@@ -1176,7 +1180,15 @@ private struct MarkdownParser {
             body.append(lines[index])
             index += 1
         }
-        let language = opening.language == "tokenstat-chart" && !closed ? "tokenstat-chart-pending" : (opening.language.isEmpty ? nil : opening.language)
+        var language = opening.language.isEmpty ? nil : opening.language
+        if opening.language == "tokenstat-chart" {
+            if chartCount < Self.chartLimit {
+                chartCount += 1
+                language = closed ? "tokenstat-chart" : "tokenstat-chart-pending"
+            } else {
+                language = "json"
+            }
+        }
         let text = body.joined(separator: "\n")
         return make(.code(
             language: language,

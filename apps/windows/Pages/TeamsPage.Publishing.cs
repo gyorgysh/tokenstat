@@ -127,12 +127,13 @@ internal sealed partial class TeamsPage
             var history = review.Preview["history"]!;
             if (Flag(history, "historyTrimmed")) fields.Children.Add(TeamText(L10n.Text("common.teams.shared_history_trimmed")));
             var events = history["events"]!.AsArray(); Require(events.All(row => row is JsonObject));
+            var charts = new ChartRenderBudget(ChartRenderBudget.PerTranscript);
             foreach (var block in TeamTranscript.Project(events.OfType<JsonObject>(), Text(chat, "backend")))
             {
                 // A private preview has no shared-file authority. Its file names
                 // are reviewed here; fetching becomes available after sharing.
                 if (block.Kind == TeamBlockKind.File) fields.Children.Add(TeamText(Text(block.File, "name")));
-                else fields.Children.Add(TranscriptRow(model.Target(checkout), block));
+                else fields.Children.Add(TranscriptRow(model.Target(checkout), block, charts));
             }
             TeamEditor(L10n.Text("common.teams.share_chat"), fields, L10n.Text("common.teams.share_chat"), () => true,
                 () => model.PublishChat(review), back, _ => back(), confirmation: true);

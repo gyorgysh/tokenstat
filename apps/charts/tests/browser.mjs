@@ -98,6 +98,60 @@ try {
                                 await page.locator("#error").isVisible(),
                                 false,
                             );
+                            const appearance = await page.evaluate(() => {
+                                const option =
+                                    window.TokenstatChartEngine.echarts
+                                        .getInstanceByDom(
+                                            document.querySelector("#plot"),
+                                        )
+                                        .getOption();
+                                return {
+                                    panel: getComputedStyle(
+                                        document.querySelector("main"),
+                                    ).backgroundColor,
+                                    accent: getComputedStyle(
+                                        document.documentElement,
+                                    )
+                                        .getPropertyValue("--accent")
+                                        .trim(),
+                                    series: option.color.slice(0, 2),
+                                    border: option.tooltip[0].borderColor,
+                                    heat: option.visualMap?.[0]?.inRange.color,
+                                    box: option.series[0].type === "boxplot"
+                                        ? option.series[0].itemStyle.color
+                                        : undefined,
+                                };
+                            });
+                            assert.equal(
+                                appearance.panel,
+                                dark ? "rgb(16, 14, 26)" : "rgb(255, 255, 255)",
+                            );
+                            assert.equal(
+                                appearance.accent,
+                                dark ? "#8b5cf6" : "#6a3dff",
+                            );
+                            assert.deepEqual(
+                                appearance.series,
+                                dark
+                                    ? ["#8b5cf6", "#e879f9"]
+                                    : ["#6a3dff", "#c026d3"],
+                            );
+                            assert.equal(
+                                appearance.border,
+                                dark ? "#211d33" : "#e7e7ee",
+                            );
+                            if (spec.type === "boxplot")
+                                assert.equal(
+                                    appearance.box,
+                                    dark ? "#1b1430" : "#f0ecff",
+                                );
+                            if (spec.type === "heatmap")
+                                assert.deepEqual(
+                                    appearance.heat,
+                                    dark
+                                        ? ["#191627", "#3b2a6b", "#5f3fb8", "#8b5cf6", "#e879f9"]
+                                        : ["#eceaf2", "#d6c9ff", "#a98cff", "#7c4dff", "#c026d3"],
+                                );
                             assert.ok(
                                 (await page.locator("#plot svg path").count()) >
                                     0,

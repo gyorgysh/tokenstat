@@ -29,7 +29,13 @@ assert(code("~~~tokenstat-chart\n" + json + "\n~~~").first?.0 == "tokenstat-char
 assert(code("````tokenstat-chart\n" + json + "\n```\n").first?.0 == "tokenstat-chart-pending")
 assert(code("```json\n" + json + "\n```").first?.0 == "json")
 assert(code(pending + "\n```\n\nAfter\n\n" + pending + "\n```").count == 2)
-print("Production Apple chart fences preserve incomplete, complete, long and tilde fences, ordinary code and multiple charts")
+let many = code(Array(repeating: pending + "\n```", count: 200).joined(separator: "\n\n"))
+assert(many.count == 200 && many.allSatisfy { $0.1 == json }, "The complete JSON remains readable for every chart")
+assert(many.filter { $0.0 == "tokenstat-chart" }.count == 4, "A reply must bound its native browsers")
+assert(many.dropFirst(4).allSatisfy { $0.0 == "json" }, "Excess charts use ordinary JSON code blocks")
+let unfinished = code(Array(repeating: pending + "\n```", count: 4).joined(separator: "\n\n") + "\n\n" + pending)
+assert(unfinished.last?.0 == "json" && unfinished.last?.1 == json)
+print("Production Apple chart fences preserve streaming and complete data, with at most four interactive charts per reply")
 '''
 with tempfile.TemporaryDirectory(prefix='tokenstat-chart-parser-') as directory:
     work = pathlib.Path(directory)

@@ -19,7 +19,7 @@ internal sealed partial class TeamsPage
         _ => author.FormerInitiator ? L10n.Text("common.teams.agent_asked_by", BackendLabel(author.Backend), L10n.Text("common.teams.former_member"))
             : author.Name.Length > 0 ? L10n.Text("common.teams.agent_asked_by", BackendLabel(author.Backend), author.Name) : BackendLabel(author.Backend),
     };
-    private UIElement TranscriptRow(JsonObject target, TeamBlock block)
+    private UIElement TranscriptRow(JsonObject target, TeamBlock block, ChartRenderBudget charts)
     {
         var panel = new StackPanel { Spacing = Theme.SpaceS, Margin = new Thickness(0, 4, 0, 4) };
         if (block.Author is { } author)
@@ -46,7 +46,7 @@ internal sealed partial class TeamsPage
                 var bytes = Encoding.UTF8.GetByteCount(block.Text);
                 var chart = block.Text.Trim().StartsWith("```tokenstat-chart\n", StringComparison.Ordinal) && block.Text.TrimEnd().EndsWith("```", StringComparison.Ordinal);
                 panel.Children.Add(bytes <= 64 * 1024 || chart && bytes <= 256 * 1024 + 128
-                    ? ChatMarkdown.Create(block.Text, code => LiteralText(code, true), allowDesktopActions: false) : LiteralText(block.Text)); break;
+                    ? ChatMarkdown.Create(block.Text, code => LiteralText(code, true), allowDesktopActions: false, chartBudget: charts) : LiteralText(block.Text)); break;
             case TeamBlockKind.Tool or TeamBlockKind.Thinking or TeamBlockKind.Edit:
                 var title = block.Kind == TeamBlockKind.Thinking ? L10n.Text("common.teams.thinking")
                     : block.Kind == TeamBlockKind.Edit ? L10n.Text("common.teams.recorded_changes") + " · " + block.Title
