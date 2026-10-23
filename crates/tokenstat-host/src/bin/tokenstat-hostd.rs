@@ -40,6 +40,7 @@ fn main() -> ExitCode {
         std::env::args().nth(1).as_deref(),
         Some(
             "hook"
+                | "team-hook"
                 | "chat-live"
                 | "team-run-anchor"
                 | "team-run-guardian"
@@ -150,6 +151,25 @@ fn run() -> Result<(), String> {
                 let flavor = args.next().ok_or("hook needs a backend flavor")?;
                 let phase = args.next().ok_or("hook needs pre or post")?;
                 return run_hook(&flavor, &phase);
+            }
+            "team-hook" => {
+                let flavor = args.next().ok_or("Team hook needs a backend")?;
+                let phase = args.next().ok_or("Team hook needs a phase")?;
+                let decision = if phase == "pre" {
+                    (|| -> Result<Decision, String> {
+                        let mut body = String::new();
+                        std::io::stdin().take(512 * 1024).read_to_string(&mut body).map_err(|_| "Invalid Team tool request")?;
+                        let input:Value = serde_json::from_str(&body).map_err(|_| "Invalid Team tool request")?;
+                        let (name,_,_) = hook_tool(&flavor, &input);
+                        if tokenstat_host::team_sdk::allows_tool(&name).map_err(|_| "Team authority is unavailable")? {
+                            Ok(Decision::Allow)
+                        } else { Ok(Decision::Deny("Only this run's Team tools are available. Use the team_file tools for lane work.".into())) }
+                    })().unwrap_or_else(Decision::Deny)
+                } else {
+                    Decision::Deny("This Team hook cannot authorize that phase.".into())
+                };
+                println!("{}", decision_document(&flavor, &decision));
+                return Ok(());
             }
             "--socket" | "-s" | "--pipe" => {
                 socket = Some(args.next().ok_or("--socket / --pipe needs a path")?);

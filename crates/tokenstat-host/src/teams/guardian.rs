@@ -271,18 +271,16 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
     // admitted: a keychain prompt or a login shell must not spend its lease.
     *stage = "provider";
     let launch = match init.program {
-        Some(program) => Ok((None, program)),
+        Some(program) => Ok(program),
         None => (|| {
             super::provider::supported(prepared.backend())?;
-            let token = super::provider::access_token()?;
-            let program = super::provider::program(&work_folder)?;
-            Ok((Some(token), program))
+            super::provider::program(&work_folder, prepared.backend())
         })(),
     };
-    let (provider, mut program) = match launch {
-        Ok((provider, mut program)) => {
+    let mut program = match launch {
+        Ok(mut program) => {
             program.folder.clone_from(&work_folder);
-            (provider, program)
+            program
         }
         Err(error) => {
             let _ = chats.refuse_prepared_ask(source.target(), *prepared);
@@ -354,6 +352,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
             &authority,
             prepared.context().sdk(),
             prepared.binding().fence.run_id().into(),
+            lane.as_ref().map(|lane| lane.path.as_path()),
             move || {
                 if current.ensure_current().is_err() {
                     fixture_stop("sdk account");
@@ -396,9 +395,14 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
     program.folder.clone_from(&run_home.cwd);
     program.env.clone_from(&run_home.env);
     sdk.configure(&mut program);
-    if let Some(token) = provider
-        && let Err(error) =
-            super::provider::configure(&run_home, &mut program, &helper, token, lane.is_some())
+    if !fixture
+        && let Err(error) = super::provider::configure(
+            &run_home,
+            &mut program,
+            &helper,
+            prepared.backend(),
+            lane.is_some(),
+        )
     {
         let _ = authority.retire();
         let _ = chats.refuse_prepared_ask(source.target(), *prepared);
@@ -575,6 +579,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
                 chats.transition_owned_run(source.target(), &prepared, State::Stopping)?;
             }
             let proof = process.stop().map_err(map_io)?;
+            sdk.pause_files();
             let final_output = if running && matches!(terminal, State::Succeeded | State::Failed) {
                 output
                     .drain(true, |batch, events| {
@@ -750,10 +755,26 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
             };
             attempt += 1;
             let mut follow = base_program.clone();
-            super::provider::follow_up(&run_home, &mut follow, attempt, &instruction)
+            if fixture {
+                follow.input = run_home.file(&format!("input-{attempt}"));
+                follow.output = run_home.file(&format!("output-{attempt}"));
+                follow.errors = run_home.file(&format!("errors-{attempt}"));
+                std::fs::write(&follow.input, &instruction).map_err(map_io)?;
+            } else {
+                super::provider::follow_up(
+                    &run_home,
+                    &mut follow,
+                    &helper,
+                    prepared.backend(),
+                    attempt,
+                    &instruction,
+                )
                 .map_err(map_io)?;
+            }
             output.follow(&follow.output);
             let _ = proof;
+            sdk.resume_files().map_err(map_io)?;
+            sdk.configure(&mut follow);
             process = Owned::start(&helper, follow, |group| {
                 birth(group, false)?;
                 if authority

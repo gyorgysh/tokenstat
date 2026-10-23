@@ -483,6 +483,7 @@ pub(super) struct NewChat<'a> {
     pub repository: &'a str,
     pub checkout: &'a str,
     pub title: &'a str,
+    pub backend: Option<&'a str>,
     pub request_id: &'a str,
     pub person: &'a str,
 }
@@ -490,6 +491,8 @@ pub(super) struct NewChat<'a> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct NewChatInput {
     pub title: String,
+    #[serde(default)]
+    pub backend: Option<String>,
     pub request_id: String,
 }
 pub(super) fn new_chat_input(params: &str) -> Result<NewChatInput, DispatchError> {
@@ -504,6 +507,9 @@ pub(super) fn new_chat_input(params: &str) -> Result<NewChatInput, DispatchError
         || !crate::chat_receipts::valid_id(&input.request_id)
     {
         return Err(invalid());
+    }
+    if let Some(backend) = &input.backend {
+        super::provider::supported(backend)?;
     }
     Ok(input)
 }
@@ -539,6 +545,7 @@ pub(super) fn start_for_owner(
             repository,
             checkout,
             title: &input.title,
+            backend: input.backend.as_deref(),
             request_id: &input.request_id,
             person: &binding.publisher_id,
         },
@@ -558,6 +565,7 @@ pub(super) fn start_for_member(
         repository,
         checkout,
         title,
+        backend,
         request_id,
         person,
     } = asked;
@@ -586,6 +594,7 @@ pub(super) fn start_for_member(
         &chats,
         &local.workspace_id,
         title,
+        backend,
         previous.as_ref(),
         current,
         || admit_new_chat(person, checkout),
@@ -638,6 +647,7 @@ fn new_chat_conversation(
     chats: &crate::chat::Store,
     workspace: &str,
     title: &str,
+    backend: Option<&str>,
     previous: Option<&ChatShare>,
     current: &dyn Fn() -> Result<(), DispatchError>,
     admit: impl FnOnce() -> Result<(), DispatchError>,
@@ -655,15 +665,23 @@ fn new_chat_conversation(
             .into_iter()
             .find(|chat| chat.id == previous.conversation_id)
             .ok_or_else(changed)?;
+        if backend.is_some_and(|backend| backend != chat.backend) {
+            return Err(changed());
+        }
         return Ok((chat, false));
     }
+    let backend = match backend {
+        Some(backend) => backend,
+        None => super::provider::default_backend()?,
+    };
+    super::provider::supported(backend)?;
     admit()?;
     current()?;
     chats
         .create(crate::chat::Create {
             workspace_id: workspace.into(),
             title: Some(title.into()),
-            backend: "claude".into(),
+            backend: backend.into(),
             persona_id: Some(String::new()),
             ..Default::default()
         })
@@ -750,6 +768,18 @@ mod new_chat_tests {
         let input = super::new_chat_input(&valid.to_string()).unwrap();
         assert_eq!(input.title, "Fictional project chat");
         assert_eq!(input.request_id, "new-fixture");
+        assert!(input.backend.is_none());
+        for backend in ["claude", "codex"] {
+            let mut selected = valid.clone();
+            selected["backend"] = serde_json::json!(backend);
+            assert_eq!(
+                super::new_chat_input(&selected.to_string())
+                    .unwrap()
+                    .backend
+                    .as_deref(),
+                Some(backend)
+            );
+        }
         for field in [
             "conversation",
             "workspace",
@@ -781,6 +811,7 @@ mod new_chat_tests {
             &chats,
             "reviewed-workspace",
             "Shared chat",
+            Some("claude"),
             None,
             &|| {
                 Err(crate::error::DispatchError::new(
@@ -816,6 +847,7 @@ mod new_chat_tests {
                 &chats,
                 "workspace",
                 "Retry title",
+                Some("claude"),
                 Some(&previous),
                 &|| Ok(()),
                 || panic!("a retry cannot spend another admission slot"),
@@ -826,6 +858,19 @@ mod new_chat_tests {
             assert!(!created);
         }
         assert_eq!(chats.list("workspace").len(), 1);
+        assert!(
+            super::new_chat_conversation(
+                &chats,
+                "workspace",
+                "Retry title",
+                Some("codex"),
+                Some(&previous),
+                &|| Ok(()),
+                || panic!("changing an existing request cannot create another chat"),
+            )
+            .is_err(),
+            "a prepared request keeps its original backend"
+        );
         // Another native/daemon instance may have cached the index before
         // the original creator saved this source. Its retry must reload it.
         let stale = crate::chat::Store::at(root.path().join("chats"));
@@ -834,6 +879,7 @@ mod new_chat_tests {
             &stale,
             "workspace",
             "Retry title",
+            Some("claude"),
             Some(&previous),
             &|| Ok(()),
             || panic!("a retry cannot spend another admission slot"),
@@ -847,6 +893,7 @@ mod new_chat_tests {
             &stale,
             "workspace",
             "Retry title",
+            Some("claude"),
             Some(&previous),
             &|| Ok(()),
             || panic!("a retry cannot spend another admission slot"),
@@ -859,6 +906,7 @@ mod new_chat_tests {
                 &chats,
                 "workspace",
                 "Retry title",
+                Some("claude"),
                 Some(&previous),
                 &|| Ok(()),
                 || Ok(()),

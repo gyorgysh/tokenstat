@@ -8,6 +8,7 @@ import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsCard
 import ai.tokenstat.tokenstat.ui.components.TsDangerButton
+import ai.tokenstat.tokenstat.ui.components.TsPickerField
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.localization.L10n
@@ -15,6 +16,7 @@ import ai.tokenstat.tokenstat.ui.logic.WatchingOwner
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +25,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -390,8 +394,10 @@ internal fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, o
     var message by remember(repoId) { mutableStateOf<String?>(null) }
     var busy by remember(repoId) { mutableStateOf(false) }
     var newTitles by remember(repoId) { mutableStateOf<Map<String, String>>(emptyMap()) }
-    // Kept per title so a retry after a lost reply settles to the same chat.
-    var newRequests by remember(repoId) { mutableStateOf<Map<String, Pair<String, String>>>(emptyMap()) }
+    var newBackends by remember(repoId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var pickingBackend by remember(repoId) { mutableStateOf<String?>(null) }
+    // Keep the original title/backend identity when a reply is lost.
+    var newRequests by remember(repoId) { mutableStateOf<Map<String, Triple<String, String, String>>>(emptyMap()) }
 
     suspend fun loadCatalog(checkout: String, more: Boolean = false) {
         val cursor = if (more) catalogNext[checkout] else null
@@ -459,16 +465,21 @@ internal fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, o
 
     fun startChat(checkout: String, computer: String) {
         val title = newTitles[checkout].orEmpty().trim()
+        val backend = newBackends[checkout].orEmpty()
         if (title.isEmpty()) return
-        val request = newRequests[checkout]?.takeIf { it.first == title } ?: (title to "new-" + UUID.randomUUID()).also { newRequests = newRequests + (checkout to it) }
+        val request = newRequests[checkout]?.takeIf { it.first == title && it.second == backend }
+            ?: Triple(title, backend, "new-" + UUID.randomUUID()).also { newRequests = newRequests + (checkout to it) }
         scope.launch {
             busy = true
             try {
                 val made = calls.call("teams.ask", buildJsonObject {
                     put("target", target(orgId, repoId, checkout)); put("method", "team.chat.new")
-                    put("params", buildJsonObject { put("title", title); put("requestId", request.second) })
+                    put("params", buildJsonObject {
+                        put("title", title); put("requestId", request.third)
+                        if (backend.isNotEmpty()) put("backend", backend)
+                    })
                 })
-                if (newTitles[checkout]?.trim() == title) newTitles = newTitles - checkout
+                if (newTitles[checkout]?.trim() == title && newBackends[checkout].orEmpty() == backend) newTitles = newTitles - checkout
                 if (newRequests[checkout] == request) newRequests = newRequests - checkout
                 made.str("share")?.let { onOpenChat(ChatTarget(target(orgId, repoId, checkout, it), title, computer, checkouts.firstOrNull { row -> row.str("id") == checkout }?.str("hostKey").orEmpty())) }
             } catch (cancelled: CancellationException) {
@@ -517,6 +528,22 @@ internal fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, o
                     finally { loading = false }
                 } })
             if (repo.str("role") in setOf("contributor", "maintainer")) {
+                val backends = listOf("" to L10n.text("common.local_provider_use_default"), "claude" to "Claude", "codex" to "Codex")
+                Text(L10n.text("common.teams.agent"), style = TsType.caption)
+                Box {
+                    TsPickerField(
+                        summary = backends.firstOrNull { it.first == newBackends[id].orEmpty() }?.second ?: backends.first().second,
+                        enabled = !busy && !loading,
+                        onOpen = { pickingBackend = id },
+                    )
+                    DropdownMenu(expanded = pickingBackend == id, onDismissRequest = { pickingBackend = null }) {
+                        backends.forEach { (value, label) ->
+                            DropdownMenuItem(text = { Text(label) }, enabled = !busy && !loading, onClick = {
+                                newBackends = newBackends + (id to value); pickingBackend = null
+                            })
+                        }
+                    }
+                }
                 OutlinedTextField(newTitles[id].orEmpty(), { newTitles = newTitles + (id to it) }, Modifier.fillMaxWidth(),
                     label = { Text(L10n.text("common.teams.new_chat_title")) },
                     placeholder = { Text(L10n.text("common.teams.new_chat_placeholder")) })

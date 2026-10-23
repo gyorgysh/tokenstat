@@ -12,6 +12,7 @@ use std::{
 
 fn sdk(helper: &str, request: &str, wrong_token: bool) -> std::process::Output {
     let address = std::env::var("TOKENSTAT_TEAM_SDK_ADDRESS").unwrap();
+    let generation = std::env::var("TOKENSTAT_TEAM_SDK_GENERATION").unwrap();
     let token = if wrong_token {
         "00".repeat(32)
     } else {
@@ -23,6 +24,7 @@ fn sdk(helper: &str, request: &str, wrong_token: bool) -> std::process::Output {
         .env_clear()
         .env("TOKENSTAT_TEAM_SDK_ADDRESS", address)
         .env("TOKENSTAT_TEAM_SDK_TOKEN", token)
+        .env("TOKENSTAT_TEAM_SDK_GENERATION", generation)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -139,8 +141,22 @@ fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     if args.get(1).is_some_and(|arg| arg == "leaf") {
         let beat = args.get(2).expect("fixture heartbeat");
+        let control = args.get(3).map(PathBuf::from);
+        let mut acknowledged = Vec::new();
         let mut count = 0u64;
         loop {
+            if let Some(control) = &control {
+                if control.with_extension("release").exists() {
+                    fs::write(control.with_extension("released"), "released").unwrap();
+                    return;
+                }
+                if let Ok(probe) = fs::read(control.with_extension("probe"))
+                    && probe != acknowledged
+                {
+                    fs::write(control.with_extension("ack"), &probe).unwrap();
+                    acknowledged = probe;
+                }
+            }
             fs::write(beat, count.to_string()).unwrap();
             count += 1;
             std::thread::sleep(Duration::from_millis(40));
@@ -198,6 +214,7 @@ fn main() {
     if mode == "separate-group" {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
+        command.arg(state.with_extension("control"));
     }
     #[cfg(windows)]
     {

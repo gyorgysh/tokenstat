@@ -431,7 +431,9 @@ mod tests {
                 for backend in ["claude", "codex", "muse", "unknown"] {
                     assert_eq!(
                         allows_agent_runs(ready, backend, role),
-                        ready && backend == "claude" && role != RepositoryRole::Viewer,
+                        ready
+                            && matches!(backend, "claude" | "codex")
+                            && role != RepositoryRole::Viewer,
                         "{ready:?} {backend} {role:?}"
                     );
                 }

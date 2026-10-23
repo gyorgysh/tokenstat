@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-//! A guardian-owned MCP service. Its only data is the accepted Ask snapshot;
-//! it never opens the personal Engine, host socket or management dispatcher.
+//! A guardian-owned MCP service for the accepted Ask snapshot and an optional
+//! pinned lane. It never opens the personal Engine, host socket or management
+//! dispatcher. File effects stop and drain before landing or fence release.
 
 use crate::lease_clock::{Deadline, Stamp};
 use serde::{Deserialize, Serialize};
@@ -11,12 +12,13 @@ use std::{
     net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokenstat_sync::teams::HostRunAuthority;
 use zeroize::Zeroize;
+mod files;
 
 const REQUEST: usize = 512 * 1024;
 // MCP text plus structuredContent can encode the same frozen JSON twice;
@@ -31,6 +33,7 @@ const RESPONSE: usize = 16 * 1024 * 1024;
 const IO_BUDGET: Duration = Duration::from_secs(2);
 const ADDRESS: &str = "TOKENSTAT_TEAM_SDK_ADDRESS";
 const TOKEN: &str = "TOKENSTAT_TEAM_SDK_TOKEN";
+const GENERATION: &str = "TOKENSTAT_TEAM_SDK_GENERATION";
 const GUIDE: &str = "This connection belongs to one Team run. team_context returns the frozen shared conversation and original Ask approved for this run. When the result includes nextCursor, call team_context again with that cursor to read the next page. The original Ask is on every page. Later discussion does not change the snapshot. team_run_status describes this run only. Use chart_schema and chart_examples to choose a portable chart, then chart_create to validate it and return the tokenstat-chart block verbatim in your reply. Use observed data and label quantities and units. Personal archives, other chats, workspace management and launching agents are unavailable here.";
 
 fn unavailable() -> io::Error {
@@ -76,6 +79,9 @@ struct Shared {
     gate: Mutex<Gate>,
     current: Box<dyn Fn() -> bool + Send + Sync>,
     workers: AtomicUsize,
+    lane: Option<Mutex<Option<files::LaneFiles>>>,
+    files_enabled: AtomicBool,
+    generation: AtomicU64,
 }
 impl Drop for Shared {
     fn drop(&mut self) {
@@ -106,6 +112,20 @@ impl Shared {
             gate.retired = true;
         }
     }
+    fn file_live(&self, generation: u64) -> io::Result<()> {
+        if !self.files_enabled.load(Ordering::Acquire)
+            || self.generation.load(Ordering::Acquire) != generation
+        {
+            return Err(unavailable());
+        }
+        self.live()?;
+        if !self.files_enabled.load(Ordering::Acquire)
+            || self.generation.load(Ordering::Acquire) != generation
+        {
+            return Err(unavailable());
+        }
+        Ok(())
+    }
     fn authenticated(&self, token: &str) -> bool {
         if !token_shape(token) {
             return false;
@@ -133,6 +153,7 @@ impl Service {
         authority: &HostRunAuthority,
         context: crate::chat::sharing::SdkContext,
         run: String,
+        lane: Option<&std::path::Path>,
         current: impl Fn() -> bool + Send + Sync + 'static,
     ) -> io::Result<Self> {
         let bytes = context.byte_bound().map_err(|_| unavailable())?;
@@ -153,6 +174,7 @@ impl Service {
             Some(context),
             run,
             Box::new(current),
+            lane.map(files::LaneFiles::bind).transpose()?,
         )
     }
     #[cfg(test)]
@@ -169,7 +191,7 @@ impl Service {
         {
             return Err(unavailable());
         }
-        Self::bind_context(budget, context, encoded.len(), None, run, current)
+        Self::bind_context(budget, context, encoded.len(), None, run, current, None)
     }
     fn bind_context(
         budget: Budget,
@@ -178,6 +200,7 @@ impl Service {
         frozen: Option<crate::chat::sharing::SdkContext>,
         run: String,
         current: Box<dyn Fn() -> bool + Send + Sync>,
+        lane: Option<files::LaneFiles>,
     ) -> io::Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
         listener.set_nonblocking(true)?;
@@ -192,6 +215,9 @@ impl Service {
             run,
             current,
             workers: AtomicUsize::new(0),
+            lane: lane.map(|lane| Mutex::new(Some(lane))),
+            files_enabled: AtomicBool::new(true),
+            generation: AtomicU64::new(0),
             gate: Mutex::new(Gate {
                 budget,
                 state: "launching",
@@ -242,6 +268,10 @@ impl Service {
         })
     }
     pub(crate) fn configure(&self, program: &mut crate::team_process::Program) {
+        program.env.insert(
+            GENERATION.into(),
+            self.shared.generation.load(Ordering::Acquire).to_string(),
+        );
         program.env.insert(ADDRESS.into(), self.address.to_string());
         program
             .env
@@ -269,6 +299,30 @@ impl Service {
     }
     pub(crate) fn retire(&self) {
         self.shared.retire();
+        self.pause_files();
+        if let Some(lane) = &self.shared.lane {
+            // Also release directory handles before Windows worktree cleanup.
+            drop(
+                lane.lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .take(),
+            );
+        }
+    }
+    pub(crate) fn pause_files(&self) {
+        if self.shared.files_enabled.swap(false, Ordering::AcqRel) {
+            self.shared.generation.fetch_add(1, Ordering::AcqRel);
+        }
+        if let Some(lane) = &self.shared.lane {
+            // A guardian worker is outside the owned backend process group.
+            // Drain it before committing/landing or releasing its writer fence.
+            drop(lane.lock().unwrap_or_else(|error| error.into_inner()));
+        }
+    }
+    pub(crate) fn resume_files(&self) -> io::Result<()> {
+        self.shared.live()?;
+        self.shared.files_enabled.store(true, Ordering::Release);
+        Ok(())
     }
     pub(crate) fn ensure_live(&self) -> io::Result<()> {
         self.shared.live()
@@ -294,6 +348,7 @@ impl Drop for Worker {
 struct Envelope {
     version: u8,
     token: String,
+    generation: u64,
     request: Value,
 }
 fn read_frame(
@@ -382,15 +437,21 @@ fn write_bytes(
 fn serve(mut stream: TcpStream, shared: &Shared) -> io::Result<()> {
     let bytes = read_frame(&mut stream, REQUEST, || shared.budget_live())?;
     let envelope: Envelope = serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
-    if envelope.version != 1 || !shared.authenticated(&envelope.token) {
+    if envelope.version != 1
+        || !shared.authenticated(&envelope.token)
+        || envelope.generation != shared.generation.load(Ordering::Acquire)
+    {
         return Err(unavailable());
     }
     shared.live()?;
-    let response = handle(shared, envelope.request);
+    let response = handle(shared, envelope.request, envelope.generation);
     let bytes = encode_frame(&response, RESPONSE)?;
     // Check the exact local publication again after serialization and before
     // the first response byte. Subsequent chunks use cheap clock/Stop checks.
     shared.live()?;
+    if envelope.generation != shared.generation.load(Ordering::Acquire) {
+        return Err(unavailable());
+    }
     write_bytes(&mut stream, &bytes, || shared.budget_live())
 }
 fn keys(value: &Value, allowed: &[&str]) -> bool {
@@ -577,13 +638,29 @@ fn page_frozen_context(
 fn content(data: Value) -> Value {
     json!({"content":[{"type":"text","text":data.to_string()}],"structuredContent":{"data":data}})
 }
-fn call(shared: &Shared, params: &Value) -> Result<Value, &'static str> {
+fn call(shared: &Shared, params: &Value, generation: u64) -> Result<Value, &'static str> {
     if !keys(params, &["name", "arguments"]) {
         return Err("Invalid tool arguments.");
     }
     let name = params["name"].as_str().ok_or("Missing tool name.")?;
     let fallback = json!({});
     let args = params.get("arguments").unwrap_or(&fallback);
+    if name.starts_with("team_file") || name == "team_directory_create" {
+        shared
+            .file_live(generation)
+            .map_err(|_| "The run is unavailable.")?;
+        let lane = shared
+            .lane
+            .as_ref()
+            .ok_or("This run has no lane file access.")?
+            .lock()
+            .map_err(|_| "The lane is unavailable.")?;
+        return Ok(content(
+            lane.as_ref()
+                .ok_or("The lane is unavailable.")?
+                .call(name, args, || shared.file_live(generation))?,
+        ));
+    }
     if matches!(name, "chart_create" | "chart_validate") {
         if !keys(args, &["chart"]) || !args["chart"].is_object() {
             return Err("Provide one chart.");
@@ -611,7 +688,7 @@ fn call(shared: &Shared, params: &Value) -> Result<Value, &'static str> {
         _ => return Err("This tool is unavailable in a Team run."),
     }))
 }
-fn handle(shared: &Shared, request: Value) -> Value {
+fn handle(shared: &Shared, request: Value, generation: u64) -> Value {
     let id = request
         .get("id")
         .filter(|id| id.as_i64().is_some() || id.as_str().is_some_and(|s| s.len() <= 128))
@@ -635,8 +712,35 @@ fn handle(shared: &Shared, request: Value) -> Value {
             json!({"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"tokenstat-team-run","version":tokenstat_core::VERSION},"instructions":GUIDE})
         }
         Some("ping") if empty(&params) => json!({}),
-        Some("tools/list") if empty(&params) => json!({"tools":tools()}),
-        Some("tools/call") => match call(shared, &params) {
+        Some("tools/list") if empty(&params) => {
+            let mut available = tools();
+            if shared.lane.is_some() {
+                available.extend(files::tools());
+            }
+            json!({"tools":available})
+        }
+        Some("team/tool-policy") if keys(&params, &["name"]) => {
+            let name = params["name"].as_str().unwrap_or("");
+            let allowed = name
+                .strip_prefix("mcp__tokenstat_team__")
+                .is_some_and(|name| {
+                    if (name.starts_with("team_file") || name == "team_directory_create")
+                        && !shared.files_enabled.load(Ordering::Acquire)
+                    {
+                        return false;
+                    }
+                    tools()
+                        .into_iter()
+                        .chain(if shared.lane.is_some() {
+                            files::tools()
+                        } else {
+                            Vec::new()
+                        })
+                        .any(|tool| tool["name"] == name)
+                });
+            json!({"allow":allowed})
+        }
+        Some("tools/call") => match call(shared, &params, generation) {
             Ok(value) => value,
             Err(message) => json!({"isError":true,"content":[{"type":"text","text":message}]}),
         },
@@ -650,6 +754,43 @@ fn handle(shared: &Shared, request: Value) -> Value {
 pub fn main() -> Result<(), String> {
     bridge().map_err(|_| "The Team run SDK is unavailable.".into())
 }
+
+/// The Team hook asks only its guardian's scoped endpoint. It never opens the
+/// personal host socket, reads a chat turn token, or falls back to personal mode.
+pub fn allows_tool(name: &str) -> io::Result<bool> {
+    let address = std::env::var(ADDRESS)
+        .map_err(|_| unavailable())?
+        .parse::<SocketAddr>()
+        .map_err(|_| unavailable())?;
+    if address.ip() != Ipv4Addr::LOCALHOST || address.port() == 0 {
+        return Err(unavailable());
+    }
+    let generation = std::env::var(GENERATION)
+        .map_err(|_| unavailable())?
+        .parse::<u64>()
+        .map_err(|_| unavailable())?;
+    let token = std::env::var(TOKEN).map_err(|_| unavailable())?;
+    if !token_shape(&token) {
+        return Err(unavailable());
+    }
+    let mut stream = TcpStream::connect_timeout(&address, IO_BUDGET)?;
+    write_frame(
+        &mut stream,
+        &Envelope {
+            version: 1,
+            token,
+            generation,
+            request: json!({"jsonrpc":"2.0","id":1,"method":"team/tool-policy","params":{"name":name}}),
+        },
+        REQUEST,
+        || Ok(()),
+    )?;
+    let response: Value = serde_json::from_slice(&read_frame(&mut stream, RESPONSE, || Ok(()))?)
+        .map_err(|_| unavailable())?;
+    response["result"]["allow"]
+        .as_bool()
+        .ok_or_else(unavailable)
+}
 fn bridge() -> io::Result<()> {
     let address = std::env::var(ADDRESS)
         .map_err(|_| unavailable())?
@@ -658,6 +799,10 @@ fn bridge() -> io::Result<()> {
     if address.ip() != Ipv4Addr::LOCALHOST || address.port() == 0 {
         return Err(unavailable());
     }
+    let generation = std::env::var(GENERATION)
+        .map_err(|_| unavailable())?
+        .parse::<u64>()
+        .map_err(|_| unavailable())?;
     let token = std::env::var(TOKEN).map_err(|_| unavailable())?;
     if !token_shape(&token) {
         return Err(unavailable());
@@ -680,6 +825,7 @@ fn bridge() -> io::Result<()> {
             &Envelope {
                 version: 1,
                 token: token.clone(),
+                generation,
                 request,
             },
             REQUEST,

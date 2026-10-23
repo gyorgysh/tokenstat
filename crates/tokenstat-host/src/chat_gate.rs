@@ -169,6 +169,32 @@ fn hooks_document(helper: &Path, flavor: &str) -> Value {
     })
 }
 
+/// Same backend hook protocol, with a guardian-only Team policy endpoint.
+pub(crate) fn team_hooks_document(helper: &Path, flavor: &str) -> Value {
+    let mut document = hooks_document(helper, flavor);
+    for phase in ["PreToolUse", "PostToolUse"] {
+        if let Some(groups) = document["hooks"][phase].as_array_mut() {
+            for group in groups {
+                if let Some(hooks) = group["hooks"].as_array_mut() {
+                    for hook in hooks {
+                        hook["command"] = format!(
+                            "{} team-hook {flavor} pre",
+                            shell_quote(&stable_hook_path(helper).display().to_string())
+                        )
+                        .into();
+                    }
+                }
+            }
+        }
+    }
+    // Post hooks carry no Team capability and cannot annotate private chats.
+    document["hooks"]
+        .as_object_mut()
+        .expect("hook document")
+        .remove("PostToolUse");
+    document
+}
+
 /// A private `CODEX_HOME` retaining this conversation's sessions, with the
 /// person's credential linked in so they stay signed in. Only hooks are
 /// temporary. Removing the home would destroy Codex's resume history.
@@ -366,15 +392,21 @@ fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), Strin
         std::env::var_os("CODEX_HOME").map(PathBuf::from).as_deref(),
     );
     let target = home.join(file);
+    route_cli_credential(&source, &target)
+}
+
+/// Reuse a native CLI's own credential file without interpreting or refreshing
+/// its tokens. Team runs use this same routing with an otherwise empty home.
+pub(crate) fn route_cli_credential(source: &Path, target: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         // A dangling link is intentional after sign-out. Leaving an old
         // link or legacy copy here would reuse the previous account instead.
-        ensure_symlink(&source, &target)
+        ensure_symlink(source, target)
     }
     #[cfg(not(unix))]
     {
-        ensure_credential_file(&source, &target)
+        ensure_credential_file(source, target)
     }
 }
 

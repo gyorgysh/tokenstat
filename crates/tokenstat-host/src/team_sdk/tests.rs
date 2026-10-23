@@ -21,6 +21,7 @@ fn request(service: &Service, token: &str, request: Value) -> io::Result<Value> 
         &Envelope {
             version: 1,
             token: token.into(),
+            generation: service.shared.generation.load(Ordering::Acquire),
             request,
         },
         REQUEST,
@@ -113,6 +114,160 @@ fn scoped_context_charts_and_status_have_no_personal_dispatch() {
 }
 
 #[test]
+fn team_hook_policy_and_lane_tools_share_only_current_run_authority() {
+    let root = tempfile::tempdir().unwrap();
+    let live = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let current = live.clone();
+    let sdk = Service::bind_context(
+        Budget {
+            deadline: Deadline::capture(Duration::from_secs(10)).unwrap(),
+            wall_end: wall_ms().unwrap() + 10_000,
+        },
+        json!({}),
+        2,
+        None,
+        "run_fixture".into(),
+        Box::new(move || current.load(Ordering::Acquire)),
+        Some(files::LaneFiles::bind(root.path()).unwrap()),
+    )
+    .unwrap();
+    let token = tokenstat_identity::hex(&sdk.shared.token);
+    for name in [
+        "exec_command",
+        "Bash",
+        "Read",
+        "apply_patch",
+        "mcp__personal__vault",
+        "mcp__tokenstat_team__unknown",
+    ] {
+        assert_eq!(
+            request(
+                &sdk,
+                &token,
+                json!({"jsonrpc":"2.0","id":1,"method":"team/tool-policy","params":{"name":name}})
+            )
+            .unwrap()["result"]["allow"],
+            false,
+            "{name}"
+        );
+    }
+    for name in [
+        "mcp__tokenstat_team__team_context",
+        "mcp__tokenstat_team__team_file_write",
+    ] {
+        assert_eq!(
+            request(
+                &sdk,
+                &token,
+                json!({"jsonrpc":"2.0","id":1,"method":"team/tool-policy","params":{"name":name}})
+            )
+            .unwrap()["result"]["allow"],
+            true,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        call(
+            &sdk,
+            "team_file_write",
+            json!({"path":"new.txt","content":"lane work"})
+        )["result"]["isError"],
+        Value::Null
+    );
+    assert_eq!(
+        call(&sdk, "team_file_read", json!({"path":"new.txt"}))["result"]["structuredContent"]["data"]
+            ["text"],
+        "lane work"
+    );
+    live.store(false, Ordering::Release);
+    assert!(request(&sdk,&token,json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"team_file_write","arguments":{"path":"new.txt","content":"expired"}}})).is_err());
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("new.txt")).unwrap(),
+        "lane work"
+    );
+}
+
+#[test]
+fn pausing_files_drains_guardian_workers_before_landing_or_writer_release() {
+    use std::sync::mpsc;
+    let root = tempfile::tempdir().unwrap();
+    let sdk = Arc::new(
+        Service::bind_context(
+            Budget {
+                deadline: Deadline::capture(Duration::from_secs(10)).unwrap(),
+                wall_end: wall_ms().unwrap() + 10_000,
+            },
+            json!({}),
+            2,
+            None,
+            "run_fixture".into(),
+            Box::new(|| true),
+            Some(files::LaneFiles::bind(root.path()).unwrap()),
+        )
+        .unwrap(),
+    );
+    let (entered, waiting) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let shared = sdk.shared.clone();
+    let worker = std::thread::spawn(move || {
+        let lane = shared.lane.as_ref().unwrap().lock().unwrap();
+        let checks = std::cell::Cell::new(0);
+        lane.as_ref().unwrap().call(
+            "team_file_write",
+            &json!({"path":"late.txt","content":"too late"}),
+            || {
+                checks.set(checks.get() + 1);
+                if checks.get() == 2 {
+                    entered.send(()).unwrap();
+                    resume.recv().unwrap();
+                }
+                shared.file_live(0)
+            },
+        )
+    });
+    waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+    let (done, finished) = mpsc::channel();
+    let pausing = sdk.clone();
+    let pauser = std::thread::spawn(move || {
+        pausing.pause_files();
+        done.send(()).unwrap();
+    });
+    let early = finished.recv_timeout(Duration::from_millis(50));
+    release.send(()).unwrap();
+    let result = worker.join().unwrap();
+    pauser.join().unwrap();
+    assert!(
+        early.is_err(),
+        "pause must wait for the in-flight guardian file operation"
+    );
+    assert!(result.is_err());
+    assert!(!root.path().join("late.txt").exists());
+    assert_eq!(
+        call(
+            &sdk,
+            "team_file_write",
+            json!({"path":"paused.txt","content":"no"})
+        )["result"]["isError"],
+        true
+    );
+    sdk.resume_files().unwrap();
+    let mut stale = TcpStream::connect(sdk.address).unwrap();
+    write_frame(&mut stale,&Envelope {version:1,token:tokenstat_identity::hex(&sdk.shared.token),generation:0,request:json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"team_file_write","arguments":{"path":"stale.txt","content":"old attempt"}}})},REQUEST,||Ok(())).unwrap();
+    assert!(read_frame(&mut stale, RESPONSE, || Ok(())).is_err());
+    assert!(!root.path().join("stale.txt").exists());
+    assert_ne!(
+        call(
+            &sdk,
+            "team_file_write",
+            json!({"path":"repair.txt","content":"new attempt"})
+        )["result"]["isError"],
+        true
+    );
+    sdk.retire();
+    assert!(sdk.shared.lane.as_ref().unwrap().lock().unwrap().is_none());
+}
+
+#[test]
 fn wrong_token_expiry_and_explicit_retirement_fail_closed() {
     let sdk = service(Duration::from_secs(10));
     assert!(
@@ -191,7 +346,8 @@ fn malformed_requests_and_extra_routing_fields_cannot_be_dispatched() {
     assert!(
         handle(
             &sdk.shared,
-            json!({"jsonrpc":"2.0","method":"notifications/initialized"})
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            0,
         )
         .is_null()
     );

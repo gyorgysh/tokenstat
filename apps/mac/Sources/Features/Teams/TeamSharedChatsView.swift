@@ -28,8 +28,9 @@ struct TeamSharedChatsView: View {
     @State private var settingsSheet = false
     @State private var localCheckoutIds: Set<String> = []
     @State private var newTitle = ""
-    // Kept per title so a retry after a lost reply settles to the same chat.
-    @State private var newRequest: (title: String, id: String)?
+    @State private var newBackend = ""
+    // The original title/backend keep the same identity after a lost reply.
+    @State private var newRequest: (title: String, backend: String, id: String)?
     @State private var starting = false
     private var isCurrent: Bool { store.mutationContext == context && store.phase == .ready }
     private var availableRepositories: [TeamRepository] { repositories.filter { $0.role != nil } }
@@ -183,6 +184,11 @@ struct TeamSharedChatsView: View {
     private func newChat(_ checkout: TeamCheckout) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(L10n.text("common.teams.new_chat_title")).font(Theme.callout.weight(.semibold))
+            TeamPickerField(title: L10n.text("common.teams.agent"), selection: $newBackend) {
+                Text(L10n.text("common.local_provider_use_default")).tag("")
+                Text("Claude").tag("claude")
+                Text("Codex").tag("codex")
+            }.disabled(starting).accessibilityIdentifier("team.chats.backend")
             HStack(spacing: Theme.Space.s) {
                 TextField(L10n.text("common.teams.new_chat_placeholder"), text: $newTitle).textFieldStyle(ThemedFieldStyle())
                     .accessibilityLabel(L10n.text("common.teams.new_chat_title"))
@@ -199,18 +205,22 @@ struct TeamSharedChatsView: View {
     private func startChat(_ checkout: TeamCheckout) async {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, !starting, let repository else { return }
-        let request: (title: String, id: String) = newRequest?.title == title ? newRequest! : (title, "new-" + UUID().uuidString.lowercased())
+        let backend = newBackend
+        let request: (title: String, backend: String, id: String) = newRequest?.title == title && newRequest?.backend == backend
+            ? newRequest! : (title, backend, "new-" + UUID().uuidString.lowercased())
         newRequest = request; starting = true; error = nil
         defer { starting = false }
         do {
             let target: JSONValue = .object(["organization":.string(repository.organizationId),"repository":.string(repository.id),"checkout":.string(checkout.id)])
+            var params: [String: JSONValue] = ["title":.string(title),"requestId":.string(request.id)]
+            if !backend.isEmpty { params["backend"] = .string(backend) }
             let result: TeamNewChat = try await store.read(.ask, fields: ["target":target,"method":.string("team.chat.new"),
-                "params":.object(["title":.string(title),"requestId":.string(request.id)])], context: context)
+                "params":.object(params)], context: context)
             guard isCurrent, self.repository?.id == repository.id, checkoutId == checkout.id else { return }
             guard let created = result.openingReference(checkout: checkout.id, title: title) else {
                 throw TeamRequestFailure(code: "invalid_response", message: L10n.text("common.teams.history_cannot_display"))
             }
-            if newTitle.trimmingCharacters(in: .whitespacesAndNewlines) == title { newTitle = "" }
+            if newTitle.trimmingCharacters(in: .whitespacesAndNewlines) == title && newBackend == backend { newTitle = "" }
             newRequest = nil
             if !shares.contains(where: { $0.id == created.id }) { shares.insert(created, at: 0) }
             selectedComputer = checkout; selected = created

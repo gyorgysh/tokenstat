@@ -185,13 +185,27 @@ fn a_definite_backend_spawn_failure_remains_distinct_from_process_completion() {
 #[cfg(unix)]
 #[test]
 fn a_descendant_in_another_group_cannot_prove_run_completion() {
+    struct ReleaseLeaf(PathBuf);
+    impl Drop for ReleaseLeaf {
+        fn drop(&mut self) {
+            let _ = fs::write(self.0.with_extension("release"), "release");
+        }
+    }
     let root = tempfile::tempdir().unwrap();
+    let anchor = std::cell::Cell::new(0);
     let mut process = Owned::start(
         Path::new(env!("CARGO_BIN_EXE_tokenstat-hostd")),
         program(root.path(), "separate-group"),
-        |_| Ok(()),
+        |group| {
+            anchor.set(group);
+            Ok(())
+        },
     )
     .unwrap();
+    // Release before Owned drops on every assertion/panic path, so cleanup
+    // never signals a possibly reused grandchild PID.
+    let control = root.path().join("processes.control");
+    let release = ReleaseLeaf(control.clone());
     wait(|| matches!(process.poll().unwrap(), Poll::Exited(Some(0))));
     let leaf = root.path().join("processes.leaf");
     wait(|| !beat(&leaf).is_empty());
@@ -202,17 +216,27 @@ fn a_descendant_in_another_group_cannot_prove_run_completion() {
         .unwrap()
         .parse::<i32>()
         .unwrap();
-    // Keep the fixture alive until the completion check, then always clean it
-    // up before asserting so a failing implementation leaves no child behind.
     let stopped = process.stop();
-    let before = beat(&leaf);
-    std::thread::sleep(Duration::from_millis(100));
-    let survived = beat(&leaf) != before;
-    // SAFETY: this PID names the still-running, infinite fixture leaf above.
-    unsafe {
-        libc::kill(leaf_pid, libc::SIGKILL);
-    }
+    // A fixed heartbeat sampling window can see no progress on a loaded CI
+    // runner. Ask for a fresh acknowledgement after Stop instead: the child
+    // must execute this request while its original owner refuses completion.
+    fs::write(control.with_extension("probe"), "after-stop").unwrap();
+    wait(|| beat(&control.with_extension("ack")) == "after-stop");
+    // SAFETY: these queries deliver no signal. The acknowledgement above
+    // proves the fixture is running; its group must differ from the anchor.
+    let (group, session) = unsafe { (libc::getpgid(leaf_pid), libc::getsid(leaf_pid)) };
+    drop(release);
+    wait(|| control.with_extension("released").exists());
+    let cleanup = stopped.is_err().then(|| process.stop());
     assert!(stopped.is_err(), "a live descendant was reported completed");
-    assert!(survived, "fixture did not exercise the other process group");
-    let _proof = process.stop().unwrap();
+    assert_eq!(
+        group, leaf_pid,
+        "fixture did not lead its own process group"
+    );
+    assert_eq!(
+        session,
+        anchor.get() as i32,
+        "fixture left its owner's session"
+    );
+    let _proof = cleanup.unwrap().unwrap();
 }

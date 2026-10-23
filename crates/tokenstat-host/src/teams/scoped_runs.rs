@@ -105,6 +105,7 @@ pub(super) fn new_chat(
             repository: &scope.repository_id,
             checkout: &scope.checkout_id,
             title: &input.title,
+            backend: input.backend.as_deref(),
             request_id: &input.request_id,
             person: &scope.person.id,
         },

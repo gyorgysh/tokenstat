@@ -1,20 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-//! The agent command for one Team run.
-//!
-//! A teammate's Ask drives this process with the publisher's OS account, and
-//! whatever it can read can end up in the shared chat. In the default mode,
-//! Claude has only the scoped Team tools. With lanes enabled by the owner,
-//! it also has file tools restricted to its lane, and no shell. Neither mode
-//! loads personal settings. The frozen conversation pages through
-//! `team_context`, never stdin.
-//!
-//! Claude gets a current access token in its environment and nothing that
-//! could renew it. No file in the run home is a credential or a link to one.
-//! The scoped SDK token is named by variable in the config, never written.
-//!
-//! Codex is refused: its login is a file holding a refresh token, and there
-//! is no way yet to hand it only a short-lived token.
+//! Team execution uses the same guarded CLI argv and native sign-in routing as
+//! private chat. Native tools are disabled: only the guardian's scoped MCP can
+//! read context or edit a lane. No personal settings, sessions or hooks load.
 
 use super::run_home::RunHome;
 use crate::{error::DispatchError, team_process::Program};
@@ -23,45 +11,122 @@ use std::{
     collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
+    time::Duration,
 };
+use unicode_normalization::UnicodeNormalization;
 
-/// The MCP server name the agent sees. Tool names derive from it.
 const SERVER: &str = "tokenstat_team";
-const SDK_VARS: [&str; 2] = ["TOKENSTAT_TEAM_SDK_ADDRESS", "TOKENSTAT_TEAM_SDK_TOKEN"];
-const PROMPT: &str = "You are answering an Ask in a shared Team chat. Call the team_context tool first. When its result includes nextCursor, call it again with that cursor until you have read every page. The original Ask is on every page. Answer that Ask for the people in this chat from that conversation. You have no file or shell access in this run.";
+const SDK_VARS: [&str; 3] = [
+    "TOKENSTAT_TEAM_SDK_ADDRESS",
+    "TOKENSTAT_TEAM_SDK_TOKEN",
+    "TOKENSTAT_TEAM_SDK_GENERATION",
+];
+const CODEX_AUTH_ENV: [&str; 2] = ["OPENAI_API_KEY", "OPENAI_BASE_URL"];
+const CLAUDE_AUTH_ENV: [&str; 4] = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
+const INFERENCE_ENV: [&str; 7] = [
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+    "OPENAI_BASE_URL",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+];
+const PROMPT: &str = "You are answering an Ask in a shared Team chat. Call team_context first, following nextCursor until every page is read. Answer the original Ask from that frozen conversation. Use only the tokenstat_team MCP tools. Native tools, shell commands, personal settings and other chats are unavailable.";
+const LANE_PROMPT: &str = "You are doing work asked for in a shared Team chat. Call team_context first, following nextCursor until every page is read. Use only tokenstat_team MCP tools. Use team_files_list, team_file_read, team_file_search, team_directory_create, team_file_write and team_file_edit to inspect and change your isolated lane. All paths are relative to that lane. You cannot run shell commands or use native tools. Do not commit: tokenstat commits, checks and lands your work. End with a short summary.";
 
-const LANE_PROMPT: &str = "You are doing work asked for in a shared Team chat. Call the team_context tool first. When its result includes nextCursor, call it again with that cursor until you have read every page. The original Ask is on every page. Make the change it asks for by editing files in this folder, which is your own copy of the project on a fresh branch. You can read and edit files only inside this folder and cannot run commands. Do not commit: tokenstat commits your work, checks it and lands it after you finish. End with a short summary of what you changed.";
-
-/// Only Claude Code can answer an Ask for now.
 pub(super) fn supported(backend: &str) -> Result<(), DispatchError> {
-    if backend == "claude" {
-        return Ok(());
+    if matches!(backend, "codex" | "claude") {
+        Ok(())
+    } else {
+        Err(DispatchError::new(
+            "team_agent_backend_unsupported",
+            "Shared chats support Codex and Claude Code on the publishing computer.",
+        ))
     }
-    Err(DispatchError::new(
-        "team_agent_backend_unsupported",
-        "Shared chats can ask Claude Code for now. Fork this chat to use another agent.",
-    ))
 }
 
-/// The access token alone, renewed first when it is close to expiry.
-pub(super) fn access_token() -> Result<String, DispatchError> {
-    tokenstat_sync::claude_limits::access_token().map_err(|_| {
-        DispatchError::new(
-            "team_agent_signed_out",
-            "Claude Code is not signed in on the publishing computer.",
-        )
-    })
+pub(super) fn default_backend() -> Result<&'static str, DispatchError> {
+    // Creating an empty shared chat neither executes nor grants an agent.
+    // Preserve its legacy metadata default on machines with no CLI installed.
+    Ok(default_choice(|backend| {
+        crate::launcher::resolve_command(backend).is_some()
+    }))
 }
 
-/// The program before its home exists. `run_home::prepare` checks the folder
-/// and keeps only `PATH` from this environment.
-pub(super) fn program(checkout: &Path) -> Result<Program, DispatchError> {
-    let path = search_path().ok_or_else(missing)?;
-    let executable = resolve("claude", &path).ok_or_else(missing)?;
+fn default_choice(installed: impl Fn(&str) -> bool) -> &'static str {
+    ["codex", "claude"]
+        .into_iter()
+        .find(|backend| installed(backend))
+        .unwrap_or("claude")
+}
+
+pub(super) fn program(checkout: &Path, backend: &str) -> Result<Program, DispatchError> {
+    supported(backend)?;
+    let auth = Auth::capture(checkout)
+        .map_err(|error| DispatchError::new("team_agent_sign_in_unavailable", error.to_string()))?;
+    if backend == "claude" {
+        claude_relative_selector(&auth.claude_selector).map_err(|error| {
+            DispatchError::new("team_agent_sign_in_unavailable", error.to_string())
+        })?;
+    }
+    if backend == "codex"
+        && !auth
+            .environment
+            .get("OPENAI_API_KEY")
+            .is_some_and(|key| !key.trim().is_empty())
+        && !auth.codex.try_exists().map_err(|_| missing())?
+    {
+        return Err(DispatchError::new(
+            "team_agent_sign_in_unavailable",
+            "Codex needs its existing file-based CLI sign-in or OPENAI_API_KEY for an isolated Team run. Keyring-only Codex sign-ins are not supported here yet.",
+        ));
+    }
+    let executable = crate::launcher::resolve_command(backend).ok_or_else(missing)?;
+    // Probe help/version only. Never inspect credentials or spend a model call.
+    let args = if backend == "claude" {
+        vec!["--version".into()]
+    } else {
+        vec!["exec".into(), "--help".into()]
+    };
+    let (probe, args) = invocation(&executable, &args).map_err(|_| missing())?;
+    let words = args.iter().map(String::as_str).collect::<Vec<_>>();
+    let capability = crate::agent_models::run_cli_probe(
+        probe.to_str().ok_or_else(missing)?,
+        &words,
+        Duration::from_secs(5),
+        64 * 1024,
+        None,
+        &[],
+    )
+    .filter(|reply| reply.success)
+    .ok_or_else(missing)?;
+    let text = format!("{}\n{}", capability.stdout, capability.stderr);
+    if (backend == "claude" && !claude_version_supported(&text))
+        || (backend == "codex"
+            && ![
+                "--ignore-user-config",
+                "--ignore-rules",
+                "--ephemeral",
+                "--dangerously-bypass-hook-trust",
+            ]
+            .iter()
+            .all(|flag| text.contains(flag)))
+    {
+        return Err(DispatchError::new(
+            "team_agent_update_required",
+            "Update this agent CLI before using it in a shared chat.",
+        ));
+    }
     Ok(Program {
-        executable,
+        executable: executable.into(),
         args: Vec::new(),
-        env: BTreeMap::from([("PATH".into(), path)]),
+        env: BTreeMap::from([("PATH".into(), crate::launcher::search_path_var())]),
         folder: checkout.into(),
         input: PathBuf::new(),
         output: PathBuf::new(),
@@ -72,89 +137,412 @@ pub(super) fn program(checkout: &Path) -> Result<Program, DispatchError> {
 fn missing() -> DispatchError {
     DispatchError::new(
         "team_agent_missing",
-        "Claude Code is not installed on the publishing computer.",
+        "The selected agent CLI is unavailable on the publishing computer.",
     )
 }
 
-fn search_path() -> Option<String> {
-    #[cfg(unix)]
-    let login = tokenstat_pty::login_env_ready();
-    #[cfg(not(unix))]
-    let login = tokenstat_pty::login_env();
-    login
-        .map(|env| env.path.clone())
-        .filter(|path| !path.is_empty())
-        .or_else(|| std::env::var("PATH").ok())
+fn claude_version_supported(text: &str) -> bool {
+    text.split_whitespace()
+        .next()
+        .and_then(|word| {
+            let parts = word
+                .split('.')
+                .map(str::parse::<u32>)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            (parts.len() == 3).then(|| (parts[0], parts[1], parts[2]) >= (2, 1, 309))
+        })
+        .unwrap_or(false)
 }
 
-/// The first executable file named `name` on `path`. Only absolute entries
-/// count: a relative one would resolve against the checkout.
-fn resolve(name: &str, path: &str) -> Option<PathBuf> {
-    let file = if cfg!(windows) {
-        format!("{name}.exe")
+struct Auth {
+    codex: PathBuf,
+    claude_selector: String,
+    claude_file: PathBuf,
+    environment: BTreeMap<String, String>,
+}
+impl Auth {
+    fn capture(folder: &Path) -> io::Result<Self> {
+        // Settle the same login baseline the CLI launcher uses before checking
+        // env-only sign-in; a cold launchd environment may not contain its key.
+        #[cfg(unix)]
+        let login = tokenstat_pty::login_env_ready();
+        #[cfg(not(unix))]
+        let login = tokenstat_pty::login_env();
+        let env = |name: &str| match &login {
+            Some(login) => login.vars.get(name).cloned(),
+            None => std::env::var(name).ok(),
+        };
+        let home = env("HOME")
+            .filter(|path| Path::new(path).is_absolute())
+            .map(PathBuf::from)
+            .or_else(tokenstat_paths::home_dir)
+            .ok_or_else(|| io::Error::other("The CLI sign-in location is unavailable."))?;
+        let codex = env("CODEX_HOME")
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".codex"));
+        let codex = if codex.is_absolute() {
+            codex
+        } else {
+            folder.join(codex)
+        };
+        // Native Claude 2.1.309 supports a credential-store selector independent
+        // of CLAUDE_CONFIG_DIR. Empty preserves its default keychain namespace.
+        let (claude_selector, claude_file) = claude_auth_location(
+            &home,
+            folder,
+            env("CLAUDE_SECURESTORAGE_CONFIG_DIR"),
+            env("CLAUDE_CONFIG_DIR"),
+        );
+        Ok(Self {
+            codex: codex.join("auth.json"),
+            claude_selector,
+            claude_file,
+            environment: CODEX_AUTH_ENV
+                .into_iter()
+                .chain(CLAUDE_AUTH_ENV)
+                .filter_map(|key| env(key).map(|value| (key.into(), value)))
+                .collect(),
+        })
+    }
+}
+
+fn claude_auth_location(
+    home: &Path,
+    folder: &Path,
+    secure: Option<String>,
+    config: Option<String>,
+) -> (String, PathBuf) {
+    let selector = secure
+        .clone()
+        .or_else(|| config.clone())
+        .unwrap_or_default();
+    // Claude hashes the raw NFC selector, including a relative spelling. Do
+    // not absolutize it: that would select a different keychain account.
+    let storage = match secure {
+        Some(value) if value.is_empty() => home.join(".claude"),
+        Some(value) => PathBuf::from(value.nfc().collect::<String>()),
+        None => config
+            .map(|value| PathBuf::from(value.nfc().collect::<String>()))
+            .unwrap_or_else(|| home.join(".claude")),
+    };
+    let storage = if storage.is_absolute() {
+        storage
     } else {
-        name.into()
+        folder.join(storage)
     };
-    std::env::split_paths(path)
-        .filter(|dir| dir.is_absolute())
-        .map(|dir| dir.join(&file))
-        .find(|candidate| executable(candidate))
+    (selector, storage.join(".credentials.json"))
 }
 
-fn executable(path: &Path) -> bool {
-    let Ok(metadata) = fs::metadata(path) else {
-        return false;
-    };
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+fn claude_relative_selector(selector: &str) -> io::Result<Option<PathBuf>> {
+    if selector.is_empty() || Path::new(selector).is_absolute() {
+        return Ok(None);
     }
-    #[cfg(not(unix))]
-    {
-        metadata.is_file()
+    let relative = PathBuf::from(selector.nfc().collect::<String>());
+    if relative.components().any(|part| {
+        !matches!(
+            part,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    }) {
+        return Err(io::Error::other(
+            "This Claude CLI uses a relative credential directory outside its working folder, which cannot be reused in an isolated Team run.",
+        ));
     }
+    Ok(Some(relative))
 }
 
-/// Finish the program inside its prepared home: IO files, arguments, the MCP
-/// bridge and the token. Call after `sdk.configure`, which adds the bridge's
-/// address and token to the environment.
 pub(super) fn configure(
     home: &RunHome,
     program: &mut Program,
     helper: &Path,
-    token: String,
+    backend: &str,
     lane: bool,
 ) -> io::Result<()> {
-    program.input = home.file("input");
-    program.output = home.file("output");
-    program.errors = home.file("errors");
-    write_new(
-        &program.input,
-        if lane { LANE_PROMPT } else { PROMPT }.as_bytes(),
-    )?;
-    let config = home.file("mcp.json");
-    write_new(&config, claude_mcp(helper).to_string().as_bytes())?;
-    program.args = claude_args(&config, lane);
-    program.env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token);
+    let auth = Auth::capture(&program.folder)?;
+    configure_with_auth(home, program, helper, backend, lane, &auth)
+}
+
+fn configure_with_auth(
+    home: &RunHome,
+    program: &mut Program,
+    helper: &Path,
+    backend: &str,
+    lane: bool,
+    auth: &Auth,
+) -> io::Result<()> {
+    program.env.insert(
+        "TOKENSTAT_TEAM_CLI_EXECUTABLE".into(),
+        program.executable.display().to_string(),
+    );
+    let keys: &[&str] = if backend == "codex" {
+        &CODEX_AUTH_ENV
+    } else {
+        &CLAUDE_AUTH_ENV
+    };
+    for key in keys {
+        if let Some(value) = auth.environment.get(*key) {
+            program.env.insert((*key).into(), value.clone());
+        }
+    }
+    match backend {
+        "codex" => {
+            let directory = PathBuf::from(&home.env["CODEX_HOME"]);
+            crate::chat_gate::route_cli_credential(&auth.codex, &directory.join("auth.json"))
+                .map_err(io::Error::other)?;
+            write_new(
+                &directory.join("hooks.json"),
+                crate::chat_gate::team_hooks_document(helper, backend)
+                    .to_string()
+                    .as_bytes(),
+            )?;
+        }
+        "claude" => {
+            program.env.insert(
+                "CLAUDE_SECURESTORAGE_CONFIG_DIR".into(),
+                auth.claude_selector.clone(),
+            );
+            let directory = if auth.claude_selector.is_empty() {
+                Some(PathBuf::from(&home.env["HOME"]).join(".claude"))
+            } else {
+                claude_relative_selector(&auth.claude_selector)?
+                    .map(|relative| home.file("home").join(relative))
+            };
+            if let Some(directory) = directory {
+                fs::create_dir_all(&directory)?;
+                crate::chat_gate::route_cli_credential(
+                    &auth.claude_file,
+                    &directory.join(".credentials.json"),
+                )
+                .map_err(io::Error::other)?;
+            }
+            for (key, value) in [
+                ("CLAUDE_CODE_DISABLE_CLAUDE_MDS", "1"),
+                ("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1"),
+                ("CLAUDE_CODE_DISABLE_BUNDLED_SKILLS", "1"),
+                ("ENABLE_CLAUDEAI_MCP_SERVERS", "false"),
+            ] {
+                program.env.insert(key.into(), value.into());
+            }
+            let config = home.file("mcp.json");
+            let mut env: serde_json::Map<String, serde_json::Value> = SDK_VARS
+                .iter()
+                .map(|name| ((*name).into(), format!("${{{name}}}").into()))
+                .collect();
+            for key in INFERENCE_ENV {
+                env.insert(key.into(), "".into());
+            }
+            write_new(
+                &config,
+                json!({"mcpServers":{SERVER:{"command":helper,"args":["team-run-sdk"],"env":env}}})
+                    .to_string()
+                    .as_bytes(),
+            )?;
+        }
+        _ => return Err(io::Error::other("Unsupported Team CLI.")),
+    }
+    // CLI cwd never exposes the checkout's project settings or instructions.
+    // Lane access is the SDK's separately pinned capability, not cwd authority.
+    program.folder = home.file("home");
+    rebuild(
+        home,
+        program,
+        helper,
+        backend,
+        0,
+        if lane { LANE_PROMPT } else { PROMPT },
+    )
+}
+
+fn rebuild(
+    home: &RunHome,
+    program: &mut Program,
+    helper: &Path,
+    backend: &str,
+    attempt: u32,
+    prompt: &str,
+) -> io::Result<()> {
+    let suffix = if attempt == 0 {
+        String::new()
+    } else {
+        format!("-{attempt}")
+    };
+    program.input = home.file(&format!("input{suffix}"));
+    program.output = home.file(&format!("output{suffix}"));
+    program.errors = home.file(&format!("errors{suffix}"));
+    let mut argv = crate::automations::chat_agent_command_in(
+        backend,
+        prompt,
+        None,
+        None,
+        0,
+        crate::automations::ChatLaunch {
+            resume: None,
+            bypass: false,
+            mode: "execute",
+            hook_helper: Some(helper),
+            system_append: None,
+            agy_customization_dir: None,
+            cursor_plugin_dir: None,
+            grok_allow_rules: &[],
+            attachments: &[],
+        },
+        Some(&program.folder),
+    )
+    .map_err(io::Error::other)?;
+    // Keep the common guarded CLI construction, but transport the prompt on
+    // stdin. Conflict paths can exceed Windows' command-line limit. Native
+    // Codex accepts '-' after '--'; Claude -p reads stdin without a positional
+    // prompt, as the previous Team launcher did.
+    let input_prompt = prompt_to_stdin(&mut argv, backend)?;
+    write_new(&program.input, input_prompt.as_bytes())?;
+    match backend {
+        "claude" => {
+            let at = argv
+                .iter()
+                .position(|word| word == "--settings")
+                .ok_or_else(|| io::Error::other("Missing CLI tool gate."))?;
+            let mut settings = crate::chat_gate::team_hooks_document(helper, backend);
+            settings["disableClaudeAiConnectors"] = true.into();
+            settings["autoMemoryEnabled"] = false.into();
+            argv[at + 1] = settings.to_string();
+            argv.splice(
+                1..1,
+                [
+                    "--setting-sources".into(),
+                    "".into(),
+                    "--disable-slash-commands".into(),
+                    "--strict-mcp-config".into(),
+                    "--mcp-config".into(),
+                    home.file("mcp.json").display().to_string(),
+                    "--no-session-persistence".into(),
+                    "--tools".into(),
+                    "".into(),
+                    "--allowedTools".into(),
+                    "mcp__tokenstat_team".into(),
+                ],
+            );
+        }
+        "codex" => {
+            let mut extra = vec!["--no-daemon".into(), "--sandbox".into(), "read-only".into()];
+            let quote = |text: &str| serde_json::to_string(text).map_err(io::Error::other);
+            for setting in [
+                "approval_policy=\"never\"".into(),
+                "project_doc_max_bytes=0".into(),
+                "features.shell_tool=false".into(),
+                "features.hooks=true".into(),
+                "features.multi_agent_v2=false".into(),
+                "agents.enabled=false".into(),
+                "apps._default.enabled=false".into(),
+                "web_search=\"disabled\"".into(),
+                format!(
+                    "mcp_servers.{SERVER}.command={}",
+                    quote(&helper.display().to_string())?
+                ),
+                format!("mcp_servers.{SERVER}.args=[\"team-run-sdk\"]"),
+                format!(
+                    "mcp_servers.{SERVER}.env_vars={}",
+                    serde_json::to_string(&SDK_VARS).map_err(io::Error::other)?
+                ),
+                format!("mcp_servers.{SERVER}.default_tools_approval_mode=\"auto\""),
+            ] {
+                extra.extend(["-c".into(), setting]);
+            }
+            for key in INFERENCE_ENV {
+                extra.extend(["-c".into(), format!("mcp_servers.{SERVER}.env.{key}=\"\"")]);
+            }
+            argv.splice(1..1, extra);
+            let exec = argv
+                .iter()
+                .position(|word| word == "exec")
+                .ok_or_else(|| io::Error::other("Missing CLI command."))?;
+            argv.splice(
+                exec + 1..exec + 1,
+                [
+                    "--ignore-user-config".into(),
+                    "--ignore-rules".into(),
+                    "--ephemeral".into(),
+                ],
+            );
+        }
+        _ => return Err(io::Error::other("Unsupported Team CLI.")),
+    }
+    let command = program
+        .env
+        .get("TOKENSTAT_TEAM_CLI_EXECUTABLE")
+        .ok_or_else(|| io::Error::other("The agent CLI is unavailable."))?;
+    let (executable, args) = invocation(command, &argv[1..])?;
+    program.executable = executable;
+    program.args = args;
     Ok(())
 }
 
-/// The same lane agent again, with what blocked its landing as the prompt.
-/// Fresh IO files per attempt; arguments and environment stay the same.
+fn prompt_to_stdin(argv: &mut Vec<String>, backend: &str) -> io::Result<String> {
+    let marker = if backend == "codex" { "--" } else { "-p" };
+    let at = argv
+        .iter()
+        .rposition(|arg| arg == marker)
+        .and_then(|index| index.checked_add(1))
+        .ok_or_else(|| io::Error::other("The guarded CLI prompt operand is unavailable."))?;
+    let prompt = argv
+        .get(at)
+        .filter(|arg| !arg.is_empty() && !arg.starts_with("--"))
+        .cloned()
+        .ok_or_else(|| io::Error::other("The guarded CLI prompt operand is unavailable."))?;
+    match backend {
+        "codex" => argv[at] = "-".into(),
+        "claude" => {
+            argv.remove(at);
+        }
+        _ => return Err(io::Error::other("Unsupported Team CLI.")),
+    }
+    Ok(prompt)
+}
+
 pub(super) fn follow_up(
     home: &RunHome,
     program: &mut Program,
+    helper: &Path,
+    backend: &str,
     attempt: u32,
     instruction: &str,
 ) -> io::Result<()> {
-    program.input = home.file(&format!("input-{attempt}"));
-    program.output = home.file(&format!("output-{attempt}"));
-    program.errors = home.file(&format!("errors-{attempt}"));
-    let prompt = format!(
-        "You are continuing work in your own copy of the project. You can read and edit files only inside this folder and cannot run commands. Do not commit. {instruction}"
-    );
-    write_new(&program.input, prompt.as_bytes())
+    rebuild(
+        home,
+        program,
+        helper,
+        backend,
+        attempt,
+        &format!(
+            "{LANE_PROMPT}\n\nThis attempt must address the following landing failure: {instruction}"
+        ),
+    )
+}
+
+fn invocation(command: &str, args: &[String]) -> io::Result<(PathBuf, Vec<String>)> {
+    let command = tokenstat_pty::headless_command(command, args);
+    let executable = PathBuf::from(command.get_program());
+    let executable = if executable.is_absolute() {
+        executable
+    } else {
+        crate::launcher::resolve_command(
+            executable
+                .to_str()
+                .ok_or_else(|| io::Error::other("Invalid CLI path."))?,
+        )
+        .map(PathBuf::from)
+        .ok_or_else(|| io::Error::other("The CLI launcher is unavailable."))?
+    };
+    let args = command
+        .get_args()
+        .map(|arg| {
+            arg.to_str()
+                .map(str::to_owned)
+                .ok_or_else(|| io::Error::other("Invalid CLI argument."))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    Ok((executable, args))
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -171,219 +559,400 @@ fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.sync_all()
 }
 
-fn claude_mcp(helper: &Path) -> serde_json::Value {
-    let env: serde_json::Map<String, serde_json::Value> = SDK_VARS
-        .iter()
-        .map(|var| ((*var).into(), format!("${{{var}}}").into()))
-        .collect();
-    json!({"mcpServers": {SERVER: {
-        "command": helper,
-        "args": ["team-run-sdk"],
-        "env": env,
-    }}})
-}
-
-/// A lane agent edits files inside its own lane and nothing else: path rules
-/// confine every file tool to the working folder, and it has no shell.
-/// tokenstat commits, checks and lands the work afterwards.
-const LANE_TOOLS: [&str; 5] = [
-    "Read(./**)",
-    "Edit(./**)",
-    "Glob(./**)",
-    "Grep(./**)",
-    "mcp__tokenstat_team",
-];
-
-const LANE_DENIED: [&str; 3] = ["Edit(./.git)", "Edit(./.git/**)", "Read(./.git/**)"];
-
-fn claude_args(config: &Path, lane: bool) -> Vec<String> {
-    let mut args: Vec<String> = [
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        // No user, project or local settings: a teammate's Ask must not run
-        // hooks or pick up permissions written for the publisher.
-        "--setting-sources",
-        "",
-        "--disable-slash-commands",
-        "--strict-mcp-config",
-        "--mcp-config",
-    ]
-    .map(str::to_string)
-    .into();
-    args.push(config.to_string_lossy().into_owned());
-    if lane {
-        args.extend([
-            "--tools".into(),
-            "Read,Edit,Write,Glob,Grep".into(),
-            "--allowedTools".into(),
-        ]);
-        args.extend(LANE_TOOLS.map(str::to_string));
-        // The git pointer and directory are tokenstat's, never the agent's.
-        args.push("--disallowedTools".into());
-        args.extend(LANE_DENIED.map(str::to_string));
-    } else {
-        // No built-in tools. Read, Grep and Glob accept paths outside the
-        // checkout, and Bash reads anything.
-        args.extend(["--tools", "", "--allowedTools", "mcp__tokenstat_team"].map(str::to_string));
-    }
-    args
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn empty_chat_default_does_not_require_an_installed_agent() {
+        for (codex, claude, wanted) in [
+            (true, false, "codex"),
+            (false, true, "claude"),
+            (true, true, "codex"),
+            (false, false, "claude"),
+        ] {
+            assert_eq!(
+                default_choice(|backend| if backend == "codex" { codex } else { claude }),
+                wanted
+            );
+        }
+    }
 
-    const SDK_TOKEN: &str = "5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d";
-    const ACCESS: &str = "sk-ant-oat01-fixture-access";
+    #[test]
+    fn claude_auth_selectors_preserve_native_relative_keychain_identity() {
+        let home = Path::new("/native/home");
+        let folder = Path::new("/native/project");
+        for (secure, config, raw, source) in [
+            (
+                Some("auth"),
+                None,
+                "auth",
+                folder.join("auth/.credentials.json"),
+            ),
+            (
+                None,
+                Some("auth"),
+                "auth",
+                folder.join("auth/.credentials.json"),
+            ),
+            (
+                Some("./cafe\u{301}"),
+                Some("ignored"),
+                "./cafe\u{301}",
+                folder.join("café/.credentials.json"),
+            ),
+            (
+                Some(""),
+                Some("ignored"),
+                "",
+                home.join(".claude/.credentials.json"),
+            ),
+            (None, Some(""), "", folder.join(".credentials.json")),
+            (None, None, "", home.join(".claude/.credentials.json")),
+        ] {
+            let (selector, file) = claude_auth_location(
+                home,
+                folder,
+                secure.map(str::to_string),
+                config.map(str::to_string),
+            );
+            assert_eq!(selector, raw);
+            assert_eq!(file, source);
+        }
+        assert!(claude_relative_selector("../outside").is_err());
+        assert!(claude_relative_selector("nested/../../outside").is_err());
+    }
 
-    fn prepared() -> (tempfile::TempDir, tempfile::TempDir, RunHome, Program) {
-        let scratch = tempfile::tempdir().unwrap();
-        let checkout = tempfile::tempdir().unwrap();
-        let program = Program {
-            executable: checkout.path().join("claude"),
+    #[test]
+    fn relative_claude_file_auth_is_routed_inside_the_private_cli_cwd() {
+        let (_root, home, program) =
+            configured_auth("claude", BTreeMap::new(), "./nested/auth".into());
+        assert_eq!(
+            program.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"],
+            "./nested/auth"
+        );
+        assert_eq!(
+            fs::read_to_string(home.file("home/nested/auth/.credentials.json")).unwrap(),
+            "fictional Claude login"
+        );
+        assert_eq!(program.folder, home.file("home"));
+    }
+
+    #[test]
+    fn repair_prompts_larger_than_windows_argv_limits_use_complete_private_stdin() {
+        let instruction = format!(
+            "Resolve every conflicting path:\n{}",
+            "目录/長い名前/file.rs\n".repeat(5000)
+        ) + "End of conflict list.";
+        assert!(instruction.encode_utf16().count() > 32767);
+        for backend in ["codex", "claude"] {
+            let composed = "<system-instructions>Keep the shared builder rules.</system-instructions>\n\nOriginal request";
+            let mut argv = if backend == "codex" {
+                vec!["codex", "exec", "--", composed]
+            } else {
+                vec!["claude", "-p", composed, "--output-format", "stream-json"]
+            }
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+            assert_eq!(prompt_to_stdin(&mut argv, backend).unwrap(), composed);
+            let (root, home, mut program) = configured(backend);
+            follow_up(
+                &home,
+                &mut program,
+                &root.path().join("helper with spaces.exe"),
+                backend,
+                1,
+                &instruction,
+            )
+            .unwrap();
+            let input = fs::read_to_string(&program.input).unwrap();
+            assert!(input.ends_with(&instruction));
+            assert!(
+                program
+                    .args
+                    .iter()
+                    .map(|arg| arg.encode_utf16().count() + 1)
+                    .sum::<usize>()
+                    < 32767
+            );
+            assert!(!program.args.iter().any(|arg| arg.contains("目录")));
+            if backend == "codex" {
+                assert_eq!(program.args.last().map(String::as_str), Some("-"));
+            } else {
+                assert!(program.args.iter().any(|arg| arg == "-p"));
+            }
+        }
+    }
+    #[test]
+    fn supported_clis_and_native_auth_capability_are_explicit() {
+        for backend in ["codex", "claude"] {
+            assert!(supported(backend).is_ok());
+        }
+        for backend in ["sh", "muse", ""] {
+            assert!(supported(backend).is_err());
+        }
+        assert!(claude_version_supported("2.1.309 (Claude Code)"));
+        assert!(!claude_version_supported("2.1.308 (Claude Code)"));
+        assert!(!claude_version_supported("unknown"));
+    }
+
+    fn configured(backend: &str) -> (tempfile::TempDir, RunHome, Program) {
+        configured_auth(backend, BTreeMap::new(), String::new())
+    }
+
+    fn configured_auth(
+        backend: &str,
+        environment: BTreeMap<String, String>,
+        claude_selector: String,
+    ) -> (tempfile::TempDir, RunHome, Program) {
+        let root = tempfile::tempdir().unwrap();
+        let checkout = root.path().join("checkout");
+        fs::create_dir(&checkout).unwrap();
+        let credentials = root.path().join("native-auth");
+        fs::create_dir(&credentials).unwrap();
+        fs::write(credentials.join("auth.json"), "fictional Codex login").unwrap();
+        fs::write(
+            credentials.join(".credentials.json"),
+            "fictional Claude login",
+        )
+        .unwrap();
+        let mut program = Program {
+            executable: root.path().join(format!("fake-{backend}.exe")),
             args: Vec::new(),
             env: BTreeMap::from([("PATH".into(), "/usr/bin:/bin".into())]),
-            folder: checkout.path().into(),
+            folder: checkout.clone(),
             input: PathBuf::new(),
             output: PathBuf::new(),
             errors: PathBuf::new(),
         };
         let home =
-            super::super::run_home::prepare(scratch.path(), checkout.path(), &program).unwrap();
-        let mut program = program;
-        program.env.clone_from(&home.env);
-        program.env.insert(SDK_VARS[0].into(), "127.0.0.1:9".into());
-        program.env.insert(SDK_VARS[1].into(), SDK_TOKEN.into());
-        (scratch, checkout, home, program)
+            super::super::run_home::prepare(&root.path().join("scratch"), &checkout, &program)
+                .unwrap();
+        program.env = home.env.clone();
+        program
+            .env
+            .insert("TOKENSTAT_TEAM_SDK_TOKEN".into(), "5d".repeat(32));
+        program
+            .env
+            .insert("TOKENSTAT_TEAM_SDK_GENERATION".into(), "0".into());
+        program
+            .env
+            .insert("TOKENSTAT_TEAM_SDK_ADDRESS".into(), "127.0.0.1:1234".into());
+        configure_with_auth(
+            &home,
+            &mut program,
+            &root.path().join("helper with spaces.exe"),
+            backend,
+            true,
+            &Auth {
+                codex: credentials.join("auth.json"),
+                claude_selector,
+                claude_file: credentials.join(".credentials.json"),
+                environment,
+            },
+        )
+        .unwrap();
+        (root, home, program)
     }
 
-    /// Every entry under the run root. A link of any kind fails the test:
-    /// nothing in a Team run may point back into a personal home.
-    fn home_files(root: &Path) -> Vec<(PathBuf, String)> {
-        let mut found = Vec::new();
-        let mut stack = vec![root.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            for entry in fs::read_dir(dir).unwrap() {
-                let path = entry.unwrap().path();
-                let kind = fs::symlink_metadata(&path).unwrap().file_type();
-                assert!(!kind.is_symlink(), "{path:?} is a link");
-                if kind.is_dir() {
-                    stack.push(path);
+    #[test]
+    fn native_auth_keys_keep_their_endpoints_and_do_not_reach_sdk_children() {
+        let values = BTreeMap::from([
+            ("OPENAI_API_KEY".into(), "fixture-openai-key".into()),
+            (
+                "OPENAI_BASE_URL".into(),
+                "https://codex-gateway.invalid/v1".into(),
+            ),
+            ("ANTHROPIC_API_KEY".into(), "fixture-anthropic-key".into()),
+            ("ANTHROPIC_AUTH_TOKEN".into(), "fixture-auth-token".into()),
+            (
+                "CLAUDE_CODE_OAUTH_TOKEN".into(),
+                "fixture-native-oauth".into(),
+            ),
+            (
+                "ANTHROPIC_BASE_URL".into(),
+                "https://claude-gateway.invalid".into(),
+            ),
+        ]);
+        for backend in ["codex", "claude"] {
+            let (_root, home, program) = configured_auth(
+                backend,
+                values.clone(),
+                "/fictional/custom-claude-auth".into(),
+            );
+            let wanted: &[&str] = if backend == "codex" {
+                &CODEX_AUTH_ENV
+            } else {
+                &CLAUDE_AUTH_ENV
+            };
+            for key in wanted {
+                assert_eq!(program.env.get(*key), values.get(*key));
+            }
+            let other: &[&str] = if backend == "codex" {
+                &CLAUDE_AUTH_ENV
+            } else {
+                &CODEX_AUTH_ENV
+            };
+            for key in other {
+                assert!(!program.env.contains_key(*key));
+            }
+            let configuration = if backend == "claude" {
+                assert_eq!(
+                    program.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"],
+                    "/fictional/custom-claude-auth"
+                );
+                fs::read_to_string(home.file("mcp.json")).unwrap()
+            } else {
+                program.args.join("\n")
+            };
+            for secret in [
+                "fixture-openai-key",
+                "fixture-anthropic-key",
+                "fixture-auth-token",
+                "fixture-native-oauth",
+            ] {
+                assert!(!configuration.contains(secret));
+            }
+            for key in INFERENCE_ENV {
+                if backend == "claude" {
+                    let config: serde_json::Value = serde_json::from_str(&configuration).unwrap();
+                    assert_eq!(config["mcpServers"][SERVER]["env"][key], "");
                 } else {
-                    let text = fs::read_to_string(&path).unwrap_or_default();
-                    found.push((path, text));
+                    assert!(
+                        program
+                            .args
+                            .iter()
+                            .any(|arg| arg == &format!("mcp_servers.{SERVER}.env.{key}=\"\""))
+                    );
                 }
             }
         }
-        found
     }
 
     #[test]
-    fn only_claude_can_answer_for_now() {
-        assert!(supported("claude").is_ok());
-        for backend in ["codex", "grok", "cursor", ""] {
-            assert_eq!(
-                supported(backend).unwrap_err().code,
-                "team_agent_backend_unsupported"
-            );
-        }
-    }
-
-    #[test]
-    fn claude_has_only_team_tools_and_no_credential_on_disk() {
-        let (_scratch, _checkout, home, mut program) = prepared();
-        let helper = Path::new("/opt/tokenstat/tokenstat-hostd");
-        configure(&home, &mut program, helper, ACCESS.into(), false).unwrap();
-        assert_eq!(program.env["CLAUDE_CODE_OAUTH_TOKEN"], ACCESS);
-        assert!(!program.args.iter().any(|a| a.contains("skip-permissions")));
-        let at = |flag: &str| program.args.iter().position(|a| a == flag).unwrap() + 1;
-        assert_eq!(program.args[at("--tools")], "");
-        assert_eq!(program.args[at("--setting-sources")], "");
-        assert_eq!(program.args[at("--allowedTools")], "mcp__tokenstat_team");
-        assert!(program.args.iter().any(|a| a == "--strict-mcp-config"));
-        let config = PathBuf::from(&program.args[at("--mcp-config")]);
-        assert!(config.starts_with(home.file("")));
-        let mcp: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
-        let server = &mcp["mcpServers"]["tokenstat_team"];
-        assert_eq!(server["command"], helper.to_str().unwrap());
-        assert_eq!(server["args"], json!(["team-run-sdk"]));
-        assert_eq!(
-            server["env"]["TOKENSTAT_TEAM_SDK_TOKEN"],
-            "${TOKENSTAT_TEAM_SDK_TOKEN}"
-        );
-        assert_eq!(fs::read_to_string(&program.input).unwrap(), PROMPT);
-        let files = home_files(&home.file(""));
-        for (path, text) in &files {
-            assert!(!text.contains(SDK_TOKEN), "{path:?}");
-            assert!(!text.contains(ACCESS), "{path:?}");
-            assert!(!text.contains("refresh"), "{path:?}");
-            let name = path.file_name().unwrap().to_string_lossy();
+    fn guarded_cli_arguments_use_native_login_and_only_team_tools() {
+        for backend in ["codex", "claude"] {
+            let (_root, home, program) = configured(backend);
+            assert_eq!(program.folder, home.file("home"));
+            assert!(!program.args.iter().any(|arg| matches!(
+                arg.as_str(),
+                "--dangerously-bypass-approvals-and-sandbox"
+                    | "--dangerously-skip-permissions"
+                    | "--resume"
+            )));
+            assert!(!program.env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+            assert!(!program.env.contains_key("TOKENSTAT_CHAT_SOCKET"));
+            assert!(!program.env.contains_key("TOKENSTAT_CHAT_TURN_FILE"));
             assert!(
-                ![".credentials.json", "auth.json"].contains(&name.as_ref()),
-                "{path:?}"
+                fs::read_to_string(&program.input)
+                    .unwrap()
+                    .contains("team_file_edit")
             );
+            assert!(
+                !program
+                    .args
+                    .iter()
+                    .any(|arg| arg.contains("You are doing work asked for"))
+            );
+            if backend == "codex" {
+                let directory = PathBuf::from(&program.env["CODEX_HOME"]);
+                assert_eq!(
+                    fs::read_to_string(directory.join("auth.json")).unwrap(),
+                    "fictional Codex login"
+                );
+                let hooks = fs::read_to_string(directory.join("hooks.json")).unwrap();
+                assert!(hooks.contains("team-hook codex pre"));
+                assert!(!hooks.contains("chat.toolRequest"));
+                assert!(program.args.iter().any(|arg| arg == "--ignore-user-config"));
+                assert!(program.args.iter().any(|arg| arg == "--ignore-rules"));
+                assert!(
+                    program
+                        .args
+                        .iter()
+                        .any(|arg| arg == "features.shell_tool=false")
+                );
+            } else {
+                assert_eq!(program.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"], "");
+                assert_eq!(program.env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"], "1");
+                let settings = program
+                    .args
+                    .iter()
+                    .position(|arg| arg == "--settings")
+                    .unwrap();
+                assert!(program.args[settings + 1].contains("team-hook claude pre"));
+                let tools = program
+                    .args
+                    .iter()
+                    .position(|arg| arg == "--tools")
+                    .unwrap();
+                assert_eq!(program.args[tools + 1], "");
+                assert_eq!(
+                    fs::read_to_string(home.file("home/.claude/.credentials.json")).unwrap(),
+                    "fictional Claude login"
+                );
+                let mcp = fs::read_to_string(home.file("mcp.json")).unwrap();
+                assert!(!mcp.contains(&"5d".repeat(32)));
+            }
         }
-        let mut names: Vec<_> = files
-            .iter()
-            .map(|(p, _)| p.file_name().unwrap().to_string_lossy().into_owned())
-            .collect();
-        names.sort();
-        assert_eq!(names, ["input", "mcp.json"]);
-    }
-
-    #[test]
-    fn a_lane_agent_edits_only_inside_its_lane_and_has_no_shell() {
-        let (_scratch, _checkout, home, mut program) = prepared();
-        configure(
-            &home,
-            &mut program,
-            Path::new("/opt/hostd"),
-            ACCESS.into(),
-            true,
-        )
-        .unwrap();
-        let at = |flag: &str| program.args.iter().position(|a| a == flag).unwrap() + 1;
-        assert_eq!(program.args[at("--tools")], "Read,Edit,Write,Glob,Grep");
-        assert!(
-            !program
-                .args
-                .iter()
-                .any(|a| a.contains("Bash") || a.contains("skip-permissions"))
-        );
-        let allowed = &program.args[at("--allowedTools")..at("--disallowedTools") - 1];
-        assert_eq!(allowed, LANE_TOOLS.map(str::to_string));
-        assert_eq!(
-            &program.args[at("--disallowedTools")..],
-            LANE_DENIED.map(str::to_string)
-        );
-        assert!(
-            allowed
-                .iter()
-                .all(|rule| rule.ends_with("(./**)") || rule == "mcp__tokenstat_team")
-        );
-        assert_eq!(fs::read_to_string(&program.input).unwrap(), LANE_PROMPT);
     }
 
     #[cfg(unix)]
     #[test]
-    fn resolution_takes_the_first_absolute_executable() {
+    fn fake_clis_receive_rebuilt_repair_prompts_without_personal_state() {
         use std::os::unix::fs::PermissionsExt;
-        let first = tempfile::tempdir().unwrap();
-        let second = tempfile::tempdir().unwrap();
-        fs::write(first.path().join("claude"), "not executable").unwrap();
-        let found = second.path().join("claude");
-        fs::write(&found, "#!/bin/sh\n").unwrap();
-        fs::set_permissions(&found, fs::Permissions::from_mode(0o755)).unwrap();
-        let path = std::env::join_paths([
-            "relative",
-            first.path().to_str().unwrap(),
-            second.path().to_str().unwrap(),
-        ])
-        .unwrap();
-        assert_eq!(resolve("claude", path.to_str().unwrap()), Some(found));
-        assert_eq!(resolve("codex", path.to_str().unwrap()), None);
+        for backend in ["codex", "claude"] {
+            let (root, home, mut program) = configured(backend);
+            fs::write(
+                &program.executable,
+                "#!/bin/sh\nprintf '%s\\n' \"$@\"\ncat\nprintf 'child-home=%s\\n' \"$HOME\"\n",
+            )
+            .unwrap();
+            fs::set_permissions(&program.executable, fs::Permissions::from_mode(0o700)).unwrap();
+            let initial = std::process::Command::new(&program.executable)
+                .args(&program.args)
+                .env_clear()
+                .envs(&program.env)
+                .current_dir(&program.folder)
+                .stdin(std::process::Stdio::from(
+                    fs::File::open(&program.input).unwrap(),
+                ))
+                .output()
+                .unwrap();
+            assert!(initial.status.success());
+            assert!(
+                String::from_utf8(initial.stdout)
+                    .unwrap()
+                    .contains("team_context")
+            );
+            follow_up(
+                &home,
+                &mut program,
+                &root.path().join("helper with spaces.exe"),
+                backend,
+                1,
+                "Resolve the exact fictional conflict.",
+            )
+            .unwrap();
+            let repair = std::process::Command::new(&program.executable)
+                .args(&program.args)
+                .env_clear()
+                .envs(&program.env)
+                .current_dir(&program.folder)
+                .stdin(std::process::Stdio::from(
+                    fs::File::open(&program.input).unwrap(),
+                ))
+                .output()
+                .unwrap();
+            assert!(repair.status.success());
+            let text = String::from_utf8(repair.stdout).unwrap();
+            assert!(text.contains("Resolve the exact fictional conflict."));
+            assert!(text.contains(&format!("child-home={}", home.file("home").display())));
+            assert_eq!(program.output, home.file("output-1"));
+            assert!(
+                fs::read_to_string(&program.input)
+                    .unwrap()
+                    .contains("Resolve the exact fictional conflict.")
+            );
+        }
     }
 }

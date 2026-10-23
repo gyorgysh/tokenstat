@@ -38,7 +38,8 @@ internal sealed partial class TeamsPage : Page
     private readonly Dictionary<TeamCommentTarget, TeamCommentModel> _comments = new();
     private readonly Dictionary<string, string> _checkoutHosts = new();
     private readonly Dictionary<string, string> _newChatWriting = new();
-    private readonly Dictionary<string, (string Title, string Id)> _newChatRequests = new();
+    private readonly Dictionary<string, string> _newChatBackends = new();
+    private readonly Dictionary<string, (string Title, string Backend, string Id)> _newChatRequests = new();
     private readonly Dictionary<TeamCommentTarget, TeamAskModel> _asks = new();
     private readonly TeamAskRecoveryStore _askStorage;
     private readonly Func<TeamSharedFileData, Func<bool>, Task>? _saveFile;
@@ -115,7 +116,7 @@ internal sealed partial class TeamsPage : Page
                 if (_scope is not null) _initialProject = null;
                 _organization = null;
                 _organizations = []; _organizationsNext = null;
-                _comments.Clear(); _checkoutHosts.Clear(); _newChatWriting.Clear(); _newChatRequests.Clear(); _asks.Clear(); _openedImages.Clear(); _flash = null;
+                _comments.Clear(); _checkoutHosts.Clear(); _newChatWriting.Clear(); _newChatBackends.Clear(); _newChatRequests.Clear(); _asks.Clear(); _openedImages.Clear(); _flash = null;
                 _historyTarget = null; _history = new([]); _readingEarlier = false;
             }
             _scope = scope; _session = session;
@@ -415,25 +416,37 @@ internal sealed partial class TeamsPage : Page
         var panel = new StackPanel { Spacing = Theme.SpaceXs, Margin = new Thickness(0, 4, 0, 0) };
         var box = new TextBox { Header = L10n.Text("common.teams.new_chat_title"), PlaceholderText = L10n.Text("common.teams.new_chat_placeholder") };
         var key = Target(orgId, repoId, checkout).ToJsonString();
+        var agent = new ComboBox { Header = L10n.Text("common.teams.agent"), SelectedValuePath = "Tag" };
+        agent.Items.Add(new ComboBoxItem { Content = L10n.Text("common.local_provider_use_default"), Tag = "" });
+        agent.Items.Add(new ComboBoxItem { Content = "Claude", Tag = "claude" });
+        agent.Items.Add(new ComboBoxItem { Content = "Codex", Tag = "codex" });
+        agent.SelectedValue = _newChatBackends.GetValueOrDefault(key) ?? "";
+        agent.SelectionChanged += (_, _) => { if (_view == view) _newChatBackends[key] = agent.SelectedValue as string ?? ""; };
         box.Text = _newChatWriting.GetValueOrDefault(key) ?? "";
         box.TextChanged += (_, _) => { if (_view == view) _newChatWriting[key] = box.Text; };
         Button? start = null;
         start = ActionIconGlyph.Button(L10n.Text("common.teams.new_chat"), ActionIcon.Create, async (_, _) =>
         {
+            if (!IsLoaded || _view != view) return;
             var title = box.Text.Trim();
+            var backend = agent.SelectedValue as string ?? "";
             if (title.Length == 0) return;
-            if (!_newChatRequests.TryGetValue(key, out var pending) || pending.Title != title) _newChatRequests[key] = pending = (title, "new-" + Guid.NewGuid().ToString("N"));
+            if (!_newChatRequests.TryGetValue(key, out var pending) || pending.Title != title || pending.Backend != backend)
+                _newChatRequests[key] = pending = (title, backend, "new-" + Guid.NewGuid().ToString("N"));
             start!.IsEnabled = false;
+            agent.IsEnabled = false;
             try
             {
+                var parameters = new JsonObject { ["title"] = title, ["requestId"] = pending.Id };
+                if (backend.Length > 0) parameters["backend"] = backend;
                 var made = await CallAsync("teams.ask", new JsonObject
                 {
                     ["target"] = Target(orgId, repoId, checkout), ["method"] = "team.chat.new",
-                    ["params"] = new JsonObject { ["title"] = title, ["requestId"] = pending.Id },
+                    ["params"] = parameters,
                 });
                 var share = Format.Text(made, "share");
                 if (!IsLoaded || _view != view) return;
-                if (_newChatWriting.GetValueOrDefault(key)?.Trim() == title) _newChatWriting.Remove(key);
+                if (_newChatWriting.GetValueOrDefault(key)?.Trim() == title && (_newChatBackends.GetValueOrDefault(key) ?? "") == backend) _newChatWriting.Remove(key);
                 if (_newChatRequests.GetValueOrDefault(key) == pending) _newChatRequests.Remove(key);
                 if (share.Length > 0) await ShowChatAsync(Target(orgId, repoId, checkout, share), title, computer);
             }
@@ -442,8 +455,10 @@ internal sealed partial class TeamsPage : Page
                 if (!IsLoaded || _view != view) return;
                 panel.Children.Add(new TextBlock { Text = error.Message, Foreground = Theme.Brush(static () => Theme.Warning), TextWrapping = TextWrapping.Wrap });
                 start.IsEnabled = true;
+                agent.IsEnabled = true;
             }
         });
+        panel.Children.Add(agent);
         panel.Children.Add(box);
         panel.Children.Add(start);
         panel.Children.Add(new TextBlock { Text = L10n.Text("common.teams.new_chat_detail", computer), Opacity = 0.7, TextWrapping = TextWrapping.Wrap });

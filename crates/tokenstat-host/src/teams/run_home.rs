@@ -5,7 +5,8 @@
 //! The backend process starts with an empty environment except the path it
 //! needs to find its own tools and the variables the scoped SDK adds later.
 //! Personal hooks, resume state and memory stay in the person's own home.
-//! Nothing is copied from there.
+//! Preparation imports none of them. The provider may subsequently route only
+//! its CLI's native sign-in, using the same credential routing as private chat.
 
 use std::{
     collections::BTreeMap,
