@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
 
 namespace NativeUiTests;
@@ -10,12 +12,27 @@ internal static class SidebarAdaptiveSmoke
     {
         var view = new NavigationView { Width = 900, Height = 180, CompactPaneLength = 0,
             PaneDisplayMode = NavigationViewPaneDisplayMode.Auto, IsPaneToggleButtonVisible = false };
+        // Production resource lookup and native focus states must be present:
+        // an unstyled, unfocused item does not exercise the shell's transitions.
+        Theme.InstallControlResources();
+        view.OpenPaneLength = ShellWidths.Shared.Sidebar;
+        view.Resources["NavigationViewDefaultPaneBackground"] = Theme.SidebarBrush;
+        view.Resources["NavigationViewExpandedPaneBackground"] = Theme.SidebarBrush;
+        view.Resources["NavigationViewContentBackground"] = Theme.BackgroundBrush;
+        view.Resources["NavigationViewContentGridBorderBrush"] = Theme.BorderBrush;
+        view.Resources["NavigationViewPaneContentGridMargin"] = new Thickness(0);
+        view.Resources["NavigationViewContentGridBorderThickness"] = new Thickness(1, 0, 0, 0);
+        view.Resources["NavigationViewBorderThickness"] = new Thickness(0);
+        view.Resources["NavigationViewMinimalContentGridBorderThickness"] = new Thickness(0);
+        view.Resources["NavigationViewContentGridCornerRadius"] = new CornerRadius(0);
+        view.Resources["NavigationViewItemOnLeftMinHeight"] = 32d;
+        view.Resources["NavigationViewItemContentPresenterMargin"] = new Thickness(4, 0, 4, 0);
         var project = new NavigationViewItem { Content = "Fictional project", IsExpanded = true };
         for (var i = 0; i < 13; i++) project.MenuItems.Add(new NavigationViewItem { Content = "Fictional chat " + i });
         project.Content = SidebarChrome.ProjectContent(project, new TextBlock { Text = "Fictional project" }, false,
             new Button { Content = "Fictional action" });
         SidebarChrome.AlignProject(project); // Unmounted rows must not force a native template.
-        var selectedChat = project.MenuItems[1];
+        var selectedChat = (NavigationViewItem)project.MenuItems[1];
         view.MenuItems.Add(project);
         view.PaneHeader = new TextBlock { Text = "Fictional header" };
         view.PaneFooter = new TextBlock { Text = "Fictional account" };
@@ -49,6 +66,9 @@ internal static class SidebarAdaptiveSmoke
         {
             await Settle(NavigationViewDisplayMode.Expanded);
             view.SelectedItem = selectedChat;
+            if (!selectedChat.Focus(FocusState.Keyboard))
+                throw new Exception("Native sidebar could not focus its selected chat");
+            await Task.Delay(250);
             modes.Clear();
             // A chat adds its companion width. Returning to an ordinary page
             // removes it while the window remains between the two thresholds.
