@@ -244,6 +244,9 @@ try {
     # A late Unloaded from tab selection must neither cancel the current reveal
     # nor reset its draft. Keep the same rendering deadline as the first open.
     Open-Place 'Home'
+    # Select the repository destination before opening its adaptive drawer.
+    # The toolbar toggle changes pane visibility; it does not leave Home.
+    Open-Place 'Repositories'
     Reveal-RepositorySidebar
     Invoke-Control (Wait-ForControl "sidebar.chat.$($chats[-1].id)")
     $draft = Wait-ForControl 'chat.composer'
