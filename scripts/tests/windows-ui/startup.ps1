@@ -240,6 +240,16 @@ try {
     }
     Invoke-Control (Wait-ForControl 'chat.setup.done')
     Wait-ForControl 'chat.composer' | Out-Null
+    # Exercise the retained page's real native detach/reattach before a reload.
+    # A late Unloaded from tab selection must neither cancel the current reveal
+    # nor reset its draft. Keep the same rendering deadline as the first open.
+    Open-Place 'Home'
+    Reveal-RepositorySidebar
+    Invoke-Control (Wait-ForControl "sidebar.chat.$($chats[-1].id)")
+    $draft = Wait-ForControl 'chat.composer'
+    if ($draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne 'Retained unsent smoke draft') {
+        throw 'Reattaching the production chat page lost the selected conversation draft'
+    }
     Open-Place 'Reload chats'
     $draft = Wait-ForControl 'chat.composer'
     if ($draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne 'Retained unsent smoke draft') {

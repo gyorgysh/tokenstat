@@ -181,22 +181,75 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Content = layout;
         SizeChanged += (_, _) => FitSetupViewport();
         RenderInspector();
-        Loaded += async (_, _) =>
-        {
-            TraceComposition("loaded");
-            AttachInspectionWindow();
-            TraceComposition("inspection attached");
-            AppServices.AccountChanged -= ImagesAccountChanged;
-            AppServices.AccountChanged += ImagesAccountChanged;
-            RemoteWorkspaces.Changed -= ImagesPeerChanged;
-            RemoteWorkspaces.Changed += ImagesPeerChanged;
-            if (_openId is string id && _opening) await OpenAsync(id);
-            else if (_openId is not null) StartPoll();
-            else await ShowListAsync();
-        };
-        Unloaded += (_, _) => { DetachInspectionWindow(); AppServices.AccountChanged -= ImagesAccountChanged; RemoteWorkspaces.Changed -= ImagesPeerChanged; RememberDraft(); _openGeneration++; CancelDropImport(); ResetImagePreviews(); _poll?.Cancel(); _commandDialog?.Hide(); _inspection = null; _inspectionHost.Children.Clear(); };
+        Loaded += (_, _) => ReconcileAttachment();
+        Unloaded += (_, _) => ReconcileAttachment();
         AutomationProperties.SetAutomationId(_draft, "chat.composer");
         AutomationProperties.SetAutomationId(_titleBox, "chat.title");
+    }
+
+    private int _attachmentRevision;
+    private bool _attached;
+    private bool _detached = true;
+    private Task? _listLoad;
+    private int _listLoadGeneration;
+    private Task? _conversationLoad;
+    private int _conversationLoadGeneration;
+
+    private void ReconcileAttachment()
+    {
+        var revision = ++_attachmentRevision;
+        // WinUI can finish Loaded/Unloaded out of order while native tabs
+        // change content. Only the settled current tree may retire a load or
+        // start its replacement; a stale Unloaded must not strand a skeleton.
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, async () =>
+        {
+            if (revision != _attachmentRevision) return;
+            if (!IsLoaded || VisualTreeHelper.GetParent(this) is null) { DetachChat(); return; }
+            _detached = false;
+            if (!_attached)
+            {
+                _attached = true;
+                TraceComposition("loaded");
+                AttachInspectionWindow();
+                TraceComposition("inspection attached");
+                AppServices.AccountChanged += ImagesAccountChanged;
+                RemoteWorkspaces.Changed += ImagesPeerChanged;
+            }
+            // A sidebar/deep-link request can begin before this deferred
+            // callback. Let that exact destination finish instead of resetting
+            // its generation, and never replace an explicit new-chat request.
+            if (_creatingChat && _creatingChatGeneration == _openGeneration) return;
+            if (_openId is string id)
+            {
+                if (_opening)
+                {
+                    if (_conversationLoadGeneration != _openGeneration || _conversationLoad is not { IsCompleted: false }) await OpenAsync(id);
+                }
+                else StartPoll();
+            }
+            else if (_listLoadGeneration != _openGeneration || _listLoad is not { IsCompleted: false }) await ShowListAsync();
+        })) DetachChat();
+    }
+
+    private void DetachChat()
+    {
+        // Explicit navigation can start before the first deferred attach.
+        // Its loads still need retiring even if subscriptions were not added.
+        if (_detached) return;
+        _detached = true;
+        _attached = false;
+        TraceComposition("unloaded");
+        DetachInspectionWindow();
+        AppServices.AccountChanged -= ImagesAccountChanged;
+        RemoteWorkspaces.Changed -= ImagesPeerChanged;
+        RememberDraft();
+        _openGeneration++;
+        CancelDropImport();
+        ResetImagePreviews();
+        _poll?.Cancel();
+        _commandDialog?.Hide();
+        _inspection = null;
+        _inspectionHost.Children.Clear();
     }
 
     /// <summary>
@@ -400,7 +453,15 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return ShowListAsync();
     }
 
-    private async Task ShowListAsync()
+    private Task ShowListAsync()
+    {
+        _detached = false;
+        var task = ShowListCoreAsync();
+        _listLoadGeneration = _openGeneration;
+        return _listLoad = task;
+    }
+
+    private async Task ShowListCoreAsync()
     {
         TraceComposition("list resetting");
         RememberDraft();
@@ -599,6 +660,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     }
 
     private bool _creatingChat;
+    private int _creatingChatGeneration;
 
     public Task BeginNewChatAsync()
     {
@@ -622,6 +684,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         if (_creatingChat || ownsRequest?.Invoke() == false) return null;
         _creatingChat = true;
+        _creatingChatGeneration = _openGeneration;
+        _detached = false;
         try
         {
             var generation = _openGeneration;
@@ -718,7 +782,15 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private int _openGeneration;
     private bool _opening;
 
-    private async Task OpenAsync(string id, JsonNode? created = null)
+    private Task OpenAsync(string id, JsonNode? created = null)
+    {
+        _detached = false;
+        var task = OpenCoreAsync(id, created);
+        _conversationLoadGeneration = _openGeneration;
+        return _conversationLoad = task;
+    }
+
+    private async Task OpenCoreAsync(string id, JsonNode? created)
     {
         if (string.IsNullOrEmpty(id)) return;
         RememberDraft();
