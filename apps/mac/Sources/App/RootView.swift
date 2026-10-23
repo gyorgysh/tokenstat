@@ -52,6 +52,7 @@ struct RootView: View {
     @State private var model = InsightsModel()
     @State private var home = HomeModel()
     @State private var account = AccountModel()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var teams = TeamStore(api: .live)
     @State private var workspaces = WorkspacesModel()
     @State private var pullCounts = PullCountStore.shared
@@ -514,6 +515,9 @@ struct RootView: View {
             await teams.refreshSelected()
         }
         .task(id: teams.selectionKey) { await teams.refreshSelected() }
+        .task(id: TeamAppPresenceKey(owner: teams.owner, active: scenePhase == .active && teams.phase == .ready, supported: teams.capabilities?.supportsAppPresence == true)) {
+            await teams.watchAppPresence(active: { NSApp.isActive })
+        }
         .onChange(of: teams.owner) { sharingProject = nil }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if route.isGlobal(.team) || teams.phase == .authorization { Task { await teams.reloadAfterChange() } }
@@ -1274,7 +1278,7 @@ struct RootView: View {
         guard account.signedIn else { return L10n.text("apple.rootview.account_sign_in_to_tokenstat.7888d723") }
         let name = account.account?.title ?? L10n.text("apple.rootview.signed_in.ca566c89")
         guard let tier = railAccountTier else { return L10n.text("apple.rootview.account_0.1342b321", "\(name)") }
-        return L10n.text("apple.rootview.account_0_1_plan.75429042", "\(name)", "\(tier.capitalized)") + ", " + (teams.selectedOrganization?.name ?? L10n.text("common.teams.personal"))
+        return L10n.text("apple.rootview.account_0_1_plan.75429042", "\(name)", "\(tier.capitalized)")
     }
 
     /// Leading toggles injected into every destination's chrome bar.
@@ -2941,7 +2945,7 @@ struct RootView: View {
     private var sidebarAccountBar: some View {
         SidebarAccountBar(
             name: account.signedIn ? (account.account?.title ?? L10n.text("common.account")) : L10n.text("common.sign_in"),
-            detail: account.signedIn ? [railAccountTier?.capitalized, teams.selectedOrganization?.name ?? L10n.text("common.teams.personal")].compactMap { $0 }.joined(separator: " · ") : nil,
+            detail: account.signedIn ? railAccountTier?.capitalized : nil,
             accessibilityLabel: railAccountLabel,
             menuItems: { accountMenuItems },
             settings: { navigate(to: .global(.account)) }
@@ -2970,7 +2974,9 @@ struct RootView: View {
                 checkUpdates,
             ]
         }
-        return TeamScopeMenuItems.make(store: teams) { navigate(to: .global(.team)) } + [
+        return [
+            NativeMenuItem(L10n.text("common.teams.title"), icon: .team) { navigate(to: .global(.team)) },
+            .separator,
             NativeMenuItem(
                 L10n.text("common.sync_now"),
                 isEnabled: !account.isSyncing && account.syncCooldownUntil == nil

@@ -97,7 +97,7 @@ pub(super) fn call(
         })
         .collect();
     let chats = crate::chat::shared();
-    let before = chats.sharing_bindings(&checkout.workspace_id, &candidates)?;
+    let before = chats.sharing_catalog_entries(&checkout.workspace_id, &candidates)?;
     let mut rows = Vec::new();
     let mut selected = Vec::new();
     for cloud in &page.shares {
@@ -107,13 +107,14 @@ pub(super) fn call(
         else {
             continue;
         };
-        let Some(marker) = before.get(&local.conversation_id).filter(|marker| {
-            marker.id == local.id
-                && marker.initial_fingerprint == local.preview
-                && marker.source_revision == local.source_revision
+        let Some(entry) = before.get(&local.conversation_id).filter(|entry| {
+            entry.binding.id == local.id
+                && entry.binding.initial_fingerprint == local.preview
+                && entry.binding.source_revision == local.source_revision
         }) else {
             continue;
         };
+        let marker = &entry.binding;
         if marker
             .approved
             .as_ref()
@@ -124,7 +125,8 @@ pub(super) fn call(
         // Older local markers remain readable through their exact share, but
         // have no approved catalog title. Never substitute a current title.
         rows.push(json!({"id":cloud.id,"checkoutId":cloud.checkout_id,"revision":cloud.revision,"createdAt":cloud.created_at,
-            "title":marker.approved.as_ref().map(|approved| &approved.title),"backend":marker.approved.as_ref().map(|approved| &approved.backend)}));
+            "title":marker.approved.as_ref().map(|approved| &approved.title),"backend":marker.approved.as_ref().map(|approved| &approved.backend),
+            "lastMessageAtMs":entry.last_message_at_ms}));
         selected.push((local, marker));
     }
     let after = chats.sharing_bindings(&checkout.workspace_id, &candidates)?;

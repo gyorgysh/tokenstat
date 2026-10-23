@@ -63,6 +63,13 @@ pub(crate) struct EventPage {
     pub binding: Binding,
 }
 
+/// Display activity for already shared conversations. This is read from the
+/// bounded canonical index, never by expanding transcripts or private titles.
+pub(crate) struct CatalogEntry {
+    pub binding: Binding,
+    pub last_message_at_ms: Option<i64>,
+}
+
 /// Approved metadata and reachable files, without expanding archived output.
 /// Agent output cannot introduce attachment references; those stay in the
 /// bounded, verified inline history approved when the chat was shared.
@@ -196,6 +203,18 @@ impl Store {
         workspace: &str,
         candidates: &[String],
     ) -> Result<HashMap<String, Binding>, DispatchError> {
+        Ok(self
+            .sharing_catalog_entries(workspace, candidates)?
+            .into_iter()
+            .map(|(id, entry)| (id, entry.binding))
+            .collect())
+    }
+
+    pub(crate) fn sharing_catalog_entries(
+        &self,
+        workspace: &str,
+        candidates: &[String],
+    ) -> Result<HashMap<String, CatalogEntry>, DispatchError> {
         if candidates.len() > 100 {
             return Err(invalid());
         }
@@ -225,7 +244,13 @@ impl Store {
                 return Err(invalid());
             }
             if let Some(binding) = &chat.team_share {
-                result.insert(chat.id.clone(), binding.clone());
+                result.insert(
+                    chat.id.clone(),
+                    CatalogEntry {
+                        binding: binding.clone(),
+                        last_message_at_ms: chat.last_message_at_ms.filter(|at| *at > 0),
+                    },
+                );
             }
         }
         Ok(result)

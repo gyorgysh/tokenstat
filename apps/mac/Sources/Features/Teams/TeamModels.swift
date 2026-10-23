@@ -57,6 +57,7 @@ struct TeamAPI: Sendable {
     }
 }
 struct TeamCapabilities: Decodable, Sendable {
+    var supportsAppPresence = false
     var canPublishCheckouts = false
     var canConnectCheckouts = false
     var canPublishChats = false
@@ -74,9 +75,10 @@ struct TeamCapabilities: Decodable, Sendable {
         self.needsDeviceRegistration = needsDeviceRegistration
         self.authorizationRequired = authorizationRequired; self.version = version
     }
-    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats, canResumeProjectSharing, canReviewChatSelection }
+    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats, canResumeProjectSharing, canReviewChatSelection, features }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        supportsAppPresence = (try c.decodeIfPresent([String].self, forKey: .features) ?? []).contains("app-presence-v1")
         actorId = try c.decodeIfPresent(String.self, forKey: .actorId)
         canPublishCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canPublishCheckouts) ?? false
         canConnectCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canConnectCheckouts) ?? false
@@ -136,6 +138,13 @@ struct TeamMember: Codable, Identifiable, Hashable, Sendable {
     let eligible: Bool
     let ownershipEligible: Bool?
     let joinedAt: String
+    var onlineForSeconds: Double? = nil
+}
+
+struct TeamAppPresenceKey: Equatable {
+    let owner: TeamAccountOwner?
+    let active: Bool
+    let supported: Bool
 }
 struct TeamRepository: Codable, Identifiable, Hashable, Sendable {
     let id: String
@@ -224,6 +233,7 @@ struct TeamSharedChat: Codable, Identifiable, Hashable, Sendable {
     let id: String; let checkoutId: String; let revision: UInt64; let createdAt: String
     var title: String? = nil
     var backend: String? = nil
+    var lastMessageAtMs: Int64? = nil
 }
 struct TeamSharedChats: Decodable, Sendable { let shares: [TeamSharedChat]; let nextOffset: Int? }
 struct TeamNewChat: Decodable, Sendable {

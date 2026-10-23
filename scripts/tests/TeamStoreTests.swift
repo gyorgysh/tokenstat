@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with TeamStore.swift TeamModels.swift WorkReference.swift JSONValue.swift.
+// Compile with TeamStore.swift TeamChatReadState.swift TeamModels.swift WorkReference.swift JSONValue.swift.
 import Foundation
 
 private func check(_ value: @autoclosure () -> Bool, _ message: String) { precondition(value(), message) }
@@ -107,6 +107,7 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         await lateSharedProjectAccountResponse()
         await staleSharedProjectNavigation()
         await projectCatalogRefresh()
+        await memberPresence()
         avatars()
         try messageAuthors()
         newChatOutsideFirstCatalogPage()
@@ -389,6 +390,28 @@ private func waitFor(_ key: String, fixture: Fixture) async {
         check(store.directory == nil && store.organizations.isEmpty && !store.isRefreshing, "A late refresh restored revoked cache")
         let oldCapabilities = try JSONDecoder().decode(TeamCapabilities.self, from: JSONEncoder().encode(JSONValue.object(["enabled":.bool(true),"ready":.bool(true),"actorId":.string("fixture-owner"),"version":.int(1),"authorizationRequired":.bool(false)])))
         check(oldCapabilities.ready && !oldCapabilities.canPublishCheckouts, "An older account server enabled unsupported checkout publication")
+    }
+    @MainActor static func memberPresence() async {
+        let fixture = Fixture(), store = TeamStore(api: await fixture.api())
+        await store.bind(to: owner("alpha"))
+        store.select(store.organizations.first)
+        check(store.section == .overview, "Organization entry must start at its work overview")
+        let time = Date(timeIntervalSince1970: 1000)
+        var member = TeamMember(id: "presence-person", name: "Example person", handle: nil, avatar: nil,
+            role: .member, revision: 1, eligible: true, ownershipEligible: nil, joinedAt: "")
+        member.onlineForSeconds = 30
+        store.observePresence([member], organization: "org_a", at: time)
+        check(store.presenceStatus(member: member.id, organization: "org_a", at: time.addingTimeInterval(20)) == true, "Fresh foreground presence disappeared")
+        check(store.presenceStatus(member: member.id, organization: "org_a", at: time.addingTimeInterval(31)) == false, "Expired foreground presence stayed online")
+        check(store.presenceStatus(member: member.id, organization: "org_a", at: time.addingTimeInterval(45)) == nil, "A stale roster kept claiming live presence")
+        check(store.presenceStatus(member: member.id, organization: "org_b", at: time) == nil, "Presence crossed organizations")
+        member.onlineForSeconds = .infinity
+        store.observePresence([member], organization: "org_a", at: time)
+        check(store.presenceStatus(member: member.id, organization: "org_a", at: time) == nil, "Malformed presence produced an online state")
+        member.onlineForSeconds = 75
+        store.observePresence([member], organization: "org_a", at: time)
+        await store.bind(to: owner("beta"))
+        check(store.presenceStatus(member: member.id, organization: "org_a", at: time) == nil, "Account switch retained another person's roster activity")
     }
     static func avatars() {
         let account = owner("alpha")

@@ -46,12 +46,12 @@ are ignored. Run the fixture on a separate Simulator device selected by its
 explicit identifier.
 
 CI runs `python3 scripts/run-team-ui-tests.py` for each device family. It creates a new compatible
-iPhone or iPad Simulator, verifies all 16 scenarios, and removes only that device.
+iPhone or iPad Simulator, verifies all 27 scenarios, and removes only that device.
 `--select-only` reports an installed runtime without changing any device.
 Use `--only-test testCommentPostsWithVerifiedAuthor` for a focused local run.
 Omit that option for the complete CI check.
 
-Check members, search, scope switching, empty states, invitation validation,
+Check the Team hub, organization overview, project filtering, foreground app presence, members, search, empty states, invitation validation,
 repository roles, ownership, checkout publication and stop-sharing confirmations.
 Test narrow windows, both appearances, larger text, keyboard navigation and VoiceOver. These fixtures
 supplement the account and transport integration tests; their API deliberately
@@ -85,3 +85,10 @@ This explicitly skips the guardian/lease lifecycle suite and reports a filtered
 result; omit the filter for release verification.
 `TOKENSTAT_TEAMS_KEEP_FIXTURE=1` retains the disposable fixture and its stderr
 logs for diagnosis. Remove that retained directory after inspection.
+
+The `newOrganization` scenario has one member and no projects, to exercise the
+first-project setup state. Directory responses include fictional expiring app
+presence; they do not infer activity from a running computer. Shared catalog
+activity metadata is synthetic and device-local read positions live only in
+the fixture app's preferences. Production account menus no longer switch a
+Personal/organization scope; navigate between organizations inside Team.

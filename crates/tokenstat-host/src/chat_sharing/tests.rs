@@ -694,6 +694,8 @@ fn catalog_metadata_is_approved_bounded_and_never_borrowed_from_a_later_private_
     let mut index: Index =
         serde_json::from_slice(&fs::read(store.root.join("conversations.json")).unwrap()).unwrap();
     index.conversations[0].title = "PRIVATE_UNREVIEWED_TITLE".into();
+    index.conversations[0].last_message_at_ms = Some(123);
+    index.conversations[0].updated_at_ms = 999;
     fs::write(
         store.root.join("conversations.json"),
         serde_json::to_vec(&index).unwrap(),
@@ -705,6 +707,11 @@ fn catalog_metadata_is_approved_bounded_and_never_borrowed_from_a_later_private_
             .unwrap(),
         initial
     );
+    let activity = store
+        .sharing_catalog_entries(&chat.workspace_id, &candidates)
+        .unwrap();
+    assert_eq!(activity[&chat.id].last_message_at_ms, Some(123));
+    assert_eq!(activity[&chat.id].binding, initial[&chat.id]);
     assert!(
         store
             .shared_history(&chat.workspace_id, &chat.id, share, &history.fingerprint)

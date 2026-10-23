@@ -11,6 +11,7 @@ struct TeamDirectorySnapshot: Sendable {
 
 @MainActor @Observable
 final class TeamStore {
+    let chatReadState: TeamChatReadState
     enum Phase: Equatable { case signedOut, loading, unavailable, authorization, ready, failed }
     private(set) var owner: TeamAccountOwner?
     private(set) var phase: Phase = .signedOut
@@ -48,8 +49,15 @@ final class TeamStore {
     private var mutationId: UUID?
     private var selectionSummary: TeamOrganization?
     private var formLifetime: UInt64 = 0
+    private struct PresenceObservation {
+        let checked: Date
+        let activeForSeconds: Double
+    }
+    private var memberPresence: [String: [String: PresenceObservation]] = [:]
 
-    init(api: TeamAPI) { self.api = api }
+    init(api: TeamAPI, activityDefaults: UserDefaults = .standard) {
+        self.api = api; chatReadState = TeamChatReadState(defaults: activityDefaults)
+    }
     var selectionKey: TeamSelectionKey { .init(owner: owner, organizationId: selectedOrganizationId) }
     var selectedOrganization: TeamOrganization? {
         if let directory, directory.details.organization.id == selectedOrganizationId { return directory.details.organization }
@@ -63,6 +71,8 @@ final class TeamStore {
         loadRevision &+= 1
         let revision = loadRevision
         if changed {
+            memberPresence = [:]
+            chatReadState.bind(to: next)
             formLifetime &+= 1
             owner = next; capabilities = nil; localDraftPersonId = next?.personId; organizations = []; inbox = []
             organizationsNextOffset = nil; inboxNextOffset = nil
@@ -86,6 +96,7 @@ final class TeamStore {
             }
             self.capabilities = capabilities
             localDraftPersonId = capabilities.actorId ?? next.personId
+            chatReadState.bind(to: next, person: localDraftPersonId)
             guard capabilities.enabled else { clearAuthorization(); phase = .unavailable; return }
             guard capabilities.ready else { clearAuthorization(); phase = .authorization; return }
             let api = api
@@ -123,7 +134,7 @@ final class TeamStore {
         selectedOrganizationId = organization?.id; selectedRepositoryId = nil
         focusedProject = nil; preferredCheckoutId = nil; browsingProjects = false
         directory = organization.flatMap { cachedDirectories[$0.id] }
-        section = organization == nil ? .overview : .members
+        section = .overview
         error = nil
     }
     func show(_ section: TeamSection) { projectOpenRevision &+= 1; browsingProjects = false; self.section = section }
@@ -215,6 +226,7 @@ final class TeamStore {
             let details: TeamOrganizationDetails = try await directoryRequest("organizations.get", fields: ["organization": .string(org)], owner: owner)
             guard selectionKey == key, directoryRevision == revision else { return }
             let api = api, organization = details.organization
+            let presenceStarted = Date()
             async let members: TeamMembers = organization.eligible || organization.role == .owner
                 ? api.request(.directory, ["operation": .string("members.list"), "organization": .string(org), "page": Self.page()], owner: owner)
                 : TeamMembers(members: [], nextOffset: nil)
@@ -228,6 +240,7 @@ final class TeamStore {
             let snapshot = TeamDirectorySnapshot(details: details, members: roster, repositories: projects, invitations: pending)
             guard selectionKey == key, directoryRevision == revision else { return }
             directory = snapshot; cache(snapshot, for: org)
+            observePresence(roster.members, organization: org, at: presenceStarted)
             if let index = organizations.firstIndex(where: { $0.id == org }) { organizations[index] = organization }
         } catch is CancellationError {
         } catch {
@@ -239,6 +252,57 @@ final class TeamStore {
                 organizations.removeAll { $0.id == org }; selectedOrganizationId = nil; selectedRepositoryId = nil; selectionSummary = nil
                 section = .overview
             }
+        }
+    }
+
+    /// Login ownership, not organization navigation, owns the app heartbeat.
+    /// The account service advertises support before this operation is used.
+    func watchAppPresence(active: @MainActor () -> Bool) async {
+        guard let owner, phase == .ready, capabilities?.supportsAppPresence == true else { return }
+        repeat {
+            guard self.owner == owner, phase == .ready, !Task.isCancelled else { return }
+            let foreground = active()
+            do {
+                let _: JSONValue = try await api.request(.directory, ["operation": .string("presence.set"), "active": .bool(foreground)], owner: owner)
+            } catch {}
+            guard foreground, !Task.isCancelled else { return }
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+        } while self.owner == owner
+    }
+
+    func observePresence(_ members: [TeamMember], organization: String, at: Date) {
+        var observations = memberPresence[organization] ?? [:]
+        for member in members {
+            if let seconds = member.onlineForSeconds, seconds.isFinite, seconds >= 0, seconds <= 75 {
+                observations[member.id] = PresenceObservation(checked: at, activeForSeconds: seconds)
+            } else { observations.removeValue(forKey: member.id) }
+        }
+        // Match the bounded directory cache; this is never persisted history.
+        if memberPresence.count >= 8, memberPresence[organization] == nil { memberPresence = [:] }
+        memberPresence[organization] = observations
+    }
+    func presenceStatus(member: String, organization: String, at: Date) -> Bool? {
+        guard phase == .ready, let observation = memberPresence[organization]?[member] else { return nil }
+        let age = at.timeIntervalSince(observation.checked)
+        guard age >= 0, age < 45 else { return nil }
+        return age < observation.activeForSeconds
+    }
+    func refreshMemberPresence() async {
+        guard let context = mutationContext, let organization = context.organizationId, let directory else { return }
+        let count = directory.members.members.count
+        do {
+            var offset = 0
+            repeat {
+                let started = Date()
+                let page: TeamMembers = try await read("members.list", fields: ["organization": .string(organization), "page": Self.page(offset: offset)], context: context)
+                guard mutationContext == context else { return }
+                observePresence(page.members, organization: organization, at: started)
+                guard let next = page.nextOffset, next > offset, next < count else { return }
+                offset = next
+            } while !Task.isCancelled
+        } catch {
+            guard mutationContext == context else { return }
+            memberPresence.removeValue(forKey: organization)
         }
     }
 
@@ -376,6 +440,7 @@ final class TeamStore {
         return retired
     }
     private func clearAuthorization() {
+        memberPresence = [:]
         clearProjects()
         loadRevision &+= 1; formLifetime &+= 1; isRefreshing = false
         organizations = []; inbox = []; organizationsNextOffset = nil; inboxNextOffset = nil

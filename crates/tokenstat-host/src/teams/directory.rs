@@ -102,6 +102,8 @@ pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError
 #[derive(Deserialize)]
 #[serde(tag = "operation", deny_unknown_fields)]
 pub(super) enum Operation {
+    #[serde(rename = "presence.set")]
+    AppPresence { active: bool },
     #[serde(rename = "organizations.list")]
     Organizations {
         #[serde(default)]
@@ -263,6 +265,7 @@ pub(super) fn perform(client: &TeamClient, operation: Operation) -> Result<Value
         };
     }
     match operation {
+        Operation::AppPresence { active } => api!(client.app_presence(active)),
         Operation::Organizations { page } => api!(client.organizations(page)),
         Operation::Organization { organization } => api!(client.organization(&organization)),
         Operation::CreateOrganization { input } => api!(client.create_organization(&input)),
@@ -435,6 +438,20 @@ mod tests {
         assert!(parse("teams.prepareAuthorization", r#"{"confirmMetadata":true}"#).is_err());
         assert!(parse("teams.authorizationPreview", "{}").is_ok());
         assert!(parse("teams.directory", r#"{"operation":"organizations.list","_accountSession":"fixture","_accountScope":{"kind":"account"}}"#).is_ok());
+        assert!(
+            parse(
+                "teams.directory",
+                r#"{"operation":"presence.set","active":true}"#
+            )
+            .is_ok()
+        );
+        for body in [
+            r#"{"operation":"presence.set","active":"true"}"#,
+            r#"{"operation":"presence.set","active":true,"user":"someone-else"}"#,
+            r#"{"operation":"presence.set"}"#,
+        ] {
+            assert!(parse("teams.directory", body).is_err());
+        }
     }
     #[test]
     fn every_management_method_refuses_an_authenticated_peer_before_loading_credentials() {

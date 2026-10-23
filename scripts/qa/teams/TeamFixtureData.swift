@@ -43,7 +43,7 @@ actor TeamFixtureChatSelection {
 }
 
 enum TeamFixtureData {
-    enum State: String { case ready, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer, draftOffline, askUncertain, sharingUnknown, sharingUnavailable, chatSelection }
+    enum State: String { case ready, newOrganization, empty, authorization, unavailable, failure, paused, member, invitation, expiredInvitation, comment, commentUncertain, commentViewer, draftOffline, askUncertain, sharingUnknown, sharingUnavailable, chatSelection }
     static let state: State = {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--fixture-state"), args.indices.contains(index + 1) else { return .ready }
@@ -54,9 +54,13 @@ enum TeamFixtureData {
     static let repository = TeamRepository(id: "repo_fixture", organizationId: organization.id, name: "Website", role: .maintainer, revision: 1, createdAt: timestamp)
     static let member = TeamMember(id: "fixture-member", name: "Márta Nagy", handle: "example-marta", avatar: nil, role: .member, revision: 1, eligible: true, ownershipEligible: true, joinedAt: timestamp)
     static let invitation = TeamInvitation(id: "invite_fixture", organizationId: "org_partner", recipient: nil, role: .member, assignments: [TeamAssignment(repositoryId: "repo_partner", role: .viewer)], expiresAt: timestamp, revision: 1, state: state == .expiredInvitation ? "expired" : "pending", createdAt: timestamp, organizationName: "Partner Studio", organizationSlug: "partner-studio")
-    static let members = [TeamMember(id: "fixture-owner", name: "Example owner", handle: "example-owner", avatar: nil, role: .owner, revision: 1, eligible: true, ownershipEligible: true, joinedAt: timestamp), member,
+    static var members: [TeamMember] {
+        var rows = [TeamMember(id: "fixture-owner", name: "Example owner", handle: "example-owner", avatar: nil, role: .owner, revision: 1, eligible: true, ownershipEligible: true, joinedAt: timestamp), member,
         TeamMember(id: "fixture-admin", name: "Alex Morgan", handle: "example-alex", avatar: nil, role: .admin, revision: 1, eligible: true, ownershipEligible: false, joinedAt: timestamp),
         TeamMember(id: "fixture-downgraded", name: "山田 太郎", handle: "example-taro", avatar: nil, role: .member, revision: 1, eligible: false, ownershipEligible: false, joinedAt: timestamp)]
+        for index in rows.indices { rows[index].onlineForSeconds = index < 2 ? 75 : 0 }
+        return state == .newOrganization ? [rows[0]] : rows
+    }
     static func json<T: Encodable>(_ value: T) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value)) }
     static let chatEvents: [JSONValue] = [.object(["kind":.string("user"),"text":.string("Compare the fictional quarterly totals."),"seq":.int(0),"atMs":.int(1)]),.object(["kind":.string("agent"),"backend":.string("codex"),"seq":.int(100),"atMs":.int(2),"event":.object(["kind":.string("text"),"delta":.string("The fictional total increased from 24 to 42.")])])]
     static func chatReview(_ id: String, _ title: String) throws -> JSONValue {
@@ -66,7 +70,7 @@ enum TeamFixtureData {
         switch method {
         case .capabilities:
             if state == .failure || state == .draftOffline { throw TeamRequestFailure(code: "teams_unreachable", message: "The fictional account server is unavailable.") }
-            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"canReviewChatSelection":.bool(state == .chatSelection),"canResumeProjectSharing":.bool(state == .sharingUnknown || state == .sharingUnavailable),"canPublishCheckouts":.bool(true),"canConnectCheckouts":.bool(true),"canPublishChats":.bool(true)])
+            return .object(["enabled":.bool(state != .unavailable), "ready":.bool(state != .authorization), "authorizationRequired":.bool(state == .authorization), "actorId":.string(state == .member ? "fixture-member" : "fixture-owner"), "version":.int(1),"features":.array([.string("app-presence-v1")]),"canReviewChatSelection":.bool(state == .chatSelection),"canResumeProjectSharing":.bool(state == .sharingUnknown || state == .sharingUnavailable),"canPublishCheckouts":.bool(true),"canConnectCheckouts":.bool(true),"canPublishChats":.bool(true)])
         case .authorizationPreview: return .object(["deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .prepareAuthorization: return .object(["authorizationURL":.string("https://accounts.example.test/settings/teams/devices/fixture"),"deviceName":.string("Example Mac"),"deviceKey":.string(String(repeating:"ab",count:32))])
         case .checkoutOptions: return .object(["deviceName":.string("Example Mac"),"workspaces":.array([try json(TeamLocalWorkspace(id: "/example/Website", name: "Website", path: "/example/Website")),try json(TeamLocalWorkspace(id: "/example/Feature checkout", name: "Website feature", path: "/example/Feature checkout"))]),"nextOffset":.null])
@@ -81,7 +85,7 @@ enum TeamFixtureData {
             if fields["method"] == .string("team.chat.catalog") {
                 guard target["share"] == nil else { throw CancellationError() }
                 let own = checkout == .string("checkout_" + String(repeating: "a", count: 32))
-                return .object(["shares":.array([.object(["id":.string("share_"+String(repeating: own ? "a" : "b",count:32)),"checkoutId":checkout,"revision":.int(1),"createdAt":.string(timestamp),"title":.string(own ? "Quarterly totals" : "Teammate's feature"),"backend":.string("codex")])]),"nextCursor":.null])
+                return .object(["shares":.array([.object(["id":.string("share_"+String(repeating: own ? "a" : "b",count:32)),"checkoutId":checkout,"revision":.int(1),"createdAt":.string(timestamp),"title":.string(own ? "Quarterly totals" : "Teammate's feature"),"backend":.string("codex"),"lastMessageAtMs":.int(2)])]),"nextCursor":.null])
             }
             if case let .string(method)? = fields["method"], let share = target["share"] {
                 if method == "team.chat.details" { return .object(["chat":.object(["id":share,"checkoutId":checkout,"title":.string("Quarterly totals"),"backend":.string("codex"),"historyTrimmed":.bool(false),"allowsAgentRuns":.bool(state == .askUncertain),"allowsComments":.bool(state == .comment || state == .commentUncertain)])]) }
@@ -127,7 +131,7 @@ enum TeamFixtureData {
             case "organizations.get": return .object(["organization":try json(organization),"ownershipRequest":.null])
             case "members.list": return .object(["members":.array(try members.map { try json($0) }),"nextOffset":.null])
             case "repositories.list":
-                var rows = [try json(repository)]
+                var rows: [JSONValue] = state == .newOrganization ? [] : [try json(repository)]
                 if await TeamFixtureProjects.shared.hasNewProject {
                     rows.append(try json(TeamRepository(id: "repo_refresh_fixture", organizationId: organization.id, name: "New shared project", role: .viewer, revision: 1, createdAt: timestamp)))
                 }

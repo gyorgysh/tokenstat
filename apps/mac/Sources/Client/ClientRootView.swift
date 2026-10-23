@@ -342,6 +342,9 @@ struct ClientRootView: View {
             await teams.refreshSelected()
         }
         .task(id: teams.selectionKey) { await teams.refreshSelected() }
+        .task(id: TeamAppPresenceKey(owner: teams.owner, active: scenePhase == .active && teams.phase == .ready, supported: teams.capabilities?.supportsAppPresence == true)) {
+            await teams.watchAppPresence(active: { UIApplication.shared.applicationState == .active })
+        }
         .task(id: WorkSessionContext.shared.generation) {
             let retained = sessionModels.models(for: WorkSessionContext.shared.scope).ssh
             retained.setForeground(scenePhase == .active)

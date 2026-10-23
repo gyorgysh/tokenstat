@@ -17,8 +17,10 @@ struct TeamProjectChatGroup: View {
     @State private var usesCatalog = true
     @State private var loading = false
     @State private var loaded = false
+    @State private var hasLoadedMore = false
     @State private var error: String?
     @State private var request = UUID()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -40,6 +42,7 @@ struct TeamProjectChatGroup: View {
                         Text(share.title.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.text("common.teams.shared_chat"))
                             .font(Theme.body.weight(.medium)).lineLimit(2)
                         Spacer(minLength: Theme.Space.s)
+                        TeamChatActivityBadge(store: store, share: share, repository: repository, checkout: checkout)
                         Image(systemName: "chevron.right").foregroundStyle(.secondary)
                     }.padding(.vertical, Theme.Space.s).contentShape(.rect)
                 }.buttonStyle(.plain).accessibilityIdentifier("team.chats.open.\(share.id)")
@@ -54,12 +57,21 @@ struct TeamProjectChatGroup: View {
             }
         }.padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
             .task(id: refresh) { await load(more: false) }
+            .task {
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                    // Preserve a person's expanded pages, including sparse
+                    // catalogs whose visible row count is less than a page.
+                    guard scenePhase == .active, !loading, !hasLoadedMore else { continue }
+                    await load(more: false, background: true)
+                }
+            }
     }
 
-    private func load(more: Bool) async {
+    private func load(more: Bool, background: Bool = false) async {
         if more && loading { return }
         let id = UUID(); request = id; loading = true
-        if !more { usesCatalog = true; cursor = nil; offset = nil }
+        if !more && !background { usesCatalog = true; cursor = nil; offset = nil; hasLoadedMore = false }
         defer { if request == id { loading = false } }
         do {
             var catalog: TeamChatCatalog?
@@ -83,6 +95,8 @@ struct TeamProjectChatGroup: View {
                 rows = page.shares; nextOffset = page.nextOffset; nextCursor = nil
             }
             guard request == id, store.mutationContext == context, rows.allSatisfy({ $0.checkoutId == checkout.id }) else { return }
+            store.chatReadState.refresh()
+            if more { hasLoadedMore = true }
             shares = more ? shares + rows.filter { next in !shares.contains { $0.id == next.id } } : rows
             cursor = nextCursor; offset = nextOffset; loaded = true; error = nil
         } catch is CancellationError {} catch {

@@ -294,6 +294,15 @@ impl TeamClient {
             Some(page),
         )
     }
+    /// Foreground app activity; never called by a background host heartbeat.
+    pub fn app_presence(&self, active: bool) -> Result<Value, TeamError> {
+        self.request(
+            Method::POST,
+            &["teams", "presence"],
+            Some(serde_json::json!({"active": active})),
+            None,
+        )
+    }
     pub fn change_member_role(
         &self,
         org: &str,

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with TeamProjectAccessReview.swift TeamStore.swift TeamModels.swift WorkReference.swift JSONValue.swift.
+// Compile with TeamProjectAccessReview.swift TeamStore.swift TeamChatReadState.swift TeamModels.swift WorkReference.swift JSONValue.swift.
 import Foundation
 
 private func member(_ id: String, role: TeamRepositoryRole? = nil, revision: UInt64 = 0, eligible: Bool = true) -> TeamRepositoryMember {

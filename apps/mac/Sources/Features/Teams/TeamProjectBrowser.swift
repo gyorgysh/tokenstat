@@ -6,17 +6,32 @@ import SwiftUI
 struct TeamProjectBrowser: View {
     @Bindable var store: TeamStore
     let manageTeams: () -> Void
+    @State private var organizationId: String?
+    @State private var filteredOrganization: TeamOrganization?
+    /// A directory refresh returns its first page. Keep a chosen later-page
+    /// organization until its own authorized project lookup can refresh it.
+    private var filterChoices: [TeamOrganization] {
+        if let filteredOrganization, !store.organizations.contains(where: { $0.id == filteredOrganization.id }) {
+            return store.organizations + [filteredOrganization]
+        }
+        return store.organizations
+    }
+    private var organizations: [TeamOrganization] { filterChoices.filter { organizationId == nil || $0.id == organizationId } }
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.Space.l) {
                 TeamSectionHeader(title: L10n.text("common.teams.shared_projects"), subtitle: L10n.text("common.teams.shared_projects_detail")) {
                     Button(L10n.text("common.teams.manage_teams"), .team, action: manageTeams).buttonStyle(TeamButtonStyle())
                 }
+                TeamPickerField(title: L10n.text("common.teams.organization"), selection: $organizationId) {
+                    Text(L10n.text("common.teams.all_organizations")).tag(Optional<String>.none)
+                    ForEach(filterChoices) { Text($0.name).tag(Optional($0.id)) }
+                }.padding(.horizontal, Theme.Space.l).accessibilityIdentifier("team.projects.organization-filter")
                 if let error = store.localProjectsError { TeamNotice(message: error, warning: true).padding(.horizontal, Theme.Space.l) }
                 if store.organizations.isEmpty {
                     TeamNotice(message: L10n.text("common.teams.no_shared_projects")).padding(.horizontal, Theme.Space.l)
                 }
-                ForEach(store.organizations) { organization in
+                ForEach(organizations) { organization in
                     if let context = store.mutationContext {
                         TeamProjectGroup(store: store, context: context, organization: organization)
                             .id("\(store.selectionKey)-\(organization.id)")
@@ -26,10 +41,12 @@ struct TeamProjectBrowser: View {
                     Button(L10n.text("common.teams.more_organizations"), .more) { Task { await store.loadMoreOrganizations() } }
                         .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing).padding(.horizontal, Theme.Space.l)
                 }
-            }.frame(maxWidth: 860, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxWidth: 1160, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, Theme.Space.l)
         }
         .task { await store.reloadAfterChange() }
+        .onChange(of: organizationId) { _, id in filteredOrganization = store.organizations.first { $0.id == id } }
+        .onChange(of: store.owner) { organizationId = nil; filteredOrganization = nil }
     }
 }
 

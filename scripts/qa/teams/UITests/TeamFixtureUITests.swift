@@ -25,6 +25,35 @@ final class TeamFixtureUITests: XCTestCase {
         image.name = name; image.lifetime = .keepAlways
         add(image)
     }
+    func testTeamHubShowsWorkAndCompactInvitationState() {
+        let app = launch()
+        let back = app.buttons["team.organizations.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
+        XCTAssertTrue(app.buttons["team.organization.open.org_fixture"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["No pending invitations"].exists)
+        XCTAssertFalse(app.staticTexts["Your invitations"].exists)
+        let project = app.buttons["team.project.open.repo_fixture"]
+        XCTAssertTrue(project.waitForExistence(timeout: 10)); project.tap()
+        XCTAssertTrue(app.buttons["team.chats.checkout"].waitForExistence(timeout: 10))
+        capture(app, "Team hub opens project conversations")
+    }
+    func testOrganizationOverviewShowsForegroundPresence() {
+        let app = launch()
+        XCTAssertTrue(app.staticTexts["Overview"].waitForExistence(timeout: 10))
+        app.swipeUp()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Online")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Offline")).firstMatch.exists)
+        capture(app, "Organization overview and app presence")
+    }
+    func testNewOrganizationExplainsFirstProjectAtLargeText() {
+        let app = launch("newOrganization", largeText: true)
+        let title = app.staticTexts["A place to build together"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10)); reveal(title, in: app, scroll: app.scrollViews.firstMatch)
+        XCTAssertTrue(title.isHittable)
+        let add = app.buttons["New shared project"]
+        reveal(add, in: app, scroll: app.scrollViews.firstMatch); XCTAssertTrue(add.isHittable)
+        capture(app, "New organization project setup large text")
+    }
     func testSharedSourceKeepsPrivateDraftAtLargeText() {
         let app = XCUIApplication()
         app.launchArguments = ["--fixture-shared-source", "--fixture-large-text"]

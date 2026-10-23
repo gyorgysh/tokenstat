@@ -70,6 +70,28 @@ fn capabilities() -> Value {
 }
 
 #[test]
+fn app_presence_uses_only_the_current_device_account_and_retires_late_replies() {
+    let (client, wire) = fixture(
+        response(json!({"active": true,"expiresInSeconds":75})),
+        false,
+    );
+    assert_eq!(client.app_presence(true).unwrap()["active"], true);
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(requests[0].0, Method::POST);
+    assert_eq!(
+        requests[0].1,
+        "https://accounts.example.test/api/v1/teams/presence"
+    );
+    assert_eq!(requests[0].2, Some(json!({"active":true})));
+    assert!(requests[0].3);
+    let (retired, _) = fixture(response(json!({"active":false})), true);
+    assert!(matches!(
+        retired.app_presence(false),
+        Err(TeamError::AccountChanged)
+    ));
+}
+
+#[test]
 fn move_catch_up_collects_every_page_and_rejects_nonadvancing_cursors() {
     let first = format!("repo_{:032x}", 1);
     let last = format!("repo_{:032x}", 1000);

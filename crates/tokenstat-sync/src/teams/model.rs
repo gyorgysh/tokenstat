@@ -78,6 +78,8 @@ pub struct Member {
     pub eligible: bool,
     pub ownership_eligible: Option<bool>,
     pub joined_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub online_for_seconds: Option<f64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

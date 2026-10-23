@@ -75,7 +75,7 @@ extension TeamRepositoryRole {
 extension TeamSection {
     var label: String {
         switch self {
-        case .overview: L10n.text("common.teams.title")
+        case .overview: L10n.text("common.teams.overview")
         case .chats: L10n.text("common.teams.chats")
         case .members: L10n.text("common.teams.members")
         case .invitations: L10n.text("common.teams.invitations")
@@ -99,6 +99,8 @@ struct TeamPersonLabel: View {
     let handle: String?
     let avatar: String?
     let owner: TeamAccountOwner?
+    var showsPresence = false
+    var online: Bool? = nil
     var body: some View {
         HStack(spacing: Theme.Space.m) {
             Avatar(url: teamAvatarURL(avatar, owner: owner)?.absoluteString, name: name, handle: handle, size: 32, tint: Avatar.tint(for: id))
@@ -106,9 +108,29 @@ struct TeamPersonLabel: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(name).font(Theme.body.weight(.medium)).lineLimit(2)
                 if let handle { Text("@\(handle)").font(Theme.callout).foregroundStyle(.secondary).lineLimit(1) }
+                if showsPresence {
+                    HStack(spacing: Theme.Space.xs) {
+                        if let online {
+                            Circle().fill(online ? Theme.accent : Theme.secondary.opacity(0.5)).frame(width: 6, height: 6).accessibilityHidden(true)
+                            Text(online ? L10n.text("common.teams.online") : L10n.text("common.teams.offline"))
+                        } else { Text(L10n.text("common.teams.presence_unknown")) }
+                    }.font(Theme.caption).foregroundStyle(online == true ? TeamColors.action : .secondary)
+                }
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+struct TeamMemberLabel: View {
+    @Bindable var store: TeamStore
+    let member: TeamMember
+    let organization: String
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 15)) { _ in
+            TeamPersonLabel(id: member.id, name: member.name, handle: member.handle, avatar: member.avatar, owner: store.owner,
+                showsPresence: true, online: store.presenceStatus(member: member.id, organization: organization, at: Date()))
+        }
     }
 }
 struct TeamRoleBadge: View {
@@ -248,5 +270,22 @@ struct TeamPickerField<Selection: Hashable, Options: View>: View {
             Picker(title, selection: $selection, content: options)
                 .pickerStyle(.menu).labelsHidden()
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+
+struct TeamChatActivityBadge: View {
+    @Bindable var store: TeamStore
+    let share: TeamSharedChat
+    let repository: TeamRepository
+    let checkout: TeamCheckout
+    var body: some View {
+        if store.chatReadState.isUnread(share, repository: repository, checkout: checkout) {
+            Text(store.chatReadState.hasRead(share, repository: repository, checkout: checkout) ? L10n.text("common.teams.unread") : L10n.text("common.teams.new_activity"))
+                .font(Theme.caption.weight(.semibold)).foregroundStyle(TeamColors.action)
+                .padding(.horizontal, Theme.Space.s).padding(.vertical, Theme.Space.xs)
+                .background(Theme.accentSoft, in: Capsule())
+                .accessibilityIdentifier("team.chat.unread.\(share.id)")
+        }
     }
 }

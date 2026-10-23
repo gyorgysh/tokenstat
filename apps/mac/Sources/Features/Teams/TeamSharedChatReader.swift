@@ -26,6 +26,7 @@ struct TeamSharedChatReader: View {
     @Environment(\.teamCommentDraftStorage) private var commentStorage
     @Environment(\.teamAskRecoveryStorage) private var askStorage
     @Environment(\.dynamicTypeSize) private var textSize
+    @Environment(\.scenePhase) private var scenePhase
     private var isCurrent: Bool {
         store.mutationContext == context && store.phase == .ready && context.organizationId == repository.organizationId
             && checkout.organizationId == repository.organizationId && checkout.repositoryId == repository.id && share.checkoutId == checkout.id
@@ -193,6 +194,13 @@ struct TeamSharedChatReader: View {
             summary = details.chat; events = bounded; cursor = page.nextCursor; hasMore = page.hasMore; loadedEarlier = earlier
             renderedHistory = TeamChatHistory(title: details.chat.title, backend: details.chat.backend, historyTrimmed: details.chat.historyTrimmed, events: bounded)
             asOf = Date(timeIntervalSince1970: Double(page.asOfMs) / 1000)
+            if !earlier, scenePhase == .active {
+                let latest = page.events.compactMap { event -> Int64? in
+                    guard case let .object(fields) = event, case let .int(at)? = fields["atMs"] else { return nil }
+                    return at
+                }.max()
+                store.chatReadState.markRead(share, repository: repository, checkout: checkout, through: latest)
+            }
         } catch is CancellationError {} catch {
             guard isCurrent, loadId == id else { return }
             self.error = error.localizedDescription

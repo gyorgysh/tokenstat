@@ -21,6 +21,7 @@ struct TeamSharedChatsView: View {
     @State private var catalogRefresh = UUID()
     @State private var loadingCheckouts = false
     @State private var loadingShares = false
+    @State private var hasLoadedMoreShares = false
     @State private var checkoutLoad = UUID()
     @State private var shareLoad = UUID()
     private var loading: Bool { loadingCheckouts || loadingShares }
@@ -33,6 +34,7 @@ struct TeamSharedChatsView: View {
     // The original title/backend keep the same identity after a lost reply.
     @State private var newRequest: (title: String, backend: String, id: String)?
     @State private var starting = false
+    @Environment(\.scenePhase) private var scenePhase
     private var isCurrent: Bool { store.mutationContext == context && store.phase == .ready }
     private var availableRepositories: [TeamRepository] { repositories.filter { $0.role != nil } }
     private var repository: TeamRepository? { availableRepositories.first { $0.id == store.selectedRepositoryId } }
@@ -53,7 +55,14 @@ struct TeamSharedChatsView: View {
         }
         .preference(key: TeamChatReadingKey.self, value: selected != nil)
         .task(id: "\(store.selectedRepositoryId ?? "")|\(store.preferredCheckoutId ?? "")") { await loadCheckouts() }
-        .task(id: checkoutId) { await loadShares(more: false) }
+        .task(id: checkoutId) {
+            await loadShares(more: false)
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                guard scenePhase == .active, selected == nil, !loading, !hasLoadedMoreShares else { continue }
+                await loadShares(more: false, background: true)
+            }
+        }
         .sheet(isPresented: $shareSheet) {
             if let repository, let checkout {
                 TeamChatShareEditor(store: store, context: context, repository: repository, checkout: checkout, transcript: transcript)
@@ -155,6 +164,7 @@ struct TeamSharedChatsView: View {
                                         }.font(Theme.callout).foregroundStyle(.secondary)
                                     }
                                     Spacer(minLength: 0)
+                                    if let repository { TeamChatActivityBadge(store: store, share: share, repository: repository, checkout: checkout) }
                                     Image(systemName: "chevron.right").foregroundStyle(.secondary)
                                 }.padding(Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading).background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
                             }.buttonStyle(.plain).accessibilityIdentifier("team.chats.open.\(share.id)")
@@ -258,9 +268,9 @@ struct TeamSharedChatsView: View {
             }
         } catch is CancellationError {} catch { if isCurrent, checkoutLoad == load, self.repository?.id == repository.id { self.error = error.localizedDescription } }
     }
-    private func loadShares(more: Bool) async {
+    private func loadShares(more: Bool, background: Bool = false) async {
         let load = UUID(); shareLoad = load
-        if !more { shares = []; sharesNext = nil; sharesCursor = nil; catalogAvailable = true; selected = nil; error = nil }
+        if !more && !background { shares = []; sharesNext = nil; sharesCursor = nil; catalogAvailable = true; selected = nil; error = nil; hasLoadedMoreShares = false }
         guard isCurrent, let repository, let checkoutId else { loadingShares = false; return }
         loadingShares = true
         defer { if shareLoad == load { loadingShares = false } }
@@ -289,6 +299,9 @@ struct TeamSharedChatsView: View {
                 rows = result.shares; nextCursor = nil; nextOffset = result.nextOffset
             }
             guard isCurrent, shareLoad == load, self.checkoutId == checkoutId, self.repository?.id == repository.id, rows.allSatisfy({ $0.checkoutId == checkoutId }) else { return }
+            store.chatReadState.refresh()
+            error = nil
+            if more { hasLoadedMoreShares = true }
             backendChoices[checkoutId] = catalog?.backends ?? []
             shares = more ? shares + rows.filter { next in !shares.contains { $0.id == next.id } } : rows
             sharesNext = nextOffset; sharesCursor = nextCursor

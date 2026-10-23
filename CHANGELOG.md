@@ -13,10 +13,12 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Added
 
+- A Team hub with organization cards, direct shared-project entry, an organization filter and compact invitation states on Apple devices. Shared chat lists refresh while visible and show device-local New and Unread badges.
+- Foreground app presence for team members on Apple devices, when supported by the account server. Presence expires and follows current device consent; unavailable status remains explicit.
 - Interactive charts in agent replies on Mac, Windows, iPhone, iPad and Android. Twelve chart families cover comparisons, trends, distributions, proportions and relationships, with the same offline renderer on every client.
 - Pointer, touch and keyboard inspection, selectable legends, chart zoom, expansion, accessible paginated data tables and native PNG, SVG, CSV and JSON exports. Charts follow light and dark themes, number locales and reduced motion settings.
 - A versioned data-only chart format, MCP creation, validation, schema and example tools, a `tokenstat chart` command, and JavaScript and Python helpers. Chart data stays in the conversation and works across agents, reopened chats and connected devices.
-- Teams account management on Mac, iPhone and iPad, with organization selection in the account menu, invitations, member roles, repository access and ownership recovery. Creating an organization requires Legend; members need Patron or Legend.
+- Teams account management on Mac, iPhone and iPad, with a project and people overview, invitations, member roles, repository access and ownership recovery. Creating an organization requires Legend; members need Patron or Legend.
 - Review and share individual repository checkouts from their publishing computer. Team members can check availability through a separate authorized connection while personal remote access remains off. Each checkout stays on its own computer and branch.
 - Review a private chat's visible history before sharing it with repository members. Shared chats show their approved titles, preserve charts and tool output, and label older messages as Local user (before Teams).
 - Stop a chat's local sharing from the publishing computer even when signed out. Private drafts stay in their original chat while sharing pauses personal sends and queued messages.
@@ -28,6 +30,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
+- Isolated OpenCode Team runs verify per-user policy against the OS account and refuse uninspectable machine settings or broken native profile selectors instead of treating them as absent.
 - Parallel Team chats can validate the same published project together. Brief publication updates settle before access is checked, while revoked or unavailable records still refuse access.
 - Shared chat author names refresh when team membership changes, so newly joined teammates are not temporarily shown as former members.
 - A Team Ask whose reviewed chat or checkout changed now offers a fresh review instead of incorrectly requesting run recovery. Interrupted recorded requests retain their original recovery identity.

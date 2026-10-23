@@ -44,9 +44,9 @@ import AppKit
                 Spacer()
                 ZStack {
                     HStack { Text("Example owner"); Spacer(); Image(systemName: "chevron.up.chevron.down") }.font(Theme.body).padding(Theme.Space.m)
-                    NativeMenuTrigger(items: { TeamScopeMenuItems.make(store: store) { store.show(.overview) } }, accessibilityLabel: "Fixture account scope")
+                    NativeMenuTrigger(items: { [NativeMenuItem(L10n.text("common.teams.title"), icon: .team) { store.select(nil) }] }, accessibilityLabel: "Fixture account")
                 }
-                Text("Legend · \(store.selectedOrganization?.name ?? "Personal")").font(Theme.callout).foregroundStyle(.secondary).padding(.horizontal, Theme.Space.m).padding(.bottom, Theme.Space.m)
+                Text("Legend").font(Theme.callout).foregroundStyle(.secondary).padding(.horizontal, Theme.Space.m).padding(.bottom, Theme.Space.m)
             }.frame(width: 250).background(Theme.sidebar)
             ThemeRule.vertical
             TeamManagementView(store: store, canCreateOrganization: true, onAccount: {}, transcript: TeamFixtureTranscript.render)

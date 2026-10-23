@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with TeamCommentModel.swift TeamCommentDraftStore.swift TeamStore.swift TeamModels.swift WorkReference.swift JSONValue.swift.
+// Compile with TeamCommentModel.swift TeamCommentDraftStore.swift TeamStore.swift TeamChatReadState.swift TeamModels.swift WorkReference.swift JSONValue.swift.
 import Foundation
 
 private actor CommentAPI {
