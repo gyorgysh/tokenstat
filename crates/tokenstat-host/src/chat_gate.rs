@@ -396,7 +396,7 @@ fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), Strin
 }
 
 /// Reuse a native CLI's own credential file without interpreting or refreshing
-/// its tokens. Team runs use this same routing with an otherwise empty home.
+/// its tokens. Private chat retains this existing per-turn routing.
 pub(crate) fn route_cli_credential(source: &Path, target: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
@@ -407,6 +407,29 @@ pub(crate) fn route_cli_credential(source: &Path, target: &Path) -> Result<(), S
     #[cfg(not(unix))]
     {
         ensure_credential_file(source, target)
+    }
+}
+
+/// A Team home is disposable. Copying a rotating login here could discard a
+/// native refresh on teardown, so this path requires a symbolic or hard link.
+/// This is for native in-place writers; atomic-replace writers need their
+/// original credential selector rather than a file alias.
+pub(crate) fn route_team_cli_credential(source: &Path, target: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        ensure_symlink(source, target)
+    }
+    #[cfg(windows)]
+    {
+        if std::fs::symlink_metadata(target).is_ok() {
+            std::fs::remove_file(target).map_err(|error| error.to_string())?;
+        }
+        if !source.try_exists().map_err(|error| error.to_string())? {
+            return Ok(());
+        }
+        std::os::windows::fs::symlink_file(source,target)
+            .or_else(|_|std::fs::hard_link(source,target))
+            .map_err(|_|"The native CLI sign-in cannot be linked into an isolated Team run on this computer. A copied credential would lose native login refreshes, so this sign-in storage is unsupported here.".into())
     }
 }
 
@@ -711,6 +734,27 @@ pub(crate) fn remove_muse_home(root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disposable_team_auth_links_preserve_native_in_place_refreshes() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("native-auth.json");
+        let target = root.path().join("private-auth.json");
+        std::fs::write(&source, "fictional-before").unwrap();
+        route_team_cli_credential(&source, &target).unwrap();
+        // A copy would leave the native sign-in stale after this write and
+        // the private home would discard its refreshed token at teardown.
+        std::fs::write(&target, "fictional-refreshed").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&source).unwrap(),
+            "fictional-refreshed"
+        );
+        std::fs::remove_file(target).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(source).unwrap(),
+            "fictional-refreshed"
+        );
+    }
 
     #[test]
     fn muse_uses_a_custom_xdg_config_root_before_its_private_override() {

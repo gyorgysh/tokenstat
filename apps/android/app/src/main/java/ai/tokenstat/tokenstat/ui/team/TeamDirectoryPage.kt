@@ -20,7 +20,27 @@ internal data class TeamDirectoryPage(val rows: List<JsonObject>, val next: Int?
         }
     }
 }
-internal data class TeamCatalogPage(val rows: List<JsonObject>, val next: String?) {
+internal data class TeamBackendOption(val id: String, val label: String) {
+    companion object {
+        fun read(value: JsonElement?): List<TeamBackendOption> {
+            val result = mutableListOf<TeamBackendOption>()
+            val seen = mutableSetOf<String>()
+            for (entry in (value as? JsonArray ?: return emptyList()).take(32)) {
+                val row = entry as? JsonObject ?: continue
+                val id = (row["id"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: continue
+                if (id.isEmpty() || id.length > 64 || id.any { it !in 'a'..'z' && it !in '0'..'9' && it != '-' && it != '_' }) continue
+                val rawLabel = row["label"]
+                val label = if (rawLabel == null || rawLabel == JsonNull) id else
+                    (rawLabel as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf {
+                        it.length <= 128 && it.isNotBlank() && it.none { char -> char.isISOControl() || char.category == CharCategory.FORMAT }
+                    }?.trim() ?: continue
+                if (seen.add(id)) result.add(TeamBackendOption(id, label))
+            }
+            return result
+        }
+    }
+}
+internal data class TeamCatalogPage(val rows: List<JsonObject>, val next: String?, val backends: List<TeamBackendOption>) {
     companion object {
         fun read(answer: JsonObject, checkout: String, cursor: String?): TeamCatalogPage {
             val value = answer["nextCursor"]
@@ -28,7 +48,7 @@ internal data class TeamCatalogPage(val rows: List<JsonObject>, val next: String
             require(next == null || next.isNotEmpty() && next != cursor) { "Invalid Team page" }
             val rows = pageRows(answer, "shares")
             require(rows.all { (it["checkoutId"] as? JsonPrimitive)?.content == checkout }) { "Invalid Team checkout" }
-            return TeamCatalogPage(rows, next)
+            return TeamCatalogPage(rows, next, TeamBackendOption.read(answer["backends"]))
         }
         fun append(before: List<JsonObject>, incoming: List<JsonObject>): List<JsonObject> = (before + incoming).distinctBy { it["id"] }
     }

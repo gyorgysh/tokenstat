@@ -769,7 +769,7 @@ mod new_chat_tests {
         assert_eq!(input.title, "Fictional project chat");
         assert_eq!(input.request_id, "new-fixture");
         assert!(input.backend.is_none());
-        for backend in ["claude", "codex"] {
+        for backend in crate::automations::agent_backends().map(|backend| backend.id) {
             let mut selected = valid.clone();
             selected["backend"] = serde_json::json!(backend);
             assert_eq!(

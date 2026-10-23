@@ -1070,6 +1070,86 @@ fn shell_argv(prompt: &str) -> Vec<&str> {
     vec!["cmd.exe", "/C", prompt]
 }
 
+pub(crate) struct BackendSpec {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub command: &'static str,
+    pub executable: &'static str,
+    pub efforts: &'static [&'static str],
+}
+
+// One catalog for automation discovery and shared-chat agent choices. Shell
+// executes owner-authored commands rather than conversational agent turns.
+const BACKENDS: &[BackendSpec] = &[
+    BackendSpec {
+        id: "sh",
+        executable: "sh",
+        label: "Shell",
+        command: "sh -c \"…\"",
+        efforts: &[],
+    },
+    BackendSpec {
+        id: "claude",
+        executable: "claude",
+        label: "Claude",
+        command: "claude -p \"…\"",
+        efforts: &["low", "medium", "high", "xhigh", "max"],
+    },
+    BackendSpec {
+        id: "codex",
+        executable: "codex",
+        label: "Codex",
+        command: "codex exec … -- \"…\"",
+        efforts: &["low", "medium", "high", "xhigh", "max"],
+    },
+    BackendSpec {
+        id: "muse",
+        executable: "muse",
+        label: "Muse",
+        command: "muse exec --json …",
+        efforts: &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+    },
+    BackendSpec {
+        id: "grok",
+        executable: "grok",
+        label: "Grok",
+        command: "grok -p \"…\"",
+        efforts: &["low", "medium", "high"],
+    },
+    BackendSpec {
+        id: "cursor",
+        executable: "cursor-agent",
+        label: "Cursor",
+        command: "cursor-agent -p …",
+        efforts: &[],
+    },
+    BackendSpec {
+        id: "agy",
+        executable: "agy",
+        label: "Antigravity",
+        command: "agy --print \"…\"",
+        efforts: &[],
+    },
+    BackendSpec {
+        id: "opencode",
+        executable: "opencode",
+        label: "OpenCode",
+        command: "opencode run \"…\"",
+        efforts: &["minimal", "medium", "high", "max"],
+    },
+    BackendSpec {
+        id: "opencode2",
+        executable: "opencode2",
+        label: "OpenCode 2",
+        command: "opencode2 run \"…\"",
+        efforts: &["minimal", "medium", "high", "max"],
+    },
+];
+
+pub(crate) fn agent_backends() -> impl Iterator<Item = &'static BackendSpec> {
+    BACKENDS.iter().filter(|backend| backend.id != "sh")
+}
+
 /// The backends a client can choose from, in picker order.
 ///
 /// `models` are taken from the installed CLI when it can list them
@@ -1087,67 +1167,10 @@ pub fn backends(force: bool) -> Vec<serde_json::Value> {
     } else {
         crate::agent_models::refresh();
     }
-    [
-        ("sh", "Shell", "sh -c \"…\"", serde_json::json!([])),
-        (
-            "claude",
-            "Claude",
-            "claude -p \"…\"",
-            // `--effort` per `claude --help`: low, medium, high, xhigh, max.
-            serde_json::json!(["low", "medium", "high", "xhigh", "max"]),
-        ),
-        (
-            "codex",
-            "Codex",
-            "codex exec … -- \"…\"",
-            // Codex takes an effort through `-c model_reasoning_effort=`.
-            serde_json::json!(["low", "medium", "high", "xhigh", "max"]),
-        ),
-        (
-            "muse",
-            "Muse",
-            "muse exec --json …",
-            serde_json::json!(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]),
-        ),
-        (
-            "grok",
-            "Grok",
-            "grok -p \"…\"",
-            serde_json::json!(["low", "medium", "high"]),
-        ),
-        (
-            "cursor",
-            "Cursor",
-            "cursor-agent -p …",
-            serde_json::json!([]),
-        ),
-        (
-            "agy",
-            "Antigravity",
-            "agy --print \"…\"",
-            // High / medium / low are separate model ids, not a second flag.
-            serde_json::json!([]),
-        ),
-        (
-            "opencode",
-            "OpenCode",
-            "opencode run \"…\"",
-            serde_json::json!(["minimal", "medium", "high", "max"]),
-        ),
-        (
-            "opencode2",
-            "OpenCode 2",
-            "opencode2 run \"…\"",
-            serde_json::json!(["minimal", "medium", "high", "max"]),
-        ),
-    ]
-    .into_iter()
-    .map(|(id, label, command, efforts)| {
-        let models =
-            crate::agent_models::for_backend(id, crate::agent_models::fallback_for(id));
-        serde_json::json!({"id": id, "label": label, "command": command, "models": models, "efforts": efforts})
-    })
-    .collect()
+    BACKENDS.iter().map(|backend| {
+        let models = crate::agent_models::for_backend(backend.id, crate::agent_models::fallback_for(backend.id));
+        serde_json::json!({"id": backend.id, "label": backend.label, "command": backend.command, "models": models, "efforts": backend.efforts})
+    }).collect()
 }
 
 // MARK: - The job

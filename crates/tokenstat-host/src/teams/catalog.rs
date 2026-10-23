@@ -149,6 +149,7 @@ pub(super) fn call(
     client.ensure_current().map_err(api_error)?;
     principal.ensure_live()?;
     Ok(
-        json!({"shares":rows,"nextCursor":page.next_offset.map(|next| format!("v1:catalog:{}:{next}", checkout.id))}),
+        json!({"shares":rows,"nextCursor":page.next_offset.map(|next| format!("v1:catalog:{}:{next}", checkout.id)),
+            "backends":crate::automations::agent_backends().map(|backend| json!({"id":backend.id,"label":backend.label})).collect::<Vec<_>>()}),
     )
 }

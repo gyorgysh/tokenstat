@@ -155,12 +155,12 @@ fn run() -> Result<(), String> {
             "team-hook" => {
                 let flavor = args.next().ok_or("Team hook needs a backend")?;
                 let phase = args.next().ok_or("Team hook needs a phase")?;
-                let decision = if phase == "pre" {
+                let decision = if phase == "pre" || (flavor == "cursor" && phase == "mcp") {
                     (|| -> Result<Decision, String> {
                         let mut body = String::new();
                         std::io::stdin().take(512 * 1024).read_to_string(&mut body).map_err(|_| "Invalid Team tool request")?;
                         let input:Value = serde_json::from_str(&body).map_err(|_| "Invalid Team tool request")?;
-                        let (name,_,_) = hook_tool(&flavor, &input);
+                        let name = team_tool_request(&flavor, &phase, &input).ok_or("Only this run's Team tools are available.")?;
                         if tokenstat_host::team_sdk::allows_tool(&name).map_err(|_| "Team authority is unavailable")? {
                             Ok(Decision::Allow)
                         } else { Ok(Decision::Deny("Only this run's Team tools are available. Use the team_file tools for lane work.".into())) }
@@ -233,6 +233,36 @@ fn run() -> Result<(), String> {
     tokenstat_host::install_team_sync();
 
     server::serve(listener, session)
+}
+
+/// Normalize only native MCP identities, never a tool basename. Cursor has
+/// two mandatory fail-closed hooks: its generic pre hook identifies MCP calls
+/// but omits their server, and beforeMCPExecution proves the exact server.
+fn team_tool_request(flavor: &str, phase: &str, input: &Value) -> Option<String> {
+    let (name, _, _) = hook_tool(flavor, input);
+    let tool = match (flavor, phase) {
+        ("claude" | "codex", "pre") => name.strip_prefix("mcp__tokenstat_team__"),
+        ("grok", "pre") => {
+            let args = input.get("tool_input").or_else(|| input.get("toolInput"))?;
+            // Native use_tool has file-based argument forms which would read
+            // outside the lane. Only its complete inline MCP form is valid.
+            if args["tool_name"] != name
+                || !args["tool_input"].is_object()
+                || !args
+                    .as_object()?
+                    .keys()
+                    .all(|key| matches!(key.as_str(), "tool_name" | "tool_input"))
+            {
+                return None;
+            }
+            name.strip_prefix("tokenstat_team__")
+        }
+        ("agy", "pre") => name.strip_prefix("mcp_tokenstat_team_"),
+        ("cursor", "pre") => name.strip_prefix("MCP:"),
+        ("cursor", "mcp") if input["mcp_server_name"] == "tokenstat_team" => Some(name.as_str()),
+        _ => None,
+    }?;
+    (!tool.is_empty()).then(|| format!("mcp__tokenstat_team__{tool}"))
 }
 
 /// What one `PreToolUse` hook decided, and why.
@@ -806,6 +836,83 @@ Runs in the foreground. Use launchd to keep it alive; see docs/desktop-app.md.
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn team_hooks_bind_native_mcp_names_to_the_guardians_server() {
+        for (backend, name) in [
+            ("claude", "mcp__tokenstat_team__team_file_read"),
+            ("codex", "mcp__tokenstat_team__team_file_read"),
+            ("agy", "mcp_tokenstat_team_team_file_read"),
+        ] {
+            assert_eq!(
+                team_tool_request(backend, "pre", &json!({"tool_name":name})).as_deref(),
+                Some("mcp__tokenstat_team__team_file_read")
+            );
+            for denied in [
+                "team_file_read",
+                "Shell",
+                "mcp__other__team_file_read",
+                "other__team_file_read",
+                "mcp_other_team_file_read",
+            ] {
+                assert!(team_tool_request(backend, "pre", &json!({"tool_name":denied})).is_none());
+            }
+        }
+        let grok = json!({"tool_name":"tokenstat_team__team_file_read","tool_input":{"tool_name":"tokenstat_team__team_file_read","tool_input":{"path":"source.rs"}}});
+        assert_eq!(
+            team_tool_request("grok", "pre", &grok).as_deref(),
+            Some("mcp__tokenstat_team__team_file_read")
+        );
+        for args in [
+            json!({"tool_name":"tokenstat_team__team_file_read","tool_input_file":"/private/file"}),
+            json!({"file":"/private/wrapper"}),
+            json!({"tool_name":"other__team_file_read","tool_input":{}}),
+        ] {
+            assert!(
+                team_tool_request(
+                    "grok",
+                    "pre",
+                    &json!({"tool_name":"tokenstat_team__team_file_read","tool_input":args})
+                )
+                .is_none()
+            );
+        }
+        assert_eq!(
+            team_tool_request(
+                "agy",
+                "pre",
+                &json!({"toolCall":{"name":"mcp_tokenstat_team_team_context","args":{}}})
+            )
+            .as_deref(),
+            Some("mcp__tokenstat_team__team_context")
+        );
+        assert!(team_tool_request("cursor", "pre", &json!({"tool_name":"Read"})).is_none());
+        // Cursor's generic hook only defers MCP-shaped calls to the mandatory
+        // beforeMCPExecution hook, which supplies the authoritative server.
+        assert!(
+            team_tool_request("cursor", "pre", &json!({"tool_name":"MCP:team_file_read"}))
+                .is_some()
+        );
+        assert_eq!(
+            team_tool_request(
+                "cursor",
+                "mcp",
+                &json!({"tool_name":"team_file_read","mcp_server_name":"tokenstat_team"})
+            )
+            .as_deref(),
+            Some("mcp__tokenstat_team__team_file_read")
+        );
+        for server in [json!("other"), json!(null)] {
+            assert!(
+                team_tool_request(
+                    "cursor",
+                    "mcp",
+                    &json!({"tool_name":"team_file_read","mcp_server_name":server})
+                )
+                .is_none()
+            );
+        }
+    }
 
     #[test]
     fn hook_input_keeps_the_tool_and_short_shell_prefix() {

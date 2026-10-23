@@ -83,6 +83,96 @@ namespace NativeUiTests
             finally { if (mounted is not null) body.Children.Remove(mounted); if (Directory.Exists(root)) Directory.Delete(root, true); }
             Program.Log("PASS: production Teams restores accessible Stop from disk through page recreation, malformed status and history failure");
             await DirectoryAsync(body);
+            await BackendChoicesAsync(body);
+        }
+
+        private static async Task BackendChoicesAsync(StackPanel body)
+        {
+            string[] ids = ["claude", "codex", "muse", "grok", "cursor", "agy", "opencode", "opencode2"];
+            var advertised = true;
+            var attempts = new List<JsonObject>();
+            static JsonObject Page(string field, params JsonObject[] rows) => new() { [field] = new JsonArray(rows.Select(row => row.DeepClone()).ToArray()), ["nextOffset"] = null };
+            Task<JsonNode> Host(string method, JsonObject? fields)
+            {
+                if (method == "account.status") return Task.FromResult<JsonNode>(new JsonObject {
+                    ["signedIn"] = true, ["host"] = "https://fixture.invalid", ["handle"] = "fictional", ["accountId"] = "person", ["accountSession"] = "backend-session",
+                });
+                if (Format.Text(fields, "_accountSession") != "backend-session") throw new Exception("Backend picker lost its account receipt");
+                if (method == "teams.capabilities") return Task.FromResult<JsonNode>(new JsonObject { ["enabled"] = true, ["ready"] = true, ["actorId"] = "person" });
+                if (method == "teams.directory") return Task.FromResult<JsonNode>(Format.Text(fields, "operation") switch {
+                    "organizations.list" => Page("organizations", new JsonObject { ["id"] = "org", ["name"] = "Fictional team" }),
+                    "repositories.list" => Page("repositories", new JsonObject { ["id"] = "repo", ["name"] = "Fictional project", ["organizationId"] = "org", ["role"] = "maintainer" }),
+                    "checkouts.list" => Page("checkouts", new JsonObject { ["id"] = "computer", ["deviceName"] = "Publishing computer", ["hostKey"] = "fictional-host" }),
+                    _ => throw new Exception("Unexpected backend directory call"),
+                });
+                if (method == "teams.connection.call" && Format.Text(fields, "method") == "team.lanes")
+                    return Task.FromResult<JsonNode>(new JsonObject { ["lanes"] = new JsonArray() });
+                if (method == "teams.connection.call" && Format.Text(fields, "method") == "team.chat.catalog")
+                {
+                    var result = new JsonObject { ["shares"] = new JsonArray() };
+                    if (advertised) result["backends"] = new JsonArray(ids.Select(id => (JsonNode)new JsonObject { ["id"] = id, ["label"] = "Publisher " + id }).ToArray());
+                    return Task.FromResult<JsonNode>(result);
+                }
+                if (method == "teams.ask" && Format.Text(fields, "method") == "team.chat.new")
+                {
+                    attempts.Add((JsonObject)fields!["params"]!.DeepClone());
+                    throw new Tokenstat.Host.HostException("teams_unreachable", "Fictional lost creation reply");
+                }
+                throw new Exception("Backend picker attempted local discovery or an unrelated method");
+            }
+            static IEnumerable<DependencyObject> Descendants(DependencyObject root)
+            {
+                yield return root;
+                for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+                    foreach (var child in Descendants(VisualTreeHelper.GetChild(root, i))) yield return child;
+            }
+            var page = new TeamsPage(Host);
+            ComboBox Agent() => Descendants(page).OfType<ComboBox>().Single(box => box.Header as string == L10n.Text("common.teams.agent"));
+            TextBox Title() => Descendants(page).OfType<TextBox>().Single(box => box.Header as string == L10n.Text("common.teams.new_chat_title"));
+            Button Start() => Descendants(page).OfType<Button>().Single(button => AutomationProperties.GetName(button) == L10n.Text("common.teams.new_chat"));
+            async Task Wait(Func<bool> ready)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                while (!ready() && DateTime.UtcNow < deadline) { page.UpdateLayout(); await Task.Delay(20); }
+                if (!ready()) throw new Exception("Publisher backend UI did not settle");
+            }
+            async Task Send()
+            {
+                var before = attempts.Count;
+                if (new ButtonAutomationPeer(Start()).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke) throw new Exception("New-chat action is inaccessible");
+                invoke.Invoke();
+                await Wait(() => attempts.Count == before + 1 && Start().IsEnabled);
+            }
+            body.Children.Add(page); body.UpdateLayout();
+            try
+            {
+                await Wait(() => Descendants(page).OfType<ComboBox>().Any(box => box.Header as string == L10n.Text("common.teams.agent") && box.Items.Count == 9));
+                var choices = Agent().Items.OfType<ComboBoxItem>().ToArray();
+                if (!choices.Skip(1).Select(item => item.Tag as string).SequenceEqual(ids) || choices[6].Content as string != "Publisher agy")
+                    throw new Exception("The Team picker did not use the publishing computer's complete catalog");
+                Title().Text = "Retained backend draft";
+                foreach (var id in ids)
+                {
+                    Agent().SelectedValue = id;
+                    await Task.Delay(20);
+                    await Send();
+                    if (Format.Text(attempts[^1], "backend") != id || Title().Text != "Retained backend draft") throw new Exception("The selected publisher backend or draft was lost");
+                }
+                var original = (JsonObject)attempts[^1].DeepClone();
+                advertised = false;
+                const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                await (Task)typeof(TeamsPage).GetMethod("LoadAsync", flags)!.Invoke(page, null)!;
+                await Wait(() => Descendants(page).OfType<ComboBox>().Any(box => box.Header as string == L10n.Text("common.teams.agent") && box.Items.Count == 1));
+                if (Title().Text != "Retained backend draft") throw new Exception("Catalog refresh cleared a new-chat draft");
+                await Send();
+                if (!JsonNode.DeepEquals(original, attempts[^1])) throw new Exception("Missing backend metadata changed an uncertain request's identity");
+                Agent().SelectedValue = "";
+                await Task.Delay(20);
+                await Send();
+                if (attempts[^1].ContainsKey("backend")) throw new Exception("Use Default must omit backend for an older publishing host");
+            }
+            finally { body.Children.Remove(page); }
+            Program.Log("PASS: all publisher backends reach new-chat requests; old-host catalogs preserve drafts/retry identity and offer Default without a backend field");
         }
 
         private static async Task DirectoryAsync(StackPanel body)

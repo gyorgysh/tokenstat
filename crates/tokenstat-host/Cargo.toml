@@ -43,7 +43,7 @@ required-features = ["local-host"]
 # identity, and reaching a machine that does have `local-host`.
 [features]
 default = ["local-host"]
-local-host = ["dep:tokenstat-workspace", "dep:tokenstat-pty", "dep:igd-next", "dep:toml_edit"]
+local-host = ["dep:tokenstat-workspace", "dep:tokenstat-pty", "dep:igd-next", "dep:toml_edit", "dep:rusqlite"]
 
 [dependencies]
 tokenstat-core.workspace = true
@@ -55,6 +55,7 @@ tokenstat-workspace = { workspace = true, optional = true }
 tokenstat-pty = { workspace = true, optional = true }
 tempfile.workspace = true
 toml_edit = { version = "0.25", optional = true }
+rusqlite = { workspace = true, optional = true }
 tokenstat-highlight.workspace = true
 tokenstat-identity.workspace = true
 tokenstat-remote.workspace = true

@@ -27,6 +27,73 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class TeamBrowserTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    @Test fun publisherBackendsDriveCreationAndCatalogRefreshPreservesUncertainDrafts() {
+        val ids = listOf("claude", "codex", "muse", "grok", "cursor", "agy", "opencode", "opencode2")
+        val attempts = CopyOnWriteArrayList<JsonObject>()
+        var advertise = true
+        val account = buildJsonObject { put("signedIn", true); put("host", "https://fixture.invalid"); put("handle", "fixture"); put("accountId", "person"); put("accountSession", "backend-session") }
+        val calls = TeamCalls(account) { method, body ->
+            assertEquals("backend-session", body["_accountSession"]?.jsonPrimitive?.content)
+            when {
+                method == "teams.directory" -> buildJsonObject { put("checkouts", JsonArray(listOf(buildJsonObject {
+                    put("id", "computer"); put("deviceName", "Publishing computer"); put("hostKey", "fictional-host")
+                }))) }
+                method == "teams.connection.call" && body["method"]?.jsonPrimitive?.content == "team.lanes" -> buildJsonObject { put("lanes", JsonArray(emptyList())) }
+                method == "teams.connection.call" && body["method"]?.jsonPrimitive?.content == "team.chat.catalog" -> buildJsonObject {
+                    put("shares", JsonArray(emptyList()))
+                    if (advertise) {
+                        put("backends", JsonArray(ids.map { id -> buildJsonObject { put("id", id); put("label", "Publisher $id") } }))
+                        put("nextCursor", "metadata-refresh")
+                    }
+                }
+                method == "teams.ask" && body["method"]?.jsonPrimitive?.content == "team.chat.new" -> {
+                    attempts += body["params"]!!.jsonObject
+                    throw java.io.IOException("Fictional lost creation reply")
+                }
+                else -> error("Backend picker attempted local discovery or an unrelated call")
+            }
+        }
+        compose.setContent {
+            TsTheme(DarkColors) {
+                MaterialTheme(colorScheme = DarkColors.toColorScheme(), typography = TsType.typography) {
+                    Surface(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        Column(Modifier.verticalScroll(rememberScrollState()).padding(12.dp)) {
+                            RepositoryCard(calls, "org", buildJsonObject { put("id", "repo"); put("name", "Fictional project"); put("role", "maintainer") }, onOpenChat = {})
+                        }
+                    }
+                }
+            }
+        }
+        val default = L10n.text("common.local_provider_use_default")
+        compose.waitUntil(5_000) { compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size == 1 }
+        compose.onNode(hasSetTextAction()).performScrollTo().performTextInput("Retained backend draft")
+        fun send() {
+            val before = attempts.size
+            compose.onNodeWithText(L10n.text("common.teams.new_chat")).performScrollTo().assertIsEnabled().performClick()
+            compose.waitUntil(5_000) { attempts.size == before + 1 }
+            compose.waitForIdle()
+            compose.onNode(hasSetTextAction()).assertTextContains("Retained backend draft")
+        }
+        var selected = default
+        for (id in ids) {
+            compose.onNodeWithText(selected).performScrollTo().performClick()
+            compose.onNodeWithText("Publisher $id").performScrollTo().performClick()
+            selected = "Publisher $id"
+            send()
+            assertEquals(id, attempts.last()["backend"]?.jsonPrimitive?.content)
+        }
+        val original = attempts.last()
+        compose.runOnIdle { advertise = false }
+        compose.onNodeWithText(L10n.text("common.teams.load_more")).performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("opencode2").fetchSemanticsNodes().size == 1 }
+        send()
+        assertEquals(original, attempts.last())
+        compose.onNodeWithText("opencode2").performScrollTo().performClick()
+        ids.forEach { compose.onNodeWithText("Publisher $it").assertDoesNotExist() }
+        compose.onNodeWithText(default).performClick()
+        send()
+        assertFalse(attempts.last().containsKey("backend"))
+    }
     @Test fun laterComputersAndSharedChatsAreReachableThroughTheProductionBrowser() {
         val account = buildJsonObject { put("signedIn", true); put("host", "https://fixture.invalid"); put("handle", "fixture"); put("accountId", "person-fixture"); put("accountSession", "fictional-session") }
         val observed = CopyOnWriteArrayList<Pair<String, JsonObject>>()

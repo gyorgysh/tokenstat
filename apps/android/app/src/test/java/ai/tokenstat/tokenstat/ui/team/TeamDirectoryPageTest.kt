@@ -26,4 +26,24 @@ class TeamDirectoryPageTest {
         assertTrue(runCatching { TeamCatalogPage.read(answer("shares", listOf(row(1), row(1))), "computer", null) }.isFailure)
         assertEquals("next", TeamCatalogPage.read(answer("shares", emptyList(), "nextCursor" to JsonPrimitive("next")), "computer", null).next)
     }
+    @Test fun publisherBackendMetadataIsOptionalFilteredUniqueAndBounded() {
+        fun option(id: String, label: JsonElement? = null) = buildJsonObject { put("id", id); label?.let { put("label", it) } }
+        val ids = listOf("claude", "codex", "muse", "grok", "cursor", "agy", "opencode", "opencode2")
+        val catalog = buildJsonObject { put("shares", JsonArray(emptyList())); put("backends", JsonArray(ids.map { option(it, JsonPrimitive("Publisher $it")) })) }
+        val advertised = TeamCatalogPage.read(catalog, "computer", null).backends
+        assertEquals(ids, advertised.map { it.id }); assertEquals("Publisher agy", advertised[5].label)
+        assertTrue(TeamCatalogPage.read(answer("shares", emptyList()), "computer", null).backends.isEmpty())
+        assertTrue(TeamBackendOption.read(JsonObject(emptyMap())).isEmpty())
+        val invalid = listOf(JsonNull, option(""), option("UPPER"), option("slash/name"), option("é"), option("x".repeat(65)),
+            option("blank", JsonPrimitive("  ")), option("long", JsonPrimitive("x".repeat(129))), option("wrong", JsonPrimitive(4)),
+            option("multiline", JsonPrimitive("Agent\nname")), option("hidden", JsonPrimitive("\u200b")))
+        val filtered = TeamBackendOption.read(JsonArray(invalid + listOf(option("claude", JsonPrimitive("First")), option("claude", JsonPrimitive("Duplicate")), option("future-agent_v2"))))
+        assertEquals(listOf(TeamBackendOption("claude", "First"), TeamBackendOption("future-agent_v2", "future-agent_v2")), filtered)
+        val bounded = TeamBackendOption.read(JsonArray((0..<1000).map { option("agent-$it") }))
+        assertEquals(32, bounded.size); assertEquals("agent-31", bounded.last().id)
+        val duplicates = JsonArray(List(32) { option("claude") } + option("outside-cap"))
+        val invalidPrefix = JsonArray(List(32) { JsonNull } + option("outside-cap"))
+        assertEquals(listOf("claude"), TeamBackendOption.read(duplicates).map { it.id })
+        assertTrue(TeamBackendOption.read(invalidPrefix).isEmpty())
+    }
 }

@@ -62,6 +62,17 @@ pub(super) fn prepare(scratch: &Path, cwd: &Path, program: &Program) -> io::Resu
         #[cfg(unix)]
         set_private(directory)?;
     }
+    // Native CLI discovery must stop inside this private cwd even when the
+    // scratch directory lives below a person's project or real home. Build
+    // a valid empty Git boundary directly: git-init could load user templates.
+    for directory in [home.join(".git/objects"), home.join(".git/refs/heads")] {
+        fs::create_dir_all(directory)?;
+    }
+    fs::write(home.join(".git/HEAD"), "ref: refs/heads/team-run\n")?;
+    fs::write(
+        home.join(".git/config"),
+        "[core]\nrepositoryformatversion = 0\nbare = false\n",
+    )?;
     let mut env = BTreeMap::new();
     if let Some(path) = program.env.get("PATH") {
         if path.is_empty() || path.contains('\0') || path.len() > 64 * 1024 {
@@ -87,6 +98,12 @@ pub(super) fn prepare(scratch: &Path, cwd: &Path, program: &Program) -> io::Resu
     env.insert("CODEX_HOME".into(), codex.to_string_lossy().into_owned());
     #[cfg(windows)]
     {
+        let roaming = home.join("AppData/Roaming");
+        let local = home.join("AppData/Local");
+        fs::create_dir_all(&roaming)?;
+        fs::create_dir_all(&local)?;
+        env.insert("APPDATA".into(), roaming.to_string_lossy().into_owned());
+        env.insert("LOCALAPPDATA".into(), local.to_string_lossy().into_owned());
         env.insert("USERPROFILE".into(), home.to_string_lossy().into_owned());
         env.insert("TEMP".into(), tmp.to_string_lossy().into_owned());
         env.insert("TMP".into(), tmp.to_string_lossy().into_owned());
@@ -165,5 +182,34 @@ mod tests {
         let mut launched = program(checkout.path());
         launched.folder = other.path().into();
         assert!(prepare(scratch.path(), checkout.path(), &launched).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_git_discovery_stops_at_the_private_cli_home() {
+        let scratch = tempfile::tempdir().unwrap();
+        let checkout = tempfile::tempdir().unwrap();
+        let home = prepare(scratch.path(), checkout.path(), &program(checkout.path())).unwrap();
+        let output = std::process::Command::new("git")
+            .args(["--no-optional-locks", "rev-parse", "--show-toplevel"])
+            .current_dir(home.file("home"))
+            .env_clear()
+            .envs(&home.env)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            Path::new(String::from_utf8(output.stdout).unwrap().trim())
+                .canonicalize()
+                .unwrap(),
+            home.file("home").canonicalize().unwrap()
+        );
+        assert!(!home.file("home/.git/hooks").exists());
     }
 }

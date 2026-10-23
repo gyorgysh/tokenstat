@@ -3656,6 +3656,7 @@ dependencies = [
  "libc",
  "rand",
  "reqwest",
+ "rusqlite",
  "russh",
  "serde",
  "serde_json",

@@ -274,7 +274,11 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
         Some(program) => Ok(program),
         None => (|| {
             super::provider::supported(prepared.backend())?;
-            super::provider::program(&work_folder, prepared.backend())
+            super::provider::program(
+                &work_folder,
+                &source.checkout.folder.canonical,
+                prepared.backend(),
+            )
         })(),
     };
     let mut program = match launch {
@@ -402,6 +406,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
             &helper,
             prepared.backend(),
             lane.is_some(),
+            &source.checkout.folder.canonical,
         )
     {
         let _ = authority.retire();

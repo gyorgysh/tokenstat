@@ -15,6 +15,7 @@ struct TeamSharedChatsView: View {
     @State private var sharesNext: Int?
     @State private var sharesCursor: String?
     @State private var catalogAvailable = true
+    @State private var backendChoices: [String: [TeamBackendOption]] = [:]
     @State private var selected: TeamSharedChat?
     @State private var selectedComputer: TeamCheckout?
     @State private var catalogRefresh = UUID()
@@ -186,8 +187,10 @@ struct TeamSharedChatsView: View {
             Text(L10n.text("common.teams.new_chat_title")).font(Theme.callout.weight(.semibold))
             TeamPickerField(title: L10n.text("common.teams.agent"), selection: $newBackend) {
                 Text(L10n.text("common.local_provider_use_default")).tag("")
-                Text("Claude").tag("claude")
-                Text("Codex").tag("codex")
+                ForEach(backendChoices[checkout.id] ?? []) { backend in Text(backend.label).tag(backend.id) }
+                if !newBackend.isEmpty, !(backendChoices[checkout.id] ?? []).contains(where: { $0.id == newBackend }) {
+                    Text(newBackend).tag(newBackend).disabled(true)
+                }
             }.disabled(starting).accessibilityIdentifier("team.chats.backend")
             HStack(spacing: Theme.Space.s) {
                 TextField(L10n.text("common.teams.new_chat_placeholder"), text: $newTitle).textFieldStyle(ThemedFieldStyle())
@@ -286,6 +289,7 @@ struct TeamSharedChatsView: View {
                 rows = result.shares; nextCursor = nil; nextOffset = result.nextOffset
             }
             guard isCurrent, shareLoad == load, self.checkoutId == checkoutId, self.repository?.id == repository.id, rows.allSatisfy({ $0.checkoutId == checkoutId }) else { return }
+            backendChoices[checkoutId] = catalog?.backends ?? []
             shares = more ? shares + rows.filter { next in !shares.contains { $0.id == next.id } } : rows
             sharesNext = nextOffset; sharesCursor = nextCursor
         } catch is CancellationError {} catch { if isCurrent, shareLoad == load, self.checkoutId == checkoutId { self.error = error.localizedDescription } }

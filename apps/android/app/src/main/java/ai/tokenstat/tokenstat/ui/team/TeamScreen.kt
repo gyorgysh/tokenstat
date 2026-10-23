@@ -388,6 +388,7 @@ internal fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, o
     var shares by remember(repoId) { mutableStateOf<Map<String, List<JsonObject>>>(emptyMap()) }
     var checkoutNext by remember(repoId) { mutableStateOf<Int?>(null) }
     var catalogNext by remember(repoId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var backendChoices by remember(repoId) { mutableStateOf<Map<String, List<TeamBackendOption>>>(emptyMap()) }
     var hostErrors by remember(repoId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var loading by remember(repoId) { mutableStateOf(false) }
     var loaded by remember(repoId) { mutableStateOf(false) }
@@ -406,6 +407,7 @@ internal fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, o
             put("params", buildJsonObject { put("limit", 50); cursor?.let { put("cursor", it) } })
         })
         val page = TeamCatalogPage.read(answer, checkout, cursor)
+        backendChoices = backendChoices + (checkout to page.backends)
         shares = shares + (checkout to TeamCatalogPage.append(if (more) shares[checkout].orEmpty() else emptyList(), page.rows))
         catalogNext = catalogNext - checkout
         page.next?.let { catalogNext = catalogNext + (checkout to it) }
@@ -528,11 +530,12 @@ internal fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, o
                     finally { loading = false }
                 } })
             if (repo.str("role") in setOf("contributor", "maintainer")) {
-                val backends = listOf("" to L10n.text("common.local_provider_use_default"), "claude" to "Claude", "codex" to "Codex")
+                val backends = listOf("" to L10n.text("common.local_provider_use_default")) + backendChoices[id].orEmpty().map { it.id to it.label }
+                val selectedBackend = newBackends[id].orEmpty()
                 Text(L10n.text("common.teams.agent"), style = TsType.caption)
                 Box {
                     TsPickerField(
-                        summary = backends.firstOrNull { it.first == newBackends[id].orEmpty() }?.second ?: backends.first().second,
+                        summary = backends.firstOrNull { it.first == selectedBackend }?.second ?: selectedBackend,
                         enabled = !busy && !loading,
                         onOpen = { pickingBackend = id },
                     )

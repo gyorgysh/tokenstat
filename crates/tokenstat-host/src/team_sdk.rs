@@ -489,6 +489,19 @@ fn tools() -> Vec<Value> {
         tool("chart_validate", "Validate a portable chart.", true),
     ]
 }
+
+/// Provider-native permission policies mirror the actual SDK roster rather
+/// than maintaining a second list that can silently lose chart/file tools.
+pub(crate) fn registered_tool_names() -> Vec<String> {
+    registered_tool_schemas()
+        .into_iter()
+        .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+        .collect()
+}
+
+pub(crate) fn registered_tool_schemas() -> Vec<Value> {
+    tools().into_iter().chain(files::tools()).collect()
+}
 fn context_cursor(args: &Value) -> Result<usize, &'static str> {
     if empty(args) {
         return Ok(0);
@@ -716,6 +729,12 @@ fn handle(shared: &Shared, request: Value, generation: u64) -> Value {
             let mut available = tools();
             if shared.lane.is_some() {
                 available.extend(files::tools());
+            }
+            // Antigravity otherwise defers MCP tools behind a native discovery
+            // tool. Team runs deny native tools, so offer the scoped roster
+            // directly. Other MCP clients ignore vendor metadata.
+            for tool in &mut available {
+                tool["_meta"] = json!({"antigravity/alwaysLoad":true});
             }
             json!({"tools":available})
         }

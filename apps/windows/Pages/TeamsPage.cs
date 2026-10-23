@@ -39,6 +39,7 @@ internal sealed partial class TeamsPage : Page
     private readonly Dictionary<string, string> _checkoutHosts = new();
     private readonly Dictionary<string, string> _newChatWriting = new();
     private readonly Dictionary<string, string> _newChatBackends = new();
+    private readonly Dictionary<string, IReadOnlyList<TeamBackendOption>> _newChatBackendChoices = new();
     private readonly Dictionary<string, (string Title, string Backend, string Id)> _newChatRequests = new();
     private readonly Dictionary<TeamCommentTarget, TeamAskModel> _asks = new();
     private readonly TeamAskRecoveryStore _askStorage;
@@ -116,7 +117,7 @@ internal sealed partial class TeamsPage : Page
                 if (_scope is not null) _initialProject = null;
                 _organization = null;
                 _organizations = []; _organizationsNext = null;
-                _comments.Clear(); _checkoutHosts.Clear(); _newChatWriting.Clear(); _newChatBackends.Clear(); _newChatRequests.Clear(); _asks.Clear(); _openedImages.Clear(); _flash = null;
+                _comments.Clear(); _checkoutHosts.Clear(); _newChatWriting.Clear(); _newChatBackends.Clear(); _newChatBackendChoices.Clear(); _newChatRequests.Clear(); _asks.Clear(); _openedImages.Clear(); _flash = null;
                 _historyTarget = null; _history = new([]); _readingEarlier = false;
             }
             _scope = scope; _session = session;
@@ -314,6 +315,7 @@ internal sealed partial class TeamsPage : Page
             var answer = await CallAsync("teams.connection.call", new JsonObject { ["target"] = Target(orgId, repoId, checkout), ["method"] = "team.chat.catalog", ["params"] = query });
             if (!Current()) return;
             var page = TeamCatalogPage.Read(answer, checkout, cursor);
+            _newChatBackendChoices[Target(orgId, repoId, checkout).ToJsonString()] = page.Backends;
             shares[checkout] = TeamCatalogPage.Append(more ? shares.GetValueOrDefault(checkout) ?? [] : [], page.Rows);
             cursors.Remove(checkout); if (page.Next is not null) cursors[checkout] = page.Next;
             failures.Remove(checkout);
@@ -418,10 +420,14 @@ internal sealed partial class TeamsPage : Page
         var key = Target(orgId, repoId, checkout).ToJsonString();
         var agent = new ComboBox { Header = L10n.Text("common.teams.agent"), SelectedValuePath = "Tag" };
         agent.Items.Add(new ComboBoxItem { Content = L10n.Text("common.local_provider_use_default"), Tag = "" });
-        agent.Items.Add(new ComboBoxItem { Content = "Claude", Tag = "claude" });
-        agent.Items.Add(new ComboBoxItem { Content = "Codex", Tag = "codex" });
-        agent.SelectedValue = _newChatBackends.GetValueOrDefault(key) ?? "";
-        agent.SelectionChanged += (_, _) => { if (_view == view) _newChatBackends[key] = agent.SelectedValue as string ?? ""; };
+        foreach (var backend in _newChatBackendChoices.GetValueOrDefault(key) ?? [])
+            agent.Items.Add(new ComboBoxItem { Content = backend.Label, Tag = backend.Id });
+        var selectedBackend = _newChatBackends.GetValueOrDefault(key) ?? "";
+        agent.SelectedValue = selectedBackend;
+        agent.PlaceholderText = selectedBackend;
+        // A refreshed/older catalog must not silently replace an existing
+        // draft's backend and the identity of its pending request.
+        agent.SelectionChanged += (_, _) => { if (_view == view && agent.SelectedValue is string chosen) _newChatBackends[key] = chosen; };
         box.Text = _newChatWriting.GetValueOrDefault(key) ?? "";
         box.TextChanged += (_, _) => { if (_view == view) _newChatWriting[key] = box.Text; };
         Button? start = null;
@@ -429,7 +435,7 @@ internal sealed partial class TeamsPage : Page
         {
             if (!IsLoaded || _view != view) return;
             var title = box.Text.Trim();
-            var backend = agent.SelectedValue as string ?? "";
+            var backend = _newChatBackends.GetValueOrDefault(key) ?? "";
             if (title.Length == 0) return;
             if (!_newChatRequests.TryGetValue(key, out var pending) || pending.Title != title || pending.Backend != backend)
                 _newChatRequests[key] = pending = (title, backend, "new-" + Guid.NewGuid().ToString("N"));

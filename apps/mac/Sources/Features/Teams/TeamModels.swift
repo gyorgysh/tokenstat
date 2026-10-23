@@ -240,7 +240,54 @@ struct TeamAttachmentReply: Decodable, Sendable {
     struct File: Decodable, Sendable { let id: String; let name: String; let mediaType: String?; let size: Int64? }
     let shareId: String; let attachment: File; let data: String
 }
-struct TeamChatCatalog: Decodable, Sendable { let shares: [TeamSharedChat]; let nextCursor: String? }
+struct TeamBackendOption: Identifiable, Equatable, Sendable {
+    let id: String
+    let label: String
+    static func read(_ entries: [JSONValue]) -> [Self] {
+        var result: [Self] = [], seen: Set<String> = []
+        for entry in entries.prefix(32) {
+            guard case let .object(row) = entry, case let .string(id) = row["id"],
+                  !id.isEmpty, id.utf8.count <= 64,
+                  id.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95 }) else { continue }
+            let label: String
+            switch row["label"] {
+            case .none, .some(.null): label = id
+            case let .some(.string(value)):
+                guard value.utf16.prefix(129).count <= 128,
+                      !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { continue }
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                label = trimmed
+            default: continue
+            }
+            if seen.insert(id).inserted { result.append(Self(id: id, label: label)) }
+        }
+        return result
+    }
+}
+struct TeamChatCatalog: Decodable, Sendable {
+    let shares: [TeamSharedChat]
+    let nextCursor: String?
+    let backends: [TeamBackendOption]?
+    private enum CodingKeys: String, CodingKey { case shares, nextCursor, backends }
+    private struct BackendMetadata: Decodable {
+        let choices: [TeamBackendOption]
+        init(from decoder: Decoder) throws {
+            var values = try decoder.unkeyedContainer()
+            var entries: [JSONValue] = []
+            while !values.isAtEnd && entries.count < 32 { entries.append(try values.decode(JSONValue.self)) }
+            choices = TeamBackendOption.read(entries)
+        }
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        shares = try values.decode([TeamSharedChat].self, forKey: .shares)
+        nextCursor = try values.decodeIfPresent(String.self, forKey: .nextCursor)
+        // Agent discovery is optional on older publishers. Malformed metadata
+        // must not hide valid shared chats or silently replace a draft choice.
+        backends = (try? values.decode(BackendMetadata.self, forKey: .backends))?.choices
+    }
+}
 struct TeamChatSummary: Codable, Identifiable, Sendable {
     let id: String; let checkoutId: String; let title: String; let backend: String
     let historyTrimmed: Bool; let allowsAgentRuns: Bool

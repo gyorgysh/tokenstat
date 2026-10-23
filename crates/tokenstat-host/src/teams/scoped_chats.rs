@@ -428,11 +428,14 @@ mod tests {
                 RepositoryRole::Contributor,
                 RepositoryRole::Maintainer,
             ] {
-                for backend in ["claude", "codex", "muse", "unknown"] {
+                for backend in crate::automations::agent_backends()
+                    .map(|backend| backend.id)
+                    .chain(["sh", "unknown"])
+                {
                     assert_eq!(
                         allows_agent_runs(ready, backend, role),
                         ready
-                            && matches!(backend, "claude" | "codex")
+                            && !matches!(backend, "sh" | "unknown")
                             && role != RepositoryRole::Viewer,
                         "{ready:?} {backend} {role:?}"
                     );
