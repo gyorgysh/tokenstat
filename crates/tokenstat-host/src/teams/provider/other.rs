@@ -583,7 +583,14 @@ fn read_json(path: &Path) -> io::Result<Option<Value>> {
     }
     let mut file = match options.open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            // A dangling selector or an uninspectable ancestor is not an
+            // absent native profile. Falling back could change its account.
+            return match super::startup_source_metadata(path)? {
+                None => Ok(None),
+                Some(_) => Err(error),
+            };
+        }
         Err(error) => return Err(error),
     };
     if !file.metadata()?.is_file() {
@@ -885,19 +892,22 @@ fn alias(
 // every CLI config override. Refuse those installations rather than allow
 // machine plugins/MCP servers or permission overrides into a scoped run.
 fn refuse_managed_config(env: &dyn Fn(&str) -> Option<String>) -> io::Result<()> {
+    refuse_managed_paths(&managed_config_paths(env)?)
+}
+
+fn managed_config_paths(env: &dyn Fn(&str) -> Option<String>) -> io::Result<Vec<PathBuf>> {
     #[cfg(target_os = "macos")]
     let paths = {
         let mut paths = vec![
             PathBuf::from("/Library/Application Support/opencode"),
             PathBuf::from("/Library/Managed Preferences/ai.opencode.managed.plist"),
         ];
-        if let Some(user) = env("USER").filter(|user| !user.contains(['/', '\\'])) {
-            paths.push(
-                PathBuf::from("/Library/Managed Preferences")
-                    .join(user)
-                    .join("ai.opencode.managed.plist"),
-            );
-        }
+        let _ = env;
+        paths.push(
+            PathBuf::from("/Library/Managed Preferences")
+                .join(super::local_username()?)
+                .join("ai.opencode.managed.plist"),
+        );
         paths
     };
     #[cfg(target_os = "windows")]
@@ -914,8 +924,12 @@ fn refuse_managed_config(env: &dyn Fn(&str) -> Option<String>) -> io::Result<()>
         let _ = env;
         vec![PathBuf::from("/etc/opencode")]
     };
+    Ok(paths)
+}
+
+fn refuse_managed_paths(paths: &[PathBuf]) -> io::Result<()> {
     for path in paths {
-        if path.try_exists()? {
+        if super::startup_source_metadata(path)?.is_some() {
             return Err(io::Error::other(
                 "Managed OpenCode settings override CLI isolation on this machine. Scoped Team runs require an OpenCode installation without machine-wide plugins or configuration.",
             ));
@@ -1076,6 +1090,63 @@ export default {id:'tokenstat.team',async setup(ctx){
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn opencode_user_policy_matches_the_os_identity_without_shell_user() {
+        let paths =
+            managed_config_paths(&|_| panic!("Shell USER must not select managed policy")).unwrap();
+        let username = super::super::local_username().unwrap();
+        assert!(
+            paths.contains(
+                &PathBuf::from("/Library/Managed Preferences")
+                    .join(username)
+                    .join("ai.opencode.managed.plist")
+            )
+        );
+    }
+
+    #[test]
+    fn opencode_managed_settings_must_be_proven_absent() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("managed");
+        let child = source.join("opencode");
+        refuse_managed_paths(std::slice::from_ref(&child)).unwrap();
+        fs::create_dir(&source).unwrap();
+        refuse_managed_paths(std::slice::from_ref(&child)).unwrap();
+        fs::write(&child, "opaque managed startup settings").unwrap();
+        assert!(refuse_managed_paths(std::slice::from_ref(&child)).is_err());
+        fs::remove_file(&child).unwrap();
+        fs::remove_dir(&source).unwrap();
+        fs::write(&source, "an ancestor is a regular file").unwrap();
+        assert!(refuse_managed_paths(std::slice::from_ref(&child)).is_err());
+        #[cfg(unix)]
+        {
+            fs::remove_file(&source).unwrap();
+            std::os::unix::fs::symlink(root.path().join("missing"), &source).unwrap();
+            assert!(refuse_managed_paths(std::slice::from_ref(&source)).is_err());
+            assert!(refuse_managed_paths(std::slice::from_ref(&child)).is_err());
+        }
+    }
+
+    #[test]
+    fn missing_connection_settings_require_an_inspectable_native_profile() {
+        let root = tempfile::tempdir().unwrap();
+        let profile = root.path().join("profile");
+        let settings = profile.join("settings.json");
+        assert!(read_json(&settings).unwrap().is_none());
+        fs::write(&profile, "an ancestor is a regular file").unwrap();
+        assert!(read_json(&settings).is_err());
+        #[cfg(unix)]
+        {
+            fs::remove_file(&profile).unwrap();
+            std::os::unix::fs::symlink(root.path().join("missing"), &profile).unwrap();
+            assert!(read_json(&settings).is_err());
+            let selector = root.path().join("selector.json");
+            std::os::unix::fs::symlink(root.path().join("missing.json"), &selector).unwrap();
+            assert!(read_json(&selector).is_err());
+        }
+    }
 
     #[test]
     fn opencode_v2_requires_the_tested_native_plugin_protocol_version() {

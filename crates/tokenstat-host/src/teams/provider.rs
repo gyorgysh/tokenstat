@@ -314,6 +314,44 @@ fn native_home_from_env(
         .ok_or_else(|| io::Error::other("The CLI sign-in location is unavailable."))
 }
 
+#[cfg(target_os = "macos")]
+fn local_username() -> io::Result<String> {
+    // Match native os.userInfo().username rather than trusting a shell USER.
+    let mut size = 16 * 1024;
+    loop {
+        let mut bytes = vec![0 as libc::c_char; size];
+        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+        let mut result = std::ptr::null_mut();
+        let code = unsafe {
+            libc::getpwuid_r(
+                libc::geteuid(),
+                &mut pwd,
+                bytes.as_mut_ptr(),
+                bytes.len(),
+                &mut result,
+            )
+        };
+        if code == libc::ERANGE && size < 64 * 1024 {
+            size *= 2;
+            continue;
+        }
+        if code != 0 || result.is_null() || pwd.pw_name.is_null() {
+            return Err(io::Error::other(
+                "The native CLI user could not be determined.",
+            ));
+        }
+        let name = unsafe { std::ffi::CStr::from_ptr(pwd.pw_name) }
+            .to_str()
+            .map_err(|_| io::Error::other("The native CLI user could not be determined."))?;
+        if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".." {
+            return Err(io::Error::other(
+                "The native CLI user could not be determined.",
+            ));
+        }
+        return Ok(name.to_owned());
+    }
+}
+
 /// Windows can report NotFound for a child of a regular file. Only treat a
 /// startup source as absent after its nearest existing ancestor is proven to
 /// be a directory; unreadable or dangling ancestors remain unknown/refused.

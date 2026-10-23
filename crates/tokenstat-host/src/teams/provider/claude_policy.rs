@@ -24,7 +24,7 @@ pub(super) fn ensure_unmanaged(home: &Path, native_folder: &Path) -> io::Result<
     refuse_profile_connection_overrides(&config, native_folder)?;
     #[cfg(target_os = "macos")]
     {
-        let username = local_username()?;
+        let username = super::local_username()?;
         paths.push(
             PathBuf::from("/Library/Managed Preferences")
                 .join(username)
@@ -419,40 +419,6 @@ fn unavailable() -> io::Error {
     io::Error::other(
         "Claude managed startup settings could not be checked for this isolated Team run.",
     )
-}
-
-#[cfg(target_os = "macos")]
-fn local_username() -> io::Result<String> {
-    // Match native os.userInfo().username rather than trusting a shell USER.
-    let mut size = 16 * 1024;
-    loop {
-        let mut bytes = vec![0 as libc::c_char; size];
-        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
-        let mut result = std::ptr::null_mut();
-        let code = unsafe {
-            libc::getpwuid_r(
-                libc::geteuid(),
-                &mut pwd,
-                bytes.as_mut_ptr(),
-                bytes.len(),
-                &mut result,
-            )
-        };
-        if code == libc::ERANGE && size < 64 * 1024 {
-            size *= 2;
-            continue;
-        }
-        if code != 0 || result.is_null() || pwd.pw_name.is_null() {
-            return Err(unavailable());
-        }
-        let name = unsafe { std::ffi::CStr::from_ptr(pwd.pw_name) }
-            .to_str()
-            .map_err(|_| unavailable())?;
-        if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".." {
-            return Err(unavailable());
-        }
-        return Ok(name.to_owned());
-    }
 }
 
 #[cfg(windows)]
