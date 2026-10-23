@@ -18,7 +18,7 @@ namespace NativeUiTests
             var scroll = new ScrollViewer { Content = chart, Height = 700 };
             body.Children.Insert(0, scroll);
             body.UpdateLayout();
-            async Task<WebView2> Ready()
+            async Task<WebView2> Ready(string stage)
             {
                 var deadline = DateTime.UtcNow.AddSeconds(30);
                 while (DateTime.UtcNow < deadline)
@@ -30,9 +30,26 @@ namespace NativeUiTests
                     }
                     await Task.Delay(50);
                 }
-                throw new Exception("Native chart did not load the bundled offline renderer");
+                throw new Exception($"Native chart did not load the bundled offline renderer ({stage}; loaded={chart.IsLoaded}, rootVisible={chart.XamlRoot?.IsHostVisible}, size={chart.ActualWidth}x{chart.ActualHeight}, scroll={scroll.VerticalOffset}/{scroll.ExtentHeight}, viewport={scroll.ViewportHeight}, children={string.Join(",", chart.Children.Select(child => child.GetType().Name))}, error={string.Join(" | ", chart.Children.OfType<TextBlock>().Select(child => child.Text))})");
             }
-            var web = await Ready();
+            var web = await Ready("initial mount");
+            var initial = web;
+            // The effective viewport has not changed. Reattaching must use
+            // that geometry even if WinUI does not repeat its notification.
+            scroll.Content = null;
+            await Task.Delay(100);
+            scroll.Content = chart;
+            body.UpdateLayout();
+            web = await Ready("same-position remount");
+            if (ReferenceEquals(initial, web)) throw new Exception("A detached chart retained its closed browser");
+            // A deferred old Unloaded must not retire the final attachment.
+            for (var index = 0; index < 3; index++)
+            {
+                scroll.Content = null; body.UpdateLayout();
+                scroll.Content = chart; body.UpdateLayout();
+            }
+            await Task.Delay(100);
+            web = await Ready("rapid detach/remount");
             foreach (var example in examples.RootElement.EnumerateArray())
             {
                 await web.ExecuteScriptAsync($"window.TokenstatChart.render({example.GetRawText()},{{dark:true,reducedMotion:true}})");
@@ -51,7 +68,7 @@ namespace NativeUiTests
             await Task.Delay(100);
             scroll.Content = chart;
             body.UpdateLayout();
-            await Ready();
+            await Ready("remount after table expansion");
             body.Children.Remove(scroll);
             await CheckViewportAsync(body, source);
             Program.Log("PASS: offline native charts render all families, inspect values, open data, resize, block navigation and remount cleanly");

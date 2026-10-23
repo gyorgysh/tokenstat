@@ -23,10 +23,14 @@ internal sealed class ChatChartView : Grid
     private int _epoch;
     private bool _loaded;
     private bool _exporting;
+    // WinUI need not repeat an unchanged viewport when a retained chart
+    // reattaches, so keep its last rectangle across Unloaded/Loaded.
     private Rect? _viewport;
     private bool _inViewport;
     private bool _visibilityScheduled;
     private bool _failed;
+    private int _attachmentRevision;
+    private bool _retireBrowser;
     private readonly List<(UIElement Owner, long Token)> _visibilityOwners = new();
     private XamlRoot? _root;
 
@@ -37,12 +41,45 @@ internal sealed class ChatChartView : Grid
         MinHeight = 60;
         Height = 430;
         HorizontalAlignment = HorizontalAlignment.Stretch;
-        Loaded += (_, _) => { ObserveVisibility(); RefreshViewport(); };
-        Unloaded += (_, _) => { StopObservingVisibility(); _viewport = null; _inViewport = false; _failed = false; Close(); };
+        Loaded += (_, _) => AttachmentChanged();
+        Unloaded += (_, _) => AttachmentChanged(retireBrowser: true);
         EffectiveViewportChanged += (_, args) => { _viewport = args.EffectiveViewport; RefreshViewport(); };
         SizeChanged += (_, _) => RefreshViewport();
         ActualThemeChanged += async (_, _) => { if (_loaded) await RenderAsync(_epoch); };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(this, "chat.chart");
+    }
+
+    private void AttachmentChanged(bool retireBrowser = false)
+    {
+        if (retireBrowser) RetireBrowser();
+        var revision = ++_attachmentRevision;
+        // As with retained tabs, WinUI can deliver an old Unloaded after a
+        // quick reattachment. Reconcile the current tree after either event.
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (revision != _attachmentRevision) return;
+            if (_retireBrowser)
+            {
+                _inViewport = false; _failed = false;
+                ReleaseRetiredBrowser();
+            }
+            if (IsLoaded && Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(this) is not null)
+            {
+                ObserveVisibility();
+                RefreshViewport();
+            }
+            else
+            {
+                StopObservingVisibility();
+                _inViewport = false; _failed = false;
+                Close();
+            }
+        }))
+        {
+            StopObservingVisibility();
+            _inViewport = false; _retireBrowser = false;
+            Close();
+        }
     }
 
     private void ObserveVisibility()
@@ -75,6 +112,7 @@ internal sealed class ChatChartView : Grid
             ActualWidth, ActualHeight, viewport.X, viewport.Y, viewport.Width, viewport.Height);
         if (_inViewport == visible) return;
         _inViewport = visible;
+        if (!visible && _web is not null) RetireBrowser();
         if (_visibilityScheduled) return;
         _visibilityScheduled = true;
         // Viewport notifications run during layout. Change native browser
@@ -82,12 +120,23 @@ internal sealed class ChatChartView : Grid
         if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, async () =>
         {
             _visibilityScheduled = false;
+            // A quick return must not keep a browser whose navigation finished
+            // while it was outside the viewport and could not render.
+            ReleaseRetiredBrowser();
             if (_inViewport && IsLoaded) await StartAsync();
             else if (_web is not null) Close();
         })) _visibilityScheduled = false;
     }
 
     private bool Current(int epoch) => epoch == _epoch && IsLoaded && _inViewport;
+
+    private void RetireBrowser() { _retireBrowser = true; ++_epoch; }
+    private void ReleaseRetiredBrowser()
+    {
+        if (!_retireBrowser) return;
+        _retireBrowser = false;
+        Close();
+    }
 
     private static Task<CoreWebView2Environment> EnvironmentAsync()
     {
