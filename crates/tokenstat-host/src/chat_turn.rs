@@ -192,6 +192,9 @@ fn standing_text(persona_name: &str, persona_brief: &str, output_dir: &Path) -> 
         text.push_str(brief);
         text.push_str("\n\n");
     }
+    text.push_str(
+        "Avoid em dashes in your prose. Use commas, parentheses, or separate sentences instead.\n\n",
+    );
     text.push_str(&file_rule(output_dir));
     text.push_str("\n\n");
     text.push_str(browser_rule());
@@ -212,7 +215,7 @@ fn standing_text(persona_name: &str, persona_brief: &str, output_dir: &Path) -> 
 
 /// Charts travel in the reply, so every backend and encrypted remote client shares the capability.
 pub fn chart_rule() -> &'static str {
-    "When data is clearer as a chart, present an interactive chart in a fenced tokenstat-chart block. \
+    "When the user asks to visualize data, or a chart would make data clearer, present an interactive chart in a fenced tokenstat-chart block. \
      Use JSON only: {\"version\":1,\"type\":\"bar\",\"title\":\"Descriptive title\",\"categories\":[\"A\",\"B\"],\"series\":[{\"name\":\"Quantity\",\"data\":[10,20]}],\"yAxis\":{\"label\":\"Quantity (units)\"}}. \
      Supported types: bar, line, area, pie, donut, scatter, bubble, heatmap, radar, funnel, treemap, boxplot. \
      Use categories and equal-length numeric data arrays for categorical charts, null for missing bar/line/area values. \
