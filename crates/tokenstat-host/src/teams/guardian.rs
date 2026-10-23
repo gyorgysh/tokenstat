@@ -99,6 +99,11 @@ fn map_io(error: io::Error) -> DispatchError {
     }
     unavailable()
 }
+fn fixture_stop(reason: &str) {
+    if fixture_enabled() && std::env::var_os("TOKENSTAT_TEAMS_KEEP_FIXTURE").is_some() {
+        eprintln!("Team fixture guardian stopped: {reason}");
+    }
+}
 fn event(value: Value) -> Result<(), DispatchError> {
     team_process::send(&mut io::stdout().lock(), &value).map_err(map_io)
 }
@@ -349,7 +354,19 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
             &authority,
             prepared.context().sdk(),
             prepared.binding().fence.run_id().into(),
-            move || current.ensure_current().is_ok() && sdk_source.ensure_current().is_ok(),
+            move || {
+                if current.ensure_current().is_err() {
+                    fixture_stop("sdk account");
+                    return false;
+                }
+                match sdk_source.ensure_current() {
+                    Ok(()) => true,
+                    Err(error) => {
+                        fixture_stop(&format!("sdk source: {}", error.code));
+                        false
+                    }
+                }
+            },
         )
         .map_err(map_io)
     })();
@@ -465,18 +482,28 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
         loop {
             let mut running = false;
             let terminal = loop {
-                if authority.ensure_live().is_err()
-                    || source.ensure_current().is_err()
-                    || sdk.ensure_live().is_err()
-                {
+                if authority.ensure_live().is_err() {
+                    fixture_stop("authority");
+                    break State::Stopped;
+                }
+                if source.ensure_current().is_err() {
+                    fixture_stop("source");
+                    break State::Stopped;
+                }
+                if sdk.ensure_live().is_err() {
+                    fixture_stop("sdk");
                     break State::Stopped;
                 }
                 match control.try_recv() {
                     Ok(Ok(Control::Stop { fence })) if fence == prepared.binding().fence => {
+                        fixture_stop("requested");
                         break State::Stopped;
                     }
                     Ok(Ok(_)) => {}
-                    Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => break State::Stopped,
+                    Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {
+                        fixture_stop("pipe closed");
+                        break State::Stopped;
+                    }
                     Err(mpsc::TryRecvError::Empty) => {}
                 }
                 match process.poll().map_err(map_io)? {
@@ -532,9 +559,11 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
                 }
                 if Instant::now() >= renew {
                     if authority.renew().is_err() {
+                        fixture_stop("authority renewal");
                         break State::Stopped;
                     }
                     if sdk.renew(&authority).is_err() {
+                        fixture_stop("sdk renewal");
                         break State::Stopped;
                     }
                     renew = Instant::now() + Duration::from_secs(10);

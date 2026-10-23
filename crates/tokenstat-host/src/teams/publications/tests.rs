@@ -36,6 +36,90 @@ fn active(store: &Store, folder: &Folder) -> Checkout {
         .unwrap()
 }
 #[test]
+fn independent_publication_readers_validate_authority_without_allowing_mutation() {
+    let (_root, store, folder) = setup();
+    let active = active(&store, &folder);
+    // A second guardian can be checking this same publication. Its read lock
+    // must not make a still-authorized run permanently retire its SDK.
+    let reader = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(store.root.join("index.lock"))
+        .unwrap();
+    reader.lock_shared().unwrap();
+    assert!(
+        store
+            .resolve(&owner(), "org_fixture", "repo_fixture", &active.id)
+            .unwrap()
+            == active
+    );
+    let foreign = Owner {
+        publisher_id: "another-person".into(),
+        ..owner()
+    };
+    assert!(
+        store
+            .resolve(&foreign, "org_fixture", "repo_fixture", &active.id)
+            .is_err()
+    );
+    assert!(
+        matches!(store.withdraw(&owner(), &active.id, active.revision), Err(error) if error.code == "sharing_busy")
+    );
+    drop(reader);
+    store
+        .withdraw(&owner(), &active.id, active.revision)
+        .unwrap();
+    assert!(
+        store
+            .resolve(&owner(), "org_fixture", "repo_fixture", &active.id)
+            .is_err()
+    );
+}
+
+#[test]
+fn publication_validation_waits_for_a_writer_then_observes_its_revocation() {
+    let (_root, store, folder) = setup();
+    let active = active(&store, &folder);
+    let mut next = store.read(|index| Ok(index.clone())).unwrap();
+    let row = next
+        .checkouts
+        .iter_mut()
+        .find(|row| row.id == active.id)
+        .unwrap();
+    row.phase = Phase::Withdrawn;
+    row.revision += 1;
+    let writer = OwnerLease::try_acquire(&store.root.join("index.lock"))
+        .unwrap()
+        .unwrap();
+    let root = store.root.clone();
+    let thread = std::thread::spawn(move || {
+        let _writer = writer;
+        std::thread::sleep(Duration::from_millis(25));
+        save(&root, &root.join("index.json"), &next).unwrap();
+    });
+    let result = store.resolve(&owner(), "org_fixture", "repo_fixture", &active.id);
+    thread.join().unwrap();
+    assert!(matches!(result, Err(error) if error.code == "checkout_not_shared"));
+}
+
+#[test]
+fn an_unavailable_publication_lock_never_falls_back_to_cached_authority() {
+    let (_root, store, folder) = setup();
+    let active = active(&store, &folder);
+    assert!(
+        store
+            .resolve(&owner(), "org_fixture", "repo_fixture", &active.id)
+            .is_ok()
+    );
+    let _writer = OwnerLease::try_acquire(&store.root.join("index.lock"))
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(store.resolve(&owner(), "org_fixture", "repo_fixture", &active.id), Err(error) if error.code == "sharing_busy")
+    );
+}
+
+#[test]
 fn sharing_setup_cannot_create_a_new_project_for_an_already_published_folder() {
     let (_root, store, folder) = setup();
     let active = active(&store, &folder);

@@ -218,6 +218,10 @@ pub(crate) struct RunnerLease {
 /// An exclusive lock on `path` without waiting, or None when someone else
 /// holds it. The lock goes with the process, however that process ends.
 fn try_lock_exclusive(path: &Path) -> Result<Option<File>, String> {
+    try_lock(path, true)
+}
+
+fn try_lock(path: &Path, exclusive: bool) -> Result<Option<File>, String> {
     let file = private_options()
         .read(true)
         .write(true)
@@ -230,7 +234,12 @@ fn try_lock_exclusive(path: &Path) -> Result<Option<File>, String> {
     {
         use std::os::fd::AsRawFd;
         loop {
-            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            let mode = if exclusive {
+                libc::LOCK_EX
+            } else {
+                libc::LOCK_SH
+            };
+            if unsafe { libc::flock(file.as_raw_fd(), mode | libc::LOCK_NB) } == 0 {
                 break;
             }
             let error = std::io::Error::last_os_error();
@@ -243,10 +252,25 @@ fn try_lock_exclusive(path: &Path) -> Result<Option<File>, String> {
         }
     }
     #[cfg(windows)]
-    if !crate::win32::try_lock(&file, false, true) {
+    if !crate::win32::try_lock(&file, false, exclusive) {
         return Ok(None);
     }
     Ok(Some(file))
+}
+
+/// Protect a metadata snapshot while allowing independent readers. This is
+/// not a process-ownership or runner claim; writes still require exclusivity.
+#[cfg(feature = "local-host")]
+pub(crate) struct MetadataLease {
+    _lock: FileLock,
+}
+#[cfg(feature = "local-host")]
+impl MetadataLease {
+    pub(crate) fn try_acquire(path: &Path, exclusive: bool) -> Result<Option<Self>, String> {
+        Ok(try_lock(path, exclusive)?.map(|file| Self {
+            _lock: FileLock(file),
+        }))
+    }
 }
 
 /// Held by one process for as long as it lives, to say that a file of state

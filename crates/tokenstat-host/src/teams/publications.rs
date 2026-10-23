@@ -5,13 +5,17 @@
 //! before contacting the account server, so a network outage cannot keep a
 //! revoked local publication readable.
 
-use crate::{chat_receipts::OwnerLease, error::DispatchError};
+use crate::{
+    chat_receipts::{MetadataLease, OwnerLease},
+    error::DispatchError,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
@@ -463,7 +467,7 @@ impl Store {
         &self,
         operation: impl FnOnce(&mut Index) -> Result<T, DispatchError>,
     ) -> Result<T, DispatchError> {
-        self.with_index(|cached| {
+        self.with_index(true, |cached| {
             let mut working = cached.index.clone();
             let result = operation(&mut working)?;
             if working != cached.index {
@@ -479,10 +483,11 @@ impl Store {
         &self,
         operation: impl FnOnce(&Index) -> Result<T, DispatchError>,
     ) -> Result<T, DispatchError> {
-        self.with_index(|cached| operation(&cached.index))
+        self.with_index(false, |cached| operation(&cached.index))
     }
     fn with_index<T>(
         &self,
+        write: bool,
         operation: impl FnOnce(&mut Cached) -> Result<T, DispatchError>,
     ) -> Result<T, DispatchError> {
         // Metadata reads are frequent. Parse the private index only when its
@@ -493,14 +498,25 @@ impl Store {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         private_directory(&self.root)?;
-        let _lease = OwnerLease::try_acquire(&self.root.join("index.lock"))
-            .map_err(|_| storage())?
-            .ok_or_else(|| {
-                unavailable(
+        let started = Instant::now();
+        let _lease = loop {
+            if let Some(lease) = MetadataLease::try_acquire(&self.root.join("index.lock"), write)
+                .map_err(|_| storage())?
+            {
+                break lease;
+            }
+            // Other guardians read this same index before each effect. Readers
+            // can coexist; a brief writer must settle before we validate the
+            // current snapshot, rather than retiring an unrelated run's SDK.
+            // Never accept cached authority when the lock stays unavailable.
+            if write || started.elapsed() >= Duration::from_millis(250) {
+                return Err(unavailable(
                     "sharing_busy",
                     "Another sharing change is being saved. Try again shortly.",
-                )
-            })?;
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        };
         let path = self.root.join("index.json");
         let stamp = stamp(&path)?;
         if stamp.is_none() && fs::symlink_metadata(self.root.join("initialized")).is_ok() {

@@ -109,7 +109,9 @@ pub(super) fn call(
                 return Err(changed());
             }
             let mut events = viewed.events;
-            if let Some(current) = current_members(&scope.organization_id) {
+            if let Some(current) =
+                current_members(principal.issuer(), &scope.organization_id, scope.epoch)
+            {
                 for event in &mut events {
                     former_authors(event, &current);
                 }
@@ -197,37 +199,65 @@ pub(super) fn call(
     Ok(result)
 }
 
-/// Who is in the organization now, from the publisher's own view, held for a
-/// minute so paging through a chat does not ask the server every time.
+/// Who is in the organization now, from the publisher's own view. Reuse a
+/// roster within its verified membership epoch for at most a minute.
 /// `None` when the list cannot be read: authors then show as recorded.
-fn current_members(organization: &str) -> Option<HashSet<String>> {
-    static CACHE: Mutex<Option<(String, Instant, HashSet<String>)>> = Mutex::new(None);
-    if let Ok(cache) = CACHE.lock()
-        && let Some((org, at, members)) = cache.as_ref()
-        && org == organization
-        && at.elapsed() < Duration::from_secs(60)
+struct MemberRoster {
+    issuer: String,
+    organization: String,
+    epoch: u64,
+    at: Instant,
+    members: HashSet<String>,
+}
+fn cached_members(
+    cache: &Mutex<Option<MemberRoster>>,
+    issuer: &str,
+    organization: &str,
+    epoch: u64,
+    load: impl FnOnce() -> Option<HashSet<String>>,
+) -> Option<HashSet<String>> {
+    if let Ok(cached) = cache.lock()
+        && let Some(roster) = cached.as_ref()
+        && roster.issuer == issuer
+        && roster.organization == organization
+        && roster.epoch == epoch
+        && roster.at.elapsed() < Duration::from_secs(60)
     {
-        return Some(members.clone());
+        return Some(roster.members.clone());
     }
-    let client = TeamClient::capture().ok()?;
-    let mut members = HashSet::new();
-    let mut offset = 0;
-    for _ in 0..20 {
-        let page = client
-            .members(organization, Page { limit: 100, offset })
-            .ok()?;
-        members.extend(page.members.into_iter().map(|member| member.person.id));
-        match page.next_offset {
-            Some(next) => offset = next,
-            None => {
-                if let Ok(mut cache) = CACHE.lock() {
-                    *cache = Some((organization.to_string(), Instant::now(), members.clone()));
-                }
-                return Some(members);
+    let members = load()?;
+    if let Ok(mut cached) = cache.lock() {
+        *cached = Some(MemberRoster {
+            issuer: issuer.into(),
+            organization: organization.into(),
+            epoch,
+            at: Instant::now(),
+            members: members.clone(),
+        });
+    }
+    Some(members)
+}
+fn current_members(issuer: &str, organization: &str, epoch: u64) -> Option<HashSet<String>> {
+    static CACHE: Mutex<Option<MemberRoster>> = Mutex::new(None);
+    cached_members(&CACHE, issuer, organization, epoch, || {
+        let client = TeamClient::capture().ok()?;
+        if client.origin() != issuer {
+            return None;
+        }
+        let mut members = HashSet::new();
+        let mut offset = 0;
+        for _ in 0..20 {
+            let page = client
+                .members(organization, Page { limit: 100, offset })
+                .ok()?;
+            members.extend(page.members.into_iter().map(|member| member.person.id));
+            match page.next_offset {
+                Some(next) => offset = next,
+                None => return Some(members),
             }
         }
-    }
-    None
+        None
+    })
 }
 
 /// A person who has left the organization, or deleted their account, reads
@@ -358,6 +388,37 @@ fn page_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn membership_changes_refresh_author_names_without_waiting_for_roster_expiry() {
+        let cache = Mutex::new(None);
+        let issuer = "https://accounts.example.test";
+        let people = |ids: &[&str]| ids.iter().map(|id| (*id).to_string()).collect();
+        let old = cached_members(&cache, issuer, "org", 1, || Some(people(&["owner"]))).unwrap();
+        let mut before = json!({"author":{"kind":"person","id":"joined","name":"New teammate"}});
+        former_authors(&mut before, &old);
+        assert_eq!(before["author"]["kind"], "formerMember");
+        let joined = cached_members(&cache, issuer, "org", 2, || {
+            Some(people(&["owner", "joined"]))
+        })
+        .unwrap();
+        let mut named = json!({"author":{"kind":"person","id":"joined","name":"New teammate"}});
+        former_authors(&mut named, &joined);
+        assert_eq!(named["author"]["name"], "New teammate");
+        // Paging within the same verified membership epoch can reuse the list.
+        assert!(
+            cached_members(&cache, issuer, "org", 2, || panic!(
+                "unchanged roster refetched"
+            ))
+            .unwrap()
+            .contains("joined")
+        );
+        let removed =
+            cached_members(&cache, issuer, "org", 3, || Some(people(&["owner"]))).unwrap();
+        former_authors(&mut named, &removed);
+        assert_eq!(named["author"], json!({"kind":"formerMember"}));
+        assert!(cached_members(&cache, "https://other.example.test", "org", 3, || None).is_none());
+        assert!(cached_members(&cache, issuer, "org", 4, || None).is_none());
+    }
 
     #[test]
     fn read_only_members_are_never_offered_agent_execution() {

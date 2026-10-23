@@ -28,6 +28,8 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Fixed
 
+- Parallel Team chats can validate the same published project together. Brief publication updates settle before access is checked, while revoked or unavailable records still refuse access.
+- Shared chat author names refresh when team membership changes, so newly joined teammates are not temporarily shown as former members.
 - A Team Ask whose reviewed chat or checkout changed now offers a fresh review instead of incorrectly requesting run recovery. Interrupted recorded requests retain their original recovery identity.
 - Update cryptographic dependencies to address the constant-time mask and integer comparison issues in RUSTSEC-2026-0385.
 - Windows sidebar sizing keeps expanded and minimal modes while chat companion widths change, avoiding a temporary icon-only pane.
