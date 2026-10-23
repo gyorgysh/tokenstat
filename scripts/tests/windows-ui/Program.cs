@@ -21,8 +21,9 @@ internal static class Program
         Console.WriteLine(message);
     }
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
+        if (args.FirstOrDefault() == "--crash-trace") return WindowsCrashTrace.Run(args);
         try
         {
             Log("Starting native Windows UI tests");

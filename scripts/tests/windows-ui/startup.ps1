@@ -32,11 +32,28 @@ $originalPath = $env:PATH
 $originalTrace = $env:TOKENSTAT_UI_STARTUP_TRACE
 $started = Get-Date
 $process = $null
+$crashTracers = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
+$crashLogs = [System.Collections.Generic.List[string]]::new()
+function Start-NativeCrashTrace([System.Diagnostics.Process]$Target) {
+    $tracer = Get-ChildItem "$PSScriptRoot/bin" -Filter WindowsUiTests.exe -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
+    if (!$tracer) { Write-Output 'Native exception tracer is unavailable in this build'; return }
+    $traceLog = Join-Path $env:RUNNER_TEMP "tokenstat-native-exception-$($Target.Id).log"
+    $crashLogs.Add($traceLog)
+    $child = Start-Process -FilePath $tracer.FullName -ArgumentList @('--crash-trace', "$($Target.Id)", "`"$traceLog`"") -PassThru
+    $crashTracers.Add($child)
+    # This observes only exception headers and stack addresses; no process dump.
+    for ($traceAttempt = 0; $traceAttempt -lt 20; $traceAttempt++) {
+        if ((Test-Path -LiteralPath $traceLog) -or $child.HasExited) { break }
+        Start-Sleep -Milliseconds 100
+    }
+}
 try {
     [System.IO.File]::WriteAllText($agentFile, "@echo off`r`necho UI startup fixture cannot run an agent. 1>&2`r`nexit /b 64`r`n")
     $env:PATH = "$agentBin;$originalPath"
     $env:TOKENSTAT_UI_STARTUP_TRACE = '1'
     $process = Start-Process -FilePath $app.FullName -WorkingDirectory $app.DirectoryName -PassThru
+    Start-NativeCrashTrace $process
     for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 500
         $process.Refresh()
@@ -395,6 +412,7 @@ try {
             Start-Sleep -Milliseconds 250
         }
         if (!$process) { throw 'Cold desktop protocol activation did not open the application' }
+        Start-NativeCrashTrace $process
         Wait-ForDesktopTool 'changes'
         $trace = Get-Content "$env:LOCALAPPDATA/tokenstat/logs/startup.log" | Where-Object { $_ -match "pid=$($process.Id) " }
         if ($trace -match 'Chat open failed|Chat (composer|inspector) construction failed|[Uu]nhandled exception') { throw 'Production chat or sidebar raised a XAML exception' }
@@ -415,4 +433,9 @@ try {
         if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
         $process.Dispose()
     }
+    foreach ($tracer in $crashTracers) {
+        if (!$tracer.HasExited -and !$tracer.WaitForExit(3000)) { Stop-Process -Id $tracer.Id -Force }
+        $tracer.Dispose()
+    }
+    foreach ($log in $crashLogs) { if (Test-Path -LiteralPath $log) { Write-Output '--- native exception structure ---'; Get-Content -LiteralPath $log } }
 }
