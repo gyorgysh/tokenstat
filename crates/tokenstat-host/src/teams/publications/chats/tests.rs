@@ -303,3 +303,53 @@ fn physical_owner_recovery_is_revision_checked_and_cannot_revive_or_retire_a_rep
             .is_ok()
     );
 }
+
+#[test]
+fn identical_new_chat_requests_are_serialized_without_blocking_every_other_request() {
+    let (root, store, owner, checkout) = fixture();
+    let target = target(&owner, &checkout);
+    let first = store.new_chat_lease(&target, "same-request").unwrap();
+    let reopened = Store::test_store(root.path().join("sharing"));
+    assert_eq!(
+        reopened
+            .new_chat_lease(&target, "same-request")
+            .err()
+            .unwrap()
+            .code,
+        "chat_creation_busy"
+    );
+    let other = (0..256)
+        .find_map(|index| {
+            reopened
+                .new_chat_lease(&target, &format!("other-request-{index}"))
+                .ok()
+        })
+        .expect("unrelated requests in another stripe can run concurrently");
+    drop(first);
+    assert!(reopened.new_chat_lease(&target, "same-request").is_ok());
+    drop(other);
+    assert!(store.new_chat_lease(&target, "../untrusted").is_err());
+}
+
+#[test]
+fn arbitrary_new_chat_requests_use_a_bounded_set_of_lock_files() {
+    let (_root, store, owner, checkout) = fixture();
+    let target = target(&owner, &checkout);
+    for index in 0..1000 {
+        drop(
+            store
+                .new_chat_lease(&target, &format!("request-{index}"))
+                .unwrap(),
+        );
+    }
+    let locks = fs::read_dir(&store.root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("new-chat-") && name.ends_with(".lock")
+        })
+        .count();
+    assert!(locks > 1 && locks <= 256, "found {locks} lock files");
+}

@@ -63,6 +63,34 @@ fn digest(value: &str) -> bool {
 }
 
 impl Store {
+    /// Serialize one empty-chat request across in-process and daemon callers.
+    /// Hash the complete immutable scope into a fixed set of lock files so
+    /// rejected requests cannot leave an unbounded number of persistent files.
+    pub(in crate::teams) fn new_chat_lease(
+        &self,
+        target: &ChatTarget<'_>,
+        request: &str,
+    ) -> Result<OwnerLease, DispatchError> {
+        use sha2::{Digest, Sha256};
+        if !crate::chat_receipts::valid_id(request) {
+            return Err(conflict());
+        }
+        self.local_chat_checkout(target)?;
+        private_directory(&self.root)?;
+        let key = serde_json::json!({"owner":target.owner,"organization":target.organization,
+            "repository":target.repository,"checkout":target.checkout,"request":request});
+        let digest = Sha256::digest(serde_json::to_vec(&key).map_err(|_| storage())?);
+        // Unrelated requests in the same stripe may return transient Busy.
+        // Never unlink these files: an old holder could still own that inode.
+        OwnerLease::try_acquire(&self.root.join(format!("new-chat-{:02x}.lock", digest[0])))
+            .map_err(|_| storage())?
+            .ok_or_else(|| {
+                unavailable(
+                    "chat_creation_busy",
+                    "This chat request is already being created. Try again shortly.",
+                )
+            })
+    }
     /// Physical-owner recovery is revocation only. It does not require the
     /// original cloud account or key to still exist, and cannot activate a ref.
     pub(in crate::teams) fn source_record(

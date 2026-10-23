@@ -79,7 +79,16 @@ pub(super) fn new_chat(
     principal.new_chat_ticket()?;
     let scope = principal.value();
     let owner = crate::account_session::AccountSnapshot::capture().map_err(|_| unavailable())?;
-    let client = super::client(&owner)?;
+    let authority = principal.clone();
+    let client = super::client(&owner)?.with_retirement_guard(move || {
+        authority.ensure_account_current().map_err(|error| {
+            tokenstat_sync::teams::TeamError::Rejected {
+                status: 403,
+                code: error.code,
+                message: error.message,
+            }
+        })
+    });
     // Only the computer that published this checkout makes chats for it.
     let binding = super::sharing::local_binding(&owner, &client)?;
     if binding.issuer != principal.issuer()
@@ -99,6 +108,7 @@ pub(super) fn new_chat(
             request_id: &input.request_id,
             person: &scope.person.id,
         },
+        &|| principal.ensure_account_current(),
     )?;
     principal.ensure_account_current()?;
     Ok(result)

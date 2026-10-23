@@ -714,7 +714,7 @@ impl Store {
     }
 
     #[cfg(test)]
-    fn at(root: PathBuf) -> Self {
+    pub(crate) fn at(root: PathBuf) -> Self {
         Self {
             root,
             conversations: Mutex::new(Vec::new()),
@@ -2613,6 +2613,16 @@ impl Store {
     }
 
     pub fn remove(&self, id: &str) -> Result<bool, String> {
+        self.remove_checked(id, None)
+    }
+
+    /// Clean up a failed empty-chat creation only if no local user has touched
+    /// it. The same acceptance/lifecycle locks protect this check and removal.
+    pub(crate) fn remove_untouched_empty(&self, id: &str, revision: u64) -> Result<bool, String> {
+        self.remove_checked(id, Some(revision))
+    }
+
+    fn remove_checked(&self, id: &str, empty_revision: Option<u64>) -> Result<bool, String> {
         validate_record_id(id)?;
         if !self.root.exists() {
             return Ok(false);
@@ -2643,6 +2653,15 @@ impl Store {
             }
             if let Some(chat) = current.iter().find(|chat| chat.id == id) {
                 sharing::require_personal_send(chat).map_err(|error| error.to_string())?;
+                if let Some(revision) = empty_revision {
+                    let directory = safe_join(&self.root, id)?;
+                    if chat.send_revision != revision
+                        || chat.last_message_at_ms.is_some()
+                        || !matches!(fs::symlink_metadata(directory), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+                    {
+                        return Err("this conversation changed; keep its local work".into());
+                    }
+                }
             }
             let before = current.len();
             current.retain(|chat| chat.id != id);

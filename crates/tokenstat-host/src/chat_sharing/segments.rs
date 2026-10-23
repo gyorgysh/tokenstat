@@ -545,9 +545,10 @@ fn select_refs(
         ));
     }
     let mut cache: Vec<Option<Vec<Value>>> = (0..refs.len()).map(|_| None).collect();
-    let load_rows = |cache: &mut Vec<Option<Vec<Value>>>,
-                     index: usize|
-     -> Result<Vec<Value>, super::super::DispatchError> {
+    let load_event = |cache: &mut Vec<Option<Vec<Value>>>,
+                      index: usize,
+                      row: usize|
+     -> Result<Value, super::super::DispatchError> {
         if cache[index].is_none() {
             cache[index] = Some(project_payload(
                 directory,
@@ -555,7 +556,13 @@ fn select_refs(
                 refs[index].seq,
             )?);
         }
-        Ok(cache[index].clone().unwrap_or_default())
+        // A page may select many rows from one sealed payload. Clone only the
+        // chosen event, rather than its entire (up to 512 KiB) segment per row.
+        cache[index]
+            .as_ref()
+            .and_then(|events| events.get(row))
+            .cloned()
+            .ok_or_else(paused)
     };
     let matches = |seq: u64| {
         request.after.is_none_or(|position| {
@@ -606,7 +613,7 @@ fn select_refs(
             }
             let event = if from_chain {
                 let index = chain_at - 1;
-                load_rows(&mut cache, index)?[(row_at - 1) as usize].clone()
+                load_event(&mut cache, index, (row_at - 1) as usize)?
             } else {
                 inline[inline_at - 1].clone()
             };
@@ -656,7 +663,7 @@ fn select_refs(
             let from_chain = chain_seq == Some(seq);
             if matches(seq) {
                 let event = if from_chain {
-                    load_rows(&mut cache, chain_at)?[row_at as usize].clone()
+                    load_event(&mut cache, chain_at, row_at as usize)?
                 } else {
                     inline[inline_at].clone()
                 };

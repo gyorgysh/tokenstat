@@ -353,6 +353,18 @@ fn publish(
     client: &TeamClient,
     input: Publish,
 ) -> Result<Value, DispatchError> {
+    publish_if_current(owner, client, input, &|| {
+        owner.ensure_current().map_err(super::changed)
+    })
+}
+
+fn publish_if_current(
+    owner: &AccountSnapshot,
+    client: &TeamClient,
+    input: Publish,
+    current: &dyn Fn() -> Result<(), DispatchError>,
+) -> Result<Value, DispatchError> {
+    current()?;
     let request = Target {
         organization: input.organization,
         repository: input.repository,
@@ -404,6 +416,7 @@ fn publish(
             "This chat changed after its sharing preview. Review the history again.",
         ));
     }
+    current()?;
     let prepared = store.prepare_chat_at_revision(
         &target,
         &request.conversation,
@@ -419,6 +432,7 @@ fn publish(
         &review.history.fingerprint,
         review.history.source_revision,
         || {
+            current()?;
             let row = store
                 .chat_request(&target, &input.request_id)?
                 .ok_or_else(changed)?;
@@ -442,6 +456,7 @@ fn publish(
         return Err(error);
     }
     owner.ensure_current().map_err(super::changed)?;
+    current()?;
     let published = client
         .publish_chat(&request.organization, &request.checkout, &prepared.id, true)
         .map_err(api_error)?
@@ -453,6 +468,7 @@ fn publish(
         return Err(api_error(TeamError::InvalidResponse));
     }
     owner.ensure_current().map_err(super::changed)?;
+    current()?;
     store.activate_chat(&target, &prepared.id, prepared.revision, published.revision)?;
     Ok(json!({"publication":publication_dto(&store.resolve_chat(&target,&prepared.id)?)}))
 }
@@ -526,6 +542,7 @@ pub(super) fn start_for_owner(
             request_id: &input.request_id,
             person: &binding.publisher_id,
         },
+        &|| owner.ensure_current().map_err(super::changed),
     )
     .map(Some)
 }
@@ -533,7 +550,9 @@ pub(super) fn start_for_member(
     owner: &AccountSnapshot,
     client: &TeamClient,
     asked: NewChat<'_>,
+    current: &dyn Fn() -> Result<(), DispatchError>,
 ) -> Result<Value, DispatchError> {
+    current()?;
     let NewChat {
         organization,
         repository,
@@ -551,29 +570,37 @@ pub(super) fn start_for_member(
     };
     let (binding, local, _, _) = review_context(owner, client, &source)?;
     let store = Store::capture()?;
-    // The same request asked again settles to the chat it already made.
-    if let Some(previous) = store.chat_request(&target(&binding, &source), request_id)?
+    let _request = store.new_chat_lease(&target(&binding, &source), request_id)?;
+    // A timed-out cloud publication keeps its original conversation and
+    // request. Creating another conversation would conflict with that saved
+    // request forever, and would spend another rate-limit slot on each retry.
+    let previous = store.chat_request(&target(&binding, &source), request_id)?;
+    if let Some(previous) = &previous
         && previous.phase == Phase::Active
     {
+        current()?;
         return Ok(json!({"share":previous.id}));
     }
-    admit_new_chat(person, checkout)?;
     let chats = crate::chat::shared();
-    let chat = chats
-        .create(crate::chat::Create {
-            workspace_id: local.workspace_id.clone(),
-            title: Some(title.into()),
-            backend: "claude".into(),
-            persona_id: Some(String::new()),
-            ..Default::default()
-        })
-        .map_err(|_| changed())?;
+    let (chat, created) = new_chat_conversation(
+        &chats,
+        &local.workspace_id,
+        title,
+        previous.as_ref(),
+        current,
+        || admit_new_chat(person, checkout),
+    )?;
     let request = Target {
         conversation: chat.id.clone(),
         ..source
     };
+    let original_revision = previous
+        .as_ref()
+        .map_or(Some(chat.send_revision), |row| row.source_revision)
+        .ok_or_else(changed)?;
     let shared = review(owner, client, &request).and_then(|review| {
-        publish(
+        require_empty_new_chat(&review.history, original_revision)?;
+        publish_if_current(
             owner,
             client,
             Publish {
@@ -585,15 +612,76 @@ pub(super) fn start_for_member(
                 request_id: request_id.into(),
                 confirm_history: true,
             },
+            current,
         )
     });
     match shared {
         Ok(value) => Ok(json!({"share":value["publication"]["id"]})),
         Err(error) => {
-            let _ = chats.remove(&chat.id);
+            // A prepared record may already be committed remotely even when
+            // its reply was lost. Keep the matching source for idempotent
+            // recovery instead of deleting it or creating a replacement.
+            let owns_source = store
+                .chat_request(&target(&binding, &request), request_id)
+                .map(|saved| saved.is_some_and(|row| row.conversation_id == chat.id));
+            if created && matches!(owns_source, Ok(false)) {
+                let _ = chats.remove_untouched_empty(&chat.id, chat.send_revision);
+            }
             Err(error)
         }
     }
+}
+
+/// The account lookups and publication locks above can outlive a short member
+/// lease. Check it again at the local creation boundary, before making a chat.
+fn new_chat_conversation(
+    chats: &crate::chat::Store,
+    workspace: &str,
+    title: &str,
+    previous: Option<&ChatShare>,
+    current: &dyn Fn() -> Result<(), DispatchError>,
+    admit: impl FnOnce() -> Result<(), DispatchError>,
+) -> Result<(crate::chat::Conversation, bool), DispatchError> {
+    current()?;
+    if let Some(previous) = previous {
+        if previous.phase != Phase::Prepared {
+            return Err(changed());
+        }
+        let chat = chats
+            .list(workspace)
+            .into_iter()
+            .find(|chat| chat.id == previous.conversation_id)
+            .ok_or_else(changed)?;
+        return Ok((chat, false));
+    }
+    admit()?;
+    current()?;
+    chats
+        .create(crate::chat::Create {
+            workspace_id: workspace.into(),
+            title: Some(title.into()),
+            backend: "claude".into(),
+            persona_id: Some(String::new()),
+            ..Default::default()
+        })
+        .map(|chat| (chat, true))
+        .map_err(|_| changed())
+}
+
+/// A member requested a fresh, empty chat, not permission to share private
+/// messages the physical owner may have added while account lookups ran.
+/// The publication preview and canonical freeze bind this exact revision too.
+fn require_empty_new_chat(
+    history: &crate::chat::sharing::History,
+    revision: u64,
+) -> Result<(), DispatchError> {
+    if history.history_bytes != 0 || history.source_revision != revision {
+        return Err(DispatchError::new(
+            "chat_history_changed",
+            "This chat changed before sharing. Its local history has been kept private.",
+        ));
+    }
+    Ok(())
 }
 
 /// A Run proof lives for minutes, so one person could otherwise fill this
@@ -630,6 +718,28 @@ fn admit_new_chat(person: &str, checkout: &str) -> Result<(), DispatchError> {
 
 #[cfg(test)]
 mod new_chat_tests {
+    fn saved_empty_chat() -> (
+        tempfile::TempDir,
+        crate::chat::Store,
+        crate::chat::Conversation,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("chats");
+        std::fs::create_dir(&directory).unwrap();
+        let original: crate::chat::Conversation = serde_json::from_value(serde_json::json!({
+            "id": "chat_fixture", "workspaceId": "workspace", "title": "Original chat",
+            "backend": "claude", "createdAtMs": 1, "updatedAtMs": 1,
+        }))
+        .unwrap();
+        std::fs::write(
+            directory.join("conversations.json"),
+            serde_json::to_vec(&serde_json::json!({"conversations": [original]})).unwrap(),
+        )
+        .unwrap();
+        let chats = crate::chat::Store::at(directory);
+        chats.refresh_index().unwrap();
+        (root, chats, original)
+    }
     #[test]
     fn empty_chat_input_cannot_carry_a_private_source_or_agent_request() {
         let valid =
@@ -660,6 +770,102 @@ mod new_chat_tests {
             assert!(super::new_chat_input(&input.to_string()).is_err());
         }
     }
+    #[test]
+    fn expired_member_cannot_create_a_chat_after_review_lookups() {
+        let root = tempfile::tempdir().unwrap();
+        let chats = crate::chat::Store::at(root.path().join("chats"));
+        let error = super::new_chat_conversation(
+            &chats,
+            "reviewed-workspace",
+            "Shared chat",
+            None,
+            &|| {
+                Err(crate::error::DispatchError::new(
+                    "team_access_expired",
+                    "The member's reviewed authority expired during account lookups.",
+                ))
+            },
+            || panic!("an expired request cannot spend an admission slot"),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "team_access_expired");
+        assert!(chats.list("reviewed-workspace").is_empty());
+        assert!(!root.path().join("chats/conversations.json").exists());
+    }
+
+    #[test]
+    fn retrying_a_prepared_new_chat_reuses_its_source_without_another_admission() {
+        let (_root, chats, original) = saved_empty_chat();
+        let mut previous = super::ChatShare {
+            id: format!("share_{}", "ab".repeat(16)),
+            checkout_id: "checkout".into(),
+            conversation_id: original.id.clone(),
+            request_id: "original-request".into(),
+            preview: "ab".repeat(32),
+            phase: super::Phase::Prepared,
+            revision: 1,
+            cloud_revision: None,
+            cloud_withdrawn: false,
+            source_revision: Some(0),
+        };
+        for _ in 0..12 {
+            let (retried, created) = super::new_chat_conversation(
+                &chats,
+                "workspace",
+                "Retry title",
+                Some(&previous),
+                &|| Ok(()),
+                || panic!("a retry cannot spend another admission slot"),
+            )
+            .unwrap();
+            assert_eq!(retried.id, original.id);
+            assert_eq!(retried.title, "Original chat");
+            assert!(!created);
+        }
+        assert_eq!(chats.list("workspace").len(), 1);
+        previous.phase = super::Phase::Withdrawn;
+        assert!(
+            super::new_chat_conversation(
+                &chats,
+                "workspace",
+                "Retry title",
+                Some(&previous),
+                &|| Ok(()),
+                || Ok(()),
+            )
+            .is_err(),
+            "a retired request cannot create a replacement chat"
+        );
+    }
+
+    #[test]
+    fn automatic_empty_chat_publication_never_adopts_private_edits_or_deletes_them() {
+        let (root, chats, original) = saved_empty_chat();
+        let mut history = chats.sharing_history("workspace", &original.id).unwrap();
+        assert!(super::require_empty_new_chat(&history, 0).is_ok());
+        history.source_revision = 1;
+        assert!(super::require_empty_new_chat(&history, 0).is_err());
+        let directory = root.path().join("chats").join(&original.id);
+        std::fs::create_dir(&directory).unwrap();
+        let private =
+            b"{\"kind\":\"user\",\"text\":\"Private local note\",\"at_ms\":2,\"seq\":0}\n";
+        std::fs::write(directory.join("events.ndjson"), private).unwrap();
+        let history = chats.sharing_history("workspace", &original.id).unwrap();
+        assert_eq!(
+            super::require_empty_new_chat(&history, 0).unwrap_err().code,
+            "chat_history_changed"
+        );
+        assert!(chats.remove_untouched_empty(&original.id, 0).is_err());
+        assert_eq!(chats.list("workspace").len(), 1);
+        assert_eq!(
+            std::fs::read(directory.join("events.ndjson")).unwrap(),
+            private
+        );
+        let (_root, untouched, original) = saved_empty_chat();
+        assert!(untouched.remove_untouched_empty(&original.id, 0).unwrap());
+        assert!(untouched.list("workspace").is_empty());
+    }
+
     #[test]
     fn new_chats_are_capped_per_person_and_checkout() {
         for _ in 0..10 {
