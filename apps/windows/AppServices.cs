@@ -23,6 +23,8 @@ internal static class AppServices
     public static void NotifyAccountChanged() { Interlocked.Increment(ref _accountGeneration); AccountChanged?.Invoke(); }
     public static event Action? ConversationsChanged;
     public static void NotifyConversationsChanged() => ConversationsChanged?.Invoke();
+    public static event Action? TeamProjectsChanged;
+    public static void NotifyTeamProjectsChanged() => TeamProjectsChanged?.Invoke();
 
     public static AppUpdateModel Update { get; } = new();
 

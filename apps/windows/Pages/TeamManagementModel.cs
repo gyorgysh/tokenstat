@@ -6,19 +6,24 @@ using System.Text.RegularExpressions;
 
 namespace Tokenstat.Pages;
 
-/// A directory operation stays bound to the login that opened its review.
+/// A Team operation stays bound to the login that opened its review.
 internal sealed class TeamDirectoryClient(JsonObject scope, string? session, string person,
     Func<string, JsonObject?, Task<JsonNode>> call)
 {
     private readonly JsonObject _scope = (JsonObject)scope.DeepClone();
     internal string Person { get; } = person;
     internal string Origin => TeamManagementModel.Text(_scope, "origin");
-    internal async Task<JsonNode> Request(string operation, JsonObject? fields = null)
+    internal async Task<JsonNode> Call(string method, JsonObject? fields = null)
     {
         var body = (JsonObject?)fields?.DeepClone() ?? new();
-        body["operation"] = operation; body["_accountScope"] = _scope.DeepClone();
+        body["_accountScope"] = _scope.DeepClone();
         if (session is not null) body["_accountSession"] = session;
-        return await call("teams.directory", body);
+        return await call(method, body);
+    }
+    internal Task<JsonNode> Request(string operation, JsonObject? fields = null)
+    {
+        var body = (JsonObject?)fields?.DeepClone() ?? new(); body["operation"] = operation;
+        return Call("teams.directory", body);
     }
     internal async Task<JsonObject> Create(string name, string slug)
     {

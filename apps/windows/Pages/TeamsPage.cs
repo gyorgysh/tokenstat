@@ -32,6 +32,7 @@ internal sealed partial class TeamsPage : Page
     private TeamCommentModel? _currentComment;
     private bool CommentIdle => _currentComment is not { } comment || !comment.Busy && comment.Text.Length == 0 && comment.RecoveredText is null;
     private string? _person;
+    private bool _canPublish;
     private readonly Dictionary<TeamCommentTarget, TeamCommentModel> _comments = new();
     private readonly Dictionary<string, string> _checkoutHosts = new();
     private readonly Dictionary<string, string> _newChatWriting = new();
@@ -115,6 +116,7 @@ internal sealed partial class TeamsPage : Page
             var actor = Format.Text(capabilities, "actorId");
             if (actor.Length == 0 || !string.IsNullOrEmpty(_person) && _person != actor) throw new HostException("account_changed", L10n.Text("common.teams.account_changed"));
             _person = actor;
+            _canPublish = Format.Flag(capabilities, "canPublishCheckouts");
             var page = TeamDirectoryPage.Read(await CallAsync("teams.directory", new JsonObject { ["operation"] = "organizations.list", ["page"] = Page100() }), "organizations", 0);
             if (!IsLoaded || _view != view) return;
             _organizations = page.Rows; _organizationsNext = page.Next;
@@ -335,6 +337,9 @@ internal sealed partial class TeamsPage : Page
             if (!Current()) return;
             card.Children.Clear();
             card.Children.Add(new TextBlock { Text = Format.Text(repo, "name"), FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            if (_canPublish) card.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.project_settings"), ActionIcon.Settings, async (_, _) => {
+                if (Current()) await ShowTeamPublisherAsync(repo);
+            }));
             if (repo["role"] is null) { card.Children.Add(new TextBlock { Text = L10n.Text("common.teams.no_access"), Opacity = 0.7 }); return; }
             if (error is not null) card.Children.Add(new TextBlock { Text = error, TextWrapping = TextWrapping.Wrap });
             if (loaded && checkouts.Count == 0) card.Children.Add(new TextBlock { Text = L10n.Text("common.teams.repository_not_shared"), Opacity = 0.7 });

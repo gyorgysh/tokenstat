@@ -46,6 +46,7 @@ namespace Tokenstat
     {
         internal static Action<Tokenstat.Navigation.DesktopOpenRequest>? OpenDesktopAction { get; set; }
         internal static FixtureHost Host { get; } = new();
+        internal static void NotifyTeamProjectsChanged() { }
     }
     internal sealed class FixtureHost
     {

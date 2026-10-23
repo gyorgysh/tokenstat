@@ -81,6 +81,7 @@ internal sealed partial class TeamsPage
         {
             if (input is TextBox text) text.TextChanged += (_, _) => Update();
             if (input is ComboBox combo) combo.SelectionChanged += (_, _) => Update();
+            if (input is CheckBox check) { check.Checked += (_, _) => Update(); check.Unchecked += (_, _) => Update(); }
         }
         if (confirm is not null) { confirm.Checked += (_, _) => Update(); confirm.Unchecked += (_, _) => Update(); }
         _body.Children.Add(apply); _body.Children.Add(cancel); Update();
