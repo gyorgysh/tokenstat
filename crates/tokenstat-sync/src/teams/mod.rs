@@ -633,6 +633,14 @@ impl TeamClient {
             None,
         )
     }
+    pub fn set_execution_policy(
+        &self,
+        org: &str,
+        checkout: &str,
+        input: &SetExecutionPolicy,
+    ) -> Result<ExecutionPolicyReply, TeamError> {
+        host_execution::policy(self, org, checkout, input)
+    }
     pub fn member_devices(
         &self,
         org: &str,

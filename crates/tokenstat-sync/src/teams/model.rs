@@ -186,16 +186,31 @@ pub struct ExecutionGrant {
     /// None marks a legacy grant requiring renewed physical-host approval.
     pub grant_id: Option<String>,
 }
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionPolicy {
+    Members,
+    #[default]
+    Devices,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecutionGrants {
     pub grants: Vec<ExecutionGrant>,
     pub revision: u64,
+    /// Missing on older servers, which require explicit device grants.
+    #[serde(default)]
+    pub policy: ExecutionPolicy,
+    #[serde(default)]
+    pub supports_member_policy: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemberDevice {
     pub id: String,
     pub key: String,
     pub kind: String,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemberDevices {
@@ -340,6 +355,18 @@ pub struct SetExecutionGrant {
     pub expected_revision: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acknowledge_host_access: Option<bool>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetExecutionPolicy {
+    pub policy: ExecutionPolicy,
+    pub expected_revision: u64,
+    pub acknowledge_host_access: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionPolicyReply {
+    pub policy: ExecutionPolicy,
+    pub revision: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

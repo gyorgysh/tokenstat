@@ -42,6 +42,7 @@ internal static class TeamPublisherSmoke
         var publication = new JsonObject { ["id"] = "checkout", ["organizationId"] = "org", ["repositoryId"] = "repo", ["workspaceId"] = "folder", ["phase"] = "active", ["revision"] = 5L, ["accountCleanupPending"] = false };
         var checkoutShared = false; var chatShared = false; var publishAttempts = new List<JsonObject>(); var writes = new List<JsonObject>(); var granted = false;
         JsonObject? laneSettings = null;
+        var supportsPolicy = false; var executionPolicy = "members"; var executionRevision = 4L;
         Task<JsonNode> Host(string method, JsonObject? fields)
         {
             if (method == "account.status") return Task.FromResult<JsonNode>(new JsonObject { ["signedIn"] = true, ["host"] = "https://fixture.invalid", ["handle"] = "fictional", ["accountId"] = "owner", ["accountSession"] = "fictional-session" });
@@ -53,10 +54,11 @@ internal static class TeamPublisherSmoke
                 case "teams.directory":
                     result = Text(fields, "operation") switch {
                         "organizations.list" => Page("organizations", org), "repositories.list" => Page("repositories", repo), "checkouts.list" => Page("checkouts"),
-                        "execution.list" => new JsonObject { ["revision"] = 4L, ["grants"] = new JsonArray() },
+                        "execution.list" => ExecutionList(),
                         "repositories.members" => Page("members", new JsonObject { ["id"] = "mate", ["name"] = "Fictional teammate", ["role"] = "contributor", ["eligible"] = true }),
-                        "execution.devices" => new JsonObject { ["devices"] = new JsonArray(new JsonObject { ["id"] = "machine", ["key"] = new string('d', 64), ["kind"] = "Fictional phone" }) },
+                        "execution.devices" => new JsonObject { ["devices"] = new JsonArray(new JsonObject { ["id"] = "machine", ["key"] = new string('d', 64), ["kind"] = "client", ["name"] = "Fictional phone" }) },
                         "execution.set" => Grant(),
+                        "execution.policy" => Policy(),
                         _ => throw new Exception("Unexpected publishing directory operation"),
                     }; break;
                 case "teams.checkout.list": result = checkoutShared ? Page("publications", publication) : Page("publications"); break;
@@ -77,6 +79,21 @@ internal static class TeamPublisherSmoke
             }
             return Task.FromResult(result);
             JsonNode Grant() { writes.Add((JsonObject)fields!.DeepClone()); granted = true; return new JsonObject(); }
+            JsonNode ExecutionList()
+            {
+                var reply = new JsonObject { ["revision"] = executionRevision, ["grants"] = new JsonArray() };
+                if (supportsPolicy) { reply["policy"] = executionPolicy; reply["supportsMemberPolicy"] = true; }
+                return reply;
+            }
+            JsonNode Policy()
+            {
+                if (!supportsPolicy || Revision(fields?["input"]!, "expectedRevision") != executionRevision || !Flag(fields?["input"], "acknowledgeHostAccess"))
+                    throw new Exception("Policy change lost its reviewed revision or host acknowledgement");
+                executionPolicy = Text(fields?["input"], "policy");
+                if (executionPolicy is not ("members" or "devices")) throw new Exception("Unknown policy was submitted");
+                writes.Add((JsonObject)fields!.DeepClone());
+                return new JsonObject { ["policy"] = executionPolicy, ["revision"] = ++executionRevision };
+            }
         }
         var page = new TeamsPage(Host); body.Children.Add(page); body.UpdateLayout();
         try
@@ -128,7 +145,7 @@ internal static class TeamPublisherSmoke
             await Click(page, L10n.Text("common.teams.agent_runs"));
             await Click(page, L10n.Text("common.teams.add_agent_grant"));
             await Click(page, "Fictional teammate");
-            await Click(page, "Fictional phone · " + new string('d', 12));
+            await Click(page, "Fictional phone");
             await Wait(page, () => Descendants(page).OfType<CheckBox>().Any(), "Host access grant warning missing");
             if (Find(page, L10n.Text("common.teams.allow_agent_runs"))!.IsEnabled || granted) throw new Exception("Execution grant skipped explicit device review");
             Descendants(page).OfType<CheckBox>().Single().IsChecked = true;
@@ -136,8 +153,30 @@ internal static class TeamPublisherSmoke
             await Wait(page, () => granted, "Device-specific grant was not saved");
             var grant = writes.Single(row => Text(row, "operation") == "execution.set");
             if (Text(grant["input"], "userId") != "mate" || Text(grant["input"], "deviceKey") != new string('d', 64) || Text(grant["input"], "machineId") != "machine" || Revision(grant["input"]!, "expectedRevision") != 4 || !Flag(grant["input"], "acknowledgeHostAccess")) throw new Exception("Native grant lost reviewed user, device, revision or acknowledgement");
+            await Wait(page, () => Find(page, L10n.Text("common.teams.add_agent_grant")) is not null, "Legacy grant list did not reload");
+            supportsPolicy = true; executionRevision = 10;
+            var model = new TeamPublisherModel(new TeamDirectoryClient(new() { ["origin"] = "https://fixture.invalid" }, "fictional-session", "owner", Host), repo);
+            var show = typeof(TeamsPage).GetMethod("ShowTeamAgentGrantsAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            await (Task)show.Invoke(page, [model, repo, publication, (Func<Task>)(() => Task.CompletedTask)])!;
+            ComboBox? PolicyChoice() => Descendants(page).OfType<ComboBox>().SingleOrDefault(box => AutomationProperties.GetAutomationId(box) == "team.agent-access.policy");
+            await Wait(page, () => PolicyChoice() is { SelectedIndex: 0 }, "Automatic member access was not the default");
+            if (Find(page, L10n.Text("common.teams.add_agent_grant")) is not null || Descendants(page).OfType<CheckBox>().Any())
+                throw new Exception("Automatic member access still required device selection or individual approval");
+            var automatic = PolicyChoice()!; automatic.SelectedIndex = 1;
+            await Wait(page, () => Find(page, L10n.Text("common.save")) is { IsEnabled: true }, "Strict access selection was not saveable");
+            await Click(page, L10n.Text("common.save"));
+            await Wait(page, () => PolicyChoice() is { SelectedIndex: 1 } box && !ReferenceEquals(box, automatic)
+                && Find(page, L10n.Text("common.teams.add_agent_grant")) is not null, "Explicit strict device management was not restored");
+            var strict = PolicyChoice()!; strict.SelectedIndex = 0;
+            await Wait(page, () => Find(page, L10n.Text("common.save")) is { IsEnabled: true }, "Automatic access selection was not saveable");
+            await Click(page, L10n.Text("common.save"));
+            await Wait(page, () => PolicyChoice() is { SelectedIndex: 0 } box && !ReferenceEquals(box, strict)
+                && Find(page, L10n.Text("common.teams.add_agent_grant")) is null, "Automatic access did not remove per-device setup");
+            var policies = writes.Where(row => Text(row, "operation") == "execution.policy").ToArray();
+            if (policies.Length != 2 || Revision(policies[0]["input"]!, "expectedRevision") != 10 || Revision(policies[1]["input"]!, "expectedRevision") != 11)
+                throw new Exception("Policy changes lost their current revision");
         }
         finally { body.Children.Remove(page); }
-        Program.Log("PASS: production Windows publishing reviews exact folder and history, retries original request, acknowledges changed-code checks and grants one reviewed teammate device");
+        Program.Log("PASS: production Windows publishing preserves reviewed sharing and legacy grants, defaults to automatic member access, and round-trips explicit strict device management");
     }
 }

@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-use super::{ExecutionReply, SetExecutionGrant, TeamClient, TeamError, value};
+use super::{
+    ExecutionPolicyReply, ExecutionReply, SetExecutionGrant, SetExecutionPolicy, TeamClient,
+    TeamError, value,
+};
 use reqwest::Method;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokenstat_identity::{
     MachineIdentity, hex,
@@ -43,13 +48,105 @@ pub(super) fn grant_for_identity(
     {
         return Err(TeamError::InvalidRequest);
     }
+    let operation = serde_json::to_vec(&(
+        "execution.grant",
+        &input.user_id,
+        &input.machine_id,
+        &input.device_key,
+        input.allow,
+        input.expected_revision,
+        input.acknowledge_host_access == Some(true),
+    ))
+    .map_err(|_| TeamError::InvalidRequest)?;
+    confirmed(
+        client,
+        organization,
+        checkout,
+        value(input)?,
+        operation,
+        &["execution"],
+        "host-execution-proof-v1",
+        identity,
+        machine,
+        clock,
+    )
+}
+
+pub(super) fn policy(
+    client: &TeamClient,
+    organization: &str,
+    checkout: &str,
+    input: &SetExecutionPolicy,
+) -> Result<ExecutionPolicyReply, TeamError> {
+    let identity = MachineIdentity::load_or_create().map_err(|_| TeamError::InvalidRequest)?;
+    let machine = crate::config::ensure_machine_id().map_err(|_| TeamError::InvalidRequest)?;
+    policy_for_identity(
+        client,
+        organization,
+        checkout,
+        input,
+        &identity,
+        &machine,
+        || jiff::Timestamp::now().as_millisecond(),
+    )
+}
+
+pub(super) fn policy_for_identity(
+    client: &TeamClient,
+    organization: &str,
+    checkout: &str,
+    input: &SetExecutionPolicy,
+    identity: &MachineIdentity,
+    machine: &str,
+    clock: impl FnOnce() -> i64,
+) -> Result<ExecutionPolicyReply, TeamError> {
+    if input.expected_revision == 0
+        || input.expected_revision > 9_007_199_254_740_991
+        || !input.acknowledge_host_access
+    {
+        return Err(TeamError::InvalidRequest);
+    }
+    let operation = serde_json::to_vec(&(
+        "execution.policy",
+        input.policy,
+        input.expected_revision,
+        true,
+    ))
+    .map_err(|_| TeamError::InvalidRequest)?;
+    confirmed(
+        client,
+        organization,
+        checkout,
+        value(input)?,
+        operation,
+        &["execution", "policy"],
+        "member-execution-policy-v1",
+        identity,
+        machine,
+        clock,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn confirmed<T: DeserializeOwned>(
+    client: &TeamClient,
+    organization: &str,
+    checkout: &str,
+    mut body: Value,
+    operation: Vec<u8>,
+    resource: &[&str],
+    feature: &str,
+    identity: &MachineIdentity,
+    machine: &str,
+    clock: impl FnOnce() -> i64,
+) -> Result<T, TeamError> {
     let capabilities = client.capabilities()?;
     if !capabilities.enabled
         || capabilities.version != 1
         || !capabilities
             .features
             .iter()
-            .any(|feature| feature == "host-execution-proof-v1")
+            .any(|available| available == feature)
     {
         return Err(TeamError::Unsupported);
     }
@@ -75,30 +172,13 @@ pub(super) fn grant_for_identity(
     {
         return Err(TeamError::InvalidResponse);
     }
-    let operation = serde_json::to_vec(&(
-        "execution.grant",
-        &input.user_id,
-        &input.machine_id,
-        &input.device_key,
-        input.allow,
-        input.expected_revision,
-        input.acknowledge_host_access == Some(true),
-    ))
-    .map_err(|_| TeamError::InvalidRequest)?;
     let operation_hash = hex(Sha256::digest(operation).as_slice());
-    let challenge: HostChallenge = client.request(
-        Method::POST,
-        &[
-            "organizations",
-            organization,
-            "checkouts",
-            checkout,
-            "execution",
-            "challenge",
-        ],
-        Some(value(input)?),
-        None,
-    )?;
+    let mut path = vec!["organizations", organization, "checkouts", checkout];
+    path.extend_from_slice(resource);
+    let mut challenge_path = path.clone();
+    challenge_path.push("challenge");
+    let challenge: HostChallenge =
+        client.request(Method::POST, &challenge_path, Some(body.clone()), None)?;
     client.ensure_current()?;
     let proof = challenge
         .answer(
@@ -115,20 +195,8 @@ pub(super) fn grant_for_identity(
             clock(),
         )
         .map_err(|_| TeamError::InvalidResponse)?;
-    let mut body = value(input)?;
     body.as_object_mut()
         .ok_or(TeamError::InvalidRequest)?
         .insert("hostProof".into(), value(&proof)?);
-    client.request(
-        Method::PUT,
-        &[
-            "organizations",
-            organization,
-            "checkouts",
-            checkout,
-            "execution",
-        ],
-        Some(body),
-        None,
-    )
+    client.request(Method::PUT, &path, Some(body), None)
 }

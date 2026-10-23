@@ -3746,6 +3746,7 @@ version = "1.8.0"
 dependencies = [
  "anyhow",
  "atomicwrites",
+ "base64 0.23.1",
  "directories",
  "flate2",
  "getrandom 0.4.3",

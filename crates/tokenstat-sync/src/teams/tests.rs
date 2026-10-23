@@ -277,6 +277,132 @@ fn host_execution_proves_the_actual_identity_for_one_exact_reviewed_write() {
 }
 
 #[test]
+fn member_policy_requires_a_bound_physical_host_proof_and_server_support() {
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    use sha2::{Digest, Sha256};
+    let v: Value = serde_json::from_str(include_str!(
+        "../../../../fixtures/teams/host-proof-v1.json"
+    ))
+    .unwrap();
+    let identity = tokenstat_identity::MachineIdentity::from_secret([7; 32]);
+    let input = SetExecutionPolicy {
+        policy: ExecutionPolicy::Members,
+        expected_revision: 1,
+        acknowledge_host_access: true,
+    };
+    let operation = serde_json::to_vec(&("execution.policy", input.policy, 1, true)).unwrap();
+    let mut fields: Value = serde_json::from_slice(
+        &URL_SAFE_NO_PAD
+            .decode(v["challenge"]["context"].as_str().unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    fields[8] = json!(tokenstat_identity::hex(
+        Sha256::digest(operation).as_slice()
+    ));
+    let challenge = json!({"version": 1, "context": URL_SAFE_NO_PAD.encode(serde_json::to_vec(&fields).unwrap())});
+    let org = v["binding"]["organization"].as_str().unwrap();
+    let checkout = v["binding"]["checkout"].as_str().unwrap();
+    let mut caps = capabilities();
+    caps["actorId"] = json!("fixture-owner");
+    caps["deviceKey"] = json!(identity.public_key_hex());
+    caps["features"] = json!(["member-execution-policy-v1"]);
+    caps["authorizationPath"] = json!("/settings/teams/devices/abcdef0123456789abcdef01");
+    let (client, wire) = fixture_replies(
+        vec![
+            response(caps.clone()),
+            response(challenge.clone()),
+            response(json!({"policy":"members","revision":2})),
+        ],
+        false,
+    );
+    let reply = super::host_execution::policy_for_identity(
+        &client,
+        org,
+        checkout,
+        &input,
+        &identity,
+        "fixture-host",
+        || v["nowMs"].as_i64().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reply.policy, ExecutionPolicy::Members);
+    assert_eq!(reply.revision, 2);
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[1].1.ends_with("/execution/policy/challenge"));
+    assert_eq!(requests[1].2, Some(serde_json::to_value(&input).unwrap()));
+    assert_eq!(requests[2].0, Method::PUT);
+    assert!(requests[2].1.ends_with("/execution/policy"));
+    assert!(requests[2].2.as_ref().unwrap().get("hostProof").is_some());
+    assert!(requests.iter().all(|request| request.3));
+    drop(requests);
+    let mut substituted = input.clone();
+    substituted.policy = ExecutionPolicy::Devices;
+    let (client, wire) = fixture_replies(vec![response(caps.clone()), response(challenge)], false);
+    assert_eq!(
+        super::host_execution::policy_for_identity(
+            &client,
+            org,
+            checkout,
+            &substituted,
+            &identity,
+            "fixture-host",
+            || v["nowMs"].as_i64().unwrap()
+        )
+        .unwrap_err(),
+        TeamError::InvalidResponse
+    );
+    assert_eq!(
+        wire.requests.lock().unwrap().len(),
+        2,
+        "a substituted policy must never send a write"
+    );
+    caps["features"] = json!(["host-execution-proof-v1"]);
+    let (client, wire) = fixture(response(caps), false);
+    assert_eq!(
+        super::host_execution::policy_for_identity(
+            &client,
+            org,
+            checkout,
+            &input,
+            &identity,
+            "fixture-host",
+            || 0
+        )
+        .unwrap_err(),
+        TeamError::Unsupported
+    );
+    assert_eq!(wire.requests.lock().unwrap().len(), 1);
+    for (revision, acknowledged) in [(0, true), (9_007_199_254_740_992, true), (1, false)] {
+        let bad = SetExecutionPolicy {
+            expected_revision: revision,
+            acknowledge_host_access: acknowledged,
+            ..input.clone()
+        };
+        let (client, wire) = fixture_replies(vec![], false);
+        assert_eq!(
+            super::host_execution::policy_for_identity(
+                &client,
+                org,
+                checkout,
+                &bad,
+                &identity,
+                "fixture-host",
+                || 0
+            )
+            .unwrap_err(),
+            TeamError::InvalidRequest
+        );
+        assert!(wire.requests.lock().unwrap().is_empty());
+    }
+    let legacy: ExecutionGrants =
+        serde_json::from_value(json!({"grants":[],"revision":1})).unwrap();
+    assert_eq!(legacy.policy, ExecutionPolicy::Devices);
+    assert!(!legacy.supports_member_policy);
+}
+
+#[test]
 fn captures_the_origin_uses_sensitive_headers_and_bounds_pages_and_identifiers() {
     let (client, wire) = fixture(
         response(json!({"organizations":[],"nextOffset":null})),

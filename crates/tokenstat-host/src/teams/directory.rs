@@ -236,6 +236,12 @@ pub(super) enum Operation {
         checkout: String,
         input: SetExecutionGrant,
     },
+    #[serde(rename = "execution.policy")]
+    SetExecutionPolicy {
+        organization: String,
+        checkout: String,
+        input: SetExecutionPolicy,
+    },
     #[serde(rename = "execution.devices")]
     MemberDevices {
         organization: String,
@@ -360,6 +366,11 @@ pub(super) fn perform(client: &TeamClient, operation: Operation) -> Result<Value
             checkout,
             input,
         } => api!(client.set_execution_grant(&organization, &checkout, &input)),
+        Operation::SetExecutionPolicy {
+            organization,
+            checkout,
+            input,
+        } => api!(client.set_execution_policy(&organization, &checkout, &input)),
         Operation::MemberDevices {
             organization,
             checkout,

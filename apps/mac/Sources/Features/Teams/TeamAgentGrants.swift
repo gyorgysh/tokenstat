@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Who may ask this computer's agent about a shared checkout. Each grant names
-/// one member and one of their devices. Nobody has it by default, and the
-/// owner confirms on this computer that an agent runs with their account.
+/// Project membership normally authorizes a member's devices. Publishers can
+/// explicitly select strict management to maintain individual device grants.
 struct TeamAgentGrants: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext
@@ -19,6 +18,10 @@ struct TeamAgentGrants: View {
     @State private var loading = false
     @State private var saving = false
     @State private var error: String?
+    @State private var loaded = false
+    @State private var supportsMemberPolicy = false
+    @State private var policy = "devices"
+    @State private var selectedPolicy = "devices"
 
     private var eligible: [TeamRepositoryMember] {
         members.filter { $0.role == .contributor || $0.role == .maintainer }
@@ -26,9 +29,42 @@ struct TeamAgentGrants: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text(L10n.text("common.teams.agent_grants_detail")).font(Theme.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let error { TeamNotice(message: error, warning: true) }
+            if error != nil && !loading {
+                Button(L10n.text("common.retry"), .refresh) { Task { await load() } }
+                    .buttonStyle(TeamButtonStyle()).disabled(saving)
+            }
             if loading { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
+            if supportsMemberPolicy {
+                TeamPickerField(title: L10n.text("common.teams.agent_access_policy"), selection: $selectedPolicy) {
+                    Text(L10n.text("common.teams.agent_access_members")).tag("members")
+                    Text(L10n.text("common.teams.agent_access_devices")).tag("devices")
+                }.disabled(!loaded || loading || saving).accessibilityIdentifier("team.agent-access.policy")
+                Text(L10n.text("common.teams.agent_access_account_detail"))
+                    .font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if selectedPolicy != policy || saving {
+                    Button(L10n.text("common.save"), .save) { Task { await setPolicy() } }
+                        .buttonStyle(TeamButtonStyle(primary: true))
+                        .disabled(!loaded || loading || saving || selectedPolicy == policy)
+                        .accessibilityIdentifier("team.agent-access.save")
+                }
+            }
+            if loaded && policy == "members" {
+                Text(L10n.text("common.teams.agent_access_members_detail"))
+                    .font(Theme.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if loaded && policy == "devices" { deviceGrants }
+        }
+        .task { await load() }
+        .onChange(of: memberId) { _, member in
+            deviceKey = nil; devices = []
+            if let member { Task { await loadDevices(member) } }
+        }
+    }
+
+    private var deviceGrants: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Text(L10n.text("common.teams.agent_grants_detail")).font(Theme.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if grants.isEmpty && !loading {
                 Text(L10n.text("common.teams.agent_grants_none")).font(Theme.callout).foregroundStyle(.secondary)
             }
@@ -52,7 +88,7 @@ struct TeamAgentGrants: View {
             if memberId != nil {
                 TeamPickerField(title: L10n.text("common.teams.device"), selection: $deviceKey) {
                     Text(L10n.text("common.teams.choose_device")).tag(Optional<String>.none)
-                    ForEach(devices, id: \.key) { device in Text("\(device.kind) · \(shortKey(device.key))").tag(Optional(device.key)) }
+                    ForEach(devices, id: \.key) { device in Text(deviceLabel(device)).tag(Optional(device.key)) }
                 }.disabled(saving || loading)
             }
             TeamNotice(message: L10n.text("common.teams.agent_grant_warning"), warning: true)
@@ -64,17 +100,16 @@ struct TeamAgentGrants: View {
             .buttonStyle(TeamButtonStyle(primary: true))
             .disabled(memberId == nil || deviceKey == nil || !acknowledged || saving || loading)
         }
-        .task { await load() }
-        .onChange(of: memberId) { _, member in
-            deviceKey = nil; devices = []
-            if let member { Task { await loadDevices(member) } }
-        }
     }
 
     private func name(_ user: String) -> String {
         members.first { $0.id == user }?.name ?? user
     }
     private func shortKey(_ key: String) -> String { String(key.prefix(12)) }
+    private func deviceLabel(_ device: TeamMemberDevice) -> String {
+        let name = device.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "\(L10n.text("common.teams.device")) · \(shortKey(device.key))" : name
+    }
     private var base: [String: JSONValue] {
         ["organization": .string(repository.organizationId), "checkout": .string(checkoutId)]
     }
@@ -84,7 +119,14 @@ struct TeamAgentGrants: View {
         loading = true; defer { loading = false }
         do {
             let result: TeamExecutionGrants = try await store.read("execution.list", fields: base, context: context)
+            let supportsPolicy = result.supportsMemberPolicy == true
+            let currentPolicy = supportsPolicy ? result.policy ?? "" : "devices"
+            guard currentPolicy == "members" || currentPolicy == "devices" else {
+                throw TeamRequestFailure(code: "invalid_response", message: L10n.text("common.teams.agent_access_unavailable"))
+            }
             grants = result.grants; revision = result.revision
+            supportsMemberPolicy = supportsPolicy; policy = currentPolicy; selectedPolicy = currentPolicy; loaded = true
+            if currentPolicy == "members" { members = []; error = nil; return }
             var page: TeamRepositoryMembers = try await store.read("repositories.members", fields: ["organization": .string(repository.organizationId), "repository": .string(repository.id), "page": TeamStore.page(offset: 0)], context: context)
             var all = page.members
             while let next = page.nextOffset, all.count < 500 {
@@ -104,8 +146,21 @@ struct TeamAgentGrants: View {
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 
+    private func setPolicy() async {
+        guard loaded, supportsMemberPolicy, selectedPolicy != policy, !saving, !loading else { return }
+        saving = true; error = nil
+        defer { saving = false }
+        do {
+            var fields = base
+            fields["input"] = .object(["policy": .string(selectedPolicy), "expectedRevision": .uint(revision), "acknowledgeHostAccess": .bool(true)])
+            let _: JSONValue = try await store.perform("execution.policy", fields: fields, context: context)
+            acknowledged = false; memberId = nil; deviceKey = nil; devices = []
+            await load()
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+
     private func set(user: String, device: String, machine: String?, allow: Bool) async {
-        guard !saving else { return }
+        guard loaded, policy == "devices", !saving, !loading else { return }
         saving = true; error = nil
         defer { saving = false }
         do {
@@ -121,6 +176,6 @@ struct TeamAgentGrants: View {
 }
 
 struct TeamExecutionGrant: Codable, Hashable, Sendable { let userId: String; let deviceKey: String; let createdAt: String; let grantId: String? }
-struct TeamExecutionGrants: Codable, Sendable { let grants: [TeamExecutionGrant]; let revision: UInt64 }
-struct TeamMemberDevice: Codable, Hashable, Sendable { let id: String; let key: String; let kind: String }
+struct TeamExecutionGrants: Codable, Sendable { let grants: [TeamExecutionGrant]; let revision: UInt64; var policy: String? = nil; var supportsMemberPolicy: Bool? = nil }
+struct TeamMemberDevice: Codable, Hashable, Sendable { let id: String; let key: String; let kind: String; var name: String? = nil }
 struct TeamMemberDevices: Codable, Sendable { let devices: [TeamMemberDevice] }

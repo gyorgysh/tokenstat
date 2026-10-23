@@ -107,6 +107,42 @@ internal sealed partial class TeamsPage
             var revision = Revision(answer); var grants = answer["grants"] as JsonArray ?? throw new InvalidDataException();
             Require(grants.Count <= 1000 && grants.All(row => row is JsonObject && Text(row, "userId").Length > 0 && Text(row, "deviceKey").Length > 0));
             if (!IsLoaded || _view != view) return;
+            var supportsPolicy = Flag(answer, "supportsMemberPolicy");
+            var policy = supportsPolicy ? Text(answer, "policy") : "devices";
+            Require(policy is "members" or "devices");
+            if (supportsPolicy)
+            {
+                var choice = new ComboBox { Header = L10n.Text("common.teams.agent_access_policy"), HorizontalAlignment = HorizontalAlignment.Stretch };
+                choice.Items.Add(new ComboBoxItem { Content = L10n.Text("common.teams.agent_access_members"), Tag = "members" });
+                choice.Items.Add(new ComboBoxItem { Content = L10n.Text("common.teams.agent_access_devices"), Tag = "devices" });
+                choice.SelectedIndex = policy == "members" ? 0 : 1;
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(choice, "team.agent-access.policy");
+                _body.Children.Add(choice);
+                Note(L10n.Text("common.teams.agent_access_account_detail"));
+                var saving = false;
+                Button? save = null;
+                save = ActionIconGlyph.Button(L10n.Text("common.save"), ActionIcon.Save, async (_, _) => {
+                    if (!IsLoaded || _view != view || saving || (choice.SelectedIndex == 0 ? "members" : "devices") == policy) return;
+                    saving = true; choice.IsEnabled = false; save!.IsEnabled = false;
+                    try
+                    {
+                        await model.Directory("execution.policy", new() { ["organization"] = model.Organization, ["checkout"] = checkout,
+                            ["input"] = new JsonObject { ["policy"] = choice.SelectedIndex == 0 ? "members" : "devices", ["expectedRevision"] = revision, ["acknowledgeHostAccess"] = true } });
+                        if (IsLoaded && _view == view) await ShowTeamAgentGrantsAsync(model, repository, publication, back);
+                    }
+                    catch (Exception error) { if (IsLoaded && _view == view) Note(TeamError(error), true); }
+                    finally { saving = false; if (IsLoaded && _view == view) { choice.IsEnabled = true; save!.IsEnabled = (choice.SelectedIndex == 0 ? "members" : "devices") != policy; } }
+                });
+                save.IsEnabled = false; save.Visibility = Visibility.Collapsed;
+                choice.SelectionChanged += (_, _) => {
+                    if (saving) return;
+                    var changed = (choice.SelectedIndex == 0 ? "members" : "devices") != policy;
+                    save.IsEnabled = changed; save.Visibility = changed ? Visibility.Visible : Visibility.Collapsed;
+                };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(save, "team.agent-access.save");
+                _body.Children.Add(save);
+            }
+            if (policy == "members") { Note(L10n.Text("common.teams.agent_access_members_detail")); return; }
             Note(L10n.Text("common.teams.agent_grants_detail"));
             if (grants.Count == 0) Note(L10n.Text("common.teams.agent_grants_none"));
             foreach (var grant in grants.OfType<JsonObject>())
@@ -157,12 +193,14 @@ internal sealed partial class TeamsPage
             if (!IsLoaded || _view != view) return;
             Note(Text(member, "name"));
             foreach (var device in devices.OfType<JsonObject>())
-                _body.Children.Add(ActionIconGlyph.Button(Text(device, "kind") + " · " + Text(device, "key")[..Math.Min(12, Text(device, "key").Length)], ActionIcon.Device, (_, _) => {
+                _body.Children.Add(ActionIconGlyph.Button(TeamGrantDeviceLabel(device), ActionIcon.Device, (_, _) => {
                     if (!IsLoaded || _view != view) return;
-                    TeamEditor(L10n.Text("common.teams.allow_agent_runs"), TeamCard(Text(member, "name"), Text(device, "kind") + "\n" + L10n.Text("common.teams.agent_grant_warning")), L10n.Text("common.teams.allow_agent_runs"), () => true,
+                    TeamEditor(L10n.Text("common.teams.allow_agent_runs"), TeamCard(Text(member, "name"), TeamGrantDeviceLabel(device) + "\n" + L10n.Text("common.teams.agent_grant_warning")), L10n.Text("common.teams.allow_agent_runs"), () => true,
                         () => SetTeamAgentGrant(model, checkout, Text(member, "id"), Text(device, "key"), Text(device, "id"), true, revision), Return, _ => Return(), confirmation: true);
                 }));
         }
         catch (Exception error) { if (IsLoaded && _view == view) Note(TeamError(error), true); }
     }
+    private static string TeamGrantDeviceLabel(JsonNode device) => Text(device, "name").Trim() is { Length: > 0 } name
+        ? name : L10n.Text("common.teams.device") + " · " + Text(device, "key")[..Math.Min(12, Text(device, "key").Length)];
 }

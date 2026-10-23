@@ -37,4 +37,5 @@ zeroize = "1.9"
 libc.workspace = true
 
 [dev-dependencies]
+base64 = "0.23"
 tempfile.workspace = true
