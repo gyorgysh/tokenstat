@@ -21,6 +21,7 @@ internal sealed class WorkspaceLiveReviewPage : Page
     private string? _path;
     private bool _loading;
     private bool _pending;
+    private int _attachmentRevision;
     private string? _snapshotSignature;
     private readonly DispatcherQueueTimer _poll;
 
@@ -51,8 +52,26 @@ internal sealed class WorkspaceLiveReviewPage : Page
         Grid.SetRow(_viewer, 2); root.Children.Add(_viewer);
         _viewer.Content = new ProgressRing { IsActive = true };
         Content = root;
-        Loaded += (_, _) => { _lifetime.Dispose(); _lifetime = new(); _poll.Start(); Refresh(); };
-        Unloaded += (_, _) => { _poll.Stop(); _lifetime.Cancel(); };
+        Loaded += (_, _) => ReconcileAttachment();
+        Unloaded += (_, _) => ReconcileAttachment();
+    }
+
+    private void ReconcileAttachment()
+    {
+        var revision = ++_attachmentRevision;
+        // An old Unloaded can arrive after a quick remove/re-add. Cancelling
+        // there would stop the current review's polling and every later load.
+        if (!DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (revision != _attachmentRevision) return;
+            if (IsLoaded && Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(this) is not null)
+            {
+                if (_lifetime.IsCancellationRequested) { _lifetime.Dispose(); _lifetime = new(); }
+                _poll.Start();
+                Refresh();
+            }
+            else { _poll.Stop(); _lifetime.Cancel(); }
+        })) { _poll.Stop(); _lifetime.Cancel(); }
     }
 
     internal void Review(string? path) { _path = path; _title.Text = path ?? L10n.Text("windows.workbench.working_tree"); Refresh(); }
