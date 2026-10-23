@@ -42,7 +42,7 @@ internal sealed partial class ChatPage
         return button;
     }
 
-    private bool FastModeLocked() => Busy() && !(Format.Flag(_openChat, "running")
+    private bool FastModeLocked() => SharedSource || Busy() && !(Format.Flag(_openChat, "running")
         && Format.Flag(Backend(Format.Text(_openChat, "backend")), "fastModeLive"));
 
     private void RefreshFastModeButton()

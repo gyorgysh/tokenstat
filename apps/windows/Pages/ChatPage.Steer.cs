@@ -225,6 +225,7 @@ internal sealed partial class ChatPage
 
     private async Task DeliverParkedSteerAsync(string chat)
     {
+        if (SharedSource) return;
         var ticket = ++_steerDeliverGeneration;
         var noteRevision = _steerOverlay.Revision(chat);
         bool Current() => SteerCurrent(ticket, chat) && _steerOverlay.Revision(chat) == noteRevision;

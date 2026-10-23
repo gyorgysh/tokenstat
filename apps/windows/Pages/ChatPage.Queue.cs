@@ -32,7 +32,8 @@ internal sealed partial class ChatPage
         {
             var items = ChatOutbox.Shared.Read(key);
             if (items.Count == 0) return body;
-            body.Children.Add(new TextBlock { Text = L10n.Text("windows.chatpage_queue.pending_messages_0.c3f22136", $"{items.Count}"), FontSize = 12, Foreground = Theme.AccentBrush });
+            var pendingTitle = SharedSource ? L10n.Text("common.teams.private_pending_paused") : L10n.Text("windows.chatpage_queue.pending_messages_0.c3f22136", $"{items.Count}");
+            body.Children.Add(new TextBlock { Text = pendingTitle, FontSize = 12, Foreground = Theme.AccentBrush });
             foreach (var item in items)
             {
                 var row = new StackPanel { Spacing = 4 };
@@ -64,7 +65,7 @@ internal sealed partial class ChatPage
                 {
                     var steerForItem = Busy() && Format.Flag(_openChat, "nativeSteer")
                         && ChatCommandRules.CanSteer(item.Text, item.Attachments.Length > 0, Format.Flag(_openChat, "nativeSteerAttachments"));
-                    actions.Children.Add(ActionIconGlyph.Button(steerForItem ? L10n.Text("common.chat.steer") : L10n.Text("common.chat_send_latest"), ActionIcon.Run, async (_, _) =>
+                    if (!SharedSource) actions.Children.Add(ActionIconGlyph.Button(steerForItem ? L10n.Text("common.chat.steer") : L10n.Text("common.chat_send_latest"), ActionIcon.Run, async (_, _) =>
                     {
                         try
                         {
@@ -72,6 +73,7 @@ internal sealed partial class ChatPage
                             if (!steerForItem) await RefreshCatalogAsync();
                             if (!Current()) return;
                             _openChat = FindChat(chat);
+                            if (SharedSource) { _authorizedQueue.Clear(); PaintConversation(); return; }
                             if (_openChat?["sendRevision"] is null) throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.this_conversation_is_no_longer_available.07f8c47b"));
                             var revision = Format.Long(_openChat, "sendRevision");
                             ChatOutbox.Shared.Update(key, rows =>
@@ -154,6 +156,7 @@ internal sealed partial class ChatPage
 
     private async Task DrainQueueAsync(bool deliverNote = true, string? messageId = null, bool steerCurrent = false)
     {
+        if (SharedSource) { _authorizedQueue.Clear(); return; }
         // A parked note does not need the outbox key, and it goes out before
         // any queued message. The flag is set by the delivery itself so a
         // poll tick cannot start a second one.

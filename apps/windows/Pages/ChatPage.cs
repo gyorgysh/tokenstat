@@ -336,7 +336,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         detailControls.Children.Add(ActionIconGlyph.Button(L10n.Text(stepsOpen ? "windows.chatdetail.collapse_steps" : "windows.chatdetail.expand_steps"), ActionIcon.Visibility, (_, _) => SetAllGroups(!stepsOpen)));
         _inspector.Children.Add(CollapsibleStatsCard(L10n.Text("windows.chatdetail.title"), "chat-detail", DetailChoices(), detailControls));
         _inspector.Children.Add(RoutingControls());
-        _inspector.Children.Add(SetupCard(inspector: true));
+        if (!SharedSource) _inspector.Children.Add(SetupCard(inspector: true));
         AddWorkingAccessCards(_inspector, chat);
     }
 
@@ -796,7 +796,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Clear();
         var chrome = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chats"), ActionIcon.Back, async (_, _) => await ShowListAsync()));
-        chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.delete"), ActionIcon.Delete, async (_, _) => await ConfirmDeleteAsync()));
+        if (!SharedSource) chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.delete"), ActionIcon.Delete, async (_, _) => await ConfirmDeleteAsync()));
         chrome.Children.Add(DetailButton());
         _root.Children.Add(chrome);
 
@@ -805,6 +805,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _titleBox.Text = Format.Text(_openChat, "title", L10n.Text("windows.chatpage.new_chat.db18382a"));
         }
         _root.Children.Add(_titleBox);
+        _titleBox.IsReadOnly = SharedSource;
 
         _transcript.Children.Clear();
         RebuildTranscript(full: true);
@@ -1730,9 +1731,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _setupScroll.Content = null;
         _composerContext.Children.Clear();
         var context = _composerContext = new StackPanel { Spacing = Theme.SpaceS };
+        if (SharedSource) context.Children.Add(SharedSourceNotice());
+        _draft.PlaceholderText = L10n.Text(SharedSource ? "common.teams.private_draft_placeholder" : "windows.chatpage.ask_about_this_folder.33b8b41b");
         RenderGitStrip();
         context.Children.Add(_gitStrip);
-        if (_setupExpanded)
+        if (_setupExpanded && !SharedSource)
         {
             context.Children.Add(SetupCard());
         }
@@ -2066,6 +2069,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void RebuildComposerActions()
     {
+        if (SharedSource) { _composerActions.Children.Clear(); _composerSteering = false; return; }
         if (_dropImport is not null) {
             _composerActions.Children.Clear();
             _composerActions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Stop, (_, _) => CancelDropImport()));
@@ -2159,7 +2163,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task SendAsync(bool sendNext = false)
     {
-        if (_opening) return;
+        if (_opening || SharedSource) return;
         if (_openId is not string chat || _sending || _queueing || _fileTransfer is not null) return;
         if (await ConsumeCommandAsync()) return;
         var liveInput = !sendNext && Busy() && Format.Flag(_openChat, "nativeSteer")
@@ -2219,6 +2223,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task StopAsync()
     {
+        if (SharedSource) return;
         if (_openId is not string chat) return;
         var generation = _openGeneration;
         var revision = _openChat?["sendRevision"] is null ? (long?)null : Format.Long(_openChat, "sendRevision");
@@ -2266,6 +2271,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         var id = chatId ?? _openId;
         if (id is null) return;
+        if (ChatLocalSharingModel.Paused(_chats.FirstOrDefault(row => Format.Text(row, "id") == id)) || id == _openId && SharedSource) return;
         var dialog = new ContentDialog
         {
             Title = L10n.Text("windows.chatpage.delete_this_chat.848dad9b"),
@@ -2289,7 +2295,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task UpdateAsync(JsonObject patch)
     {
-        if (_opening) return;
+        if (_opening || SharedSource) return;
         if (_openId is not string chat) return;
         var generation = _openGeneration;
         patch["id"] = chat;
