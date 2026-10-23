@@ -100,10 +100,16 @@ struct ThemedSheet<Content: View, Actions: View>: View {
     @ViewBuilder
     private var bodyContent: some View {
         if scrolls {
-            ScrollView {
-                content()
-                    .padding(embedded ? Theme.Space.m : Theme.Modal.bodyPadding)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            GeometryReader { viewport in
+                let padding = embedded ? Theme.Space.m : Theme.Modal.bodyPadding
+                ScrollView {
+                    // Native pickers and checkbox labels can have a wider
+                    // minimum than a sheet. Keep that minimum inside the
+                    // scrolling body instead of widening its header/footer.
+                    content()
+                        .frame(width: max(0, viewport.size.width - padding * 2), alignment: .topLeading)
+                        .padding(padding)
+                }
             }
         } else if fills {
             content()

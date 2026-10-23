@@ -48,16 +48,7 @@ struct TeamLaneSettings: View {
                 Button(L10n.text("common.teams.catch_up_again"), .refresh) { Task { await retry() } }
                     .buttonStyle(TeamButtonStyle()).disabled(retrying)
             }
-            Picker(L10n.text("common.teams.workflow"), selection: $mode) {
-                Text(L10n.text("common.teams.workflow_manual")).tag(Mode.manual)
-                Text(L10n.text("common.teams.workflow_review")).tag(Mode.review)
-                Text(L10n.text("common.teams.workflow_lanes")).tag(Mode.automatic)
-            }
-            #if os(macOS)
-            .pickerStyle(.segmented)
-            #else
-            .pickerStyle(.menu)
-            #endif
+            modePicker
             .labelsHidden()
             .accessibilityIdentifier("team.workflow.mode")
             .disabled(!loaded || saving)
@@ -116,6 +107,25 @@ struct TeamLaneSettings: View {
         .onChange(of: pullRequest) { saved = false }
         .onChange(of: updateCheckout) { saved = false }
         .onChange(of: check) { saved = false; checkAcknowledged = false }
+    }
+
+    @ViewBuilder private var modePicker: some View {
+        #if os(macOS)
+        ViewThatFits(in: .horizontal) {
+            workflowPicker.pickerStyle(.segmented).fixedSize(horizontal: true, vertical: false)
+            workflowPicker.pickerStyle(.menu)
+        }
+        #else
+        workflowPicker.pickerStyle(.menu)
+        #endif
+    }
+
+    private var workflowPicker: some View {
+        Picker(L10n.text("common.teams.workflow"), selection: $mode) {
+            Text(L10n.text("common.teams.workflow_manual")).tag(Mode.manual)
+            Text(L10n.text("common.teams.workflow_review")).tag(Mode.review)
+            Text(L10n.text("common.teams.workflow_lanes")).tag(Mode.automatic)
+        }
     }
 
     private func load() async {

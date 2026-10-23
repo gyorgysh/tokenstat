@@ -116,7 +116,9 @@ struct TeamAuthorizationEditor: View {
 struct TeamCheckboxStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         #if os(macOS)
-        Toggle(isOn: configuration.$isOn) { configuration.label }.toggleStyle(.checkbox)
+        Toggle(isOn: configuration.$isOn) {
+            configuration.label.fixedSize(horizontal: false, vertical: true)
+        }.toggleStyle(.checkbox)
         #else
         Toggle(isOn: configuration.$isOn) { configuration.label }.toggleStyle(.switch)
         #endif
