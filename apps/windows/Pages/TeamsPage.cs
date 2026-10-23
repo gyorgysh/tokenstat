@@ -120,6 +120,7 @@ internal sealed partial class TeamsPage : Page
             _organizations = page.Rows; _organizationsNext = page.Next;
             if (page.Rows.Count == 0 && page.Next is null)
             {
+                AddTeamDirectoryActions();
                 Note(L10n.Text("common.teams.no_organizations"));
                 Note(L10n.Text("common.teams.no_organizations_detail"));
                 return;
@@ -160,6 +161,7 @@ internal sealed partial class TeamsPage : Page
     private void ShowOrganizations()
     {
         Reset(L10n.Text("common.teams.title")); AddDraftsButton();
+        AddTeamDirectoryActions();
         var view = _view;
         foreach (var organization in _organizations)
         {
@@ -219,6 +221,11 @@ internal sealed partial class TeamsPage : Page
     {
         var orgId = Format.Text(organization, "id");
         var view = _view;
+        var client = DirectoryClient();
+        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.organization_settings"), ActionIcon.Settings, async (_, _) => {
+            if (IsLoaded && _view == view) await ShowTeamManagementAsync(client, new(client, organization));
+        }));
+        AddTeamDirectoryActions();
         if (_flash is { } flash) { _flash = null; Note(flash); }
         if (canSwitch)
             _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.organizations"), ActionIcon.Back, async (_, _) => { _organization = null; await LoadAsync(); }));

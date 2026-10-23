@@ -21,6 +21,9 @@
   <ItemGroup>
     <Compile Include="../../../apps/windows/Pages/ChatMarkdown.cs" Link="ChatMarkdown.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamsPage.cs" Link="TeamsPage.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamsPage.Management.cs" Link="TeamsPage.Management.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamManagementModel.cs" Link="TeamManagementModel.cs" />
+    <Compile Include="../../../apps/windows/Pages/TeamInboxModel.cs" Link="TeamInboxModel.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamsPage.Comments.cs" Link="TeamsPage.Comments.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamsPage.Transcript.cs" Link="TeamsPage.Transcript.cs" />
     <Compile Include="../../../apps/windows/Pages/TeamTranscript.cs" Link="TeamTranscript.cs" />
@@ -33,6 +36,7 @@
     <Compile Include="../../../apps/windows/Pages/TeamCommentModel.cs" Link="TeamCommentModel.cs" />
     <Compile Include="../windows-chat/TeamCommentTests.cs" Link="TeamCommentTests.cs" />
     <Compile Include="../windows-chat/TeamAskTests.cs" Link="TeamAskTests.cs" />
+    <Compile Include="../windows-chat/TeamManagementTests.cs" Link="TeamManagementTests.cs" />
     <Compile Include="../../../apps/windows/Navigation/DesktopOpenRequest.cs" Link="DesktopOpenRequest.cs" />
     <Compile Include="../../../apps/windows/Pages/DesktopWorkbenchState.cs" Link="DesktopWorkbenchState.cs" />
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
