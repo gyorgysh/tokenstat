@@ -57,6 +57,8 @@ internal static class TeamAskDiscoverySmoke
         }
         async Task Click(string key, bool last = false)
         {
+            await Wait(() => Descendants(page).OfType<Button>().Any(button => AutomationProperties.GetName(button) == L10n.Text(key)
+                && button.Visibility == Visibility.Visible && button.IsEnabled), "Saved request action did not become available: " + key);
             var buttons = Descendants(page).OfType<Button>().Where(b => AutomationProperties.GetName(b) == L10n.Text(key) && b.Visibility == Visibility.Visible).ToArray();
             var button = last ? buttons.Last() : buttons.Single();
             if (!button.IsEnabled || new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke) throw new Exception("Saved Ask action is inaccessible");
