@@ -135,7 +135,7 @@ internal static class SidebarAdaptiveSmoke
                 SidebarChrome.RevealActions(freshProject, action);
                 var heading = SidebarChrome.ProjectContent(freshProject, new TextBlock { Text = "Fictional current project" }, false, action);
                 freshProject.Content = heading;
-                freshProject.MenuItems.Add(new NavigationViewItem { Tag = "current:chat", Content = "Fictional current chat" });
+                freshProject.MenuItems.Add(new NavigationViewItem { Tag = $"lifetime:{cycle * 2 + 1}:0", Content = "Fictional current chat" });
                 parent = NavigationRows.Reuse(view, freshProject);
                 view.MenuItems.Add(parent);
                 view.IsPaneOpen = true;
