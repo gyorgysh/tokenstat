@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 # Runs only on the disposable CI runner: the real application may register its helper.
-param([string]$AppPath = '')
+param([string]$AppPath = '', [switch]$TraceNative)
 
 $ErrorActionPreference = 'Stop'
 if ($env:CI -ne 'true') { throw 'Run this startup regression on a disposable CI runner.' }
@@ -35,6 +35,7 @@ $process = $null
 $crashTracers = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 $crashLogs = [System.Collections.Generic.List[string]]::new()
 function Start-NativeCrashTrace([System.Diagnostics.Process]$Target) {
+    if (!$TraceNative) { return }
     $tracer = Get-ChildItem "$PSScriptRoot/bin" -Filter WindowsUiTests.exe -Recurse -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
     if (!$tracer) { Write-Output 'Native exception tracer is unavailable in this build'; return }

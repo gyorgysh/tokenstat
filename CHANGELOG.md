@@ -29,6 +29,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 ### Fixed
 
 - Update cryptographic dependencies to address the constant-time mask and integer comparison issues in RUSTSEC-2026-0385.
+- Windows sidebar sizing keeps expanded and minimal modes while chat companion widths change, avoiding a temporary icon-only pane.
 - The Mac project Share/Open button appears only while hovering over its row. Team sections stay inside Team instead of repeating in the project sidebar; Shared projects remains available inside Team.
 - On the publishing computer, its signed-in owner can start an empty shared chat without first granting agent execution. This does not start an agent or grant another device access.
 - Long shared chats can open their details and approved files without loading the entire conversation. Development agent runs read the full approved history in pages, excluding later discussion. Publication retries also work after a chat grows.

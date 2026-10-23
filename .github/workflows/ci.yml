@@ -438,9 +438,15 @@ jobs:
           exit $result
 
       - name: Production Windows application startup
+        id: windows_startup
         if: ${{ !cancelled() && runner.os == 'Windows' && steps.windows_ui_compile.outcome == 'success' }}
         timeout-minutes: 3
         run: ./scripts/tests/windows-ui/startup.ps1
+
+      - name: Diagnose a failed production Windows startup
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.windows_startup.outcome == 'failure' }}
+        timeout-minutes: 3
+        run: ./scripts/tests/windows-ui/startup.ps1 -TraceNative
 
       - name: Windows client and daemon lifetime regressions
         if: runner.os == 'Windows'

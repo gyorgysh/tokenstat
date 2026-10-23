@@ -10,6 +10,24 @@ namespace Tokenstat.Design;
 /// <summary>Shared sidebar and rail metrics, independent of native template defaults.</summary>
 internal static class SidebarChrome
 {
+    /// <summary>Keep adaptive navigation between expanded and minimal modes.</summary>
+    public static void SetAdaptiveThreshold(NavigationView view, double width)
+    {
+        // The shell has no icon-only pane. Updating Expanded first while
+        // growing briefly enters Compact before the second setter runs.
+        // Overlap the thresholds during the update, then leave them equal.
+        if (width > view.ExpandedModeThresholdWidth)
+        {
+            if (view.CompactModeThresholdWidth != width) view.CompactModeThresholdWidth = width;
+            if (view.ExpandedModeThresholdWidth != width) view.ExpandedModeThresholdWidth = width;
+        }
+        else
+        {
+            if (view.ExpandedModeThresholdWidth != width) view.ExpandedModeThresholdWidth = width;
+            if (view.CompactModeThresholdWidth != width) view.CompactModeThresholdWidth = width;
+        }
+    }
+
     public static void ExpandNewHistory(NavigationViewItem row, bool hadChildren, bool paneOpen)
     {
         if (hadChildren || row.MenuItems.Count == 0 || !paneOpen) return;

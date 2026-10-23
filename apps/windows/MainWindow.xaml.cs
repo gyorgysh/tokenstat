@@ -1259,8 +1259,7 @@ public sealed partial class MainWindow : Window
     {
         var companionWidth = _inspectorHost.IsOpen && _inspectorHost.MinimumInspectorWidth > ShellWidths.Minimum
             ? Math.Max(_inspectorHost.MinimumInspectorWidth, ShellWidths.Shared.Inspector) + 6 : 0;
-        _nav.ExpandedModeThresholdWidth = ShellWidths.Shared.Sidebar + _inspectorHost.MinimumContentWidth + companionWidth;
-        _nav.CompactModeThresholdWidth = _nav.ExpandedModeThresholdWidth - 1;
+        SidebarChrome.SetAdaptiveThreshold(_nav, ShellWidths.Shared.Sidebar + _inspectorHost.MinimumContentWidth + companionWidth);
         bool fits = _contentHost.ActualWidth <= 0 || _contentHost.ActualWidth >= _inspectorHost.RequiredWidth;
         if (fits == _inspectorHost.FitsWidth)
         {
