@@ -86,101 +86,77 @@ struct TeamSharedChatsView: View {
         }
     }
     private var directory: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                TeamSectionHeader(title: store.focusedProject?.name ?? L10n.text("common.teams.chats"), subtitle: L10n.text("common.teams.shared_project_chats_detail")) {
-                    Button(L10n.text("common.refresh"), .refresh) {
-                        catalogRefresh = UUID()
-                        Task { if checkout == nil { await loadCheckouts() } else { await loadShares(more: false) } }
-                    }.buttonStyle(TeamButtonStyle()).disabled(loading || repository == nil)
+        TeamPage(title: repository?.name ?? store.focusedProject?.name ?? L10n.text("common.teams.section_chats"), subtitle: L10n.text("common.teams.shared_project_chats_detail")) {
+            if let local = checkout.flatMap({ localCheckoutIds.contains($0.id) ? $0 : nil }) ?? (checkoutId == nil ? localCheckout : nil) {
+                Button(L10n.text("common.teams.project_settings"), .settings) { checkoutId = local.id; settingsSheet = true }
+                    .buttonStyle(TeamButtonStyle()).accessibilityIdentifier("team.project.settings")
+                if store.capabilities?.canPublishChats == true {
+                    Button(L10n.text("common.teams.share_chat"), .connect) { checkoutId = local.id; shareSheet = true }
+                        .buttonStyle(TeamButtonStyle(primary: true)).accessibilityIdentifier("team.chats.share")
                 }
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    if let error { TeamNotice(message: error, warning: true) }
-                    if availableRepositories.isEmpty {
-                        TeamNotice(message: L10n.text("common.teams.no_repositories_member"))
-                    } else {
-                        if store.focusedProject?.id != repository?.id || repository == nil {
-                          TeamPickerField(title: L10n.text("common.teams.repository_name"), selection: $store.selectedRepositoryId) {
-                            Text(L10n.text("common.teams.choose_repository")).tag(Optional<String>.none)
-                            ForEach(availableRepositories) { Text($0.name).tag(Optional($0.id)) }
-                        }.accessibilityIdentifier("team.chats.repository")
-                        }
-                        if repository != nil {
-                            TeamPickerField(title: L10n.text("common.teams.chats_from"), selection: $checkoutId) {
-                                Text(L10n.text("common.teams.all_teammates")).tag(Optional<String>.none)
-                                ForEach(checkouts) { row in Text(computerName(row)).tag(Optional(row.id)) }
-                            }.accessibilityIdentifier("team.chats.checkout")
-                            if checkoutsNext != nil {
-                                Button(L10n.text("common.teams.load_more"), .more) { Task { await loadCheckouts(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
-                            }
-                            if checkouts.isEmpty && !loading && error == nil { TeamNotice(message: L10n.text("common.teams.no_checkouts")) }
-                        }
-                    }
-                    if loading { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
-                    if checkoutId == nil, let repository {
-                        LazyVStack(spacing: Theme.Space.m) {
-                            ForEach(checkouts) { computer in
-                                TeamProjectChatGroup(store: store, context: context, repository: repository, checkout: computer,
-                                    refresh: catalogRefresh, open: { share in selectedComputer = computer; selected = share },
-                                    start: computerCanStart(repository) ? { checkoutId = computer.id } : nil)
-                            }
-                        }
-                        if let local = localCheckout {
-                            HStack(spacing: Theme.Space.s) {
-                                Button(L10n.text("common.teams.share_chat"), .connect) { checkoutId = local.id; shareSheet = true }
-                                    .buttonStyle(TeamButtonStyle()).accessibilityIdentifier("team.chats.share")
-                                Button(L10n.text("common.teams.project_settings"), .settings) { checkoutId = local.id; settingsSheet = true }.buttonStyle(TeamButtonStyle())
-                            }
-                            Text(L10n.text("common.teams.project_chats_private")).font(Theme.callout).foregroundStyle(.secondary)
-                        }
-                    }
-                    if let checkout {
-                        if localCheckoutIds.contains(checkout.id) {
-                            Button(L10n.text("common.teams.project_settings"), .settings) { settingsSheet = true }
-                                .buttonStyle(TeamButtonStyle()).accessibilityIdentifier("team.project.settings")
-                        }
-                        if let publisher = checkout.publisher {
-                            TeamPersonLabel(id: publisher.id, name: publisher.name, handle: publisher.handle, avatar: publisher.avatar, owner: context.owner)
-                        }
-                        if shares.isEmpty && sharesNext == nil && sharesCursor == nil && !loading && error == nil {
-                            TeamNotice(message: localCheckoutIds.contains(checkout.id) ? L10n.text("common.teams.project_chats_private") : L10n.text("common.teams.no_shared_chats"))
-                        }
-                        ForEach(shares) { share in
-                            Button {
-                                selectedComputer = checkout
-                                selected = share
-                            } label: {
-                                HStack(spacing: Theme.Space.m) {
-                                    Image(systemName: ActionIcon.comment.symbol).foregroundStyle(TeamColors.action)
-                                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                                        Text(share.title.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.text("common.teams.shared_chat"))
-                                            .font(Theme.body.weight(.medium)).lineLimit(2)
-                                        if let date = TeamDate.parse(share.createdAt) {
-                                            Text(date, format: .dateTime.month().day().hour().minute()).font(Theme.caption).foregroundStyle(.secondary)
-                                        }
-                                        Group {
-                                            if share.title == nil { Text(L10n.text("common.teams.connect_to_read")) }
-                                            else { Text(L10n.text("common.teams.open_shared_chat")) }
-                                        }.font(Theme.callout).foregroundStyle(.secondary)
-                                    }
-                                    Spacer(minLength: 0)
-                                    if let repository { TeamChatActivityBadge(store: store, share: share, repository: repository, checkout: checkout) }
-                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                                }.padding(Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading).background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
-                            }.buttonStyle(.plain).accessibilityIdentifier("team.chats.open.\(share.id)")
-                        }
-                        if sharesNext != nil || sharesCursor != nil { Button(L10n.text("common.teams.load_more"), .more) { Task { await loadShares(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading) }
-                        if let role = repository?.role, role != .viewer {
-                            newChat(checkout)
-                        }
-                        if store.capabilities?.canPublishChats == true, localCheckoutIds.contains(checkout.id) {
-                            Button(L10n.text("common.teams.share_chat"), .connect) { shareSheet = true }.buttonStyle(TeamButtonStyle(primary: true)).accessibilityIdentifier("team.chats.share")
-                        }
-                    }
-                }.padding(.horizontal, Theme.Space.l)
-                .frame(maxWidth: 860, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, Theme.Space.l)
+            Button(L10n.text("common.refresh"), .refresh) {
+                catalogRefresh = UUID()
+                Task { if checkout == nil { await loadCheckouts() } else { await loadShares(more: false) } }
+            }.buttonStyle(TeamButtonStyle()).environment(\.compactActions, true).help(L10n.text("common.refresh")).disabled(loading || repository == nil)
+        } content: {
+            if let error { TeamNotice(message: error, warning: true) }
+            if availableRepositories.isEmpty {
+                EmptyState(symbol: "folder", title: L10n.text("common.teams.no_repositories"), message: L10n.text("common.teams.no_repositories_member")).teamCard()
+            } else {
+                filters
+                if repository != nil, checkouts.isEmpty && !loading && error == nil {
+                    EmptyState(symbol: "desktopcomputer", title: L10n.text("common.teams.section_chats"), message: L10n.text("common.teams.no_checkouts")).teamCard()
+                }
+            }
+            if loading && checkouts.isEmpty { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
+            if checkoutId == nil, let repository {
+                LazyVStack(spacing: Theme.Space.m) {
+                    ForEach(checkouts) { computer in
+                        TeamProjectChatGroup(store: store, context: context, repository: repository, checkout: computer,
+                            refresh: catalogRefresh, open: { share in selectedComputer = computer; selected = share },
+                            start: computerCanStart(repository) ? { checkoutId = computer.id } : nil)
+                    }
+                }
+                if localCheckout != nil {
+                    Text(L10n.text("common.teams.project_chats_private")).font(Theme.caption).foregroundStyle(.secondary).padding(.horizontal, Theme.Space.xs)
+                }
+            }
+            if let checkout {
+                VStack(spacing: 0) {
+                    computerHeader(checkout)
+                    if shares.isEmpty && sharesNext == nil && sharesCursor == nil && !loading && error == nil {
+                        ThemeRule()
+                        Text(localCheckoutIds.contains(checkout.id) ? L10n.text("common.teams.project_chats_private") : L10n.text("common.teams.no_shared_chats"))
+                            .font(Theme.callout).foregroundStyle(.secondary).teamRowPadding()
+                    }
+                    ForEach(shares) { share in
+                        ThemeRule().padding(.leading, Theme.cardPadding)
+                        Button {
+                            selectedComputer = checkout
+                            selected = share
+                        } label: {
+                            HStack(spacing: Theme.Space.m) {
+                                Image(systemName: ActionIcon.comment.symbol).foregroundStyle(TeamColors.action).frame(width: 20)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(share.title.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.text("common.teams.shared_chat"))
+                                        .font(Theme.body.weight(.medium)).foregroundStyle(.primary).lineLimit(2)
+                                    Group {
+                                        if share.title == nil { Text(L10n.text("common.teams.connect_to_read")) }
+                                        else if let date = TeamDate.parse(share.createdAt) { Text(date, format: .dateTime.month().day().hour().minute()) }
+                                    }.font(Theme.callout).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                if let repository { TeamChatActivityBadge(store: store, share: share, repository: repository, checkout: checkout) }
+                            }
+                        }.buttonStyle(TeamListRowButtonStyle()).accessibilityIdentifier("team.chats.open.\(share.id)")
+                    }
+                }.teamCard()
+                if sharesNext != nil || sharesCursor != nil { Button(L10n.text("common.teams.load_more"), .more) { Task { await loadShares(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading) }
+                if let role = repository?.role, role != .viewer {
+                    newChat(checkout)
+                }
+            }
         }
         .onAppear {
             // One repository needs no choice. Picking it saves an empty step.
@@ -189,31 +165,85 @@ struct TeamSharedChatsView: View {
             }
         }
     }
+    /// Which project and whose computer, side by side, as the two filters
+    /// they are rather than as a form to fill in.
+    private var filters: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.l) { filterControls; Spacer(minLength: 0) }
+            VStack(alignment: .leading, spacing: Theme.Space.s) { filterControls }
+        }
+    }
+    @ViewBuilder private var filterControls: some View {
+        if repository == nil || availableRepositories.count > 1 {
+            filter(L10n.text("common.teams.repositories")) {
+                AppMenuPicker(options: [(Optional<String>.none, L10n.text("common.teams.choose_repository"))] + availableRepositories.map { (Optional($0.id), $0.name) },
+                    selection: $store.selectedRepositoryId)
+                    .accessibilityIdentifier("team.chats.repository")
+            }
+        }
+        if repository != nil {
+            filter(L10n.text("common.teams.chats_from")) {
+                AppMenuPicker(options: [(Optional<String>.none, L10n.text("common.teams.all_teammates"))] + checkouts.map { (Optional($0.id), computerName($0)) },
+                    selection: $checkoutId)
+                    .accessibilityIdentifier("team.chats.checkout")
+            }
+            if checkoutsNext != nil {
+                Button(L10n.text("common.teams.load_more_computers"), .more) { Task { await loadCheckouts(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
+            }
+        }
+    }
+    private func filter<Control: View>(_ title: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            Text(title).font(Theme.callout).foregroundStyle(.secondary).fixedSize()
+            control().frame(width: 240)
+        }
+    }
+    private func computerHeader(_ checkout: TeamCheckout) -> some View {
+        HStack(spacing: Theme.Space.m) {
+            if let publisher = checkout.publisher {
+                TeamPersonLabel(id: publisher.id, name: publisher.name, handle: publisher.handle, avatar: publisher.avatar, owner: context.owner)
+            }
+            Spacer(minLength: Theme.Space.m)
+            Label(checkout.deviceName ?? L10n.text("common.teams.computer"), systemImage: ActionIcon.device.symbol).font(Theme.callout).foregroundStyle(.secondary)
+            if localCheckoutIds.contains(checkout.id) { TeamRoleBadge(text: L10n.text("common.teams.this_computer")) }
+        }.teamRowPadding()
+    }
     private func computerCanStart(_ repository: TeamRepository) -> Bool { repository.role == .contributor || repository.role == .maintainer }
     /// A member starts an empty shared chat on that computer and asks its
     /// agent there, without waiting for the owner to share one.
     private func newChat(_ checkout: TeamCheckout) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text(L10n.text("common.teams.new_chat_title")).font(Theme.callout.weight(.semibold))
-            TeamPickerField(title: L10n.text("common.teams.agent"), selection: $newBackend) {
-                Text(L10n.text("common.local_provider_use_default")).tag("")
-                ForEach(backendChoices[checkout.id] ?? []) { backend in Text(backend.label).tag(backend.id) }
-                if !newBackend.isEmpty, !(backendChoices[checkout.id] ?? []).contains(where: { $0.id == newBackend }) {
-                    Text(newBackend).tag(newBackend).disabled(true)
-                }
-            }.disabled(starting).accessibilityIdentifier("team.chats.backend")
-            HStack(spacing: Theme.Space.s) {
-                TextField(L10n.text("common.teams.new_chat_placeholder"), text: $newTitle).textFieldStyle(ThemedFieldStyle())
-                    .accessibilityLabel(L10n.text("common.teams.new_chat_title"))
-                    .onSubmit { Task { await startChat(checkout) } }
-                Button(L10n.text("common.teams.new_chat"), .create) { Task { await startChat(checkout) } }
-                    .buttonStyle(TeamButtonStyle(primary: true))
-                    .disabled(starting || newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("team.chats.new")
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.text("common.teams.new_chat_title")).font(Theme.body.weight(.semibold))
+                Text(L10n.text("common.teams.new_chat_detail", computerName(checkout))).font(Theme.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text(L10n.text("common.teams.new_chat_detail", computerName(checkout))).font(Theme.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }.padding(Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading).background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.s) { newChatTitle(checkout); newChatAgent(checkout).frame(maxWidth: 220); newChatButton(checkout) }
+                VStack(alignment: .leading, spacing: Theme.Space.s) { newChatTitle(checkout); HStack(spacing: Theme.Space.s) { newChatAgent(checkout); newChatButton(checkout) } }
+            }
+        }.padding(Theme.cardPadding).frame(maxWidth: .infinity, alignment: .leading).teamCard()
+    }
+    private func newChatTitle(_ checkout: TeamCheckout) -> some View {
+        TextField(L10n.text("common.teams.new_chat_placeholder"), text: $newTitle).textFieldStyle(ThemedFieldStyle())
+            .accessibilityLabel(L10n.text("common.teams.new_chat_title"))
+            .onSubmit { Task { await startChat(checkout) } }
+    }
+    private func newChatAgent(_ checkout: TeamCheckout) -> some View {
+        Picker(L10n.text("common.teams.agent"), selection: $newBackend) {
+            Text(L10n.text("common.local_provider_use_default")).tag("")
+            ForEach(backendChoices[checkout.id] ?? []) { backend in Text(backend.label).tag(backend.id) }
+            if !newBackend.isEmpty, !(backendChoices[checkout.id] ?? []).contains(where: { $0.id == newBackend }) {
+                Text(newBackend).tag(newBackend).disabled(true)
+            }
+        }.pickerStyle(.menu).labelsHidden().disabled(starting).accessibilityIdentifier("team.chats.backend")
+            .help(L10n.text("common.teams.agent"))
+    }
+    private func newChatButton(_ checkout: TeamCheckout) -> some View {
+        Button(L10n.text("common.teams.new_chat"), .create) { Task { await startChat(checkout) } }
+            .buttonStyle(TeamButtonStyle(primary: true))
+            .disabled(starting || newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .accessibilityIdentifier("team.chats.new")
     }
     private func startChat(_ checkout: TeamCheckout) async {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)

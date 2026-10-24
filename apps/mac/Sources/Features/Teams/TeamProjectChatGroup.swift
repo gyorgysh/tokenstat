@@ -23,39 +23,46 @@ struct TeamProjectChatGroup: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(spacing: Theme.Space.s) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: Theme.Space.m) {
                 if let publisher = checkout.publisher {
                     TeamPersonLabel(id: publisher.id, name: publisher.name, handle: publisher.handle, avatar: publisher.avatar, owner: context.owner)
                 }
-                Spacer(minLength: 0)
-                Text(checkout.deviceName ?? L10n.text("common.teams.computer")).font(Theme.callout).foregroundStyle(.secondary)
-            }
+                Spacer(minLength: Theme.Space.m)
+                Label(checkout.deviceName ?? L10n.text("common.teams.computer"), systemImage: ActionIcon.device.symbol).font(Theme.callout).foregroundStyle(.secondary)
+                if let start {
+                    Button(L10n.text("common.teams.new_chat"), .create, action: start).buttonStyle(TeamButtonStyle())
+                }
+            }.teamRowPadding()
             if let error {
-                TeamNotice(message: error, warning: true)
-                Button(L10n.text("common.retry"), .refresh) { Task { await load(more: false) } }.buttonStyle(TeamButtonStyle())
+                ThemeRule()
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    TeamNotice(message: error, warning: true)
+                    Button(L10n.text("common.retry"), .refresh) { Task { await load(more: false) } }.buttonStyle(TeamButtonStyle())
+                }.padding(Theme.Space.m)
             }
             ForEach(shares) { share in
+                ThemeRule().padding(.leading, Theme.cardPadding)
                 Button { open(share) } label: {
                     HStack(spacing: Theme.Space.m) {
-                        Image(systemName: ActionIcon.comment.symbol).foregroundStyle(TeamColors.action)
+                        Image(systemName: ActionIcon.comment.symbol).foregroundStyle(TeamColors.action).frame(width: 20)
                         Text(share.title.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.text("common.teams.shared_chat"))
-                            .font(Theme.body.weight(.medium)).lineLimit(2)
+                            .font(Theme.body.weight(.medium)).foregroundStyle(.primary).lineLimit(2)
                         Spacer(minLength: Theme.Space.s)
                         TeamChatActivityBadge(store: store, share: share, repository: repository, checkout: checkout)
-                        Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                    }.padding(.vertical, Theme.Space.s).contentShape(.rect)
-                }.buttonStyle(.plain).accessibilityIdentifier("team.chats.open.\(share.id)")
+                    }
+                }.buttonStyle(TeamListRowButtonStyle()).accessibilityIdentifier("team.chats.open.\(share.id)")
             }
-            if loaded && shares.isEmpty && error == nil { Text(L10n.text("common.teams.no_shared_chats")).font(Theme.callout).foregroundStyle(.secondary) }
-            if loading { ProgressView().controlSize(.small) }
+            if loaded && shares.isEmpty && error == nil {
+                ThemeRule().padding(.leading, Theme.cardPadding)
+                Text(L10n.text("common.teams.no_shared_chats")).font(Theme.callout).foregroundStyle(.secondary).teamRowPadding()
+            }
+            if loading && shares.isEmpty { ProgressView().controlSize(.small).padding(Theme.Space.m) }
             if cursor != nil || offset != nil {
-                Button(L10n.text("common.teams.load_more"), .more) { Task { await load(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
+                ThemeRule()
+                Button(L10n.text("common.teams.load_more"), .more) { Task { await load(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading).padding(Theme.Space.m)
             }
-            if let start {
-                Button(L10n.text("common.teams.new_chat"), .create, action: start).buttonStyle(TeamButtonStyle())
-            }
-        }.padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
+        }.teamCard()
             .task(id: refresh) { await load(more: false) }
             .task {
                 while !Task.isCancelled {

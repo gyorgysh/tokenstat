@@ -23,6 +23,7 @@ struct TeamSharedChatReader: View {
     @State private var editingComment = false
     @State private var pendingComment = false
     @State private var loadedEarlier = false
+    @State private var mode: TeamComposerMode = .comment
     @Environment(\.teamCommentDraftStorage) private var commentStorage
     @Environment(\.teamAskRecoveryStorage) private var askStorage
     @Environment(\.dynamicTypeSize) private var textSize
@@ -32,27 +33,27 @@ struct TeamSharedChatReader: View {
             && checkout.organizationId == repository.organizationId && checkout.repositoryId == repository.id && share.checkoutId == checkout.id
     }
 
+    private var canComment: Bool { summary?.allowsComments == true }
+    private var canAsk: Bool { summary?.allowsAgentRuns == true }
+    /// A comment waiting on delivery keeps the composer on comments until it
+    /// lands. Otherwise the composer follows what this chat allows.
+    private var activeMode: TeamComposerMode {
+        if pendingComment || !canAsk { return .comment }
+        if !canComment { return .ask }
+        return mode
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if !editingComment {
-                Group {
-                if textSize.isAccessibilitySize {
-                    HStack(alignment: .top, spacing: Theme.Space.s) { header; refresh }
-                } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack { header; Spacer(minLength: Theme.Space.m); refresh }
-                    VStack(alignment: .leading, spacing: Theme.Space.s) { header; refresh }
-                }
-                }
-                }.padding(Theme.Space.m).background(Theme.panel)
-            }
-            if let error { TeamNotice(message: error, warning: true).padding(Theme.Space.m) }
+            if !editingComment { header }
+            if let error { TeamNotice(message: error, warning: true).frame(maxWidth: ReadingRoom.laneWidth).padding(.horizontal, Theme.Space.l).padding(.top, Theme.Space.m).frame(maxWidth: .infinity) }
             if let summary {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
                             if hasMore {
                                 Button(L10n.text("common.teams.load_earlier"), .history) { Task { await load(earlier: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
+                                    .frame(maxWidth: .infinity)
                             }
                             if summary.historyTrimmed { TeamNotice(message: L10n.text("common.teams.shared_history_trimmed")) }
                             if windowed { TeamNotice(message: L10n.text("common.teams.shared_history_window")) }
@@ -60,9 +61,14 @@ struct TeamSharedChatReader: View {
                                 transcript(renderedHistory).environment(\.teamAvatarOwner, context.owner)
                                     .environment(\.teamAttachmentLoader, { id in try await attachment(id) })
                             }
-                            if events.isEmpty && !loading { Text(L10n.text("common.teams.no_chat_messages")).font(Theme.body).foregroundStyle(.secondary) }
+                            if events.isEmpty && !loading {
+                                EmptyState(symbol: "bubble.left.and.bubble.right", title: summary.title ?? L10n.text("common.teams.shared_chat"), message: L10n.text("common.teams.no_chat_messages"))
+                            }
                             Color.clear.frame(height: 1).id("team-history-end")
-                        }.frame(maxWidth: 1000).frame(maxWidth: .infinity).padding(Theme.Space.l)
+                        }
+                        .frame(maxWidth: ReadingRoom.laneWidth)
+                        .padding(.horizontal, Theme.Space.l).padding(.vertical, Theme.Space.l)
+                        .frame(maxWidth: .infinity)
                     }
                     .onPreferenceChange(TeamTranscriptRenderedKey.self) { rendered in
                         guard rendered == renderedHistory?.renderId, !loadedEarlier else { return }
@@ -80,32 +86,7 @@ struct TeamSharedChatReader: View {
                 EmptyState(symbol: "wifi.exclamationmark", title: L10n.text("common.teams.chat_unavailable"), message: L10n.text("common.teams.shared_host_needed"))
             }
             Spacer(minLength: 0)
-            ThemeRule()
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                if !editingComment, !pendingComment, let asOf {
-                    Text(L10n.text("common.teams.history_checked", asOf.formatted(date: .abbreviated, time: .shortened))).font(Theme.caption).foregroundStyle(.secondary)
-                }
-                if summary?.allowsComments != true, !pendingComment {
-                    Text(L10n.text("common.teams.shared_read_only")).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
-                if let person = store.capabilities?.actorId, isCurrent {
-                    let target = TeamCommentTarget(origin: context.owner.scope.origin, person: person, organization: repository.organizationId, repository: repository.id, checkout: checkout.id, share: share.id, host: checkout.hostKey)
-                    TeamCommentComposer(store: store, context: context, target: target, allowsComments: summary?.allowsComments == true, storage: commentStorage, location: TeamCommentLocation(organization: store.selectedOrganization?.name ?? "", repository: repository.name, chat: summary?.title ?? share.title ?? L10n.text("common.teams.shared_chat"), computer: checkout.deviceName ?? ""), presentationChanged: { focused, pending in
-                        #if os(iOS)
-                        editingComment = focused
-                        #endif
-                        pendingComment = pending
-                    }) {
-                        if loading { reloadAfterRead = true } else { Task { await load(earlier: false) } }
-                    }.id(target)
-                    TeamAskBar(store: store, context: context, target: target, computer: checkout.deviceName ?? L10n.text("common.teams.computer"),
-                        allowsAgentRuns: summary?.allowsAgentRuns == true, storage: askStorage,
-                        location: TeamCommentLocation(organization: store.selectedOrganization?.name ?? "", repository: repository.name, chat: summary?.title ?? share.title ?? L10n.text("common.teams.shared_chat"), computer: checkout.deviceName ?? "")) {
-                            if loading { reloadAfterRead = true } else { Task { await load(earlier: false) } }
-                        }.id(target)
-
-                }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(Theme.Space.m).background(Theme.panel)
+            composer
         }
         .task { await load(earlier: false) }
         .task(id: share.id) {
@@ -119,25 +100,78 @@ struct TeamSharedChatReader: View {
         }
         .onDisappear { loadId = UUID(); loading = false; reloadAfterRead = false }
     }
+    /// The same dock the main chat uses: one well in the reading lane, on
+    /// the page ground, under a hairline.
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if canComment && canAsk && !pendingComment {
+                SegmentedTabs(options: TeamComposerMode.allCases, selection: $mode, title: { $0.label }, comfortable: compactTouch)
+                    .frame(maxWidth: 280)
+                    .accessibilityLabel(L10n.text("common.teams.composer_mode"))
+            }
+            if summary != nil && !canComment && !canAsk && !pendingComment {
+                Text(L10n.text("common.teams.shared_read_only")).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let person = store.capabilities?.actorId, isCurrent {
+                let target = TeamCommentTarget(origin: context.owner.scope.origin, person: person, organization: repository.organizationId, repository: repository.id, checkout: checkout.id, share: share.id, host: checkout.hostKey)
+                let location = TeamCommentLocation(organization: store.selectedOrganization?.name ?? "", repository: repository.name, chat: summary?.title ?? share.title ?? L10n.text("common.teams.shared_chat"), computer: checkout.deviceName ?? "")
+                TeamCommentComposer(store: store, context: context, target: target, allowsComments: canComment, storage: commentStorage, location: location, visible: activeMode == .comment, presentationChanged: { focused, pending in
+                    #if os(iOS)
+                    editingComment = focused
+                    #endif
+                    pendingComment = pending
+                }) {
+                    if loading { reloadAfterRead = true } else { Task { await load(earlier: false) } }
+                }.id(target)
+                TeamAskBar(store: store, context: context, target: target, computer: checkout.deviceName ?? L10n.text("common.teams.computer"),
+                    allowsAgentRuns: canAsk, storage: askStorage, location: location, visible: activeMode == .ask) {
+                        if loading { reloadAfterRead = true } else { Task { await load(earlier: false) } }
+                    }.id(target)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(showsWell ? Theme.Space.m : 0)
+        .background(showsWell ? Theme.panel : .clear, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(showsWell ? Theme.border : .clear, lineWidth: 1))
+        .frame(maxWidth: ReadingRoom.laneWidth)
+        .padding(.horizontal, Theme.Space.l)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Space.m)
+        .background(Theme.background)
+        .overlay(alignment: .top) { ThemeRule() }
+    }
+    /// Nothing to write into until the chat has said what it allows, so no
+    /// empty well while it loads. A comment waiting on delivery still shows.
+    private var showsWell: Bool { summary != nil || pendingComment }
+    private var compactTouch: Bool {
+        #if os(iOS)
+        true
+        #else
+        false
+        #endif
+    }
     private var header: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
-            Button(L10n.text("common.teams.chats"), .back, action: back).buttonStyle(TeamButtonStyle()).accessibilityIdentifier("team.chat.back")
-                .environment(\.compactActions, textSize.isAccessibilitySize)
-                .frame(minWidth: 44, minHeight: 44)
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text(summary?.title ?? L10n.text("common.teams.shared_chat")).font(Theme.headline).lineLimit(2).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
+            ToolbarIconButton(systemImage: "chevron.left", help: L10n.text("common.teams.section_chats"), action: back)
+                .accessibilityLabel(L10n.text("common.teams.section_chats"))
+                .accessibilityIdentifier("team.chat.back")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(summary?.title ?? share.title ?? L10n.text("common.teams.shared_chat")).font(Theme.headline).lineLimit(textSize.isAccessibilitySize ? 3 : 1).accessibilityAddTraits(.isHeader)
                 Text([repository.name, checkout.deviceName ?? L10n.text("common.teams.computer"), checkout.publisher?.name].compactMap { $0 }.joined(separator: " · "))
-                    .font(Theme.caption).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    .font(Theme.caption).foregroundStyle(.secondary).lineLimit(textSize.isAccessibilitySize ? 3 : 1)
             }.frame(maxWidth: .infinity, alignment: .leading).layoutPriority(1)
+            if !textSize.isAccessibilitySize, !pendingComment, let asOf {
+                Text(L10n.text("common.teams.history_checked", asOf.formatted(date: .omitted, time: .shortened)))
+                    .font(Theme.caption).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                    .help(asOf.formatted(date: .abbreviated, time: .standard))
+            }
+            ToolbarIconButton(systemImage: "arrow.clockwise", help: L10n.text("common.refresh"), isBusy: loading, isEnabled: !loading) { Task { await load(earlier: false) } }
+                .accessibilityLabel(L10n.text("common.refresh"))
         }
-    }
-    private var refresh: some View {
-        HStack(spacing: Theme.Space.s) {
-            if loading { ProgressView().controlSize(.small).accessibilityLabel(L10n.text("common.loading")) }
-            Button(L10n.text("common.refresh"), .refresh) { Task { await load(earlier: false) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
-                .environment(\.compactActions, textSize.isAccessibilitySize)
-                .frame(minWidth: 44, minHeight: 44)
-        }
+        .padding(.horizontal, Theme.Space.l).padding(.vertical, Theme.Space.s)
+        .frame(minHeight: 52)
+        .background(Theme.background)
+        .overlay(alignment: .bottom) { ThemeRule() }
     }
     private func attachment(_ id: String) async throws -> TeamAttachmentFile {
         let reply: TeamAttachmentReply

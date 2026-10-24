@@ -8,7 +8,6 @@ struct TeamManagementView: View {
     var transcript: (TeamChatHistory) -> AnyView
     @State private var sheet: TeamSheet?
     @State private var query = ""
-    @State private var selectedMemberId: String?
     @State private var readingSharedChat = false
     @State private var showingDrafts = false
     @State private var showingSavedAsks = false
@@ -27,20 +26,32 @@ struct TeamManagementView: View {
     var body: some View {
         VStack(spacing: 0) {
             #if os(macOS)
-            DetailChromeBar {
-                if store.phase == .ready && !store.browsingProjects { projectsButton }
-                if store.browsingProjects || store.section != .chats {
-                    Button(L10n.text("common.refresh"), .refresh) { refresh() }
-                        .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing)
+            DetailChromeBar(scope: chromeScope, leading: {
+                if store.phase == .ready && (store.browsingProjects || store.selectedOrganization != nil) {
+                    ToolbarIconButton(systemImage: "chevron.left", help: L10n.text("common.teams.all_organizations")) { leaveToHub() }
+                        .accessibilityIdentifier("team.organizations.back")
                 }
-                if store.localDraftPersonId != nil { draftsButton }
+            }) {
+                if store.phase == .ready && !store.browsingProjects {
+                    ToolbarIconButton(systemImage: "folder.badge.person.crop", help: L10n.text("common.teams.shared_projects")) { store.showProjects() }
+                        .accessibilityIdentifier("team.projects.open")
+                }
+                if store.localDraftPersonId != nil {
+                    ToolbarIconButton(systemImage: "square.and.pencil", help: L10n.text("common.teams.comment_drafts")) { showingDrafts = true }
+                        .accessibilityIdentifier("team.drafts.open")
+                    ToolbarIconButton(systemImage: "clock.arrow.circlepath", help: L10n.text("common.teams.saved_asks")) { showingSavedAsks = true }
+                        .accessibilityIdentifier("team.asks.open")
+                }
+                if store.browsingProjects || store.section != .chats {
+                    ToolbarIconButton(systemImage: "arrow.clockwise", help: L10n.text("common.refresh"), isBusy: store.isRefreshing, isEnabled: !store.isRefreshing) { refresh() }
+                }
             }
             #endif
-            if let error = store.error {
-                TeamNotice(message: error, warning: true).padding(Theme.Space.m)
-            }
             if let org = store.selectedOrganization, store.phase == .ready, !compactReader, !store.browsingProjects {
                 organizationNavigation(org)
+            }
+            if let error = store.error {
+                TeamNotice(message: error, warning: true).padding(.horizontal, Theme.Space.l).padding(.top, Theme.Space.m)
             }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -105,6 +116,21 @@ struct TeamManagementView: View {
         }
         #endif
     }
+    #if os(macOS)
+    /// The organization being looked at, named where every scoped screen
+    /// names its scope.
+    private var chromeScope: ScopeChip? {
+        guard store.phase == .ready else { return nil }
+        if store.browsingProjects { return ScopeChip(label: L10n.text("common.teams.shared_projects"), symbol: "folder.fill.badge.person.crop") }
+        if let organization = store.selectedOrganization { return ScopeChip(label: organization.name, symbol: "person.2.fill") }
+        return nil
+    }
+    #endif
+    private func leaveToHub() {
+        if store.browsingProjects { store.show(.overview) }
+        store.select(nil)
+    }
+    #if !os(macOS)
     private var projectsButton: some View {
         Button(L10n.text("common.teams.shared_projects"), .team) { store.showProjects() }
             .accessibilityIdentifier("team.projects.open")
@@ -117,6 +143,7 @@ struct TeamManagementView: View {
                 .labelStyle(.iconOnly).accessibilityIdentifier("team.asks.open")
         }
     }
+    #endif
     @ViewBuilder private var content: some View {
         switch store.phase {
         case .signedOut:
@@ -139,28 +166,18 @@ struct TeamManagementView: View {
             }
         case .ready:
             if store.browsingProjects {
-                TeamProjectBrowser(store: store) { store.show(.overview); store.select(nil) }
+                TeamProjectBrowser(store: store) { leaveToHub() }
             } else if let organization = store.selectedOrganization {
                 organizationContent(organization)
             } else { hubContent }
         }
     }
-    private func organizationNavigation(_ organization: TeamOrganization) -> some View {
+    @ViewBuilder private func organizationNavigation(_ organization: TeamOrganization) -> some View {
+        #if os(macOS)
+        TabStrip(tabs: TeamSection.allCases.map { ($0, $0.label, $0.symbol) }, selection: $store.section)
+        organizationNotice(organization)
+        #else
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Button(L10n.text("common.teams.all_organizations"), .back) { store.select(nil) }
-                .buttonStyle(.plain).font(Theme.callout).foregroundStyle(TeamColors.action)
-                .accessibilityIdentifier("team.organizations.back")
-            #if os(macOS)
-            HStack(spacing: Theme.Space.s) {
-                Text(organization.name).font(Theme.headline).lineLimit(2)
-                TeamRoleBadge(text: organization.role.label)
-                Spacer(minLength: 0)
-            }
-            ViewThatFits(in: .horizontal) {
-                sectionPicker.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
-                sectionPicker.pickerStyle(.menu)
-            }
-            #else
             if textSize.isAccessibilitySize {
                 sectionPicker.pickerStyle(.menu).labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -171,21 +188,31 @@ struct TeamManagementView: View {
                     sectionPicker.pickerStyle(.menu)
                 }
             }
-            #endif
+            organizationNotice(organization)
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.sidebar)
+        #endif
+    }
+    @ViewBuilder private func organizationNotice(_ organization: TeamOrganization) -> some View {
+        Group {
             if !organization.eligible {
                 TeamNotice(message: organization.role == .owner ? L10n.text("common.teams.owner_plan_recovery") : L10n.text("common.teams.member_plan_recovery"), warning: true)
             } else if organization.state != "active" {
                 TeamNotice(message: L10n.text("common.teams.organization_paused"), warning: true)
             }
         }
-        .padding(Theme.Space.m)
-        .background(Theme.sidebar)
+        #if os(macOS)
+        .padding(.horizontal, Theme.Space.l).padding(.top, Theme.Space.m)
+        #endif
     }
+    #if !os(macOS)
     private var sectionPicker: some View {
         Picker(L10n.text("common.teams.section"), selection: $store.section) {
             ForEach(TeamSection.allCases) { section in Text(section.label).tag(section) }
         }
     }
+    #endif
     @ViewBuilder private func organizationContent(_ organization: TeamOrganization) -> some View {
         if store.section == .settings {
             settingsContent(organization)
@@ -223,196 +250,170 @@ struct TeamManagementView: View {
         return rows
     }
     private var hubContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                TeamSectionHeader(title: L10n.text("common.teams.title"), subtitle: L10n.text("common.teams.hub_detail")) {
-                    Button(L10n.text("common.teams.create_organization"), .create) { openCreate() }.buttonStyle(TeamButtonStyle(primary: true))
-                }
-                if !store.inbox.isEmpty { inboxContent }
+        TeamPage(title: L10n.text("common.teams.title"), subtitle: L10n.text("common.teams.hub_detail")) {
+            Button(L10n.text("common.teams.create_organization"), .create) { openCreate() }.buttonStyle(TeamButtonStyle(primary: true))
+        } content: {
+            if !store.inbox.isEmpty { inboxContent }
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                TeamGroupHeading(title: L10n.text("common.teams.organizations"))
                 if store.organizations.isEmpty {
-                    VStack(alignment: .leading, spacing: Theme.Space.l) {
-                        Image(systemName: "person.2.crop.square.stack").font(Theme.font(42, weight: .light)).foregroundStyle(TeamColors.action).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        Image(systemName: "person.2.crop.square.stack").font(Theme.font(32, weight: .light)).foregroundStyle(TeamColors.action).accessibilityHidden(true)
                         Text(L10n.text("common.teams.no_organizations")).font(Theme.title2.weight(.semibold))
                         Text(L10n.text("common.teams.no_organizations_detail")).font(Theme.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Label(L10n.text("common.teams.setup_people"), systemImage: "person.badge.plus")
-                        Label(L10n.text("common.teams.setup_projects"), systemImage: "folder.badge.person.crop")
-                        Label(L10n.text("common.teams.setup_conversations"), systemImage: "bubble.left.and.bubble.right")
-                    }.font(Theme.callout).padding(Theme.Space.l).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal, Theme.Space.l)
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
+                            Label(L10n.text("common.teams.setup_people"), systemImage: "person.badge.plus")
+                            Label(L10n.text("common.teams.setup_projects"), systemImage: "folder.badge.person.crop")
+                            Label(L10n.text("common.teams.setup_conversations"), systemImage: "bubble.left.and.bubble.right")
+                        }.font(Theme.callout).foregroundStyle(.secondary)
+                    }.padding(Theme.cardPadding).frame(maxWidth: .infinity, alignment: .leading).teamCard()
                 } else {
-                    LazyVGrid(columns: textSize.isAccessibilitySize ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 250), alignment: .leading)], alignment: .leading, spacing: Theme.Space.l) {
+                    LazyVGrid(columns: textSize.isAccessibilitySize ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 300), spacing: Theme.Space.m, alignment: .top)], alignment: .leading, spacing: Theme.Space.m) {
                         ForEach(store.organizations) { organization in
                             if let context = store.mutationContext {
                                 TeamOrganizationCard(store: store, organization: organization, context: context)
                                     .id("\(store.selectionKey)-\(organization.id)")
                             }
                         }
-                    }.padding(.horizontal, Theme.Space.l)
+                    }
                 }
                 if store.organizationsNextOffset != nil {
                     Button(L10n.text("common.teams.more_organizations"), .more) { Task { await store.loadMoreOrganizations() } }
-                        .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing).padding(.horizontal, Theme.Space.l)
-                }
-                if store.inbox.isEmpty {
-                    HStack(alignment: .top, spacing: Theme.Space.m) {
-                        Image(systemName: "envelope.badge.shield.half.filled").foregroundStyle(.secondary).accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                            Text(L10n.text("common.teams.no_pending_invitations")).font(Theme.callout.weight(.medium))
-                            Text(L10n.text("common.teams.invitation_inbox_hint")).font(Theme.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }.padding(Theme.Space.l)
+                        .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing)
                 }
             }
-            .frame(maxWidth: 1160, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(.bottom, Theme.Space.l)
+            if store.inbox.isEmpty {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    TeamGroupHeading(title: L10n.text("common.teams.your_invitations"))
+                    HStack(alignment: .top, spacing: Theme.Space.m) {
+                        Image(systemName: "envelope").font(Theme.font(15)).foregroundStyle(.secondary).frame(width: 32).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L10n.text("common.teams.no_pending_invitations")).font(Theme.body.weight(.medium))
+                            Text(L10n.text("common.teams.invitation_inbox_hint")).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }.teamRowPadding().teamCard()
+                }
+            }
         }
     }
     private var inboxContent: some View {
-        Card(title: L10n.text("common.teams.your_invitations"), subtitle: L10n.text("common.teams.inbox_detail")) {
-            if store.inbox.isEmpty {
-                Text(L10n.text("common.teams.no_invitations")).font(Theme.body).foregroundStyle(.secondary).padding(.vertical, Theme.Space.m)
-            } else {
-                ForEach(store.inbox) { invitation in
-                    HStack(spacing: Theme.Space.m) {
-                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                            Text(invitation.organizationName ?? L10n.text("common.teams.organization")).font(Theme.body.weight(.medium))
-                            Text(invitation.role.label).font(Theme.callout).foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: Theme.Space.m)
-                        Button(L10n.text("common.teams.review_invitation"), .preview) {
-                            if let context = store.mutationContext { sheet = .accept(context, invitation) }
-                        }.buttonStyle(TeamButtonStyle())
-                    }.padding(.vertical, Theme.Space.s)
-                }
-                if store.inboxNextOffset != nil {
-                    Button(L10n.text("common.teams.more_invitations"), .more) { Task { await store.loadMoreInbox() } }.buttonStyle(TeamButtonStyle())
-                }
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            TeamGroupHeading(title: L10n.text("common.teams.your_invitations"))
+            TeamListCard(items: store.inbox) { invitation in
+                HStack(spacing: Theme.Space.m) {
+                    Image(systemName: "envelope.badge").font(Theme.font(15)).foregroundStyle(TeamColors.action).frame(width: 32).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(invitation.organizationName ?? L10n.text("common.teams.organization")).font(Theme.body.weight(.medium))
+                        Text(invitation.role.label).font(Theme.callout).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: Theme.Space.m)
+                    Button(L10n.text("common.teams.review_invitation"), .preview) {
+                        if let context = store.mutationContext { sheet = .accept(context, invitation) }
+                    }.buttonStyle(TeamButtonStyle(primary: true))
+                }.teamRowPadding()
             }
-        }.padding(.horizontal, Theme.Space.l)
+            if store.inboxNextOffset != nil {
+                Button(L10n.text("common.teams.more_invitations"), .more) { Task { await store.loadMoreInbox() } }.buttonStyle(TeamButtonStyle())
+            }
+        }
     }
     private func membersContent(_ directory: TeamDirectorySnapshot) -> some View {
         let organization = directory.details.organization
         let members = directory.members.members.filter { query.isEmpty || $0.name.localizedStandardContains(query) || ($0.handle?.localizedStandardContains(query) ?? false) }
-        return VStack(spacing: 0) {
-            TeamSectionHeader(title: L10n.text("common.teams.members"), subtitle: L10n.text("common.teams.member_list_detail")) {
-                if organization.role.canManage {
-                    Button(L10n.text("common.teams.invite_member"), .invite) { if let context = store.mutationContext { sheet = .invite(context) } }
-                        .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
+        return TeamPage(title: L10n.text("common.teams.members"), subtitle: L10n.text("common.teams.member_list_detail")) {
+            TextField(L10n.text("common.search"), text: $query).textFieldStyle(ThemedFieldStyle(small: true)).frame(width: 200)
+            if organization.role.canManage {
+                Button(L10n.text("common.teams.invite_member"), .invite) { if let context = store.mutationContext { sheet = .invite(context) } }
+                    .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
+            }
+        } content: {
+            if members.isEmpty {
+                Text(L10n.text("common.teams.no_matching_members")).font(Theme.callout).foregroundStyle(.secondary).teamRowPadding().teamCard()
+            } else {
+                TeamListCard(items: members) { member in
+                    HStack(spacing: Theme.Space.m) {
+                        TeamMemberLabel(store: store, member: member, organization: organization.id)
+                        Spacer(minLength: Theme.Space.m)
+                        if !member.eligible {
+                            Label(L10n.text("common.teams.needs_patron"), systemImage: "exclamationmark.circle").font(Theme.callout).foregroundStyle(TeamColors.warning)
+                        }
+                        TeamRoleBadge(text: member.role.label)
+                        memberMenu(member, organization: organization)
+                            .frame(width: Theme.Control.heightComfortable)
+                    }.teamRowPadding()
                 }
             }
-            searchField
-            #if os(macOS)
-            Table(members, selection: $selectedMemberId) {
-                TableColumn(L10n.text("common.teams.member")) { member in person(member) }.width(min: 160, ideal: 240)
-                TableColumn(L10n.text("common.teams.role")) { member in Text(member.role.label).font(Theme.body) }.width(min: 80, ideal: 100, max: 130)
-                TableColumn(L10n.text("common.teams.access")) { member in
-                    Text(member.eligible ? L10n.text("common.teams.active") : L10n.text("common.teams.needs_patron"))
-                        .font(Theme.callout).foregroundStyle(member.eligible ? Color.secondary : TeamColors.warning)
-                }.width(min: 100, ideal: 120, max: 160)
-                TableColumn("") { member in memberMenu(member, organization: organization) }.width(36)
-            }
-            .tableStyle(.inset(alternatesRowBackgrounds: false)).scrollContentBackground(.hidden)
-            #else
-            List(members) { member in
-                HStack(spacing: Theme.Space.m) {
-                    person(member)
-                    Spacer(minLength: 0)
-                    VStack(alignment: .trailing, spacing: Theme.Space.xs) {
-                        Text(member.role.label).font(Theme.callout)
-                        if !member.eligible { Text(L10n.text("common.teams.needs_patron")).font(Theme.callout).foregroundStyle(TeamColors.warning) }
-                    }
-                    memberMenu(member, organization: organization)
-                }
-                .padding(.vertical, Theme.Space.xs).listRowBackground(Theme.panel)
-            }.listStyle(.plain).scrollContentBackground(.hidden)
-            #endif
-            if members.isEmpty { Text(L10n.text("common.teams.no_matching_members")).font(Theme.callout).foregroundStyle(.secondary).padding(Theme.Space.l) }
             if directory.members.nextOffset != nil { moreButton(.members) }
         }
-    }
-    private func person(_ member: TeamMember) -> some View {
-        TeamMemberLabel(store: store, member: member, organization: store.selectedOrganizationId ?? "")
-            .padding(.vertical, Theme.Space.xs)
     }
     @ViewBuilder private func memberMenu(_ member: TeamMember, organization: TeamOrganization) -> some View {
         let canChangeRole = organization.role == .owner && member.role != .owner && organization.isActive
         let canRemove = member.role != .owner && (organization.role == .owner || (organization.role == .admin && member.role == .member))
         if canChangeRole || canRemove {
-            Menu {
+            TeamRowMenu(label: L10n.text("common.teams.manage_member", member.name)) {
                 if canChangeRole { Button(L10n.text("common.teams.change_role")) { if let context = store.mutationContext { sheet = .memberRole(context, member) } } }
                 if canRemove { Button(L10n.text("common.teams.remove_member"), role: .destructive) { if let context = store.mutationContext { sheet = .remove(context, member) } } }
-            } label: {
-                Image(systemName: "ellipsis").frame(minWidth: Theme.Control.heightComfortable, minHeight: Theme.Control.heightComfortable)
             }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            .accessibilityLabel(L10n.text("common.teams.manage_member", member.name))
+        } else {
+            Color.clear.frame(height: 1)
         }
     }
     private func invitationsContent(_ directory: TeamDirectorySnapshot) -> some View {
         let organization = directory.details.organization
-        return VStack(spacing: 0) {
-            TeamSectionHeader(title: L10n.text("common.teams.invitations"), subtitle: L10n.text("common.teams.invitation_list_detail")) {
-                if organization.role.canManage {
-                    Button(L10n.text("common.teams.invite_member"), .invite) { if let context = store.mutationContext { sheet = .invite(context) } }
-                        .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
-                }
+        return TeamPage(title: L10n.text("common.teams.invitations"), subtitle: L10n.text("common.teams.invitation_list_detail")) {
+            if organization.role.canManage {
+                Button(L10n.text("common.teams.invite_member"), .invite) { if let context = store.mutationContext { sheet = .invite(context) } }
+                    .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
             }
+        } content: {
             if !organization.role.canManage {
-                EmptyState(symbol: "person.badge.plus", title: L10n.text("common.teams.invitation_admin"), message: L10n.text("common.teams.invitation_admin_detail"))
+                EmptyState(symbol: "person.badge.plus", title: L10n.text("common.teams.invitation_admin"), message: L10n.text("common.teams.invitation_admin_detail")).teamCard()
+            } else if directory.invitations.invitations.isEmpty {
+                EmptyState(symbol: "envelope", title: L10n.text("common.teams.no_invitations"), message: L10n.text("common.teams.invite_empty_detail")).teamCard()
             } else {
-                if directory.invitations.invitations.isEmpty {
-                    EmptyState(symbol: "person.badge.plus", title: L10n.text("common.teams.no_invitations"), message: L10n.text("common.teams.invite_empty_detail"))
-                } else {
-                    List(directory.invitations.invitations) { invitation in
-                        HStack(spacing: Theme.Space.m) {
-                            if let recipient = invitation.recipient {
-                                TeamPersonLabel(id: recipient.id, name: recipient.name, handle: recipient.handle, avatar: recipient.avatar, owner: store.owner)
-                            } else { Text(L10n.text("common.teams.member_unavailable")).font(Theme.body) }
-                            Spacer(minLength: Theme.Space.s)
-                            VStack(alignment: .trailing, spacing: Theme.Space.xs) {
-                                Text(invitation.role.label).font(Theme.callout)
-                                Text(invitationState(invitation.state)).font(Theme.callout).foregroundStyle(.secondary)
-                            }
+                TeamListCard(items: directory.invitations.invitations) { invitation in
+                    HStack(spacing: Theme.Space.m) {
+                        if let recipient = invitation.recipient {
+                            TeamPersonLabel(id: recipient.id, name: recipient.name, handle: recipient.handle, avatar: recipient.avatar, owner: store.owner)
+                        } else { Text(L10n.text("common.teams.member_unavailable")).font(Theme.body) }
+                        Spacer(minLength: Theme.Space.m)
+                        Text(invitationState(invitation.state)).font(Theme.callout)
+                            .foregroundStyle(invitation.state == "pending" ? TeamColors.action : .secondary)
+                        TeamRoleBadge(text: invitation.role.label)
+                        Group {
                             if (invitation.state == "pending" || invitation.state == "expired") && (invitation.role != .admin || organization.role == .owner) {
-                                Menu {
+                                TeamRowMenu(label: L10n.text("common.teams.manage_invitation")) {
                                     Button(L10n.text("common.teams.new_invitation_link")) { if let context = store.mutationContext { sheet = .invitationAction(context, invitation, renewing: true) } }
                                         .disabled(!organization.isActive)
                                     Button(L10n.text("common.teams.revoke_invitation"), role: .destructive) { if let context = store.mutationContext { sheet = .invitationAction(context, invitation, renewing: false) } }
-                                } label: { Image(systemName: "ellipsis").frame(minWidth: Theme.Control.heightComfortable, minHeight: Theme.Control.heightComfortable) }
-                                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(store.isMutating)
-                                .accessibilityLabel(L10n.text("common.teams.manage_invitation"))
-                            }
-                        }.padding(.vertical, Theme.Space.xs).listRowBackground(Theme.panel)
-                    }.listStyle(.plain).scrollContentBackground(.hidden)
+                                }.disabled(store.isMutating)
+                            } else { Color.clear.frame(height: 1) }
+                        }.frame(width: Theme.Control.heightComfortable)
+                    }.teamRowPadding()
                 }
-                if directory.invitations.nextOffset != nil { moreButton(.invitations) }
             }
+            if organization.role.canManage, directory.invitations.nextOffset != nil { moreButton(.invitations) }
         }
     }
     private func repositoriesContent(_ directory: TeamDirectorySnapshot) -> some View {
         let organization = directory.details.organization
-        return VStack(spacing: 0) {
-            TeamSectionHeader(title: L10n.text("common.teams.repositories"), subtitle: L10n.text("common.teams.repository_list_detail")) {
-                if store.capabilities?.canPublishCheckouts == true && (organization.role.canManage || directory.repositories.repositories.contains { $0.role == .contributor || $0.role == .maintainer }) {
-                    Button(L10n.text("common.teams.share_project"), .connect) { if let context = store.mutationContext { sheet = .repository(context) } }
-                        .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
-                }
+        return TeamPage(title: L10n.text("common.teams.repositories"), subtitle: L10n.text("common.teams.repository_list_detail")) {
+            if store.capabilities?.canPublishCheckouts == true && (organization.role.canManage || directory.repositories.repositories.contains { $0.role == .contributor || $0.role == .maintainer }) {
+                Button(L10n.text("common.teams.share_project"), .connect) { if let context = store.mutationContext { sheet = .repository(context) } }
+                    .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
             }
+        } content: {
             if directory.repositories.repositories.isEmpty {
-                EmptyState(symbol: "folder", title: L10n.text("common.teams.no_repositories"), message: organization.role.canManage ? L10n.text("common.teams.no_repositories_admin") : L10n.text("common.teams.no_repositories_member"))
+                EmptyState(symbol: "folder", title: L10n.text("common.teams.no_repositories"), message: organization.role.canManage ? L10n.text("common.teams.no_repositories_admin") : L10n.text("common.teams.no_repositories_member")).teamCard()
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(directory.repositories.repositories) { repository in
-                            if let context = store.mutationContext {
-                                TeamRepositoryRow(store: store, context: context, repository: repository, organization: organization,
-                                    openChats: { store.selectedRepositoryId = repository.id; store.show(.chats) },
-                                    openCheckouts: { sheet = .checkouts(context, repository) },
-                                    manageAccess: { sheet = .access(context, repository) },
-                                    rename: { sheet = .renameRepository(context, repository) })
-                            }
-                            ThemeRule()
+                LazyVStack(spacing: Theme.Space.m) {
+                    ForEach(directory.repositories.repositories) { repository in
+                        if let context = store.mutationContext {
+                            TeamRepositoryRow(store: store, context: context, repository: repository, organization: organization,
+                                openChats: { store.selectedRepositoryId = repository.id; store.show(.chats) },
+                                openCheckouts: { sheet = .checkouts(context, repository) },
+                                manageAccess: { sheet = .access(context, repository) },
+                                rename: { sheet = .renameRepository(context, repository) })
                         }
                     }
                 }
@@ -421,53 +422,70 @@ struct TeamManagementView: View {
         }
     }
     private func settingsContent(_ organization: TeamOrganization) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                Card(title: L10n.text("common.teams.organization_settings"), subtitle: organization.name) {
-                    LabeledContent(L10n.text("common.teams.organization_address"), value: organization.slug)
-                    LabeledContent(L10n.text("common.teams.your_role"), value: organization.role.label)
+        TeamPage(title: L10n.text("common.teams.section_settings"), subtitle: L10n.text("common.teams.settings_detail")) {
+            EmptyView()
+        } content: {
+            settingsGroup(L10n.text("common.teams.organization")) {
+                TeamSettingRow(title: L10n.text("common.teams.organization_name"), detail: organization.name) {
                     if organization.role.canManage {
                         Button(L10n.text("common.teams.rename_organization"), .edit) { if let context = store.mutationContext { sheet = .rename(context) } }
                             .buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)
                     }
                 }
-                if let request = store.directory?.details.ownershipRequest, request.toUserId == store.capabilities?.actorId {
-                    Card(title: L10n.text("common.teams.ownership_request"), subtitle: L10n.text("common.teams.ownership_accept_detail")) {
-                        if !request.current { TeamNotice(message: L10n.text("common.teams.ownership_stale"), warning: true) }
+                ThemeRule().padding(.leading, Theme.cardPadding)
+                TeamSettingRow(title: L10n.text("common.teams.organization_address"), detail: "@" + organization.slug) { EmptyView() }
+                ThemeRule().padding(.leading, Theme.cardPadding)
+                TeamSettingRow(title: L10n.text("common.teams.your_role"), detail: nil) { TeamRoleBadge(text: organization.role.label) }
+                ThemeRule().padding(.leading, Theme.cardPadding)
+                TeamSettingRow(title: L10n.text("common.teams.plan"), detail: L10n.text("common.teams.plan_detail")) {
+                    Button(L10n.text("common.teams.view_plan"), .plans, action: onAccount).buttonStyle(TeamButtonStyle())
+                }
+            }
+            if let request = store.directory?.details.ownershipRequest, request.toUserId == store.capabilities?.actorId {
+                settingsGroup(L10n.text("common.teams.ownership_request")) {
+                    if !request.current { TeamNotice(message: L10n.text("common.teams.ownership_stale"), warning: true).padding(Theme.Space.m) }
+                    TeamSettingRow(title: L10n.text("common.teams.review_ownership"), detail: L10n.text("common.teams.ownership_accept_detail")) {
                         Button(L10n.text("common.teams.review_ownership"), .approve) { if let context = store.mutationContext { sheet = .ownershipDecision(context, request, cancelling: false) } }
                             .buttonStyle(TeamButtonStyle(primary: true)).disabled(!request.current || store.isMutating)
                     }
                 }
-                if organization.role == .owner {
+            }
+            if organization.role == .owner {
+                settingsGroup(L10n.text("common.teams.ownership")) {
                     if let request = store.directory?.details.ownershipRequest, request.fromUserId == store.capabilities?.actorId {
-                        Card(title: L10n.text("common.teams.ownership_request"), subtitle: (request.current ? L10n.text("common.teams.ownership_pending") : L10n.text("common.teams.ownership_stale"))) {
-                            Button(L10n.text("common.teams.cancel_ownership_request"), .revoke) { if let context = store.mutationContext { sheet = .ownershipDecision(context, request, cancelling: true) } }.buttonStyle(TeamButtonStyle()).disabled(request.requestId == nil || store.isMutating)
+                        TeamSettingRow(title: L10n.text("common.teams.ownership_request"), detail: request.current ? L10n.text("common.teams.ownership_pending") : L10n.text("common.teams.ownership_stale")) {
+                            Button(L10n.text("common.teams.cancel_ownership_request"), .revoke) { if let context = store.mutationContext { sheet = .ownershipDecision(context, request, cancelling: true) } }
+                                .buttonStyle(TeamButtonStyle()).disabled(request.requestId == nil || store.isMutating)
                         }
+                        ThemeRule().padding(.leading, Theme.cardPadding)
                     }
-                    Card(title: L10n.text("common.teams.ownership"), subtitle: L10n.text("common.teams.owner_detail")) {
+                    TeamSettingRow(title: L10n.text("common.teams.transfer_ownership"), detail: L10n.text("common.teams.owner_detail")) {
                         Button(L10n.text("common.teams.transfer_ownership"), .move) { if let context = store.mutationContext { sheet = .transfer(context) } }.buttonStyle(TeamButtonStyle())
                     }
-                    Card(title: L10n.text("common.teams.delete_organization"), subtitle: L10n.text("common.teams.delete_detail")) {
+                }
+                settingsGroup(L10n.text("common.teams.danger_zone")) {
+                    TeamSettingRow(title: L10n.text("common.teams.delete_organization"), detail: L10n.text("common.teams.delete_detail")) {
                         Button(L10n.text("common.teams.delete_organization"), .delete, role: .destructive) { if let context = store.mutationContext { sheet = .delete(context) } }.buttonStyle(TeamButtonStyle())
                     }
-                } else {
-                    Card(title: L10n.text("common.teams.leave_organization"), subtitle: L10n.text("common.teams.leave_detail")) {
+                }
+            } else {
+                settingsGroup(L10n.text("common.teams.danger_zone")) {
+                    TeamSettingRow(title: L10n.text("common.teams.leave_organization"), detail: L10n.text("common.teams.leave_detail")) {
                         Button(L10n.text("common.teams.leave_organization"), .signOut, role: .destructive) { if let context = store.mutationContext { sheet = .leave(context) } }.buttonStyle(TeamButtonStyle())
                     }
                 }
-                Button(L10n.text("common.teams.view_plan"), .plans, action: onAccount).buttonStyle(TeamButtonStyle())
-            }.padding(Theme.Space.l).frame(maxWidth: 800, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
-    private var searchField: some View {
-        HStack {
-            TextField(L10n.text("common.search"), text: $query).textFieldStyle(ThemedFieldStyle(small: true)).frame(maxWidth: 300)
-            Spacer(minLength: 0)
-        }.padding(.horizontal, Theme.Space.l).padding(.bottom, Theme.Space.m)
+    private func settingsGroup<Rows: View>(_ title: String, @ViewBuilder rows: () -> Rows) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            TeamGroupHeading(title: title)
+            VStack(spacing: 0) { rows() }.teamCard()
+        }
     }
     private func moreButton(_ section: TeamSection) -> some View {
         Button(L10n.text("common.teams.load_more"), .more) { Task { await store.loadMore(section) } }
-            .buttonStyle(TeamButtonStyle()).disabled(store.isLoadingDirectory).padding(Theme.Space.m)
+            .buttonStyle(TeamButtonStyle()).disabled(store.isLoadingDirectory)
     }
     private func openCreate() { if let context = store.mutationContext { sheet = .create(context) } }
     private func refresh() { Task { await store.reloadAfterChange() } }

@@ -76,18 +76,19 @@ extension TeamSection {
     var label: String {
         switch self {
         case .overview: L10n.text("common.teams.overview")
-        case .chats: L10n.text("common.teams.chats")
+        case .chats: L10n.text("common.teams.section_chats")
         case .members: L10n.text("common.teams.members")
         case .invitations: L10n.text("common.teams.invitations")
         case .repositories: L10n.text("common.teams.repositories")
-        case .settings: L10n.text("common.teams.organization_settings")
+        case .settings: L10n.text("common.teams.section_settings")
         }
     }
     var symbol: String {
         switch self {
-        case .overview, .members: "person.2"
+        case .overview: "square.grid.2x2"
+        case .members: "person.2"
         case .chats: "bubble.left.and.bubble.right"
-        case .invitations: "person.badge.plus"
+        case .invitations: "envelope"
         case .repositories: "folder"
         case .settings: "gearshape"
         }
@@ -111,7 +112,7 @@ struct TeamPersonLabel: View {
                 if showsPresence {
                     HStack(spacing: Theme.Space.xs) {
                         if let online {
-                            Circle().fill(online ? Theme.accent : Theme.secondary.opacity(0.5)).frame(width: 6, height: 6).accessibilityHidden(true)
+                            Circle().fill(online ? Theme.accent : Theme.stateIdle).frame(width: 6, height: 6).accessibilityHidden(true)
                             Text(online ? L10n.text("common.teams.online") : L10n.text("common.teams.offline"))
                         } else { Text(L10n.text("common.teams.presence_unknown")) }
                     }.font(Theme.caption).foregroundStyle(online == true ? TeamColors.action : .secondary)
@@ -152,8 +153,8 @@ struct TeamNotice: View {
             Spacer(minLength: 0)
         }
         .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Theme.border, lineWidth: 1))
+        .background(warning ? TeamColors.warning.opacity(0.08) : Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(warning ? TeamColors.warning.opacity(0.3) : Theme.accent.opacity(0.2), lineWidth: 1))
         .accessibilityElement(children: .combine)
     }
 }
@@ -200,22 +201,186 @@ struct TeamRowButtonStyle: ButtonStyle {
         .contentShape(.rect)
     }
 }
+/// The heading every Team page starts with: a title, one line saying what
+/// the page is for, and that page's actions on the trailing edge.
 struct TeamSectionHeader<Actions: View>: View {
     let title: String
     let subtitle: String
     @ViewBuilder let actions: () -> Actions
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: Theme.Space.m) { heading; Spacer(minLength: Theme.Space.l); actions() }
-            VStack(alignment: .leading, spacing: Theme.Space.m) { heading; actions() }
+            HStack(alignment: .center, spacing: Theme.Space.m) { heading; Spacer(minLength: Theme.Space.l); HStack(spacing: Theme.Space.s) { actions() } }
+            VStack(alignment: .leading, spacing: Theme.Space.m) { heading; HStack(spacing: Theme.Space.s) { actions() } }
         }
-        .padding(Theme.Space.l)
     }
     private var heading: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text(title).font(Theme.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+            Text(title).font(Theme.title2.weight(.semibold)).lineLimit(2).accessibilityAddTraits(.isHeader)
             Text(subtitle).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+extension TeamSectionHeader where Actions == EmptyView {
+    init(title: String, subtitle: String) { self.init(title: title, subtitle: subtitle) { EmptyView() } }
+}
+
+/// One page shape for every Team screen. The same lane, margins and header
+/// on every tab, so switching tabs never moves the content under the eye.
+struct TeamPage<Actions: View, Content: View>: View {
+    let title: String
+    let subtitle: String
+    @ViewBuilder var actions: () -> Actions
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                TeamSectionHeader(title: title, subtitle: subtitle, actions: actions)
+                content()
+            }
+            .teamLane()
+        }
+    }
+}
+
+extension View {
+    /// The Team lane: leading, capped at the reading room's structured
+    /// width, with the page margin on every side.
+    func teamLane() -> some View {
+        padding(Theme.Space.l)
+            .frame(maxWidth: ReadingRoom.laneWidth + Theme.Space.l * 2, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+    /// The one surface Team content sits on: a panel with the app's card
+    /// radius and hairline, clipped so a pressed row stays inside it.
+    func teamCard() -> some View {
+        background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+    }
+    /// Inner spacing of a row in a Team list card.
+    func teamRowPadding() -> some View {
+        padding(.horizontal, Theme.cardPadding).padding(.vertical, Theme.Space.m)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+    }
+}
+
+/// A group heading inside a page: the same small caps label the sidebar
+/// uses, with an optional link to the full list.
+struct TeamGroupHeading: View {
+    let title: String
+    var action: (title: String, run: () -> Void)?
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title.uppercased()).font(Theme.sectionHeader).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
+            Spacer(minLength: Theme.Space.s)
+            if let action {
+                Button(action.title, .next, action: action.run).buttonStyle(.plain).font(Theme.callout).foregroundStyle(TeamColors.action)
+            }
+        }
+        .padding(.horizontal, Theme.Space.xs)
+    }
+}
+
+/// Rows in one card, with hairlines between them inset to the text.
+struct TeamListCard<Item: Identifiable, Row: View>: View {
+    let items: [Item]
+    @ViewBuilder let row: (Item) -> Row
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                if index > 0 { ThemeRule().padding(.leading, Theme.cardPadding) }
+                row(item)
+            }
+        }
+        .teamCard()
+    }
+}
+
+/// A row that opens something. Hover and press tint the whole row, the way
+/// a sidebar row does, and a chevron says it leads somewhere.
+struct TeamListRowButtonStyle: ButtonStyle {
+    var chevron = true
+    func makeBody(configuration: Configuration) -> some View { RowBody(configuration: configuration, chevron: chevron) }
+    private struct RowBody: View {
+        let configuration: Configuration
+        let chevron: Bool
+        @State private var hovering = false
+        var body: some View {
+            HStack(spacing: Theme.Space.m) {
+                configuration.label.frame(maxWidth: .infinity, alignment: .leading)
+                if chevron { Image(systemName: "chevron.right").font(Theme.font(11, weight: .semibold)).foregroundStyle(.tertiary).accessibilityHidden(true) }
+            }
+            .teamRowPadding()
+            .background(configuration.isPressed ? Theme.rowSelected : hovering ? Theme.rowHighlight : Color.clear)
+            .contentShape(.rect)
+            .onHover { hovering = $0 }
+        }
+    }
+}
+
+/// One count on an overview. Every tile in a row has the same height and
+/// width, and the label never wraps, so a row of them reads as one strip.
+struct TeamMetricTile: View {
+    let title: String
+    let value: String
+    let symbol: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                HStack {
+                    Image(systemName: symbol).font(Theme.font(14, weight: .medium)).foregroundStyle(TeamColors.action)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(Theme.font(10, weight: .semibold)).foregroundStyle(.tertiary)
+                }
+                Text(value).font(Theme.numeric(26, weight: .semibold)).foregroundStyle(.primary).lineLimit(1)
+                Text(title).font(Theme.callout).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
+            }
+            .padding(Theme.cardPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .teamCard()
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A setting on a Settings page: what it is on the leading side, the
+/// control that changes it on the trailing side.
+struct TeamSettingRow<Control: View>: View {
+    let title: String
+    var detail: String?
+    @ViewBuilder var control: () -> Control
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: Theme.Space.l) { text; Spacer(minLength: Theme.Space.m); control() }
+            VStack(alignment: .leading, spacing: Theme.Space.s) { text; control() }
+        }
+        .teamRowPadding()
+    }
+    private var text: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(Theme.body.weight(.medium))
+            if let detail { Text(detail).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        }
+    }
+}
+
+/// The trailing "more" menu of a row: platform menu rows, one glyph.
+struct TeamRowMenu<Content: View>: View {
+    let label: String
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        Menu(content: content) {
+            Image(systemName: "ellipsis").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.controlGlyph)
+                .frame(width: Theme.Control.heightComfortable, height: Theme.Control.heightComfortable).contentShape(.rect)
+        }
+        #if os(macOS)
+        .menuStyle(.borderlessButton)
+        #endif
+        .menuIndicator(.hidden).fixedSize()
+        .accessibilityLabel(label)
     }
 }
 
@@ -287,5 +452,50 @@ struct TeamChatActivityBadge: View {
                 .background(Theme.accentSoft, in: Capsule())
                 .accessibilityIdentifier("team.chat.unread.\(share.id)")
         }
+    }
+}
+
+/// What the shared chat composer sends: a comment people read, or a
+/// request the publishing computer's agent runs.
+enum TeamComposerMode: String, CaseIterable, Hashable {
+    case comment, ask
+    var label: String {
+        switch self {
+        case .comment: L10n.text("common.teams.composer_comment")
+        case .ask: L10n.text("common.teams.composer_ask")
+        }
+    }
+}
+
+/// Buttons inside the composer well. The Mac uses the main composer's
+/// dense size. A phone keeps the comfortable touch target.
+struct TeamComposerButtonStyle: ButtonStyle {
+    var primary = false
+    @ViewBuilder func makeBody(configuration: Configuration) -> some View {
+        #if os(iOS)
+        TeamButtonStyle(primary: primary).makeBody(configuration: configuration)
+        #else
+        if configuration.role == .destructive {
+            DestructiveButtonStyle(small: true).makeBody(configuration: configuration)
+        } else if primary {
+            AccentButtonStyle(small: true).makeBody(configuration: configuration)
+        } else {
+            SecondaryButtonStyle(small: true).makeBody(configuration: configuration)
+        }
+        #endif
+    }
+}
+
+/// The text field of the composer well: no box of its own, because the
+/// well is the box, exactly as in the main chat composer.
+struct TeamComposerField: View {
+    let placeholder: String
+    @Binding var text: String
+    var body: some View {
+        TextField(placeholder, text: $text, axis: .vertical)
+            .font(Theme.body).textFieldStyle(.plain)
+            .lineLimit(1...8)
+            .padding(.vertical, 6).padding(.horizontal, Theme.Space.xs)
+            .frame(minHeight: 34, alignment: .topLeading)
     }
 }

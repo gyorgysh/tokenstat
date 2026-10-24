@@ -8,16 +8,19 @@ struct TeamAskBar: View {
     @State private var model: TeamAskModel
     let computer: String
     let allowsAgentRuns: Bool
+    /// False while the composer shows comments. A running agent still
+    /// reports here, because stopping it should never be a tab away.
+    let visible: Bool
     let refresh: () -> Void
 
     init(model: TeamAskModel, computer: String, refresh: @escaping () -> Void) {
-        self.computer = computer; allowsAgentRuns = false; self.refresh = refresh
+        self.computer = computer; allowsAgentRuns = false; visible = true; self.refresh = refresh
         _model = State(initialValue: model)
     }
 
     init(store: TeamStore, context: TeamMutationContext, target: TeamCommentTarget, computer: String, allowsAgentRuns: Bool,
-         storage: TeamAskRecoveryStore, location: TeamCommentLocation, refresh: @escaping () -> Void) {
-        self.computer = computer; self.allowsAgentRuns = allowsAgentRuns; self.refresh = refresh
+         storage: TeamAskRecoveryStore, location: TeamCommentLocation, visible: Bool = true, refresh: @escaping () -> Void) {
+        self.computer = computer; self.allowsAgentRuns = allowsAgentRuns; self.visible = visible; self.refresh = refresh
         _model = State(initialValue: TeamAskModel(target: target, storage: storage, location: location,
             current: { store.mutationContext == context && store.phase == .ready && store.capabilities?.actorId == target.person },
             call: { method, params in
@@ -30,32 +33,32 @@ struct TeamAskBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            if let error = model.error { TeamNotice(message: error, warning: true) }
-            if model.fence == nil, model.error != nil {
-                Button(L10n.text("common.teams.load_saved_ask"), .refresh) { Task { await model.restore(force: true) } }.buttonStyle(TeamButtonStyle()).disabled(model.busy)
+            if visible || model.fence != nil, let error = model.error { TeamNotice(message: error, warning: true) }
+            if visible, model.fence == nil, model.error != nil {
+                Button(L10n.text("common.teams.load_saved_ask"), .refresh) { Task { await model.restore(force: true) } }.buttonStyle(TeamComposerButtonStyle()).disabled(model.busy)
             }
             if model.fence != nil {
                 HStack(spacing: Theme.Space.s) {
                     ProgressView().controlSize(.small)
                     Text(model.stopping ? L10n.text("common.teams.agent_stopping") : L10n.text("common.teams.agent_working", computer))
-                        .font(Theme.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                    Button(L10n.text("common.teams.stop_agent"), .stop) { Task { await model.stop() } }
-                        .buttonStyle(TeamButtonStyle()).disabled(model.stopping).accessibilityIdentifier("team.ask.stop")
+                        .font(Theme.callout).foregroundStyle(TeamColors.action).frame(maxWidth: .infinity, alignment: .leading)
+                    Button(L10n.text("common.teams.stop_agent"), .stop, role: .destructive) { Task { await model.stop() } }
+                        .buttonStyle(TeamComposerButtonStyle()).disabled(model.stopping).accessibilityIdentifier("team.ask.stop")
                 }
-            } else if allowsAgentRuns || model.pending {
-                Text(L10n.text("common.teams.ask_agent")).font(Theme.callout.weight(.semibold))
-                HStack(alignment: .bottom, spacing: Theme.Space.s) {
-                    TextField(L10n.text("common.teams.ask_placeholder"), text: $model.text, axis: .vertical)
-                        .font(Theme.body).textFieldStyle(.plain).lineLimit(1...4)
-                        .padding(Theme.Space.m).background(Theme.controlSeat, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
-                        .disabled(!model.loaded || model.busy || model.pending).accessibilityIdentifier("team.ask.text")
+            } else if visible && (allowsAgentRuns || model.pending) {
+                TeamComposerField(placeholder: L10n.text("common.teams.ask_placeholder"), text: $model.text)
+                    .disabled(!model.loaded || model.busy || model.pending).accessibilityIdentifier("team.ask.text")
+                HStack(spacing: Theme.Space.s) {
+                    Label(L10n.text("common.teams.ask_runs_on", computer), systemImage: ActionIcon.device.symbol)
+                        .font(Theme.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .help(L10n.text("common.teams.ask_detail", computer))
+                    Spacer(minLength: Theme.Space.m)
                     Button(model.pending ? L10n.text("common.teams.retry_same_ask") : L10n.text("common.teams.ask"), .run) { Task { await model.ask(computer: computer); refresh() } }
-                        .buttonStyle(TeamButtonStyle(primary: true))
+                        .buttonStyle(TeamComposerButtonStyle(primary: true))
                         .disabled(!model.canAsk)
+                        .keyboardShortcut(.return, modifiers: .command)
                         .accessibilityIdentifier("team.ask.send")
                 }
-                Text(L10n.text("common.teams.ask_detail", computer)).font(Theme.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .task { await model.restore() }

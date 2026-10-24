@@ -45,6 +45,9 @@ ALLOWED = [
     # The shared Team editor receives an ActionIcon-typed parameter. Swift
     # enforces the glyph even though it is not a case literal at this site.
     ("Features/Teams/TeamEditorSheet.swift", "Button(submitTitle, submitIcon, role:"),
+    # An organization card's header row. The organization's own letter mark
+    # leads it and the row style adds the chevron, like a sidebar row.
+    ("Features/Teams/TeamDashboard.swift", "store.select(organization)"),
     ("Features/Work/WorkSearchSheet.swift", "model.selected = hit.reference"),
     # A place in the app, offered beside the work. Whole-surface rows like the
     # work results above them, and each one already leads with the glyph of the
