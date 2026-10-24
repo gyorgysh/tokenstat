@@ -3255,7 +3255,7 @@ struct RootView: View {
                 directoryError: workspaces.directoryError,
                 onRetry: { Task { await workspaces.loadLocal() } },
                 sessionsIn: { id in terminals.sessions(in: id).filter(\.alive).count },
-                sharedWith: { teams.sharedOrganizations(for: $0) },
+                sharedWith: { teams.sharedOrganizations(reported: $0.teamOrganizations, workspace: $0.id, isRemote: $0.isRemote) },
                 onOpenFolder: { selectWorkspace($0) },
                 onAdd: { workspaces.requestAdd() }
             )

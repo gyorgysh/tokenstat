@@ -97,7 +97,7 @@ struct ClientFolderRow: View {
                         .font(ClientType.label.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    TeamFolderBadges(names: teams.sharedOrganizations(for: folder))
+                    TeamFolderBadges(names: teams.sharedOrganizations(reported: folder.teamOrganizations, workspace: folder.id, isRemote: folder.isRemote))
                 }
                 Text(folder.path)
                     .font(ClientType.caption)

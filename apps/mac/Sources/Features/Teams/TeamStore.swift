@@ -173,9 +173,11 @@ final class TeamStore {
     }
     /// Who a folder is shared with: what its computer reports, plus this
     /// computer's own publications, which are current before the next read.
-    func sharedOrganizations(for folder: WorkspaceFolder) -> [String] {
-        var ids = folder.teamOrganizations ?? []
-        if !folder.isRemote { ids += localProjects(for: folder.id).map(\.organizationId) }
+    /// Takes the folder's fields rather than the folder, so the store stays
+    /// free of the app's workspace model.
+    func sharedOrganizations(reported: [String]?, workspace: String, isRemote: Bool) -> [String] {
+        var ids = reported ?? []
+        if !isRemote { ids += localProjects(for: workspace).map(\.organizationId) }
         return ids.isEmpty ? [] : organizationNames(ids)
     }
     func localProjects(for workspace: String) -> [TeamLocalPublication] {
