@@ -56,6 +56,9 @@ struct TeamAPI: Sendable {
         return try JSONDecoder().decode(T.self, from: JSONEncoder().encode(value))
     }
 }
+/// The step that stopped a signed-in device from turning Teams on: a code
+/// that stays the same across releases and a sentence for the person.
+struct TeamSetupIssue: Decodable, Sendable, Equatable { let code: String; let message: String }
 struct TeamCapabilities: Decodable, Sendable {
     var supportsAppPresence = false
     var canPublishCheckouts = false
@@ -66,6 +69,8 @@ struct TeamCapabilities: Decodable, Sendable {
     /// The person removed this device from Teams. Signing in again does not
     /// turn it back on; their account settings do.
     var deviceRemoved = false
+    /// Why this device did not turn Teams on by itself, as the host saw it.
+    var setupIssue: TeamSetupIssue?
     var actorId: String?
     var enabled: Bool
     var ready: Bool
@@ -78,7 +83,7 @@ struct TeamCapabilities: Decodable, Sendable {
         self.needsDeviceRegistration = needsDeviceRegistration
         self.authorizationRequired = authorizationRequired; self.version = version
     }
-    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats, canResumeProjectSharing, canReviewChatSelection, features, deviceRemoved }
+    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats, canResumeProjectSharing, canReviewChatSelection, features, deviceRemoved, setupIssue }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         supportsAppPresence = (try c.decodeIfPresent([String].self, forKey: .features) ?? []).contains("app-presence-v1")
@@ -89,6 +94,7 @@ struct TeamCapabilities: Decodable, Sendable {
         canResumeProjectSharing = try c.decodeIfPresent(Bool.self, forKey: .canResumeProjectSharing) ?? false
         canReviewChatSelection = try c.decodeIfPresent(Bool.self, forKey: .canReviewChatSelection) ?? false
         deviceRemoved = try c.decodeIfPresent(Bool.self, forKey: .deviceRemoved) ?? false
+        setupIssue = try? c.decodeIfPresent(TeamSetupIssue.self, forKey: .setupIssue)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         ready = try c.decodeIfPresent(Bool.self, forKey: .ready) ?? false
         needsDeviceRegistration = try c.decodeIfPresent(Bool.self, forKey: .needsDeviceRegistration) ?? false

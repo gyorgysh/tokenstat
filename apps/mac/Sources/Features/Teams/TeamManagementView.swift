@@ -157,8 +157,18 @@ struct TeamManagementView: View {
             EmptyState(symbol: "person.2",
                 title: removed ? L10n.text("common.teams.device_removed_title") : L10n.text("common.teams.enable_title"),
                 message: removed ? L10n.text("common.teams.device_removed_detail") : L10n.text("common.teams.enable_detail")) {
-                Button(L10n.text("common.teams.enable_action"), .team) { sheet = .authorize }.buttonStyle(TeamButtonStyle(primary: true))
-                    .accessibilityIdentifier("team.authorization.open")
+                VStack(spacing: Theme.Space.m) {
+                    // Teams should have turned on by itself. When it did not,
+                    // say which step stopped it, with the code to report.
+                    if !removed, let issue = store.capabilities?.setupIssue {
+                        TeamNotice(message: L10n.text("common.teams.setup_issue", issue.message, issue.code), warning: true)
+                            .frame(maxWidth: 420)
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("team.authorization.issue")
+                    }
+                    Button(L10n.text("common.teams.enable_action"), .team) { sheet = .authorize }.buttonStyle(TeamButtonStyle(primary: true))
+                        .accessibilityIdentifier("team.authorization.open")
+                }
             }
         case .failed:
             EmptyState(symbol: "wifi.exclamationmark", title: L10n.text("common.teams.load_failed"), message: L10n.text("common.teams.retry_detail")) {

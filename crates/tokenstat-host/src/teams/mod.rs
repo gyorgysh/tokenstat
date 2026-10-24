@@ -292,19 +292,34 @@ fn client(owner: &AccountSnapshot) -> Result<TeamClient, DispatchError> {
 /// supports it turns Teams on for this sign-in. Only a device the person
 /// removed from Teams still reports that it needs them.
 fn capabilities(owner: &AccountSnapshot, client: &TeamClient) -> Result<Value, DispatchError> {
+    // Why this device is not on Teams yet, when it should have turned itself
+    // on. Shown on the setup screen, so a failure names its step instead of
+    // looking like a request to approve the device by hand.
+    let mut issue: Option<DispatchError> = None;
     let mut answer = client.capabilities();
-    if matches!(&answer, Err(TeamError::Rejected { code, .. }) if code == "device_required")
-        && register_device(owner).is_ok()
-    {
-        answer = client.capabilities();
+    if matches!(&answer, Err(TeamError::Rejected { code, .. }) if code == "device_required") {
+        match register_device(owner) {
+            Ok(()) => answer = client.capabilities(),
+            Err(error) => issue = Some(error),
+        }
     }
     if let Ok(current) = &answer
         && !current.ready()
-        && TeamClient::can_enable_device(current)
-        && let Ok(enabled) = client.enable_device()
+        && !current.device_removed
     {
-        answer = Ok(enabled);
+        if TeamClient::can_enable_device(current) {
+            match client.enable_device() {
+                Ok(enabled) => answer = Ok(enabled),
+                Err(error) => issue = Some(api_error(error)),
+            }
+        } else if current.enabled {
+            issue = Some(DispatchError::new(
+                "teams_self_enable_unsupported",
+                "The account server does not turn Teams on for signed-in devices yet. It needs the current website release.",
+            ));
+        }
     }
+    let issue = issue.map(|error| json!({"code": error.code, "message": error.message}));
     match answer {
         Ok(capabilities) => {
             let ready = capabilities.ready();
@@ -332,10 +347,13 @@ fn capabilities(owner: &AccountSnapshot, client: &TeamClient) -> Result<Value, D
             value["canPublishChats"] = json!(can_publish_chats);
             value["canResumeProjectSharing"] = json!(can_publish);
             value["canReviewChatSelection"] = json!(can_publish_chats);
+            if !ready && let Some(issue) = issue {
+                value["setupIssue"] = issue;
+            }
             Ok(value)
         }
         Err(TeamError::Rejected { code, .. }) if code == "device_required" => Ok(
-            json!({"enabled":true,"ready":false,"needsDeviceRegistration":true,"authorizationRequired":true,"version":1}),
+            json!({"enabled":true,"ready":false,"needsDeviceRegistration":true,"authorizationRequired":true,"version":1,"setupIssue":issue}),
         ),
         Err(TeamError::Unsupported) => Ok(json!({"enabled":false,"ready":false,"version":0})),
         Err(error) => Err(api_error(error)),

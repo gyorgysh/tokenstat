@@ -276,9 +276,10 @@ settings:
     # 170 continues 1.8.0. 168 and 169 are spent.
     # 199 went up to TestFlight as 1.8.0 with the Teams layout redesign.
     # 200 went up to TestFlight as 1.8.0 with Teams on every signed-in device.
-    # 201 is 1.8.0 with Team as a root tab on the phone, the new chat prism
-    # held on its card, and team connection failures named precisely.
-    CURRENT_PROJECT_VERSION: "201"
+    # 201 went up to TestFlight as 1.8.0 with Team as a root tab on the phone,
+    # the new chat prism held on its card, and precise connection failures.
+    # 202 is 1.8.0 naming why a device did not turn Teams on by itself.
+    CURRENT_PROJECT_VERSION: "202"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

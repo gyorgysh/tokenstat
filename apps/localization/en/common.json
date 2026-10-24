@@ -791,5 +791,6 @@
   "common.teams.shared_with_team": "Shared with {0}",
   "common.teams.device_removed_title": "Teams is off on this device",
   "common.teams.device_removed_detail": "This device was removed from Teams. Turn it back on to see your teams here.",
-  "common.teams.continue_in_team_chat": "Continue in team chat"
+  "common.teams.continue_in_team_chat": "Continue in team chat",
+  "common.teams.setup_issue": "Teams could not turn on by itself: {0} ({1})"
 }

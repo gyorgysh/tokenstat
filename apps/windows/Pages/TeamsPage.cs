@@ -159,7 +159,14 @@ internal sealed partial class TeamsPage : Page
             var capabilities = await CallAsync("teams.capabilities");
             if (!IsLoaded || _view != view) return;
             if (!Format.Flag(capabilities, "enabled")) { Note(L10n.Text("common.teams.load_failed"), true); return; }
-            if (!Format.Flag(capabilities, "ready")) { ShowAuthorize(Format.Flag(capabilities, "deviceRemoved")); return; }
+            if (!Format.Flag(capabilities, "ready"))
+            {
+                ShowAuthorize(Format.Flag(capabilities, "deviceRemoved"));
+                // Teams should have turned on by itself. Name the step that stopped it.
+                if (capabilities["setupIssue"] is JsonObject issue && !Format.Flag(capabilities, "deviceRemoved"))
+                    Note(L10n.Text("common.teams.setup_issue", Format.Text(issue, "message"), Format.Text(issue, "code")), true);
+                return;
+            }
             var actor = Format.Text(capabilities, "actorId");
             if (actor.Length == 0 || !string.IsNullOrEmpty(_person) && _person != actor) throw new HostException("account_changed", L10n.Text("common.teams.account_changed"));
             _person = actor;
