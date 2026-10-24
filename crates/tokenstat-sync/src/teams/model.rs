@@ -264,6 +264,10 @@ pub struct Capabilities {
     pub device_key: Option<String>,
     #[serde(default)]
     pub ticket_lifetime_seconds: u32,
+    /// The person removed this device from Teams. It stays off until they
+    /// turn it back on in their account settings.
+    #[serde(default)]
+    pub device_removed: bool,
 }
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

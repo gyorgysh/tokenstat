@@ -86,15 +86,19 @@ private enum ClientRowMark {
 /// mark, same split the Mac sidebar uses.
 struct ClientFolderRow: View {
     let folder: WorkspaceFolder
+    @Environment(TeamStore.self) private var teams
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
             folderMark
             VStack(alignment: .leading, spacing: 2) {
-                Text(folder.name)
-                    .font(ClientType.label.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                HStack(spacing: Theme.Space.s) {
+                    Text(folder.name)
+                        .font(ClientType.label.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    TeamFolderBadges(names: teams.sharedOrganizations(for: folder))
+                }
                 Text(folder.path)
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)

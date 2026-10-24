@@ -6,6 +6,7 @@ import SwiftUI
 /// has a separate audience and can never inherit this composer's writing.
 struct ChatSharingNotice: View {
     @Bindable var model: ChatModel
+    @Environment(\.openTeamChat) private var openTeamChat
     #if os(macOS)
     @State private var recovery: ChatSharingRecoveryTarget?
     #endif
@@ -20,6 +21,15 @@ struct ChatSharingNotice: View {
             Text(L10n.text("common.teams.private_source_notice"))
                 .font(Theme.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // The team thread is where this chat continues, so the notice
+            // leads there instead of ending at a composer that cannot send.
+            if let openTeamChat, let share = model.selected?.teamShare {
+                Button(L10n.text("common.teams.continue_in_team_chat"), .comment) {
+                    openTeamChat(share.id, model.selected?.workspaceID)
+                }
+                .buttonStyle(TeamButtonStyle(primary: true))
+                .accessibilityIdentifier("chat.sharing.continue")
+            }
             #if os(macOS)
             if model.peer == nil, model.savedCopy == nil {
                 Button(L10n.text("common.teams.manage_sharing"), .team) {

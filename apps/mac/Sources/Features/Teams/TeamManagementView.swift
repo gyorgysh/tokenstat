@@ -105,10 +105,22 @@ struct TeamManagementView: View {
         }
         #if !os(macOS)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if store.phase == .ready && !store.browsingProjects { projectsButton.labelStyle(.iconOnly) }
-                if store.browsingProjects || store.section != .chats { Button(L10n.text("common.refresh"), systemImage: "arrow.clockwise") { refresh() }.disabled(store.isRefreshing) }
-                if store.localDraftPersonId != nil { draftsButton }
+            // One control in a phone's crowded bar. Four icons pushed the
+            // app's own name into an ellipsis.
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    if store.phase == .ready && !store.browsingProjects {
+                        Button(L10n.text("common.teams.shared_projects"), systemImage: "folder.badge.person.crop") { store.showProjects() }
+                    }
+                    if store.localDraftPersonId != nil {
+                        Button(L10n.text("common.teams.comment_drafts"), systemImage: "square.and.pencil") { showingDrafts = true }
+                        Button(L10n.text("common.teams.saved_asks"), systemImage: "clock.arrow.circlepath") { showingSavedAsks = true }
+                    }
+                    Button(L10n.text("common.refresh"), systemImage: "arrow.clockwise") { refresh() }.disabled(store.isRefreshing)
+                } label: {
+                    Label(L10n.text("common.teams.more_actions"), systemImage: "ellipsis")
+                }
+                .accessibilityIdentifier("team.more")
             }
         }
         #endif
@@ -127,20 +139,6 @@ struct TeamManagementView: View {
         if store.browsingProjects { store.show(.overview) }
         store.select(nil)
     }
-    #if !os(macOS)
-    private var projectsButton: some View {
-        Button(L10n.text("common.teams.shared_projects"), .team) { store.showProjects() }
-            .accessibilityIdentifier("team.projects.open")
-    }
-    private var draftsButton: some View {
-        HStack(spacing: Theme.Space.s) {
-            Button(L10n.text("common.teams.comment_drafts"), systemImage: "square.and.pencil") { showingDrafts = true }
-                .accessibilityIdentifier("team.drafts.open")
-            Button(L10n.text("common.teams.saved_asks"), systemImage: "clock.arrow.circlepath") { showingSavedAsks = true }
-                .labelStyle(.iconOnly).accessibilityIdentifier("team.asks.open")
-        }
-    }
-    #endif
     @ViewBuilder private var content: some View {
         switch store.phase {
         case .signedOut:
@@ -153,7 +151,12 @@ struct TeamManagementView: View {
                 Button(L10n.text("common.refresh"), .refresh) { refresh() }.buttonStyle(TeamButtonStyle())
             }
         case .authorization:
-            EmptyState(symbol: "person.2", title: L10n.text("common.teams.enable_title"), message: L10n.text("common.teams.enable_detail")) {
+            // A signed-in device turns Teams on by itself. Only a device the
+            // person removed from Teams lands here, so say that plainly.
+            let removed = store.capabilities?.deviceRemoved == true
+            EmptyState(symbol: "person.2",
+                title: removed ? L10n.text("common.teams.device_removed_title") : L10n.text("common.teams.enable_title"),
+                message: removed ? L10n.text("common.teams.device_removed_detail") : L10n.text("common.teams.enable_detail")) {
                 Button(L10n.text("common.teams.enable_action"), .team) { sheet = .authorize }.buttonStyle(TeamButtonStyle(primary: true))
                     .accessibilityIdentifier("team.authorization.open")
             }
@@ -185,11 +188,7 @@ struct TeamManagementView: View {
                 sectionPicker.pickerStyle(.menu).labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                HStack(spacing: Theme.Space.m) {
-                    TeamRoleBadge(text: organization.role.label)
-                    Spacer(minLength: 0)
-                    sectionPicker.pickerStyle(.menu)
-                }
+                TeamSectionChips(selection: $store.section)
             }
             if let directory = store.directory {
                 ViewThatFits(in: .horizontal) {
@@ -199,8 +198,10 @@ struct TeamManagementView: View {
             }
             organizationNotice(organization)
         }
-        .padding(Theme.Space.m)
-        .background(Theme.sidebar)
+        .padding(.vertical, Theme.Space.s)
+        .padding(.horizontal, Theme.Space.m)
+        .background(Theme.background)
+        .overlay(alignment: .bottom) { ThemeRule() }
         #endif
     }
     @ViewBuilder private func organizationNotice(_ organization: TeamOrganization) -> some View {

@@ -1114,6 +1114,7 @@ fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
         added_at_ms: ws.added_at_ms,
         exists,
         git: exists.then(|| tokenstat_workspace::git::status(&ws.path)),
+        team_organizations: Vec::new(),
     };
 
     if let Ok(mut cache) = workspace_status_cache().lock() {
@@ -3223,6 +3224,13 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     })
                 })
                 .collect();
+            // Read after the status cache, so sharing a folder shows at once
+            // rather than when that folder's Git reading next expires.
+            let shared = crate::teams::shared_workspace_organizations();
+            let mut dtos = dtos;
+            for dto in &mut dtos {
+                dto.team_organizations = shared.get(&dto.id).cloned().unwrap_or_default();
+            }
             serde_json::to_value(dtos).map_err(|e| e.to_string())
         }
 

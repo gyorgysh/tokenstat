@@ -259,7 +259,7 @@ fn busy() -> DispatchError {
 fn ended() -> DispatchError {
     DispatchError::new(
         "team_connection_unavailable",
-        "This shared checkout could not be reached. Refresh and try again.",
+        "The computer sharing this project is not reachable right now. It needs to be on, with tokenstat open.",
     )
 }
 struct Retirement {

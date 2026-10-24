@@ -63,6 +63,9 @@ struct TeamCapabilities: Decodable, Sendable {
     var canPublishChats = false
     var canResumeProjectSharing = false
     var canReviewChatSelection = false
+    /// The person removed this device from Teams. Signing in again does not
+    /// turn it back on; their account settings do.
+    var deviceRemoved = false
     var actorId: String?
     var enabled: Bool
     var ready: Bool
@@ -75,7 +78,7 @@ struct TeamCapabilities: Decodable, Sendable {
         self.needsDeviceRegistration = needsDeviceRegistration
         self.authorizationRequired = authorizationRequired; self.version = version
     }
-    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats, canResumeProjectSharing, canReviewChatSelection, features }
+    private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats, canResumeProjectSharing, canReviewChatSelection, features, deviceRemoved }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         supportsAppPresence = (try c.decodeIfPresent([String].self, forKey: .features) ?? []).contains("app-presence-v1")
@@ -85,6 +88,7 @@ struct TeamCapabilities: Decodable, Sendable {
         canPublishChats = try c.decodeIfPresent(Bool.self, forKey: .canPublishChats) ?? false
         canResumeProjectSharing = try c.decodeIfPresent(Bool.self, forKey: .canResumeProjectSharing) ?? false
         canReviewChatSelection = try c.decodeIfPresent(Bool.self, forKey: .canReviewChatSelection) ?? false
+        deviceRemoved = try c.decodeIfPresent(Bool.self, forKey: .deviceRemoved) ?? false
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         ready = try c.decodeIfPresent(Bool.self, forKey: .ready) ?? false
         needsDeviceRegistration = try c.decodeIfPresent(Bool.self, forKey: .needsDeviceRegistration) ?? false

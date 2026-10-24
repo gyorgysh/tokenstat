@@ -649,7 +649,7 @@
   "common.teams.new_chat_detail": "The chat starts empty on {0} and is shared with everyone in this repository. Ask its agent once it opens.",
   "common.teams.history_cannot_display": "This history could not be displayed. Refresh the chat and try again.",
   "common.teams.shared_history_window": "Showing an earlier part of the chat. Refresh to return to the latest messages.",
-  "common.teams.private_source_notice": "Drafts here stay private. Open Team chats to continue.",
+  "common.teams.private_source_notice": "This chat is shared with your team and continues in the team thread. Drafts here stay private.",
   "common.teams.private_draft_placeholder": "Private draft — kept on this device",
   "common.teams.manage_sharing": "Manage sharing",
   "common.teams.recover_on_publisher": "Stop sharing on its publishing computer.",
@@ -788,5 +788,8 @@
   "common.teams.computers_sharing": "Shared from",
   "common.teams.more_actions": "More actions",
   "common.teams.ask_runs_on": "Runs on {0}",
-  "common.teams.shared_with_team": "Shared with {0}"
+  "common.teams.shared_with_team": "Shared with {0}",
+  "common.teams.device_removed_title": "Teams is off on this device",
+  "common.teams.device_removed_detail": "This device was removed from Teams. Turn it back on to see your teams here.",
+  "common.teams.continue_in_team_chat": "Continue in team chat"
 }

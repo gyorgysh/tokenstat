@@ -2623,6 +2623,9 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     /// no machine id. The id is optional for compatibility with older daemons.
     var machineID: String?
     var machineLabel: String?
+    /// Organizations the owning computer shares this folder with, by id.
+    /// Absent from older hosts, which reads the same as not shared.
+    var teamOrganizations: [String]?
 
     var changeCount: Int { git?.files.count ?? 0 }
 

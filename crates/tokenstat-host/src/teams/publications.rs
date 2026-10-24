@@ -406,6 +406,26 @@ impl Store {
                 .any(|row| row.phase == Phase::Active && row.owner.host_key == key))
         })
     }
+    /// Each active publication as (workspace id, organization id). Read from
+    /// this computer's own index, so it needs no network and no sign-in.
+    pub(super) fn active_workspaces(&self) -> Result<Vec<(String, String)>, DispatchError> {
+        if !self
+            .root
+            .join("index.json")
+            .try_exists()
+            .map_err(|_| storage())?
+        {
+            return Ok(Vec::new());
+        }
+        self.read(|index| {
+            Ok(index
+                .checkouts
+                .iter()
+                .filter(|row| row.phase == Phase::Active)
+                .map(|row| (row.workspace_id.clone(), row.organization_id.clone()))
+                .collect())
+        })
+    }
     pub(super) fn has_active(&self, owner: &Owner) -> Result<bool, DispatchError> {
         if !self
             .root

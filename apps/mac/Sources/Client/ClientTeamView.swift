@@ -17,13 +17,12 @@ struct ClientTeamAccountLink: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        Card(title: L10n.text("common.teams.title"), subtitle: L10n.text("common.teams.hub_detail")) {
-            Button(L10n.text("common.teams.manage_teams"), .team) {
+        Card(title: L10n.text("common.teams.title"), subtitle: L10n.text("common.teams.hub_detail"), mark: "mark_account",
+            accessory: AnyView(Button(L10n.text("common.teams.manage_teams"), .team) {
                 navigation.chooseNavigation(); navigation.restoredRoute = nil
                 navigation.destination = .team; navigation.folderID = nil
                 dismiss()
-            }.buttonStyle(TeamButtonStyle())
-        }
+            }.buttonStyle(TeamSmallButtonStyle())))
     }
 }
 #endif

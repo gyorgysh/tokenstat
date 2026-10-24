@@ -557,6 +557,11 @@ pub struct WorkspaceDto {
     /// Absent when the folder is missing, so a caller cannot mistake "we did
     /// not look" for "no changes".
     pub git: Option<tokenstat_workspace::GitStatus>,
+    /// Organizations this computer shares the folder with, by id. A client
+    /// names them from its own Teams directory. Empty when nobody else sees
+    /// the folder, and absent from older hosts, which read the same way.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub team_organizations: Vec<String>,
 }
 
 /// What a folder has in it right now, as counts and nothing else.

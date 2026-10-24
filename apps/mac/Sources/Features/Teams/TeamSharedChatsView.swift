@@ -320,6 +320,10 @@ struct TeamSharedChatsView: View {
             backendChoices[checkoutId] = catalog?.backends ?? []
             shares = more ? shares + rows.filter { next in !shares.contains { $0.id == next.id } } : rows
             sharesNext = nextOffset; sharesCursor = nextCursor
+            if let pending = store.pendingShareId, let share = shares.first(where: { $0.id == pending }) {
+                store.pendingShareId = nil
+                selectedComputer = self.checkout; selected = share
+            }
         } catch is CancellationError {} catch { if isCurrent, shareLoad == load, self.checkoutId == checkoutId { self.error = error.localizedDescription } }
     }
 }

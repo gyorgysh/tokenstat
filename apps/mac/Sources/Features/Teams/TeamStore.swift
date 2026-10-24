@@ -137,6 +137,27 @@ final class TeamStore {
         section = .overview
         error = nil
     }
+    /// A shared chat to open as soon as a chat list shows it. Set by the
+    /// personal chat's "Continue in team chat", which knows only the share.
+    var pendingShareId: String?
+    /// Open the team thread for a chat this account shared. On the computer
+    /// that publishes the folder the project and computer are known, so it
+    /// goes straight there. Elsewhere it opens the team's chats, and the
+    /// thread opens when its row loads.
+    func openSharedChat(id: String, workspace: String?) {
+        guard phase == .ready else { return }
+        pendingShareId = id
+        if let workspace, let publication = localProjects(for: workspace).first,
+           let organization = organizations.first(where: { $0.id == publication.organizationId }) {
+            select(organization)
+            selectedRepositoryId = publication.repositoryId; preferredCheckoutId = publication.id
+            browsingProjects = false; section = .chats
+        } else if organizations.count == 1, let organization = organizations.first {
+            select(organization); section = .chats
+        } else {
+            select(nil); section = .chats
+        }
+    }
     func show(_ section: TeamSection) { projectOpenRevision &+= 1; browsingProjects = false; self.section = section }
     func showProjects() { projectOpenRevision &+= 1; browsingProjects = true }
     func openProject(_ repository: TeamRepository, in organization: TeamOrganization, checkout: String? = nil) {
@@ -144,6 +165,18 @@ final class TeamStore {
         select(organization)
         focusedProject = repository; selectedRepositoryId = repository.id
         preferredCheckoutId = checkout; browsingProjects = false; section = .chats
+    }
+    /// Names for organization ids, in this account's own words. An id this
+    /// directory has not loaded yet reads as the generic Team.
+    func organizationNames(_ ids: [String]) -> [String] {
+        Array(Set(ids.map { id in organizations.first { $0.id == id }?.name ?? L10n.text("common.teams.title") })).sorted()
+    }
+    /// Who a folder is shared with: what its computer reports, plus this
+    /// computer's own publications, which are current before the next read.
+    func sharedOrganizations(for folder: WorkspaceFolder) -> [String] {
+        var ids = folder.teamOrganizations ?? []
+        if !folder.isRemote { ids += localProjects(for: folder.id).map(\.organizationId) }
+        return ids.isEmpty ? [] : organizationNames(ids)
     }
     func localProjects(for workspace: String) -> [TeamLocalPublication] {
         localProjects.filter { $0.workspaceId == workspace && $0.phase == "active" }

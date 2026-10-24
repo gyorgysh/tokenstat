@@ -231,6 +231,24 @@ impl TeamClient {
     pub fn capabilities(&self) -> Result<Capabilities, TeamError> {
         self.request(Method::GET, &["teams", "capabilities"], None, None)
     }
+    /// Turn Teams on for this device's own sign-in. The server checks the
+    /// sign-in and the registered device key, and refuses a device the
+    /// person removed from Teams.
+    pub fn enable_device(&self) -> Result<Capabilities, TeamError> {
+        self.request(
+            Method::POST,
+            &["teams", "devices", "self"],
+            Some(serde_json::json!({})),
+            None,
+        )
+    }
+    /// Whether this server lets a signed-in device turn Teams on itself.
+    pub fn can_enable_device(value: &Capabilities) -> bool {
+        value.enabled
+            && value.authorization_required
+            && !value.device_removed
+            && value.features.iter().any(|f| f == "device-self-enable-v1")
+    }
     pub fn authorization_url(&self, value: &Capabilities) -> Result<String, TeamError> {
         let path = value
             .authorization_path

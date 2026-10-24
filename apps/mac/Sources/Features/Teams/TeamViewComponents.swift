@@ -11,6 +11,10 @@ struct TeamChatReadingKey: PreferenceKey {
 }
 
 private struct TeamAvatarOwnerKey: EnvironmentKey { static let defaultValue: TeamAccountOwner? = nil }
+/// Opens the team thread for a shared chat: the share id, and the folder the
+/// chat belongs to when it is known.
+typealias TeamChatOpener = @MainActor (String, String?) -> Void
+private struct TeamChatOpenerKey: EnvironmentKey { static let defaultValue: TeamChatOpener? = nil }
 /// A file from someone else's computer. Name and type are the ones that
 /// computer derived from the stored file, never the history's own label.
 struct TeamAttachmentFile: Sendable { let name: String; let mediaType: String?; let data: Data }
@@ -32,6 +36,10 @@ extension EnvironmentValues {
     var teamAttachmentLoader: TeamAttachmentLoader? {
         get { self[TeamAttachmentLoaderKey.self] }
         set { self[TeamAttachmentLoaderKey.self] = newValue }
+    }
+    var openTeamChat: TeamChatOpener? {
+        get { self[TeamChatOpenerKey.self] }
+        set { self[TeamChatOpenerKey.self] = newValue }
     }
     var teamAvatarOwner: TeamAccountOwner? {
         get { self[TeamAvatarOwnerKey.self] }
@@ -485,6 +493,59 @@ enum TeamHubPage: String, CaseIterable, Hashable {
         switch self {
         case .organizations: L10n.text("common.teams.organizations")
         case .projects: L10n.text("common.teams.shared_projects")
+        }
+    }
+}
+
+/// The sections of an organization on a phone: the same choice as the Mac's
+/// tabs, as a row of chips that scrolls when it does not fit, so every
+/// section is one tap away instead of behind a menu.
+struct TeamSectionChips: View {
+    @Binding var selection: TeamSection
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.Space.xs) {
+                    ForEach(TeamSection.allCases) { section in
+                        let selected = section == selection
+                        Button {
+                            withAnimation(.snappy(duration: 0.2)) { selection = section }
+                        } label: {
+                            Label(section.label, systemImage: section.symbol)
+                                .font(Theme.callout.weight(selected ? .semibold : .regular))
+                                .foregroundStyle(selected ? Theme.accent : Theme.controlGlyph)
+                                .padding(.horizontal, Theme.Space.m)
+                                .frame(minHeight: Theme.Control.heightComfortable)
+                                .background(selected ? Theme.accentSoft : Theme.panel, in: Capsule())
+                                .overlay(Capsule().strokeBorder(selected ? Theme.accent.opacity(0.35) : Theme.border, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .id(section)
+                        .accessibilityAddTraits(selected ? [.isSelected] : [])
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .onAppear { proxy.scrollTo(selection, anchor: .center) }
+            .onChange(of: selection) { _, next in withAnimation { proxy.scrollTo(next, anchor: .center) } }
+        }
+    }
+}
+
+/// Which teams can open a folder, as small accent pills. The same mark on
+/// the Mac's repository list and the phone's, so a shared folder is told
+/// apart at a glance wherever it is listed.
+struct TeamFolderBadges: View {
+    let names: [String]
+    var body: some View {
+        ForEach(names, id: \.self) { team in
+            Label(team, systemImage: "person.2.fill")
+                .font(Theme.font(10, weight: .semibold)).lineLimit(1)
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, Theme.Space.s).padding(.vertical, 2)
+                .background(Theme.accentSoft, in: Capsule())
+                .help(L10n.text("common.teams.shared_with_team", team))
+                .accessibilityLabel(L10n.text("common.teams.shared_with_team", team))
         }
     }
 }

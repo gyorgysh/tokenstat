@@ -335,6 +335,10 @@ struct ClientRootView: View {
                 if navigation.restoredRoute != route { navigation.restoredRoute = route }
             }
         }
+        .environment(\.openTeamChat) { share, workspace in
+            teams.openSharedChat(id: share, workspace: workspace)
+            navigation.destination = .team
+        }
         .task(id: teamAccountOwner) {
             await BridgeLaunch.wait()
             guard !Task.isCancelled else { return }

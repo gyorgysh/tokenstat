@@ -244,7 +244,7 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
             .ok_or_else(|| api_error(TeamError::AccountChanged))?;
         let client = client(&owner)?;
         let result = match parsed {
-            directory::Request::Capabilities => capabilities(&client),
+            directory::Request::Capabilities => capabilities(&owner, &client),
             directory::Request::AuthorizationPreview => authorization_preview(),
             directory::Request::PrepareAuthorization {
                 expected_device_key,
@@ -287,8 +287,25 @@ fn client(owner: &AccountSnapshot) -> Result<TeamClient, DispatchError> {
     owner.ensure_current().map_err(changed)?;
     Ok(client)
 }
-fn capabilities(client: &TeamClient) -> Result<Value, DispatchError> {
-    match client.capabilities() {
+/// Teams for a signed-in device needs no setup step. A device the account
+/// server does not know yet is registered with its own key, and a server that
+/// supports it turns Teams on for this sign-in. Only a device the person
+/// removed from Teams still reports that it needs them.
+fn capabilities(owner: &AccountSnapshot, client: &TeamClient) -> Result<Value, DispatchError> {
+    let mut answer = client.capabilities();
+    if matches!(&answer, Err(TeamError::Rejected { code, .. }) if code == "device_required")
+        && register_device(owner).is_ok()
+    {
+        answer = client.capabilities();
+    }
+    if let Ok(current) = &answer
+        && !current.ready()
+        && TeamClient::can_enable_device(current)
+        && let Ok(enabled) = client.enable_device()
+    {
+        answer = Ok(enabled);
+    }
+    match answer {
         Ok(capabilities) => {
             let ready = capabilities.ready();
             let can_publish = cfg!(feature = "local-host")
@@ -340,7 +357,7 @@ fn prepare_authorization(
     client: &TeamClient,
     expected_device_key: &str,
 ) -> Result<Value, DispatchError> {
-    let status = capabilities(client)?;
+    let status = capabilities(owner, client)?;
     if status["enabled"] != true {
         return Err(DispatchError::new(
             "teams_unavailable",
@@ -360,6 +377,21 @@ fn prepare_authorization(
             "This device's connection key changed. Review the device again.",
         ));
     }
+    register_device(owner)?;
+    let status = client.capabilities().map_err(api_error)?;
+    let url = client.authorization_url(&status).map_err(api_error)?;
+    Ok(
+        json!({"authorizationURL":url,"deviceKey":identity.public_key_hex(),"deviceName":tokenstat_identity::machine_label()}),
+    )
+}
+/// Register this device and its connection key with the signed-in account.
+fn register_device(owner: &AccountSnapshot) -> Result<(), DispatchError> {
+    let identity = tokenstat_identity::MachineIdentity::load_or_create().map_err(|_| {
+        DispatchError::new(
+            "identity_unavailable",
+            "This device's connection key is unavailable.",
+        )
+    })?;
     let machine = tokenstat_sync::config::ensure_machine_id().map_err(|_| {
         DispatchError::new(
             "identity_unavailable",
@@ -387,12 +419,23 @@ fn prepare_authorization(
                 "Couldn't register this device. Check your account's device limit and try again.",
             )
         })?;
-    owner.ensure_current().map_err(changed)?;
-    let status = client.capabilities().map_err(api_error)?;
-    let url = client.authorization_url(&status).map_err(api_error)?;
-    Ok(
-        json!({"authorizationURL":url,"deviceKey":identity.public_key_hex(),"deviceName":tokenstat_identity::machine_label()}),
-    )
+    owner.ensure_current().map_err(changed)
+}
+/// The organizations each local folder is shared with, keyed by folder id.
+/// An unreadable index reads as nothing shared: this only labels folders.
+#[cfg(feature = "local-host")]
+pub(crate) fn shared_workspace_organizations() -> std::collections::HashMap<String, Vec<String>> {
+    let mut shared: std::collections::HashMap<String, Vec<String>> = Default::default();
+    let rows = publications::Store::capture()
+        .and_then(|store| store.active_workspaces())
+        .unwrap_or_default();
+    for (workspace, organization) in rows {
+        let list = shared.entry(workspace).or_default();
+        if !list.contains(&organization) {
+            list.push(organization);
+        }
+    }
+    shared
 }
 fn serialize<T: serde::Serialize>(value: T) -> Result<Value, DispatchError> {
     serde_json::to_value(value).map_err(|_| {

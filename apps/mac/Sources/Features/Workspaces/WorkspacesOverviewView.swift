@@ -28,7 +28,7 @@ struct WorkspacesOverviewView: View {
     var sessionsIn: (String) -> Int
     /// The teams a local folder is shared into, by organization name. Empty
     /// for a folder nobody else can see.
-    var sharedWith: (String) -> [String] = { _ in [] }
+    var sharedWith: (WorkspaceFolder) -> [String] = { _ in [] }
     var onOpenFolder: (String) -> Void
     var onAdd: () -> Void
 
@@ -207,7 +207,7 @@ struct WorkspacesOverviewView: View {
                 title: folder.name,
                 subtitle: machineLine(for: folder),
                 mark: "mark_archive",
-                accessory: folder.isRemote || sharedWith(folder.id).isEmpty ? nil : AnyView(teamBadges(folder)),
+                accessory: sharedWith(folder).isEmpty ? nil : AnyView(teamBadges(folder)),
                 fillsHeight: true
             ) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -271,18 +271,8 @@ struct WorkspacesOverviewView: View {
 
     /// Which teams can open this folder, in the accent the Teams screens
     /// use, so a shared folder is told apart at a glance.
-    @ViewBuilder private func teamBadges(_ folder: WorkspaceFolder) -> some View {
-        if !folder.isRemote {
-            ForEach(Array(Set(sharedWith(folder.id))).sorted(), id: \.self) { team in
-                Label(team, systemImage: "person.2.fill")
-                    .font(Theme.font(10, weight: .semibold)).lineLimit(1)
-                    .foregroundStyle(Theme.accent)
-                    .padding(.horizontal, Theme.Space.s).padding(.vertical, 2)
-                    .background(Theme.accentSoft, in: Capsule())
-                    .help(L10n.text("common.teams.shared_with_team", team))
-                    .accessibilityLabel(L10n.text("common.teams.shared_with_team", team))
-            }
-        }
+    private func teamBadges(_ folder: WorkspaceFolder) -> some View {
+        TeamFolderBadges(names: sharedWith(folder))
     }
 
     private func machineLine(for folder: WorkspaceFolder) -> String? {

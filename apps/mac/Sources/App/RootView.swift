@@ -508,6 +508,10 @@ struct RootView: View {
             }
         }
         .environment(\.hostReady, launch.hostReady)
+        .environment(\.openTeamChat) { share, workspace in
+            teams.openSharedChat(id: share, workspace: workspace)
+            navigate(to: .global(.team))
+        }
         .task(id: teamAccountOwner) {
             await BridgeLaunch.wait()
             guard !Task.isCancelled else { return }
@@ -3251,9 +3255,7 @@ struct RootView: View {
                 directoryError: workspaces.directoryError,
                 onRetry: { Task { await workspaces.loadLocal() } },
                 sessionsIn: { id in terminals.sessions(in: id).filter(\.alive).count },
-                sharedWith: { id in teams.localProjects(for: id).map { publication in
-                    teams.organizations.first { $0.id == publication.organizationId }?.name ?? L10n.text("common.teams.title")
-                } },
+                sharedWith: { teams.sharedOrganizations(for: $0) },
                 onOpenFolder: { selectWorkspace($0) },
                 onAdd: { workspaces.requestAdd() }
             )

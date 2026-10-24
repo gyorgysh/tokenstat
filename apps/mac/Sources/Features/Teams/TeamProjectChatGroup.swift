@@ -90,6 +90,10 @@ struct TeamProjectChatGroup: View {
             store.chatReadState.refresh()
             if more { hasLoadedMore = true }
             shares = more ? shares + rows.filter { next in !shares.contains { $0.id == next.id } } : rows
+            if let pending = store.pendingShareId, let share = shares.first(where: { $0.id == pending }) {
+                store.pendingShareId = nil
+                open(share)
+            }
             cursor = nextCursor; offset = nextOffset; loaded = true; error = nil
         } catch is CancellationError {} catch {
             if request == id, store.mutationContext == context { self.error = error.localizedDescription }
