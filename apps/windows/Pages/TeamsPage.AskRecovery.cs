@@ -16,7 +16,7 @@ internal sealed partial class TeamsPage
         var view = _view; var scope = _scope!.DeepClone(); var session = _session; var generation = AppServices.AccountGeneration;
         bool Current() => IsLoaded && _view == view && AppServices.AccountGeneration == generation
             && _scope?.ToJsonString() == scope.ToJsonString() && _session == session && _person == person;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (Current()) await LoadAsync(); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (Current()) await LoadAsync(); });
         Note(L10n.Text("common.teams.saved_asks_detail"));
         var rows = new StackPanel { Spacing = Theme.SpaceM }; _body.Children.Add(rows);
         var note = TeamText(""); _body.Children.Add(note);

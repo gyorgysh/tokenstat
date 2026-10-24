@@ -12,7 +12,7 @@ internal sealed partial class TeamsPage
     private async Task ShowTeamPublisherSettingsAsync(TeamPublisherModel model, JsonObject repository, JsonObject publication, Func<Task> back)
     {
         Reset(L10n.Text("common.teams.project_settings")); var view = _view; var checkout = Text(publication, "id");
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await back(); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await back(); });
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.agent_runs"), ActionIcon.Run, async (_, _) => { if (IsLoaded && _view == view) await ShowTeamAgentGrantsAsync(model, repository, publication, back); }));
         JsonNode result;
         try { result = await model.Call("teams.lanes.get", new() { ["checkout"] = checkout }); }
@@ -100,7 +100,7 @@ internal sealed partial class TeamsPage
     private async Task ShowTeamAgentGrantsAsync(TeamPublisherModel model, JsonObject repository, JsonObject publication, Func<Task> back)
     {
         Reset(L10n.Text("common.teams.agent_runs")); var view = _view; var checkout = Text(publication, "id");
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await back(); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await back(); });
         try
         {
             var answer = await model.Directory("execution.list", new() { ["organization"] = model.Organization, ["checkout"] = checkout });
@@ -184,7 +184,7 @@ internal sealed partial class TeamsPage
     {
         Reset(L10n.Text("common.teams.choose_device")); var view = _view; var checkout = Text(publication, "id");
         Task Return() => ShowTeamAgentGrantsAsync(model, repository, publication, back);
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await Return(); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await Return(); });
         try
         {
             var answer = await model.Directory("execution.devices", new() { ["organization"] = model.Organization, ["checkout"] = checkout, ["user"] = Text(member, "id") });

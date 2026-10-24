@@ -24,17 +24,16 @@ internal sealed partial class TeamsPage
     {
         var origin = Format.Text(_scope, "origin"); var person = _person;
         if (origin.Length == 0 || string.IsNullOrEmpty(person)) return;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.comment_drafts"), ActionIcon.History,
-            async (_, _) => await ShowDraftsAsync(origin, person)));
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.saved_asks"), ActionIcon.Restore,
-            async (_, _) => await ShowSavedAsksAsync(origin, person)));
+        Tool(ActionIcon.History, L10n.Text("common.teams.comment_drafts"), async (_, _) => await ShowDraftsAsync(origin, person));
+        Tool(ActionIcon.Restore, L10n.Text("common.teams.saved_asks"), async (_, _) => await ShowSavedAsksAsync(origin, person));
     }
-    private async Task AddCommentComposerAsync(JsonObject target, string title, string computer, int view)
+    /// The comment side of the composer well. The caller docks it.
+    private async Task<(StackPanel Panel, TeamCommentModel Model)?> AddCommentComposerAsync(JsonObject target, string title, string computer, int view)
     {
         var checkout = target.DeepClone().AsObject(); checkout.Remove("share");
         var host = _checkoutHosts.GetValueOrDefault(checkout.ToJsonString());
         var origin = Format.Text(_scope, "origin"); var person = _person;
-        if (string.IsNullOrEmpty(host) || origin.Length == 0 || string.IsNullOrEmpty(person)) { Note(L10n.Text("common.teams.comment_save_failed"), true); return; }
+        if (string.IsNullOrEmpty(host) || origin.Length == 0 || string.IsNullOrEmpty(person)) { Note(L10n.Text("common.teams.comment_save_failed"), true); return null; }
         var binding = new TeamCommentTarget(origin, person, Format.Text(target, "organization"), Format.Text(target, "repository"), Format.Text(target, "checkout"), Format.Text(target, "share"), host);
         if (!_comments.TryGetValue(binding, out var model))
         {
@@ -51,13 +50,18 @@ internal sealed partial class TeamsPage
             _comments[binding] = model = new(TeamCommentDraftStore.Shared, binding, Label(title) + " · " + Label(computer), BoundCall);
         }
         await model.RestoreAsync();
-        if (!IsLoaded || _view != view) return;
+        if (!IsLoaded || _view != view) return null;
         _currentComment = model;
         var panel = new StackPanel { Spacing = Theme.SpaceS };
-        var box = new TextBox { Text = model.Text, PlaceholderText = L10n.Text("common.teams.comment_placeholder"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
-        var note = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        var recovered = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
-        Button? send = null; Button? check = null;
+        // The well is the box, as in the main composer, so the field draws none.
+        var box = new TextBox { Text = model.Text, PlaceholderText = L10n.Text("common.teams.comment_placeholder"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
+            BorderThickness = new Thickness(0), Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), MinHeight = 40, MaxHeight = 180 };
+        box.Resources["TextControlBackgroundFocused"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        box.Resources["TextControlBackgroundPointerOver"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+        var note = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        var recovered = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, FontSize = 12 };
+        Button? send = null; Button? check = null; Button? copy = null; Button? reload = null;
         void Update()
         {
             if (!IsLoaded || _view != view) return;
@@ -69,26 +73,34 @@ internal sealed partial class TeamsPage
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(send, sendTitle);
             check!.Visibility = model.Pending ? Visibility.Visible : Visibility.Collapsed;
             check.IsEnabled = !model.Busy;
+            // Recovery tools only when there is writing to recover.
+            var recovering = model.RecoveredText is not null || model.Error is not null || !model.Loaded;
+            if (copy is not null) copy.Visibility = recovering ? Visibility.Visible : Visibility.Collapsed;
+            if (reload is not null) reload.Visibility = recovering ? Visibility.Visible : Visibility.Collapsed;
             var messages = new[] { model.Error, model.Status }.Where(s => s is not null).Select(s => CommentMessage(s!));
             note.Text = string.Join("\n", messages);
             if (model.TooLong) note.Text += "\n" + L10n.Text("common.teams.comment_too_long");
             recovered.Text = model.RecoveredText is null ? "" : L10n.Text("common.teams.unsaved_comment_copy") + "\n" + model.RecoveredText;
         }
         box.TextChanged += (_, _) => { if (_view == view && box.Text != model.Text) { model.Edit(box.Text); Update(); } };
-        send = ActionIconGlyph.Button(L10n.Text("common.teams.post_comment"), ActionIcon.Comment, async (_, _) => {
+        send = Buttons.Primary(L10n.Text("common.teams.post_comment"), ActionIcon.Send, async (_, _) => {
             var action = model.SendAsync(); Update(); await action; Update();
             if (IsLoaded && _view == view && model.Status == "comment_posted" && !_readingEarlier) await ShowChatAsync(target, title, computer);
         });
-        check = ActionIconGlyph.Button(L10n.Text("common.teams.check_delivery"), ActionIcon.Refresh, async (_, _) => {
+        check = Buttons.Secondary(L10n.Text("common.teams.check_delivery"), ActionIcon.Refresh, async (_, _) => {
             var action = model.CheckAsync(); Update(); await action; Update();
             if (IsLoaded && _view == view && model.Status == "comment_posted" && !_readingEarlier) await ShowChatAsync(target, title, computer);
         });
+        // Who reads it on the leading side, the buttons on the trailing side,
+        // the way the main composer's utility row is laid out.
+        var audience = new TextBlock { Text = L10n.Text("common.teams.comment_audience"), FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+        copy = Buttons.Secondary(L10n.Text("common.teams.copy_draft"), ActionIcon.Copy, (_, _) => CopyDraft(model.RecoveredText ?? model.Text), small: true);
+        reload = Buttons.Secondary(L10n.Text("common.teams.load_saved_draft"), ActionIcon.Refresh, async (_, _) => { var action = model.ReloadAsync(); Update(); await action; Update(); }, small: true);
         panel.Children.Add(box); panel.Children.Add(note); panel.Children.Add(recovered);
-        panel.Children.Add(send); panel.Children.Add(check);
-        panel.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.copy_draft"), ActionIcon.Copy, (_, _) => CopyDraft(model.RecoveredText ?? model.Text)));
-        panel.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.load_saved_draft"), ActionIcon.Refresh, async (_, _) => { var action = model.ReloadAsync(); Update(); await action; Update(); }));
+        panel.Children.Add(Row(audience, copy!, reload!, check!, send!));
         model.Changed = Update;
-        _body.Children.Add(panel); Update();
+        Update();
+        return (panel, model);
     }
     private static void CopyDraft(string text)
     {
@@ -98,7 +110,7 @@ internal sealed partial class TeamsPage
     private async Task ShowDraftsAsync(string origin, string person, string? after = null)
     {
         Reset(L10n.Text("common.teams.comment_drafts")); var view = _view;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => await LoadAsync()));
+        NavBack(L10n.Text("common.back"), async (_, _) => await LoadAsync());
         Note(L10n.Text("common.teams.comment_drafts_detail"));
         try
         {

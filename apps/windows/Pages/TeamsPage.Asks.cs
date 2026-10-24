@@ -48,15 +48,21 @@ internal sealed partial class TeamsPage
         var panel = new StackPanel { Spacing = Theme.SpaceS };
         var note = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        var detail = new TextBlock { Text = L10n.Text("common.teams.ask_detail", computer), TextWrapping = TextWrapping.Wrap, Opacity = 0.75 };
-        var question = new TextBox { Text = model.Text, PlaceholderText = L10n.Text("common.teams.ask_placeholder"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
+        var detail = new TextBlock { Text = L10n.Text("common.teams.ask_runs_on", computer), FontSize = 12, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        ToolTipService.SetToolTip(detail, L10n.Text("common.teams.ask_detail", computer));
+        var question = new TextBox { Text = model.Text, PlaceholderText = L10n.Text("common.teams.ask_placeholder"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
+            BorderThickness = new Thickness(0), Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), MinHeight = 40, MaxHeight = 180 };
+        question.Resources["TextControlBackgroundFocused"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        question.Resources["TextControlBackgroundPointerOver"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        question.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
         Button? ask = null;
-        ask = ActionIconGlyph.Button(L10n.Text("common.teams.ask"), ActionIcon.Run, async (_, _) => {
+        ask = Buttons.Primary(L10n.Text("common.teams.ask"), ActionIcon.Run, async (_, _) => {
             await model.AskAsync();
             if (IsLoaded && _view == view) await ShowChatAsync(target, title, computer);
         });
-        var stop = ActionIconGlyph.Button(L10n.Text("common.teams.stop_agent"), ActionIcon.Stop, async (_, _) => await model.StopAsync());
-        var retry = ActionIconGlyph.Button(L10n.Text("common.teams.load_saved_ask"), ActionIcon.Refresh, async (_, _) => await model.RestoreAsync(true));
+        var stop = Buttons.Destructive(L10n.Text("common.teams.stop_agent"), ActionIcon.Stop, async (_, _) => await model.StopAsync(), small: true);
+        var retry = Buttons.Secondary(L10n.Text("common.teams.load_saved_ask"), ActionIcon.Refresh, async (_, _) => await model.RestoreAsync(true), small: true);
+        Grid? running = null; Grid? footer = null;
         void Update()
         {
             if (!IsLoaded || _view != view) return;
@@ -75,9 +81,15 @@ internal sealed partial class TeamsPage
             stop.IsEnabled = !model.Stopping;
             retry.Visibility = model.Fence is null && model.Error is not null ? Visibility.Visible : Visibility.Collapsed;
             retry.IsEnabled = !model.Busy;
+            if (running is not null) running.Visibility = status.Visibility;
+            if (footer is not null) footer.Visibility = question.Visibility == Visibility.Visible || retry.Visibility == Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
         }
         question.TextChanged += (_, _) => { if (_view == view && !model.Pending && !model.Busy && question.Text != model.Text) { model.Text = question.Text; Update(); } };
-        panel.Children.Add(note); panel.Children.Add(status); panel.Children.Add(stop); panel.Children.Add(question); panel.Children.Add(ask); panel.Children.Add(detail); panel.Children.Add(retry);
+        // Running state on one line with Stop at its end; otherwise the field,
+        // then where it runs on the leading side and Ask on the trailing side.
+        status.Foreground = Theme.AccentBrush; status.VerticalAlignment = VerticalAlignment.Center;
+        running = Row(status, stop); footer = Row(detail, retry, ask);
+        panel.Children.Add(note); panel.Children.Add(running); panel.Children.Add(question); panel.Children.Add(footer);
         model.Changed = Update;
         Update();
         return (panel, value => { allowed = value; Update(); });

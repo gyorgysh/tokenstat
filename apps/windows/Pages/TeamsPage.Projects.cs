@@ -13,7 +13,7 @@ internal sealed partial class TeamsPage
     private async Task ShowFocusedTeamProjectAsync(JsonObject repository)
     {
         Reset(L10n.Text("common.teams.shared_projects")); var view = _view;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await ShowAllTeamProjectsAsync(DirectoryClient()); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await ShowAllTeamProjectsAsync(DirectoryClient()); });
         try
         {
             var details = await DirectoryClient().Request("repositories.get", new() { ["organization"] = Text(repository, "organizationId"), ["repository"] = Text(repository, "id") });
@@ -25,7 +25,7 @@ internal sealed partial class TeamsPage
             if (IsLoaded && _view == view) { Note(TeamError(error), true); _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh, async (_, _) => { if (IsLoaded && _view == view) await ShowFocusedTeamProjectAsync(repository); })); } return;
         }
         Reset(Text(repository, "name")); view = _view;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.shared_projects"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await ShowAllTeamProjectsAsync(DirectoryClient()); }));
+        NavBack(L10n.Text("common.teams.shared_projects"), async (_, _) => { if (IsLoaded && _view == view) await ShowAllTeamProjectsAsync(DirectoryClient()); });
         Note(L10n.Text("common.teams.all_teammates")); Note(L10n.Text("common.teams.shared_project_chats_detail"));
         await AddRepositoryAsync(Text(repository, "organizationId"), repository);
     }
@@ -44,14 +44,15 @@ internal sealed partial class TeamsPage
             }
             localKnown = true;
         } catch { }
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.manage_teams"), ActionIcon.Settings, async (_, _) => { if (IsLoaded && _view == view) await LoadAsync(); }));
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => {
+        Trail(Buttons.Secondary(L10n.Text("common.teams.manage_teams"), ActionIcon.Settings, async (_, _) => { if (IsLoaded && _view == view) await LoadAsync(); }));
+        Tool(ActionIcon.Refresh, L10n.Text("common.refresh"), async (_, _) => {
             if (!IsLoaded || _view != view) return;
             _startSharedProjects = true; await LoadAsync();
-        }));
+        });
         foreach (var organization in _organizations)
         {
-            var group = TeamCard(Text(organization, "name")); _body.Children.Add(group);
+            var group = new StackPanel { Spacing = Theme.SpaceS }; var projects = Rows(); group.Children.Add(projects);
+            Section(Text(organization, "name"), group, null, ActionIcon.Source);
             var next = (int?)0; var seen = new HashSet<string>(); var busy = false; Button? more = null; var error = TeamText(""); group.Children.Add(error);
             async Task LoadMore()
             {
@@ -63,9 +64,10 @@ internal sealed partial class TeamsPage
                     Require(page.Rows.All(repo => Text(repo, "organizationId") == Text(organization, "id")));
                     foreach (var repo in page.Rows.Where(repo => Text(repo, "role") is "viewer" or "contributor" or "maintainer")) if (seen.Add(Text(repo, "id")))
                     {
-                        var card = TeamCard(Text(repo, "name"), TeamRole(Text(repo, "role")));
-                        if (localKnown) card.Children.Add(TeamText(L10n.Text(localProjects.Contains(Text(repo, "organizationId") + "/" + Text(repo, "id")) ? "common.teams.shared_from_this_computer" : "common.teams.shared_with_you")));
-                        card.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.open_shared_project"), ActionIcon.Connect, async (_, _) => { if (IsLoaded && _view == view) await ShowFocusedTeamProjectAsync(repo); })); group.Children.Add(card);
+                        var where = localKnown ? L10n.Text(localProjects.Contains(Text(repo, "organizationId") + "/" + Text(repo, "id")) ? "common.teams.shared_from_this_computer" : "common.teams.shared_with_you") : null;
+                        var mark = ActionIcon.Source.Mark(16); ((FrameworkElement)mark).Opacity = 0.8;
+                        var open = Buttons.Secondary(L10n.Text("common.teams.open_shared_project"), ActionIcon.Connect, async (_, _) => { if (IsLoaded && _view == view) await ShowFocusedTeamProjectAsync(repo); }, small: true);
+                        AddRow(projects, Row(Marked(mark, Labelled(Text(repo, "name"), where)), Badge(TeamRole(Text(repo, "role"))), open));
                     }
                     next = page.Next; error.Text = seen.Count == 0 && next is null ? L10n.Text("common.teams.no_shared_projects") : "";
                     more.Visibility = next is null ? Visibility.Collapsed : Visibility.Visible;

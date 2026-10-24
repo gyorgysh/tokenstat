@@ -17,7 +17,7 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal sealed partial class TeamsPage : Page
 {
-    private readonly StackPanel _body = new() { Spacing = Theme.SpaceM, Padding = new Thickness(24), MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly StackPanel _body = new() { Spacing = Theme.SpaceM };
     private readonly Func<string, JsonObject?, Task<JsonNode>> _call;
     private JsonObject? _scope;
     private string? _session;
@@ -28,6 +28,8 @@ internal sealed partial class TeamsPage : Page
     // stops instead of drawing over the one now shown.
     private int _view;
     private int _attachmentRevision;
+    // Which side of the shared chat composer was last used: comment or ask.
+    private string _composerMode = "comment";
     private bool _attached;
     // A result to show once the reload after Land or Discard has drawn.
     private string? _flash;
@@ -62,7 +64,7 @@ internal sealed partial class TeamsPage : Page
         _folderShareRequest = (JsonObject?)folder?.DeepClone(); _initialProject = (JsonObject?)initialProject?.DeepClone(); _startSharedProjects = sharedProjects;
         _askStorage = askStorage ?? TeamAskRecoveryStore.Shared;
         _call = call ?? ((method, fields) => AppServices.Host.CallAsync(method, fields));
-        Content = new ScrollViewer { Content = _body };
+        Content = BuildRoot();
         Loaded += (_, _) => ReconcileAttachment();
         Unloaded += (_, _) => ReconcileAttachment();
     }
@@ -121,7 +123,10 @@ internal sealed partial class TeamsPage : Page
         _view++;
         _currentComment = null;
         _body.Children.Clear();
-        _body.Children.Add(new TextBlock { Text = title, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        _dockStack.Children.Clear();
+        if (_dock is not null) _dock.Visibility = Visibility.Collapsed;
+        _title.Text = title;
+        _body.Children.Add(NavigationRow());
     }
 
     private void Note(string text, bool warning = false) => _body.Children.Add(new TextBlock
@@ -171,8 +176,10 @@ internal sealed partial class TeamsPage : Page
             if (page.Rows.Count == 0 && page.Next is null)
             {
                 AddTeamDirectoryActions();
-                Note(L10n.Text("common.teams.no_organizations"));
-                Note(L10n.Text("common.teams.no_organizations_detail"));
+                var empty = new StackPanel { Spacing = Theme.SpaceXs };
+                empty.Children.Add(new TextBlock { Text = L10n.Text("common.teams.no_organizations"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+                empty.Children.Add(new TextBlock { Text = L10n.Text("common.teams.no_organizations_detail"), Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
+                Section(L10n.Text("common.teams.organizations"), empty, L10n.Text("common.teams.hub_detail"));
                 return;
             }
             var selected = page.Rows.FirstOrDefault(row => Format.Text(row, "id") == Format.Text(_organization, "id"));
@@ -213,12 +220,17 @@ internal sealed partial class TeamsPage : Page
         Reset(L10n.Text("common.teams.title")); AddDraftsButton();
         AddTeamDirectoryActions();
         var view = _view;
+        var rows = Rows();
         foreach (var organization in _organizations)
         {
             var chosen = organization;
-            _body.Children.Add(ActionIconGlyph.Button(Format.Text(organization, "name"), ActionIcon.Next,
-                async (_, _) => { if (IsLoaded && _view == view) { _organization = chosen; await LoadAsync(); } }));
+            var name = Format.Text(organization, "name");
+            var slug = Format.Text(organization, "slug");
+            var text = Labelled(name, slug.Length > 0 ? "@" + slug : null);
+            var line = Marked(Initial(name), text, Badge(TeamRole(Format.Text(organization, "role"))));
+            AddRow(rows, OpenRow(line, name, async (_, _) => { if (IsLoaded && _view == view) { _organization = chosen; await LoadAsync(); } }));
         }
+        Section(L10n.Text("common.teams.organizations"), rows, L10n.Text("common.teams.hub_detail"));
         if (_organizationsNext is not { } offset) return;
         Button? more = null;
         more = ActionIconGlyph.Button(L10n.Text("common.teams.more_organizations"), ActionIcon.More, async (_, _) =>
@@ -264,7 +276,7 @@ internal sealed partial class TeamsPage : Page
             }
             catch (Exception error) { if (IsLoaded && _view == view) Note(error.Message, true); }
         }));
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => await LoadAsync()));
+        Tool(ActionIcon.Refresh, L10n.Text("common.refresh"), async (_, _) => await LoadAsync());
     }
 
     private async Task ShowRepositoriesAsync(JsonObject organization, bool canSwitch)
@@ -272,13 +284,13 @@ internal sealed partial class TeamsPage : Page
         var orgId = Format.Text(organization, "id");
         var view = _view;
         var client = DirectoryClient();
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.organization_settings"), ActionIcon.Settings, async (_, _) => {
+        AddTeamDirectoryActions();
+        Trail(Buttons.Secondary(L10n.Text("common.teams.organization_settings"), ActionIcon.Settings, async (_, _) => {
             if (IsLoaded && _view == view) await ShowTeamManagementAsync(client, new(client, organization));
         }));
-        AddTeamDirectoryActions();
         if (_flash is { } flash) { _flash = null; Note(flash); }
         if (canSwitch)
-            _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.organizations"), ActionIcon.Back, async (_, _) => { _organization = null; await LoadAsync(); }));
+            NavBack(L10n.Text("common.teams.organizations"), async (_, _) => { _organization = null; await LoadAsync(); });
         int? next = 0;
         var seen = new HashSet<string>();
         var loading = false;
@@ -324,8 +336,12 @@ internal sealed partial class TeamsPage : Page
     {
         var view = _view;
         var repoId = Format.Text(repo, "id");
-        var card = new StackPanel { Spacing = Theme.SpaceS, Padding = new Thickness(16), Background = Theme.PanelBrush, CornerRadius = new CornerRadius(10) };
-        _body.Children.Add(card);
+        var card = new StackPanel { Spacing = Theme.SpaceS };
+        var roleText = repo["role"] is null ? L10n.Text("common.teams.no_access") : TeamRole(Format.Text(repo, "role"));
+        var settings = _canPublish ? Buttons.Secondary(L10n.Text("common.teams.project_settings"), ActionIcon.Settings, async (_, _) => {
+            if (IsLoaded && _view == view) await ShowTeamPublisherAsync(repo);
+        }, small: true) : null;
+        _body.Children.Add(Chrome.Card(Format.Text(repo, "name"), card, roleText, settings, Chrome.CardMark(ActionIcon.Source)));
         List<JsonObject> checkouts = [];
         var lanes = new Dictionary<string, List<JsonObject>>();
         var shares = new Dictionary<string, List<JsonObject>>();
@@ -385,11 +401,7 @@ internal sealed partial class TeamsPage : Page
         {
             if (!Current()) return;
             card.Children.Clear();
-            card.Children.Add(new TextBlock { Text = Format.Text(repo, "name"), FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            if (_canPublish) card.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.project_settings"), ActionIcon.Settings, async (_, _) => {
-                if (Current()) await ShowTeamPublisherAsync(repo);
-            }));
-            if (repo["role"] is null) { card.Children.Add(new TextBlock { Text = L10n.Text("common.teams.no_access"), Opacity = 0.7 }); return; }
+            if (repo["role"] is null) return;
             if (error is not null) card.Children.Add(new TextBlock { Text = error, TextWrapping = TextWrapping.Wrap });
             if (loaded && checkouts.Count == 0) card.Children.Add(new TextBlock { Text = L10n.Text("common.teams.repository_not_shared"), Opacity = 0.7 });
             if (loading) card.Children.Add(new ProgressRing { IsActive = true, Width = 20, Height = 20 });
@@ -399,7 +411,8 @@ internal sealed partial class TeamsPage : Page
             {
                 var id = Format.Text(checkout, "id");
                 var computer = Format.Text(checkout, "deviceName", L10n.Text("common.teams.computer"));
-                card.Children.Add(new TextBlock { Text = computer, Opacity = 0.8, Margin = new Thickness(0, 6, 0, 0) });
+                var device = ActionIcon.Computer.Mark(13); device.Opacity = 0.7;
+                card.Children.Add(Marked(device, new TextBlock { Text = computer, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center }));
                 if (failures.TryGetValue(id, out var failure))
                 {
                     card.Children.Add(new TextBlock { Text = failure, TextWrapping = TextWrapping.Wrap });
@@ -411,12 +424,16 @@ internal sealed partial class TeamsPage : Page
                     retry.IsEnabled = !loading; card.Children.Add(retry);
                 }
                 foreach (var lane in lanes.GetValueOrDefault(id) ?? []) card.Children.Add(LaneRow(orgId, repoId, id, lane, all));
+                var chats = Rows();
                 foreach (var share in shares.GetValueOrDefault(id) ?? [])
                 {
                     var shareId = Format.Text(share, "id"); var title = Format.Text(share, "title");
                     if (title.Length == 0) title = L10n.Text("common.teams.shared_chat");
-                    card.Children.Add(ActionIconGlyph.Button(title, ActionIcon.Comment, async (_, _) => await ShowChatAsync(Target(orgId, repoId, id, shareId), title, computer)));
+                    var glyph = ActionIcon.Comment.Mark(13);
+                    AddRow(chats, OpenRow(Marked(glyph, new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center }), title,
+                        async (_, _) => await ShowChatAsync(Target(orgId, repoId, id, shareId), title, computer)));
                 }
+                if (chats.Children.Count > 0) card.Children.Add(chats);
                 if (cursors.ContainsKey(id))
                 {
                     var more = ActionIconGlyph.Button(L10n.Text("common.teams.load_more"), ActionIcon.More, async (_, _) => {
@@ -443,10 +460,11 @@ internal sealed partial class TeamsPage : Page
     private UIElement NewChat(string orgId, string repoId, string checkout, string computer)
     {
         var view = _view;
-        var panel = new StackPanel { Spacing = Theme.SpaceXs, Margin = new Thickness(0, 4, 0, 0) };
+        var panel = new StackPanel { Spacing = Theme.SpaceS, Margin = new Thickness(0, Theme.SpaceXs, 0, 0), Padding = new Thickness(Theme.SpaceM),
+            Background = Theme.BackgroundBrush, BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12) };
         var box = new TextBox { Header = L10n.Text("common.teams.new_chat_title"), PlaceholderText = L10n.Text("common.teams.new_chat_placeholder") };
         var key = Target(orgId, repoId, checkout).ToJsonString();
-        var agent = new ComboBox { Header = L10n.Text("common.teams.agent"), SelectedValuePath = "Tag" };
+        var agent = new ComboBox { Header = L10n.Text("common.teams.agent"), SelectedValuePath = "Tag", MinWidth = 200 };
         agent.Items.Add(new ComboBoxItem { Content = L10n.Text("common.local_provider_use_default"), Tag = "" });
         foreach (var backend in _newChatBackendChoices.GetValueOrDefault(key) ?? [])
             agent.Items.Add(new ComboBoxItem { Content = backend.Label, Tag = backend.Id });
@@ -459,7 +477,7 @@ internal sealed partial class TeamsPage : Page
         box.Text = _newChatWriting.GetValueOrDefault(key) ?? "";
         box.TextChanged += (_, _) => { if (_view == view) _newChatWriting[key] = box.Text; };
         Button? start = null;
-        start = ActionIconGlyph.Button(L10n.Text("common.teams.new_chat"), ActionIcon.Create, async (_, _) =>
+        start = Buttons.Primary(L10n.Text("common.teams.new_chat"), ActionIcon.Create, async (_, _) =>
         {
             if (!IsLoaded || _view != view) return;
             var title = box.Text.Trim();
@@ -492,17 +510,26 @@ internal sealed partial class TeamsPage : Page
                 agent.IsEnabled = true;
             }
         });
-        panel.Children.Add(agent);
-        panel.Children.Add(box);
-        panel.Children.Add(start);
-        panel.Children.Add(new TextBlock { Text = L10n.Text("common.teams.new_chat_detail", computer), Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
+        // Title, agent and Start side by side, the way the Mac lays out the
+        // same card, with what it does underneath.
+        var fields = new Grid { ColumnSpacing = Theme.SpaceS };
+        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        fields.Children.Add(box);
+        Grid.SetColumn(agent, 1); fields.Children.Add(agent);
+        start.VerticalAlignment = VerticalAlignment.Bottom;
+        Grid.SetColumn(start, 2); fields.Children.Add(start);
+        panel.Children.Add(fields);
+        panel.Children.Add(new TextBlock { Text = L10n.Text("common.teams.new_chat_detail", computer), FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
         return panel;
     }
 
     private UIElement LaneRow(string orgId, string repoId, string checkout, JsonObject lane, List<JsonObject> all)
     {
         var view = _view;
-        var row = new StackPanel { Spacing = Theme.SpaceXs, Padding = new Thickness(10), Background = Theme.ControlSeatBrush, CornerRadius = new CornerRadius(8) };
+        var row = new StackPanel { Spacing = Theme.SpaceXs, Padding = new Thickness(Theme.SpaceM), Background = Theme.BackgroundBrush,
+            BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10) };
         var state = Format.Text(lane, "state");
         var asker = Format.Text(lane["askedBy"], "name");
         var files = (lane["files"] as JsonArray)?.Select(f => f?.ToString() ?? "").ToHashSet() ?? [];
@@ -540,8 +567,8 @@ internal sealed partial class TeamsPage : Page
                 catch (Exception error) { if (!IsLoaded || _view != view) return; _flash = error.Message; }
                 await LoadAsync();
             }
-            if (state == "ready") actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.land"), ActionIcon.Merge, async (_, _) => await Act("team.lanes.land")));
-            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.discard"), ActionIcon.Delete, async (_, _) => await Act("team.lanes.discard")));
+            if (state == "ready") actions.Children.Add(Buttons.Primary(L10n.Text("common.teams.land"), ActionIcon.Merge, async (_, _) => await Act("team.lanes.land"), small: true));
+            actions.Children.Add(Buttons.Destructive(L10n.Text("common.teams.discard"), ActionIcon.Delete, async (_, _) => await Act("team.lanes.discard"), small: true));
             row.Children.Add(actions);
         }
         return row;
@@ -555,12 +582,12 @@ internal sealed partial class TeamsPage : Page
         var loading = true;
         _readingEarlier = earlierCursor is not null;
         var previous = _historyTarget == targetKey ? _history : new TeamHistoryWindow([]);
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => await LoadAsync()));
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => await ShowChatAsync(target, title, computer)));
+        NavBack(L10n.Text("common.back"), async (_, _) => await LoadAsync());
+        Tool(ActionIcon.Refresh, L10n.Text("common.refresh"), async (_, _) => await ShowChatAsync(target, title, computer));
         var askModel = await AskModelAsync(target, title, computer);
         if (!IsLoaded || _view != view) return false;
         (StackPanel Panel, Action<bool> Allow)? askControls = askModel is null ? null : AskControls(askModel, target, title, computer, view);
-        if (askControls is { } initial) _body.Children.Add(initial.Panel);
+        if (askControls is { } initial) Dock(initial.Panel);
         if (askModel?.Fence is not null) _ = WatchAskAsync(askModel, target, title, computer, view, () => !loading && !_readingEarlier && CommentIdle);
         JsonNode details, page;
         List<TeamBlock> transcript;
@@ -597,13 +624,27 @@ internal sealed partial class TeamsPage : Page
         if (_history.Truncated) Note(L10n.Text("common.teams.shared_history_window"));
         foreach (var block in transcript) _body.Children.Add(TranscriptRow(target, block));
         var chat = details["chat"];
-        if (Format.Flag(chat, "allowsComments")) await AddCommentComposerAsync(target, title, computer, view);
+        var comment = Format.Flag(chat, "allowsComments") ? await AddCommentComposerAsync(target, title, computer, view) : null;
         if (!IsLoaded || _view != view) return false;
+        if (comment is { } written) _dockStack.Children.Insert(0, written.Panel);
+        var runs = Format.Flag(chat, "allowsAgentRuns");
         if (askControls is { } controls)
         {
-            _body.Children.Remove(controls.Panel); _body.Children.Add(controls.Panel);
-            controls.Allow(Format.Flag(chat, "allowsAgentRuns"));
+            // One well, one thing to write at a time, as on the Mac: a switch
+            // picks Comment or Ask agent when the chat allows both. A running
+            // agent or a request or comment waiting on delivery keeps its own
+            // side in view, so Stop and Check are never behind the switch.
+            if (comment is { } both && runs && askModel!.Fence is null && !askModel.Pending && !both.Model.Pending)
+            {
+                var mode = _composerMode;
+                void Apply() { both.Panel.Visibility = mode == "comment" ? Visibility.Visible : Visibility.Collapsed; controls.Allow(mode == "ask"); }
+                _dockStack.Children.Insert(0, TeamTabs([("comment", L10n.Text("common.teams.composer_comment")), ("ask", L10n.Text("common.teams.composer_ask"))], mode,
+                    choice => { mode = choice; _composerMode = choice; Apply(); return Task.CompletedTask; }));
+                Apply();
+            }
+            else controls.Allow(runs);
         }
+        if (_dockStack.Children.Count > 0 && _dock is not null) _dock.Visibility = Visibility.Visible;
         loading = false;
         if (!_readingEarlier && askModel?.Fence is null) _ = KeepCurrentAsync(target, title, computer, view, _body.Children.OfType<TextBox>().ToList(), askModel);
         return true;

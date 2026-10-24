@@ -21,7 +21,7 @@ internal sealed partial class TeamsPage
         catch (Exception error) {
             if (!IsLoaded || _view != view) return; Note(TeamError(error), true);
             _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh, async (_, _) => { if (IsLoaded && _view == view) await ShowTeamChatSelectionAsync(publisher, repository, publication, back); }));
-            _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await back(); })); return;
+            NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await back(); }); return;
         }
         if (IsLoaded && _view == view) DrawChatSelection(publisher, repository, publication, back, model);
     }
@@ -35,7 +35,7 @@ internal sealed partial class TeamsPage
             catch (Exception e) { failure = TeamError(e); try { await model.LoadSaved(); } catch { if (IsLoaded && _view == pending) { await ShowTeamChatSelectionAsync(publisher, repository, publication, back); return; } } }
             if (IsLoaded && _view == pending) DrawChatSelection(publisher, repository, publication, back, model, failure);
         }
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await back(); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await back(); });
         if (error is not null) Note(error, true);
         if (model.Selection is not { } selection)
         {
@@ -99,7 +99,7 @@ internal sealed partial class TeamsPage
             if (Environment.GetEnvironmentVariable("TOKENSTAT_SCREEN_FIXTURE") is not null)
                 Console.Error.WriteLine($"Team history fixture phase={stage}; type={error.GetType().Name}; HRESULT=0x{error.HResult:x8}");
             if (!IsLoaded || _view != view) return; Note(TeamError(error), true);
-            _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await back(); }));
+            NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await back(); });
         }
     }
 }

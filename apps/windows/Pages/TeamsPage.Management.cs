@@ -13,10 +13,30 @@ internal sealed partial class TeamsPage
 {
     private TeamDirectoryClient DirectoryClient() => new(_scope ?? throw new InvalidDataException(), _session, _person ?? throw new InvalidDataException(), _call);
     private static TextBlock TeamText(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+    /// The card every Teams form and review sits in: the shared card fill,
+    /// hairline and radius, a semibold name and a quieter line under it.
     private static StackPanel TeamCard(string title, string? detail = null)
     {
-        var panel = new StackPanel { Spacing = Theme.SpaceS, Padding = new Thickness(16), Background = Theme.PanelBrush, CornerRadius = new CornerRadius(10) };
-        panel.Children.Add(TeamText(title)); if (detail is not null) panel.Children.Add(TeamText(detail)); return panel;
+        var panel = new StackPanel
+        {
+            Spacing = Theme.SpaceS, Padding = new Thickness(Theme.CardPadding), Background = Theme.PanelBrush,
+            BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(Theme.CardRadius),
+        };
+        var name = TeamText(title); name.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold; panel.Children.Add(name);
+        if (detail is not null) { var line = TeamText(detail); line.Opacity = 0.7; line.FontSize = 12; panel.Children.Add(line); }
+        return panel;
+    }
+    /// Sections as the segmented control Devices uses. Each chip is named,
+    /// so a screen reader and the UI tests reach it by its label.
+    private static Border TeamTabs(IList<(string Value, string Label)> tabs, string selected, Func<string, Task> select)
+    {
+        var bar = Chrome.Segmented(tabs, selected, select);
+        if (bar.Child is Panel row)
+        {
+            var chips = row.Children.OfType<Button>().ToList();
+            for (var i = 0; i < chips.Count && i < tabs.Count; i++) AutomationProperties.SetName(chips[i], tabs[i].Label);
+        }
+        return bar;
     }
     private static string TeamRole(string? role) => role switch {
         "owner" => L10n.Text("common.teams.owner"), "admin" => L10n.Text("common.teams.admin"), "member" => L10n.Text("common.teams.member"),
@@ -35,16 +55,14 @@ internal sealed partial class TeamsPage
     private void AddTeamDirectoryActions()
     {
         var client = DirectoryClient(); var view = _view;
-        var actions = new FlowPanel { Spacing = Theme.SpaceS };
-        actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.shared_projects"), ActionIcon.Connect, async (_, _) => { if (IsLoaded && _view == view) await ShowAllTeamProjectsAsync(client); }));
-        actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.invitations_for_you"), ActionIcon.Send, async (_, _) => {
+        Tool(ActionIcon.Connect, L10n.Text("common.teams.shared_projects"), async (_, _) => { if (IsLoaded && _view == view) await ShowAllTeamProjectsAsync(client); });
+        Tool(ActionIcon.Send, L10n.Text("common.teams.invitations_for_you"), async (_, _) => {
             if (IsLoaded && _view == view) await ShowTeamInboxAsync(client, new(client));
-        }));
-        actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.create_organization"), ActionIcon.Create, (_, _) => {
+        });
+        Tool(ActionIcon.Refresh, L10n.Text("common.refresh"), async (_, _) => { if (IsLoaded && _view == view) await LoadAsync(); });
+        Trail(Buttons.Primary(L10n.Text("common.teams.create_organization"), ActionIcon.Create, (_, _) => {
             if (IsLoaded && _view == view) ShowTeamCreate(client);
         }));
-        actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => { if (IsLoaded && _view == view) await LoadAsync(); }));
-        _body.Children.Add(actions);
     }
 
     // Editors are native page content, so long access reviews scroll with the
@@ -59,7 +77,7 @@ internal sealed partial class TeamsPage
         if (confirmation) { confirm = new CheckBox { Content = L10n.Text("common.teams.confirm_understood") }; _body.Children.Add(confirm); }
         var error = TeamText(""); _body.Children.Add(error);
         Button? apply = null; Button? cancel = null;
-        apply = ActionIconGlyph.Button(submit, ActionIcon.Approve, async (_, _) => {
+        apply = Buttons.Primary(submit, ActionIcon.Approve, async (_, _) => {
             if (sending || !IsLoaded || _view != view || !ready() || confirm is not null && confirm.IsChecked != true) return;
             sending = true; enabledInputs = TeamInputs(fields).ToDictionary(control => control, control => control.IsEnabled);
             EnableTeamInputs(fields, false); apply!.IsEnabled = false; cancel!.IsEnabled = false; if (confirm is not null) confirm.IsEnabled = false;
@@ -78,7 +96,7 @@ internal sealed partial class TeamsPage
                 if (IsLoaded && _view == view) { foreach (var input in enabledInputs!) input.Key.IsEnabled = input.Value; cancel.IsEnabled = true; if (confirm is not null) confirm.IsEnabled = true; Update(); }
             }
         });
-        cancel = ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Dismiss, async (_, _) => { if (!sending && IsLoaded && _view == view) await back(); });
+        cancel = Buttons.Secondary(L10n.Text("common.cancel"), ActionIcon.Dismiss, async (_, _) => { if (!sending && IsLoaded && _view == view) await back(); });
         void Update() { if (IsLoaded && _view == view) apply.IsEnabled = !sending && ready() && (confirm is null || confirm.IsChecked == true); }
         foreach (var input in TeamInputs(fields))
         {
@@ -88,7 +106,7 @@ internal sealed partial class TeamsPage
             if (input is CheckBox check) { check.Checked += (_, _) => Edited(); check.Unchecked += (_, _) => Edited(); }
         }
         if (confirm is not null) { confirm.Checked += (_, _) => Update(); confirm.Unchecked += (_, _) => Update(); }
-        _body.Children.Add(apply); _body.Children.Add(cancel); Update();
+        _body.Children.Add(ActionRow(cancel, apply)); Update();
     }
     private static IEnumerable<Control> TeamInputs(Panel panel)
     {
@@ -120,7 +138,7 @@ internal sealed partial class TeamsPage
     private async Task ShowTeamManagementAsync(TeamDirectoryClient client, TeamManagementModel model, string section = "members", bool more = false)
     {
         Reset(Text(model.Organization, "name")); var view = _view; string? error = null;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await LoadAsync(); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await LoadAsync(); });
         Note(L10n.Text("common.teams.loading"));
         try { await model.Refresh(section, more); }
         catch (Exception failure) { error = TeamError(failure); }
@@ -132,15 +150,14 @@ internal sealed partial class TeamsPage
         Reset(Text(model.Organization, "name")); var view = _view;
         bool Alive() => IsLoaded && _view == view;
         Task Reload() => ShowTeamManagementAsync(client, model, section);
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (Alive()) { _organization = model.Organization; await LoadAsync(); } }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (Alive()) { _organization = model.Organization; await LoadAsync(); } });
+        var tabs = new List<(string Value, string Label)> { ("members", L10n.Text("common.teams.members")), ("repositories", L10n.Text("common.teams.repositories")) };
+        if (model.Manager) tabs.Add(("invitations", L10n.Text("common.teams.invitations")));
+        tabs.Add(("settings", L10n.Text("common.settings")));
+        Tabs(TeamTabs(tabs, section, async key => { if (Alive()) await ShowTeamManagementAsync(client, model, key); }));
+        Tool(ActionIcon.Refresh, L10n.Text("common.refresh"), async (_, _) => { if (Alive()) await Reload(); });
         if (!model.Active) Note(L10n.Text("common.teams.organization_paused"));
         if (error is not null) Note(error, true);
-        var tabs = new FlowPanel { Spacing = Theme.SpaceS };
-        void Tab(string key, string label, ActionIcon icon) => tabs.Children.Add(ActionIconGlyph.Button(L10n.Text(label), icon, async (_, _) => { if (Alive()) await ShowTeamManagementAsync(client, model, key); }));
-        Tab("members", "common.teams.members", ActionIcon.Profile); Tab("repositories", "common.teams.repositories", ActionIcon.Source);
-        if (model.Manager) Tab("invitations", "common.teams.invitations", ActionIcon.Send);
-        Tab("settings", "common.settings", ActionIcon.Settings);
-        tabs.Children.Add(ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => { if (Alive()) await Reload(); })); _body.Children.Add(tabs);
         if (model.Verified && model.OwnershipRequest is { } request && Text(request, "requestId").Length > 0)
         {
             var recipient = Text(request, "toUserId") == client.Person;
@@ -148,46 +165,65 @@ internal sealed partial class TeamsPage
             if (recipient || sender)
             {
                 var card = TeamCard(L10n.Text("common.teams.ownership_request"), L10n.Text(Flag(request, "current") ? "common.teams.ownership_pending" : "common.teams.ownership_stale"));
-                if (sender || Flag(request, "current")) card.Children.Add(ActionIconGlyph.Button(L10n.Text(sender ? "common.teams.cancel_ownership_request" : "common.teams.review_ownership"), ActionIcon.Preview, (_, _) => {
+                if (sender || Flag(request, "current")) card.Children.Add(Buttons.Secondary(L10n.Text(sender ? "common.teams.cancel_ownership_request" : "common.teams.review_ownership"), ActionIcon.Preview, (_, _) => {
                     if (Alive()) ReviewTeamOwnership(client, model, (JsonObject)request.DeepClone(), sender, Reload);
                 })); _body.Children.Add(card);
             }
         }
         if (section is "members" or "invitations" && model.Manager)
-            _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.invite_member"), ActionIcon.Create, async (_, _) => {
+            Trail(Buttons.Primary(L10n.Text("common.teams.invite_member"), ActionIcon.Create, async (_, _) => {
                 if (!Alive()) return;
                 try { if (!model.Repositories.Loaded) await model.Refresh("repositories"); if (Alive() && model.Manager) ShowTeamInvite(client, model, Reload); }
                 catch (Exception failure) { if (Alive()) Note(TeamError(failure), true); }
             }));
         if (section == "settings") { AddTeamSettings(client, model, Reload, Alive); return; }
         var rows = model.Rows(section);
-        if (rows.Loaded && rows.Rows.Count == 0 && section is "invitations" or "repositories") Note(L10n.Text(section == "invitations" ? "common.teams.no_invitations" : "common.teams.no_repositories"));
+        var list = Rows();
+        if (rows.Loaded && rows.Rows.Count == 0 && section is "invitations" or "repositories")
+            list.Children.Add(new TextBlock { Text = L10n.Text(section == "invitations" ? "common.teams.no_invitations" : "common.teams.no_repositories"), Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
         foreach (var row in rows.Rows)
         {
-            var card = TeamCard(section == "invitations" ? Text(row["recipient"], "name") : Text(row, "name"), TeamRole(Text(row, "role")));
+            var actions = new List<UIElement>();
+            UIElement who;
             if (section == "members")
             {
-                if (Text(row, "handle").Length > 0) card.Children.Add(TeamText("@" + Text(row, "handle")));
-                if (!Flag(row, "eligible")) card.Children.Add(TeamText(L10n.Text("common.teams.needs_patron")));
+                var detail = Text(row, "handle").Length > 0 ? "@" + Text(row, "handle") : null;
+                if (!Flag(row, "eligible")) detail = (detail is null ? "" : detail + " · ") + L10n.Text("common.teams.needs_patron");
+                who = Marked(Initial(Text(row, "name")), Labelled(Text(row, "name"), detail));
+                actions.Add(Badge(TeamRole(Text(row, "role"))));
                 var other = Text(row, "id") != client.Person && Text(row, "role") is "member" or "admin";
-                if (model.Owner && other) card.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.change_role"), ActionIcon.Edit, (_, _) => { if (Alive()) ShowTeamMemberRole(client, model, row, Reload); }));
-                if (model.Manager && other && (model.Owner || Text(row, "role") == "member")) card.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.remove_member"), ActionIcon.Revoke, (_, _) => {
+                if (model.Owner && other) actions.Add(Buttons.Secondary(L10n.Text("common.teams.change_role"), ActionIcon.Edit, (_, _) => { if (Alive()) ShowTeamMemberRole(client, model, row, Reload); }, small: true));
+                if (model.Manager && other && (model.Owner || Text(row, "role") == "member")) actions.Add(Buttons.Destructive(L10n.Text("common.teams.remove_member"), ActionIcon.Revoke, (_, _) => {
                     if (Alive()) TeamEditor(L10n.Text("common.teams.remove_member"), TeamCard(Text(row, "name"), L10n.Text("common.teams.remove_confirmation_detail")), L10n.Text("common.teams.remove_member"), () => model.Manager,
                         () => model.Mutate("members.remove", model.RemoveMember(row), user: Text(row, "id")), Reload, _ => Reload(), confirmation: true);
-                }));
+                }, small: true));
             }
-            else if (section == "repositories" && model.Active && (model.Manager || Text(row, "role") == "maintainer"))
-                card.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.repository_access"), ActionIcon.Security, async (_, _) => { if (Alive()) await ShowTeamAccessAsync(client, model, row); }));
-            else if (section == "invitations")
+            else if (section == "repositories")
             {
-                card.Children.Add(TeamText(TeamInvitationState(Text(row, "state"))));
-                if (model.Manager && Text(row, "state") is "pending" or "expired")
-                    card.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.new_invitation_link"), ActionIcon.Refresh, (_, _) => { if (Alive()) ReviewTeamInvitation(client, model, row, true, Reload); }));
-                if (model.Manager && Text(row, "state") == "pending")
-                    card.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.revoke_invitation"), ActionIcon.Revoke, (_, _) => { if (Alive()) ReviewTeamInvitation(client, model, row, false, Reload); }));
+                var mark = ActionIcon.Source.Mark(16); ((FrameworkElement)mark).Opacity = 0.8;
+                who = Marked(mark, Labelled(Text(row, "name")));
+                actions.Add(Badge(TeamRole(Text(row, "role"))));
+                if (model.Active && (model.Manager || Text(row, "role") == "maintainer"))
+                    actions.Add(Buttons.Secondary(L10n.Text("common.teams.repository_access"), ActionIcon.Security, async (_, _) => { if (Alive()) await ShowTeamAccessAsync(client, model, row); }, small: true));
             }
-            _body.Children.Add(card);
+            else
+            {
+                who = Marked(Initial(Text(row["recipient"], "name")), Labelled(Text(row["recipient"], "name"), TeamInvitationState(Text(row, "state"))));
+                actions.Add(Badge(TeamRole(Text(row, "role"))));
+                if (model.Manager && Text(row, "state") is "pending" or "expired")
+                    actions.Add(Buttons.Secondary(L10n.Text("common.teams.new_invitation_link"), ActionIcon.Refresh, (_, _) => { if (Alive()) ReviewTeamInvitation(client, model, row, true, Reload); }, small: true));
+                if (model.Manager && Text(row, "state") == "pending")
+                    actions.Add(Buttons.Destructive(L10n.Text("common.teams.revoke_invitation"), ActionIcon.Revoke, (_, _) => { if (Alive()) ReviewTeamInvitation(client, model, row, false, Reload); }, small: true));
+            }
+            AddRow(list, Row(who, actions.ToArray()));
         }
+        var (heading, subtitle, icon) = section switch
+        {
+            "repositories" => (L10n.Text("common.teams.repositories"), L10n.Text("common.teams.repository_list_detail"), ActionIcon.Source),
+            "invitations" => (L10n.Text("common.teams.invitations"), L10n.Text("common.teams.invitation_list_detail"), ActionIcon.Send),
+            _ => (L10n.Text("common.teams.members"), L10n.Text("common.teams.member_list_detail"), ActionIcon.Profile),
+        };
+        Section(heading, list, subtitle, icon);
         if (rows.Next is not null || error is not null) _body.Children.Add(ActionIconGlyph.Button(L10n.Text(error is null ? "common.teams.load_more" : "common.retry"), ActionIcon.More, async (_, _) => {
             if (Alive()) await ShowTeamManagementAsync(client, model, section, rows.Next is not null && rows.Loaded);
         }));
@@ -248,7 +284,7 @@ internal sealed partial class TeamsPage
     private async Task ShowTeamAccessAsync(TeamDirectoryClient client, TeamManagementModel model, JsonObject repository, TeamManagementRows? previous = null)
     {
         Reset(Text(repository, "name")); var view = _view; var rows = previous ?? new([]); string? error = null;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await ShowTeamManagementAsync(client, model, "repositories"); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await ShowTeamManagementAsync(client, model, "repositories"); });
         try { var page = await model.RepositoryMembers(repository, previous?.Next ?? 0); rows = new(TeamCatalogPage.Append(rows.Rows, page.Rows), page.Next, true); }
         catch (Exception failure) { error = TeamError(failure); }
         if (!IsLoaded || _view != view) return;
@@ -273,35 +309,48 @@ internal sealed partial class TeamsPage
     }
     private void AddTeamSettings(TeamDirectoryClient client, TeamManagementModel model, Func<Task> back, Func<bool> alive)
     {
-        if (model.Manager) _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.rename_organization"), ActionIcon.Edit, (_, _) => {
+        var organization = Rows();
+        var rename = model.Manager ? Buttons.Secondary(L10n.Text("common.teams.rename_organization"), ActionIcon.Edit, (_, _) => {
             if (!alive()) return; var fields = new StackPanel { Spacing = Theme.SpaceM };
             var name = new TextBox { Header = L10n.Text("common.teams.organization_name"), Text = Text(model.Organization, "name"), MaxLength = 80 }; fields.Children.Add(name);
             TeamEditor(L10n.Text("common.teams.rename_organization"), fields, L10n.Text("common.save"), () => model.Manager && ValidName(name.Text) && name.Text.Trim() != Text(model.Organization, "name"),
                 () => model.Mutate("organizations.rename", model.Rename(name.Text)), back, _ => back());
-        }));
+        }, small: true) : null;
+        AddRow(organization, rename is null ? Row(Labelled(L10n.Text("common.teams.organization_name"), Text(model.Organization, "name")))
+            : Row(Labelled(L10n.Text("common.teams.organization_name"), Text(model.Organization, "name")), rename));
+        AddRow(organization, Row(Labelled(L10n.Text("common.teams.your_role")), Badge(TeamRole(model.Role))));
+        Section(L10n.Text("common.teams.organization"), organization, L10n.Text("common.teams.settings_detail"));
         if (model.CurrentOwner)
         {
-            Note(L10n.Text(model.Active ? "common.teams.owner_detail" : "common.teams.owner_plan_recovery"));
-            _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.transfer_ownership"), ActionIcon.Move, async (_, _) => { if (alive()) await ShowTeamTransferAsync(client, model, back); }));
-            _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.delete_organization"), ActionIcon.Delete, (_, _) => {
+            var ownership = Rows();
+            AddRow(ownership, Row(Labelled(L10n.Text("common.teams.transfer_ownership")),
+                Buttons.Secondary(L10n.Text("common.teams.transfer_ownership"), ActionIcon.Move, async (_, _) => { if (alive()) await ShowTeamTransferAsync(client, model, back); }, small: true)));
+            Section(L10n.Text("common.teams.ownership"), ownership, L10n.Text(model.Active ? "common.teams.owner_detail" : "common.teams.owner_plan_recovery"));
+            var danger = Rows();
+            AddRow(danger, Row(Labelled(L10n.Text("common.teams.delete_organization")), Buttons.Destructive(L10n.Text("common.teams.delete_organization"), ActionIcon.Delete, (_, _) => {
                 if (!alive()) return; var org = (JsonObject)model.Organization.DeepClone();
                 var fields = TeamCard(Text(org, "name"), L10n.Text("common.teams.delete_confirmation_detail"));
                 var typed = new TextBox { Header = L10n.Text("common.teams.type_name_to_delete", Text(org, "name")), IsSpellCheckEnabled = false }; fields.Children.Add(typed);
                 TeamEditor(L10n.Text("common.teams.delete_organization"), fields, L10n.Text("common.teams.delete_organization"), () => model.CurrentOwner && typed.Text == Text(org, "name"),
                     () => model.Mutate("organizations.delete", model.Delete(typed.Text, org)), back, async _ => { _organization = null; await LoadAsync(); });
-            }));
+            }, small: true)));
+            Section(L10n.Text("common.teams.danger_zone"), danger, L10n.Text("common.teams.delete_detail"), ActionIcon.Delete);
         }
         else if (model.Verified && model.Role is "member" or "admin")
-            _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.leave_organization"), ActionIcon.SignOut, (_, _) => {
+        {
+            var danger = Rows();
+            AddRow(danger, Row(Labelled(L10n.Text("common.teams.leave_organization")), Buttons.Destructive(L10n.Text("common.teams.leave_organization"), ActionIcon.SignOut, (_, _) => {
                 if (!alive()) return; var org = (JsonObject)model.Organization.DeepClone();
                 TeamEditor(L10n.Text("common.teams.leave_organization"), TeamCard(Text(org, "name"), L10n.Text("common.teams.leave_confirmation_detail")), L10n.Text("common.teams.leave_organization"), () => model.Verified && model.Role is "member" or "admin",
                     () => model.Mutate("members.remove", model.Leave(org), user: client.Person), back, async _ => { _organization = null; await LoadAsync(); }, confirmation: true);
-            }));
+            }, small: true)));
+            Section(L10n.Text("common.teams.danger_zone"), danger, L10n.Text("common.teams.leave_detail"), ActionIcon.Delete);
+        }
     }
     private async Task ShowTeamTransferAsync(TeamDirectoryClient client, TeamManagementModel model, Func<Task> back, bool more = false)
     {
         Reset(L10n.Text("common.teams.transfer_ownership")); var view = _view;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await back(); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await back(); });
         string? error = null; try { await model.Refresh("members", more); } catch (Exception failure) { error = TeamError(failure); }
         if (!IsLoaded || _view != view) return;
         if (error is not null) Note(error, true);
@@ -330,11 +379,11 @@ internal sealed partial class TeamsPage
     private async Task ShowTeamInboxAsync(TeamDirectoryClient client, TeamInboxModel model, bool more = false)
     {
         Reset(L10n.Text("common.teams.invitations_for_you")); var view = _view;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await LoadAsync(); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await LoadAsync(); });
         string? error = null; try { model.Close(); await model.Load(more); } catch (Exception failure) { error = TeamError(failure); }
         if (!IsLoaded || _view != view) return;
         Note(L10n.Text("common.teams.inbox_detail")); if (error is not null) Note(error, true);
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => { if (IsLoaded && _view == view) await ShowTeamInboxAsync(client, model); }));
+        Tool(ActionIcon.Refresh, L10n.Text("common.refresh"), async (_, _) => { if (IsLoaded && _view == view) await ShowTeamInboxAsync(client, model); });
         if (model.Page.Loaded && model.Page.Rows.Count == 0) Note(L10n.Text("common.teams.no_invitations"));
         foreach (var invitation in model.Page.Rows)
         {

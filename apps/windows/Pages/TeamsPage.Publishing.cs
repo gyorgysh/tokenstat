@@ -13,7 +13,7 @@ internal sealed partial class TeamsPage
         Func<Task> back, TeamManagementRows? previous = null, Action<int>? header = null)
     {
         Reset(title); var view = _view; var rows = previous ?? new([]); string? error = null;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await back(); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await back(); });
         try { var page = await load(previous?.Next ?? 0); rows = new(TeamCatalogPage.Append(rows.Rows, page.Rows), page.Next, true); }
         catch (Exception failure) { error = TeamError(failure); }
         if (!IsLoaded || _view != view) return;
@@ -78,7 +78,7 @@ internal sealed partial class TeamsPage
         TeamManagementRows? priorOptions = null, TeamManagementRows? priorShares = null, bool moreOptions = false, bool moreShares = false)
     {
         var checkout = Text(publication, "id"); Reset(L10n.Text("common.teams.share_chat")); var view = _view;
-        _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) => { if (IsLoaded && _view == view) await back(); }));
+        NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await back(); });
         var options = priorOptions ?? new([]); var shares = priorShares ?? new([]); string? optionError = null; string? shareError = null;
         if (priorOptions is null || moreOptions) try { var page = await model.Chats(checkout, false, moreOptions ? options.Next ?? 0 : 0); options = new(TeamCatalogPage.Append(options.Rows, page.Rows), page.Next, true); } catch (Exception e) { optionError = TeamError(e); }
         if (!IsLoaded || _view != view) return;
