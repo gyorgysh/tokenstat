@@ -125,8 +125,7 @@ internal sealed partial class TeamsPage : Page
         _body.Children.Clear();
         _dockStack.Children.Clear();
         if (_dock is not null) _dock.Visibility = Visibility.Collapsed;
-        _title.Text = title;
-        _body.Children.Add(NavigationRow());
+        _body.Children.Add(NavigationRow(title));
     }
 
     private void Note(string text, bool warning = false) => _body.Children.Add(new TextBlock

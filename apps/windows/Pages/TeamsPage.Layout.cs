@@ -15,9 +15,10 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal sealed partial class TeamsPage
 {
-    private readonly StackPanel _leading = new() { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS, VerticalAlignment = VerticalAlignment.Center };
-    private readonly StackPanel _trailing = new() { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS, VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _title = new() { FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+    // Rebuilt on every Reset. A WinUI element keeps its old parent after the
+    // screen is cleared, so reusing one in the next row throws.
+    private StackPanel _leading = new();
+    private StackPanel _trailing = new();
     private readonly StackPanel _dockStack = new() { Spacing = Theme.SpaceS };
     private Border? _dock;
 
@@ -61,15 +62,15 @@ internal sealed partial class TeamsPage
     }
 
     /// The leading and trailing row every screen starts with.
-    private Grid NavigationRow()
+    private Grid NavigationRow(string title)
     {
         var row = new Grid { ColumnSpacing = Theme.SpaceM, MinHeight = 32 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        (_leading.Parent as Panel)?.Children.Remove(_leading);
-        (_trailing.Parent as Panel)?.Children.Remove(_trailing);
-        _leading.Children.Clear(); _trailing.Children.Clear();
-        _leading.Children.Add(_title);
+        _leading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS, VerticalAlignment = VerticalAlignment.Center };
+        _trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS, VerticalAlignment = VerticalAlignment.Center };
+        _leading.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
         row.Children.Add(_leading);
         Grid.SetColumn(_trailing, 1);
         row.Children.Add(_trailing);
