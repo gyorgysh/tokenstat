@@ -201,103 +201,76 @@ struct TeamRowButtonStyle: ButtonStyle {
         .contentShape(.rect)
     }
 }
-/// The heading every Team page starts with: a title, one line saying what
-/// the page is for, and that page's actions on the trailing edge.
-struct TeamSectionHeader<Actions: View>: View {
-    let title: String
-    let subtitle: String
-    @ViewBuilder let actions: () -> Actions
+/// The row under the chrome bar on every Team screen, the same row Devices
+/// has: the screen's tabs on the leading edge, its actions on the trailing
+/// edge, a hairline under both.
+struct TeamToolbarRow<Leading: View, Trailing: View>: View {
+    @ViewBuilder var leading: () -> Leading
+    @ViewBuilder var trailing: () -> Trailing
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: Theme.Space.m) { heading; Spacer(minLength: Theme.Space.l); HStack(spacing: Theme.Space.s) { actions() } }
-            VStack(alignment: .leading, spacing: Theme.Space.m) { heading; HStack(spacing: Theme.Space.s) { actions() } }
+        VStack(spacing: 0) {
+            HStack(spacing: Theme.Space.m) {
+                leading()
+                Spacer(minLength: 0)
+                HStack(spacing: Theme.Space.s) { trailing() }
+            }
+            .padding(Theme.Space.m)
+            ThemeRule()
         }
     }
-    private var heading: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text(title).font(Theme.title2.weight(.semibold)).lineLimit(2).accessibilityAddTraits(.isHeader)
-            Text(subtitle).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-extension TeamSectionHeader where Actions == EmptyView {
-    init(title: String, subtitle: String) { self.init(title: title, subtitle: subtitle) { EmptyView() } }
 }
 
-/// One page shape for every Team screen. The same lane, margins and header
-/// on every tab, so switching tabs never moves the content under the eye.
-struct TeamPage<Actions: View, Content: View>: View {
-    let title: String
-    let subtitle: String
-    @ViewBuilder var actions: () -> Actions
+/// The scrolling body of a Team screen: the full width of the window with
+/// the same margin and gap as Devices, so cards line up across screens.
+struct TeamPage<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                TeamSectionHeader(title: title, subtitle: subtitle, actions: actions)
-                content()
-            }
-            .teamLane()
+            VStack(alignment: .leading, spacing: Theme.Space.m) { content() }
+                .padding(Theme.Space.m)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 }
 
 extension View {
-    /// The Team lane: leading, capped at the reading room's structured
-    /// width, with the page margin on every side.
-    func teamLane() -> some View {
-        padding(Theme.Space.l)
-            .frame(maxWidth: ReadingRoom.laneWidth + Theme.Space.l * 2, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+    /// A tile inside a card: the page ground, a hairline and a smaller
+    /// radius, so it reads as part of the card around it.
+    func teamTile() -> some View {
+        background(Theme.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
-    /// The one surface Team content sits on: a panel with the app's card
-    /// radius and hairline, clipped so a pressed row stays inside it.
+    /// A standalone surface outside a card, with the card's own radius.
     func teamCard() -> some View {
         background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
-    /// Inner spacing of a row in a Team list card.
+    /// Spacing of one row inside a card. The card supplies the side margin.
     func teamRowPadding() -> some View {
-        padding(.horizontal, Theme.cardPadding).padding(.vertical, Theme.Space.m)
-            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        padding(.vertical, Theme.Space.s)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
 }
 
-/// A group heading inside a page: the same small caps label the sidebar
-/// uses, with an optional link to the full list.
-struct TeamGroupHeading: View {
-    let title: String
-    var action: (title: String, run: () -> Void)?
-    var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title.uppercased()).font(Theme.sectionHeader).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
-            Spacer(minLength: Theme.Space.s)
-            if let action {
-                Button(action.title, .next, action: action.run).buttonStyle(.plain).font(Theme.callout).foregroundStyle(TeamColors.action)
-            }
-        }
-        .padding(.horizontal, Theme.Space.xs)
-    }
-}
-
-/// Rows in one card, with hairlines between them inset to the text.
-struct TeamListCard<Item: Identifiable, Row: View>: View {
+/// Rows inside a card, with a hairline between each pair.
+struct TeamRows<Item: Identifiable, Row: View>: View {
     let items: [Item]
     @ViewBuilder let row: (Item) -> Row
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                if index > 0 { ThemeRule().padding(.leading, Theme.cardPadding) }
+                if index > 0 { ThemeRule() }
                 row(item)
             }
         }
-        .teamCard()
     }
 }
 
-/// A row that opens something. Hover and press tint the whole row, the way
-/// a sidebar row does, and a chevron says it leads somewhere.
+/// A row that opens something. Hover and press tint the row the way a
+/// sidebar row tints, reaching just past the text so the tint has a margin,
+/// and a chevron says it leads somewhere.
 struct TeamListRowButtonStyle: ButtonStyle {
     var chevron = true
     func makeBody(configuration: Configuration) -> some View { RowBody(configuration: configuration, chevron: chevron) }
@@ -310,16 +283,19 @@ struct TeamListRowButtonStyle: ButtonStyle {
                 configuration.label.frame(maxWidth: .infinity, alignment: .leading)
                 if chevron { Image(systemName: "chevron.right").font(Theme.font(11, weight: .semibold)).foregroundStyle(.tertiary).accessibilityHidden(true) }
             }
+            .padding(.horizontal, Theme.Space.s)
             .teamRowPadding()
-            .background(configuration.isPressed ? Theme.rowSelected : hovering ? Theme.rowHighlight : Color.clear)
+            .background(configuration.isPressed ? Theme.rowSelected : hovering ? Theme.rowHighlight : Color.clear,
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(.horizontal, -Theme.Space.s)
             .contentShape(.rect)
             .onHover { hovering = $0 }
         }
     }
 }
 
-/// One count on an overview. Every tile in a row has the same height and
-/// width, and the label never wraps, so a row of them reads as one strip.
+/// One count on an overview, in the shape of the app's summary tiles. Every
+/// tile in a row has the same height and width, and the label never wraps.
 struct TeamMetricTile: View {
     let title: String
     let value: String
@@ -329,14 +305,14 @@ struct TeamMetricTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack {
-                    Image(systemName: symbol).font(Theme.font(14, weight: .medium)).foregroundStyle(TeamColors.action)
+                    Image(systemName: symbol).font(Theme.font(15, weight: .medium)).foregroundStyle(TeamColors.action)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right").font(Theme.font(10, weight: .semibold)).foregroundStyle(.tertiary)
                 }
-                Text(value).font(Theme.numeric(26, weight: .semibold)).foregroundStyle(.primary).lineLimit(1)
-                Text(title).font(Theme.callout).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
+                Text(value).font(Theme.font(26, weight: .semibold)).monospacedDigit().foregroundStyle(.primary).lineLimit(1)
+                Text(title).font(Theme.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
             }
-            .padding(Theme.cardPadding)
+            .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .teamCard()
             .contentShape(.rect)
@@ -467,9 +443,10 @@ enum TeamComposerMode: String, CaseIterable, Hashable {
     }
 }
 
-/// Buttons inside the composer well. The Mac uses the main composer's
-/// dense size. A phone keeps the comfortable touch target.
-struct TeamComposerButtonStyle: ButtonStyle {
+/// Buttons in a toolbar row and in the composer well. The Mac uses the
+/// dense size Devices and the main composer use. A phone keeps the
+/// comfortable touch target.
+struct TeamSmallButtonStyle: ButtonStyle {
     var primary = false
     @ViewBuilder func makeBody(configuration: Configuration) -> some View {
         #if os(iOS)
@@ -497,5 +474,17 @@ struct TeamComposerField: View {
             .lineLimit(1...8)
             .padding(.vertical, 6).padding(.horizontal, Theme.Space.xs)
             .frame(minHeight: 34, alignment: .topLeading)
+    }
+}
+
+/// The two views of the Teams place: the organizations and every shared
+/// project across them.
+enum TeamHubPage: String, CaseIterable, Hashable {
+    case organizations, projects
+    var label: String {
+        switch self {
+        case .organizations: L10n.text("common.teams.organizations")
+        case .projects: L10n.text("common.teams.shared_projects")
+        }
     }
 }

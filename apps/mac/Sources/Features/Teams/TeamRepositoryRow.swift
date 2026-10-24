@@ -24,26 +24,14 @@ struct TeamRepositoryRow: View {
     private var canManage: Bool { organization.role.canManage || repository.role == .maintainer }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: Theme.Space.m) {
-                Image(systemName: "folder.badge.person.crop").font(Theme.font(18)).foregroundStyle(TeamColors.action)
-                    .frame(width: 40, height: 40).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(repository.name).font(Theme.body.weight(.semibold)).lineLimit(2).accessibilityAddTraits(.isHeader)
-                    TeamRoleBadge(text: repository.role?.label ?? L10n.text("common.teams.unassigned"))
-                }
-                Spacer(minLength: Theme.Space.m)
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: Theme.Space.s) { actions }
-                    HStack(spacing: Theme.Space.s) { primaryAction; overflow(includingCheckouts: true) }
-                }
-            }
-            .padding(Theme.cardPadding)
+        Card(title: repository.name, subtitle: repository.role?.label ?? L10n.text("common.teams.unassigned"), mark: "mark_folder",
+            accessory: AnyView(ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.s) { actions }
+                HStack(spacing: Theme.Space.s) { primaryAction; overflow(includingCheckouts: true) }
+            })) {
             if repository.role != nil {
-                ThemeRule().padding(.leading, Theme.cardPadding)
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text(L10n.text("common.teams.computers_sharing").uppercased()).font(Theme.sectionHeader).foregroundStyle(.secondary)
+                    Text(L10n.text("common.teams.computers_sharing").uppercased()).font(Theme.sectionHeader).foregroundStyle(.tertiary)
                     if loaded && checkouts.isEmpty {
                         Text(L10n.text("common.teams.repository_not_shared")).font(Theme.callout).foregroundStyle(.secondary)
                     }
@@ -56,33 +44,27 @@ struct TeamRepositoryRow: View {
                     }
                     if more { Text(L10n.text("common.teams.more_computers")).font(Theme.caption).foregroundStyle(.secondary) }
                 }
-                .padding(.horizontal, Theme.cardPadding).padding(.vertical, Theme.Space.m)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 let work = checkouts.flatMap { lanes[$0.id] ?? [] }
                 if !work.isEmpty {
-                    ThemeRule().padding(.leading, Theme.cardPadding)
+                    ThemeRule()
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        Text(L10n.text("common.teams.work_in_progress").uppercased()).font(Theme.sectionHeader).foregroundStyle(.secondary)
+                        Text(L10n.text("common.teams.work_in_progress").uppercased()).font(Theme.sectionHeader).foregroundStyle(.tertiary)
                         if more || lanes.count < checkouts.count { Text(L10n.text("common.teams.partial_lanes")).font(Theme.caption).foregroundStyle(.secondary) }
                         if let landMessage { TeamNotice(message: landMessage) }
                         ForEach(checkouts) { checkout in
                             ForEach(lanes[checkout.id] ?? [], id: \.branch) { lane in laneRow(lane, all: work, checkout: checkout) }
                         }
                     }
-                    .padding(.horizontal, Theme.cardPadding).padding(.vertical, Theme.Space.m)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .teamCard()
         .task(id: repository.revision) { await load() }
     }
 
     @ViewBuilder private var primaryAction: some View {
         if repository.role != nil {
             Button(L10n.text("common.teams.section_chats"), .comment, action: openChats)
-                .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
+                .buttonStyle(TeamSmallButtonStyle(primary: true)).disabled(!organization.isActive)
         }
     }
 
@@ -90,7 +72,7 @@ struct TeamRepositoryRow: View {
         primaryAction
         if repository.role != nil {
             Button(L10n.text("common.teams.checkouts"), .checkout, action: openCheckouts)
-                .buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)
+                .buttonStyle(TeamSmallButtonStyle()).disabled(!organization.isActive)
         }
         overflow(includingCheckouts: false)
     }
@@ -141,10 +123,10 @@ struct TeamRepositoryRow: View {
                 HStack(spacing: Theme.Space.s) {
                     if lane.state == "ready" {
                         Button(L10n.text("common.teams.land"), .merge) { Task { await act("team.lanes.land", lane, share: share, checkout: checkout) } }
-                            .buttonStyle(TeamButtonStyle(primary: true)).disabled(landing != nil)
+                            .buttonStyle(TeamSmallButtonStyle(primary: true)).disabled(landing != nil)
                     }
                     Button(L10n.text("common.teams.discard"), .delete, role: .destructive) { Task { await act("team.lanes.discard", lane, share: share, checkout: checkout) } }
-                        .buttonStyle(TeamButtonStyle()).disabled(landing != nil)
+                        .buttonStyle(TeamSmallButtonStyle()).disabled(landing != nil)
                 }
             }
         }

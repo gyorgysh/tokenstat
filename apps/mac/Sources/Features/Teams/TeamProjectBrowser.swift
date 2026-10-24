@@ -5,7 +5,6 @@ import SwiftUI
 /// Each section loads independently and keeps its own explicit next page.
 struct TeamProjectBrowser: View {
     @Bindable var store: TeamStore
-    let manageTeams: () -> Void
     @State private var organizationId: String?
     @State private var filteredOrganization: TeamOrganization?
     /// A directory refresh returns its first page. Keep a chosen later-page
@@ -18,18 +17,20 @@ struct TeamProjectBrowser: View {
     }
     private var organizations: [TeamOrganization] { filterChoices.filter { organizationId == nil || $0.id == organizationId } }
     var body: some View {
-        TeamPage(title: L10n.text("common.teams.shared_projects"), subtitle: L10n.text("common.teams.shared_projects_detail")) {
+        TeamPage {
             if filterChoices.count > 1 {
-                Picker(L10n.text("common.teams.organization"), selection: $organizationId) {
-                    Text(L10n.text("common.teams.all_organizations")).tag(Optional<String>.none)
-                    ForEach(filterChoices) { Text($0.name).tag(Optional($0.id)) }
-                }.pickerStyle(.menu).labelsHidden().fixedSize().accessibilityIdentifier("team.projects.organization-filter")
+                HStack(spacing: Theme.Space.s) {
+                    Text(L10n.text("common.teams.organization")).font(Theme.callout).foregroundStyle(.secondary)
+                    AppMenuPicker(options: [(Optional<String>.none, L10n.text("common.teams.all_organizations"))] + filterChoices.map { (Optional($0.id), $0.name) },
+                        selection: $organizationId).frame(width: 240)
+                        .accessibilityIdentifier("team.projects.organization-filter")
+                }
             }
-            Button(L10n.text("common.teams.manage_teams"), .team, action: manageTeams).buttonStyle(TeamButtonStyle())
-        } content: {
             if let error = store.localProjectsError { TeamNotice(message: error, warning: true) }
             if store.organizations.isEmpty {
-                EmptyState(symbol: "folder.badge.person.crop", title: L10n.text("common.teams.shared_projects"), message: L10n.text("common.teams.no_shared_projects")).teamCard()
+                Card(title: L10n.text("common.teams.shared_projects"), subtitle: L10n.text("common.teams.shared_projects_detail"), mark: "mark_folder") {
+                    Text(L10n.text("common.teams.no_shared_projects")).font(Theme.callout).foregroundStyle(.secondary)
+                }
             }
             ForEach(organizations) { organization in
                 if let context = store.mutationContext {
@@ -39,7 +40,7 @@ struct TeamProjectBrowser: View {
             }
             if store.organizationsNextOffset != nil {
                 Button(L10n.text("common.teams.more_organizations"), .more) { Task { await store.loadMoreOrganizations() } }
-                    .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing)
+                    .buttonStyle(TeamSmallButtonStyle()).disabled(store.isRefreshing)
             }
         }
         .task { await store.reloadAfterChange() }
@@ -59,39 +60,36 @@ private struct TeamProjectGroup: View {
     @State private var error: String?
     @State private var request = UUID()
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            TeamGroupHeading(title: organization.name)
+        Card(title: organization.name, subtitle: L10n.text("common.teams.shared_projects_detail"), mark: "mark_folder") {
             if !organization.isActive { TeamNotice(message: L10n.text("common.teams.organization_paused"), warning: true) }
             if let error {
                 TeamNotice(message: error, warning: true)
-                Button(L10n.text("common.retry"), .refresh) { Task { await load(more: false) } }.buttonStyle(TeamButtonStyle())
+                Button(L10n.text("common.retry"), .refresh) { Task { await load(more: false) } }.buttonStyle(TeamSmallButtonStyle())
             }
-            if !projects.isEmpty {
-                TeamListCard(items: projects) { project in
-                    let local = store.localProjects.first { $0.organizationId == organization.id && $0.repositoryId == project.id && $0.phase == "active" }
-                    Button {
-                        store.openProject(project, in: organization, checkout: local?.id)
-                    } label: {
-                        HStack(spacing: Theme.Space.m) {
-                            Image(systemName: "folder.badge.person.crop").font(Theme.font(16)).foregroundStyle(TeamColors.action)
-                                .frame(width: 32, height: 32).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(project.name).font(Theme.body.weight(.semibold)).foregroundStyle(.primary)
-                                Text(local == nil ? L10n.text("common.teams.shared_with_you") : L10n.text("common.teams.shared_from_this_computer"))
-                                    .font(Theme.callout).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: Theme.Space.s)
-                            if let role = project.role { TeamRoleBadge(text: role.label) }
+            TeamRows(items: projects) { project in
+                let local = store.localProjects.first { $0.organizationId == organization.id && $0.repositoryId == project.id && $0.phase == "active" }
+                Button {
+                    store.openProject(project, in: organization, checkout: local?.id)
+                } label: {
+                    HStack(spacing: Theme.Space.m) {
+                        Image(systemName: "folder.badge.person.crop").font(Theme.font(15)).foregroundStyle(TeamColors.action)
+                            .frame(width: 30, height: 30).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(project.name).font(Theme.body.weight(.semibold)).foregroundStyle(.primary)
+                            Text(local == nil ? L10n.text("common.teams.shared_with_you") : L10n.text("common.teams.shared_from_this_computer"))
+                                .font(Theme.callout).foregroundStyle(.secondary)
                         }
-                    }.buttonStyle(TeamListRowButtonStyle())
-                        .accessibilityIdentifier("team.project.open.\(project.id)")
-                }
+                        Spacer(minLength: Theme.Space.s)
+                        if let role = project.role { TeamRoleBadge(text: role.label) }
+                    }
+                }.buttonStyle(TeamListRowButtonStyle())
+                    .accessibilityIdentifier("team.project.open.\(project.id)")
             }
             if loaded && organization.isActive && projects.isEmpty && error == nil {
-                Text(L10n.text("common.teams.no_shared_projects")).font(Theme.callout).foregroundStyle(.secondary).teamRowPadding().teamCard()
+                Text(L10n.text("common.teams.no_shared_projects")).font(Theme.callout).foregroundStyle(.secondary)
             }
             if nextOffset != nil {
-                Button(L10n.text("common.teams.load_more"), .more) { Task { await load(more: true) } }.buttonStyle(TeamButtonStyle()).disabled(loading)
+                Button(L10n.text("common.teams.load_more"), .more) { Task { await load(more: true) } }.buttonStyle(TeamSmallButtonStyle()).disabled(loading)
             }
             if loading && projects.isEmpty { ProgressView().controlSize(.small) }
         }

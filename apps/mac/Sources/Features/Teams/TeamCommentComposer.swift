@@ -43,12 +43,12 @@ struct TeamCommentComposer: View {
                         Text(recovered).font(Theme.body).lineLimit(6).textSelection(.enabled)
                     }
                     HStack(spacing: Theme.Space.s) {
-                        Button(model.recoveredText == nil ? L10n.text("common.teams.copy_draft") : L10n.text("common.teams.copy_unsaved_text"), .copy) { copy(model.copyText) }.buttonStyle(TeamComposerButtonStyle())
-                        Button(L10n.text("common.teams.load_saved_draft"), .refresh) { Task { await model.reloadSavedDraft() } }.buttonStyle(TeamComposerButtonStyle()).disabled(model.pending || model.busy)
+                        Button(model.recoveredText == nil ? L10n.text("common.teams.copy_draft") : L10n.text("common.teams.copy_unsaved_text"), .copy) { copy(model.copyText) }.buttonStyle(TeamSmallButtonStyle())
+                        Button(L10n.text("common.teams.load_saved_draft"), .refresh) { Task { await model.reloadSavedDraft() } }.buttonStyle(TeamSmallButtonStyle()).disabled(model.pending || model.busy)
                     }
                 }
                 if !model.loaded {
-                    Button(L10n.text("common.retry"), .refresh) { Task { await model.restore() } }.buttonStyle(TeamComposerButtonStyle())
+                    Button(L10n.text("common.retry"), .refresh) { Task { await model.restore() } }.buttonStyle(TeamSmallButtonStyle())
                 }
             } else if !model.loaded, model.error != nil {
                 TeamNotice(message: L10n.text("common.teams.comment_save_failed"), warning: true)
@@ -83,12 +83,12 @@ struct TeamCommentComposer: View {
         if focused { ClientKeyboardDismissButton() }
         #endif
         if model.pending {
-            Button(L10n.text("common.teams.copy_draft"), .copy) { copy(model.text) }.buttonStyle(TeamComposerButtonStyle())
-            Button(L10n.text("common.teams.check_delivery"), .refresh) { Task { await model.checkDelivery() } }.buttonStyle(TeamComposerButtonStyle()).disabled(model.busy || !model.current).accessibilityIdentifier("team.comment.check")
+            Button(L10n.text("common.teams.copy_draft"), .copy) { copy(model.text) }.buttonStyle(TeamSmallButtonStyle())
+            Button(L10n.text("common.teams.check_delivery"), .refresh) { Task { await model.checkDelivery() } }.buttonStyle(TeamSmallButtonStyle()).disabled(model.busy || !model.current).accessibilityIdentifier("team.comment.check")
         }
         if allowsComments {
             Button(model.pending ? L10n.text("common.teams.send_same_comment") : L10n.text("common.teams.post_comment"), .send) { focused = false; Task { await model.send() } }
-                .buttonStyle(TeamComposerButtonStyle(primary: true))
+                .buttonStyle(TeamSmallButtonStyle(primary: true))
                 .help(L10n.text("common.teams.post_comment")).disabled(!model.canSend).keyboardShortcut(.return, modifiers: .command).accessibilityIdentifier("team.comment.send")
         }
     }

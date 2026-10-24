@@ -32,10 +32,6 @@ struct TeamManagementView: View {
                         .accessibilityIdentifier("team.organizations.back")
                 }
             }) {
-                if store.phase == .ready && !store.browsingProjects {
-                    ToolbarIconButton(systemImage: "folder.badge.person.crop", help: L10n.text("common.teams.shared_projects")) { store.showProjects() }
-                        .accessibilityIdentifier("team.projects.open")
-                }
                 if store.localDraftPersonId != nil {
                     ToolbarIconButton(systemImage: "square.and.pencil", help: L10n.text("common.teams.comment_drafts")) { showingDrafts = true }
                         .accessibilityIdentifier("team.drafts.open")
@@ -47,11 +43,12 @@ struct TeamManagementView: View {
                 }
             }
             #endif
-            if let org = store.selectedOrganization, store.phase == .ready, !compactReader, !store.browsingProjects {
-                organizationNavigation(org)
+            if store.phase == .ready, !compactReader {
+                if let org = store.selectedOrganization, !store.browsingProjects { organizationNavigation(org) }
+                else { hubToolbar }
             }
             if let error = store.error {
-                TeamNotice(message: error, warning: true).padding(.horizontal, Theme.Space.l).padding(.top, Theme.Space.m)
+                TeamNotice(message: error, warning: true).padding([.horizontal, .top], Theme.Space.m)
             }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -166,7 +163,7 @@ struct TeamManagementView: View {
             }
         case .ready:
             if store.browsingProjects {
-                TeamProjectBrowser(store: store) { leaveToHub() }
+                TeamProjectBrowser(store: store)
             } else if let organization = store.selectedOrganization {
                 organizationContent(organization)
             } else { hubContent }
@@ -174,7 +171,13 @@ struct TeamManagementView: View {
     }
     @ViewBuilder private func organizationNavigation(_ organization: TeamOrganization) -> some View {
         #if os(macOS)
-        TabStrip(tabs: TeamSection.allCases.map { ($0, $0.label, $0.symbol) }, selection: $store.section)
+        TeamToolbarRow {
+            SegmentedTabs(options: TeamSection.allCases, selection: $store.section, title: { $0.label })
+                .frame(maxWidth: 640)
+                .accessibilityLabel(L10n.text("common.teams.section"))
+        } trailing: {
+            if let directory = store.directory { sectionActions(directory) }
+        }
         organizationNotice(organization)
         #else
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -186,6 +189,12 @@ struct TeamManagementView: View {
                     TeamRoleBadge(text: organization.role.label)
                     Spacer(minLength: 0)
                     sectionPicker.pickerStyle(.menu)
+                }
+            }
+            if let directory = store.directory {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Theme.Space.s) { Spacer(minLength: 0); sectionActions(directory) }
+                    VStack(alignment: .leading, spacing: Theme.Space.s) { sectionActions(directory) }
                 }
             }
             organizationNotice(organization)
@@ -203,7 +212,7 @@ struct TeamManagementView: View {
             }
         }
         #if os(macOS)
-        .padding(.horizontal, Theme.Space.l).padding(.top, Theme.Space.m)
+        .padding([.horizontal, .top], Theme.Space.m)
         #endif
     }
     #if !os(macOS)
@@ -249,24 +258,63 @@ struct TeamManagementView: View {
             !rows.contains(where: { $0.id == focused.id }) { return rows + [focused] }
         return rows
     }
+    /// The team list and every shared project are the two views of the same
+    /// place, so they are its tabs, the way Devices and Access are.
+    @ViewBuilder private var hubToolbar: some View {
+        #if os(macOS)
+        TeamToolbarRow {
+            SegmentedTabs(options: TeamHubPage.allCases, selection: Binding(
+                get: { store.browsingProjects ? TeamHubPage.projects : .organizations },
+                set: { $0 == .projects ? store.showProjects() : leaveToHub() }), title: { $0.label })
+                .frame(maxWidth: 320)
+                .accessibilityIdentifier("team.projects.open")
+        } trailing: {
+            if !store.browsingProjects {
+                Button(L10n.text("common.teams.create_organization"), .create) { openCreate() }.buttonStyle(TeamSmallButtonStyle(primary: true))
+            }
+        }
+        #endif
+    }
+    /// The trailing actions of an organization's toolbar row: what this
+    /// section adds to, never navigation.
+    @ViewBuilder private func sectionActions(_ directory: TeamDirectorySnapshot) -> some View {
+        let organization = directory.details.organization
+        switch store.section {
+        case .overview, .invitations:
+            if organization.role.canManage { inviteButton(organization) }
+        case .members:
+            TextField(L10n.text("common.search"), text: $query).textFieldStyle(ThemedFieldStyle(small: true)).frame(width: 200)
+            if organization.role.canManage { inviteButton(organization) }
+        case .repositories:
+            if store.capabilities?.canPublishCheckouts == true && (organization.role.canManage || directory.repositories.repositories.contains { $0.role == .contributor || $0.role == .maintainer }) {
+                Button(L10n.text("common.teams.share_project"), .connect) { if let context = store.mutationContext { sheet = .repository(context) } }
+                    .buttonStyle(TeamSmallButtonStyle(primary: true)).disabled(!organization.isActive)
+            }
+        case .chats, .settings:
+            EmptyView()
+        }
+    }
+    private func inviteButton(_ organization: TeamOrganization) -> some View {
+        Button(L10n.text("common.teams.invite_member"), .invite) { if let context = store.mutationContext { sheet = .invite(context) } }
+            .buttonStyle(TeamSmallButtonStyle(primary: true)).disabled(!organization.isActive)
+    }
     private var hubContent: some View {
-        TeamPage(title: L10n.text("common.teams.title"), subtitle: L10n.text("common.teams.hub_detail")) {
+        TeamPage {
+            #if !os(macOS)
             Button(L10n.text("common.teams.create_organization"), .create) { openCreate() }.buttonStyle(TeamButtonStyle(primary: true))
-        } content: {
+            #endif
             if !store.inbox.isEmpty { inboxContent }
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                TeamGroupHeading(title: L10n.text("common.teams.organizations"))
+            Card(title: L10n.text("common.teams.organizations"), subtitle: L10n.text("common.teams.hub_detail"), mark: "mark_account") {
                 if store.organizations.isEmpty {
-                    VStack(alignment: .leading, spacing: Theme.Space.m) {
-                        Image(systemName: "person.2.crop.square.stack").font(Theme.font(32, weight: .light)).foregroundStyle(TeamColors.action).accessibilityHidden(true)
-                        Text(L10n.text("common.teams.no_organizations")).font(Theme.title2.weight(.semibold))
-                        Text(L10n.text("common.teams.no_organizations_detail")).font(Theme.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        Text(L10n.text("common.teams.no_organizations")).font(Theme.body.weight(.semibold))
+                        Text(L10n.text("common.teams.no_organizations_detail")).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Label(L10n.text("common.teams.setup_people"), systemImage: "person.badge.plus")
                             Label(L10n.text("common.teams.setup_projects"), systemImage: "folder.badge.person.crop")
                             Label(L10n.text("common.teams.setup_conversations"), systemImage: "bubble.left.and.bubble.right")
-                        }.font(Theme.callout).foregroundStyle(.secondary)
-                    }.padding(Theme.cardPadding).frame(maxWidth: .infinity, alignment: .leading).teamCard()
+                        }.font(Theme.callout).foregroundStyle(.secondary).padding(.top, Theme.Space.xs)
+                    }
                 } else {
                     LazyVGrid(columns: textSize.isAccessibilitySize ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 300), spacing: Theme.Space.m, alignment: .top)], alignment: .leading, spacing: Theme.Space.m) {
                         ForEach(store.organizations) { organization in
@@ -279,29 +327,19 @@ struct TeamManagementView: View {
                 }
                 if store.organizationsNextOffset != nil {
                     Button(L10n.text("common.teams.more_organizations"), .more) { Task { await store.loadMoreOrganizations() } }
-                        .buttonStyle(TeamButtonStyle()).disabled(store.isRefreshing)
+                        .buttonStyle(TeamSmallButtonStyle()).disabled(store.isRefreshing)
                 }
             }
             if store.inbox.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    TeamGroupHeading(title: L10n.text("common.teams.your_invitations"))
-                    HStack(alignment: .top, spacing: Theme.Space.m) {
-                        Image(systemName: "envelope").font(Theme.font(15)).foregroundStyle(.secondary).frame(width: 32).accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L10n.text("common.teams.no_pending_invitations")).font(Theme.body.weight(.medium))
-                            Text(L10n.text("common.teams.invitation_inbox_hint")).font(Theme.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }.teamRowPadding().teamCard()
-                }
+                Card(title: L10n.text("common.teams.your_invitations"), subtitle: L10n.text("common.teams.invitation_inbox_hint"), mark: "mark_note",
+                    accessory: AnyView(Text(L10n.text("common.teams.no_pending_invitations")).font(Theme.callout).foregroundStyle(.secondary)))
             }
         }
     }
     private var inboxContent: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            TeamGroupHeading(title: L10n.text("common.teams.your_invitations"))
-            TeamListCard(items: store.inbox) { invitation in
+        Card(title: L10n.text("common.teams.your_invitations"), subtitle: L10n.text("common.teams.inbox_detail"), mark: "mark_note") {
+            TeamRows(items: store.inbox) { invitation in
                 HStack(spacing: Theme.Space.m) {
-                    Image(systemName: "envelope.badge").font(Theme.font(15)).foregroundStyle(TeamColors.action).frame(width: 32).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(invitation.organizationName ?? L10n.text("common.teams.organization")).font(Theme.body.weight(.medium))
                         Text(invitation.role.label).font(Theme.callout).foregroundStyle(.secondary)
@@ -309,41 +347,37 @@ struct TeamManagementView: View {
                     Spacer(minLength: Theme.Space.m)
                     Button(L10n.text("common.teams.review_invitation"), .preview) {
                         if let context = store.mutationContext { sheet = .accept(context, invitation) }
-                    }.buttonStyle(TeamButtonStyle(primary: true))
+                    }.buttonStyle(TeamSmallButtonStyle(primary: true))
                 }.teamRowPadding()
             }
             if store.inboxNextOffset != nil {
-                Button(L10n.text("common.teams.more_invitations"), .more) { Task { await store.loadMoreInbox() } }.buttonStyle(TeamButtonStyle())
+                Button(L10n.text("common.teams.more_invitations"), .more) { Task { await store.loadMoreInbox() } }.buttonStyle(TeamSmallButtonStyle())
             }
         }
     }
     private func membersContent(_ directory: TeamDirectorySnapshot) -> some View {
         let organization = directory.details.organization
         let members = directory.members.members.filter { query.isEmpty || $0.name.localizedStandardContains(query) || ($0.handle?.localizedStandardContains(query) ?? false) }
-        return TeamPage(title: L10n.text("common.teams.members"), subtitle: L10n.text("common.teams.member_list_detail")) {
-            TextField(L10n.text("common.search"), text: $query).textFieldStyle(ThemedFieldStyle(small: true)).frame(width: 200)
-            if organization.role.canManage {
-                Button(L10n.text("common.teams.invite_member"), .invite) { if let context = store.mutationContext { sheet = .invite(context) } }
-                    .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
-            }
-        } content: {
-            if members.isEmpty {
-                Text(L10n.text("common.teams.no_matching_members")).font(Theme.callout).foregroundStyle(.secondary).teamRowPadding().teamCard()
-            } else {
-                TeamListCard(items: members) { member in
-                    HStack(spacing: Theme.Space.m) {
-                        TeamMemberLabel(store: store, member: member, organization: organization.id)
-                        Spacer(minLength: Theme.Space.m)
-                        if !member.eligible {
-                            Label(L10n.text("common.teams.needs_patron"), systemImage: "exclamationmark.circle").font(Theme.callout).foregroundStyle(TeamColors.warning)
-                        }
-                        TeamRoleBadge(text: member.role.label)
-                        memberMenu(member, organization: organization)
-                            .frame(width: Theme.Control.heightComfortable)
-                    }.teamRowPadding()
+        return TeamPage {
+            Card(title: L10n.text("common.teams.members"), subtitle: L10n.text("common.teams.member_list_detail"), mark: "mark_account") {
+                if members.isEmpty {
+                    Text(L10n.text("common.teams.no_matching_members")).font(Theme.callout).foregroundStyle(.secondary)
+                } else {
+                    TeamRows(items: members) { member in
+                        HStack(spacing: Theme.Space.m) {
+                            TeamMemberLabel(store: store, member: member, organization: organization.id)
+                            Spacer(minLength: Theme.Space.m)
+                            if !member.eligible {
+                                Label(L10n.text("common.teams.needs_patron"), systemImage: "exclamationmark.circle").font(Theme.callout).foregroundStyle(TeamColors.warning)
+                            }
+                            TeamRoleBadge(text: member.role.label)
+                            memberMenu(member, organization: organization)
+                                .frame(width: Theme.Control.heightComfortable)
+                        }.teamRowPadding()
+                    }
                 }
+                if directory.members.nextOffset != nil { moreButton(.members) }
             }
-            if directory.members.nextOffset != nil { moreButton(.members) }
         }
     }
     @ViewBuilder private func memberMenu(_ member: TeamMember, organization: TeamOrganization) -> some View {
@@ -360,61 +394,53 @@ struct TeamManagementView: View {
     }
     private func invitationsContent(_ directory: TeamDirectorySnapshot) -> some View {
         let organization = directory.details.organization
-        return TeamPage(title: L10n.text("common.teams.invitations"), subtitle: L10n.text("common.teams.invitation_list_detail")) {
-            if organization.role.canManage {
-                Button(L10n.text("common.teams.invite_member"), .invite) { if let context = store.mutationContext { sheet = .invite(context) } }
-                    .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
-            }
-        } content: {
-            if !organization.role.canManage {
-                EmptyState(symbol: "person.badge.plus", title: L10n.text("common.teams.invitation_admin"), message: L10n.text("common.teams.invitation_admin_detail")).teamCard()
-            } else if directory.invitations.invitations.isEmpty {
-                EmptyState(symbol: "envelope", title: L10n.text("common.teams.no_invitations"), message: L10n.text("common.teams.invite_empty_detail")).teamCard()
-            } else {
-                TeamListCard(items: directory.invitations.invitations) { invitation in
-                    HStack(spacing: Theme.Space.m) {
-                        if let recipient = invitation.recipient {
-                            TeamPersonLabel(id: recipient.id, name: recipient.name, handle: recipient.handle, avatar: recipient.avatar, owner: store.owner)
-                        } else { Text(L10n.text("common.teams.member_unavailable")).font(Theme.body) }
-                        Spacer(minLength: Theme.Space.m)
-                        Text(invitationState(invitation.state)).font(Theme.callout)
-                            .foregroundStyle(invitation.state == "pending" ? TeamColors.action : .secondary)
-                        TeamRoleBadge(text: invitation.role.label)
-                        Group {
-                            if (invitation.state == "pending" || invitation.state == "expired") && (invitation.role != .admin || organization.role == .owner) {
-                                TeamRowMenu(label: L10n.text("common.teams.manage_invitation")) {
-                                    Button(L10n.text("common.teams.new_invitation_link")) { if let context = store.mutationContext { sheet = .invitationAction(context, invitation, renewing: true) } }
-                                        .disabled(!organization.isActive)
-                                    Button(L10n.text("common.teams.revoke_invitation"), role: .destructive) { if let context = store.mutationContext { sheet = .invitationAction(context, invitation, renewing: false) } }
-                                }.disabled(store.isMutating)
-                            } else { Color.clear.frame(height: 1) }
-                        }.frame(width: Theme.Control.heightComfortable)
-                    }.teamRowPadding()
+        return TeamPage {
+            Card(title: L10n.text("common.teams.invitations"), subtitle: L10n.text("common.teams.invitation_list_detail"), mark: "mark_note") {
+                if !organization.role.canManage {
+                    EmptyState(symbol: "person.badge.plus", title: L10n.text("common.teams.invitation_admin"), message: L10n.text("common.teams.invitation_admin_detail"))
+                } else if directory.invitations.invitations.isEmpty {
+                    EmptyState(symbol: "envelope", title: L10n.text("common.teams.no_invitations"), message: L10n.text("common.teams.invite_empty_detail"))
+                } else {
+                    TeamRows(items: directory.invitations.invitations) { invitation in
+                        HStack(spacing: Theme.Space.m) {
+                            if let recipient = invitation.recipient {
+                                TeamPersonLabel(id: recipient.id, name: recipient.name, handle: recipient.handle, avatar: recipient.avatar, owner: store.owner)
+                            } else { Text(L10n.text("common.teams.member_unavailable")).font(Theme.body) }
+                            Spacer(minLength: Theme.Space.m)
+                            Text(invitationState(invitation.state)).font(Theme.callout)
+                                .foregroundStyle(invitation.state == "pending" ? TeamColors.action : .secondary)
+                            TeamRoleBadge(text: invitation.role.label)
+                            Group {
+                                if (invitation.state == "pending" || invitation.state == "expired") && (invitation.role != .admin || organization.role == .owner) {
+                                    TeamRowMenu(label: L10n.text("common.teams.manage_invitation")) {
+                                        Button(L10n.text("common.teams.new_invitation_link")) { if let context = store.mutationContext { sheet = .invitationAction(context, invitation, renewing: true) } }
+                                            .disabled(!organization.isActive)
+                                        Button(L10n.text("common.teams.revoke_invitation"), role: .destructive) { if let context = store.mutationContext { sheet = .invitationAction(context, invitation, renewing: false) } }
+                                    }.disabled(store.isMutating)
+                                } else { Color.clear.frame(height: 1) }
+                            }.frame(width: Theme.Control.heightComfortable)
+                        }.teamRowPadding()
+                    }
                 }
+                if organization.role.canManage, directory.invitations.nextOffset != nil { moreButton(.invitations) }
             }
-            if organization.role.canManage, directory.invitations.nextOffset != nil { moreButton(.invitations) }
         }
     }
     private func repositoriesContent(_ directory: TeamDirectorySnapshot) -> some View {
         let organization = directory.details.organization
-        return TeamPage(title: L10n.text("common.teams.repositories"), subtitle: L10n.text("common.teams.repository_list_detail")) {
-            if store.capabilities?.canPublishCheckouts == true && (organization.role.canManage || directory.repositories.repositories.contains { $0.role == .contributor || $0.role == .maintainer }) {
-                Button(L10n.text("common.teams.share_project"), .connect) { if let context = store.mutationContext { sheet = .repository(context) } }
-                    .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
-            }
-        } content: {
+        return TeamPage {
             if directory.repositories.repositories.isEmpty {
-                EmptyState(symbol: "folder", title: L10n.text("common.teams.no_repositories"), message: organization.role.canManage ? L10n.text("common.teams.no_repositories_admin") : L10n.text("common.teams.no_repositories_member")).teamCard()
+                Card(title: L10n.text("common.teams.repositories"), subtitle: L10n.text("common.teams.repository_list_detail"), mark: "mark_folder") {
+                    EmptyState(symbol: "folder", title: L10n.text("common.teams.no_repositories"), message: organization.role.canManage ? L10n.text("common.teams.no_repositories_admin") : L10n.text("common.teams.no_repositories_member"))
+                }
             } else {
-                LazyVStack(spacing: Theme.Space.m) {
-                    ForEach(directory.repositories.repositories) { repository in
-                        if let context = store.mutationContext {
-                            TeamRepositoryRow(store: store, context: context, repository: repository, organization: organization,
-                                openChats: { store.selectedRepositoryId = repository.id; store.show(.chats) },
-                                openCheckouts: { sheet = .checkouts(context, repository) },
-                                manageAccess: { sheet = .access(context, repository) },
-                                rename: { sheet = .renameRepository(context, repository) })
-                        }
+                ForEach(directory.repositories.repositories) { repository in
+                    if let context = store.mutationContext {
+                        TeamRepositoryRow(store: store, context: context, repository: repository, organization: organization,
+                            openChats: { store.selectedRepositoryId = repository.id; store.show(.chats) },
+                            openCheckouts: { sheet = .checkouts(context, repository) },
+                            manageAccess: { sheet = .access(context, repository) },
+                            rename: { sheet = .renameRepository(context, repository) })
                     }
                 }
             }
@@ -422,70 +448,66 @@ struct TeamManagementView: View {
         }
     }
     private func settingsContent(_ organization: TeamOrganization) -> some View {
-        TeamPage(title: L10n.text("common.teams.section_settings"), subtitle: L10n.text("common.teams.settings_detail")) {
-            EmptyView()
-        } content: {
-            settingsGroup(L10n.text("common.teams.organization")) {
-                TeamSettingRow(title: L10n.text("common.teams.organization_name"), detail: organization.name) {
-                    if organization.role.canManage {
-                        Button(L10n.text("common.teams.rename_organization"), .edit) { if let context = store.mutationContext { sheet = .rename(context) } }
-                            .buttonStyle(TeamButtonStyle()).disabled(!organization.isActive)
+        TeamPage {
+            Card(title: L10n.text("common.teams.organization"), subtitle: L10n.text("common.teams.settings_detail"), mark: "mark_account") {
+                VStack(spacing: 0) {
+                    TeamSettingRow(title: L10n.text("common.teams.organization_name"), detail: organization.name) {
+                        if organization.role.canManage {
+                            Button(L10n.text("common.teams.rename_organization"), .edit) { if let context = store.mutationContext { sheet = .rename(context) } }
+                                .buttonStyle(TeamSmallButtonStyle()).disabled(!organization.isActive)
+                        }
                     }
-                }
-                ThemeRule().padding(.leading, Theme.cardPadding)
-                TeamSettingRow(title: L10n.text("common.teams.organization_address"), detail: "@" + organization.slug) { EmptyView() }
-                ThemeRule().padding(.leading, Theme.cardPadding)
-                TeamSettingRow(title: L10n.text("common.teams.your_role"), detail: nil) { TeamRoleBadge(text: organization.role.label) }
-                ThemeRule().padding(.leading, Theme.cardPadding)
-                TeamSettingRow(title: L10n.text("common.teams.plan"), detail: L10n.text("common.teams.plan_detail")) {
-                    Button(L10n.text("common.teams.view_plan"), .plans, action: onAccount).buttonStyle(TeamButtonStyle())
+                    ThemeRule()
+                    TeamSettingRow(title: L10n.text("common.teams.organization_address"), detail: "@" + organization.slug) { EmptyView() }
+                    ThemeRule()
+                    TeamSettingRow(title: L10n.text("common.teams.your_role"), detail: nil) { TeamRoleBadge(text: organization.role.label) }
+                    ThemeRule()
+                    TeamSettingRow(title: L10n.text("common.teams.plan"), detail: L10n.text("common.teams.plan_detail")) {
+                        Button(L10n.text("common.teams.view_plan"), .plans, action: onAccount).buttonStyle(TeamSmallButtonStyle())
+                    }
                 }
             }
             if let request = store.directory?.details.ownershipRequest, request.toUserId == store.capabilities?.actorId {
-                settingsGroup(L10n.text("common.teams.ownership_request")) {
-                    if !request.current { TeamNotice(message: L10n.text("common.teams.ownership_stale"), warning: true).padding(Theme.Space.m) }
-                    TeamSettingRow(title: L10n.text("common.teams.review_ownership"), detail: L10n.text("common.teams.ownership_accept_detail")) {
+                Card(title: L10n.text("common.teams.ownership_request"), subtitle: L10n.text("common.teams.ownership_accept_detail"), mark: "mark_account") {
+                    if !request.current { TeamNotice(message: L10n.text("common.teams.ownership_stale"), warning: true) }
+                    TeamSettingRow(title: L10n.text("common.teams.review_ownership"), detail: nil) {
                         Button(L10n.text("common.teams.review_ownership"), .approve) { if let context = store.mutationContext { sheet = .ownershipDecision(context, request, cancelling: false) } }
-                            .buttonStyle(TeamButtonStyle(primary: true)).disabled(!request.current || store.isMutating)
+                            .buttonStyle(TeamSmallButtonStyle(primary: true)).disabled(!request.current || store.isMutating)
                     }
                 }
             }
             if organization.role == .owner {
-                settingsGroup(L10n.text("common.teams.ownership")) {
-                    if let request = store.directory?.details.ownershipRequest, request.fromUserId == store.capabilities?.actorId {
-                        TeamSettingRow(title: L10n.text("common.teams.ownership_request"), detail: request.current ? L10n.text("common.teams.ownership_pending") : L10n.text("common.teams.ownership_stale")) {
-                            Button(L10n.text("common.teams.cancel_ownership_request"), .revoke) { if let context = store.mutationContext { sheet = .ownershipDecision(context, request, cancelling: true) } }
-                                .buttonStyle(TeamButtonStyle()).disabled(request.requestId == nil || store.isMutating)
+                Card(title: L10n.text("common.teams.ownership"), subtitle: L10n.text("common.teams.owner_detail"), mark: "mark_account") {
+                    VStack(spacing: 0) {
+                        if let request = store.directory?.details.ownershipRequest, request.fromUserId == store.capabilities?.actorId {
+                            TeamSettingRow(title: L10n.text("common.teams.ownership_request"), detail: request.current ? L10n.text("common.teams.ownership_pending") : L10n.text("common.teams.ownership_stale")) {
+                                Button(L10n.text("common.teams.cancel_ownership_request"), .revoke) { if let context = store.mutationContext { sheet = .ownershipDecision(context, request, cancelling: true) } }
+                                    .buttonStyle(TeamSmallButtonStyle()).disabled(request.requestId == nil || store.isMutating)
+                            }
+                            ThemeRule()
                         }
-                        ThemeRule().padding(.leading, Theme.cardPadding)
-                    }
-                    TeamSettingRow(title: L10n.text("common.teams.transfer_ownership"), detail: L10n.text("common.teams.owner_detail")) {
-                        Button(L10n.text("common.teams.transfer_ownership"), .move) { if let context = store.mutationContext { sheet = .transfer(context) } }.buttonStyle(TeamButtonStyle())
+                        TeamSettingRow(title: L10n.text("common.teams.transfer_ownership"), detail: nil) {
+                            Button(L10n.text("common.teams.transfer_ownership"), .move) { if let context = store.mutationContext { sheet = .transfer(context) } }.buttonStyle(TeamSmallButtonStyle())
+                        }
                     }
                 }
-                settingsGroup(L10n.text("common.teams.danger_zone")) {
-                    TeamSettingRow(title: L10n.text("common.teams.delete_organization"), detail: L10n.text("common.teams.delete_detail")) {
-                        Button(L10n.text("common.teams.delete_organization"), .delete, role: .destructive) { if let context = store.mutationContext { sheet = .delete(context) } }.buttonStyle(TeamButtonStyle())
+                Card(title: L10n.text("common.teams.danger_zone"), subtitle: L10n.text("common.teams.delete_detail"), mark: "mark_delete", markTint: Theme.danger) {
+                    TeamSettingRow(title: L10n.text("common.teams.delete_organization"), detail: nil) {
+                        Button(L10n.text("common.teams.delete_organization"), .delete, role: .destructive) { if let context = store.mutationContext { sheet = .delete(context) } }.buttonStyle(TeamSmallButtonStyle())
                     }
                 }
             } else {
-                settingsGroup(L10n.text("common.teams.danger_zone")) {
-                    TeamSettingRow(title: L10n.text("common.teams.leave_organization"), detail: L10n.text("common.teams.leave_detail")) {
-                        Button(L10n.text("common.teams.leave_organization"), .signOut, role: .destructive) { if let context = store.mutationContext { sheet = .leave(context) } }.buttonStyle(TeamButtonStyle())
+                Card(title: L10n.text("common.teams.danger_zone"), subtitle: L10n.text("common.teams.leave_detail"), mark: "mark_delete", markTint: Theme.danger) {
+                    TeamSettingRow(title: L10n.text("common.teams.leave_organization"), detail: nil) {
+                        Button(L10n.text("common.teams.leave_organization"), .signOut, role: .destructive) { if let context = store.mutationContext { sheet = .leave(context) } }.buttonStyle(TeamSmallButtonStyle())
                     }
                 }
             }
         }
     }
-    private func settingsGroup<Rows: View>(_ title: String, @ViewBuilder rows: () -> Rows) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            TeamGroupHeading(title: title)
-            VStack(spacing: 0) { rows() }.teamCard()
-        }
-    }
     private func moreButton(_ section: TeamSection) -> some View {
         Button(L10n.text("common.teams.load_more"), .more) { Task { await store.loadMore(section) } }
-            .buttonStyle(TeamButtonStyle()).disabled(store.isLoadingDirectory)
+            .buttonStyle(TeamSmallButtonStyle()).disabled(store.isLoadingDirectory)
     }
     private func openCreate() { if let context = store.mutationContext { sheet = .create(context) } }
     private func refresh() { Task { await store.reloadAfterChange() } }

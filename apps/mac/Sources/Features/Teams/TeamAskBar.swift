@@ -35,7 +35,7 @@ struct TeamAskBar: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if visible || model.fence != nil, let error = model.error { TeamNotice(message: error, warning: true) }
             if visible, model.fence == nil, model.error != nil {
-                Button(L10n.text("common.teams.load_saved_ask"), .refresh) { Task { await model.restore(force: true) } }.buttonStyle(TeamComposerButtonStyle()).disabled(model.busy)
+                Button(L10n.text("common.teams.load_saved_ask"), .refresh) { Task { await model.restore(force: true) } }.buttonStyle(TeamSmallButtonStyle()).disabled(model.busy)
             }
             if model.fence != nil {
                 HStack(spacing: Theme.Space.s) {
@@ -43,7 +43,7 @@ struct TeamAskBar: View {
                     Text(model.stopping ? L10n.text("common.teams.agent_stopping") : L10n.text("common.teams.agent_working", computer))
                         .font(Theme.callout).foregroundStyle(TeamColors.action).frame(maxWidth: .infinity, alignment: .leading)
                     Button(L10n.text("common.teams.stop_agent"), .stop, role: .destructive) { Task { await model.stop() } }
-                        .buttonStyle(TeamComposerButtonStyle()).disabled(model.stopping).accessibilityIdentifier("team.ask.stop")
+                        .buttonStyle(TeamSmallButtonStyle()).disabled(model.stopping).accessibilityIdentifier("team.ask.stop")
                 }
             } else if visible && (allowsAgentRuns || model.pending) {
                 TeamComposerField(placeholder: L10n.text("common.teams.ask_placeholder"), text: $model.text)
@@ -54,7 +54,7 @@ struct TeamAskBar: View {
                         .help(L10n.text("common.teams.ask_detail", computer))
                     Spacer(minLength: Theme.Space.m)
                     Button(model.pending ? L10n.text("common.teams.retry_same_ask") : L10n.text("common.teams.ask"), .run) { Task { await model.ask(computer: computer); refresh() } }
-                        .buttonStyle(TeamComposerButtonStyle(primary: true))
+                        .buttonStyle(TeamSmallButtonStyle(primary: true))
                         .disabled(!model.canAsk)
                         .keyboardShortcut(.return, modifiers: .command)
                         .accessibilityIdentifier("team.ask.send")

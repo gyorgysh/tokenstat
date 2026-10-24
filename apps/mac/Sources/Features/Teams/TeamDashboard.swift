@@ -27,7 +27,8 @@ struct TeamOrganizationCard: View {
                         }
                     }
                 }
-            }.buttonStyle(TeamListRowButtonStyle()).accessibilityIdentifier("team.organization.open.\(organization.id)")
+            }.buttonStyle(TeamListRowButtonStyle()).padding(.horizontal, Theme.Space.m).padding(.vertical, Theme.Space.xs)
+                .accessibilityIdentifier("team.organization.open.\(organization.id)")
             ThemeRule()
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if !organization.isActive { Text(L10n.text("common.teams.organization_paused")).font(Theme.callout).foregroundStyle(TeamColors.warning) }
@@ -62,11 +63,11 @@ struct TeamOrganizationCard: View {
                     ProgressView().controlSize(.small)
                 }
             }
-            .padding(Theme.cardPadding)
+            .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
-        .teamCard()
+        .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
+        .teamTile()
         .task(id: store.catalogRefresh) { await load() }
         .task {
             while !Task.isCancelled {
@@ -107,12 +108,7 @@ struct TeamOrganizationOverview: View {
     private var projects: [TeamRepository] { directory.repositories.repositories.filter { $0.role != nil } }
 
     var body: some View {
-        TeamPage(title: L10n.text("common.teams.overview"), subtitle: L10n.text("common.teams.organization_overview_detail")) {
-            if organization.role.canManage {
-                Button(L10n.text("common.teams.invite_member"), .invite, action: invite)
-                    .buttonStyle(TeamButtonStyle(primary: true)).disabled(!organization.isActive)
-            }
-        } content: {
+        TeamPage {
             if !textSize.isAccessibilitySize {
                 // One row, equal widths, equal heights: the tallest tile sets
                 // the row and every other tile fills it.
@@ -130,8 +126,8 @@ struct TeamOrganizationOverview: View {
                     }
                 }.fixedSize(horizontal: false, vertical: true)
             }
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                TeamGroupHeading(title: L10n.text("common.teams.shared_projects"), action: projects.isEmpty ? nil : (L10n.text("common.teams.view_all"), { store.show(.repositories) }))
+            Card(title: L10n.text("common.teams.shared_projects"), subtitle: L10n.text("common.teams.project_collaboration_detail"), mark: "mark_folder",
+                accessory: projects.isEmpty ? nil : AnyView(viewAll(.repositories))) {
                 if projects.isEmpty {
                     TeamGettingStarted(canManage: organization.role.canManage, addProject: addProject, invite: invite)
                         .disabled(!organization.isActive)
@@ -142,24 +138,22 @@ struct TeamOrganizationOverview: View {
                                 store.openProject(project, in: organization)
                             } label: {
                                 HStack(spacing: Theme.Space.m) {
-                                    Image(systemName: "folder.badge.person.crop").font(Theme.font(18)).foregroundStyle(TeamColors.action)
-                                        .frame(width: 40, height: 40).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    Image(systemName: "folder.badge.person.crop").font(Theme.font(16)).foregroundStyle(TeamColors.action)
+                                        .frame(width: 34, height: 34).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(project.name).font(Theme.body.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                                         Text(L10n.text("common.teams.open_conversations")).font(Theme.callout).foregroundStyle(.secondary).lineLimit(1)
                                     }
                                 }
-                            }.buttonStyle(TeamListRowButtonStyle()).teamCard()
+                            }.buttonStyle(TeamListRowButtonStyle()).padding(.horizontal, Theme.Space.m).teamTile()
                                 .accessibilityIdentifier("team.project.open.\(project.id)")
                         }
                     }
-                    Text(L10n.text("common.teams.project_collaboration_detail"))
-                        .font(Theme.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.horizontal, Theme.Space.xs)
                 }
             }
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                TeamGroupHeading(title: L10n.text("common.teams.people"), action: (L10n.text("common.teams.view_all"), { store.show(.members) }))
-                TeamListCard(items: Array(directory.members.members.prefix(6))) { member in
+            Card(title: L10n.text("common.teams.people"), subtitle: L10n.text("common.teams.organization_overview_detail"), mark: "mark_account",
+                accessory: AnyView(viewAll(.members))) {
+                TeamRows(items: Array(directory.members.members.prefix(6))) { member in
                     HStack(spacing: Theme.Space.m) {
                         TeamMemberLabel(store: store, member: member, organization: organization.id)
                         Spacer(minLength: Theme.Space.m)
@@ -168,6 +162,10 @@ struct TeamOrganizationOverview: View {
                 }
             }
         }
+    }
+    private func viewAll(_ section: TeamSection) -> some View {
+        Button(L10n.text("common.teams.view_all"), .next) { store.show(section) }
+            .buttonStyle(.plain).font(Theme.callout).foregroundStyle(TeamColors.action)
     }
     private func count(_ value: Int, more: Bool) -> String { value.formatted() + (more ? "+" : "") }
     private var cardColumns: [GridItem] {
@@ -191,12 +189,11 @@ struct TeamGettingStarted: View {
                     VStack(alignment: .leading, spacing: Theme.Space.m) { actions }
                 }
             }
-        }.padding(Theme.cardPadding).frame(maxWidth: .infinity, alignment: .leading)
-            .teamCard()
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
     @ViewBuilder private var actions: some View {
-        Button(L10n.text("common.teams.new_repository"), .create, action: addProject).buttonStyle(TeamButtonStyle(primary: true))
-        Button(L10n.text("common.teams.invite_member"), .invite, action: invite).buttonStyle(TeamButtonStyle())
+        Button(L10n.text("common.teams.new_repository"), .create, action: addProject).buttonStyle(TeamSmallButtonStyle(primary: true))
+        Button(L10n.text("common.teams.invite_member"), .invite, action: invite).buttonStyle(TeamSmallButtonStyle())
     }
 }
 
