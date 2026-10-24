@@ -197,9 +197,28 @@ private struct FlowRow: Layout {
 /// panel, a hairline, a bevel that catches the light along the top edge, and
 /// a glow under it. It also reports its frame, which is where the surface
 /// draws the spectrum the card throws.
-struct ChatStartCardAnchor: PreferenceKey {
-    static var defaultValue: Anchor<CGRect>? { nil }
-    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = nextValue() ?? value }
+/// Where the page wants the card's frame, in the page's own coordinates.
+/// A preference anchor is resolved once and does not follow a scroll, so the
+/// spectrum stayed behind as a loose frame when the content moved under it.
+/// A geometry observer reports every change, scrolling included.
+struct ChatStartCardFrameKey: EnvironmentKey {
+    static let defaultValue: (@MainActor (CGRect) -> Void)? = nil
+}
+extension EnvironmentValues {
+    var chatStartCardFrame: (@MainActor (CGRect) -> Void)? {
+        get { self[ChatStartCardFrameKey.self] }
+        set { self[ChatStartCardFrameKey.self] = newValue }
+    }
+}
+/// The named space the card's frame is measured in: the start page's pane.
+enum ChatStartPaneSpace { static let name = "chatStartPane" }
+private struct ChatStartCardReporter: ViewModifier {
+    @Environment(\.chatStartCardFrame) private var report
+    func body(content: Content) -> some View {
+        content.onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatStartPaneSpace.name)) } action: { frame in
+            report?(frame)
+        }
+    }
 }
 
 extension View {
@@ -217,6 +236,6 @@ extension View {
                     .allowsHitTesting(false)
             }
             .shadow(color: Theme.accent.opacity(highlighted ? 0.16 : 0.06), radius: 35, y: 12)
-            .anchorPreference(key: ChatStartCardAnchor.self, value: .bounds) { $0 }
+            .modifier(ChatStartCardReporter())
     }
 }

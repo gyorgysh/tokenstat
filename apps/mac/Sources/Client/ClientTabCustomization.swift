@@ -47,7 +47,9 @@ final class ClientTabCustomization {
     /// Keep that destination in the bar while selected, without changing
     /// this device's preferences or introducing another modal navigation flow.
     func tabs(including selected: ClientTab) -> [ClientTab] {
-        ClientTabVisibility.displayed(order: order, visible: visibleTabs, selected: selected)
+        // Five is where a phone's tab bar stops before iOS adds More.
+        ClientTabVisibility.displayed(order: order, visible: visibleTabs, selected: selected,
+                                      limit: UIDevice.current.userInterfaceIdiom == .pad ? .max : 5)
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -222,8 +224,17 @@ struct ClientTabEditor: View {
 
 /// Pure selection policy shared by the tab renderer and its regression suite.
 enum ClientTabVisibility {
-    static func displayed<T: Hashable>(order: [T], visible: [T], selected: T) -> [T] {
+    /// The tabs to draw. A destination off the bar, such as Team, joins it
+    /// while open. Past `limit` it takes the last slot instead of adding one:
+    /// a sixth tab makes iOS fold the extras into its own More tab, which
+    /// wraps the screen in a second navigation stack, adds a back button and
+    /// pushes the whole page down a row.
+    static func displayed<T: Hashable>(order: [T], visible: [T], selected: T, limit: Int = .max) -> [T] {
         guard !visible.contains(selected) else { return visible }
-        return order.filter { visible.contains($0) || $0 == selected }
+        var shown = order.filter { visible.contains($0) || $0 == selected }
+        while shown.count > limit, let last = shown.lastIndex(where: { $0 != selected }) {
+            shown.remove(at: last)
+        }
+        return shown
     }
 }

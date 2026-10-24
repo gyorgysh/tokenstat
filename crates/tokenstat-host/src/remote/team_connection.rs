@@ -205,6 +205,42 @@ pub(crate) fn unavailable() -> DispatchError {
         "The computer sharing this project is not reachable right now. It needs to be on, with tokenstat open.",
     )
 }
+/// This device could not hold its own connection to the relay.
+fn relay_unreachable() -> DispatchError {
+    DispatchError::new(
+        "team_relay_unreachable",
+        "This device could not reach the tokenstat relay. Check the connection and try again.",
+    )
+}
+/// The relay answered the team channel with a refusal or never paired it.
+/// Its reason codes are stable and say which side to look at, so they are
+/// kept rather than folded into one sentence that fits every failure.
+fn relay_refused(reason: &str) -> DispatchError {
+    if reason.contains("no_such_peer") {
+        return unavailable();
+    }
+    if reason.contains("did not pair") {
+        return DispatchError::new(
+            "team_relay_timeout",
+            "The relay did not answer this team connection in time. Try again shortly.",
+        );
+    }
+    let code = reason
+        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .find(|part| !part.is_empty())
+        .unwrap_or("unknown");
+    DispatchError::new(
+        "team_relay_refused",
+        format!("The relay refused this team connection ({code})."),
+    )
+}
+/// The sharing computer was reached but did not accept the connection.
+fn host_refused() -> DispatchError {
+    DispatchError::new(
+        "team_host_refused",
+        "The computer sharing this project did not accept the connection. Update tokenstat there and try again.",
+    )
+}
 fn invalid() -> DispatchError {
     DispatchError::new(
         "team_connection_invalid",
@@ -396,21 +432,21 @@ impl Link {
             // Socket creation is asynchronous. An initial Team open must wait
             // for READY rather than racing the writer's first registration.
             let ready_deadline = (Instant::now() + Duration::from_secs(10)).min(deadline);
-            let socket = tunnel.socket().map_err(|_| unavailable())?;
+            let socket = tunnel.socket().map_err(|_| relay_unreachable())?;
             while !socket.status().connected {
-                tunnel.ensure_current().map_err(|_| unavailable())?;
+                tunnel.ensure_current().map_err(|_| relay_unreachable())?;
                 if Instant::now() >= ready_deadline || continuous_deadline.remaining().is_none() {
-                    return Err(unavailable());
+                    return Err(relay_unreachable());
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
             let transport = socket
                 .open_team_channel(*proof.host_key(), proof.ticket().ticket())
-                .map_err(|_| unavailable())?;
+                .map_err(|error| relay_refused(&error.to_string()))?;
             let channel = transport.team_authorization().ok_or_else(invalid)?;
             let connection =
                 handshake_initiator_bounded(Box::new(transport), &identity, *proof.host_key())
-                    .map_err(|_| unavailable())?;
+                    .map_err(|_| host_refused())?;
             Transport::Relay(Box::new(Relay {
                 connection,
                 channel,

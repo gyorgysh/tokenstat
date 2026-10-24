@@ -117,16 +117,13 @@ struct ChatStartPage: View {
                 }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: showsStarters)
                 .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.1), value: needsRepository)
+                // A phone bounces a scroll view whose content already fits,
+                // which slid the card away from its own light.
+                .scrollBounceBehavior(.basedOnSize)
                 // The card's frame goes to the surface, which draws the
                 // spectrum the glass throws. Plain state on the motion
                 // object, like the pointer, so nothing redraws for it.
-                .overlayPreferenceValue(ChatStartCardAnchor.self) { anchor in
-                    let card = anchor.map { pane[$0] } ?? .zero
-                    Color.clear
-                        .onChange(of: card, initial: true) { _, frame in motion.card = frame }
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
+                .environment(\.chatStartCardFrame) { frame in motion.card = frame }
                 .overlayPreferenceValue(ChatStartContentAnchor.self) { anchor in
                     if let anchor {
                         let excluded = pane[anchor].insetBy(dx: -12, dy: -12)
@@ -136,6 +133,7 @@ struct ChatStartPage: View {
                     }
                 }
             }
+            .coordinateSpace(name: ChatStartPaneSpace.name)
             .opacity(draft.isSubmitting ? 0 : 1)
             .scaleEffect(draft.isSubmitting && !reduceMotion ? 0.975 : 1)
             .accessibilityHidden(draft.isSubmitting)
