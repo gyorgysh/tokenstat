@@ -159,7 +159,7 @@ internal sealed partial class TeamsPage : Page
             var capabilities = await CallAsync("teams.capabilities");
             if (!IsLoaded || _view != view) return;
             if (!Format.Flag(capabilities, "enabled")) { Note(L10n.Text("common.teams.load_failed"), true); return; }
-            if (!Format.Flag(capabilities, "ready")) { ShowAuthorize(); return; }
+            if (!Format.Flag(capabilities, "ready")) { ShowAuthorize(Format.Flag(capabilities, "deviceRemoved")); return; }
             var actor = Format.Text(capabilities, "actorId");
             if (actor.Length == 0 || !string.IsNullOrEmpty(_person) && _person != actor) throw new HostException("account_changed", L10n.Text("common.teams.account_changed"));
             _person = actor;
@@ -251,10 +251,20 @@ internal sealed partial class TeamsPage : Page
         _body.Children.Add(more);
     }
 
-    private void ShowAuthorize()
+    /// A signed-in device turns Teams on by itself, so this is shown for a
+    /// device the person removed from Teams, or a server that predates that.
+    private void ShowAuthorize(bool removed = false)
     {
         var view = _view;
-        Note(L10n.Text("common.teams.enable_title"));
+        if (removed)
+        {
+            Note(L10n.Text("common.teams.device_removed_title"));
+            Note(L10n.Text("common.teams.device_removed_detail"));
+        }
+        else
+        {
+            Note(L10n.Text("common.teams.enable_title"));
+        }
         Note(L10n.Text("common.teams.device_consent_detail"));
         Note(L10n.Text("common.teams.metadata_disclosure"));
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.continue_browser"), ActionIcon.External, async (_, _) =>
