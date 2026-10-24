@@ -516,7 +516,11 @@ struct RootView: View {
         }
         .task(id: teams.selectionKey) { await teams.refreshSelected() }
         .task(id: TeamAppPresenceKey(owner: teams.owner, active: scenePhase == .active && teams.phase == .ready, supported: teams.capabilities?.supportsAppPresence == true)) {
-            await teams.watchAppPresence(active: { NSApp.isActive })
+            await teams.watchAppPresence(keepsWatching: true, active: {
+                // Present while a window of the app is on screen, not only while
+                // it is frontmost: a Mac user reads one app beside another.
+                !NSApp.isHidden && NSApp.windows.contains { $0.isVisible && !$0.isMiniaturized && $0.canBecomeMain }
+            })
         }
         .onChange(of: teams.owner) { sharingProject = nil }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -3247,6 +3251,9 @@ struct RootView: View {
                 directoryError: workspaces.directoryError,
                 onRetry: { Task { await workspaces.loadLocal() } },
                 sessionsIn: { id in terminals.sessions(in: id).filter(\.alive).count },
+                sharedWith: { id in teams.localProjects(for: id).map { publication in
+                    teams.organizations.first { $0.id == publication.organizationId }?.name ?? L10n.text("common.teams.title")
+                } },
                 onOpenFolder: { selectWorkspace($0) },
                 onAdd: { workspaces.requestAdd() }
             )

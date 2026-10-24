@@ -787,5 +787,6 @@
   "common.teams.composer_mode": "What to send",
   "common.teams.computers_sharing": "Shared from",
   "common.teams.more_actions": "More actions",
-  "common.teams.ask_runs_on": "Runs on {0}"
+  "common.teams.ask_runs_on": "Runs on {0}",
+  "common.teams.shared_with_team": "Shared with {0}"
 }

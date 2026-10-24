@@ -257,7 +257,11 @@ final class TeamStore {
 
     /// Login ownership, not organization navigation, owns the app heartbeat.
     /// The account service advertises support before this operation is used.
-    func watchAppPresence(active: @MainActor () -> Bool) async {
+    /// `keepsWatching` holds the loop through a quiet spell. The Mac needs
+    /// it: the task restarts only when the scene changes, and a Mac window
+    /// stays in the same scene while another app is in front, so stopping
+    /// once left a person offline for the rest of the session.
+    func watchAppPresence(keepsWatching: Bool = false, active: @MainActor () -> Bool) async {
         guard let owner, phase == .ready, capabilities?.supportsAppPresence == true else { return }
         repeat {
             guard self.owner == owner, phase == .ready, !Task.isCancelled else { return }
@@ -265,7 +269,7 @@ final class TeamStore {
             do {
                 let _: JSONValue = try await api.request(.directory, ["operation": .string("presence.set"), "active": .bool(foreground)], owner: owner)
             } catch {}
-            guard foreground, !Task.isCancelled else { return }
+            guard foreground || keepsWatching, !Task.isCancelled else { return }
             do { try await Task.sleep(for: .seconds(30)) } catch { return }
         } while self.owner == owner
     }
@@ -282,6 +286,8 @@ final class TeamStore {
         memberPresence[organization] = observations
     }
     func presenceStatus(member: String, organization: String, at: Date) -> Bool? {
+        // The person reading this screen has the app open.
+        if phase == .ready, member == capabilities?.actorId { return true }
         guard phase == .ready, let observation = memberPresence[organization]?[member] else { return nil }
         let age = at.timeIntervalSince(observation.checked)
         guard age >= 0, age < 45 else { return nil }
