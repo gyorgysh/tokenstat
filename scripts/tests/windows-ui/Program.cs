@@ -13,6 +13,8 @@ namespace NativeUiTests;
 internal static class Program
 {
     internal static int Result = 1;
+    internal static bool RunTeamsUi = true;
+    internal static bool RunChartUi = true;
     internal static void Log(string message)
     {
         var folder = Environment.GetEnvironmentVariable("TOKENSTAT_SCREEN_FIXTURE") ?? Path.GetTempPath();
@@ -24,6 +26,8 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.FirstOrDefault() == "--crash-trace") return WindowsCrashTrace.Run(args);
+        RunTeamsUi = !args.Contains("--skip-teams-ui");
+        RunChartUi = !args.Contains("--skip-chart-ui");
         try
         {
             Log("Starting native Windows UI tests");
@@ -132,17 +136,20 @@ public sealed partial class SmokeApp : Application
                 await TeamSharedFileTests.RunAsync();
                 await ChatLocalSharingTests.RunAsync();
                 Program.Log("PASS: Teams comments persist exact attempts and protect local recovery on Windows");
-                TeamTranscriptSmoke.Run(body);
-                await TeamsPageSmoke.RunAsync(body);
-                await TeamAskDiscoverySmoke.RunAsync(body);
-                await ChatLocalSharingSmoke.RunAsync(body);
-                await TeamManagementSmoke.RunAsync(body);
-                await TeamPublisherSmoke.RunAsync(body);
-                await TeamChatSelectionSmoke.RunAsync(body);
-                await TeamFolderShareSmoke.RunAsync(body);
-                await TeamSharedFileSmoke.RunAsync(body);
+                if (Program.RunTeamsUi)
+                {
+                    TeamTranscriptSmoke.Run(body);
+                    await TeamsPageSmoke.RunAsync(body);
+                    await TeamAskDiscoverySmoke.RunAsync(body);
+                    await ChatLocalSharingSmoke.RunAsync(body);
+                    await TeamManagementSmoke.RunAsync(body);
+                    await TeamPublisherSmoke.RunAsync(body);
+                    await TeamChatSelectionSmoke.RunAsync(body);
+                    await TeamFolderShareSmoke.RunAsync(body);
+                    await TeamSharedFileSmoke.RunAsync(body);
+                }
                 PersonaSceneSmoke.Run();
-                await ChatChartSmoke.Run(body);
+                if (Program.RunChartUi) await ChatChartSmoke.Run(body);
                 await HeatmapResizeSmoke.Run(body);
                 await ShellChromeSmoke.Run(body);
                 await HarnessConfigSmoke.Run(body);

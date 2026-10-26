@@ -138,22 +138,28 @@ select broader validation. Chart renderer and SDK changes also select Linux
 and Windows integration checks; the shared JSON contract selects Rust checks.
 Portable terminal and hook regressions run in the shared Ubuntu job.
 
+To skip CI for a push to `main`, include `[skip]` in the tip commit's message.
+All CI jobs are skipped for that push. Manual and scheduled runs ignore this
+marker and keep their usual scope.
+
 Preview defaults to `desktop` (Windows and Mac), including builds requested by
 the `preview` PR label. Use the preview workflow's platform selector to build
 Android, CLI or host artifacts, or choose `all` for the full preview matrix.
 
-The iPhone/iPad UI suites, Android emulator tests, and Android release bundle
-validation run Mondays at 03:23 UTC and through **Actions → ci → Run workflow**
-with **full** enabled (the default). Run this before tagging a release that
-changes clients. Full runs use a separate concurrency group so ordinary pushes
-do not cancel them. Rust vulnerability auditing runs on dependency changes and
-full runs. Chart dependency auditing runs on chart dependency changes and full
-runs. Behavioral tests remain available; repeated mobile-feature Rust tests and
+All component builds and Android release bundle validation run Mondays at
+03:23 UTC and through **Actions → ci → Run workflow** with **full** enabled
+(the default). Run this before tagging a release that changes clients. Full
+runs use a separate concurrency group so ordinary pushes do not cancel them.
+Rust vulnerability auditing runs on dependency changes and full runs.
+Teams device UI suites, chart browser checks, and the Android chart/Teams
+emulator suites are available for local validation and do not run in CI.
+The Windows smoke suite skips Teams and chat chart UI checks in CI while
+retaining its other native regressions. Repeated mobile-feature Rust tests and
 legacy wire checks run once on Linux instead of on multiple desktop runners.
 
 For example, a Windows UI-only change uses three runner jobs rather than the old
 27; an Apple UI change uses four, and a Rust change uses eight. A full manual
-or scheduled run uses 14. Native Windows startup, terminal and H.264 playback
+or scheduled run uses 11. Native Windows startup, terminal and H.264 playback
 regressions remain automatic for Windows changes, including generation of the
 encoder fixture they consume.
 

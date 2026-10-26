@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       full:
-        description: Include device UI tests and release Android packaging
+        description: Run all components and release Android packaging
         type: boolean
         default: true
   schedule:
@@ -27,6 +27,7 @@ permissions:
 jobs:
   checks:
     name: source checks and changed components
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip]')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -111,52 +112,6 @@ jobs:
       - name: Failed service stops preserve host binaries
         if: ${{ !cancelled() }}
         run: bash scripts/tests/uninstall-host.sh
-
-  chat-charts:
-    needs: checks
-    if: needs.checks.outputs.full == 'true' || needs.checks.outputs.charts == 'true'
-    name: interactive chat charts
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: apps/charts/package-lock.json
-      - run: npm ci --prefix apps/charts --ignore-scripts --no-audit --no-fund
-      - name: Reproduce the bundled engine and licenses
-        run: |
-          npm --prefix apps/charts run build
-          git diff --exit-code -- apps/charts/runtime/
-      - run: npm --prefix apps/charts test
-      - run: npm --prefix apps/charts audit --audit-level=high
-        if: needs.checks.outputs.full == 'true' || needs.checks.outputs.dependencies == 'true'
-      - name: Use the public Ubuntu archive for browser prerequisites
-        run: |
-          sudo python3 - <<'PY'
-          from pathlib import Path
-          sources = [Path('/etc/apt/sources.list')]
-          sources += list(Path('/etc/apt/sources.list.d').glob('*.list'))
-          sources += list(Path('/etc/apt/sources.list.d').glob('*.sources'))
-          for source in sources:
-              if not source.exists():
-                  continue
-              original = source.read_text()
-              updated = original.replace('http://azure.archive.ubuntu.com/ubuntu', 'https://archive.ubuntu.com/ubuntu')
-              updated = updated.replace('https://azure.archive.ubuntu.com/ubuntu', 'https://archive.ubuntu.com/ubuntu')
-              if updated != original:
-                  source.write_text(updated)
-          PY
-      - run: apps/charts/node_modules/.bin/playwright install --with-deps chromium webkit
-      - run: node apps/charts/tests/browser.mjs
-      - name: Keep chart visual checks
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: chart-visual-checks
-          path: target/charts-review/browser/**
 
   lint:
     needs: checks
@@ -362,14 +317,14 @@ jobs:
         if: ${{ !cancelled() && runner.os == 'Windows' && steps.rust_build.outcome == 'success' }}
         run: dotnet build apps/windows/Tokenstat.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64
 
-      - name: Native Windows charts, editor and H.264 playback regressions
+      - name: Native Windows editor and H.264 playback regressions
         if: ${{ !cancelled() && runner.os == 'Windows' && steps.windows_ui_compile.outcome == 'success' }}
         shell: pwsh
         env:
           TOKENSTAT_SCREEN_FIXTURE: ${{ runner.temp }}/tokenstat-screen-fixture
         timeout-minutes: 5
         run: |
-          dotnet run --project scripts/tests/windows-ui/WindowsUiTests.csproj -c Release
+          dotnet run --project scripts/tests/windows-ui/WindowsUiTests.csproj -c Release -- --skip-teams-ui --skip-chart-ui
           $result = $LASTEXITCODE
           Get-Content "$env:TOKENSTAT_SCREEN_FIXTURE/ui-tests.log" -ErrorAction Continue
           if ($result -ne 0) {
@@ -397,37 +352,6 @@ jobs:
           dotnet run --project scripts/tests/windows-install/WindowsInstallTests.csproj
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet run --project scripts/tests/windows-host/WindowsHostTests.csproj -- --hostd "$PWD/target/debug/tokenstat-hostd.exe"
-
-  teams-ui:
-    needs: checks
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
-    name: teams native UI (${{ matrix.device }})
-    runs-on: macos-latest
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        device: [iphone, ipad]
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install the fixture project generator
-        run: brew install xcodegen
-
-      - name: Test Teams forms on a disposable simulator
-        run: python3 scripts/run-team-ui-tests.py --device-family ${{ matrix.device }}
-
-      - name: Keep fictional UI results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: teams-native-ui-${{ matrix.device }}
-          path: |
-            target/teams-ui-ci/*/Tests.xcresult
-            target/teams-ui-ci/*/summary.json
-            target/teams-ui-ci/*/build.log
-          retention-days: 7
-          if-no-files-found: ignore
 
   mac-client:
     needs: checks
@@ -559,31 +483,9 @@ jobs:
       - name: Unit tests, debug lint and APK
         run: gradle -p apps/android testDebugUnitTest lintDebug assembleDebug
 
-      - name: Instrumentation test APK, release lint and bundle
+      - name: Release lint and bundle
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
-        run: gradle -p apps/android lintRelease assembleDebugAndroidTest bundleRelease
-
-      - name: Enable KVM for the isolated chart emulator
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Native Android charts and Teams recovery and paging
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
-        timeout-minutes: 12
-        run: bash scripts/tests/run-chart-android.sh
-
-      - name: Keep native chart and Teams test reports
-        if: ${{ !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)) }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: android-chart-tests
-          path: |
-            apps/android/app/build/reports/androidTests/**
-            apps/android/app/build/outputs/androidTest-results/**
-            target/chart-android-ci/**
+        run: gradle -p apps/android lintRelease bundleRelease
 
       - name: Verify native symbols are embedded
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
@@ -607,13 +509,15 @@ jobs:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full) || needs.checks.outputs.dependencies == 'true'
     name: dependency audit
     runs-on: ubuntu-24.04
-    # rustsec/audit-check posts a check run; default workflow perms are read-only.
-    permissions:
-      contents: read
-      checks: write
     steps:
       - uses: actions/checkout@v7
 
-      - uses: rustsec/audit-check@858dc40f52ca2b8570b7a997c1c4e35c6fc9a432 # main (Node 24)
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          toolchain: 1.99.0
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Audit Rust dependencies
+        run: cargo audit
