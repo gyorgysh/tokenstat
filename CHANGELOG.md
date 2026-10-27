@@ -13,51 +13,22 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 ### Added
 
-- A Team hub with organization cards, direct shared-project entry, an organization filter and compact invitation states on Apple devices. Shared chat lists refresh while visible and show device-local New and Unread badges.
-- Foreground app presence for team members on Apple devices, when supported by the account server. Presence expires and follows current device consent; unavailable status remains explicit.
-- Interactive charts in agent replies on Mac, Windows, iPhone, iPad and Android. Twelve chart families cover comparisons, trends, distributions, proportions and relationships, with the same offline renderer on every client.
-- Pointer, touch and keyboard inspection, selectable legends, chart zoom, expansion, accessible paginated data tables and native PNG, SVG, CSV and JSON exports. Charts follow light and dark themes, number locales and reduced motion settings.
-- A versioned data-only chart format, MCP creation, validation, schema and example tools, a `tokenstat chart` command, and JavaScript and Python helpers. Chart data stays in the conversation and works across agents, reopened chats and connected devices.
-- Teams account management on Mac, iPhone and iPad, with a project and people overview, invitations, member roles, repository access and ownership recovery. Creating an organization requires Legend; members need Patron or Legend.
-- Review and share individual repository checkouts from their publishing computer. Team members can check availability through a separate authorized connection while personal remote access remains off. Each checkout stays on its own computer and branch.
-- Review a private chat's visible history before sharing it with repository members. Shared chats show their approved titles, preserve charts and tool output, and label older messages as Local user (before Teams).
-- Stop a chat's local sharing from the publishing computer even when signed out. Private drafts stay in their original chat while sharing pauses personal sends and queued messages.
-- Post named comments in shared chats without starting an agent. If delivery cannot be confirmed, keep the original pending message and check its receipt before sending again.
-- Recover your saved Team comment drafts when a computer is offline or access changes. Drafts retain their chat and computer labels, with copy and reviewed removal actions that work at larger text sizes.
-- Agent turns and Git/editor actions report when a checkout is already in use, including linked checkouts. Independent clones can run at the same time.
-- Teams reading and comments on Android and Windows, with Markdown, offline charts, read-only tool details, shared files, earlier-history paging, saved local comment drafts, delivery checks and periodic chat refresh. Comments show author initials and agent replies identify the teammate who asked. Images open inside the app; shared files can be saved on every platform, with quarantine marks on Mac and Internet-zone marks on Windows.
-- In development builds, Ask and Stop in shared Claude Code chats, separate work lanes, checked automatic landing or review, pull requests, overlap warnings and automatic checkout catch-up. Owners can also opt into clean-checkout updates when working manually or using review. Agent execution remains disabled in release builds while release verification is completed.
+- Interactive charts in agent replies on Mac, Windows, iPhone, iPad and Android. Point, tap or use the keyboard to read values, zoom in, open the data as a table, and export as PNG, SVG, CSV or JSON. Charts follow your theme, number format and reduced motion setting, and draw offline.
+- Agents can make charts through the MCP server, the new `tokenstat chart` command, or the JavaScript and Python helpers. A chart is plain data in the conversation, so it still works after a chat is reopened, on another device, or with another agent.
+- Teams, as an early preview. Share a repository checkout and selected chat history with people in your organization, then read and comment on shared chats from Mac, iPhone, iPad, Windows and Android. Stop sharing a project at any time and it stays on your computer with its chats and history. Creating an organization needs Legend, and members need Patron or Legend.
+
+### Changed
+
+- Remote access is now included on the free plan. Paid plans add more devices, longer history and more relay traffic.
+- The new chat page shows what to do first when there is no repository or computer yet, instead of a composer that cannot send.
 
 ### Fixed
 
-- Isolated OpenCode Team runs verify per-user policy against the OS account and refuse uninspectable machine settings or broken native profile selectors instead of treating them as absent.
-- Parallel Team chats can validate the same published project together. Brief publication updates settle before access is checked, while revoked or unavailable records still refuse access.
-- Shared chat author names refresh when team membership changes, so newly joined teammates are not temporarily shown as former members.
-- A Team Ask whose reviewed chat or checkout changed now offers a fresh review instead of incorrectly requesting run recovery. Interrupted recorded requests retain their original recovery identity.
-- Update cryptographic dependencies to address the constant-time mask and integer comparison issues in RUSTSEC-2026-0385.
-- Windows sidebar sizing keeps expanded and minimal modes while chat companion widths change, avoiding a temporary icon-only pane.
-- Windows project rows wait for native loading and state changes before adjusting their template parts. Sidebar refreshes reuse removed native rows to avoid the bundled WinUI control’s crash after garbage collection; reused rows refresh their project actions and chat previews.
-- The Mac project Share/Open button appears only while hovering over its row. Team sections stay inside Team instead of repeating in the project sidebar; Shared projects remains available inside Team.
-- On the publishing computer, its signed-in owner can start an empty shared chat without first granting agent execution. This does not start an agent or grant another device access.
-- Long shared chats can open their details and approved files without loading the entire conversation. Development agent runs read the full approved history in pages, excluding later discussion. Publication retries also work after a chat grows.
-- Recovering a stopped Team agent clears the chat's running state after writer cleanup succeeds, so another Ask can start.
-- Interrupted Team output no longer blocks the next Ask after verified run cleanup. Written replies are preserved, while incomplete or changed output keeps the chat fenced for recovery.
-- Project workflow settings keep mode names readable on phones and tablets. Checkout updates preserve local and ignored files and offer an explicit retry when blocked.
-- Terminal status now follows process exit. Closing output no longer marks a running process as stopped, and failed stops remain available for recovery.
-- Teams browsers on Android and Windows can load more computers and shared chats, with retry controls for unreachable computers. Overlap summaries identify which computers are included.
-- Pending Team comments on Android and Windows survive navigation and app restarts. Explicit retries retain the original words and message ID; delayed receipts preserve newer drafts.
-- Manage teams directly on Android: create and rename organizations, review members and roles, create or revoke invitations, and change project access. New invitations start without project or agent access.
-- Android shows incoming invitations and reviews their project access before joining. Owners can transfer or delete a paused team, and members can leave without using the website.
-- Windows has native organization, member, invitation and project-access management, an incoming invitation inbox, and ownership recovery for paused teams.
-- Windows can review and publish local checkouts and selected chat history, configure work lanes and checks, and approve agent access for one teammate's device at a time.
-- Windows can stop a chat's local sharing without signing in, including when publication records need repair. The original chat keeps its private draft and pauses private sends and queued messages until sharing and any interrupted agent run are safely cleared.
-- Windows project folders have Share/Open actions and a shared badge. A Shared projects entry finds teammates' projects across teams; new sharing reviews the selected teammates and keeps existing private chats separate.
-- Android's Shared projects browser finds assigned projects across teams, retains later pages through offline retries, and opens chats from all teammates. Team selection stays available when more teams exist on another page.
-- Retrying a Team Ask after a lost reply keeps the original request and recovers Stop for the same run. Apple, Android and Windows clients retain that request and run through navigation and app restarts. Windows rejects replies from a screen that has already closed.
-- Stop remains available when shared history or the agent's status cannot be confirmed. Android also reports failed Stop requests so they can be retried.
-- Saved agent requests can be found outside their original project on Apple, Android and Windows, including during directory outages. Recover the original request or Stop without creating another attempt; unreadable saved requests remain on the device.
-- Read-only repository members are no longer offered Ask in shared chats.
-- Repository checks run under process supervision and recheck permission before landing. Stopped checks cannot push, interrupted recovery can be retried, and automatic catch-up preserves untracked and ignored files.
+- Routing now moves to the next agent when Claude reports a session or weekly limit, and continues on Claude after the limit resets. It used to treat that message as a plain failure and stop.
+- An agent turn, or a Git or editor action, now says when its checkout is already in use, including through a linked checkout. Separate clones can still run side by side.
+- Terminal status follows the process. Closing the output no longer marks a running process as stopped.
+- The Windows sidebar no longer crashes or briefly collapses to icons while panes resize.
+- Updated cryptographic dependencies for the constant-time issues in RUSTSEC-2026-0385.
 
 ## [1.7.5] - 2026-10-21
 
