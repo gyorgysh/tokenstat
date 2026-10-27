@@ -1174,6 +1174,55 @@ mod tests {
         }
     }
     #[test]
+    fn a_claude_session_limit_moves_to_the_codex_fallback_and_back_after_reset() {
+        let (_temp, store) = fixture();
+        store
+            .edit_conversation("route-test", |chat| {
+                chat.backend = "claude".into();
+                chat.model = Some("opus".into());
+                chat.effort = Some("high".into());
+                Ok(())
+            })
+            .unwrap();
+        let codex = Destination {
+            backend: "codex".into(),
+            model: Some("gpt-6.1-sol".into()),
+            effort: Some("xhigh".into()),
+        };
+        let policy = Policy {
+            enabled: true,
+            routes: vec![codex.clone()],
+            wait_for_reset: true,
+            return_preferred: true,
+            ..Policy::default()
+        };
+        store.routing_update("route-test", 1, policy).unwrap();
+        let chat = store.get("route-test").unwrap();
+        store.router_arm_locked("route-test", &chat, false).unwrap();
+        let reset = now_ms() / 1000 + 3600;
+        let mut parser = crate::transcript::Parser::new("claude");
+        parser.push_events(
+            crate::provider_limit::stream_tests::claude_session_limit(reset).as_bytes(),
+        );
+        let limit = parser.take_limit().unwrap();
+        store.router_observe("route-test", 1, limit).unwrap();
+        let state = store.router_load("route-test").unwrap();
+        assert!(state.pending.as_ref().is_some_and(|p| !p.claimed));
+        assert_eq!(state.preferred.as_ref().unwrap().backend, "claude");
+        assert_eq!(state.preferred_reset_at_ms, Some(reset * 1000));
+        let chat = store.current_send_conversation("route-test").unwrap();
+        assert_eq!(state.destination(&chat, now_ms()), Some(codex.clone()));
+        // Codex also runs out: nothing is left but Claude's own reset.
+        let mut state = state;
+        state.tried.push(codex);
+        assert_eq!(state.destination(&chat, now_ms()), None);
+        assert!(state.can_wait());
+        assert_eq!(
+            state.destination(&chat, reset * 1000).unwrap().backend,
+            "claude"
+        );
+    }
+    #[test]
     fn damaged_routing_storage_cannot_prevent_stopping_a_turn() {
         let (_temp, store) = fixture();
         store.set_running("route-test", true).unwrap();

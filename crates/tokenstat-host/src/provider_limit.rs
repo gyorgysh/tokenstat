@@ -30,8 +30,11 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
         .and_then(Value::as_str)
         .or_else(|| error.as_str())
         .unwrap_or("");
+    // Claude Code puts the API's own code beside the record type, so
+    // `type` would only ever say "result" for a refused turn.
     let code = error
-        .get("code")
+        .get("api_error")
+        .or_else(|| error.get("code"))
         .or_else(|| error.get("type"))
         .and_then(Value::as_str)
         .unwrap_or("");
@@ -47,8 +50,8 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
             || lower.starts_with("your workspace is out of credits")
             || lower.starts_with("you hit your spend cap")))
         || (provider == "claude"
-            && (lower.starts_with("you've hit your limit")
-                || lower.starts_with("you’ve hit your limit")
+            && (((lower.starts_with("you've hit your") || lower.starts_with("you’ve hit your"))
+                && lower.contains("limit"))
                 || lower.starts_with("usage limit reached")));
     let throttle = matches!(code, "rate_limit_error" | "rate_limit_exceeded")
         || (!exhausted && lower.starts_with("rate limit exceeded"));
@@ -72,23 +75,16 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
     let reset = error
         .get("resets_at")
         .or_else(|| error.get("reset_at"))
+        .or_else(|| claude_resets_at(provider, value))
         .and_then(|v| {
-            v.as_i64()
-                .and_then(|n| {
-                    if n > 1_000_000_000_000 {
-                        Some(n)
-                    } else {
-                        n.checked_mul(1000)
-                    }
-                })
-                .or_else(|| {
-                    v.as_str()?
-                        .parse::<jiff::Timestamp>()
-                        .ok()
-                        .map(|t| t.as_millisecond())
-                })
+            v.as_i64().and_then(epoch_ms).or_else(|| {
+                v.as_str()?
+                    .parse::<jiff::Timestamp>()
+                    .ok()
+                    .map(|t| t.as_millisecond())
+            })
         })
-        .filter(|n| *n > now && *n < now.saturating_add(366 * 86400 * 1000));
+        .filter(|n| plausible_reset(*n, now));
     Some(Limit {
         provider: provider.into(),
         kind: if exhausted {
@@ -110,6 +106,46 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
         resets_at_ms: reset,
         observed_at_ms: now,
     })
+}
+
+/// Claude Code reports the refused window's reset beside the refusal, as
+/// `api_error_params.rate_limit_info.resetsAt` on the synthetic assistant
+/// message and as a `rate_limit_event` whose status is `rejected`. The final
+/// `result` record carries neither, so the parser keeps the last one seen.
+fn claude_resets_at<'a>(provider: &str, value: &'a Value) -> Option<&'a Value> {
+    if provider != "claude" {
+        return None;
+    }
+    let info = match value.get("type")?.as_str()? {
+        "rate_limit_event" => value.get("rate_limit_info")?,
+        _ => value.get("api_error_params")?.get("rate_limit_info")?,
+    };
+    (info.get("status")?.as_str()? == "rejected")
+        .then(|| info.get("resetsAt"))
+        .flatten()
+}
+
+/// The reset instant a provider announced for a refused window, read only
+/// from its own rate limit records. It never makes a limit on its own: a
+/// refusal still has to end the turn.
+pub fn reset_hint(provider: &str, value: &Value, now: i64) -> Option<i64> {
+    let at = epoch_ms(claude_resets_at(provider, value)?.as_i64()?)?;
+    plausible_reset(at, now).then_some(at)
+}
+
+/// Providers send epoch seconds or milliseconds. Anything past 2001 in
+/// milliseconds is already milliseconds.
+fn epoch_ms(n: i64) -> Option<i64> {
+    if n > 1_000_000_000_000 {
+        Some(n)
+    } else {
+        n.checked_mul(1000)
+    }
+}
+
+/// A reset in the past or more than a year out is a misread, not a plan.
+fn plausible_reset(at: i64, now: i64) -> bool {
+    at > now && at < now.saturating_add(366 * 86400 * 1000)
 }
 
 /// A proven terminal process failure is distinct from a provider quota reading.
@@ -155,6 +191,21 @@ mod tests {
         let success = json!({"type":"result", "is_error":false,
             "result":"Not logged in · Please run /login"});
         assert!(from_record("claude", &success, 1).is_none());
+    }
+
+    #[test]
+    fn claude_session_and_weekly_limits_are_usage_limits() {
+        for text in [
+            "You've hit your session limit · resets 4:30am (Europe/Budapest)",
+            "You’ve hit your weekly limit · resets Oct 29, 9am",
+            "You've hit your limit · resets 11pm",
+        ] {
+            let record = json!({"type":"result","is_error":true,"result":text});
+            assert_eq!(from_record("claude", &record, 1).unwrap().kind, "usage");
+        }
+        let coded = json!({"type":"result","is_error":true,"api_error":"usage_limit_reached",
+            "result":"Something new"});
+        assert_eq!(from_record("claude", &coded, 1).unwrap().kind, "usage");
     }
 
     #[test]
@@ -252,9 +303,61 @@ mod tests {
 }
 
 #[cfg(test)]
-mod stream_tests {
+pub(crate) mod stream_tests {
     use crate::transcript::{Event, Parser};
     use serde_json::json;
+    /// The records Claude Code 2.x writes when a session window runs out, in
+    /// order and trimmed to the fields that matter. Its message names a
+    /// "session" limit and its result says `type: result`, so neither the
+    /// text nor the record type alone identifies a usage limit.
+    pub(crate) fn claude_session_limit(reset_seconds: i64) -> String {
+        [
+            json!({"type":"rate_limit_event","rate_limit_info":{"rateLimitType":"five_hour",
+                "resetsAt":reset_seconds,"status":"rejected","overageStatus":"rejected"}}),
+            json!({"type":"assistant","api_error":"usage_limit_reached","api_error_status":429,
+                "error":"rate_limit","is_api_error_message":true,
+                "api_error_params":{"rate_limit_info":{"rateLimitType":"five_hour",
+                    "resetsAt":reset_seconds,"status":"rejected"}},
+                "message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text",
+                    "text":"You've hit your session limit · resets 4:30am (Europe/Budapest)"}]}}),
+            json!({"type":"result","subtype":"success","is_error":true,
+                "api_error":"usage_limit_reached","api_error_status":429,
+                "result":"You've hit your session limit · resets 4:30am (Europe/Budapest)"}),
+        ]
+        .iter()
+        .map(|record| record.to_string() + "\n")
+        .collect()
+    }
+    #[test]
+    fn a_claude_session_limit_is_usage_with_its_announced_reset() {
+        let reset = crate::chat::now_ms() / 1000 + 3600;
+        let mut parser = Parser::new("claude");
+        parser.push_events(claude_session_limit(reset).as_bytes());
+        let limit = parser.take_limit().unwrap();
+        assert_eq!(limit.provider, "claude");
+        assert_eq!(limit.kind, "usage");
+        assert_eq!(limit.resets_at_ms, Some(reset * 1000));
+    }
+    #[test]
+    fn a_warning_or_a_successful_turn_is_not_a_limit() {
+        let reset = crate::chat::now_ms() / 1000 + 3600;
+        let mut parser = Parser::new("claude");
+        let records = [
+            json!({"type":"rate_limit_event","rate_limit_info":{"resetsAt":reset,
+                "status":"allowed_warning","utilization":0.97}}),
+            json!({"type":"result","subtype":"success","is_error":false,"result":"Done."}),
+        ];
+        for record in records {
+            parser.push_events((record.to_string() + "\n").as_bytes());
+        }
+        assert!(parser.take_limit().is_none());
+        // A rejected window alone does not end the turn. Only the refusal does.
+        let mut parser = Parser::new("claude");
+        let rejected = json!({"type":"rate_limit_event","rate_limit_info":{"resetsAt":reset,
+            "status":"rejected"}});
+        parser.push_events((rejected.to_string() + "\n").as_bytes());
+        assert!(parser.take_limit().is_none());
+    }
     #[test]
     fn a_real_turn_failure_is_displayed_and_its_limit_is_consumed_once() {
         let reset = crate::chat::now_ms() + 60000;

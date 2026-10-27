@@ -169,10 +169,14 @@ private struct ChatRoutingSheet: View {
                 Toggle(L10n.text("common.chat_return_preferred"), isOn: $policy.returnPreferred)
                 if policy.returnPreferred {
                     AppMenuPicker(title: L10n.text("common.chat_route_preferred_picker"),
-                        options: [(value: -1, label: L10n.text("common.chat_route_current_preferred"))] + policy.routes.enumerated().map { index, route in
-                            (value: index, label: [model.backend(for: route.backend)?.label ?? route.backend, route.model, route.effort].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                        }, selection: Binding(get: { policy.routes.firstIndex(where: { $0 == policy.preferred }) ?? -1 }, set: { policy.preferred = policy.routes.indices.contains($0) ? policy.routes[$0] : nil }))
-                    Text(L10n.text("common.chat_route_preferred", model.backend(for: policy.preferred?.backend ?? model.selected?.routing?.preferred?.backend ?? chat.backend)?.label ?? chat.backend))
+                        options: [(value: -1, label: L10n.text("common.chat_route_current_preferred"))]
+                            + (pinnedOutsideRoutes.map { [(value: -2, label: routeLabel($0))] } ?? [])
+                            + policy.routes.enumerated().map { index, route in (value: index, label: routeLabel(route)) },
+                        selection: Binding(get: { preferredSelection }, set: { value in
+                            guard value != -2 else { return }
+                            policy.preferred = policy.routes.indices.contains(value) ? policy.routes[value] : nil
+                        }))
+                    Text(L10n.text("common.chat_route_preferred", routeLabel(effectivePreferred)))
                         .font(Theme.caption).foregroundStyle(.secondary)
                 }
                 DisclosureGroup(L10n.text("common.settings")) {
@@ -214,6 +218,32 @@ private struct ChatRoutingSheet: View {
         .onChange(of: model.selected?.id) { _, id in if id != chat.id { dismiss() } }
         .onChange(of: model.currentReference) { _, _ in dismiss() }
         .task(id: model.selected?.sendRevision) { if !loaded { await loadPolicy() } }
+    }
+
+    private func routeLabel(_ route: ChatRouteDestination) -> String {
+        [model.backend(for: route.backend)?.label ?? route.backend, route.model, route.effort]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// A saved pin that no longer equals any route, such as one whose effort
+    /// was edited since. It still decides where the chat returns, so the
+    /// picker shows it rather than claiming the current preference is kept.
+    private var pinnedOutsideRoutes: ChatRouteDestination? {
+        guard let preferred = policy.preferred, !policy.routes.contains(preferred) else { return nil }
+        return preferred
+    }
+
+    private var preferredSelection: Int {
+        guard let preferred = policy.preferred else { return -1 }
+        return policy.routes.firstIndex(of: preferred) ?? -2
+    }
+
+    /// What the host returns to: the pin, else the agent last chosen by hand,
+    /// else the agent this chat is on now.
+    private var effectivePreferred: ChatRouteDestination {
+        policy.preferred
+            ?? model.selected?.routing?.preferred
+            ?? ChatRouteDestination(backend: chat.backend, model: chat.model, effort: chat.effort)
     }
 
     private func loadPolicy() async {

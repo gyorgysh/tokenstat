@@ -192,6 +192,9 @@ pub struct Parser {
     /// wait forever for terminal input. Keep its URL/code out of chat.
     muse_auth: MuseAuthState,
     limit: Option<crate::provider_limit::Limit>,
+    /// The last reset a provider announced for a refused window, applied to
+    /// a later refusal that does not repeat it.
+    reset_hint: Option<i64>,
     inspection: crate::chat_inspection::Snapshot,
     inspection_dirty: bool,
     images: crate::chat_images::Collector,
@@ -219,6 +222,7 @@ impl Parser {
             muse_calls: HashMap::new(),
             muse_auth: MuseAuthState::Startup,
             limit: None,
+            reset_hint: None,
             inspection: Default::default(),
             inspection_dirty: false,
             images: Default::default(),
@@ -521,9 +525,14 @@ impl Parser {
         let Ok(value) = serde_json::from_str(&cleaned) else {
             return Vec::new();
         };
-        if let Some(limit) =
-            crate::provider_limit::from_record(&self.backend, &value, crate::chat::now_ms())
-        {
+        let now = crate::chat::now_ms();
+        if let Some(reset) = crate::provider_limit::reset_hint(&self.backend, &value, now) {
+            self.reset_hint = Some(reset);
+        }
+        if let Some(mut limit) = crate::provider_limit::from_record(&self.backend, &value, now) {
+            if limit.resets_at_ms.is_none() && matches!(limit.kind.as_str(), "usage" | "throttle") {
+                limit.resets_at_ms = self.reset_hint.filter(|reset| *reset > now);
+            }
             self.limit = Some(limit);
         }
         let mut events = if self.backend == "muse" {
