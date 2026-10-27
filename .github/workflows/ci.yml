@@ -44,7 +44,7 @@ jobs:
       test-os: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full) || steps.paths.outputs.ci == 'true' || steps.paths.outputs.rust == 'true') && '["ubuntu-24.04","macos-latest","windows-latest"]' || steps.paths.outputs.charts == 'true' && '["ubuntu-24.04","windows-latest"]' || '["windows-latest"]' }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dorny/paths-filter@15192bc058cc28a13dbf6cde61f19e18988b7af6 # v3
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         id: paths
         with:
           filters: .github/ci-paths.yml
