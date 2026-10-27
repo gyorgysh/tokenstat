@@ -99,7 +99,7 @@ struct ClientSetupMacDoor: View {
         ]
     }
 
-    /// Recognize a Mac already on the account as well as one just added.
+    /// Recognize a desktop already on the account as well as one just added.
     ///
     /// Ends when one arrives or when the screen goes away. Nothing is written
     /// and nothing is installed: this is a screen watching, which is the only
@@ -110,7 +110,7 @@ struct ClientSetupMacDoor: View {
             await account.load()
             arrived = (account.account?.machines ?? []).first { machine in
                 let platform = machine.platform?.lowercased() ?? ""
-                return machine.isHost && (platform.contains("macos") || platform.contains("darwin"))
+                return machine.isHost && (platform.contains("macos") || platform.contains("darwin") || platform.contains("windows"))
             }
             if arrived != nil { return }
             try? await Task.sleep(for: .seconds(5))

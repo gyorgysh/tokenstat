@@ -198,9 +198,13 @@ struct WorkspacesView: View {
             Image(systemName: "square.stack.3d.up")
                 .font(Theme.font(34, weight: .light))
                 .foregroundStyle(Theme.accent.opacity(0.65))
-            Text(L10n.text("apple.workspacesview.no_workspaces_yet.97d0b117"))
+            Text(model.folders.isEmpty
+                ? L10n.text("apple.workspacesview.no_workspaces_yet.97d0b117")
+                : L10n.text("apple.workspacesview.select_repository"))
                 .font(Theme.title3.weight(.medium))
-            Text(L10n.text("apple.workspacesview.add_a_project_folder_tokenstat_reads_its_g.eced99eb"))
+            Text(model.folders.isEmpty
+                ? L10n.text("apple.workspacesview.add_a_project_folder_tokenstat_reads_its_g.eced99eb")
+                : L10n.text("apple.workspacesview.select_repository_message"))
             .font(Theme.callout)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)

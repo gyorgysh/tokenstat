@@ -2,6 +2,9 @@
 package ai.tokenstat.tokenstat.ui.workspace
 
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.NoComputerConnected
+import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
+import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
 import ai.tokenstat.tokenstat.ui.components.*
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions
@@ -9,15 +12,10 @@ import ai.tokenstat.tokenstat.ui.logic.LaunchDefaults
 import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
 import ai.tokenstat.tokenstat.ui.logic.SharedPrefsLaunchChoice
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
-import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -27,17 +25,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -114,8 +101,10 @@ fun NewChatScreen(
     draft: String, staged: List<StagedAttachment>, onDraft: (String) -> Unit, hosts: List<JsonObject>, connectedPeer: String?, connecting: Boolean,
     folders: List<JsonObject>, selectedRepository: String?, onRepository: (String) -> Unit,
     onHost: (JsonObject) -> Unit, onAdd: () -> Unit, onSend: () -> Unit, onClose: () -> Unit, error: String? = null,
-    onManageDevices: () -> Unit = {},
+    onManageDevices: () -> Unit = {}, onSetupMachine: () -> Unit = onManageDevices,
 ) {
+    HideTopBar()
+    HideTabBar()
     val colors = LocalTsColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -210,47 +199,15 @@ fun NewChatScreen(
         setup?.isAvailable(backends) != true -> newChatCopy("needs_agent")
         else -> null
     }
-    val reduced = rememberReduceMotion()
-    val wave = remember(accountOwner) { Animatable(1f) }
-    var waveCenter by remember(accountOwner) { mutableStateOf(Offset.Zero) }
-    var waveJob by remember(accountOwner) { mutableStateOf<Job?>(null) }
-    var rootCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var contentBounds by remember { mutableStateOf<Rect?>(null) }
     val pageScroll = rememberScrollState()
-    val phase = if (reduced) 0f else {
-        val animation = rememberInfiniteTransition(label = "new-chat-ambient")
-        animation.animateFloat(0f, 1f, infiniteRepeatable(tween(12000, easing = LinearEasing), RepeatMode.Reverse), label = "ambient-phase").value
-    }
-    // Observe the final pass without consuming anything. Text fields, buttons,
-    // pickers and scrolling keep their own input; only unused background taps ripple.
-    Box(Modifier.fillMaxSize().onGloballyPositioned { rootCoordinates = it }.then(drops).pointerInput(reduced, accountOwner) {
-        if (!reduced) awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
-            val rootPoint = rootCoordinates?.takeIf { it.isAttached }?.localToRoot(down.position)
-            var background = !down.isConsumed && rootPoint != null && contentBounds?.contains(rootPoint) == false
-            do {
-                val event = awaitPointerEvent(PointerEventPass.Final)
-                if (event.changes.any { it.isConsumed || (it.position - down.position).getDistance() > viewConfiguration.touchSlop }) background = false
-                if (background && event.changes.any { it.changedToUpIgnoreConsumed() }) {
-                    waveCenter = down.position; waveJob?.cancel()
-                    waveJob = scope.launch { wave.snapTo(0f); wave.animateTo(1f, tween(1300, easing = FastOutSlowInEasing)) }
-                }
-            } while (event.changes.any { it.pressed })
-        }
-    }) {
-        Canvas(Modifier.fillMaxSize()) {
-            val center = Offset(size.width * (.45f + phase * .1f), size.height * .35f)
-            drawCircle(Brush.radialGradient(listOf(colors.accent.copy(alpha = .11f), Color.Transparent), center, size.width * .75f), size.width * .75f, center)
-            if (!reduced && wave.value < 1f) drawCircle(colors.accent.copy(alpha = .12f * (1f - wave.value)),
-                radius = 12.dp.toPx() + wave.value * size.maxDimension * .8f, center = waveCenter, style = Stroke(1.5.dp.toPx()))
-        }
+    Box(Modifier.fillMaxSize().background(colors.background).then(drops)) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             // The way out holds its place at the top while the page under it
             // reflows. No keyboard button here: the app's own bar above this
             // page already grows one whenever the keyboard is up.
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) { Icon(ActionIcon.Dismiss.vector, L10n.text("common.close")) }
+                IconButton(onClick = onClose) { Icon(ActionIcon.Dismiss.vector, L10n.text("common.close"), tint = colors.textPrimary) }
             }
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 // What is left after the keyboard has taken its share, and
@@ -267,7 +224,7 @@ fun NewChatScreen(
                     // keyboard instead, the short page left a third of the
                     // screen empty above it.
                     verticalArrangement = Arrangement.Center) {
-                Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().onGloballyPositioned { contentBounds = it.boundsInRoot() }, horizontalAlignment = Alignment.CenterHorizontally,
+                Column(Modifier.widthIn(max = 720.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     // The page names itself with as much as the room allows,
                     // in steps rather than all or nothing: a keyboard that
@@ -280,62 +237,70 @@ fun NewChatScreen(
                         }
                     }
                     if (roomForTitle) {
-                        Text(newChatCopy("title"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                        Text(newChatCopy("title"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold,
+                            color = colors.textPrimary, textAlign = TextAlign.Center)
                     }
-                    if (roomForHeading) {
+                    if (roomForHeading && hosts.isNotEmpty()) {
                         Text(newChatCopy("subtitle"), style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, textAlign = TextAlign.Center)
                     }
-                    Box(Modifier.fillMaxWidth()) {
-                        OutlinedButton(onClick = { hostMenu = true }, enabled = !connecting, modifier = Modifier.fillMaxWidth()) {
-                            Text(hosts.firstOrNull { it.newChatText("publicIdentity") == connectedPeer }?.newChatText("label")?.takeIf { it.isNotBlank() } ?: newChatCopy("choose_host"))
+                    if (hosts.isEmpty() && draft.isBlank() && staged.isEmpty()) {
+                        NoComputerConnected(onSetupMachine)
+                    } else {
+                        Box(Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = { hostMenu = true }, enabled = !connecting, modifier = Modifier.fillMaxWidth()) {
+                                Text(hosts.firstOrNull { it.newChatText("publicIdentity") == connectedPeer }?.newChatText("label")?.takeIf { it.isNotBlank() } ?: newChatCopy("choose_host"))
+                            }
+                            DropdownMenu(expanded = hostMenu, onDismissRequest = { hostMenu = false }) {
+                                hosts.forEach { host -> DropdownMenuItem(text = { Text(host.newChatText("label")) }, onClick = { hostMenu = false; onHost(host) }) }
+                                DropdownMenuItem(text = { Text(L10n.text("common.devices")) }, onClick = { hostMenu = false; onManageDevices() })
+                            }
                         }
-                        DropdownMenu(expanded = hostMenu, onDismissRequest = { hostMenu = false }) {
-                            hosts.forEach { host -> DropdownMenuItem(text = { Text(host.newChatText("label")) }, onClick = { hostMenu = false; onHost(host) }) }
-                            DropdownMenuItem(text = { Text(L10n.text("common.devices")) }, onClick = { hostMenu = false; onManageDevices() })
+                        // Lit until the choice is made, the way the Apple page lights
+                        // it: it is the one control on this page a send cannot
+                        // happen without.
+                        val litRepository = connectedPeer != null && !connecting && selected == null
+                        Box(Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = { repositoryMenu = true }, enabled = connectedPeer != null && !connecting,
+                                modifier = Modifier.fillMaxWidth().testTag("newChat.repository")) {
+                                Text(selected?.newChatText("name") ?: newChatCopy("choose_repository"))
+                            }
+                            // Over the button, not under it: the button draws its
+                            // own quiet outline on top of anything behind it. The
+                            // ring carries no input, so the button still takes the
+                            // tap through it.
+                            if (litRepository) Box(Modifier.matchParentSize().border(1.dp, colors.accent, CircleShape))
+                            DropdownMenu(expanded = repositoryMenu, onDismissRequest = { repositoryMenu = false }) {
+                                folders.forEach { folder -> DropdownMenuItem(text = { Column { Text(folder.newChatText("name")); Text(folder.newChatText("path"), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary) } },
+                                    onClick = { repositoryMenu = false; onRepository(folder.newChatText("id")) }) }
+                            }
                         }
-                    }
-                    if (hosts.isEmpty()) TextButton(onClick = onManageDevices) { Text(L10n.text("common.devices")) }
-                    // Lit until the choice is made, the way the Apple page lights
-                    // it: it is the one control on this page a send cannot
-                    // happen without.
-                    val litRepository = connectedPeer != null && !connecting && selected == null
-                    Box(Modifier.fillMaxWidth()) {
-                        OutlinedButton(onClick = { repositoryMenu = true }, enabled = connectedPeer != null && !connecting,
-                            modifier = Modifier.fillMaxWidth().testTag("newChat.repository")) {
-                            Text(selected?.newChatText("name") ?: newChatCopy("choose_repository"))
+                        TextButton(onClick = onAdd, enabled = connectedPeer != null && !connecting) { Icon(ActionIcon.Create.vector, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text(newChatCopy("add_repository")) }
+                        if (connectedPeer == null) {
+                            Text(newChatCopy("connect_host_message"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                        } else if (folders.isEmpty() && !connecting) {
+                            Text(newChatCopy("empty"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                         }
-                        // Over the button, not under it: the button draws its
-                        // own quiet outline on top of anything behind it. The
-                        // ring carries no input, so the button still takes the
-                        // tap through it.
-                        if (litRepository) Box(Modifier.matchParentSize().border(1.dp, colors.accent, CircleShape))
-                        DropdownMenu(expanded = repositoryMenu, onDismissRequest = { repositoryMenu = false }) {
-                            folders.forEach { folder -> DropdownMenuItem(text = { Column { Text(folder.newChatText("name")); Text(folder.newChatText("path"), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary) } },
-                                onClick = { repositoryMenu = false; onRepository(folder.newChatText("id")) }) }
+                        ChatComposer(chat = setup?.chat(), draft = draft, onDraft = onDraft, hint = newChatCopy("prompt"), sending = false,
+                            sendLabel = newChatCopy(if (draft.isBlank() && staged.isEmpty()) "open_chat" else "send"), staged = staged,
+                            onPick = { pickerLease = inputLease; picker.launch(arrayOf("*/*")) },
+                            onRemove = { attachment -> if (owns(accountOwner)) { val snapshot = model.chatComposers.snapshot(accountOwner); model.chatComposers.update(accountOwner, snapshot.copy(attachments = snapshot.attachments - attachment)) } },
+                            onSend = onSend, onStop = {}, onChange = { field, value -> setup = setup?.changed(field, value, backends); onSetup(setup) },
+                            backends = backends, onAgent = { agentMenu = true }, launchMode = setup?.mode ?: LaunchDefaults.MODE,
+                            launchAutonomy = setup?.autonomy ?: LaunchDefaults.autonomy(savedChoice, bypassOnly = false),
+                            allowEmpty = true, submitEnabled = connectedPeer != null && !connecting && selected != null && catalogReady && setup?.isAvailable(backends) == true && !reading,
+                            attachmentEnabled = selected != null && !connecting && !reading, fieldModifier = Modifier.testTag("newChat.composer"), sendModifier = Modifier.testTag("newChat.send"))
+                        if (reading || connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        (attachError ?: error)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.danger) }
+                        if (attachError == null && error == null && setupError == null) {
+                            blockReason?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary,
+                                    textAlign = TextAlign.Center, modifier = Modifier.testTag("newChat.blocked"))
+                            }
                         }
-                    }
-                    TextButton(onClick = onAdd, enabled = connectedPeer != null && !connecting) { Icon(ActionIcon.Create.vector, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text(newChatCopy("add_repository")) }
-                    if (folders.isEmpty()) Text(newChatCopy("empty"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                    ChatComposer(chat = setup?.chat(), draft = draft, onDraft = onDraft, hint = newChatCopy("prompt"), sending = false,
-                        sendLabel = newChatCopy(if (draft.isBlank() && staged.isEmpty()) "open_chat" else "send"), staged = staged,
-                        onPick = { pickerLease = inputLease; picker.launch(arrayOf("*/*")) },
-                        onRemove = { attachment -> if (owns(accountOwner)) { val snapshot = model.chatComposers.snapshot(accountOwner); model.chatComposers.update(accountOwner, snapshot.copy(attachments = snapshot.attachments - attachment)) } },
-                        onSend = onSend, onStop = {}, onChange = { field, value -> setup = setup?.changed(field, value, backends); onSetup(setup) },
-                        backends = backends, onAgent = { agentMenu = true }, launchMode = setup?.mode ?: LaunchDefaults.MODE,
-                        launchAutonomy = setup?.autonomy ?: LaunchDefaults.autonomy(savedChoice, bypassOnly = false),
-                        allowEmpty = true, submitEnabled = connectedPeer != null && !connecting && selected != null && catalogReady && setup?.isAvailable(backends) == true && !reading,
-                        attachmentEnabled = selected != null && !connecting && !reading, fieldModifier = Modifier.testTag("newChat.composer"), sendModifier = Modifier.testTag("newChat.send"))
-                    if (reading || connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    (attachError ?: error)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.danger) }
-                    if (attachError == null && error == null && setupError == null) {
-                        blockReason?.let {
-                            Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary,
-                                textAlign = TextAlign.Center, modifier = Modifier.testTag("newChat.blocked"))
+                        setupError?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = colors.danger)
+                            TextButton(onClick = { catalogAttempt++ }) { Text(L10n.text("common.retry")) }
                         }
-                    }
-                    setupError?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = colors.danger)
-                        TextButton(onClick = { catalogAttempt++ }) { Text(L10n.text("common.retry")) }
                     }
                 }
                 }

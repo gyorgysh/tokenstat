@@ -30,7 +30,6 @@ struct ClientHostHeader: View {
     var showsOpenWork = true
 
     @Environment(AccountModel.self) private var account
-    @Environment(ClientStore.self) private var store
 
     private var canRemote: Bool {
         if let remote = account.account?.canRemote { return remote }
@@ -100,7 +99,7 @@ struct ClientHostHeader: View {
         .cardSurface()
     }
 
-    /// Patron and above. The tier rules are the ones Devices already had.
+    /// Personal remote work follows the account capability.
     @ViewBuilder
     private var openWork: some View {
         if canRemote {
@@ -117,9 +116,7 @@ struct ClientHostHeader: View {
             }
             .buttonStyle(DeviceActionRowStyle())
         } else {
-            // The same seat and panel as the row it stands in for. An upsell
-            // drawn as loose text beside two panelled rows reads as a
-            // different component rather than as the locked version of one.
+            // Keep an unavailable account in the same panel as the action.
             HStack(spacing: Theme.Space.m) {
                 ActionSeat(icon: .reveal)
                 VStack(alignment: .leading, spacing: 4) {
@@ -129,7 +126,7 @@ struct ClientHostHeader: View {
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button(L10n.text("apple.clienthostheader.see_plans.d9898933"), .plans) { store.showPaywall = true }
+                    Button(L10n.text("common.refresh"), .refresh) { Task { await account.load() } }
                         .font(ClientType.caption.weight(.semibold))
                 }
                 Spacer(minLength: 0)

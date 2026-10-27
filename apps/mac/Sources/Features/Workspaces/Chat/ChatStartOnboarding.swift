@@ -1,100 +1,41 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// What the new chat page shows before there is any repository to talk
-/// about.
-///
-/// It used to show the whole composer with a picker that had nothing in it
-/// and a line of caption under the card, so the one action that unblocks the
-/// page was a menu item inside a menu. Here the three things a first
-/// conversation needs are laid out in order, with the first one as the only
-/// button on the page. The card wears the composer's chrome, so the page
-/// keeps its shape when the repository arrives and the composer takes over.
+/// The first action needed before a conversation can start.
 struct ChatStartOnboarding: View {
     let onAdd: () -> Void
-    /// The page takes a dropped folder as a new repository.
     var acceptsFolderDrops = false
     var dropTargeted = false
 
-    private struct Step: Identifiable {
-        let id: Int
-        let title: String
-        let message: String
-    }
-
-    private var steps: [Step] {
-        [
-            Step(id: 1, title: L10n.text("common.new_chat.step_repository_title"),
-                 message: L10n.text("common.new_chat.step_repository_message")),
-            Step(id: 2, title: L10n.text("common.new_chat.step_agent_title"),
-                 message: L10n.text("common.new_chat.step_agent_message")),
-            Step(id: 3, title: L10n.text("common.new_chat.step_send_title"),
-                 message: L10n.text("common.new_chat.step_send_message")),
-        ]
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(steps) { step in
-                row(step, last: step.id == steps.count)
-            }
-            if acceptsFolderDrops {
-                Text(L10n.text("common.new_chat.drop_folder"))
-                    .font(Theme.caption)
-                    .foregroundStyle(dropTargeted ? Theme.accent : Color.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.top, 14)
-                    .padding(.bottom, 2)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 10)
-    }
-
-    private func row(_ step: Step, last: Bool) -> some View {
-        let current = step.id == 1
-        return HStack(alignment: .top, spacing: 14) {
-            VStack(spacing: 0) {
-                badge(step.id, current: current)
-                if !last {
-                    // The thread between the steps: lit where it leaves the
-                    // step in hand, fading towards the ones still ahead.
-                    Rectangle()
-                        .fill(LinearGradient(colors: [current ? Theme.accent.opacity(0.45) : Theme.border, Theme.border.opacity(0.4)],
-                                             startPoint: .top, endPoint: .bottom))
-                        .frame(width: 1)
-                        .frame(minHeight: 18)
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                Image(systemName: "folder")
+                    .font(Theme.font(16, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 9))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.text("common.new_chat.add_repository"))
+                        .font(Theme.font(14, weight: .semibold))
+                    Text(L10n.text("common.new_chat.step_repository_message"))
+                        .font(Theme.font(12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(step.title)
-                    .font(Theme.font(14, weight: .semibold))
-                    .foregroundStyle(current ? Color.primary : Color.secondary)
-                Text(step.message)
-                    .font(Theme.font(12))
-                    .foregroundStyle(current ? Color.secondary : Color.secondary.opacity(0.8))
-                    .fixedSize(horizontal: false, vertical: true)
-                if current {
-                    Button(L10n.text("common.new_chat.add_repository"), .create, action: onAdd)
-                        .buttonStyle(AccentButtonStyle(small: true))
-                        .padding(.top, 8)
+            HStack(spacing: Theme.Space.m) {
+                Button(L10n.text("common.new_chat.add_repository"), .create, action: onAdd)
+                    .buttonStyle(AccentButtonStyle(small: true))
+                if acceptsFolderDrops {
+                    Text(L10n.text("common.new_chat.drop_folder"))
+                        .font(Theme.caption)
+                        .foregroundStyle(dropTargeted ? Theme.accent : Color.secondary)
                 }
             }
-            .padding(.bottom, last ? 0 : 16)
-            Spacer(minLength: 0)
         }
-        .accessibilityElement(children: .contain)
-    }
-
-    private func badge(_ number: Int, current: Bool) -> some View {
-        Text("\(number)")
-            .font(Theme.fixed(11, weight: .semibold))
-            .monospacedDigit()
-            .foregroundStyle(current ? Theme.accent : Color.secondary)
-            .frame(width: 24, height: 24)
-            .background(Circle().fill(current ? Theme.accentSoft : Color.clear))
-            .overlay(Circle().strokeBorder(current ? Theme.accent.opacity(0.55) : Theme.border, lineWidth: 1))
-            .accessibilityHidden(true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Space.s)
     }
 }
 
@@ -193,49 +134,12 @@ private struct FlowRow: Layout {
     }
 }
 
-/// The composer card and the onboarding card share one piece of glass: the
-/// panel, a hairline, a bevel that catches the light along the top edge, and
-/// a glow under it. It also reports its frame, which is where the surface
-/// draws the spectrum the card throws.
-/// Where the page wants the card's frame, in the page's own coordinates.
-/// A preference anchor is resolved once and does not follow a scroll, so the
-/// spectrum stayed behind as a loose frame when the content moved under it.
-/// A geometry observer reports every change, scrolling included.
-struct ChatStartCardFrameKey: EnvironmentKey {
-    static let defaultValue: (@MainActor (CGRect) -> Void)? = nil
-}
-extension EnvironmentValues {
-    var chatStartCardFrame: (@MainActor (CGRect) -> Void)? {
-        get { self[ChatStartCardFrameKey.self] }
-        set { self[ChatStartCardFrameKey.self] = newValue }
-    }
-}
-/// The named space the card's frame is measured in: the start page's pane.
-enum ChatStartPaneSpace { static let name = "chatStartPane" }
-private struct ChatStartCardReporter: ViewModifier {
-    @Environment(\.chatStartCardFrame) private var report
-    func body(content: Content) -> some View {
-        content.onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ChatStartPaneSpace.name)) } action: { frame in
-            report?(frame)
-        }
-    }
-}
-
+/// A quiet surface shared by the composer and the first-repository action.
 extension View {
     func chatStartCard(highlighted: Bool = false) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 22)
-        return self
-            .padding(12)
+        let shape = RoundedRectangle(cornerRadius: 16)
+        return self.padding(12)
             .background(Theme.panel, in: shape)
             .overlay(shape.strokeBorder(highlighted ? Theme.accent.opacity(0.6) : Theme.border))
-            .overlay {
-                shape.strokeBorder(LinearGradient(stops: [.init(color: .white.opacity(0.13), location: 0),
-                                                          .init(color: .white.opacity(0.03), location: 0.18),
-                                                          .init(color: .clear, location: 0.5)],
-                                                  startPoint: .top, endPoint: .bottom), lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
-            .shadow(color: Theme.accent.opacity(highlighted ? 0.16 : 0.06), radius: 35, y: 12)
-            .modifier(ChatStartCardReporter())
     }
 }

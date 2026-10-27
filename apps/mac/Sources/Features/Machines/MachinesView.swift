@@ -208,7 +208,9 @@ struct MachinesView: View {
                     .font(Theme.callout).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 100)
             }
-            if model.accountMachines.isEmpty && unlistedKnown.isEmpty { addDeviceAction }
+            if deviceSearch.isEmpty && model.accountMachines.allSatisfy(model.isThisMachine) && unlistedKnown.isEmpty {
+                addDeviceAction
+            }
         case .access:
             Text(L10n.text("apple.machinesview.choose_what_connected_devices_can_do_on_th.8a7b1610"))
                 .font(Theme.callout).foregroundStyle(.secondary)
@@ -244,8 +246,13 @@ struct MachinesView: View {
                 : L10n.text("apple.machinesview.sign_in_with_a_patron_or_legend_account_to.af6beaa7"),
             mark: "mark_plan"
         ) {
-            Link(L10n.text("apple.machinesview.see_plans.d9898933"), destination: URL(string: "https://tokenstat.ai/pricing")!)
-                .buttonStyle(AccentButtonStyle())
+            if model.account?.signedIn == true {
+                Button(L10n.text("common.refresh"), .refresh) { Task { await model.load() } }
+                    .buttonStyle(AccentButtonStyle())
+            } else if let onSignIn {
+                Button(L10n.text("common.sign_in"), .signIn, action: onSignIn)
+                    .buttonStyle(AccentButtonStyle())
+            }
         }
         .padding(Theme.Space.m)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -477,10 +484,6 @@ struct MachinesView: View {
                                 : L10n.text("apple.machinesview.sign_in_with_an_account_that_includes_it_t.3e4fb59e"))
                                 .font(Theme.caption)
                                 .foregroundStyle(.secondary)
-                            if model.account?.signedIn == true {
-                                Link(L10n.text("apple.machinesview.see_plans.d9898933"), destination: URL(string: "https://tokenstat.ai/pricing")!)
-                                    .font(Theme.caption.weight(.semibold))
-                            }
                         }
                         .padding(Theme.Space.s)
                         .frame(maxWidth: .infinity, alignment: .leading)

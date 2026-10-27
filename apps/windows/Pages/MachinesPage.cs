@@ -450,6 +450,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 L10n.Text("windows.machinespage.sign_in_to_see_devices.5e009c71"),
                 L10n.Text("windows.machinespage.devices_live_on_the_account_so_a_closed_la.2f29b3f0"),
                 ActionIcon.Device));
+            _root.Children.Add(ActionIconGlyph.Button(L10n.Text("common.sign_in"), ActionIcon.SignIn,
+                async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync())));
             Restore();
             return;
         }
@@ -547,7 +549,11 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             _deviceInventory.Children.Add(AccountDevicesCard(account, shownMachines, showScreenHint: query.Length == 0));
         if (shownPeers.Count > 0)
             _deviceInventory.Children.Add(OtherApprovedCard(shownPeers));
-        if (shown == 0)
+        if (query.Length == 0 && machines.All(IsSelf) && peers.Count == 0)
+            _deviceInventory.Children.Add(EmptyState.View(
+                L10n.Text("windows.machinespage.no_other_devices"),
+                L10n.Text("windows.machinespage.connect_other_devices"), EmptyArtKind.Devices));
+        else if (shown == 0)
             _deviceInventory.Children.Add(EmptyState.View(
                 total == 0 ? L10n.Text("windows.machinespage.no_devices_yet.a149f2bd") : L10n.Text("windows.machinespage.no_matching_devices.7bad272d"),
                 total == 0 ? L10n.Text("windows.machinespage.add_a_device_to_connect_to_its_projects_an.511b0e32")
@@ -1381,11 +1387,10 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     }
 
     /// <summary>
-    /// Free and Supporter already share usage. One upgrade card, then the
-    /// machine list, matching the Mac: the action that ends it reaches the
-    /// first screenful.
+    /// Account eligibility can be refreshed without sending someone to a
+    /// paid-plan checkout; personal remote access is available on every plan.
     /// </summary>
-    private static UIElement RemoteLockedCard(JsonNode account)
+    private UIElement RemoteLockedCard(JsonNode account)
     {
         var signedIn = account["signedIn"]?.GetValue<bool>() ?? false;
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -1398,7 +1403,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             TextWrapping = TextWrapping.Wrap,
         });
         body.Children.Add(ActionIconGlyph.Button(
-            L10n.Text("windows.machinespage.see_plans.d9898933"), ActionIcon.Plans, (_, _) => Open("https://tokenstat.ai/pricing")));
+            L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => await LoadAsync()));
         return Chrome.Card(L10n.Text("windows.machinespage.remote_is_on_patron.d25dea13"), body);
     }
 

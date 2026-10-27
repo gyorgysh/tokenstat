@@ -555,7 +555,6 @@ struct ClientRootView: View {
         navigation.pendingNewChatRequest = nil
         switch request {
         case .machineSetup: sessionModels.models(for: WorkSessionContext.shared.scope).setup.open()
-        case .plans: store.showPaywall = true
         }
     }
 

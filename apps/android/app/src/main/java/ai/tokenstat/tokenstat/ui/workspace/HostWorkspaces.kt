@@ -888,24 +888,23 @@ fun EmptyWorkspacesCard(
     onClone: () -> Unit,
 ) {
     val colors = LocalTsColors.current
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        EmptyState(
-            icon = Icons.Default.Folder,
-            title = L10n.text("common.projects.first_title"),
-            message = L10n.text("android.hostworkspaces.give_0_a_folder_choose_one_it_already_has.bfd23a13", "${hostName}"),
-            art = { EmptyArt(EmptyArtKind.Projects) },
-        )
-        TextButton(onClick = onChooseFolder) {
-            Icon(ActionIcon.Reveal.vector, null, tint = colors.accent, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(Space.xs))
-            Text(L10n.text("android.hostworkspaces.choose_a_folder.5c71b8cd"), color = colors.accent)
-        }
-        TextButton(onClick = onClone) {
-            Icon(ActionIcon.Download.vector, null, tint = colors.accent, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(Space.xs))
-            Text(L10n.text("android.hostworkspaces.clone_a_repository.749e5d4d"), color = colors.accent)
-        }
-    }
+    EmptyState(
+        icon = Icons.Default.Folder,
+        title = L10n.text("common.projects.first_title"),
+        message = L10n.text("common.projects.remote_first_message", hostName),
+        art = { EmptyArt(EmptyArtKind.Projects) },
+        action = {
+            TsAccentButton(label = L10n.text("common.add_project"), icon = ActionIcon.Create.vector, onClick = onChooseFolder)
+        },
+        secondaryAction = {
+            TextButton(onClick = onClone) {
+                Icon(ActionIcon.Download.vector, null, tint = colors.accent, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(Space.xs))
+                Text(L10n.text("android.hostworkspaces.clone_a_repository.749e5d4d"),
+                    color = colors.accent, style = TsType.subheadline.copy(fontWeight = FontWeight.SemiBold))
+            }
+        },
+    )
 }
 
 /// Chats live inside folders, so starting one means picking the folder

@@ -87,8 +87,6 @@ final class ClientNavigationModel {
     enum NewChatRequest: Hashable {
         /// The account has no computer on it yet.
         case machineSetup
-        /// The account has no remote on it.
-        case plans
     }
 
     /// What New chat asked for on its way out.

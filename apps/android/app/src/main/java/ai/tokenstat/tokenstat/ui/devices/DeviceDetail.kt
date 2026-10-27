@@ -225,7 +225,6 @@ fun DeviceDetailScreen(
                 platform = machine.string("platform"),
                 online = online,
                 reach = DeviceCopy.reach(isThis, online, hasKey),
-                onPlans = onPlans,
                 onOpenWork = onOpenWork,
                 onViewScreen = { viewing = true },
             )
@@ -356,7 +355,6 @@ private fun HostHeaderCard(
     platform: String?,
     online: Boolean?,
     reach: String,
-    onPlans: () -> Unit,
     onOpenWork: () -> Unit,
     onViewScreen: () -> Unit,
 ) {
@@ -403,9 +401,7 @@ private fun HostHeaderCard(
                 onClick = onOpenWork,
             )
         } else {
-            // The same seat and panel as the row it stands in for. An upsell
-            // drawn as loose text beside a panelled row reads as a different
-            // component rather than as the locked version of one.
+            // Keep an unavailable account in the same panel as the action.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -430,7 +426,7 @@ private fun HostHeaderCard(
                         style = TsType.caption,
                         color = colors.textSecondary,
                     )
-                    TextLink(label = L10n.text("android.devicedetail.see_plans.d9898933"), icon = ActionIcon.Plans, onClick = onPlans)
+                    TextLink(label = L10n.text("common.refresh"), icon = ActionIcon.Refresh, onClick = { model.refresh() })
                 }
             }
         }

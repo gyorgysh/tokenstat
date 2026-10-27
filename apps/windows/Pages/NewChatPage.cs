@@ -5,11 +5,8 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
-using Microsoft.UI.Xaml.Shapes;
 using Tokenstat.Design;
 using Tokenstat.Navigation;
-using Windows.Foundation;
 using System.Text.Json.Nodes;
 using Windows.Storage.Pickers;
 using Windows.System;
@@ -56,7 +53,6 @@ internal sealed class NewChatPage : Page
     private readonly Button _submit;
     private readonly Button _addButton;
     private readonly Button _retry;
-    private readonly Storyboard _ambient = new();
     private bool _sending;
     private bool _pickingFiles, _addingRepository;
     private bool _stagingFiles;
@@ -75,11 +71,6 @@ internal sealed class NewChatPage : Page
     {
         _repositories = repositories; _add = add; _loadAgents = loadAgents; _send = send;
         var root = new Grid { Background = Theme.BackgroundBrush, AllowDrop = true };
-        var halo = new Ellipse { Width = 600, Height = 420, Opacity = .45, IsHitTestVisible = false,
-            Fill = new RadialGradientBrush { Center = new Point(.5, .5), RadiusX = .5, RadiusY = .5,
-                GradientStops = { new GradientStop { Color = Theme.Accent, Offset = 0 }, new GradientStop { Color = Microsoft.UI.Colors.Transparent, Offset = 1 } } },
-            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        root.Children.Add(halo);
         var content = new StackPanel { Spacing = 18, MaxWidth = 720, HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(32, 40, 32, 40) };
         var bars = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Height = 40, HorizontalAlignment = HorizontalAlignment.Center };
@@ -135,23 +126,6 @@ internal sealed class NewChatPage : Page
         _retry.Visibility = Visibility.Collapsed; content.Children.Add(_retry);
         root.Children.Add(new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center });
-        var waves = new Canvas { IsHitTestVisible = false }; root.Children.Add(waves);
-        root.SizeChanged += (_, args) => waves.Clip = new RectangleGeometry { Rect = new Rect(0, 0, args.NewSize.Width, args.NewSize.Height) };
-        root.PointerPressed += (_, args) => {
-            if (args.Handled || !Motion.AnimationsEnabled() || !args.GetCurrentPoint(root).Properties.IsLeftButtonPressed) return;
-            var point = args.GetCurrentPoint(root).Position;
-            var occupied = content.TransformToVisual(root).TransformBounds(new Rect(0, 0, content.ActualWidth, content.ActualHeight));
-            if (occupied.Contains(point) || waves.Children.Count >= 3) return;
-            var ring = new Ellipse { Width = 180, Height = 180, Stroke = Theme.AccentBrush, StrokeThickness = 1, Opacity = .12,
-                RenderTransformOrigin = new Point(.5, .5), RenderTransform = new ScaleTransform { ScaleX = .2, ScaleY = .2 } };
-            Canvas.SetLeft(ring, point.X - 90); Canvas.SetTop(ring, point.Y - 90); waves.Children.Add(ring);
-            var animation = new Storyboard();
-            foreach (var property in new[] { "(UIElement.RenderTransform).(ScaleTransform.ScaleX)", "(UIElement.RenderTransform).(ScaleTransform.ScaleY)", "Opacity" }) {
-                var motion = new DoubleAnimation { From = property == "Opacity" ? .12 : .2, To = property == "Opacity" ? 0 : 2.5, Duration = new Duration(TimeSpan.FromMilliseconds(650)), EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
-                Storyboard.SetTarget(motion, ring); Storyboard.SetTargetProperty(motion, property); animation.Children.Add(motion);
-            }
-            animation.Completed += (_, _) => waves.Children.Remove(ring); animation.Begin();
-        };
         Content = root;
         AppServices.AccountChanged += AccountRetired;
         _draft.TextChanged += (_, _) => RefreshActions();
@@ -168,12 +142,8 @@ internal sealed class NewChatPage : Page
         Loaded += (_, _) => {
             RemoteWorkspaces.Changed -= RepositoriesChanged; RemoteWorkspaces.Changed += RepositoriesChanged;
             RefreshRepositories();
-            if (Motion.AnimationsEnabled()) {
-                var breath = new DoubleAnimation { From = .08, To = .16, Duration = new Duration(TimeSpan.FromSeconds(7)), AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever };
-                Storyboard.SetTarget(breath, halo); Storyboard.SetTargetProperty(breath, "Opacity"); _ambient.Children.Clear(); _ambient.Children.Add(breath); _ambient.Begin();
-            } else halo.Opacity = .1;
         };
-        Unloaded += (_, _) => { RememberDraft(); _lifetime++; _stagingCancellation?.Cancel(); waves.Children.Clear(); RemoteWorkspaces.Changed -= RepositoriesChanged; _ambient.Stop(); _catalogRevision++; if (!_handoff) _request++; };
+        Unloaded += (_, _) => { RememberDraft(); _lifetime++; _stagingCancellation?.Cancel(); RemoteWorkspaces.Changed -= RepositoriesChanged; _catalogRevision++; if (!_handoff) _request++; };
     }
     private void AccountRetired()
     {

@@ -554,7 +554,7 @@ class PortedLogicTest {
         assertEquals("This is the device you are holding.", DeviceCopy.reach(true, false, false))
         assertEquals(true, DeviceCopy.reach(false, true, true).startsWith("Awake and reachable"))
         assertEquals(true, DeviceCopy.reach(false, false, true).contains("Always-on host"))
-        assertEquals(true, DeviceCopy.reach(false, false, false).contains("Reach devices from anywhere"))
+        assertEquals(true, DeviceCopy.reach(false, false, false).contains("Enable remote access"))
     }
 
     // isHeadlessPlatform — port of the Apple fallback: Linux and the server

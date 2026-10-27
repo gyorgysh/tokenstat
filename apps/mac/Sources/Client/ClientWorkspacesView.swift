@@ -18,7 +18,6 @@ import SwiftUI
 struct ClientWorkspacesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
-    @Environment(ClientStore.self) private var store
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: ClientWorkspacesModel
@@ -27,6 +26,7 @@ struct ClientWorkspacesView: View {
     @Environment(ClientSetupSession.self) private var setup
     @State private var customizing = false
     @State private var addingFirstProject = false
+    @State private var cloningFirstProject = false
     @State private var layout = WorkspacesLayout.shared
     /// The folder handoff this view has already pushed, so a reconnect does
     /// not push it again after somebody backed out of it.
@@ -105,11 +105,9 @@ struct ClientWorkspacesView: View {
                             kind: .needsAccount,
                             title: L10n.text("apple.clientworkspacesview.remote_is_on_patron.d25dea13"),
                             message: L10n.text("apple.clientworkspacesview.this_device_already_shares_the_account_and.b2e29485"),
-                            actionTitle: L10n.text("apple.clientworkspacesview.see_plans.d9898933"),
-                            actionIcon: .plans,
-                            action: {
-                                store.showPaywall = true
-                            },
+                            actionTitle: L10n.text("common.refresh"),
+                            actionIcon: .refresh,
+                            action: { Task { await account.load() } },
                             art: .remoteGate
                         )
                     } else if model.hosts.isEmpty {
@@ -147,9 +145,18 @@ struct ClientWorkspacesView: View {
                         if let peer = model.connectedKey,
                            let host = model.hosts.first(where: { $0.peerKey == peer }) {
                             if model.folders.isEmpty, model.isConnecting == nil, model.errorMessage == nil {
-                                FirstProjectPrompt { addingFirstProject = true }
-                                    .frame(maxWidth: .infinity)
-                                    .cardSurface()
+                                ClientEmptyState(
+                                    kind: .nothingYet,
+                                    title: L10n.text("common.projects.first_title"),
+                                    message: L10n.text("common.projects.remote_first_message", host.name),
+                                    actionTitle: L10n.text("common.add_project"),
+                                    actionIcon: .create,
+                                    action: { addingFirstProject = true },
+                                    art: .projects,
+                                    secondaryActionTitle: L10n.text("apple.clienthostworkspacesview.clone_a_repository.749e5d4d"),
+                                    secondaryActionIcon: .download,
+                                    secondaryAction: { cloningFirstProject = true }
+                                )
                             }
                             if layout.allTasksVisible {
                                 ClientAllTasksLink(peer: peer, hostName: host.name)
@@ -193,6 +200,17 @@ struct ClientWorkspacesView: View {
                     NavigationStack {
                         ClientFolderPicker(peer: peer, hostName: host.name) { _ in
                             addingFirstProject = false
+                            Task { await model.refresh(account: account.account) }
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $cloningFirstProject) {
+                if let peer = model.connectedKey,
+                   let host = model.hosts.first(where: { $0.peerKey == peer }) {
+                    NavigationStack {
+                        ClientCloneRepository(peer: peer, hostName: host.name) { _ in
+                            cloningFirstProject = false
                             Task { await model.refresh(account: account.account) }
                         }
                     }

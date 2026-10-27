@@ -786,7 +786,7 @@ private fun SetupMacDoor(model: AppViewModel, state: ai.tokenstat.tokenstat.Clie
             machines.map { it.jsonObject }.firstOrNull { machine ->
                 val platform = machine.get("platform")?.jsonPrimitive?.contentOrNull?.lowercase().orEmpty()
                 machine.get("kind")?.jsonPrimitive?.contentOrNull != "client" &&
-                    (platform.contains("macos") || platform.contains("darwin"))
+                    (platform.contains("macos") || platform.contains("darwin") || platform.contains("windows"))
             },
         )
     }

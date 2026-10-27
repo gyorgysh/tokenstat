@@ -9,10 +9,7 @@ struct ClientNewChatScreen: View {
     @Environment(AccountModel.self) private var account
     @State private var addingRepository = false
     @State private var choosingHost = false
-    /// This presentation has had a computer to offer. A refresh that comes
-    /// back with an empty account snapshot must not pull the composer out
-    /// from under somebody who is writing in it.
-    @State private var sawMachine = false
+    @State private var addAfterChoosingHost = false
     private var draft: ChatStartDraft { navigation.newChatDraft }
     private var host: ClientHost? { workspaces.hosts.first { $0.peerKey == workspaces.connectedKey } }
 
@@ -57,7 +54,7 @@ struct ClientNewChatScreen: View {
                 }
                 .confirmationDialog(L10n.text("common.new_chat.choose_host"), isPresented: $choosingHost, titleVisibility: .visible) {
                     ForEach(workspaces.hosts, id: \.peerKey) { host in
-                        Button(host.name, systemImage: "desktopcomputer") { Task { await choose(host, thenAdd: true) } }
+                        Button(host.name, systemImage: "desktopcomputer") { Task { await choose(host, thenAdd: addAfterChoosingHost) } }
                     }
                     Button(L10n.text("common.devices"), systemImage: "desktopcomputer") {
                         navigation.showingNewChat = false
@@ -73,32 +70,57 @@ struct ClientNewChatScreen: View {
         .onChange(of: WorkSessionContext.shared.generation) { _, generation in
             draft.activate(scope: WorkSessionContext.shared.scope, session: generation)
         }
-        .onChange(of: workspaces.hosts.isEmpty, initial: true) { _, empty in
-            if !empty { sawMachine = true }
-        }
         .onDisappear { draft.retire() }
     }
 
     /// New chat is a first-class action on both layouts: the iPad keeps it at
     /// the top of the sidebar and the phone in the Projects bar, whatever the
     /// account has on it. So it is pressed by people with no computer paired
-    /// and by people whose plan has no remote, and what it used to open for
+    /// and by people whose account cannot currently connect, and what it used to open for
     /// both was the whole composer with a Send that could never fire. A
     /// disabled control is not an answer to "why can I not start a chat".
     /// Projects already answers both questions, in these words.
     @ViewBuilder private var page: some View {
         if !remoteAllowed, account.signedIn {
-            reason(kind: .needsAccount, art: .remoteGate,
-                   title: L10n.text("apple.clientnewchatscreen.remote_is_on_patron.d25dea13"),
-                   message: L10n.text("apple.clientnewchatscreen.running_a_conversation_on_your_computer_is.ba662608"),
-                   actionTitle: L10n.text("apple.clientnewchatscreen.see_plans.d9898933"),
-                   icon: .plans, request: .plans)
-        } else if workspaces.hosts.isEmpty, !sawMachine {
+            ZStack {
+                ChatStartGlassField.ground.ignoresSafeArea()
+                ClientEmptyState(
+                    kind: .needsAccount,
+                    title: L10n.text("apple.clientnewchatscreen.remote_is_on_patron.d25dea13"),
+                    message: L10n.text("apple.clientnewchatscreen.running_a_conversation_on_your_computer_is.ba662608"),
+                    actionTitle: L10n.text("common.refresh"), actionIcon: .refresh,
+                    action: { Task { await account.load() } }, art: .remoteGate
+                ).padding(.horizontal, 24)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if workspaces.hosts.isEmpty, draft.text.isEmpty, draft.attachments.isEmpty {
             reason(kind: .nothingYet, art: .connect,
                    title: L10n.text("apple.clientnewchatscreen.no_machine_yet.3ea83dc9"),
                    message: L10n.text("apple.clientnewchatscreen.a_conversation_runs_an_agent_on_a_computer.3bed8f6c"),
                    actionTitle: L10n.text("apple.clientnewchatscreen.set_up_a_machine.43e10e13"),
                    icon: .connect, request: .machineSetup)
+        } else if host == nil, !workspaces.hosts.isEmpty, draft.text.isEmpty, draft.attachments.isEmpty {
+            ZStack {
+                Theme.background.ignoresSafeArea()
+                if workspaces.isConnecting != nil {
+                    ProgressView(L10n.text("common.new_chat.connecting"))
+                } else if let waitingHost = workspaces.awaitingAccessHost {
+                    VStack(spacing: Theme.Space.m) {
+                        ClientAwaitingAccessCard(hostName: waitingHost, isHeadless: isHeadlessHost(named: waitingHost))
+                        Button(L10n.text("common.new_chat.choose_host"), .connect) {
+                            addAfterChoosingHost = false; choosingHost = true
+                        }
+                    }.padding(.horizontal, 24)
+                } else {
+                    ClientEmptyState(
+                        kind: .nothingYet,
+                        title: L10n.text("common.new_chat.choose_host"),
+                        message: L10n.text("common.new_chat.connect_host_message"),
+                        actionTitle: L10n.text("common.new_chat.choose_host"),
+                        actionIcon: .connect,
+                        action: { addAfterChoosingHost = false; choosingHost = true }
+                    ).padding(.horizontal, 24)
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ChatStartPage(draft: draft, repositories: workspaces.folders,
                           hostPicker: AnyView(hostPicker), allowsSend: workspaces.isConnecting == nil && host != nil,
@@ -121,10 +143,8 @@ struct ClientNewChatScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Setup and the paywall are both sheets the root owns, and this page is
-    /// covering that root, so asking for one here would queue a presentation
-    /// behind one that is going away. The root starts it once this screen
-    /// has gone.
+    /// Setup is a sheet owned by the root. The root starts it once this
+    /// screen has gone, rather than presenting it behind the closing page.
     private func leave(for request: ClientNavigationModel.NewChatRequest) {
         navigation.pendingNewChatRequest = request
         navigation.showingNewChat = false
@@ -136,6 +156,13 @@ struct ClientNewChatScreen: View {
         if let remote = account.account?.canRemote { return remote }
         let tier = account.account?.tier?.lowercased()
         return ["free", "supporter", "patron", "legend"].contains(tier)
+    }
+
+    private func isHeadlessHost(named host: String) -> Bool {
+        let machine = (account.account?.machines ?? []).first {
+            ($0.label?.isEmpty == false ? $0.label : $0.machineID) == host
+        }
+        return isHeadlessPlatform(machine?.platform)
     }
 
     private var hostPicker: some View {
@@ -157,7 +184,7 @@ struct ClientNewChatScreen: View {
 
     private func addRepository() {
         if host != nil { addingRepository = true }
-        else { choosingHost = true }
+        else { addAfterChoosingHost = true; choosingHost = true }
     }
 
     private func choose(_ host: ClientHost, thenAdd: Bool) async {

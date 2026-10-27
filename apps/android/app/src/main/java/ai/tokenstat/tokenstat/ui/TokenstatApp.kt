@@ -852,7 +852,12 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     } else {
                         RemoteGateScreen(
                             signedIn = state.signedIn,
-                            onPlans = { Plans.open() },
+                            onRetry = { model.refresh() },
+                            onSignIn = {
+                                model.signIn { url ->
+                                    runCatching { CustomTabsIntent.Builder().build().launchUrl(context, url.toUri()) }
+                                }
+                            },
                         )
                     }
                     Destination.Insights -> InsightsScreen(model, state, onHome = { selected = Destination.Home }, tabBarScroll = tabBarScroll)
@@ -980,16 +985,10 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     }
 }
 
-/// Remote work, on an account whose plan does not include it. Port of the
-/// `needsAccount` empty state in `ClientWorkspacesView`.
-///
-/// The same card every other empty screen uses, so "the answer is no, and
-/// upgrading is the fix" is told in the app's own language rather than by a
-/// centred paragraph with a button under it. Signed out is a different
-/// answer and gets a different sentence: quoting a plan at somebody who has
-/// not signed in tells them to buy their way out of a sign-in screen.
+/// An unavailable account or a signed-out device needs account recovery,
+/// not a plan upgrade. Personal remote access is included on every plan.
 @Composable
-private fun RemoteGateScreen(signedIn: Boolean, onPlans: () -> Unit) {
+private fun RemoteGateScreen(signedIn: Boolean, onRetry: () -> Unit, onSignIn: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
@@ -1004,9 +1003,9 @@ private fun RemoteGateScreen(signedIn: Boolean, onPlans: () -> Unit) {
                 art = { EmptyArt(EmptyArtKind.RemoteGate) },
                 action = {
                     TsAccentButton(
-                        label = L10n.text("android.tokenstatapp.see_plans.d9898933"),
-                        icon = ActionIcon.Plans.vector,
-                        onClick = onPlans,
+                        label = L10n.text("common.refresh"),
+                        icon = ActionIcon.Refresh.vector,
+                        onClick = onRetry,
                     )
                 },
             )
@@ -1016,6 +1015,9 @@ private fun RemoteGateScreen(signedIn: Boolean, onPlans: () -> Unit) {
                 title = L10n.text("android.tokenstatapp.sign_in_to_reach_your_computers.a7a3b4e8"),
                 message = L10n.text("android.tokenstatapp.remote_work_runs_over_your_account_sign_in.26568263"),
                 art = { EmptyArt(EmptyArtKind.RemoteGate) },
+                action = {
+                    TsAccentButton(label = L10n.text("common.sign_in"), icon = ActionIcon.SignIn.vector, onClick = onSignIn)
+                },
             )
         }
     }
@@ -1995,6 +1997,13 @@ private fun DevicesScreen(
                             small = true, onClick = { sshOpen = true })
                     }
                 }
+                if (state.signedIn && machines.none {
+                        it.string("kind") != "client" && (thisId == null || it.string("id") != thisId)
+                    } && deviceQuery.isBlank()) {
+                    item {
+                        NoComputerConnected(onSetupWizard)
+                    }
+                }
             item {
                     TsSearchField(
                         prompt = L10n.text("android.tokenstatapp.search_devices.3aebaefc"),
@@ -2108,6 +2117,19 @@ private fun DevicesScreen(
             }
         }
     }
+}
+
+@Composable
+internal fun NoComputerConnected(onSetupWizard: () -> Unit) {
+    EmptyState(
+        title = L10n.text("android.tokenstatapp.no_computer_connected"),
+        message = L10n.text("android.tokenstatapp.connect_your_computer"),
+        art = { EmptyArt(EmptyArtKind.Connect) },
+        action = {
+            TsAccentButton(label = L10n.text("android.tokenstatapp.set_up_a_machine.43e10e13"),
+                icon = ActionIcon.Connect.vector, onClick = onSetupWizard)
+        },
+    )
 }
 
 // Typed confirmation rather than one tap. This is the one control in the
@@ -3486,6 +3508,7 @@ private fun WorkspacesScreen(
             folders = folders.filterIsInstance<JsonObject>(), selectedRepository = newChatRepository,
             onRepository = { selectNewChatRepository(it) }, onHost = { machine -> newChatRepository = null; scope.launch { connect(machine) } },
             onManageDevices = onManageDevices,
+            onSetupMachine = { newChatOpen = false; onSetupWizard?.invoke() ?: onManageDevices() },
             onAdd = { newChatAddScope = newChatAccount to connectedPeer; picking = true }, onClose = { newChatOpen = false }, error = newChatFailure?.takeIf { it.owner == newChatOwner }?.message ?: error,
             onSend = {
                 val peer = connectedPeer
@@ -3633,6 +3656,14 @@ private fun WorkspaceList(
     val visibleSections = layoutOrder.filter { it !in layoutHidden }
     var chatsExpanded by remember { mutableStateOf(false) }
     LazyColumn(modifier, contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            TsSecondaryButton(
+                label = L10n.text("android.tokenstatapp.new_chat.db18382a"),
+                icon = ActionIcon.Create.vector,
+                small = true,
+                onClick = onNewChat,
+            )
+        }
         renameError?.let { message -> item { ErrorCard(message) } }
         error?.let { message ->
             item {
@@ -3755,11 +3786,11 @@ private fun WorkspaceList(
             item { SkeletonRows(count = 3) }
             return@LazyColumn
         }
-        if (folderRows.isEmpty() && sessionRows.isEmpty() && chatRows.isEmpty() && error == null) {
+        if (folderRows.isEmpty() && error == null) {
             item {
                 EmptyWorkspacesCard(hostName = hostName, onChooseFolder = onChooseFolder, onClone = onClone)
             }
-            return@LazyColumn
+            if (sessionRows.isEmpty() && chatRows.isEmpty()) return@LazyColumn
         }
         item {
             // The app's search field, like every other one. A Material box
