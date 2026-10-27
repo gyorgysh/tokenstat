@@ -104,7 +104,12 @@ private struct TeamProjectGroup: View {
             let result: TeamRepositories = try await store.read("repositories.list", fields: ["organization": .string(organization.id),
                 "page": TeamStore.page(offset: more ? nextOffset ?? 0 : 0)], context: context)
             guard request == id else { return }
-            let rows = result.repositories.filter { $0.organizationId == organization.id && $0.role != nil }
+            // A project nobody shares any more is not shared with anyone,
+            // unless this computer's own sharing is newer than the count.
+            let rows = result.repositories.filter { row in
+                row.organizationId == organization.id && row.role != nil && (row.isShared
+                    || store.localProjects.contains { $0.repositoryId == row.id && $0.organizationId == organization.id && $0.phase == "active" })
+            }
             projects = more ? projects + rows.filter { next in !projects.contains { $0.id == next.id } } : rows
             nextOffset = result.nextOffset; loaded = true; error = nil
         } catch is CancellationError {} catch { if request == id, store.mutationContext == context { self.error = error.localizedDescription } }

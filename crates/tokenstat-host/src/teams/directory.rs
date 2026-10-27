@@ -167,6 +167,12 @@ pub(super) enum Operation {
         repository: String,
         input: Rename,
     },
+    #[serde(rename = "repositories.archive")]
+    ArchiveRepository {
+        organization: String,
+        repository: String,
+        input: Revision,
+    },
     #[serde(rename = "repositories.members")]
     RepositoryMembers {
         organization: String,
@@ -311,6 +317,11 @@ pub(super) fn perform(client: &TeamClient, operation: Operation) -> Result<Value
             repository,
             input,
         } => api!(client.rename_repository(&organization, &repository, &input)),
+        Operation::ArchiveRepository {
+            organization,
+            repository,
+            input,
+        } => api!(client.archive_repository(&organization, &repository, input)),
         Operation::RepositoryMembers {
             organization,
             repository,
@@ -437,6 +448,18 @@ mod tests {
         );
         assert!(parse("teams.prepareAuthorization", r#"{"confirmMetadata":true}"#).is_err());
         assert!(parse("teams.authorizationPreview", "{}").is_ok());
+        let archive = |input: Value| {
+            json!({"operation":"repositories.archive","organization":"org_fixture","repository":"repo_fixture","input":input,"_accountSession":"fixture","_accountScope":{"kind":"account"}}).to_string()
+        };
+        assert!(parse("teams.directory", &archive(json!({"expectedRevision":1}))).is_ok());
+        assert!(
+            parse(
+                "teams.directory",
+                &archive(json!({"expectedRevision":1,"force":true}))
+            )
+            .is_err()
+        );
+        assert!(parse("teams.directory", &archive(json!({}))).is_err());
         assert!(parse("teams.directory", r#"{"operation":"organizations.list","_accountSession":"fixture","_accountScope":{"kind":"account"}}"#).is_ok());
         assert!(
             parse(

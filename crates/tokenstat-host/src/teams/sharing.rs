@@ -284,6 +284,67 @@ fn target(
 fn local_dto(row: &Checkout) -> Value {
     json!({"id":row.id,"organizationId":row.organization_id,"repositoryId":row.repository_id,"workspaceId":row.workspace_id,"phase":row.phase,"revision":row.revision,"accountCleanupPending":row.phase == Phase::Withdrawn && !row.cloud_withdrawn})
 }
+/// Whether the account server says a publication no longer exists. Only an
+/// explicit `not_found` counts: an outage or a refused request proves nothing,
+/// and a folder must never look private while teammates can still reach it.
+fn stopped_elsewhere<T>(reply: &Result<T, TeamError>) -> bool {
+    matches!(reply, Err(TeamError::Rejected { status: 404, code, .. }) if code == "not_found")
+}
+/// How often one publication is asked about, at most. The list is read on
+/// every refresh while Teams is open, and one request per shared folder on
+/// each of those would be a steady load for a change that is rare.
+const SETTLE_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
+fn due_for_settle_check(id: &str) -> bool {
+    use std::{collections::HashMap, sync::Mutex, time::Instant};
+    static CHECKED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+    let Ok(mut checked) = CHECKED.lock() else {
+        return true;
+    };
+    let checked = checked.get_or_insert_with(HashMap::new);
+    let now = Instant::now();
+    checked.retain(|_, at| now.duration_since(*at) < SETTLE_CHECK_INTERVAL);
+    if checked.contains_key(id) {
+        return false;
+    }
+    checked.insert(id.to_string(), now);
+    true
+}
+/// Sharing can end without this computer: the publisher stops it from
+/// another device or a maintainer removes the checkout. The local row then
+/// still reads as shared, so the folder keeps its badge and keeps serving
+/// teammates who can no longer find it. Retire it here, the same way a
+/// local stop would, and leave the repository, its chats and history alone.
+fn settle_stopped_elsewhere(
+    owner: &AccountSnapshot,
+    client: &TeamClient,
+    store: &Store,
+    binding: &Owner,
+) -> Result<(), DispatchError> {
+    let mut settled = false;
+    for row in store.list(binding)? {
+        if row.phase != Phase::Active || !due_for_settle_check(&row.id) {
+            continue;
+        }
+        if !stopped_elsewhere(&client.checkout_publication(&row.organization_id, &row.id)) {
+            continue;
+        }
+        owner.ensure_current().map_err(super::changed)?;
+        match store.withdraw(binding, &row.id, row.revision) {
+            Ok(_) => {
+                store.confirm_cloud_withdrawal(binding, &row.id)?;
+                settled = true;
+            }
+            // A row that moved since the read was changed by a local action,
+            // which wins over this cleanup.
+            Err(error) if error.code == "publication_changed" => {}
+            Err(error) => return Err(error),
+        }
+    }
+    if settled {
+        update_remote_reach(owner, store, binding)?;
+    }
+    Ok(())
+}
 pub(super) fn perform(
     owner: &AccountSnapshot,
     client: &TeamClient,
@@ -390,6 +451,7 @@ pub(super) fn perform(
         } => {
             page.validate().map_err(api_error)?;
             let binding = local_binding(owner, client)?;
+            settle_stopped_elsewhere(owner, client, &store, &binding)?;
             let rows: Vec<_> = store
                 .list(&binding)?
                 .into_iter()

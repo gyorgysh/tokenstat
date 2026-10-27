@@ -10,6 +10,7 @@ namespace Tokenstat.Pages;
 internal sealed partial class TeamsPage
 {
     private bool _canReviewChatSelection;
+    private bool _canArchiveRepositories;
     private Task ShowTeamLocalChatsAsync(TeamPublisherModel publisher, JsonObject repository, JsonObject publication, Func<Task> back) =>
         _canReviewChatSelection ? ShowTeamChatSelectionAsync(publisher, repository, publication, back) : ShowTeamSingleChatsAsync(publisher, repository, publication, back);
 

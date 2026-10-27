@@ -62,6 +62,7 @@ private sealed interface ManagementEdit {
     data class Remove(val member: JsonObject) : ManagementEdit
     data class Invitation(val invitation: JsonObject, val renew: Boolean) : ManagementEdit
     data class Access(val repository: JsonObject, val member: JsonObject) : ManagementEdit
+    data class RemoveProject(val repository: JsonObject) : ManagementEdit
 }
 
 @Composable internal fun TeamManagementScreen(calls: TeamCalls, initial: JsonObject, onGone: () -> Unit = {}, onBack: (JsonObject) -> Unit) {
@@ -146,8 +147,12 @@ private sealed interface ManagementEdit {
             }
             "repositories" -> items(model.repositories.rows, key = { it.teamString("id")!! }) { repository ->
                 TsCard(title = repository.teamString("name").orEmpty(), subtitle = teamRoleLabel(repository.teamString("role"))) {
+                    if (!repository.teamShared()) Text(L10n.text("common.teams.repository_not_shared"), color = colors.textSecondary)
                     if (model.manager || repository.teamString("role") == "maintainer") TsSecondaryButton(L10n.text("common.teams.repository_access"), enabled = !model.busy,
                         icon = ActionIcon.Security.vector, onClick = { accessRepository = repository; accessMembers = TeamManagementPage(); scope.launch { loadAccess(repository, false) } })
+                    // The server refuses while any computer still shares it, so a live checkout is never cut off from here.
+                    if (calls.canArchiveRepositories && model.active && model.manager && !repository.teamShared()) TsDangerButton(L10n.text("common.teams.remove_project"), enabled = !model.busy,
+                        icon = ActionIcon.Delete.vector, onClick = { edit = ManagementEdit.RemoveProject(repository) })
                 }
             }
             "settings" -> item {
@@ -216,6 +221,7 @@ private sealed interface ManagementEdit {
         is ManagementEdit.Role -> L10n.text("common.teams.change_role")
         is ManagementEdit.Remove -> L10n.text("common.teams.remove_member")
         is ManagementEdit.Access -> L10n.text("common.teams.repository_access")
+        is ManagementEdit.RemoveProject -> L10n.text("common.teams.remove_project_title", edit.repository.teamString("name").orEmpty())
         is ManagementEdit.Invitation -> if (edit.renew) L10n.text("common.teams.new_invitation_link") else L10n.text("common.teams.revoke_invitation")
     }
     val valid = !model.busy && when (edit) {
@@ -224,6 +230,7 @@ private sealed interface ManagementEdit {
         is ManagementEdit.Role -> model.owner && role != edit.member.teamString("role")
         is ManagementEdit.Remove -> model.manager
         is ManagementEdit.Access -> model.active && role != edit.member.teamString("role")
+        is ManagementEdit.RemoveProject -> model.manager
         is ManagementEdit.Invitation -> model.manager
     }
     suspend fun save() {
@@ -235,6 +242,7 @@ private sealed interface ManagementEdit {
                 is ManagementEdit.Role -> model.mutate("members.role", model.memberRole(edit.member, role ?: "member"), user = edit.member.teamString("id"))
                 is ManagementEdit.Remove -> model.mutate("members.remove", model.removeMember(edit.member), user = edit.member.teamString("id"))
                 is ManagementEdit.Access -> model.mutate("repositories.access", model.access(edit.repository, edit.member, role), user = edit.member.teamString("id"), repository = edit.repository.teamString("id"))
+                is ManagementEdit.RemoveProject -> model.mutate("repositories.archive", buildJsonObject { put("expectedRevision", edit.repository.teamRevision()) }, repository = edit.repository.teamString("id"))
                 is ManagementEdit.Invitation -> model.mutate(if (edit.renew) "invitations.renew" else "invitations.revoke", buildJsonObject { put("expectedRevision", edit.invitation.teamRevision()) }, invitation = edit.invitation.teamString("id"))
             }
             if (edit == ManagementEdit.Invite || edit is ManagementEdit.Invitation && edit.renew) {
@@ -281,13 +289,14 @@ private sealed interface ManagementEdit {
                     Text(L10n.text("common.teams.execution_separate"))
                     if ((role == null || role == "viewer") && edit.member.teamString("role") in setOf("contributor", "maintainer")) Text(L10n.text("common.teams.access_reduction_detail"))
                 }
+                is ManagementEdit.RemoveProject -> Text(L10n.text("common.teams.remove_project_detail"))
                 is ManagementEdit.Invitation -> Text(if (edit.renew) L10n.text("common.teams.renew_invitation_detail") else L10n.text("common.teams.revoke_invitation_detail"))
             }
         }
     }, confirmButton = {
         if (link != null) TsAccentButton(L10n.text("common.done"), icon = ActionIcon.Done.vector, onClick = onDone)
-        else TsAccentButton(if (edit == ManagementEdit.Invite || edit is ManagementEdit.Remove || edit is ManagementEdit.Invitation) title else L10n.text("common.save"), enabled = valid,
-            icon = if (edit is ManagementEdit.Remove || edit is ManagementEdit.Invitation && !edit.renew) ActionIcon.Revoke.vector else ActionIcon.Save.vector, onClick = { focus.clearFocus(); keyboard?.hide(); scope.launch { save() } })
+        else TsAccentButton(if (edit is ManagementEdit.RemoveProject) L10n.text("common.teams.remove_project") else if (edit == ManagementEdit.Invite || edit is ManagementEdit.Remove || edit is ManagementEdit.Invitation) title else L10n.text("common.save"), enabled = valid,
+            icon = if (edit is ManagementEdit.RemoveProject) ActionIcon.Delete.vector else if (edit is ManagementEdit.Remove || edit is ManagementEdit.Invitation && !edit.renew) ActionIcon.Revoke.vector else ActionIcon.Save.vector, onClick = { focus.clearFocus(); keyboard?.hide(); scope.launch { save() } })
     }, dismissButton = { if (link == null) TsSecondaryButton(L10n.text("common.cancel"), enabled = !model.busy, icon = ActionIcon.Dismiss.vector, onClick = onDismiss) })
 }
 

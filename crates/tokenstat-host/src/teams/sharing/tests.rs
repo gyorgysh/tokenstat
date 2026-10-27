@@ -39,3 +39,19 @@ fn every_publication_method_refuses_personal_and_team_peers_before_loading_crede
         });
     }
 }
+#[test]
+fn only_an_explicit_not_found_ends_sharing_that_was_stopped_elsewhere() {
+    let rejected = |status, code: &str| -> Result<(), TeamError> {
+        Err(TeamError::Rejected {
+            status,
+            code: code.into(),
+            message: String::new(),
+        })
+    };
+    assert!(stopped_elsewhere(&rejected(404, "not_found")));
+    assert!(!stopped_elsewhere(&rejected(404, "route_missing")));
+    assert!(!stopped_elsewhere(&rejected(403, "not_found")));
+    assert!(!stopped_elsewhere(&rejected(503, "unavailable")));
+    assert!(!stopped_elsewhere::<()>(&Err(TeamError::InvalidResponse)));
+    assert!(!stopped_elsewhere(&Ok(())));
+}

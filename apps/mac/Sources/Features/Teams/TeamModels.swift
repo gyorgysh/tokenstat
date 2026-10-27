@@ -61,6 +61,7 @@ struct TeamAPI: Sendable {
 struct TeamSetupIssue: Decodable, Sendable, Equatable { let code: String; let message: String }
 struct TeamCapabilities: Decodable, Sendable {
     var supportsAppPresence = false
+    var canArchiveRepositories = false
     var canPublishCheckouts = false
     var canConnectCheckouts = false
     var canPublishChats = false
@@ -86,7 +87,9 @@ struct TeamCapabilities: Decodable, Sendable {
     private enum CodingKeys: String, CodingKey { case enabled, ready, needsDeviceRegistration, authorizationRequired, version, actorId, canPublishCheckouts, canConnectCheckouts, canPublishChats, canResumeProjectSharing, canReviewChatSelection, features, deviceRemoved, setupIssue }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        supportsAppPresence = (try c.decodeIfPresent([String].self, forKey: .features) ?? []).contains("app-presence-v1")
+        let features = try c.decodeIfPresent([String].self, forKey: .features) ?? []
+        supportsAppPresence = features.contains("app-presence-v1")
+        canArchiveRepositories = features.contains("repository-archive-v1")
         actorId = try c.decodeIfPresent(String.self, forKey: .actorId)
         canPublishCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canPublishCheckouts) ?? false
         canConnectCheckouts = try c.decodeIfPresent(Bool.self, forKey: .canConnectCheckouts) ?? false
@@ -163,6 +166,12 @@ struct TeamRepository: Codable, Identifiable, Hashable, Sendable {
     let role: TeamRepositoryRole?
     let revision: UInt64
     let createdAt: String
+    /// How many computers share it now. An older account server leaves this
+    /// out, and then every project counts as shared, as it always did.
+    var activeCheckouts: Int? = nil
+    /// A project whose last computer stopped sharing still exists in the
+    /// team. It belongs in the project list, not among shared projects.
+    var isShared: Bool { activeCheckouts.map { $0 > 0 } ?? true }
 }
 struct TeamRepositoryMember: Codable, Identifiable, Hashable, Sendable {
     let id: String

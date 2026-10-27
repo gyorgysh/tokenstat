@@ -746,6 +746,7 @@ public sealed partial class MainWindow : Window
         var shared = !remote && _teamFolderLinks.TryGetValue(id, out var publications) && publications.Count > 0;
         if (!remote) ContextMenus.Add(menu, L10n.Text(shared ? "common.teams.open_shared_project" : "common.teams.share_project"), () => OpenTeamFolder(id, name, path));
         if (shared) ContextMenus.Add(menu, L10n.Text("common.teams.share_project"), () => OpenTeamFolder(id, name, path, shareNew: true));
+        if (shared) ContextMenus.AddAsync(menu, L10n.Text("common.teams.stop_sharing"), () => StopSharingTeamFolderAsync(id, name, CurrentParent()));
         async Task NewChat()
         {
             // Finish the native row's selection before opening its action.

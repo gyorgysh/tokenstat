@@ -189,6 +189,7 @@ struct RootView: View {
     @State private var workspacePendingRemove: WorkspaceFolder?
     @State private var worktreeProject: WorkspaceFolder?
     @State private var sharingProject: WorkspaceFolder?
+    @State private var stoppingSharing: TeamStopSharingRequest?
     /// A section-level destructive action. Kept separate from removing the
     /// workspace itself because this deletes transcripts, not the folder row.
     @State private var workspacePendingChatRemoval: WorkspaceFolder?
@@ -1876,6 +1877,7 @@ struct RootView: View {
         sessionPendingClose != nil
             || workspacePendingRemove != nil
             || workspacePendingChatRemoval != nil
+            || stoppingSharing != nil
             || sshHostPendingClose != nil
     }
 
@@ -2397,6 +2399,14 @@ struct RootView: View {
                     Task { await chat.removeAll(in: folder.id) }
                 }
             )
+        }
+        .background {
+            // The folder's badge comes from the host's folder list as well as
+            // the team store, so reread it once sharing has ended.
+            Color.clear.frame(width: 0, height: 0)
+                .modifier(TeamStopSharingConfirm(store: teams, request: $stoppingSharing) {
+                    Task { await workspaces.loadLocal() }
+                })
         }
         .background {
             CloseSessionConfirm(
@@ -3492,6 +3502,12 @@ struct RootView: View {
                 items.append(.init(L10n.text("common.teams.new_private_chat"), icon: .create) { startPrivateChat(in: folder) })
             }
             items.append(.init(L10n.text("common.teams.share_project"), icon: .connect) { sharingProject = folder })
+            let shared = teams.localProjects.filter { $0.workspaceId == folder.id && ($0.phase == "active" || $0.accountCleanupPending) }
+            if !shared.isEmpty {
+                items.append(.init(L10n.text("common.teams.stop_sharing"), icon: .revoke, destructive: true) {
+                    stoppingSharing = .init(name: folder.name, publications: shared)
+                })
+            }
             items.append(.separator)
         }
         if !folder.isRemote {

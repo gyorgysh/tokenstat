@@ -9,6 +9,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 
 internal fun JsonObject.teamString(key: String) = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+/**
+ * A project whose last computer stopped sharing stays in the team until an
+ * admin removes it. An older account server sends no count, and then every
+ * project reads as shared, as it always did.
+ */
+internal fun JsonObject.teamShared(): Boolean = (this["activeCheckouts"] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.let { it > 0 } ?: true
 internal fun JsonObject.teamRevision(): Long = (this["revision"] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.takeIf { it >= 0 }
     ?: throw IllegalArgumentException("Invalid Team revision")
 internal fun teamNameValid(value: String) = value.trim().isNotEmpty() && value.trim().length <= 80
@@ -123,7 +129,7 @@ internal class TeamManagementModel(private val calls: TeamCalls, initial: JsonOb
     }
     suspend fun mutate(operation: String, input: JsonObject, user: String? = null, repository: String? = null, invitation: String? = null): JsonObject {
         check(!busy && verified)
-        require(operation in setOf("organizations.rename", "members.role", "members.remove", "invitations.create", "invitations.renew", "invitations.revoke", "repositories.access", "organizations.delete", "ownership.request", "ownership.accept", "ownership.cancel"))
+        require(operation in setOf("organizations.rename", "members.role", "members.remove", "invitations.create", "invitations.renew", "invitations.revoke", "repositories.access", "repositories.archive", "organizations.delete", "ownership.request", "ownership.accept", "ownership.cancel"))
         when (operation) {
             "members.role" -> require(owner)
             "members.remove" -> if (user == calls.person) require(verified && role in setOf("member", "admin")) else require(manager)
@@ -131,6 +137,7 @@ internal class TeamManagementModel(private val calls: TeamCalls, initial: JsonOb
             "ownership.accept" -> { ownershipDecision(ownershipRequest ?: error("Missing request"), false) }
             "ownership.cancel" -> { ownershipDecision(ownershipRequest ?: error("Missing request"), true) }
             "repositories.access" -> require(active && (manager || repositories.rows.any { it.teamString("id") == repository && it.teamString("role") == "maintainer" }))
+            "repositories.archive" -> require(active && manager && repositories.rows.any { it.teamString("id") == repository && !it.teamShared() })
             else -> require(manager)
         }
         busy = true; error = null

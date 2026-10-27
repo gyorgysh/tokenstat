@@ -90,6 +90,11 @@ pub struct Repository {
     pub role: Option<RepositoryRole>,
     pub revision: u64,
     pub created_at: String,
+    /// How many computers share this project now. A server without the
+    /// count leaves it out, and a client then cannot tell an empty project
+    /// from a shared one, so it shows them all as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_checkouts: Option<u64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepositoryMember {
@@ -390,6 +395,10 @@ pub struct Deleted {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Removed {
     pub removed: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Archived {
+    pub archived: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Withdrawn {

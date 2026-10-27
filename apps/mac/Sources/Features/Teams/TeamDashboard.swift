@@ -36,16 +36,16 @@ struct TeamOrganizationCard: View {
                     HStack(spacing: Theme.Space.l) {
                         Label(count(members.members.count, more: members.nextOffset != nil), systemImage: "person.2")
                             .accessibilityLabel(L10n.text("common.teams.member_count", count(members.members.count, more: members.nextOffset != nil)))
-                        Label(count(projects.repositories.count, more: projects.nextOffset != nil), systemImage: "folder")
-                            .accessibilityLabel(L10n.text("common.teams.project_count", count(projects.repositories.count, more: projects.nextOffset != nil)))
+                        Label(count(projects.repositories.filter(\.isShared).count, more: projects.nextOffset != nil), systemImage: "folder")
+                            .accessibilityLabel(L10n.text("common.teams.project_count", count(projects.repositories.filter(\.isShared).count, more: projects.nextOffset != nil)))
                         Spacer(minLength: 0)
                         TeamAvatarStack(members: members.members, owner: store.owner)
                     }.font(Theme.callout).foregroundStyle(.secondary)
-                    if projects.repositories.isEmpty {
+                    if !projects.repositories.contains(where: \.isShared) {
                         Text(L10n.text("common.teams.first_project_hint")).font(Theme.callout).foregroundStyle(.secondary)
                     } else {
                         VStack(alignment: .leading, spacing: 2) {
-                            ForEach(projects.repositories.filter { $0.role != nil }.prefix(3)) { project in
+                            ForEach(projects.repositories.filter { $0.role != nil && $0.isShared }.prefix(3)) { project in
                                 Button {
                                     store.openProject(project, in: organization)
                                 } label: {
@@ -105,7 +105,7 @@ struct TeamOrganizationOverview: View {
     let addProject: () -> Void
     @Environment(\.dynamicTypeSize) private var textSize
     private var organization: TeamOrganization { directory.details.organization }
-    private var projects: [TeamRepository] { directory.repositories.repositories.filter { $0.role != nil } }
+    private var projects: [TeamRepository] { directory.repositories.repositories.filter { $0.role != nil && $0.isShared } }
 
     var body: some View {
         TeamPage {
@@ -116,7 +116,7 @@ struct TeamOrganizationOverview: View {
                     TeamMetricTile(title: L10n.text("common.teams.members"), value: count(directory.members.members.count, more: directory.members.nextOffset != nil), symbol: "person.2") {
                         store.show(.members)
                     }
-                    TeamMetricTile(title: L10n.text("common.teams.shared_projects"), value: count(directory.repositories.repositories.count, more: directory.repositories.nextOffset != nil), symbol: "folder.badge.person.crop") {
+                    TeamMetricTile(title: L10n.text("common.teams.shared_projects"), value: count(directory.repositories.repositories.filter(\.isShared).count, more: directory.repositories.nextOffset != nil), symbol: "folder.badge.person.crop") {
                         store.show(.repositories)
                     }
                     if organization.role.canManage {

@@ -201,10 +201,16 @@ internal sealed partial class TeamsPage
             else if (section == "repositories")
             {
                 var mark = ActionIcon.Source.Mark(16); ((FrameworkElement)mark).Opacity = 0.8;
-                who = Marked(mark, Labelled(Text(row, "name")));
+                who = Marked(mark, Labelled(Text(row, "name"), Shared(row) ? null : L10n.Text("common.teams.repository_not_shared")));
                 actions.Add(Badge(TeamRole(Text(row, "role"))));
                 if (model.Active && (model.Manager || Text(row, "role") == "maintainer"))
                     actions.Add(Buttons.Secondary(L10n.Text("common.teams.repository_access"), ActionIcon.Security, async (_, _) => { if (Alive()) await ShowTeamAccessAsync(client, model, row); }, small: true));
+                // The server refuses while any computer still shares it, so a live checkout is never cut off from here.
+                if (_canArchiveRepositories && model.Active && model.Manager && !Shared(row))
+                    actions.Add(Buttons.Destructive(L10n.Text("common.teams.remove_project"), ActionIcon.Delete, (_, _) => {
+                        if (Alive()) TeamEditor(L10n.Text("common.teams.remove_project_title", Text(row, "name")), TeamCard(Text(row, "name"), L10n.Text("common.teams.remove_project_detail")), L10n.Text("common.teams.remove_project"), () => model.Manager,
+                            () => model.Mutate("repositories.archive", new() { ["expectedRevision"] = Revision(row) }, repository: Text(row, "id")), Reload, _ => Reload(), confirmation: true);
+                    }, small: true));
             }
             else
             {

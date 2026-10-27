@@ -412,6 +412,21 @@ impl TeamClient {
             None,
         )
     }
+    /// Removes a project nobody shares any more from the team's listing.
+    /// The server refuses while a computer still shares it.
+    pub fn archive_repository(
+        &self,
+        org: &str,
+        repo: &str,
+        input: Revision,
+    ) -> Result<Archived, TeamError> {
+        self.request(
+            Method::DELETE,
+            &["organizations", org, "repositories", repo],
+            Some(value(&input)?),
+            None,
+        )
+    }
     pub fn repository_members(
         &self,
         org: &str,

@@ -65,7 +65,10 @@ internal class TeamCalls(account: JsonObject?, private val bridge: suspend (Stri
     val origin = owner?.scope?.str("origin")
     private val accountPerson = account?.str("accountId")?.takeIf { it.isNotBlank() }
     var person: String? = accountPerson; private set
+    /** The account server can remove a project nobody shares any more. */
+    var canArchiveRepositories = false; private set
     fun verify(capabilities: JsonObject) {
+        canArchiveRepositories = (capabilities["features"] as? JsonArray)?.any { (it as? JsonPrimitive)?.contentOrNull == "repository-archive-v1" } == true
         val actor = capabilities.str("actorId")?.takeIf { it.isNotBlank() } ?: throw IllegalStateException(L10n.text("common.teams.account_changed"))
         if (accountPerson != null && accountPerson != actor) throw IllegalStateException(L10n.text("common.teams.account_changed"))
         person = actor

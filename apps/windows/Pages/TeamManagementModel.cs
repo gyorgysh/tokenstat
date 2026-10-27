@@ -51,6 +51,15 @@ internal sealed class TeamManagementModel(TeamDirectoryClient client, JsonObject
     internal static string Text(JsonNode? node, string key) => node?[key] is JsonValue value && value.TryGetValue<string>(out var text) ? text : "";
     internal static bool Flag(JsonNode? node, string key) => node?[key] is JsonValue value && value.TryGetValue<bool>(out var flag) && flag;
     internal static void Require(bool valid) { if (!valid) throw new InvalidDataException(); }
+    /// A project whose last computer stopped sharing stays in the team until
+    /// an admin removes it. An older account server sends no count, and then
+    /// every project reads as shared, as it always did.
+    internal static bool Shared(JsonNode repository)
+    {
+        if (repository["activeCheckouts"] is not JsonValue value) return true;
+        if (value.TryGetValue<long>(out var count)) return count > 0;
+        return !value.TryGetValue<int>(out var small) || small > 0;
+    }
     internal static long Revision(JsonNode node, string key = "revision")
     {
         if (node[key] is JsonValue value)
@@ -175,6 +184,7 @@ internal sealed class TeamManagementModel(TeamDirectoryClient client, JsonObject
             "ownership.accept" => OwnershipRequest is not null && JsonNode.DeepEquals(input, OwnershipDecision(OwnershipRequest, false)),
             "ownership.cancel" => OwnershipRequest is not null && JsonNode.DeepEquals(input, OwnershipDecision(OwnershipRequest, true)),
             "repositories.access" => Active && (Manager || Repositories.Rows.Any(row => Text(row, "id") == repository && Text(row, "role") == "maintainer")),
+            "repositories.archive" => Active && Manager && Repositories.Rows.Any(row => Text(row, "id") == repository && !Shared(row)),
             "organizations.rename" or "invitations.create" or "invitations.renew" or "invitations.revoke" => Manager,
             _ => false,
         };

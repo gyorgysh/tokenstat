@@ -20,8 +20,15 @@ struct TeamRepositoryRow: View {
     @State private var lanes: [String: [TeamLane]] = [:]
     @State private var landing: String?
     @State private var landMessage: String?
+    @State private var confirmsRemove = false
+    @State private var removeError: String?
 
     private var canManage: Bool { organization.role.canManage || repository.role == .maintainer }
+    /// Only an empty project can go: the server refuses while any computer
+    /// still shares it, so a live checkout is never cut off from here.
+    private var canRemove: Bool {
+        organization.role.canManage && !repository.isShared && store.capabilities?.canArchiveRepositories == true
+    }
 
     var body: some View {
         Card(title: repository.name, subtitle: repository.role?.label ?? L10n.text("common.teams.unassigned"), mark: "mark_folder",
@@ -29,6 +36,7 @@ struct TeamRepositoryRow: View {
                 HStack(spacing: Theme.Space.s) { actions }
                 HStack(spacing: Theme.Space.s) { primaryAction; overflow(includingCheckouts: true) }
             })) {
+            if let removeError { TeamNotice(message: removeError, warning: true) }
             if repository.role != nil {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     Text(L10n.text("common.teams.computers_sharing").uppercased()).font(Theme.sectionHeader).foregroundStyle(.tertiary)
@@ -59,6 +67,19 @@ struct TeamRepositoryRow: View {
             }
         }
         .task(id: repository.revision) { await load() }
+        .confirmationDialog(L10n.text("common.teams.remove_project_title", repository.name), isPresented: $confirmsRemove, titleVisibility: .visible) {
+            Button(L10n.text("common.teams.remove_project"), role: .destructive) { Task { await remove() } }
+            Button(L10n.text("common.cancel"), role: .cancel) {}
+        } message: { Text(L10n.text("common.teams.remove_project_detail")) }
+    }
+
+    private func remove() async {
+        removeError = nil
+        do {
+            let _: JSONValue = try await store.perform("repositories.archive", fields: ["organization": .string(repository.organizationId),
+                "repository": .string(repository.id), "input": .object(["expectedRevision": .uint(repository.revision)])], context: context)
+            await store.reloadAfterChange()
+        } catch is CancellationError {} catch { removeError = error.localizedDescription }
     }
 
     @ViewBuilder private var primaryAction: some View {
@@ -80,7 +101,7 @@ struct TeamRepositoryRow: View {
     /// Changes to the project itself: rare, so they wait behind one menu
     /// instead of competing with Chats for attention on every card.
     @ViewBuilder private func overflow(includingCheckouts: Bool) -> some View {
-        if canManage || (includingCheckouts && repository.role != nil) {
+        if canManage || canRemove || (includingCheckouts && repository.role != nil) {
             TeamRowMenu(label: L10n.text("common.teams.more_actions")) {
                 if includingCheckouts && repository.role != nil {
                     Button(L10n.text("common.teams.checkouts"), action: openCheckouts).disabled(!organization.isActive)
@@ -88,6 +109,9 @@ struct TeamRepositoryRow: View {
                 if canManage {
                     Button(L10n.text("common.teams.manage_access"), action: manageAccess)
                     Button(L10n.text("common.teams.rename_repository"), action: rename).disabled(!organization.isActive)
+                }
+                if canRemove {
+                    Button(L10n.text("common.teams.remove_project"), role: .destructive) { confirmsRemove = true }.disabled(store.isMutating)
                 }
             }
         }

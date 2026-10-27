@@ -173,6 +173,8 @@ internal sealed partial class TeamsPage : Page
             _canPublish = Format.Flag(capabilities, "canPublishCheckouts");
             _canResumeSharing = Format.Flag(capabilities, "canResumeProjectSharing");
             _canReviewChatSelection = Format.Flag(capabilities, "canReviewChatSelection");
+            _canArchiveRepositories = (capabilities["features"] as JsonArray)?.Any(feature => feature is JsonValue value
+                && value.TryGetValue<string>(out var name) && name == "repository-archive-v1") == true;
             var page = TeamDirectoryPage.Read(await CallAsync("teams.directory", new JsonObject { ["operation"] = "organizations.list", ["page"] = Page100() }), "organizations", 0);
             if (!IsLoaded || _view != view) return;
             _organizations = page.Rows; _organizationsNext = page.Next;
@@ -325,7 +327,9 @@ internal sealed partial class TeamsPage : Page
                 if (page.Rows.Any(row => Format.Text(row, "organizationId") != orgId)) throw new InvalidDataException();
                 if (failure is not null) { _body.Children.Remove(failure); failure = null; }
                 _body.Children.Remove(more);
-                foreach (var repo in page.Rows)
+                // A project nobody shares has no chats to read here. It stays
+                // in the team's repository list, where an admin can remove it.
+                foreach (var repo in page.Rows.Where(TeamManagementModel.Shared))
                 {
                     if (!IsLoaded || _view != view) return;
                     if (seen.Add(Format.Text(repo, "id"))) await AddRepositoryAsync(orgId, repo);

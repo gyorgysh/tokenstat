@@ -62,7 +62,10 @@ internal sealed partial class TeamsPage
                     var page = TeamDirectoryPage.Read(await client.Request("repositories.list", new() { ["organization"] = Text(organization, "id"), ["page"] = Page100(offset) }), "repositories", offset);
                     if (!IsLoaded || _view != view) return;
                     Require(page.Rows.All(repo => Text(repo, "organizationId") == Text(organization, "id")));
-                    foreach (var repo in page.Rows.Where(repo => Text(repo, "role") is "viewer" or "contributor" or "maintainer")) if (seen.Add(Text(repo, "id")))
+                    // A project nobody shares any more is not shared with anyone, unless
+                    // this computer's own sharing is newer than the count.
+                    foreach (var repo in page.Rows.Where(repo => Text(repo, "role") is "viewer" or "contributor" or "maintainer"
+                        && (Shared(repo) || localProjects.Contains(Text(repo, "organizationId") + "/" + Text(repo, "id"))))) if (seen.Add(Text(repo, "id")))
                     {
                         var where = localKnown ? L10n.Text(localProjects.Contains(Text(repo, "organizationId") + "/" + Text(repo, "id")) ? "common.teams.shared_from_this_computer" : "common.teams.shared_with_you") : null;
                         var mark = ActionIcon.Source.Mark(16); ((FrameworkElement)mark).Opacity = 0.8;

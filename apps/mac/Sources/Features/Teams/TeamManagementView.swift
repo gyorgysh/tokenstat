@@ -264,7 +264,7 @@ struct TeamManagementView: View {
         }
     }
     private func projectChoices(_ directory: TeamDirectorySnapshot) -> [TeamRepository] {
-        let rows = directory.repositories.repositories
+        let rows = directory.repositories.repositories.filter(\.isShared)
         if let focused = store.focusedProject, focused.organizationId == directory.details.organization.id,
             !rows.contains(where: { $0.id == focused.id }) { return rows + [focused] }
         return rows

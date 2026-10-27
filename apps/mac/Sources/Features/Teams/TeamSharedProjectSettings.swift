@@ -10,6 +10,11 @@ struct TeamSharedProjectSettings: View {
     @State private var savedWorkspace: TeamLocalWorkspace?
     @State private var showsSavedSharing = false
     @State private var savedSharingError: String?
+    @State private var stoppingSharing: TeamStopSharingRequest?
+    /// Only the computer that published a checkout can stop it.
+    private var localPublication: TeamLocalPublication? {
+        store.localProjects.first { $0.id == checkout.id && ($0.phase == "active" || $0.accountCleanupPending) }
+    }
     var body: some View {
         ThemedSheet(title: L10n.text("common.teams.project_settings"), subtitle: repository.name, icon: .settings, scrolls: true, onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
@@ -25,12 +30,20 @@ struct TeamSharedProjectSettings: View {
                 TeamLaneSettings(store: store, context: context, checkoutId: checkout.id)
                 ThemeRule()
                 TeamAgentGrants(store: store, context: context, repository: repository, checkoutId: checkout.id)
+                if let localPublication {
+                    ThemeRule()
+                    Text(L10n.text("common.teams.stop_sharing_files")).font(Theme.body).foregroundStyle(.secondary)
+                    Button(L10n.text("common.teams.stop_sharing"), .revoke, role: .destructive) {
+                        stoppingSharing = .init(name: repository.name, publications: [localPublication])
+                    }.buttonStyle(TeamButtonStyle()).disabled(store.isMutating).accessibilityIdentifier("team.project.stop")
+                }
             }
         } actions: {
             Spacer()
             Button(L10n.text("common.close"), .dismiss) { dismiss() }.buttonStyle(TeamButtonStyle()).keyboardShortcut(.cancelAction)
         }
         .task { await loadSavedSharing() }
+        .modifier(TeamStopSharingConfirm(store: store, request: $stoppingSharing, onFinished: { dismiss() }))
         .sheet(isPresented: $showsSavedSharing) {
             if let savedWorkspace {
                 TeamProjectShareEditor(store: store, context: context, organization: store.selectedOrganization,
