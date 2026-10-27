@@ -135,11 +135,21 @@ private struct FlowRow: Layout {
 }
 
 /// A quiet surface shared by the composer and the first-repository action.
+/// A faint lit edge along the top and a soft shadow lift it off the glass
+/// behind it without turning it into an object of its own.
 extension View {
     func chatStartCard(highlighted: Bool = false) -> some View {
         let shape = RoundedRectangle(cornerRadius: 16)
         return self.padding(12)
             .background(Theme.panel, in: shape)
             .overlay(shape.strokeBorder(highlighted ? Theme.accent.opacity(0.6) : Theme.border))
+            .overlay {
+                shape.strokeBorder(LinearGradient(stops: [.init(color: .white.opacity(0.08), location: 0),
+                                                          .init(color: .clear, location: 0.35)],
+                                                  startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+            .shadow(color: .black.opacity(0.10), radius: 18, y: 8)
+            .shadow(color: Theme.accent.opacity(highlighted ? 0.12 : 0.04), radius: 28, y: 10)
     }
 }

@@ -1,110 +1,36 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// One pointer sample or one click, with the moment it happened.
-struct ChatStartMark {
-    var point: CGPoint
-    var began: Double
-}
-
-/// Pointer history and click rings, deliberately kept off the view graph.
+/// Where the pointer is over the new chat page, kept off the view graph.
 ///
-/// The shader reads these once per frame from inside the timeline's own
-/// update, so taking a sample costs nothing: no view is invalidated and
-/// nothing is published. Holding them as view state would rebuild the
-/// composer at pointer frequency, which is why the page used to answer the
-/// mouse with a throttled ripple rather than following it.
-///
-/// Both lists are small ring buffers, newest first. Nothing is pruned on a
-/// timer: a mark ages out of the shader's reach on its own, and a new one
-/// pushes the oldest off the end.
-@MainActor final class ChatStartSurfaceMotion {
-    private(set) var trail: [ChatStartMark] = []
-    private(set) var rings: [ChatStartMark] = []
-    private var lastSample = 0.0
-    /// When the surface was last told to stay awake.
-    var lastWake = 0.0
-    /// The last position the parallax was told about, so a jittering mouse
-    /// does not publish an offset it has not really earned.
-    var settled: CGPoint?
-    /// Where the depth layers are leaning to, as the pointer's offset from
-    /// the centre in -1...1. Zero once the pointer leaves.
-    var aim = CGSize.zero
-    /// The composer card's frame in the pane, for the prism around it.
-    var card = CGRect.zero
-    private var lean = CGSize.zero
-    private var leanedAt: Double?
+/// The shader reads it once per frame from inside the timeline's own
+/// update, so following the mouse invalidates no view at all. Presence eases
+/// in and out on the frame clock, so the lens grows and fades rather than
+/// snapping on when the pointer arrives.
+@MainActor final class ChatStartPointer {
+    /// The pointer's position in the backdrop, nil once it has left.
+    var target: CGPoint?
+    private var point = CGPoint.zero
+    private var presence = 0.0
+    private var sampledAt: Double?
 
-    /// True when the sample was taken, so the caller knows whether this was
-    /// movement worth waking the surface for.
-    @discardableResult
-    func note(_ point: CGPoint, at now: Double) -> Bool {
-        guard now - lastSample >= ChatStartGlassField.sampleInterval else { return false }
-        lastSample = now
-        trail.insert(ChatStartMark(point: point, began: now), at: 0)
-        if trail.count > ChatStartGlassField.trailSamples { trail.removeLast() }
-        return true
-    }
-
-    func strike(_ point: CGPoint, at now: Double) {
-        rings.insert(ChatStartMark(point: point, began: now), at: 0)
-        if rings.count > ChatStartGlassField.ringSlots { rings.removeLast() }
-    }
-
-    func reset() {
-        trail = []
-        rings = []
-        lastSample = 0
-        lastWake = 0
-        settled = nil
-        aim = .zero
-        lean = .zero
-        leanedAt = nil
-    }
-
-    /// The lean, eased towards the aim at the moment the frame is drawn.
-    /// Easing here rather than in an animation keeps it off the view graph
-    /// like the rest of the motion, and a paused timeline simply holds it.
-    func leaning(at now: Double) -> CGSize {
-        let elapsed = leanedAt.map { min(0.25, max(0, now - $0)) } ?? 0
-        leanedAt = now
-        let follow = 1 - exp(-elapsed / ChatStartGlassField.leanLag)
-        lean.width += (aim.width - lean.width) * follow
-        lean.height += (aim.height - lean.height) * follow
-        return lean
+    /// (x, y, presence), eased towards the target at the moment of drawing.
+    func sample(at now: Double) -> SIMD3<Float> {
+        let elapsed = sampledAt.map { min(0.25, max(0, now - $0)) } ?? 0
+        sampledAt = now
+        let follow = 1 - exp(-elapsed / 0.12)
+        if let target {
+            point.x += (target.x - point.x) * (presence < 0.01 ? 1 : follow)
+            point.y += (target.y - point.y) * (presence < 0.01 ? 1 : follow)
+        }
+        presence += ((target == nil ? 0 : 1) - presence) * (1 - exp(-elapsed / 0.35))
+        return SIMD3(Float(point.x), Float(point.y), Float(presence))
     }
 }
 
 /// The new chat page's surface, as arguments to `ChatStartField.metal`.
-///
-/// This was a CPU raster: a 72 pixel image rebuilt every frame, upscaled and
-/// blurred to fill the window. It cost an allocation and about nine thousand
-/// pixels of trigonometry per frame and could only ever draw curves broad
-/// enough to survive the upscale. The shader evaluates the same surface per
-/// pixel on the GPU for less, which is what pays for the mist, the rings and
-/// the dispersion.
 enum ChatStartGlassField {
-    /// Slots in the shader's fixed-size arrays. Changing either means
-    /// changing the parameter list in `ChatStartField.metal` to match.
-    static let trailSamples = 5
-    static let ringSlots = 3
-    /// Fast enough that a wipe follows the pointer, slow enough that five
-    /// samples still cover a visible stretch of its path.
-    static let sampleInterval = 1.0 / 45
-    static let trailLifetime = 2.4
-    static let ringLifetime = 2.2
-    /// How long the depth layers take to follow the pointer. Slower than the
-    /// wipe, so the room drifts after the hand instead of tracking it.
-    static let leanLag = 0.9
-
-    struct Palette {
-        var accent: Color
-        var secondary: Color
-        var background: Color
-        var dark: Bool
-    }
-
-    /// The floor the page is drawn on, which the surface also tints towards.
+    /// The floor the page is drawn on.
     ///
     /// The Mac sits on the window's own glass and has a desktop behind it.
     /// The phone and the iPad have nothing behind them, so they get an opaque
@@ -126,42 +52,125 @@ enum ChatStartGlassField {
     static let lightGain = 1.3
     #endif
 
-    /// Read from inside a view body, which is where the motion it packs
-    /// lives too.
-    @MainActor
-    static func shader(size: CGSize, time: Double, now: Double, motion: ChatStartSurfaceMotion,
-                       lift: Float, gathering: Double = 0, depth: Float = 1, palette: Palette) -> Shader {
-        let lean = motion.leaning(at: now)
-        let card = motion.card
-        var arguments: [Shader.Argument] = [
+    static func shader(size: CGSize, time: Double, lift: Bool, dark: Bool, moving: Bool,
+                       pointer: SIMD3<Float>) -> Shader {
+        Shader(function: ShaderLibrary.default.chatStartField, arguments: [
             .float2(size),
-            .float4(Float(time), lift, palette.dark ? 1 : 0, Float(gathering)),
-            .float4(Float(lean.width), Float(lean.height), depth, 0),
-            .float4(Float(card.minX), Float(card.minY), Float(card.width), Float(card.height)),
-            .color(palette.accent),
-            .color(palette.secondary),
-            .color(palette.background),
-        ]
-        for slot in 0..<trailSamples {
-            arguments.append(mark(motion.trail, slot, now: now, lifetime: trailLifetime))
+            .float4(Float(time), lift ? 1 : 0, dark ? 1 : 0, moving ? 1 : 0),
+            .float4(pointer.x, pointer.y, pointer.z, 0),
+            .color(Theme.accent),
+        ])
+    }
+}
+
+/// The field's own clock, integrated frame by frame so its pace can change
+/// without the waves jumping to where a faster clock would have put them.
+@MainActor final class ChatStartFieldClock {
+    private(set) var time = 0.0
+    private var pace = 1.0
+    private var tickedAt: Double?
+
+    func tick(at now: Double, running: Bool, pace target: Double) -> Double {
+        let elapsed = tickedAt.map { min(0.25, max(0, now - $0)) } ?? 0
+        tickedAt = running ? now : nil
+        pace += (target - pace) * (1 - exp(-elapsed / 0.5))
+        time += elapsed * pace
+        return time
+    }
+}
+
+/// A dot grid lit around the composer, with light flowing inward to it.
+///
+/// Three layers. Underneath is the floor: the Mac's own window glass, tinted
+/// so the desktop shows through only faintly, or an opaque colour on a phone
+/// and an iPad. Over it a still accent light, then the grid from
+/// `ChatStartField.metal`. While a message is sending the waves run faster,
+/// so the light visibly gathers into the mark. The clock stops whenever the
+/// page is not the thing in front, and with Reduce Motion the grid holds
+/// still and only the pointer is left.
+struct ChatStartBackdrop: View {
+    var isFullScreen = false
+    /// The page is on screen and nothing is covering it.
+    let active: Bool
+    /// Something is being written, so the field brightens a little.
+    var lift = false
+    /// The first message is on its way.
+    var sending = false
+    let pointer: ChatStartPointer
+    /// The page's coordinate space, which the pointer is measured in.
+    static let space = "chatStartBackdrop"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var clock = ChatStartFieldClock()
+    @State private var shown = false
+
+    private var moving: Bool { active && !reduceMotion }
+
+    var body: some View {
+        ZStack {
+            floor
+            if !reduceTransparency {
+                keyLight
+                TimelineView(.animation(minimumInterval: 1 / 30, paused: !active)) { context in
+                    let now = context.date.timeIntervalSinceReferenceDate
+                    let time = clock.tick(at: now, running: moving, pace: sending ? 4 : 1)
+                    GeometryReader { pane in
+                        // The pointer arrives in the page's space, and the
+                        // backdrop reaches past the page into any safe area.
+                        let origin = pane.frame(in: .named(Self.space)).origin
+                        let sample = pointer.sample(at: now)
+                        Rectangle()
+                            .fill(Color.white.opacity(0.001))
+                            .colorEffect(ChatStartGlassField.shader(
+                                size: pane.size, time: time, lift: lift || sending, dark: colorScheme == .dark,
+                                moving: moving,
+                                pointer: SIMD3(sample.x - Float(origin.x), sample.y - Float(origin.y), sample.z)))
+                    }
+                }
+                .opacity(shown ? 1 : 0)
+            }
         }
-        for slot in 0..<ringSlots {
-            arguments.append(mark(motion.rings, slot, now: now, lifetime: ringLifetime))
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onAppear {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.9)) { shown = true }
         }
-        return Shader(function: ShaderLibrary.default.chatStartField, arguments: arguments)
     }
 
-    /// `(x, y, age, strength)`. Strength falls to zero once a mark has aged
-    /// out, which is the shader's only test for an empty slot.
-    private static func mark(_ marks: [ChatStartMark], _ slot: Int,
-                             now: Double, lifetime: Double) -> Shader.Argument {
-        guard slot < marks.count else { return .float4(0, 0, 0, 0) }
-        let mark = marks[slot]
-        // The timeline's date can sit a few milliseconds before the stamp a
-        // mark was taken with, so a brand new one would read as negative.
-        // That is its first frame, not a reason to drop it.
-        let age = max(0, now - mark.began)
-        guard age < lifetime else { return .float4(0, 0, 0, 0) }
-        return .float4(Float(mark.point.x), Float(mark.point.y), Float(age), 1)
+    private var keyLight: some View {
+        let dark = colorScheme == .dark
+        return EllipticalGradient(
+            stops: [
+                .init(color: Theme.accent.opacity((dark ? 0.12 : 0.06) * ChatStartGlassField.lightGain), location: 0),
+                .init(color: Theme.accent.opacity((dark ? 0.04 : 0.02) * ChatStartGlassField.lightGain), location: 0.5),
+                .init(color: .clear, location: 1),
+            ],
+            center: UnitPoint(x: 0.5, y: 0.46),
+            startRadiusFraction: 0,
+            endRadiusFraction: 0.60
+        )
+        .opacity(shown ? (lift || sending ? 1.15 : 1) : 0)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.6), value: lift || sending)
+    }
+
+    @ViewBuilder private var floor: some View {
+        if reduceTransparency { ChatStartGlassField.ground }
+        else {
+            #if os(macOS)
+            Group {
+                if #available(macOS 26, *) {
+                    SidebarGlassSurface(isFullScreen: isFullScreen, cornerRadius: 0)
+                } else {
+                    Rectangle().fill(.ultraThinMaterial)
+                }
+            }
+            // The glass alone showed the desktop's text through the page.
+            .overlay(ChatStartGlassField.ground.opacity(0.2))
+            #else
+            ChatStartGlassField.ground
+            #endif
+        }
     }
 }

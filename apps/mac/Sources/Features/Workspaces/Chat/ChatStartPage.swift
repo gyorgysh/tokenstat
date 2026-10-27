@@ -36,6 +36,7 @@ struct ChatStartPage: View {
     @State private var folderDropTargeted = false
     @State private var composerDropTargeted = false
     @State private var agentPickerFocused = false
+    @State private var pointer = ChatStartPointer()
     private struct CatalogOwner: Equatable {
         var owner: ChatStartDraft.Owner?
         var repository: String?
@@ -66,7 +67,9 @@ struct ChatStartPage: View {
 
     var body: some View {
         ZStack {
-            Theme.background.ignoresSafeArea()
+            ChatStartBackdrop(isFullScreen: isFullScreen,
+                              active: active && !agentPickerFocused && scenePhase == .active,
+                              lift: writing, sending: draft.isSubmitting, pointer: pointer)
             GeometryReader { pane in
                 ScrollView {
                     VStack(spacing: 26) {
@@ -130,6 +133,15 @@ struct ChatStartPage: View {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { agentPickerFocused = focused }
         })
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Plain state on the pointer object, so following the mouse redraws
+        // nothing but the backdrop's own next frame.
+        .onContinuousHover(coordinateSpace: .named(ChatStartBackdrop.space)) { phase in
+            switch phase {
+            case .active(let point): pointer.target = point
+            case .ended: pointer.target = nil
+            }
+        }
+        .coordinateSpace(name: ChatStartBackdrop.space)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: draft.isSubmitting)
         .clipped()
         .chatDropSurface(enabled: acceptsDrops, isTargeted: $dropTargeted, receive: receive)
