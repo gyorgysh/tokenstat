@@ -31,14 +31,14 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "10.00",
+          "displayPrice" : "20.00",
           "familyShareable" : false,
           "groupNumber" : 3,
           "internalID" : "A1000001",
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Yearly Supporter plan. A year of history and four devices.",
+              "description" : "Yearly Supporter plan. More relay traffic, a year of history and four devices.",
               "displayName" : "Supporter",
               "locale" : "en_US"
             }
@@ -60,16 +60,10 @@
           "familyShareable" : false,
           "groupNumber" : 2,
           "internalID" : "A1000002",
-          "introductoryOffer" : {
-            "displayPrice" : "0",
-            "internalID" : "A1000004",
-            "numberOfPeriods" : 1,
-            "paymentMode" : "free",
-            "subscriptionPeriod" : "P3D"
-          },
+          "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Yearly Patron plan. Full history, more devices, remote management.",
+              "description" : "Yearly Patron plan. Full history, more devices and more relay traffic.",
               "displayName" : "Patron",
               "locale" : "en_US"
             }
@@ -119,7 +113,7 @@
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Monthly Patron plan. Full history, more devices, remote management.",
+              "description" : "Monthly Patron plan. Full history, more devices and more relay traffic.",
               "displayName" : "Patron",
               "locale" : "en_US"
             }

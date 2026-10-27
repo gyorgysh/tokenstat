@@ -61,7 +61,7 @@ class SshTunnelStateTest {
         })
         assertEquals(TunnelState.PlanExpired, state)
         assertEquals(
-            "Your plan no longer includes remote reach. The relay is refusing this machine until the plan is restored.",
+            "Remote access is unavailable for this account. Check your account status and try again.",
             state.message(),
         )
     }

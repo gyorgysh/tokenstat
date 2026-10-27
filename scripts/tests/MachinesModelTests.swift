@@ -53,6 +53,15 @@ extension Notification.Name { static let remotePeerDidConnect = Notification.Nam
         await model.load()
         assert(model.resolvedName(for: other) == "Other", "missing machine IDs cannot identify another device as this Mac")
         assert(model.canConnect(other), "missing directory ID does not hide a public-key host")
+        for tier in ["free", "supporter", "patron", "legend"] {
+            Bridge.currentAccount.canRemote = nil
+            Bridge.currentAccount.tier = tier
+            await model.refresh()
+            assert(model.remoteReachAllowed, "signed-in \(tier) accounts can reach their own machines")
+        }
+        Bridge.currentAccount.canRemote = false
+        await model.refresh()
+        assert(!model.remoteReachAllowed, "an explicit server denial overrides the tier")
         Bridge.currentAccount.signedIn = false
         await model.refresh()
         assert(model.account == nil && model.accountMachines.isEmpty, "explicit sign-out clears old account")

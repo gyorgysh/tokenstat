@@ -35,7 +35,7 @@ struct ClientHostHeader: View {
     private var canRemote: Bool {
         if let remote = account.account?.canRemote { return remote }
         switch account.account?.tier?.lowercased() {
-        case "patron", "legend": return true
+        case "free", "supporter", "patron", "legend": return true
         default: return false
         }
     }

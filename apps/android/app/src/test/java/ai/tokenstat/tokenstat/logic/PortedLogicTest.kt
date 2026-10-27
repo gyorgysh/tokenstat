@@ -276,7 +276,7 @@ class PortedLogicTest {
         assertEquals("Waiting for approval", approval.title)
         assertEquals(true, approval.canRetry)
         val plan = friendlyError("feature needs paid-plan")
-        assertEquals("Not on this plan", plan.title)
+        assertEquals("Remote access unavailable", plan.title)
         assertEquals(false, plan.canRetry)
     }
 

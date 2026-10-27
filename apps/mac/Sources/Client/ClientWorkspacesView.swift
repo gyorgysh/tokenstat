@@ -69,7 +69,7 @@ struct ClientWorkspacesView: View {
     private var remoteAllowed: Bool {
         if let remote = account.account?.canRemote { return remote }
         let tier = account.account?.tier?.lowercased()
-        return ["patron", "legend"].contains(tier)
+        return ["free", "supporter", "patron", "legend"].contains(tier)
     }
 
     var body: some View {

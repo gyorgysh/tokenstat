@@ -176,9 +176,7 @@ internal static class FriendlyError
                 L10n.Text("windows.friendlyerror.not_on_this_plan.92dff92e"),
                 L10n.Text("windows.friendlyerror.reaching_your_devices_from_anywhere_is_par.bfe9ca82"),
                 raw,
-                ActionTitle: L10n.Text("windows.friendlyerror.see_plans.d9898933"),
-                OpensPlans: true,
-                Symbol: Symbol.Favorite);
+                Symbol: Symbol.Important);
         }
         // Before the sign-in case, and deliberately: a refused tunnel
         // credential repairs itself, and its sentence used to contain the

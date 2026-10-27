@@ -97,16 +97,14 @@ final class MachinesModel {
     /// Whether the tunnel is holding a live socket, when the daemon has said.
     var tunnelConnected: Bool { status?.tunnelOnline == true }
 
-    /// Whether this account may use remote reach. The relay enforces the plan
-    /// at every HELLO, so this is the courtesy copy of the same gate: a free
-    /// or expired account must not be invited to flip a switch the relay will
-    /// refuse.
+    /// Whether this account may use remote reach. The server's explicit
+    /// capability takes precedence over the tier fallback for older servers.
     var remoteReachAllowed: Bool {
         if let remote = account?.canRemote { return remote }
         guard account?.signedIn == true, let tier = account?.tier?.lowercased() else {
             return false
         }
-        return ["patron", "legend"].contains(tier)
+        return ["free", "supporter", "patron", "legend"].contains(tier)
     }
 
     var vaultTier: String? {

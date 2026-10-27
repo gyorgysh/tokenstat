@@ -649,7 +649,7 @@ final class AccountModel {
     private static func remoteAllowed(_ account: Account?) -> Bool {
         if let remote = account?.canRemote { return remote }
         guard let tier = account?.tier?.lowercased() else { return false }
-        return ["patron", "legend"].contains(tier)
+        return ["free", "supporter", "patron", "legend"].contains(tier)
     }
 
     /// Remaining wait from "Try again in N minute(s).", or nil.

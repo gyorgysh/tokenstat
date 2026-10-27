@@ -42,8 +42,9 @@ enum ClientStoreInterval: String {
 /// makes monthly to yearly wait, so the annual charge is delayed by up to a
 /// month.
 ///
-/// Only Supporter yearly to Legend monthly is still immediate, and nothing is
-/// lost there: both are $10, so it is an upgrade at list price.
+/// Supporter yearly to Legend monthly is still an immediate upgrade. Apple
+/// determines the credit for the unused annual term and the new charge; they
+/// are not the same price now that Supporter is $20/year.
 ///
 /// `Tokenstat.storekit` carries the same order for local testing. Nothing in
 /// the app hardcodes these numbers, `planChange` reads `groupLevel` from

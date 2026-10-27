@@ -157,8 +157,8 @@ already queries:
 
 Base plans should match the Apple / Paddle prices. Activate yearly on
 the internal track first, then production. Do not create separate
-`…patron.monthly` / `…legend.monthly` products. Trial stays an offer
-on the yearly base plan (`trial-3d`), not a way to sell monthly.
+`…patron.monthly` / `…legend.monthly` products. New Patron purchases do
+not include a trial; deactivate any existing `trial-3d` offer before release.
 
 The account service must implement `POST /api/v1/billing/google/activate`,
 verify the package, product and purchase token with the Play Developer API,

@@ -322,11 +322,11 @@ struct ClientSetupWizard: View {
         .padding(.bottom, Theme.Space.xs)
     }
 
-    /// The server and cloud doors need the tunnel, which is patron and up.
+    /// The server and cloud doors need a signed-in account and the tunnel.
     /// Said on the door rather than after twenty minutes of SSH.
     private var paywalled: Bool {
         if let remote = account.account?.canRemote { return !remote }
-        return !["patron", "legend"].contains(account.account?.tier?.lowercased())
+        return !["free", "supporter", "patron", "legend"].contains(account.account?.tier?.lowercased())
     }
 
     private func door(

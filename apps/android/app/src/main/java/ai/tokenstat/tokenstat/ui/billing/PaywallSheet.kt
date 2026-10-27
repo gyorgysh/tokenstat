@@ -119,7 +119,7 @@ private val compareTitles = listOf(L10n.text("android.paywallsheet.free.f411a1fb
 private val compareFeatures = listOf(
     "Devices" to listOf("2", "4", "6", "10"),
     "History" to listOf("30 days", "1 yr", L10n.text("android.paywallsheet.all.a52ace42"), L10n.text("android.paywallsheet.all.a52ace42")),
-    "Terminal + SSH" to listOf(L10n.text("common.no"), L10n.text("common.no"), L10n.text("common.yes"), L10n.text("common.yes")),
+    "Terminal + SSH" to listOf(L10n.text("common.yes"), L10n.text("common.yes"), L10n.text("common.yes"), L10n.text("common.yes")),
     "View screen" to listOf(L10n.text("common.no"), L10n.text("common.no"), L10n.text("common.no"), L10n.text("common.yes")),
     L10n.text("android.paywallsheet.relay_traffic.250c5414") to listOf(L10n.text("android.paywallsheet.100_mib.98243968"), L10n.text("android.paywallsheet.1_gib.7dd46450"), L10n.text("android.paywallsheet.5_gib.aa5f04aa"), L10n.text("android.paywallsheet.20_gib.4488c54a")),
     "Sync" to listOf(L10n.text("android.paywallsheet.hourly.eab0cd8f"), "30 min", "10 min", "5 min"),

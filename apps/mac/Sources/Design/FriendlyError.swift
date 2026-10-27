@@ -197,10 +197,8 @@ struct FriendlyError {
             return FriendlyError(
                 title: L10n.text("apple.friendlyerror.not_on_this_plan.92dff92e"),
                 message: L10n.text("apple.friendlyerror.reaching_your_devices_from_anywhere_is_par.bfe9ca82"),
-                symbol: "star.circle",
-                actionTitle: L10n.text("apple.friendlyerror.see_plans.d9898933"),
-                raw: raw,
-                opensPlans: true
+                symbol: "exclamationmark.circle",
+                raw: raw
             )
         }
         // Before the sign-in case, and deliberately: a refused tunnel

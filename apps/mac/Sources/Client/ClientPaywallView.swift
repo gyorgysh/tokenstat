@@ -399,7 +399,7 @@ struct ClientPaywallView: View {
     private static let compareFeatures: [CompareFeature] = [
         CompareFeature(label: L10n.text("common.devices"), values: [.text("2"), .text("4"), .text("6"), .text("10")]),
         CompareFeature(label: L10n.text("common.history"), values: [.text("30 days"), .text("1 yr"), .text(L10n.text("apple.clientpaywallview.all.a52ace42")), .text(L10n.text("apple.clientpaywallview.all.a52ace42"))]),
-        CompareFeature(label: L10n.text("apple.clientpaywallview.terminal_ssh.501f07aa"), values: [.no, .no, .yes, .yes]),
+        CompareFeature(label: L10n.text("apple.clientpaywallview.terminal_ssh.501f07aa"), values: [.yes, .yes, .yes, .yes]),
         CompareFeature(label: L10n.text("apple.clientpaywallview.view_screen.56dea3b5"), values: [.no, .no, .no, .yes]),
         CompareFeature(label: L10n.text("apple.clientpaywallview.relay_traffic.250c5414"), values: [.text(L10n.text("apple.clientpaywallview.100_mib.98243968")), .text(L10n.text("apple.clientpaywallview.1_gib.7dd46450")), .text(L10n.text("apple.clientpaywallview.5_gib.aa5f04aa")), .text(L10n.text("apple.clientpaywallview.20_gib.4488c54a"))]),
         CompareFeature(label: L10n.text("apple.clientpaywallview.sync.8d261a37"), values: [.text(L10n.text("apple.clientpaywallview.hourly.eab0cd8f")), .text("30 min"), .text("10 min"), .text("5 min")]),

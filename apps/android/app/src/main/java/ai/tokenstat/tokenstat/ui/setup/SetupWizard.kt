@@ -675,7 +675,7 @@ private fun SetupDoors(
     val colors = LocalTsColors.current
     val tier = state.account?.get("tier")?.jsonPrimitive?.contentOrNull?.lowercase()
     val canRemote = state.account?.get("canRemote")?.jsonPrimitive?.booleanOrNull
-    val paywalled = if (canRemote != null) !canRemote else tier != "patron" && tier != "legend"
+    val paywalled = if (canRemote != null) !canRemote else tier !in listOf("free", "supporter", "patron", "legend")
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Space.m),
         verticalArrangement = Arrangement.spacedBy(Space.m),

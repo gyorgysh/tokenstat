@@ -85,11 +85,10 @@ data class ClientState(
                 return flag.jsonPrimitive.content == "true"
             }
             val tier = account?.get("tier")?.jsonPrimitive?.content?.lowercase()
-            return tier == "patron" || tier == "legend"
+            return signedIn && tier in listOf("free", "supporter", "patron", "legend")
         }
     val vaultAllowed: Boolean
         get() {
-            if (canRemote) return true
             val tier = account?.get("tier")?.jsonPrimitive?.content?.lowercase()
             return tier == "supporter" || tier == "patron" || tier == "legend"
         }

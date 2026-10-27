@@ -45,7 +45,7 @@ sealed interface TunnelState {
     /// yet. Registration retries on its own.
     data object Unregistered : TunnelState
 
-    /// The relay refuses this machine until the plan is restored.
+    /// The relay refuses this machine for an account eligibility reason.
     data object PlanExpired : TunnelState
 
     /// The tunnel is up and registered. Nothing to say.

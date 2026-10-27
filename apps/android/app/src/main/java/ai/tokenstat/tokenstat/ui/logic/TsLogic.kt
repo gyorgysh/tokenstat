@@ -290,7 +290,7 @@ fun friendlyError(raw: String?): FriendlyError {
     if (lower.contains("paid-plan") || lower.contains("not_on_this_plan") ||
         lower.contains("no longer includes remote")
     ) {
-        // Opens plans rather than retrying, so this is not a retry row.
+        // Account restrictions need attention before reconnecting.
         return FriendlyError(
             L10n.text("android.tslogic.not_on_this_plan.92dff92e"),
             L10n.text("android.tslogic.reaching_your_devices_from_anywhere_is_par.bfe9ca82"),

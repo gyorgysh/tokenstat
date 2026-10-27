@@ -572,7 +572,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             return false;
         }
         var tier = Format.Text(account, "tier").ToLowerInvariant();
-        return tier is "patron" or "legend";
+        return tier is "free" or "supporter" or "patron" or "legend";
     }
 
     private bool TunnelOn() => _status?["tunnel"]?.GetValue<bool>() ?? false;
