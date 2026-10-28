@@ -167,7 +167,8 @@ struct ChatStartBackdrop: View {
                 }
             }
             // The glass alone showed the desktop's text through the page.
-            .overlay(ChatStartGlassField.ground.opacity(0.2))
+            // Dark enough that only a faint impression of it remains.
+            .overlay(ChatStartGlassField.ground.opacity(0.4))
             #else
             ChatStartGlassField.ground
             #endif
