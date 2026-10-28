@@ -310,7 +310,7 @@ fun TierBadge(tier: String) {
             .padding(horizontal = 7.dp, vertical = 3.dp),
     ) {
         Text(
-            tier.uppercase(),
+            ai.tokenstat.tokenstat.ui.marks.planTitle(tier).uppercase(),
             style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold),
             color = colors.accent,
         )

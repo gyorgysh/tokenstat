@@ -196,7 +196,7 @@ fun PaywallSheet(
                 TsCard {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-                            TierMark(pitch.title.lowercase(), markSize = 22)
+                            TierMark(pitch.tier, markSize = 22)
                             Text(pitch.title, style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary, modifier = Modifier.weight(1f))
                             Text(
                                 when {

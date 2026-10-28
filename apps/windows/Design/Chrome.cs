@@ -348,7 +348,7 @@ internal static class Chrome
     {
         var label = new TextBlock
         {
-            Text = tier.ToUpperInvariant(),
+            Text = PlanName.Title(tier).ToUpperInvariant(),
             FontSize = 10,
             FontWeight = Microsoft.UI.Text.FontWeights.Bold,
             Foreground = Theme.AccentBrush,
