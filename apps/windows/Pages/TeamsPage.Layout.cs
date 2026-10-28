@@ -2,6 +2,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
 
@@ -71,10 +72,50 @@ internal sealed partial class TeamsPage
         _trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS, VerticalAlignment = VerticalAlignment.Center };
         _leading.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+        _leading.Children.Add(PreviewBadge());
         row.Children.Add(_leading);
         Grid.SetColumn(_trailing, 1);
         row.Children.Add(_trailing);
         return row;
+    }
+
+    /// Says that Teams is an early preview, beside the title on every Teams
+    /// screen. Hovering shows what that means, and a click or tap opens the
+    /// same note, so it also works with touch and the keyboard.
+    private static Border PreviewBadge()
+    {
+        var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        label.Children.Add(new FontIcon { Glyph = "\uE946", FontSize = 10, Foreground = Theme.AccentBrush });
+        label.Children.Add(new TextBlock { Text = L10n.Text("common.teams.preview_badge"), FontSize = 11,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Theme.AccentBrush });
+        var badge = new Border
+        {
+            Child = label, Background = Theme.AccentSoftBrush, CornerRadius = new CornerRadius(999),
+            Padding = new Thickness(8, 2, 8, 3), VerticalAlignment = VerticalAlignment.Center, IsTabStop = true,
+        };
+        ToolTipService.SetToolTip(badge, new ToolTip { Content = PreviewNote(), MaxWidth = 340 });
+        var flyout = new Flyout { Content = PreviewNote() };
+        FlyoutBase.SetAttachedFlyout(badge, flyout);
+        badge.Tapped += (_, _) => FlyoutBase.ShowAttachedFlyout(badge);
+        badge.KeyDown += (_, e) =>
+        {
+            if (e.Key is not (Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Space)) return;
+            FlyoutBase.ShowAttachedFlyout(badge); e.Handled = true;
+        };
+        AutomationProperties.SetName(badge, L10n.Text("common.teams.preview_title"));
+        AutomationProperties.SetHelpText(badge, L10n.Text("common.teams.preview_detail"));
+        return badge;
+    }
+    /// The note behind the badge: what works, what does not yet, and that
+    /// the person's own projects are safe whatever happens to Teams.
+    private static StackPanel PreviewNote()
+    {
+        var note = new StackPanel { Spacing = Theme.SpaceS, MaxWidth = 320 };
+        note.Children.Add(new TextBlock { Text = L10n.Text("common.teams.preview_title"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = Theme.AccentBrush, TextWrapping = TextWrapping.Wrap });
+        note.Children.Add(new TextBlock { Text = L10n.Text("common.teams.preview_detail"), TextWrapping = TextWrapping.Wrap });
+        note.Children.Add(new TextBlock { Text = L10n.Text("common.teams.preview_safety"), TextWrapping = TextWrapping.Wrap, Opacity = 0.75 });
+        return note;
     }
 
     /// Back goes first, before the title, where a hand reaches to leave.

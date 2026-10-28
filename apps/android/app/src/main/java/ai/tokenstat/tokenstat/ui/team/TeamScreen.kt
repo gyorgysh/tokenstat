@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
@@ -246,8 +247,10 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
         return
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(L10n.text("common.teams.title"), style = TsType.cardTitle,
-            color = LocalTsColors.current.textPrimary, modifier = Modifier.padding(top = 16.dp))
+        Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(L10n.text("common.teams.title"), style = TsType.cardTitle, color = LocalTsColors.current.textPrimary)
+            TeamPreviewBadge()
+        }
         if (calls.origin != null && calls.person != null) TsSecondaryButton(L10n.text("common.teams.comment_drafts"),
             icon = ActionIcon.History.vector, onClick = { drafts = true })
         if (calls.origin != null && calls.person != null) TsSecondaryButton(L10n.text("common.teams.saved_asks"),

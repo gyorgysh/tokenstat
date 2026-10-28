@@ -31,6 +31,8 @@ struct TeamManagementView: View {
                     ToolbarIconButton(systemImage: "chevron.left", help: L10n.text("common.teams.all_organizations")) { leaveToHub() }
                         .accessibilityIdentifier("team.organizations.back")
                 }
+            }, accessory: {
+                TeamPreviewBadge()
             }) {
                 if store.localDraftPersonId != nil {
                     ToolbarIconButton(systemImage: "square.and.pencil", help: L10n.text("common.teams.comment_drafts")) { showingDrafts = true }
@@ -47,6 +49,14 @@ struct TeamManagementView: View {
                 if let org = store.selectedOrganization, !store.browsingProjects { organizationNavigation(org) }
                 else { hubToolbar }
             }
+            #if os(iOS)
+            // A phone's bar has no room for one more item, so the note sits
+            // at the top of the screen instead.
+            if !compactReader {
+                HStack { TeamPreviewBadge(); Spacer(minLength: 0) }
+                    .padding([.horizontal, .top], Theme.Space.m)
+            }
+            #endif
             if let error = store.error {
                 TeamNotice(message: error, warning: true).padding([.horizontal, .top], Theme.Space.m)
             }

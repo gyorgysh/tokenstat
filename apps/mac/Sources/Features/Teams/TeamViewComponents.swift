@@ -549,3 +549,66 @@ struct TeamFolderBadges: View {
         }
     }
 }
+
+/// Says that Teams is an early preview, and what that means, wherever Team
+/// is open. It is a disclaimer rather than a control, so it reads as a
+/// small label: hovering it on a Mac explains it, and a tap or a click opens
+/// the same note on every device.
+struct TeamPreviewBadge: View {
+    @State private var hovering = false
+    @State private var pinned = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "flask")
+                .font(.system(size: 9, weight: .semibold))
+            Text(L10n.text("common.teams.preview_badge"))
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(Theme.accent)
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.vertical, 3)
+        .background(Theme.accentSoft, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.25), lineWidth: 0.5))
+        .contentShape(Capsule())
+        .onTapGesture { pinned.toggle() }
+        #if os(macOS)
+        .onHover { inside in
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) { hovering = inside }
+        }
+        #endif
+        .popover(isPresented: Binding(get: { hovering || pinned }, set: { if !$0 { hovering = false; pinned = false } }),
+                 arrowEdge: .bottom) {
+            TeamPreviewNote()
+                #if os(iOS)
+                .presentationCompactAdaptation(.popover)
+                #endif
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L10n.text("common.teams.preview_title"))
+        .accessibilityHint(L10n.text("common.teams.preview_detail"))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { pinned = true }
+    }
+}
+
+/// The note behind the preview badge: what works, what does not yet, and
+/// that the person's own projects are safe whatever happens to Teams.
+struct TeamPreviewNote: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Label(L10n.text("common.teams.preview_title"), systemImage: "flask")
+                .font(Theme.font(13, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+            Text(L10n.text("common.teams.preview_detail"))
+            Text(L10n.text("common.teams.preview_safety"))
+                .foregroundStyle(.secondary)
+        }
+        .font(Theme.font(12))
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 300, alignment: .leading)
+        .padding(Theme.Space.m)
+    }
+}

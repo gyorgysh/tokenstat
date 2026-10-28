@@ -796,5 +796,9 @@
   "common.teams.device_removed_title": "Teams is off on this device",
   "common.teams.device_removed_detail": "This device was removed from Teams. Turn it back on to see your teams here.",
   "common.teams.continue_in_team_chat": "Continue in team chat",
-  "common.teams.setup_issue": "Teams could not turn on by itself: {0} ({1})"
+  "common.teams.setup_issue": "Teams could not turn on by itself: {0} ({1})",
+  "common.teams.preview_badge": "Preview",
+  "common.teams.preview_title": "Teams is an early preview",
+  "common.teams.preview_detail": "Teams is still being built and arrives in stages over the next releases. Sharing projects, reading shared chats and commenting work now. Running a teammate's agent is not available yet, and screens and limits may still change.",
+  "common.teams.preview_safety": "Your own projects and chats stay on your computer. Stopping sharing never removes them."
 }
