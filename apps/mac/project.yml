@@ -278,8 +278,11 @@ settings:
     # 200 went up to TestFlight as 1.8.0 with Teams on every signed-in device.
     # 201 went up to TestFlight as 1.8.0 with Team as a root tab on the phone,
     # the new chat prism held on its card, and precise connection failures.
-    # 202 is 1.8.0 naming why a device did not turn Teams on by itself.
-    CURRENT_PROJECT_VERSION: "202"
+    # 202 went up to TestFlight as 1.8.0 naming why a device did not turn
+    # Teams on by itself.
+    # 203 is 1.8.0 with teammate agent runs behind the sharer's approval,
+    # stop sharing, routing on Claude session limits and the new chat grid.
+    CURRENT_PROJECT_VERSION: "203"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
