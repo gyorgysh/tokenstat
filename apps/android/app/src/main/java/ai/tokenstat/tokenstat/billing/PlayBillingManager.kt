@@ -121,8 +121,8 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                         val offer = group.firstOrNull { it.offerId == null } ?: return@mapNotNull null
                         val phases = offer.pricingPhases.pricingPhaseList
                         val phase = phases.lastOrNull() ?: return@mapNotNull null
-                        // The regular phase decides the tab: a trial offer
-                        // opens with days and ends with the real interval.
+                        // A base plan has one phase, the recurring price, and
+                        // its period decides the tab.
                         val interval = intervalOfBasePlan(basePlanId, phase.billingPeriod)
                             ?: return@mapNotNull null
                         PlanProduct(
