@@ -46,13 +46,11 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
     @Volatile var appAccountToken: String? = null
     @Volatile var onActivated: ((JsonElement) -> Unit)? = null
 
-    /// Whether this account has already had its one trial, on any store.
+    /// Whether this account has already had a trial, on any store.
     ///
-    /// The gate is account-scoped and lives on the server: a trial taken on
-    /// the App Store or through the website counts here, and the reverse. Play
-    /// decides its own offer eligibility per Google account and we cannot
-    /// refuse what it grants, but we can stop advertising a trial to somebody
-    /// who has already had theirs, the way the iOS paywall does.
+    /// The server still reports it for accounts that took one. No plan offers
+    /// a trial now and the paywall always sells the base plan, so this is kept
+    /// only for a future offer that would need the same account-wide gate.
     @Volatile var trialUsed: Boolean = false
         set(value) {
             val changed = field != value
@@ -116,16 +114,11 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                 details.subscriptionOfferDetails.orEmpty()
                     .groupBy { it.basePlanId }
                     .mapNotNull { (basePlanId, group) ->
-                        // The plain base plan for somebody who has had their
-                        // trial, the offer for somebody who has not. Play may
-                        // still consider them eligible; this is about what the
-                        // paywall promises, which must not be a second free
-                        // month to an account that already had one.
-                        val offer = if (trialUsed) {
-                            group.firstOrNull { it.offerId == null } ?: group.firstOrNull()
-                        } else {
-                            group.firstOrNull { it.offerId != null } ?: group.firstOrNull()
-                        } ?: return@mapNotNull null
+                        // Always the plain base plan. No plan has a free trial:
+                        // the free plan, with two devices and a relay
+                        // allowance, is how somebody tries tokenstat. An offer
+                        // left configured in Play is never bought from here.
+                        val offer = group.firstOrNull { it.offerId == null } ?: return@mapNotNull null
                         val phases = offer.pricingPhases.pricingPhaseList
                         val phase = phases.lastOrNull() ?: return@mapNotNull null
                         // The regular phase decides the tab: a trial offer

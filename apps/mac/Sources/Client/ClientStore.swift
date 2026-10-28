@@ -192,12 +192,6 @@ final class ClientStore {
     /// is false both for "renewal is off" and for "nobody has said", and the
     /// paywall must not present the second as the first.
     private(set) var renewalStatusKnown = false
-    /// Whether this Apple ID may still take the group's introductory offer.
-    /// One per subscription group per Apple ID, which is a different question
-    /// from the account's own `trialUsed`: somebody can be new here and have
-    /// spent the offer long ago under another account. Offering a trial they
-    /// are not eligible for puts the full price in Apple's sheet instead.
-    var isIntroEligible = false
 
     /// Written by the root so a successful purchase updates the same account
     /// model the rest of the app is already reading.
@@ -287,7 +281,6 @@ final class ClientStore {
             products = try await Product.products(for: ids)
                 .sorted { $0.price < $1.price }
             errorMessage = nil
-            await refreshIntroEligibility()
             await refreshSubscriptionStatus()
         } catch {
             errorMessage = L10n.text("apple.clientstore.could_not_load_app_store_plans.d42d421d")
@@ -411,7 +404,6 @@ final class ClientStore {
         onAccountChange?(account)
         await transaction.finish()
         guard owns(owner) else { return }
-        await refreshIntroEligibility()
         await refreshSubscriptionStatus()
     }
 
@@ -434,14 +426,6 @@ final class ClientStore {
                 }
             }
         }
-    }
-
-    func refreshIntroEligibility() async {
-        guard let group = products.first?.subscription?.subscriptionGroupID else {
-            isIntroEligible = false
-            return
-        }
-        isIntroEligible = await Product.SubscriptionInfo.isEligibleForIntroOffer(for: group)
     }
 
     func refreshSubscriptionStatus() async {

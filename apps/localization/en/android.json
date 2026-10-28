@@ -993,7 +993,7 @@
   "android.paywallsheet.relay_traffic.250c5414": "Relay traffic",
   "android.paywallsheet.remote_management_your_other_devices_from.5c8c63a3": "5 GiB of relay traffic per rolling 30 days",
   "android.paywallsheet.remote_screen_viewing_and_control.5b1dad2e": "Remote screen viewing and control",
-  "android.paywallsheet.renewal_terms": "{0} every {1}. Renews automatically until cancelled. Payment is charged through Google Play. Cancel in Play subscriptions before the trial or current period ends to avoid the next charge.",
+  "android.paywallsheet.renewal_terms": "{0} every {1}. Renews automatically until cancelled. Payment is charged through Google Play. Cancel in Play subscriptions before the current period ends to avoid the next charge.",
   "android.paywallsheet.star.e357d396": "Star",
   "android.paywallsheet.supporter.2ce6c010": "Supporter",
   "android.paywallsheet.supporter_is_yearly_only.927c1185": "Supporter is yearly only.",

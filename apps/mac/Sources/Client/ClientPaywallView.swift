@@ -152,17 +152,9 @@ struct ClientPaywallView: View {
         current: ClientStoreProduct?,
         queued: ClientStoreProduct?
     ) -> some View {
+        // No plan has a free trial: the free plan, with two devices and a
+        // relay allowance, is how somebody tries tokenstat.
         let product = store.product(for: item)
-        let trialUsed = account?.billing?.trialUsed == true
-        let intro = product?.subscription?.introductoryOffer
-        // Two separate gates, and both have to hold. `trialUsed` is the
-        // account's, `isIntroEligible` is the Apple ID's: one person can be new
-        // here and have spent the group's offer under a previous account, and
-        // promising them three free days puts the full price in Apple's sheet.
-        let showTrial = item == .patron && item.interval == .year && current == nil
-            && !trialUsed && intro?.paymentMode == .freeTrial
-            && intro?.period.unit == .day && intro?.period.value == 3
-            && intro?.periodCount == 1 && store.isIntroEligible
         let busy = store.purchasingProductID == item.rawValue
         let isCurrent = current == item
         let isQueued = queued == item && current != item
@@ -218,11 +210,6 @@ struct ClientPaywallView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if showTrial {
-                Text(L10n.text("apple.clientpaywallview.3_days_free_then_the_yearly_price_once_per.6b22ed3a", product?.displayPrice ?? ""))
-                    .font(ClientType.caption)
-                    .foregroundStyle(Theme.accent)
-            }
             // Only when StoreKit has actually answered. `willAutoRenew` is
             // false both for "renewal is off" and for "nobody has said", and
             // an offline open must not present the second as the first.
@@ -247,7 +234,6 @@ struct ClientPaywallView: View {
                 account: account,
                 current: current,
                 queued: queued,
-                showTrial: showTrial,
                 busy: busy
             )
         }
@@ -269,7 +255,6 @@ struct ClientPaywallView: View {
         account: Account?,
         current: ClientStoreProduct?,
         queued: ClientStoreProduct?,
-        showTrial: Bool,
         busy: Bool
     ) -> some View {
         let appleLive = account?.billing?.isApple == true && account?.billing?.blocksOtherStore == true
@@ -284,7 +269,7 @@ struct ClientPaywallView: View {
             }
         } else if current == nil {
             actionButton(
-                showTrial ? L10n.text("apple.clientpaywallview.start_3_day_trial.bb80ecdc") : L10n.text("apple.clientpaywallview.get_0.2db432a7", "\(item.title)"),
+                L10n.text("apple.clientpaywallview.get_0.2db432a7", "\(item.title)"),
                 .billing,
                 accent: true,
                 busy: busy,
