@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 using System.Text;
 using System.Text.Json.Nodes;
+using Tokenstat.Host;
 
 namespace Tokenstat.Pages;
 
@@ -16,6 +17,11 @@ internal sealed class TeamAskModel(TeamAskRecoveryStore storage, TeamCommentTarg
     internal JsonObject? Fence { get; private set; }
     internal string? Error { get; private set; }
     private TeamAskRecoveryStore.Snapshot? _saved;
+    /// The sharing computer holds this request until its owner answers. The
+    /// same request is sent again until it starts, is declined, or the
+    /// owner's window to answer has passed.
+    internal bool AwaitingApproval { get; private set; }
+    private DateTimeOffset? _approvalSince;
     internal bool Pending => _saved is not null && Fence is null;
     internal bool CanAsk => Loaded && current() && !Busy && Fence is null && !string.IsNullOrWhiteSpace(Text) && Encoding.UTF8.GetByteCount(Text) <= 8192;
     internal Action? Changed;
@@ -41,7 +47,7 @@ internal sealed class TeamAskModel(TeamAskRecoveryStore storage, TeamCommentTarg
     internal async Task AskAsync()
     {
         if (!CanAsk) return;
-        Busy = true; Error = null; Changed?.Invoke();
+        Busy = true; Error = null; AwaitingApproval = false; Changed?.Invoke();
         try
         {
             if (_saved is null)
@@ -64,13 +70,24 @@ internal sealed class TeamAskModel(TeamAskRecoveryStore storage, TeamCommentTarg
             else if (original.Record.Terminal(response, target.Share)) { await ReplaceAsync(null); Text = ""; }
             else Error = "ask_unconfirmed";
         }
+        catch (HostException failure) when (failure.Code == "team_agent_approval_pending")
+        {
+            var since = _approvalSince ??= DateTimeOffset.UtcNow;
+            if (DateTimeOffset.UtcNow - since >= TimeSpan.FromMinutes(15)) { _approvalSince = null; Error = "agent_approval_expired"; }
+            else { AwaitingApproval = true; Error = "agent_waiting_approval"; _ = RetryAfterApprovalAsync(); }
+        }
         catch (TeamAskNotAccepted refusal)
         {
             try { await ReplaceAsync(null); Error = refusal.Message; }
             catch { Error = "ask_save_failed"; }
         }
         catch (Exception error) { Error = error is TeamDraftException or InvalidDataException ? "ask_save_failed" : error.Message; }
-        finally { Busy = false; Changed?.Invoke(); }
+        finally { if (!AwaitingApproval) _approvalSince = null; Busy = false; Changed?.Invoke(); }
+    }
+    private async Task RetryAfterApprovalAsync()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        if (AwaitingApproval && current()) await AskAsync();
     }
     internal async Task CheckAsync()
     {

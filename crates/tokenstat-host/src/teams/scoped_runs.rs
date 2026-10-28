@@ -5,12 +5,12 @@ use crate::{chat::sharing::AskInput, error::DispatchError};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-// Release builds stay closed until the whole-change review and the Windows
-// proof are done. A debug build opens it so the owner's own test builds can
-// run agents for teammates the owner allowed, and the disposable fixture
-// opens it for the end-to-end check. Unit tests stay closed.
+// Open in every build, as part of the Teams preview. Whether a computer takes
+// part is the publisher's choice per project, in `agent_access`, and a new
+// share starts with it off. Unit tests stay closed so no test can start a
+// real agent; the disposable fixture opens it for the end-to-end check.
 pub(super) fn execution_ready() -> bool {
-    (cfg!(debug_assertions) && !cfg!(test)) || super::guardian::fixture_enabled()
+    !cfg!(test) || super::guardian::fixture_enabled()
 }
 
 pub(super) fn review(
@@ -36,9 +36,8 @@ pub(super) fn review(
     )?;
     source.ensure_current()?;
     principal.ensure_account_current()?;
-    Ok(
-        serde_json::json!({"review":review.digest,"agentRuns":execution_ready(),"worktree":review.worktree}),
-    )
+    Ok(serde_json::json!({"review":review.digest,
+            "agentRuns":execution_ready() && super::agent_access::allows(principal.value()),"worktree":review.worktree}))
 }
 pub(super) fn checkout_digest(source: &Source) -> Result<String, DispatchError> {
     Ok(tokenstat_identity::hex(&Sha256::digest(
@@ -61,6 +60,7 @@ pub(super) fn send(
     }
     let input: AskInput = serde_json::from_str(params).map_err(|_| invalid())?;
     input.validate()?;
+    super::agent_access::admit(principal.value(), &input.client_message_id, &input.text)?;
     super::guardian::run(principal, &input)
 }
 /// Start an empty shared chat on this checkout for the member, so a person
@@ -73,6 +73,14 @@ pub(super) fn new_chat(
         return Err(DispatchError::new(
             "team_agent_runs_unavailable",
             "Agent runs are not available in shared chats yet.",
+        ));
+    }
+    // A new chat exists to Ask in, so it follows the same choice. Waiting
+    // for approval is fine here: the first Ask is what gets approved.
+    if !super::agent_access::allows(principal.value()) {
+        return Err(DispatchError::new(
+            "team_agent_runs_off",
+            "Agent runs are off for this project on the sharing computer.",
         ));
     }
     let input = super::chats::new_chat_input(params)?;

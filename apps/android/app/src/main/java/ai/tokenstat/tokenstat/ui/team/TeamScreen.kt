@@ -624,7 +624,7 @@ internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Te
         chat.title.take(160) + " · " + chat.computer.take(160)) { method, params ->
             try { calls.call("teams.ask", buildJsonObject { put("target", chat.target); put("method", method); put("params", params) }) }
             catch (failure: CoreFailure) {
-                if (method == "team.chat.ask" && failure.code in setOf("team_run_review_changed", "invalid_ask")) throw TeamAskNotAccepted(failure.message)
+                if (method == "team.chat.ask" && failure.code in setOf("team_run_review_changed", "invalid_ask", "team_agent_request_denied", "team_agent_runs_off")) throw TeamAskNotAccepted(failure.message)
                 throw failure
             }
         } } }
@@ -748,5 +748,7 @@ internal fun askMessage(value: String, computer: String): String = when (value) 
     "ask_unconfirmed" -> L10n.text("common.teams.ask_unconfirmed")
     "run_status_unconfirmed" -> L10n.text("common.teams.run_status_unconfirmed")
     "agent_runs_off" -> L10n.text("common.teams.agent_runs_off", computer)
+    "agent_waiting_approval" -> L10n.text("common.teams.agent_waiting_approval", computer)
+    "agent_approval_expired" -> L10n.text("common.teams.agent_approval_expired", computer)
     else -> value
 }

@@ -13,6 +13,8 @@ internal sealed partial class TeamsPage
     {
         Reset(L10n.Text("common.teams.project_settings")); var view = _view; var checkout = Text(publication, "id");
         NavBack(L10n.Text("common.back"), async (_, _) => { if (IsLoaded && _view == view) await back(); });
+        await AddAgentAccessAsync(model, checkout, view);
+        if (!IsLoaded || _view != view) return;
         _body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.agent_runs"), ActionIcon.Run, async (_, _) => { if (IsLoaded && _view == view) await ShowTeamAgentGrantsAsync(model, repository, publication, back); }));
         JsonNode result;
         try { result = await model.Call("teams.lanes.get", new() { ["checkout"] = checkout }); }
@@ -96,6 +98,34 @@ internal sealed partial class TeamsPage
                 catch (Exception error) { if (IsLoaded && _view == editorView) Note(TeamError(error), true); }
             }));
         }
+    }
+    /// Whether teammates' Asks may start the agent on this computer, for this
+    /// project. A new share starts with it off. Who is eligible stays with the
+    /// team's agent access controls below.
+    private async Task AddAgentAccessAsync(TeamPublisherModel model, string checkout, int view)
+    {
+        JsonNode state;
+        try { state = await model.Call("teams.agentAccess.get", new() { ["checkout"] = checkout }); }
+        catch (Exception error) { if (IsLoaded && _view == view) Note(TeamError(error), true); return; }
+        if (!IsLoaded || _view != view) return;
+        var options = new[] { ("off", "common.teams.agent_access_off"), ("ask", "common.teams.agent_access_ask"), ("on", "common.teams.agent_access_on") };
+        static string Detail(string access) => L10n.Text(access switch { "ask" => "common.teams.agent_access_ask_detail", "on" => "common.teams.agent_access_on_detail", _ => "common.teams.agent_access_off_detail" });
+        int Index(string access) => Math.Max(0, Array.FindIndex(options, option => option.Item1 == access));
+        var current = Text(state, "access");
+        var choice = new ComboBox { Header = L10n.Text("common.teams.agent_access"), HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var (tag, key) in options) choice.Items.Add(new ComboBoxItem { Content = L10n.Text(key), Tag = tag });
+        choice.SelectedIndex = Index(current);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(choice, "team.agent.access");
+        var detail = new TextBlock { Text = Detail(current), TextWrapping = TextWrapping.Wrap, Opacity = 0.75 };
+        choice.SelectionChanged += async (_, _) =>
+        {
+            if (choice.SelectedItem is not ComboBoxItem { Tag: string next } || next == current) return;
+            choice.IsEnabled = false;
+            try { current = Text(await model.Call("teams.agentAccess.set", new() { ["checkout"] = checkout, ["access"] = next }), "access"); }
+            catch (Exception error) { if (IsLoaded && _view == view) Note(TeamError(error), true); }
+            finally { if (IsLoaded && _view == view) { choice.SelectedIndex = Index(current); detail.Text = Detail(current); choice.IsEnabled = true; } }
+        };
+        _body.Children.Add(choice); _body.Children.Add(detail);
     }
     private async Task ShowTeamAgentGrantsAsync(TeamPublisherModel model, JsonObject repository, JsonObject publication, Func<Task> back)
     {

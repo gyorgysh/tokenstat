@@ -14,6 +14,8 @@ internal sealed partial class TeamsPage
         "ask_unconfirmed" => L10n.Text("common.teams.ask_unconfirmed"),
         "run_status_unconfirmed" => L10n.Text("common.teams.run_status_unconfirmed"),
         "agent_runs_off" => L10n.Text("common.teams.agent_runs_off", computer),
+        "agent_waiting_approval" => L10n.Text("common.teams.agent_waiting_approval", computer),
+        "agent_approval_expired" => L10n.Text("common.teams.agent_approval_expired", computer),
         _ => value,
     };
     private async Task<TeamAskModel?> AskModelAsync(JsonObject target, string title, string computer)
@@ -33,7 +35,7 @@ internal sealed partial class TeamsPage
                     ["target"] = target.DeepClone(), ["method"] = method, ["params"] = parameters.DeepClone(),
                     ["_accountScope"] = scope.DeepClone(), ["_accountSession"] = session,
                 }); }
-                catch (HostException failure) when (method == "team.chat.ask" && failure.Code is "team_run_review_changed" or "invalid_ask") { throw new TeamAskNotAccepted(failure.Message); }
+                catch (HostException failure) when (method == "team.chat.ask" && failure.Code is "team_run_review_changed" or "invalid_ask" or "team_agent_request_denied" or "team_agent_runs_off") { throw new TeamAskNotAccepted(failure.Message); }
             }
             static string Label(string value) => string.Concat(value.EnumerateRunes().Take(160)
                 .Where(r => System.Text.Rune.GetUnicodeCategory(r) != System.Globalization.UnicodeCategory.Format)

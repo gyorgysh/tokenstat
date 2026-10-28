@@ -86,8 +86,11 @@ private struct TeamSavedAskControls: View {
             current: { store.owner == owner && store.localDraftPersonId == entry.target.person && owner.scope.origin == entry.target.origin },
             call: { method, input in
                 do { return try await store.recoverAsk(origin: entry.target.origin, person: entry.target.person, target: entry.target.fields, owner: owner, method: method, input: input) }
-                catch let failure as TeamRequestFailure where method == "team.chat.ask" && ["team_run_review_changed", "invalid_ask"].contains(failure.code) {
+                catch let failure as TeamRequestFailure where method == "team.chat.ask" && ["team_run_review_changed", "invalid_ask", "team_agent_request_denied", "team_agent_runs_off"].contains(failure.code) {
                     throw TeamAskNotAccepted(message: failure.localizedDescription)
+                }
+                catch let failure as TeamRequestFailure where method == "team.chat.ask" && failure.code == "team_agent_approval_pending" {
+                    throw TeamAskAwaitingApproval()
                 }
             }))
     }

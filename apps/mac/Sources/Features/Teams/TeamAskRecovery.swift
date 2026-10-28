@@ -46,6 +46,9 @@ struct TeamAskNotAccepted: LocalizedError {
     var errorDescription: String? { message }
 }
 
+/// The sharing computer is holding the request until its owner answers.
+struct TeamAskAwaitingApproval: Error {}
+
 enum TeamAskRecoveryFailure: LocalizedError {
     case unavailable, unconfirmed
     var errorDescription: String? { L10n.text(self == .unavailable ? "common.teams.ask_save_failed" : "common.teams.ask_unconfirmed") }

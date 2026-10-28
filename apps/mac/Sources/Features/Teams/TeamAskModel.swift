@@ -8,6 +8,11 @@ import Observation
     private(set) var busy = false
     private(set) var stopping = false
     private(set) var error: String?
+    /// The sharing computer is holding this request until its owner answers.
+    /// The same request is sent again until it starts, is declined, or the
+    /// owner's window to answer has passed.
+    private(set) var awaitingApproval = false
+    private var approvalSince: Date?
     private var statusUnconfirmed = false
     private(set) var fence: JSONValue?
     private(set) var saved: TeamAskRecoveryStore.Snapshot?
@@ -36,6 +41,8 @@ import Observation
     func ask(computer: String) async {
         guard canAsk else { return }
         busy = true; error = nil; statusUnconfirmed = false; defer { busy = false }
+        defer { if !awaitingApproval { approvalSince = nil } }
+        awaitingApproval = false
         do {
             if saved == nil {
                 let response = try await call("team.chat.ask.review", [:])
@@ -62,6 +69,21 @@ import Observation
                 saved = try await storage.replace(target, record: nil, expected: original)
                 text = ""
             } else { throw TeamAskRecoveryFailure.unconfirmed }
+        } catch is TeamAskAwaitingApproval {
+            let since = approvalSince ?? Date()
+            approvalSince = since
+            guard Date().timeIntervalSince(since) < 15 * 60 else {
+                awaitingApproval = false; approvalSince = nil
+                error = L10n.text("common.teams.agent_approval_expired", computer); return
+            }
+            awaitingApproval = true
+            error = L10n.text("common.teams.agent_waiting_approval", computer)
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(4))
+                guard let self, self.awaitingApproval, self.current() else { return }
+                await self.ask(computer: computer)
+            }
+            return
         } catch let refusal as TeamAskNotAccepted {
             // The host settles an existing immutable receipt before checking
             // a fresh review. Only its explicit validation refusal permits a

@@ -73,7 +73,7 @@ import kotlinx.serialization.json.*
                     put("method", method); put("params", input)
                 }).also { if (!active) throw CancellationException() }
             } catch (failure: CoreFailure) {
-                if (method == "team.chat.ask" && failure.code in setOf("team_run_review_changed", "invalid_ask")) throw TeamAskNotAccepted(failure.message.orEmpty())
+                if (method == "team.chat.ask" && failure.code in setOf("team_run_review_changed", "invalid_ask", "team_agent_request_denied", "team_agent_runs_off")) throw TeamAskNotAccepted(failure.message.orEmpty())
                 throw failure
             }
         }

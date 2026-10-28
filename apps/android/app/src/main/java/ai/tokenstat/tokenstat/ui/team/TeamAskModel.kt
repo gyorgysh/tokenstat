@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import java.util.UUID
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
+import ai.tokenstat.tokenstat.core.CoreFailure
 
 internal class TeamAskNotAccepted(message: String) : Exception(message)
 
@@ -19,6 +20,13 @@ internal class TeamAskModel(private val storage: TeamAskRecoveryStore, private v
     var fence by mutableStateOf<JsonObject?>(null); private set
     var error by mutableStateOf<String?>(null); private set
     private var saved: TeamAskRecoveryStore.Snapshot? = null
+    /**
+     * The sharing computer holds this request until its owner answers. The
+     * same request is sent again while this screen is open, until it starts,
+     * is declined, or the owner's window to answer has passed.
+     */
+    var awaitingApproval by mutableStateOf(false); private set
+    private var approvalSince: Long? = null
     val pending get() = saved != null && fence == null
     val canAsk get() = loaded && !busy && fence == null && text.isNotBlank() && text.toByteArray().size <= 8192
     private suspend fun replace(record: TeamAskRecord?) = withContext(NonCancellable) {
@@ -37,7 +45,7 @@ internal class TeamAskModel(private val storage: TeamAskRecoveryStore, private v
     }
     suspend fun ask() {
         if (!canAsk) return
-        busy = true; error = null
+        busy = true; error = null; awaitingApproval = false
         try {
             if (saved == null) {
                 val review = call("team.chat.ask.review", buildJsonObject {})
@@ -59,8 +67,15 @@ internal class TeamAskModel(private val storage: TeamAskRecoveryStore, private v
         } catch (refusal: TeamAskNotAccepted) {
             try { replace(null); error = refusal.message } catch (_: Exception) { error = "ask_save_failed" }
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (failure: Exception) { error = if (failure is TeamDraftFailure || failure is IllegalArgumentException) "ask_save_failed" else failure.message ?: "ask_unconfirmed" }
-        finally { busy = false }
+        catch (failure: Exception) {
+            if (failure is CoreFailure && failure.code == "team_agent_approval_pending") {
+                val since = approvalSince ?: System.currentTimeMillis().also { approvalSince = it }
+                if (System.currentTimeMillis() - since >= 15 * 60 * 1000L) { approvalSince = null; error = "agent_approval_expired" }
+                else { awaitingApproval = true; error = "agent_waiting_approval" }
+            } else error = if (failure is TeamDraftFailure || failure is IllegalArgumentException) "ask_save_failed" else failure.message ?: "ask_unconfirmed"
+        }
+        finally { busy = false; if (!awaitingApproval) approvalSince = null }
+        if (awaitingApproval) { delay(4000); if (awaitingApproval) ask() }
     }
     suspend fun check() {
         val running = fence ?: return

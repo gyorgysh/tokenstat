@@ -2404,6 +2404,9 @@ struct RootView: View {
             // The folder's badge comes from the host's folder list as well as
             // the team store, so reread it once sharing has ended.
             Color.clear.frame(width: 0, height: 0)
+                .modifier(TeamAgentApprovalPrompt(store: teams) { publication in
+                    workspaces.folders.first { $0.id == publication.workspaceId }?.name
+                })
                 .modifier(TeamStopSharingConfirm(store: teams, request: $stoppingSharing) {
                     Task { await workspaces.loadLocal() }
                 })

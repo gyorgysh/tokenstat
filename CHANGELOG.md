@@ -15,7 +15,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 
 - Interactive charts in agent replies on Mac, Windows, iPhone, iPad and Android. Point, tap or use the keyboard to read values, zoom in, open the data as a table, and export as PNG, SVG, CSV or JSON. Charts follow your theme, number format and reduced motion setting, and draw offline.
 - Agents can make charts through the MCP server, the new `tokenstat chart` command, or the JavaScript and Python helpers. A chart is plain data in the conversation, so it still works after a chat is reopened, on another device, or with another agent.
-- Teams, as an early preview. Share a repository checkout and selected chat history with people in your organization, then read and comment on shared chats from Mac, iPhone, iPad, Windows and Android. Stop sharing a project at any time and it stays on your computer with its chats and history. Creating an organization needs Legend, and members need Patron or Legend.
+- Teams, as an early preview. Share a repository checkout and selected chat history with people in your organization, then read and comment on shared chats from Mac, iPhone, iPad, Windows and Android. Teammates can ask your agent to work in a shared project once you allow it on your computer: off by default, ask each time with Allow once, Always allow or Deny, or automatic. Stop sharing a project at any time and it stays on your computer with its chats and history. Creating an organization needs Legend, and members need Patron or Legend.
 
 ### Changed
 

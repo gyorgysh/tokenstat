@@ -433,6 +433,7 @@ public sealed partial class MainWindow : Window
             _ = RefreshSidebarLiveAsync(slow: _sidebarTick % 6 == 0);
         };
         _sidebarPoll.Start();
+        StartTeamAgentRequests();
         RemoteWorkspaces.Changed += () => DispatcherQueue.TryEnqueue(() =>
         {
             RebuildFolderItems();

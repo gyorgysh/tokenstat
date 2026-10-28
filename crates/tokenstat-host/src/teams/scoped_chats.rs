@@ -87,7 +87,7 @@ pub(super) fn call(
             (
                 marker,
                 json!({"chat":{"id":row.id,"checkoutId":row.checkout_id,"title":history.title,
-            "backend":history.backend,"historyTrimmed":history.history_trimmed,"allowsAgentRuns":allows_agent_runs(super::agent_runs_ready(), &history.backend, scope.role),
+            "backend":history.backend,"historyTrimmed":history.history_trimmed,"allowsAgentRuns":allows_agent_runs(super::agent_runs_ready() && super::agent_access::allows(scope), &history.backend, scope.role),
             "allowsComments":row.source_revision.is_some() && matches!(scope.role,RepositoryRole::Contributor | RepositoryRole::Maintainer)}}),
             )
         }

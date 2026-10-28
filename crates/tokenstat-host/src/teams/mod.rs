@@ -4,6 +4,8 @@
 //! Teammate chat requests use their own scoped entry point; they never borrow
 //! this machine's account credential or its personal workspace policy.
 
+#[cfg(feature = "local-host")]
+mod agent_access;
 mod authorization;
 #[cfg(feature = "local-host")]
 mod catalog;
@@ -164,6 +166,7 @@ pub(crate) fn local_sharing_call(
         local_sharing::call(method, params)
             .or_else(|| recovery::call(method, params))
             .or_else(|| lanes::call(method, params))
+            .or_else(|| agent_access::call(method, params))
     }
     #[cfg(not(feature = "local-host"))]
     {

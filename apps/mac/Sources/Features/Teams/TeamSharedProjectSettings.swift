@@ -29,6 +29,10 @@ struct TeamSharedProjectSettings: View {
                 }
                 TeamLaneSettings(store: store, context: context, checkoutId: checkout.id)
                 ThemeRule()
+                if localPublication != nil {
+                    TeamAgentAccessSettings(store: store, context: context, checkoutId: checkout.id)
+                    ThemeRule()
+                }
                 TeamAgentGrants(store: store, context: context, repository: repository, checkoutId: checkout.id)
                 if let localPublication {
                     ThemeRule()

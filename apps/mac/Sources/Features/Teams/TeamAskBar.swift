@@ -25,8 +25,11 @@ struct TeamAskBar: View {
             current: { store.mutationContext == context && store.phase == .ready && store.capabilities?.actorId == target.person },
             call: { method, params in
                 do { return try await store.read(.ask, fields: ["target": target.fields, "method": .string(method), "params": .object(params)], context: context) }
-                catch let failure as TeamRequestFailure where method == "team.chat.ask" && ["team_run_review_changed", "invalid_ask"].contains(failure.code) {
+                catch let failure as TeamRequestFailure where method == "team.chat.ask" && ["team_run_review_changed", "invalid_ask", "team_agent_request_denied", "team_agent_runs_off"].contains(failure.code) {
                     throw TeamAskNotAccepted(message: failure.localizedDescription)
+                }
+                catch let failure as TeamRequestFailure where method == "team.chat.ask" && failure.code == "team_agent_approval_pending" {
+                    throw TeamAskAwaitingApproval()
                 }
             }))
     }
