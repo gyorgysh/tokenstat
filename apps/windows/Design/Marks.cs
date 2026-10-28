@@ -395,7 +395,7 @@ internal static class Marks
             Width = size,
             Height = size,
         };
-        string label = char.ToUpperInvariant(kind[0]) + kind[1..] + L10n.Text("windows.marks.tier.9382d092");
+        string label = PlanName.Title(kind) + L10n.Text("windows.marks.tier.9382d092");
         ToolTipService.SetToolTip(mark, label);
         AutomationProperties.SetName(mark, label);
         return mark;

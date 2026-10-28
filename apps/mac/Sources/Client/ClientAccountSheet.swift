@@ -335,7 +335,7 @@ private struct ClientAccountContent: View {
                             .textSelection(.enabled)
                     }
                     if let tier = account.tier, !tier.isEmpty {
-                        Text(tier.capitalized + L10n.text("apple.clientaccountsheet.plan.56aeaecb"))
+                        Text(PlanName.title(tier) + L10n.text("apple.clientaccountsheet.plan.56aeaecb"))
                             .font(ClientType.label)
                             .foregroundStyle(.secondary)
                     }
@@ -377,7 +377,7 @@ private struct ClientAccountContent: View {
             if let tier = account.tier, !tier.isEmpty {
                 let period = account.billing?.interval == "month" ? " monthly"
                     : account.isPaidTier ? " yearly" : ""
-                Text(tier.capitalized + period
+                Text(PlanName.title(tier) + period
                     + (account.billing?.periodEnd.map { L10n.text("apple.clientaccountsheet.until_0.f33ca039", "\(Self.shortDay($0))") } ?? ""))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)

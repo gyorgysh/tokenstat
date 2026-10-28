@@ -2264,7 +2264,7 @@ public sealed partial class MainWindow : Window
             labels.Children.Add(new TextBlock { Text = name, FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
             var tier = Format.Text(account, "tier");
             var handle = Format.Text(account, "handle");
-            if (!string.IsNullOrWhiteSpace(tier)) labels.Children.Add(new TextBlock { Text = tier[..1].ToUpperInvariant() + tier[1..], FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
+            if (!string.IsNullOrWhiteSpace(tier)) labels.Children.Add(new TextBlock { Text = PlanName.Title(tier), FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
             else if (!string.IsNullOrWhiteSpace(handle)) labels.Children.Add(new TextBlock { Text = "@" + handle, FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
             identity = labels;
         }
@@ -2278,7 +2278,7 @@ public sealed partial class MainWindow : Window
         };
         if (avatar is not null) ProfileHoverRing.Attach(avatar, footer);
         var label = AppServices.Update.IsReady || AppServices.Update.IsAvailable ? L10n.Text("windows.mainwindow_xaml.account_update_available.29a1fbd6") : L10n.Text("windows.mainwindow_xaml.account_0.d8cd9318", $"{name}");
-        if (expanded && !string.IsNullOrWhiteSpace(Format.Text(account, "tier"))) label = L10n.Text("common.account_plan_label", name, Format.Text(account, "tier"));
+        if (expanded && !string.IsNullOrWhiteSpace(Format.Text(account, "tier"))) label = L10n.Text("common.account_plan_label", name, PlanName.Title(Format.Text(account, "tier")));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(footer, label);
         ToolTipService.SetToolTip(footer, label);
         var menu = new MenuFlyout();

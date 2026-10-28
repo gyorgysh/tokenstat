@@ -1287,7 +1287,7 @@ struct RootView: View {
         guard account.signedIn else { return L10n.text("apple.rootview.account_sign_in_to_tokenstat.7888d723") }
         let name = account.account?.title ?? L10n.text("apple.rootview.signed_in.ca566c89")
         guard let tier = railAccountTier else { return L10n.text("apple.rootview.account_0.1342b321", "\(name)") }
-        return L10n.text("apple.rootview.account_0_1_plan.75429042", "\(name)", "\(tier.capitalized)")
+        return L10n.text("apple.rootview.account_0_1_plan.75429042", "\(name)", "\(PlanName.title(tier))")
     }
 
     /// Leading toggles injected into every destination's chrome bar.
@@ -2966,7 +2966,7 @@ struct RootView: View {
     private var sidebarAccountBar: some View {
         SidebarAccountBar(
             name: account.signedIn ? (account.account?.title ?? L10n.text("common.account")) : L10n.text("common.sign_in"),
-            detail: account.signedIn ? railAccountTier?.capitalized : nil,
+            detail: account.signedIn ? railAccountTier.map(PlanName.title) : nil,
             accessibilityLabel: railAccountLabel,
             menuItems: { accountMenuItems },
             settings: { navigate(to: .global(.account)) }

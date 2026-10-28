@@ -156,7 +156,7 @@ struct AvatarButton: View {
             .contentShape(.circle)
         }
         .buttonStyle(ClientAccountButtonStyle(showsPlan: tier != nil, showsRing: !plainBadge))
-        .accessibilityLabel(tier.map { L10n.text("apple.avatarbutton.account_plan", name, $0.capitalized) }
+        .accessibilityLabel(tier.map { L10n.text("apple.avatarbutton.account_plan", name, PlanName.title($0)) }
             ?? (signedIn ? L10n.text("apple.avatarbutton.account_0.1342b321", "\(name)") : L10n.text("apple.avatarbutton.sign_in_to_tokenstat.9a950fc4")))
         .accessibilityHint(L10n.text("apple.avatarbutton.opens_your_account.bf04ed9e"))
         .task(id: pictureRaw) {

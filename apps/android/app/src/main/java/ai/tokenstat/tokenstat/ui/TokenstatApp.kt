@@ -4635,7 +4635,7 @@ private fun AccountIdentityCard(state: ClientState, onOpen: (String) -> Unit) {
                         Text("@$it", style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
                     }
                     Text(
-                        tier.replaceFirstChar { it.uppercase() } + L10n.text("android.tokenstatapp.plan.56aeaecb"),
+                        ai.tokenstat.tokenstat.ui.marks.planTitle(tier) + L10n.text("android.tokenstatapp.plan.56aeaecb"),
                         style = TextStyle(fontSize = 13.sp),
                         color = colors.textSecondary,
                     )
@@ -4687,7 +4687,7 @@ private fun AccountPlanCard(state: ClientState, onPlans: () -> Unit) {
             }
             val until = billing?.string("periodEnd")?.let { shortDay(it) }?.let { L10n.text("android.tokenstatapp.until_0.f33ca039", "${it}") }.orEmpty()
             Text(
-                tier.replaceFirstChar { it.uppercase() } + period + until,
+                ai.tokenstat.tokenstat.ui.marks.planTitle(tier) + period + until,
                 style = TextStyle(fontSize = 14.sp),
                 color = colors.textSecondary,
             )

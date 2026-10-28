@@ -977,13 +977,13 @@ struct TabStrip<Tab: Hashable>: View {
 ///
 /// One component so the badge is the same object wherever it appears. Uppercase
 /// and tracked out, because a tier is a label and not a word in a sentence:
-/// "Patron" beside a name reads as part of the name, "PATRON" reads as a badge.
+/// "Pro" beside a name reads as part of the name, "PRO" reads as a badge.
 struct TierBadge: View {
     var tier: String
     var size: CGFloat = 10
 
     var body: some View {
-        Text(tier.uppercased())
+        Text(PlanName.title(tier).uppercased())
             .font(.system(size: size, weight: .bold))
             .tracking(0.6)
             .foregroundStyle(Theme.accent)

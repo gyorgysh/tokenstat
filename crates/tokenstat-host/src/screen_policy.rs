@@ -212,7 +212,7 @@ fn legend(tier: &str) -> Result<(), String> {
     if tier == "legend" {
         Ok(())
     } else {
-        Err("Screen access requires the Legend plan".into())
+        Err("Screen access requires the Elite plan".into())
     }
 }
 

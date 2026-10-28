@@ -352,8 +352,8 @@ struct TierMark: View {
                     )
                 )
                 .frame(width: size, height: size)
-                .help(L10n.text("apple.marks.0_tier.c75a2e12", "\(tier.capitalized)"))
-                .accessibilityLabel(L10n.text("apple.marks.0_tier.c75a2e12", "\(tier.capitalized)"))
+                .help(L10n.text("apple.marks.0_tier.c75a2e12", "\(PlanName.title(tier))"))
+                .accessibilityLabel(L10n.text("apple.marks.0_tier.c75a2e12", "\(PlanName.title(tier))"))
         }
     }
 }

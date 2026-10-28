@@ -537,7 +537,7 @@ fn verify_paid_account(client: &VaultContext) -> Result<(), String> {
     if paid_vault_tier(client.status.tier.as_deref()) {
         Ok(())
     } else {
-        Err("SSH vault sync requires Supporter or higher".into())
+        Err("SSH vault sync requires Plus or higher".into())
     }
 }
 

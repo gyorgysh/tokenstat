@@ -62,7 +62,7 @@ fun AccountAvatarButton(
             modifier = Modifier.size(48.dp).semantics {
                 contentDescription = if (signedIn) L10n.text("android.marks.account_0.1342b321", name)
                     else L10n.text("android.marks.sign_in_to_tokenstat.9a950fc4")
-                if (showsPlan) stateDescription = L10n.text("android.tiermark.0_tier.c75a2e12", plan.replaceFirstChar { it.uppercase() })
+                if (showsPlan) stateDescription = L10n.text("android.tiermark.0_tier.c75a2e12", planTitle(plan))
             },
         ) {
             Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
