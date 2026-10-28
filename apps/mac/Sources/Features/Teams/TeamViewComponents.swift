@@ -562,9 +562,9 @@ struct TeamPreviewBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "flask")
-                .font(.system(size: 9, weight: .semibold))
+                .font(Theme.font(9, weight: .semibold))
             Text(L10n.text("common.teams.preview_badge"))
-                .font(.system(size: 11, weight: .semibold))
+                .font(Theme.font(11, weight: .semibold))
                 .lineLimit(1)
         }
         .foregroundStyle(Theme.accent)
