@@ -90,6 +90,7 @@
     <Compile Include="../../../apps/windows/Design/NativeContentLayout.cs" Link="NativeContentLayout.cs" />
     <Compile Include="../../../apps/windows/Design/ContextMenus.cs" Link="ContextMenus.cs" />
     <Compile Include="../../../apps/windows/Design/Chrome.cs" Link="Chrome.cs" />
+    <Compile Include="../../../apps/windows/Design/PlanName.cs" Link="PlanName.cs" />
     <Compile Include="../../../apps/windows/Design/Motion.cs" Link="Motion.cs" />
     <Compile Include="../../../apps/windows/Pages/Format.cs" Link="Format.cs" />
     <Compile Include="../../../apps/windows/Pages/HarnessConfigState.cs" Link="HarnessConfigState.cs" />
