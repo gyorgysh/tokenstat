@@ -60,7 +60,7 @@ pub(super) fn send(
     }
     let input: AskInput = serde_json::from_str(params).map_err(|_| invalid())?;
     input.validate()?;
-    super::agent_access::admit(principal.value(), &input.client_message_id, &input.text)?;
+    super::agent_access::admit(principal.value(), &input)?;
     super::guardian::run(principal, &input)
 }
 /// Start an empty shared chat on this checkout for the member, so a person

@@ -120,20 +120,34 @@ struct TeamAgentApprovalPrompt: ViewModifier {
                     try? await Task.sleep(for: .seconds(3))
                 }
             }
-            .alert(title(shown), isPresented: Binding(get: { shown != nil }, set: { _ in }), presenting: shown) { request in
-                Button(L10n.text("common.teams.agent_request_allow_once")) { Task { await decide(request, "once") } }
-                Button(L10n.text("common.teams.agent_request_allow_always", request.personName)) { Task { await decide(request, "always") } }
-                Button(L10n.text("common.teams.agent_request_deny"), role: .destructive) { Task { await decide(request, "deny") } }
-            } message: { request in
-                Text(message(request))
+            // A sheet rather than an alert: an alert makes its first button
+            // the Return key's, and approving a run must take a deliberate
+            // click. Escape and closing the sheet both deny.
+            .sheet(item: Binding(get: { shown }, set: { _ in })) { request in
+                ThemedSheet(title: title(request), subtitle: L10n.text("common.teams.agent_access"), icon: .run, scrolls: true,
+                            onClose: { Task { await decide(request, "deny") } }) {
+                    Text(message(request)).font(Theme.body).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                } actions: {
+                    Button(L10n.text("common.teams.agent_request_deny"), .deny, role: .destructive) { Task { await decide(request, "deny") } }
+                        .buttonStyle(TeamButtonStyle()).keyboardShortcut(.cancelAction)
+                    Spacer()
+                    Button(L10n.text("common.teams.agent_request_allow_always", request.personName), .allow) { Task { await decide(request, "always") } }
+                        .buttonStyle(TeamButtonStyle())
+                    Button(L10n.text("common.teams.agent_request_allow_once"), .allow) { Task { await decide(request, "once") } }
+                        .buttonStyle(TeamButtonStyle())
+                }
+                #if os(macOS)
+                .frame(width: 480)
+                #endif
+                .interactiveDismissDisabled()
             }
             .alert(L10n.text("common.teams.agent_request_failed"), isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
                 Button(L10n.text("common.done"), role: .cancel) {}
             } message: { Text(failure ?? "") }
     }
 
-    private func title(_ request: TeamAgentRequest?) -> String {
-        guard let request else { return "" }
+    private func title(_ request: TeamAgentRequest) -> String {
         let organization = store.organizations.first { $0.id == request.organizationId }?.name
         return organization.map { L10n.text("common.teams.agent_request_title_from", request.personName, $0) }
             ?? L10n.text("common.teams.agent_request_title", request.personName)

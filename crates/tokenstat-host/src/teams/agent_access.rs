@@ -21,6 +21,7 @@
 use crate::error::DispatchError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::Digest;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -61,6 +62,7 @@ const FILE_MAX_BYTES: u64 = 256 * 1024;
 /// cannot start a run nobody remembers allowing.
 const REQUEST_LIFETIME_MS: i64 = 15 * 60 * 1000;
 const MAX_PENDING: usize = 64;
+const MAX_PENDING_PER_PERSON: usize = 3;
 
 /// What the publisher decided about one held request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -80,6 +82,9 @@ struct Request {
     person: String,
     person_name: String,
     message: String,
+    /// The whole request as it was held. An approval covers exactly this,
+    /// so the same message id cannot carry different text once allowed.
+    digest: String,
     preview: String,
     created_at_ms: i64,
     decision: Option<Decision>,
@@ -114,8 +119,7 @@ pub(super) fn allows(principal: &TeamPrincipal) -> bool {
 /// same request again until it is answered or expires.
 pub(super) fn admit(
     principal: &TeamPrincipal,
-    message: &str,
-    text: &str,
+    input: &crate::chat::sharing::AskInput,
 ) -> Result<(), DispatchError> {
     if principal.person.id == principal.publisher_id {
         return Ok(());
@@ -125,15 +129,28 @@ pub(super) fn admit(
         .get(&principal.checkout_id)
         .cloned()
         .unwrap_or_default();
-    admit_with(&entry, principal, message, text)
+    let digest = tokenstat_identity::hex(&sha2::Sha256::digest(
+        serde_json::to_vec(input).map_err(|_| invalid())?,
+    ));
+    admit_with(
+        &entry,
+        principal,
+        &input.client_message_id,
+        &digest,
+        &input.text,
+    )
 }
 
 fn admit_with(
     entry: &Entry,
     principal: &TeamPrincipal,
     message: &str,
+    digest: &str,
     text: &str,
 ) -> Result<(), DispatchError> {
+    if principal.person.id == principal.publisher_id {
+        return Ok(());
+    }
     match entry.access {
         Access::Off => Err(off()),
         Access::On => Ok(()),
@@ -145,6 +162,10 @@ fn admit_with(
                     && request.person == principal.person.id
                     && request.message == message
             }) {
+                if held[index].digest != digest {
+                    held.remove(index);
+                    return Err(changed_request());
+                }
                 return match held[index].decision {
                     // Kept rather than consumed: a retry of a run that has
                     // already started must reach its receipt, not a new prompt.
@@ -156,13 +177,19 @@ fn admit_with(
                     None => Err(pending()),
                 };
             }
-            if held
-                .iter()
-                .filter(|request| request.decision.is_none())
-                .count()
-                >= MAX_PENDING
-            {
-                return Err(pending());
+            // One person cannot bury the prompt under new requests, and the
+            // whole queue has a ceiling as well. Either way the teammate is
+            // told to wait rather than having more requests held.
+            let waiting = held.iter().filter(|request| request.decision.is_none());
+            let theirs = waiting
+                .clone()
+                .filter(|request| {
+                    request.checkout == principal.checkout_id
+                        && request.person == principal.person.id
+                })
+                .count();
+            if theirs >= MAX_PENDING_PER_PERSON || waiting.count() >= MAX_PENDING {
+                return Err(busy());
             }
             held.push(Request {
                 id: super::publications::opaque("approval"),
@@ -172,7 +199,8 @@ fn admit_with(
                 person: principal.person.id.clone(),
                 person_name: principal.person.name.chars().take(120).collect(),
                 message: message.to_string(),
-                preview: text.trim().chars().take(280).collect(),
+                digest: digest.to_string(),
+                preview: preview(text),
                 created_at_ms: now_ms(),
                 decision: None,
             });
@@ -197,6 +225,29 @@ fn decide(id: &str, decision: Decision) -> Result<(String, String), DispatchErro
     Ok((request.checkout.clone(), request.person.clone()))
 }
 
+/// What the prompt shows. Long requests are cut with an ellipsis so the
+/// sharer can see that more was asked than the prompt holds.
+fn preview(text: &str) -> String {
+    const LIMIT: usize = 600;
+    let text = text.trim();
+    if text.chars().count() <= LIMIT {
+        return text.to_string();
+    }
+    text.chars().take(LIMIT).collect::<String>() + "…"
+}
+
+fn busy() -> DispatchError {
+    DispatchError::new(
+        "team_agent_requests_busy",
+        "Requests are already waiting for the sharing computer. Wait for an answer before asking again.",
+    )
+}
+fn changed_request() -> DispatchError {
+    DispatchError::new(
+        "invalid_ask",
+        "This request changed after it was sent. Ask again to send a new one.",
+    )
+}
 fn off() -> DispatchError {
     DispatchError::new(
         "team_agent_runs_off",
@@ -517,16 +568,19 @@ mod tests {
     fn off_refuses_on_admits_and_the_publisher_is_never_held() {
         let teammate = principal("person_b", "checkout_off");
         assert_eq!(
-            code(admit_with(&Entry::default(), &teammate, "m1", "hi")),
+            code(admit_with(&Entry::default(), &teammate, "m1", "hi", "hi")),
             "team_agent_runs_off"
         );
         let on = Entry {
             access: Access::On,
             ..Entry::default()
         };
-        assert_eq!(code(admit_with(&on, &teammate, "m1", "hi")), "ok");
+        assert_eq!(code(admit_with(&on, &teammate, "m1", "hi", "hi")), "ok");
         let publisher = principal("publisher", "checkout_off");
-        assert_eq!(code(admit(&publisher, "m1", "hi")), "ok");
+        assert_eq!(
+            code(admit_with(&Entry::default(), &publisher, "m1", "hi", "hi")),
+            "ok"
+        );
     }
 
     #[test]
@@ -537,12 +591,12 @@ mod tests {
         };
         let teammate = principal("person_c", "checkout_once");
         assert_eq!(
-            code(admit_with(&ask, &teammate, "m1", "fix it")),
+            code(admit_with(&ask, &teammate, "m1", "fix it", "fix it")),
             "team_agent_approval_pending"
         );
         // Sending the same request again does not stack a second prompt.
         assert_eq!(
-            code(admit_with(&ask, &teammate, "m1", "fix it")),
+            code(admit_with(&ask, &teammate, "m1", "fix it", "fix it")),
             "team_agent_approval_pending"
         );
         assert_eq!(
@@ -553,13 +607,92 @@ mod tests {
             1
         );
         decide(&held("checkout_once"), Decision::Once).unwrap();
-        assert_eq!(code(admit_with(&ask, &teammate, "m1", "fix it")), "ok");
-        assert_eq!(code(admit_with(&ask, &teammate, "m1", "fix it")), "ok");
+        assert_eq!(
+            code(admit_with(&ask, &teammate, "m1", "fix it", "fix it")),
+            "ok"
+        );
+        assert_eq!(
+            code(admit_with(&ask, &teammate, "m1", "fix it", "fix it")),
+            "ok"
+        );
         // Allowing once covers that request only.
         assert_eq!(
-            code(admit_with(&ask, &teammate, "m2", "again")),
+            code(admit_with(&ask, &teammate, "m2", "again", "again")),
             "team_agent_approval_pending"
         );
+    }
+
+    #[test]
+    fn an_approval_does_not_carry_over_to_different_text_under_the_same_id() {
+        let ask = Entry {
+            access: Access::Ask,
+            ..Entry::default()
+        };
+        let teammate = principal("person_f", "checkout_swap");
+        assert_eq!(
+            code(admit_with(
+                &ask,
+                &teammate,
+                "m1",
+                "digest_a",
+                "fix the test"
+            )),
+            "team_agent_approval_pending"
+        );
+        decide(&held("checkout_swap"), Decision::Once).unwrap();
+        assert_eq!(
+            code(admit_with(
+                &ask,
+                &teammate,
+                "m1",
+                "digest_b",
+                "delete everything"
+            )),
+            "invalid_ask"
+        );
+        // The swapped request also cost the approval it tried to borrow.
+        assert_eq!(
+            code(admit_with(
+                &ask,
+                &teammate,
+                "m1",
+                "digest_a",
+                "fix the test"
+            )),
+            "team_agent_approval_pending"
+        );
+    }
+
+    #[test]
+    fn one_person_cannot_hold_more_than_three_requests() {
+        let ask = Entry {
+            access: Access::Ask,
+            ..Entry::default()
+        };
+        let teammate = principal("person_g", "checkout_flood");
+        for message in ["m1", "m2", "m3"] {
+            assert_eq!(
+                code(admit_with(&ask, &teammate, message, message, "go")),
+                "team_agent_approval_pending"
+            );
+        }
+        assert_eq!(
+            code(admit_with(&ask, &teammate, "m4", "m4", "go")),
+            "team_agent_requests_busy"
+        );
+        // A request already held still answers as waiting, not busy.
+        assert_eq!(
+            code(admit_with(&ask, &teammate, "m1", "m1", "go")),
+            "team_agent_approval_pending"
+        );
+    }
+
+    #[test]
+    fn a_long_request_is_marked_as_cut_in_the_prompt() {
+        assert_eq!(preview("  short  "), "short");
+        let long = "x".repeat(700);
+        let shown = preview(&long);
+        assert!(shown.ends_with('…') && shown.chars().count() == 601);
     }
 
     #[test]
@@ -570,19 +703,19 @@ mod tests {
         };
         let teammate = principal("person_d", "checkout_deny");
         assert_eq!(
-            code(admit_with(&ask, &teammate, "m1", "rm -rf")),
+            code(admit_with(&ask, &teammate, "m1", "rm -rf", "rm -rf")),
             "team_agent_approval_pending"
         );
         let id = held("checkout_deny");
         decide(&id, Decision::Deny).unwrap();
         assert!(decide(&id, Decision::Once).is_err());
         assert_eq!(
-            code(admit_with(&ask, &teammate, "m1", "rm -rf")),
+            code(admit_with(&ask, &teammate, "m1", "rm -rf", "rm -rf")),
             "team_agent_request_denied"
         );
         // A new attempt asks again rather than inheriting the refusal.
         assert_eq!(
-            code(admit_with(&ask, &teammate, "m1", "rm -rf")),
+            code(admit_with(&ask, &teammate, "m1", "rm -rf", "rm -rf")),
             "team_agent_approval_pending"
         );
     }
@@ -595,7 +728,7 @@ mod tests {
         };
         ask.allowed_people.insert("person_e".into());
         let teammate = principal("person_e", "checkout_always");
-        assert_eq!(code(admit_with(&ask, &teammate, "m9", "go")), "ok");
+        assert_eq!(code(admit_with(&ask, &teammate, "m9", "go", "go")), "ok");
         assert!(
             requests()
                 .iter()
