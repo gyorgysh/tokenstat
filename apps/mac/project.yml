@@ -280,9 +280,12 @@ settings:
     # the new chat prism held on its card, and precise connection failures.
     # 202 went up to TestFlight as 1.8.0 naming why a device did not turn
     # Teams on by itself.
-    # 203 is 1.8.0 with teammate agent runs behind the sharer's approval,
-    # stop sharing, routing on Claude session limits and the new chat grid.
-    CURRENT_PROJECT_VERSION: "203"
+    # 203 went up to TestFlight as 1.8.0 with teammate agent runs behind the
+    # sharer's approval, stop sharing, routing on Claude session limits and
+    # the new chat grid.
+    # 204 is 1.8.0 without free trials, with the grid behind sign-in and the
+    # Patron card describing what it adds.
+    CURRENT_PROJECT_VERSION: "204"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
