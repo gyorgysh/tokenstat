@@ -53,11 +53,12 @@ enum ChatStartGlassField {
     #endif
 
     static func shader(size: CGSize, time: Double, lift: Bool, dark: Bool, moving: Bool,
-                       pointer: SIMD3<Float>) -> Shader {
+                       pointer: SIMD3<Float>, focus: UnitPoint) -> Shader {
         Shader(function: ShaderLibrary.default.chatStartField, arguments: [
             .float2(size),
             .float4(Float(time), lift ? 1 : 0, dark ? 1 : 0, moving ? 1 : 0),
             .float4(pointer.x, pointer.y, pointer.z, 0),
+            .float2(Float(focus.x), Float(focus.y)),
             .color(Theme.accent),
         ])
     }
@@ -97,6 +98,9 @@ struct ChatStartBackdrop: View {
     /// The first message is on its way.
     var sending = false
     let pointer: ChatStartPointer
+    /// Where the light sits and the waves arrive. A little above the middle
+    /// by default, because the composer is.
+    var focus = UnitPoint(x: 0.5, y: 0.46)
     /// The page's coordinate space, which the pointer is measured in.
     static let space = "chatStartBackdrop"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -105,14 +109,24 @@ struct ChatStartBackdrop: View {
     @State private var clock = ChatStartFieldClock()
     @State private var shown = false
 
+    #if os(iOS)
+    /// A phone in Low Power Mode keeps the still grid and the light.
+    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+    private var moving: Bool { active && !reduceMotion && !lowPower }
+    /// Nothing points at a phone's screen, so a still grid needs no frames.
+    private var ticking: Bool { moving }
+    #else
     private var moving: Bool { active && !reduceMotion }
+    /// The pointer's lens still answers while the waves hold still.
+    private var ticking: Bool { active }
+    #endif
 
     var body: some View {
         ZStack {
             floor
             if !reduceTransparency {
                 keyLight
-                TimelineView(.animation(minimumInterval: 1 / 30, paused: !active)) { context in
+                TimelineView(.animation(minimumInterval: 1 / 30, paused: !ticking)) { context in
                     let now = context.date.timeIntervalSinceReferenceDate
                     let time = clock.tick(at: now, running: moving, pace: sending ? 4 : 1)
                     GeometryReader { pane in
@@ -125,7 +139,8 @@ struct ChatStartBackdrop: View {
                             .colorEffect(ChatStartGlassField.shader(
                                 size: pane.size, time: time, lift: lift || sending, dark: colorScheme == .dark,
                                 moving: moving,
-                                pointer: SIMD3(sample.x - Float(origin.x), sample.y - Float(origin.y), sample.z)))
+                                pointer: SIMD3(sample.x - Float(origin.x), sample.y - Float(origin.y), sample.z),
+                                focus: focus))
                     }
                 }
                 .opacity(shown ? 1 : 0)
@@ -137,6 +152,11 @@ struct ChatStartBackdrop: View {
         .onAppear {
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.9)) { shown = true }
         }
+        #if os(iOS)
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
+            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
+        #endif
     }
 
     private var keyLight: some View {
@@ -147,7 +167,7 @@ struct ChatStartBackdrop: View {
                 .init(color: Theme.accent.opacity((dark ? 0.04 : 0.02) * ChatStartGlassField.lightGain), location: 0.5),
                 .init(color: .clear, location: 1),
             ],
-            center: UnitPoint(x: 0.5, y: 0.46),
+            center: focus,
             startRadiusFraction: 0,
             endRadiusFraction: 0.60
         )

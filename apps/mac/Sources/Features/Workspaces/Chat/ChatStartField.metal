@@ -18,9 +18,6 @@ namespace tokenstat {
 
 /// Points between dots. Wide enough to read as paper, not as texture.
 constant float kSpacing = 22.0;
-/// Where the light sits, in fractions of the pane. A little above the
-/// middle, because the composer is.
-constant float2 kFocus = float2(0.5, 0.46);
 /// Points between two waves, and how fast they travel inward, in waves a
 /// second. Together about twenty-five points a second.
 constant float kWaveLength = 260.0;
@@ -58,9 +55,11 @@ using namespace tokenstat;
 /// Time is integrated on the Swift side, so a send can run it faster without
 /// the waves jumping.
 /// `pointer` is (x, y, presence, unused), presence easing between 0 and 1.
+/// `focus` is where the light sits and the waves arrive, in fractions of
+/// the pane: the composer on the new chat page, the mark on sign-in.
 [[ stitchable ]] half4 chatStartField(
     float2 position, half4 current,
-    float2 size, float4 clock, float4 pointer, half4 accent)
+    float2 size, float4 clock, float4 pointer, float2 focusUnit, half4 accent)
 {
     // A pane can be reported at zero size for a frame during a resize.
     if (size.x < 1.0 || size.y < 1.0) { return half4(0.0); }
@@ -71,7 +70,7 @@ using namespace tokenstat;
 
     float2 cell = floor(position / kSpacing);
     float2 centre = (cell + 0.5) * kSpacing;
-    float2 focus = size * kFocus;
+    float2 focus = size * focusUnit;
 
     // Everything is a property of the dot, not the pixel, so a dot is lit
     // evenly across its own disc.

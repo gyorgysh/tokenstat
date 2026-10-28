@@ -28,6 +28,8 @@ struct ClientLoginView: View {
     @State private var webURL: URL?
     @State private var developerUnlock = ReviewBuild.LoginLogoUnlock()
     @State private var developerNotice: String?
+    @State private var pointer = ChatStartPointer()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
@@ -139,7 +141,14 @@ struct ClientLoginView: View {
             .animation(.easeInOut(duration: 0.2), value: account.pendingLogin)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.background)
+        // The new chat page's grid, with its light and its inward waves on
+        // the mark. It pauses with Reduce Motion, in Low Power Mode and
+        // whenever the app is not in front, and is a plain floor with Reduce
+        // Transparency. It brightens a little while a sign-in is waiting.
+        .background {
+            ChatStartBackdrop(active: scenePhase == .active, lift: account.pendingLogin != nil,
+                              pointer: pointer, focus: UnitPoint(x: 0.5, y: 0.34))
+        }
         .overlay(alignment: .bottom) {
             TransientToast(message: $developerNotice)
                 .padding(Theme.Space.m)
