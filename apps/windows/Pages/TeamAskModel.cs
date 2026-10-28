@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 using System.Text;
 using System.Text.Json.Nodes;
-using Tokenstat.Host;
 
 namespace Tokenstat.Pages;
 
 internal sealed class TeamAskNotAccepted(string message) : Exception(message);
+/// <summary>The sharing computer is holding the request until its owner answers.</summary>
+internal sealed class TeamAskAwaitingApproval() : Exception("agent_waiting_approval");
 
 internal sealed class TeamAskModel(TeamAskRecoveryStore storage, TeamCommentTarget target, string label,
     Func<bool> current, Func<string, JsonObject, Task<JsonNode>> call)
@@ -70,7 +71,7 @@ internal sealed class TeamAskModel(TeamAskRecoveryStore storage, TeamCommentTarg
             else if (original.Record.Terminal(response, target.Share)) { await ReplaceAsync(null); Text = ""; }
             else Error = "ask_unconfirmed";
         }
-        catch (HostException failure) when (failure.Code == "team_agent_approval_pending")
+        catch (TeamAskAwaitingApproval)
         {
             var since = _approvalSince ??= DateTimeOffset.UtcNow;
             if (DateTimeOffset.UtcNow - since >= TimeSpan.FromMinutes(15)) { _approvalSince = null; Error = "agent_approval_expired"; }

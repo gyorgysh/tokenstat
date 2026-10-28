@@ -36,6 +36,7 @@ internal sealed partial class TeamsPage
                     ["_accountScope"] = scope.DeepClone(), ["_accountSession"] = session,
                 }); }
                 catch (HostException failure) when (method == "team.chat.ask" && failure.Code is "team_run_review_changed" or "invalid_ask" or "team_agent_request_denied" or "team_agent_runs_off") { throw new TeamAskNotAccepted(failure.Message); }
+                catch (HostException failure) when (method == "team.chat.ask" && failure.Code == "team_agent_approval_pending") { throw new TeamAskAwaitingApproval(); }
             }
             static string Label(string value) => string.Concat(value.EnumerateRunes().Take(160)
                 .Where(r => System.Text.Rune.GetUnicodeCategory(r) != System.Globalization.UnicodeCategory.Format)

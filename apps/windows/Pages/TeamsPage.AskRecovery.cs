@@ -73,6 +73,7 @@ internal sealed partial class TeamsPage
                 return reply;
             }
             catch (HostException failure) when (method == "team.chat.ask" && failure.Code is "team_run_review_changed" or "invalid_ask" or "team_agent_request_denied" or "team_agent_runs_off") { throw new TeamAskNotAccepted(failure.Message); }
+            catch (HostException failure) when (method == "team.chat.ask" && failure.Code == "team_agent_approval_pending") { throw new TeamAskAwaitingApproval(); }
         }
         var model = new TeamAskModel(_askStorage, t, entry.Snapshot.Saved.Label, current, Call);
         var actions = new StackPanel { Spacing = Theme.SpaceS }; var note = TeamText(""); actions.Children.Add(note);
