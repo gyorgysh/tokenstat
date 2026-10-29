@@ -3686,7 +3686,7 @@ mod tests {
             let line = serde_json::json!({"id": 1, "method": method, "params": params}).to_string();
             connection.send(line.as_bytes()).unwrap();
             let answer = connection
-                .receive_within(1024 * 1024, std::time::Duration::from_secs(5))
+                .receive_within(1024 * 1024, std::time::Duration::from_secs(30))
                 .unwrap();
             serde_json::from_slice(&answer).unwrap()
         }
@@ -3719,6 +3719,30 @@ mod tests {
         );
         let folder = root.path().join("project");
         std::fs::create_dir(&folder).unwrap();
+        let live_pulls = std::env::var_os("TOKENSTAT_TEST_LIVE_PULL_PAGES").is_some();
+        if live_pulls {
+            assert!(
+                std::process::Command::new("git")
+                    .args(["init", "-q"])
+                    .current_dir(&folder)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            assert!(
+                std::process::Command::new("git")
+                    .args([
+                        "remote",
+                        "add",
+                        "origin",
+                        "https://github.com/rust-lang/rust.git"
+                    ])
+                    .current_dir(&folder)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
         let workspace = local("workspace.add", serde_json::json!({"path": folder}));
         assert_eq!(workspace["ok"], true);
         let chat = local(
@@ -3750,6 +3774,34 @@ mod tests {
         )
         .unwrap();
         assert_eq!(connection.peer_key(), host.public_key());
+        if live_pulls {
+            let first = rpc(
+                &mut connection,
+                "pulls.listPage",
+                serde_json::json!({
+                    "workspaceId": workspace["result"]["id"], "scope": "all", "state": "open", "limit": 40
+                }),
+            );
+            assert_eq!(first["ok"], true, "{first}");
+            let cursor = first["result"]["nextCursor"].as_str().unwrap();
+            let second = rpc(
+                &mut connection,
+                "pulls.listPage",
+                serde_json::json!({
+                    "workspaceId": workspace["result"]["id"], "scope": "all", "state": "open", "limit": 40, "cursor": cursor
+                }),
+            );
+            assert_eq!(second["ok"], true, "{second}");
+            let first_rows = first["result"]["rows"].as_array().unwrap();
+            let second_rows = second["result"]["rows"].as_array().unwrap();
+            assert_eq!(first_rows.len(), 40);
+            assert_eq!(second_rows.len(), 40);
+            assert!(second_rows.iter().all(|row| {
+                first_rows
+                    .iter()
+                    .all(|prior| prior["number"] != row["number"])
+            }));
+        }
         let empty = rpc(&mut connection, "work.continuity.get", reference.clone());
         assert_eq!(empty["ok"], true, "{empty}");
         assert!(empty["result"]["handoff"].is_null());
@@ -3796,6 +3848,16 @@ mod tests {
             serde_json::json!({"query": "project"}),
         );
         assert_eq!(denied_search["ok"], false);
+        if live_pulls {
+            let denied = rpc(
+                &mut connection,
+                "pulls.listPage",
+                serde_json::json!({
+                    "workspaceId": workspace["result"]["id"], "scope": "all", "state": "open", "limit": 40
+                }),
+            );
+            assert_eq!(denied["ok"], false);
+        }
         assert!(denied_search["result"].is_null());
         assert_eq!(
             rpc(&mut connection, "work.continuity.get", reference.clone())["ok"],
@@ -3856,6 +3918,10 @@ mod tests {
         assert_eq!(purpose_for_method("chat.events"), ChannelPurpose::Chat);
         assert_eq!(purpose_for_method("chat.list"), ChannelPurpose::Chat);
         assert_eq!(purpose_for_method("work.search"), ChannelPurpose::Workspace);
+        assert_eq!(
+            purpose_for_method("pulls.listPage"),
+            ChannelPurpose::Workspace
+        );
         assert_eq!(
             purpose_for_method("work.continuity.get"),
             ChannelPurpose::Workspace

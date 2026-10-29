@@ -1238,6 +1238,7 @@ mod tests {
             "workspace.pullReviewed",
             "workspace.lfsSetup",
             "pulls.branch",
+            "pulls.listPage",
             "pty.spawn",
             "pty.write",
             "workflow.run",
