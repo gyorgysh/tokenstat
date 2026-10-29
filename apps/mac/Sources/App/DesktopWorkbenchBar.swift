@@ -42,7 +42,9 @@ struct DesktopWorkbenchBar: View {
                                     Label(tool.title, systemImage: tool.symbol)
                                         .font(Theme.font(12, weight: state.selected == tool ? .semibold : .regular))
                                         .lineLimit(1)
-                                        .padding(.leading, 9).padding(.trailing, 4).padding(.vertical, 9)
+                                        .padding(.leading, 9).padding(.trailing, 4)
+                                        .frame(minHeight: 44)
+                                        .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityAddTraits(state.selected == tool ? [.isSelected] : [])
@@ -65,7 +67,7 @@ struct DesktopWorkbenchBar: View {
                     Button { open(tool) } label: { Label(tool.title, systemImage: tool.symbol) }
                 }
             } label: {
-                Image(systemName: ActionIcon.create.symbol).frame(width: 30, height: 30)
+                Image(systemName: ActionIcon.create.symbol).frame(width: 44, height: 44)
             }
             .menuStyle(.borderlessButton).fixedSize()
             .help(L10n.text("apple.workbench.add_tool"))

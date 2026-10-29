@@ -737,8 +737,7 @@ struct ClientChatThread: View {
     @State private var chatWidth: CGFloat = 0
     @State private var browserFocus: BrowserFocus = .split
     @State private var chatPaneFraction: CGFloat = 0.5
-    @State private var dividerDragOrigin: CGFloat?
-    @State private var dividerDragWidth: CGFloat?
+    @State private var chatResize = ClientChatResizeState()
     @State private var companion: Companion?
     @State private var browserLayoutGeneration: UInt64?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -755,12 +754,6 @@ struct ClientChatThread: View {
 
     private var wideBrowser: Bool {
         (availableWorkbenchWidth ?? chatWidth) >= 600 && !dynamicTypeSize.isAccessibilitySize
-    }
-
-    private var splitChatWidth: CGFloat {
-        let available = max(0, chatWidth - 18)
-        let preferred = dividerDragWidth ?? available * chatPaneFraction
-        return min(max(preferred, 300), max(300, available - 280))
     }
 
     private var companionTabs: some View {
@@ -789,9 +782,10 @@ struct ClientChatThread: View {
             Label(title, systemImage: icon)
                 .font(ClientType.caption.weight(selected ? .semibold : .regular))
                 .padding(.horizontal, Theme.Space.s)
-                .padding(.vertical, Theme.Space.xs)
+                .frame(minHeight: 44)
                 .background(selected ? Theme.accent.opacity(0.16) : Color.clear,
                             in: RoundedRectangle(cornerRadius: Theme.Space.xs))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(selected ? Theme.accent : Theme.controlGlyph)
@@ -816,9 +810,10 @@ struct ClientChatThread: View {
             Label(title, systemImage: icon)
                 .font(ClientType.caption.weight(companion == choice && browserFocus != .chat ? .semibold : .regular))
                 .padding(.horizontal, Theme.Space.s)
-                .padding(.vertical, Theme.Space.xs)
+                .frame(minHeight: 44)
                 .background(companion == choice && browserFocus != .chat ? Theme.accent.opacity(0.16) : Color.clear,
                             in: RoundedRectangle(cornerRadius: Theme.Space.xs))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(companion == choice && browserFocus != .chat ? Theme.accent : Theme.controlGlyph)
@@ -826,43 +821,18 @@ struct ClientChatThread: View {
     }
 
     private var browserDivider: some View {
-        Rectangle()
-            .fill(Theme.controlGlyph.opacity(0.18))
-            .frame(width: 2)
-            .frame(width: 18)
-            .overlay {
-                Capsule()
-                    .fill(Theme.controlGlyph.opacity(0.7))
-                    .frame(width: 4, height: 42)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { withAnimation { chatPaneFraction = 0.5 } }
-            .gesture(DragGesture(minimumDistance: 2)
-                .onChanged { value in
-                    if dividerDragOrigin == nil { dividerDragOrigin = splitChatWidth }
-                    dividerDragWidth = (dividerDragOrigin ?? splitChatWidth) + value.translation.width
+        ClientChatResizeDivider(resize: chatResize, fraction: $chatPaneFraction,
+                                totalWidth: chatWidth) { proposed in
+            let settled = min(max(proposed, 300), max(300, chatWidth - 18 - 280))
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                if proposed < 190 { browserFocus = .browser }
+                else if proposed > chatWidth - 170 { browserFocus = .chat }
+                else {
+                    chatPaneFraction = settled / max(chatWidth - 18, 1)
+                    browserFocus = .split
                 }
-                .onEnded { value in
-                    let proposed = (dividerDragOrigin ?? splitChatWidth) + value.translation.width
-                    let settled = min(max(proposed, 300), max(300, chatWidth - 18 - 280))
-                    dividerDragOrigin = nil
-                    dividerDragWidth = nil
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                        if proposed < 190 { browserFocus = .browser }
-                        else if proposed > chatWidth - 170 { browserFocus = .chat }
-                        else {
-                            chatPaneFraction = settled / max(chatWidth - 18, 1)
-                            browserFocus = .split
-                        }
-                    }
-                })
-            .accessibilityRepresentation {
-                Slider(value: Binding(
-                    get: { Double(chatPaneFraction) },
-                    set: { chatPaneFraction = CGFloat($0) }
-                ), in: 0.3...0.7)
-                .accessibilityLabel(L10n.text("apple.workbench.resize"))
             }
+        }
     }
 
     /// The folder's uncommitted work and the branch's pull request, above
@@ -1020,8 +990,9 @@ struct ClientChatThread: View {
                             .padding(.top, Theme.Space.s)
                     }
                         }
-                        .frame(width: isActive && wideBrowser && companion != nil && browserFocus == .split
-                            ? splitChatWidth : nil)
+                        .modifier(ClientChatResizeFrame(resize: chatResize,
+                            fraction: chatPaneFraction, totalWidth: chatWidth,
+                            isSplit: isActive && wideBrowser && companion != nil && browserFocus == .split))
                         .overlay {
                             if dropExperienceVisible {
                                 ChatDropExperience()
@@ -2998,6 +2969,92 @@ private struct ClientChatChangesCompanion: View {
             self.error = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             loaded = true
         }
+    }
+}
+
+/// Keep pointer-rate drag state below the chat thread. Updating the thread's
+/// own @State on every move rebuilds its transcript and composer.
+@MainActor @Observable private final class ClientChatResizeState {
+    private(set) var liveWidth: CGFloat?
+    @ObservationIgnored private var origin: CGFloat?
+
+    var isDragging: Bool { liveWidth != nil }
+
+    func width(fraction: CGFloat, totalWidth: CGFloat) -> CGFloat {
+        let available = max(0, totalWidth - 18)
+        return min(max(liveWidth ?? available * fraction, 300), max(300, available - 280))
+    }
+
+    func proposed(translation: CGFloat, fraction: CGFloat, totalWidth: CGFloat) -> CGFloat {
+        if origin == nil { origin = width(fraction: fraction, totalWidth: totalWidth) }
+        return (origin ?? 300) + translation
+    }
+
+    func drag(translation: CGFloat, fraction: CGFloat, totalWidth: CGFloat) {
+        let next = proposed(translation: translation, fraction: fraction, totalWidth: totalWidth)
+        if liveWidth != next { liveWidth = next }
+    }
+
+    func reset() { origin = nil; liveWidth = nil }
+}
+
+private struct ClientChatResizeFrame: ViewModifier {
+    let resize: ClientChatResizeState
+    let fraction: CGFloat
+    let totalWidth: CGFloat
+    let isSplit: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: isSplit ? resize.width(fraction: fraction, totalWidth: totalWidth) : nil)
+            .transaction {
+                if resize.isDragging { $0.animation = nil; $0.disablesAnimations = true }
+            }
+    }
+}
+
+private struct ClientChatResizeDivider: View {
+    let resize: ClientChatResizeState
+    @Binding var fraction: CGFloat
+    let totalWidth: CGFloat
+    let onFinish: (CGFloat) -> Void
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.controlGlyph.opacity(0.18))
+            .frame(width: 2)
+            .frame(width: 18)
+            .overlay {
+                Capsule().fill(Theme.controlGlyph.opacity(0.7))
+                    .frame(width: 4, height: 42)
+                    .allowsHitTesting(false)
+            }
+            .overlay {
+                Color.clear.frame(width: 44).contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                        .onChanged {
+                            resize.drag(translation: $0.translation.width,
+                                fraction: fraction, totalWidth: totalWidth)
+                        }
+                        .onEnded {
+                            let proposed = resize.proposed(translation: $0.translation.width,
+                                fraction: fraction, totalWidth: totalWidth)
+                            onFinish(proposed)
+                            resize.reset()
+                        })
+                    .onTapGesture(count: 2) {
+                        resize.reset()
+                        withAnimation { fraction = 0.5 }
+                    }
+            }
+            .onDisappear { resize.reset() }
+            .accessibilityRepresentation {
+                Slider(value: Binding(
+                    get: { Double(fraction) },
+                    set: { fraction = CGFloat($0) }
+                ), in: 0.3...0.7)
+                .accessibilityLabel(L10n.text("apple.workbench.resize"))
+            }
     }
 }
 

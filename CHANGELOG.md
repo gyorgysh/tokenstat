@@ -16,6 +16,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - iPhone and iPad Home can return directly to the latest conversation in a repository. Repository chats are easier to switch, with a persistent list on wider layouts and a conversation picker on a compact iPhone.
 - On an open iPhone Duo or iPad, chat can sit beside a resizable browser, changed-file review, or terminal. The Changes pane opens file diffs beside the conversation; Terminal can reattach a running repository session or start a chosen installed tool.
 - Pull requests open from a faster, clearer overview, with paged lists, richer review details and visible partial check results. Previously loaded data stays available while a background refresh runs or the connection fails.
+- Home keeps Continue focused on the latest project and conversation. Chat, pull request and Mac workbench controls have larger touch targets, and the Duo split divider responds more smoothly while resizing.
 
 ### Fixed
 

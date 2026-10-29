@@ -22,7 +22,7 @@ struct PullDetailView: View {
             #if os(macOS)
             DetailChromeBar(scope: scope, leading: {
                 Button(action: onBack) { ActionIcon.back.label(L10n.text("apple.pulldetailview.pull_requests.d9e3f260")) }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .buttonStyle(SecondaryButtonStyle(comfortable: true))
             }) {
                 detailActions
             }
@@ -112,27 +112,41 @@ struct PullDetailView: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: Theme.Space.s) {
                 backButton
-                Spacer()
+                Spacer(minLength: Theme.Space.s)
                 detailActions
             }
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
                 backButton
-                HStack { detailActions }
+                Spacer(minLength: Theme.Space.s)
+                if let raw = model.detail?.url, let url = URL(string: raw) {
+                    Button { openURL(url) } label: {
+                        Image(systemName: ActionIcon.external.symbol)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.text("apple.pulldetailview.open_on_github.03f69885"))
+                }
+                refreshButton
             }
         }
     }
 
     private var backButton: some View {
         Button(action: onBack) { ActionIcon.back.label(L10n.text("apple.pulldetailview.pull_requests.d9e3f260")) }
-            .buttonStyle(SecondaryButtonStyle(small: true))
+            .buttonStyle(SecondaryButtonStyle(comfortable: true))
     }
 
     @ViewBuilder
     private var detailActions: some View {
         if let raw = model.detail?.url, let url = URL(string: raw) {
             Button { openURL(url) } label: { ActionIcon.external.label(L10n.text("apple.pulldetailview.open_on_github.03f69885")) }
-                .buttonStyle(SecondaryButtonStyle(small: true))
+                .buttonStyle(SecondaryButtonStyle(comfortable: true))
         }
+        refreshButton
+    }
+
+    private var refreshButton: some View {
         ToolbarIconButton(systemImage: "arrow.clockwise", help: L10n.text("apple.pulldetailview.refresh_pull_request.fc146ac9"), isBusy: model.loading) {
             Task { await model.load(workspaceID: workspaceID, peer: peer, number: summary.number, refresh: true) }
         }
@@ -524,7 +538,8 @@ private struct DetailTabs: View {
                         }
                         .font(Theme.caption.weight(selection == tab ? .semibold : .medium))
                         .foregroundStyle(selection == tab ? Theme.accent : Color.secondary)
-                        .padding(.horizontal, Theme.Space.m).frame(height: 34)
+                        .padding(.horizontal, Theme.Space.m)
+                        .frame(height: 44)
                         .background { if selection == tab { RoundedRectangle(cornerRadius: 9).fill(Theme.accentSoft).matchedGeometryEffect(id: "tab", in: slide) } }
                     }
                     .buttonStyle(.plain)

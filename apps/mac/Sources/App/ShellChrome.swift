@@ -605,6 +605,8 @@ struct ChromeTabStrip: View, Equatable {
         .padding(.horizontal, 7)
         .frame(height: 26)
         .background(Capsule().fill(current == nil ? Color.clear : Theme.rowSelected))
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
         .help(L10n.text("apple.shellchrome.switch_section.936d958d"))
         .accessibilityLabel(current.map { L10n.text("apple.shellchrome.0_switch_section.dac85de8", "\($0.label)") } ?? L10n.text("apple.shellchrome.more_sections.a8e35e36"))
     }
@@ -657,7 +659,8 @@ struct ChromeTabButton: View {
             .background(
                 Capsule().fill(isSelected ? Theme.rowSelected : (isHovering ? Theme.rowHighlight.opacity(0.7) : .clear))
             )
-            .contentShape(Capsule())
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }

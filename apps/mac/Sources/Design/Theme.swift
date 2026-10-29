@@ -223,13 +223,9 @@ enum Theme {
         /// Row accessories and card headers.
         static let heightSmall: CGFloat = 24
         /// A control that has to be easy to hit, such as Jump to latest
-        /// over a moving transcript. Taller on a phone, where a 24pt pill
-        /// is a miss more often than a press.
-        #if os(macOS)
-        static let heightComfortable: CGFloat = 32
-        #else
+        /// over a moving transcript. The same 44pt target serves touch
+        /// on both phone and desktop.
         static let heightComfortable: CGFloat = 44
-        #endif
         /// Buttons that sit beside each other in a footer.
         static let pairedWidth: CGFloat = 88
         /// Row height for a list a person scans rather than reads.
@@ -832,7 +828,7 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
 }
 
 /// Shared height for `DetailChromeBar` and matching chrome rows.
-let DetailChromeBarHeight: CGFloat = 40
+let DetailChromeBarHeight: CGFloat = 52
 let DetailChromeBottomSpacing: CGFloat = 3
 
 /// The inside geometry every destination chrome row shares.
@@ -1349,8 +1345,8 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
 /// Every mark used to sit in its own bordered circle, and a bar of eight of
 /// them read as a row of buttons asking to be pressed rather than as chrome.
 struct ToolbarIconButton: View {
-    /// The seat's side. The hit area is the whole seat, drawn or not.
-    static let diameter: CGFloat = 30
+    /// Keep the glyph seat compact while its full hit area fits a finger.
+    static let diameter: CGFloat = 44
 
     let systemImage: String
     var help: String = ""
@@ -1379,7 +1375,7 @@ struct ToolbarIconButton: View {
                             .foregroundStyle(glyphColor)
                     }
                 }
-                .frame(width: Self.diameter, height: Self.diameter)
+                .frame(width: 30, height: 30)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(seatColor)
@@ -1394,7 +1390,8 @@ struct ToolbarIconButton: View {
                         )
                 }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(width: Self.diameter, height: Self.diameter)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled || isBusy)

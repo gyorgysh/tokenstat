@@ -64,8 +64,16 @@ import Foundation
         assert(pathPlaces.contains { $0.id.workspaceID == "/Users/example/project" && $0.id.itemID == "unix-chat" })
         assert(pathPlaces.contains { $0.id.workspaceID == "C:\\Users\\example\\project" && $0.id.itemID == "windows-chat" })
         assert(pathPlaces.filter { $0.id.kind == .chat }.allSatisfy { $0.workspaceName == "Project" })
-        assert(store.continuePlaces(in: bob).filter { $0.id.kind == .chat }.count == 2,
-               "distinct repository identities each keep their latest chat")
+        assert(store.continuePlaces(in: bob).map(\.id.itemID) == ["windows-chat"],
+               "Home offers only the latest chat when there is no recent project")
+        store.record(in: otherHost, peer: "peer", workspaceID: "project", workspaceName: "Project",
+                     kind: .workspace, at: Date(timeIntervalSince1970: 10))
+        store.record(in: otherHost, peer: "peer", workspaceID: "project", workspaceName: "Project",
+                     kind: .chat, itemID: "chat", at: Date(timeIntervalSince1970: 11))
+        store.record(in: otherHost, peer: "peer", workspaceID: "project", workspaceName: "Project",
+                     kind: .terminal, itemID: "terminal", at: Date(timeIntervalSince1970: 12))
+        assert(store.continuePlaces(in: otherHost).map(\.id.kind) == [.chat, .workspace],
+               "Home keeps the project and chat instead of a newer terminal")
         store.remove(in: alice, peer: "peer", workspaceID: nil, kind: .terminal, itemID: "tty")
         assert(store.places(in: bob).contains { $0.id.itemID == "tty" }, "another account cannot remove it")
         store.remove(in: bob, peer: "peer", workspaceID: nil, kind: .terminal, itemID: "tty")
@@ -79,7 +87,7 @@ import Foundation
                          at: Date(timeIntervalSince1970: Date().timeIntervalSince1970 + Double(n)))
         }
         let continued = store.continuePlaces(in: unclaimed)
-        assert(continued.count == 4 && continued.last?.id.itemID == "chat-1")
+        assert(continued.count == 2 && continued.contains { $0.id.itemID == "chat-1" })
         assert(store.places(in: unclaimed).count == ClientRecentPlaces.capacity)
         assert(store.continuePlaces(in: alice, limit: 0).isEmpty)
         assert(store.continuePlaces(in: nil).isEmpty)

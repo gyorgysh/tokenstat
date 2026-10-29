@@ -46,8 +46,6 @@ final class ClientRecentPlaces {
 
     @ObservationIgnored private let defaults: UserDefaults
     private var revision = 0
-    private struct ChatOwner: Hashable { let peer: String; let workspace: String? }
-
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     func places(in scope: Scope?) -> [Place] {
@@ -60,25 +58,17 @@ final class ClientRecentPlaces {
             .sorted { $0.openedAt > $1.openedAt }.prefix(Self.capacity))
     }
 
-    /// Keep the last conversation reachable even when recent folders and
-    /// terminals would otherwise fill the short Home list.
-    func continuePlaces(in scope: Scope?, limit: Int = 4) -> [Place] {
+    /// Home is a shortcut, not another history list: one recent project and
+    /// one recent conversation. A terminal only fills an otherwise empty card.
+    func continuePlaces(in scope: Scope?, limit: Int = 2) -> [Place] {
         guard limit > 0 else { return [] }
-        // Titles are deliberately not persisted: a title can contain a private
-        // prompt. Multiple chats in the same repository would therefore have
-        // identical labels, so offer its most recently opened chat once.
-        var chatOwners = Set<ChatOwner>()
-        let recent = places(in: scope).filter { place in
-            guard place.id.kind == .chat else { return true }
-            return chatOwners.insert(ChatOwner(peer: place.id.peer, workspace: place.id.workspaceID)).inserted
+        let recent = places(in: scope)
+        let anchors = [recent.first { $0.id.kind == .workspace },
+                       recent.first { $0.id.kind == .chat }].compactMap { $0 }
+        if !anchors.isEmpty {
+            return Array(anchors.sorted { $0.openedAt > $1.openedAt }.prefix(min(limit, 2)))
         }
-        var shown = Array(recent.prefix(limit))
-        if !shown.contains(where: { $0.id.kind == .chat }),
-           let chat = recent.first(where: { $0.id.kind == .chat }) {
-            if shown.count == limit { shown.removeLast() }
-            shown.append(chat)
-        }
-        return shown
+        return Array(recent.prefix(1))
     }
 
     func record(
