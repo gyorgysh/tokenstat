@@ -1296,13 +1296,18 @@ private final class ClientBrowserPresentation {
 struct ClientBrowserScreen: View {
     @Bindable var session: ProjectBrowserSession
     var onClose: () -> Void
+    var onToggleFullScreen: (() -> Void)? = nil
+    var isFullScreen = false
     @State private var address: String
     @State private var presentation = ClientBrowserPresentation()
     @State private var reloadToken = 0
 
-    init(session: ProjectBrowserSession, onClose: @escaping () -> Void) {
+    init(session: ProjectBrowserSession, onClose: @escaping () -> Void,
+         onToggleFullScreen: (() -> Void)? = nil, isFullScreen: Bool = false) {
         self.session = session
         self.onClose = onClose
+        self.onToggleFullScreen = onToggleFullScreen
+        self.isFullScreen = isFullScreen
         _address = State(initialValue: session.targetURL)
     }
 
@@ -1372,17 +1377,26 @@ struct ClientBrowserScreen: View {
     }
 
     @ViewBuilder private var browserControls: some View {
+        if let onToggleFullScreen {
+            Button(action: onToggleFullScreen) {
+                Image(systemName: isFullScreen ? "rectangle.split.2x1" : "arrow.up.left.and.arrow.down.right")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel(isFullScreen
+                ? L10n.text("apple.terminalpane.split.32afaa78")
+                : L10n.text("apple.screenviewerview.full_screen.674fe2ac"))
+        }
         Menu {
             ForEach(session.recentPorts, id: \.self) { port in
                 Button(String(port), .browser) { address = "http://127.0.0.1:\(port)/" }
             }
         } label: {
-            Image(systemName: "clock.arrow.circlepath").frame(minWidth: 32, minHeight: 44)
+            Image(systemName: "clock.arrow.circlepath").frame(minWidth: 44, minHeight: 44)
         }
         .disabled(session.recentPorts.isEmpty)
         .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.recent_project_ports.b18529b8"))
         Button(action: openAddress) {
-            Image(systemName: "arrow.right.circle").frame(minWidth: 32, minHeight: 44)
+            Image(systemName: "arrow.right.circle").frame(minWidth: 44, minHeight: 44)
         }
         .font(ClientType.caption.weight(.semibold))
         .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.open_address.abc6bf46"))
@@ -1391,12 +1405,13 @@ struct ClientBrowserScreen: View {
             presentation.error = nil
             reloadToken += 1
         } label: {
-            Image(systemName: "arrow.clockwise").frame(minWidth: 32, minHeight: 44)
+            Image(systemName: "arrow.clockwise").frame(minWidth: 44, minHeight: 44)
         }
         .font(ClientType.caption.weight(.semibold))
         .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.reload.bdc090ec"))
         Button(L10n.text("common.done"), .done, action: onClose)
             .font(ClientType.caption.weight(.semibold))
+            .frame(minHeight: 44)
     }
 
     private func openAddress() {

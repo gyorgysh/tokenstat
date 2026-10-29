@@ -105,9 +105,12 @@ private struct ClientChatContent: View {
     @State private var refreshing = false
     @State private var showingChatSwitcher = false
     @State private var showingChatSidebar = true
+    @State private var chatSidebarWidth: CGFloat = 210
+    @State private var chatSidebarResize = ClientChatSidebarResizeState()
     @State private var workbenchWidth: CGFloat = 0
     @State private var workbenchHeight: CGFloat = 0
     @State private var browserOpen = false
+    @State private var restoreSidebarAfterCompanion = false
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
@@ -124,8 +127,12 @@ private struct ClientChatContent: View {
                    !dynamicTypeSize.isAccessibilitySize,
                    showingChatSidebar, opened != nil,
                    !browserOpen || geometry.size.width >= 900 {
-                    chatSwitcher.frame(width: 210)
-                    ThemeRule.vertical
+                    chatSwitcher.modifier(ClientChatSidebarFrame(resize: chatSidebarResize,
+                        width: chatSidebarWidth, totalWidth: geometry.size.width))
+                    ClientChatSidebarDivider(resize: chatSidebarResize,
+                        width: $chatSidebarWidth, totalWidth: geometry.size.width) {
+                            withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false }
+                        }
                 }
                 chatContent.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -211,13 +218,13 @@ private struct ClientChatContent: View {
                             && verticalSizeClass != .compact
                             && !dynamicTypeSize.isAccessibilitySize
                             && (!browserOpen || workbenchWidth >= 900) {
-                            showingChatSidebar.toggle()
+                            withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar.toggle() }
                         }
                         else { showingChatSwitcher = true }
                     },
                     availableWorkbenchWidth: workbenchWidth,
                     availableWorkbenchHeight: workbenchHeight,
-                    onBrowserChange: { browserOpen = $0 },
+                    onBrowserChange: { updateCompanion(open: $0) },
                     onFork: { copied in
                         guard visible, publicationLayout == navigation.stackGeneration,
                               opened?.id == thread.id else { return }
@@ -248,7 +255,7 @@ private struct ClientChatContent: View {
                 Spacer()
                 Button {
                     if showingChatSwitcher { showingChatSwitcher = false }
-                    else { showingChatSidebar = false }
+                    else { withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false } }
                 } label: {
                     Image(systemName: "sidebar.left")
                         .frame(minWidth: 44, minHeight: 44)
@@ -304,6 +311,20 @@ private struct ClientChatContent: View {
             }
         }
         .listStyle(.plain)
+        }
+    }
+
+    private func updateCompanion(open: Bool) {
+        guard browserOpen != open else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            browserOpen = open
+            if open {
+                restoreSidebarAfterCompanion = showingChatSidebar
+                showingChatSidebar = false
+            } else if restoreSidebarAfterCompanion {
+                showingChatSidebar = true
+                restoreSidebarAfterCompanion = false
+            }
         }
     }
 
@@ -770,11 +791,25 @@ struct ClientChatThread: View {
             && !dynamicTypeSize.isAccessibilitySize
     }
 
+    /// The global Duo sidebar can narrow the detail column without folding
+    /// the device. Keep the companion in this column instead of presenting a
+    /// sheet over the app; only the simultaneous two-pane layout needs 600pt.
+    private var showsCompanionTabs: Bool {
+        (availableWorkbenchWidth ?? chatWidth) >= 420
+            && (availableWorkbenchHeight ?? .infinity) >= 500
+            && verticalSizeClass != .compact
+            && !dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var displayedBrowserFocus: BrowserFocus {
+        !wideBrowser && companion != nil && browserFocus == .split ? .browser : browserFocus
+    }
+
     private var companionTabs: some View {
         ScrollView(.horizontal) {
             HStack(spacing: Theme.Space.xs) {
                 browserTab(.chat, title: L10n.text("apple.clientchatview.chat.460b3a7d"), icon: "bubble.left")
-                if companion != nil {
+                if companion != nil && wideBrowser {
                     browserTab(.split, title: L10n.text("apple.terminalpane.split.32afaa78"), icon: "rectangle.split.2x1")
                 }
                 companionTab(.changes, title: L10n.text("apple.clientworkspacesections.changes.bbd4b6a8"), icon: "plusminus")
@@ -789,7 +824,7 @@ struct ClientChatThread: View {
     }
 
     private func browserTab(_ focus: BrowserFocus, title: String, icon: String) -> some View {
-        let selected = browserFocus == focus || focus == .chat && companion == nil
+        let selected = displayedBrowserFocus == focus || focus == .chat && companion == nil
         return Button {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { browserFocus = focus }
         } label: {
@@ -985,9 +1020,9 @@ struct ClientChatThread: View {
                 if model.savedCopy == nil {
                     WorkHandoffOffer(chat: model) { showingHandoff = true }
                 }
-                if isActive, wideBrowser, model.savedCopy == nil, toolsIdentity != nil { companionTabs }
+                if isActive, showsCompanionTabs, model.savedCopy == nil, toolsIdentity != nil { companionTabs }
                 HStack(spacing: 0) {
-                    if browserFocus != .browser || companion == nil || !wideBrowser {
+                    if displayedBrowserFocus != .browser || companion == nil || !showsCompanionTabs {
                         VStack(spacing: 0) {
                 transcript(chat)
                     .environment(\.openURL, OpenURLAction { url in
@@ -1018,24 +1053,31 @@ struct ClientChatThread: View {
                         toolsPane(peer: peer, workspaceID: workspace)
                             .frame(width: 320)
                     }
-                    if isActive, wideBrowser, browserFocus != .chat, let companion,
+                    if isActive, showsCompanionTabs, displayedBrowserFocus != .chat, let companion,
                        let peer = model.peer, let workspace = model.workspaceID {
-                        if browserFocus == .split { browserDivider }
+                        if displayedBrowserFocus == .split { browserDivider }
                         switch companion {
                         case .browser:
                             if let browserSession {
-                            ClientBrowserScreen(session: browserSession) { closeBrowser() }
-                                .frame(minWidth: browserFocus == .split ? 280 : 0, maxWidth: .infinity)
+                            ClientBrowserScreen(session: browserSession,
+                                onClose: { closeBrowser() },
+                                onToggleFullScreen: wideBrowser ? {
+                                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                                        browserFocus = displayedBrowserFocus == .browser ? .split : .browser
+                                    }
+                                } : nil,
+                                isFullScreen: displayedBrowserFocus == .browser)
+                                .frame(minWidth: displayedBrowserFocus == .split ? 280 : 0, maxWidth: .infinity)
                             }
                         case .changes:
                             ClientChatChangesCompanion(peer: peer, workspaceID: workspace,
                                 hostName: hostName)
-                                .frame(minWidth: browserFocus == .split ? 280 : 0, maxWidth: .infinity)
+                                .frame(minWidth: displayedBrowserFocus == .split ? 280 : 0, maxWidth: .infinity)
                         case .terminal:
                             ClientChatTerminalCompanion(peer: peer, workspaceID: workspace,
                                 folderPath: folder?.path ?? (workspace.hasPrefix("/") ? workspace : ""),
                                 hostName: hostName)
-                                .frame(minWidth: browserFocus == .split ? 280 : 0, maxWidth: .infinity)
+                                .frame(minWidth: displayedBrowserFocus == .split ? 280 : 0, maxWidth: .infinity)
                         }
                     }
                 }
@@ -1247,9 +1289,9 @@ struct ClientChatThread: View {
         }
         .sheet(isPresented: $showPort) { portSheet }
         .sheet(item: Binding(
-            get: { isActive && !wideBrowser ? browserSession : nil },
+            get: { isActive && !showsCompanionTabs ? browserSession : nil },
             set: {
-                if $0 == nil && isActive && !wideBrowser,
+                if $0 == nil && isActive && !showsCompanionTabs,
                    browserLayoutGeneration == navigation.stackGeneration { closeBrowser() }
             }
         )) { browser in
@@ -3023,6 +3065,90 @@ private struct ClientChatResizeFrame: ViewModifier {
             .frame(width: isSplit ? resize.width(fraction: fraction, totalWidth: totalWidth) : nil)
             .transaction {
                 if resize.isDragging { $0.animation = nil; $0.disablesAnimations = true }
+            }
+    }
+}
+
+/// Keep the live drag outside the transcript's @State. A width change still
+/// lays out the content, but it does not rebuild every visible chat row.
+@MainActor @Observable final class ClientChatSidebarResizeState {
+    private(set) var liveWidth: CGFloat?
+    @ObservationIgnored private var origin: CGFloat?
+    var isDragging: Bool { liveWidth != nil }
+
+    func width(_ settled: CGFloat, totalWidth: CGFloat) -> CGFloat {
+        min(max(liveWidth ?? settled, 170), max(170, min(320, totalWidth - 380)))
+    }
+
+    func proposed(translation: CGFloat, settled: CGFloat, totalWidth: CGFloat) -> CGFloat {
+        if origin == nil { origin = width(settled, totalWidth: totalWidth) }
+        return (origin ?? settled) + translation
+    }
+
+    func drag(translation: CGFloat, settled: CGFloat, totalWidth: CGFloat) {
+        let next = proposed(translation: translation, settled: settled, totalWidth: totalWidth)
+        if liveWidth != next { liveWidth = next }
+    }
+
+    func reset() { origin = nil; liveWidth = nil }
+}
+
+struct ClientChatSidebarFrame: ViewModifier {
+    let resize: ClientChatSidebarResizeState
+    let width: CGFloat
+    let totalWidth: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: resize.width(width, totalWidth: totalWidth))
+            .transaction {
+                if resize.isDragging { $0.animation = nil; $0.disablesAnimations = true }
+            }
+    }
+}
+
+struct ClientChatSidebarDivider: View {
+    let resize: ClientChatSidebarResizeState
+    @Binding var width: CGFloat
+    let totalWidth: CGFloat
+    let onCollapse: () -> Void
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.controlGlyph.opacity(0.18))
+            .frame(width: 2)
+            .frame(width: 18)
+            .overlay {
+                Capsule().fill(Theme.controlGlyph.opacity(0.7))
+                    .frame(width: 4, height: 42)
+                    .allowsHitTesting(false)
+            }
+            .overlay {
+                Color.clear.frame(width: 44).contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                        .onChanged {
+                            resize.drag(translation: $0.translation.width,
+                                settled: width, totalWidth: totalWidth)
+                        }
+                        .onEnded {
+                            let proposed = resize.proposed(translation: $0.translation.width,
+                                settled: width, totalWidth: totalWidth)
+                            resize.reset()
+                            if proposed < 130 { onCollapse() }
+                            else { width = min(max(proposed, 170), max(170, min(320, totalWidth - 380))) }
+                        })
+                    .onTapGesture(count: 2) {
+                        resize.reset()
+                        withAnimation(.easeInOut(duration: 0.18)) { width = 210 }
+                    }
+            }
+            .onDisappear { resize.reset() }
+            .accessibilityRepresentation {
+                Slider(value: Binding(
+                    get: { Double(width) },
+                    set: { width = CGFloat($0) }
+                ), in: 170...320)
+                .accessibilityLabel(L10n.text("apple.workbench.resize"))
             }
     }
 }

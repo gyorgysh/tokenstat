@@ -345,9 +345,12 @@ private struct ClientRecentChatContent: View {
     @State private var loadGeneration: UInt64 = 0
     @State private var showingChatSwitcher = false
     @State private var showingChatSidebar = true
+    @State private var chatSidebarWidth: CGFloat = 210
+    @State private var chatSidebarResize = ClientChatSidebarResizeState()
     @State private var workbenchWidth: CGFloat = 0
     @State private var workbenchHeight: CGFloat = 0
     @State private var browserOpen = false
+    @State private var restoreSidebarAfterCompanion = false
     @State private var presentationScope: WorkReference.Scope?
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
@@ -438,8 +441,12 @@ private struct ClientRecentChatContent: View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 if showsChatSidebar {
-                    chatSwitcher.frame(width: 210)
-                    ThemeRule.vertical
+                    chatSwitcher.modifier(ClientChatSidebarFrame(resize: chatSidebarResize,
+                        width: chatSidebarWidth, totalWidth: geometry.size.width))
+                    ClientChatSidebarDivider(resize: chatSidebarResize,
+                        width: $chatSidebarWidth, totalWidth: geometry.size.width) {
+                            withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false }
+                        }
                 }
                 threadContent.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -499,12 +506,14 @@ private struct ClientRecentChatContent: View {
                         rootCover: rootChatReference, currentCover: navigation.presentedChat?.reference,
                         scope: WorkSessionContext.shared.scope),
                     onShowChats: model.savedCopy == nil ? {
-                        if canShowChatSidebar { showingChatSidebar.toggle() }
+                        if canShowChatSidebar {
+                            withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar.toggle() }
+                        }
                         else { showingChatSwitcher = true }
                     } : nil,
                     availableWorkbenchWidth: workbenchWidth,
                     availableWorkbenchHeight: workbenchHeight,
-                    onBrowserChange: { browserOpen = $0 },
+                    onBrowserChange: { updateCompanion(open: $0) },
                     onDelete: { deleted in
                         guard visible, deleted.id == chatID else { return }
                         let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
@@ -552,7 +561,7 @@ private struct ClientRecentChatContent: View {
                 Spacer()
                 Button {
                     if showingChatSwitcher { showingChatSwitcher = false }
-                    else { showingChatSidebar = false }
+                    else { withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false } }
                 } label: {
                     Image(systemName: "sidebar.left")
                         .frame(minWidth: 44, minHeight: 44)
@@ -594,6 +603,20 @@ private struct ClientRecentChatContent: View {
             .accessibilityAddTraits(chat.id == chatID ? .isSelected : [])
         }
         .listStyle(.plain)
+        }
+    }
+
+    private func updateCompanion(open: Bool) {
+        guard browserOpen != open else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            browserOpen = open
+            if open {
+                restoreSidebarAfterCompanion = showingChatSidebar
+                showingChatSidebar = false
+            } else if restoreSidebarAfterCompanion {
+                showingChatSidebar = true
+                restoreSidebarAfterCompanion = false
+            }
         }
     }
 
