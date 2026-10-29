@@ -88,7 +88,7 @@ enum L10n { static func text(_ key: String, _ values: String...) -> String { key
 @MainActor enum SSHVaultBiometrics { static var name: String? { nil }; static var hasSavedPassword: Bool { false } }
 enum ClientWorkspacesModelPlaceholder {}
 @MainActor final class ClientWorkspacesModel { var retirements = 0; func deactivate() { retirements += 1 } }
-@MainActor final class ClientChatSessions {}
+@MainActor final class ClientChatSessions { func deactivate() {} }
 @MainActor final class ClientProjectChats {}
 @MainActor final class HomeModel {}
 @MainActor final class ClientInsightsModel {}
