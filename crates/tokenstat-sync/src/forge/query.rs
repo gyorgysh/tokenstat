@@ -70,7 +70,7 @@ query PullRequestDetail($owner: String!, $repo: String!, $number: Int!) {
       } } }
       reviews(last: 40) { nodes { author { login avatarUrl } state body submittedAt } }
       files(first: 100) { nodes { path additions deletions changeType } }
-      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 50) { nodes {
+      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 50) { pageInfo { hasNextPage } nodes {
         ... on CheckRun {
           __typename name status conclusion detailsUrl startedAt completedAt
           checkSuite { workflowRun { workflow { name } } }
@@ -485,6 +485,9 @@ pub(super) fn decode_detail(
             })
             .collect(),
         checks,
+        checks_truncated: array(&node["commits"]["nodes"]).last().and_then(|commit| {
+            commit["commit"]["statusCheckRollup"]["contexts"]["pageInfo"]["hasNextPage"].as_bool()
+        }),
     })
 }
 
@@ -871,7 +874,7 @@ mod tests {
             {"author":{"login":"sam","avatarUrl":null},"state":"CHANGES_REQUESTED","body":"Earlier","submittedAt":"2026-08-27T01:00:00Z"},
             {"author":{"login":"sam","avatarUrl":null},"state":"APPROVED","body":"Lovely","submittedAt":"2026-08-28T01:00:00Z"}]},
           "files":{"nodes":[{"path":"Sources/App.swift","additions":9,"deletions":2,"changeType":"MODIFIED"}]},
-          "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+          "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":true},"nodes":[
             {"__typename":"CheckRun","name":"UI tests","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-08-29T00:00:00Z","completedAt":"2026-08-29T00:02:00Z","detailsUrl":"https://checks.test/1","checkSuite":{"workflowRun":{"workflow":{"name":"Quality"}}}},
             {"__typename":"StatusContext","context":"preview","state":"PENDING","createdAt":"2026-08-29T00:00:00Z","targetUrl":null}
           ]}}}}]}
@@ -885,6 +888,14 @@ mod tests {
         assert_eq!(detail.checks[0].state, "passing");
         assert_eq!(detail.checks[0].workflow.as_deref(), Some("Quality"));
         assert_eq!(detail.checks[1].state, "pending");
+        assert_eq!(detail.checks_truncated, Some(true));
+        let complete = raw.replace("\"hasNextPage\":true", "\"hasNextPage\":false");
+        assert_eq!(
+            decode_detail(&complete, None).unwrap().checks_truncated,
+            Some(false)
+        );
+        let legacy = raw.replace("\"pageInfo\":{\"hasNextPage\":true},", "");
+        assert_eq!(decode_detail(&legacy, None).unwrap().checks_truncated, None);
     }
 
     #[test]

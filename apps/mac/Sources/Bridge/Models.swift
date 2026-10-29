@@ -2303,9 +2303,12 @@ struct PullDetail: Codable, Sendable, Hashable, Identifiable {
     var reviews: [PullReview]
     var files: [PullFile]
     var checks: [PullCheck]
+    var checksTruncated: Bool?
 
     var id: UInt32 { number }
     var createdDate: Date? { parseServerDate(createdAt) }
+    /// Older hosts did not report pagination; 50 is their query limit.
+    var hasIncompleteChecks: Bool { checksTruncated ?? (checks.count >= 50) }
 }
 
 struct PullTimelineEvent: Codable, Sendable, Hashable, Identifiable {

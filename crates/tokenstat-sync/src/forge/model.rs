@@ -206,6 +206,8 @@ pub struct PullDetail {
     pub reviews: Vec<PullReview>,
     pub files: Vec<PullFile>,
     pub checks: Vec<PullCheck>,
+    /// None when the forge did not report pagination information.
+    pub checks_truncated: Option<bool>,
 }
 
 /// One supported item in the pull-request conversation. Unknown GraphQL union

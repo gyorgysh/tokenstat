@@ -40,7 +40,7 @@ struct PullDetailView: View {
                                 .font(Theme.caption).foregroundStyle(.secondary)
                         }
                         if let error = model.error { inlineError(error) }
-                        DetailTabs(selection: $model.tab, checks: detail.checks.count)
+                        DetailTabs(selection: $model.tab, checks: detail.checks.count, incompleteChecks: detail.hasIncompleteChecks)
                         if let notice = model.actionNotice {
                             actionBanner(notice, tint: Theme.success, symbol: "checkmark.circle.fill") { model.actionNotice = nil }
                         }
@@ -331,6 +331,10 @@ struct PullDetailView: View {
                     Text(detail.checks.isEmpty ? L10n.text("apple.pulldetailview.no_checks_reported.8454518f") : L10n.text("apple.pulldetailview.0_of_1_checks_passed.17ecc810", "\(passed)", "\(detail.checks.count)"))
                         .font(Theme.body.weight(.semibold))
                     Text(checksMessage(detail)).font(Theme.caption).foregroundStyle(.secondary)
+                    if detail.hasIncompleteChecks {
+                        Text(L10n.text("apple.pulldetailview.more_checks_not_shown"))
+                            .font(Theme.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             .padding(Theme.cardPadding).frame(maxWidth: .infinity, alignment: .leading)
@@ -343,17 +347,20 @@ struct PullDetailView: View {
     private func checksTint(_ detail: PullDetail) -> Color {
         if detail.checks.contains(where: { $0.state == "failing" }) { return Theme.danger }
         if detail.checks.contains(where: { $0.state == "pending" }) { return Theme.warning }
+        if detail.hasIncompleteChecks { return Theme.warning }
         return Theme.success
     }
     private func checksSymbol(_ detail: PullDetail) -> String {
         if detail.checks.contains(where: { $0.state == "failing" }) { return "xmark" }
         if detail.checks.contains(where: { $0.state == "pending" }) { return "ellipsis" }
+        if detail.hasIncompleteChecks { return "ellipsis" }
         return "checkmark"
     }
     private func checksMessage(_ detail: PullDetail) -> String {
         if detail.checks.isEmpty { return L10n.text("apple.pulldetailview.the_head_commit_does_not_publish_a_check_s.3a467ede") }
         if detail.checks.contains(where: { $0.state == "failing" }) { return L10n.text("apple.pulldetailview.something_needs_attention_before_this_is_r.1400a527") }
         if detail.checks.contains(where: { $0.state == "pending" }) { return L10n.text("apple.pulldetailview.the_remaining_work_is_still_running.1c81cb2a") }
+        if detail.hasIncompleteChecks { return L10n.text("apple.pulldetailview.shown_checks_passed") }
         return L10n.text("apple.pulldetailview.everything_reported_by_the_head_commit_is.6083342c")
     }
 
@@ -467,6 +474,7 @@ enum PullDetailTab: String, CaseIterable, Identifiable {
 private struct DetailTabs: View {
     @Binding var selection: PullDetailTab
     let checks: Int
+    let incompleteChecks: Bool
     @Namespace private var slide
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -477,7 +485,7 @@ private struct DetailTabs: View {
                             Image(systemName: tab.symbol).accessibilityHidden(true)
                             Text(L10n.enumLabel(tab))
                             if tab == .checks, checks > 0 {
-                                Text("\(checks)")
+                                Text("\(checks)\(incompleteChecks ? "+" : "")")
                                     .foregroundStyle(Theme.accent.opacity(selection == tab ? 1 : 0.48))
                             }
                         }
