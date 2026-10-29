@@ -15,6 +15,7 @@ struct PullDetailView: View {
     @Bindable var model: PullDetailModel
 
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,7 +53,7 @@ struct PullDetailView: View {
                         // contains a long Dependabot body. Read the actual
                         // width once and build only the layout that can fit.
                         WidthReader { width in
-                            if width >= 760 {
+                            if width >= 760 && !dynamicTypeSize.isAccessibilitySize {
                                 HStack(alignment: .top, spacing: Theme.Space.l) {
                                     selectedContent(detail).frame(maxWidth: .infinity, alignment: .topLeading)
                                     inspector(detail).frame(width: 248)
@@ -108,12 +109,22 @@ struct PullDetailView: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: Theme.Space.s) {
-            Button(action: onBack) { ActionIcon.back.label(L10n.text("apple.pulldetailview.pull_requests.d9e3f260")) }
-                .buttonStyle(SecondaryButtonStyle(small: true))
-            Spacer()
-            detailActions
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) {
+                backButton
+                Spacer()
+                detailActions
+            }
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                backButton
+                HStack { detailActions }
+            }
         }
+    }
+
+    private var backButton: some View {
+        Button(action: onBack) { ActionIcon.back.label(L10n.text("apple.pulldetailview.pull_requests.d9e3f260")) }
+            .buttonStyle(SecondaryButtonStyle(small: true))
     }
 
     @ViewBuilder
@@ -149,17 +160,25 @@ struct PullDetailView: View {
                     .font(Theme.callout)
                 }
             }
-            HStack(spacing: Theme.Space.s) {
-                Text(detail.draft ? L10n.text("apple.pulldetailview.draft.ebf12ef4") : detail.state.capitalized)
-                    .font(Theme.caption.weight(.semibold))
-                    .foregroundStyle(detail.state == "closed" ? Theme.danger : detail.state == "merged" ? Theme.secondary : Theme.accent)
-                branch(detail.headRef)
-                Image(systemName: "arrow.right").font(Theme.caption2).foregroundStyle(.tertiary)
-                branch(detail.baseRef)
-                Spacer()
-                changeCount("+\(detail.additions)", tint: Theme.diffAdded)
-                changeCount("−\(detail.deletions)", tint: Theme.diffRemoved)
-                changeCount(L10n.text("apple.pulldetailview.0_files.fb42ce4d", "\(detail.changedFiles)"), tint: .secondary)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    pullState(detail)
+                    branch(detail.headRef)
+                    Image(systemName: "arrow.down").font(Theme.caption2).foregroundStyle(.tertiary).accessibilityHidden(true)
+                    branch(detail.baseRef)
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        changeCounts(detail)
+                    }
+                }
+            } else {
+                HStack(spacing: Theme.Space.s) {
+                    pullState(detail)
+                    branch(detail.headRef)
+                    Image(systemName: "arrow.right").font(Theme.caption2).foregroundStyle(.tertiary).accessibilityHidden(true)
+                    branch(detail.baseRef)
+                    Spacer()
+                    changeCounts(detail)
+                }
             }
         }
         .padding(Theme.cardPadding)
@@ -167,12 +186,24 @@ struct PullDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.accent.opacity(0.18)))
     }
 
+    private func pullState(_ detail: PullDetail) -> some View {
+        Text(detail.draft ? L10n.text("apple.pulldetailview.draft.ebf12ef4") : detail.state.capitalized)
+            .font(Theme.caption.weight(.semibold))
+            .foregroundStyle(detail.state == "closed" ? Theme.danger : detail.state == "merged" ? Theme.secondary : Theme.accent)
+    }
+
+    @ViewBuilder private func changeCounts(_ detail: PullDetail) -> some View {
+        changeCount("+\(detail.additions)", tint: Theme.diffAdded)
+        changeCount("−\(detail.deletions)", tint: Theme.diffRemoved)
+        changeCount(L10n.text("apple.pulldetailview.0_files.fb42ce4d", "\(detail.changedFiles)"), tint: .secondary)
+    }
+
     private func authorIdentity(_ detail: PullDetail) -> some View {
         HStack(spacing: Theme.Space.s) {
             Avatar(url: detail.author.avatar, handle: detail.author.login, size: 22, tint: Avatar.tint(for: detail.author.login))
             Text(detail.author.login).font(Theme.callout.weight(.medium))
         }
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func openingTime(_ detail: PullDetail) -> some View {
@@ -184,12 +215,14 @@ struct PullDetailView: View {
             }
         }
         .foregroundStyle(.secondary)
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func branch(_ value: String) -> some View {
         Text(value).font(Theme.monoText(11, weight: .medium, relativeTo: .caption))
-            .lineLimit(1).padding(.horizontal, 9).padding(.vertical, 5)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 9).padding(.vertical, 5)
             .background(Theme.accent.opacity(0.08), in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.16)))
     }

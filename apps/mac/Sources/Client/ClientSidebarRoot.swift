@@ -29,6 +29,7 @@ struct ClientSidebarRoot: View {
     /// grow hover states. See `ClientLayout`.
     @Environment(PointerKeyboardModel.self) private var input
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// One workspaces model for the whole layout: the tree in the sidebar and
     /// the screen in the detail column are the same connection, not two. The
@@ -313,10 +314,11 @@ struct ClientSidebarRoot: View {
                             Image(systemName: tab.symbol)
                                 .font(Theme.font(13))
                                 .foregroundStyle(isCurrent(tab) ? Theme.accent : Color.secondary)
-                                .frame(width: 16)
+                                .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 16)
                             Text(tab.label)
                                 .font(Theme.font(15, weight: isCurrent(tab) ? .medium : .regular))
-                                .lineLimit(1)
+                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                                .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
                         }
                         .clientSidebarRowSurface(isSelected: isCurrent(tab), height: rowHeight)
@@ -367,16 +369,16 @@ struct ClientSidebarRoot: View {
                 // count on the right. A title-case row in the platform's own
                 // header style was a third typographic voice in a list that
                 // already has two.
-                HStack {
-                    Text(L10n.text("apple.clientsidebarroot.machines.c061da19"))
-                        .font(ClientType.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                    Spacer()
-                    if !workspaces.hosts.isEmpty {
-                        Text("\(workspaces.hosts.count)")
-                            .font(ClientType.caption.monospacedDigit())
-                            .foregroundStyle(.tertiary)
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        machinesHeading
+                        machineCount
+                    }
+                } else {
+                    HStack {
+                        machinesHeading
+                        Spacer()
+                        machineCount
                     }
                 }
             }
@@ -398,6 +400,22 @@ struct ClientSidebarRoot: View {
         .clientCompactSections()
         .refreshable {
             await ClientRefresh.pull("sidebar") { await reload() }
+        }
+    }
+
+    private var machinesHeading: some View {
+        Text(L10n.text("apple.clientsidebarroot.machines.c061da19"))
+            .font(ClientType.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private var machineCount: some View {
+        if !workspaces.hosts.isEmpty {
+            Text("\(workspaces.hosts.count)")
+                .font(ClientType.caption.monospacedDigit())
+                .foregroundStyle(.tertiary)
         }
     }
 
@@ -471,7 +489,8 @@ struct ClientSidebarRoot: View {
                 Image(systemName: ClientDeviceIcon.symbol(name: host.name, isHost: true))
                     .foregroundStyle(.secondary)
                 Text(host.name)
-                    .lineLimit(1)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 if workspaces.isBusy(with: host.peerKey) {
                     ProgressView().controlSize(.small)
@@ -519,7 +538,8 @@ struct ClientSidebarRoot: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(folder.name)
                     .font(ClientType.label.weight(.medium))
-                    .lineLimit(1)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: true)
                 gitLine(folder)
             }
         }

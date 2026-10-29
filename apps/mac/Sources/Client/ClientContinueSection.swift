@@ -14,6 +14,7 @@ extension Account {
 struct ClientContinueSection: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var places: [ClientRecentPlaces.Place] {
         ClientRecentPlaces.shared.continuePlaces(in: account.account?.recentPlacesScope)
     }
@@ -24,19 +25,15 @@ struct ClientContinueSection: View {
                 ClientSectionTitle(title: L10n.text("apple.clientcontinuesection.pick_up_where_you_left_off.47173482"), mark: "mark_activity")
                 VStack(spacing: 0) {
                     ForEach(places) { place in
-                        HStack(spacing: 0) {
-                            ClientOwnedNavigationLink {
-                                ClientSavedPlaceView(place: place)
-                            } label: {
-                                row(place)
+                        if dynamicTypeSize.isAccessibilitySize {
+                            VStack(alignment: .leading, spacing: 0) {
+                                placeLink(place)
+                                pinButton(place).padding(.horizontal, Theme.Space.m)
                             }
-                            .buttonStyle(.plain)
-                            if let reference = reference(for: place) {
-                                PinToggleButton(
-                                    reference: reference, label: place.title,
-                                    folderName: place.workspaceName
-                                )
-                                .padding(.trailing, Theme.Space.xs)
+                        } else {
+                            HStack(spacing: 0) {
+                                placeLink(place)
+                                pinButton(place).padding(.trailing, Theme.Space.xs)
                             }
                         }
                         if place.id != places.last?.id {
@@ -47,6 +44,21 @@ struct ClientContinueSection: View {
                 .cardSurface()
             }
             .accessibilityIdentifier("home.continue")
+        }
+    }
+
+    private func placeLink(_ place: ClientRecentPlaces.Place) -> some View {
+        ClientOwnedNavigationLink {
+            ClientSavedPlaceView(place: place)
+        } label: {
+            row(place)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder private func pinButton(_ place: ClientRecentPlaces.Place) -> some View {
+        if let reference = reference(for: place) {
+            PinToggleButton(reference: reference, label: place.title, folderName: place.workspaceName)
         }
     }
 
@@ -85,23 +97,25 @@ struct ClientContinueSection: View {
             Image(systemName: place.symbol)
                 .font(ClientType.body)
                 .foregroundStyle(Theme.accent)
-                .frame(width: 24)
+                .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 24)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text(place.title)
                     .font(ClientType.label.weight(.semibold))
-                    .lineLimit(2)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 (Text("\(machine?.displayName ?? L10n.text("apple.clientcontinuesection.machine.8f1cc42d")) · \(state) · ")
                     + Text(place.openedAt, style: .relative))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right")
-                .font(ClientType.caption)
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
+            if !dynamicTypeSize.isAccessibilitySize {
+                Image(systemName: "chevron.right")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(Theme.Space.m)
         .frame(minHeight: 60)
