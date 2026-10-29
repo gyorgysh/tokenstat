@@ -104,13 +104,24 @@ private struct ClientChatContent: View {
     /// until the fresh answer lands.
     @State private var refreshing = false
     @State private var showingChatSwitcher = false
-    @State private var showingChatSidebar = true
-    @State private var chatSidebarWidth: CGFloat = 210
+    private var showingChatSidebar: Bool {
+        get { session.presentation.sidebarVisible }
+        nonmutating set { session.presentation.sidebarVisible = newValue }
+    }
+    private var chatSidebarWidth: CGFloat {
+        get { session.presentation.sidebarWidth }
+        nonmutating set { session.presentation.sidebarWidth = newValue }
+    }
     @State private var chatSidebarResize = ClientChatSidebarResizeState()
     @State private var workbenchWidth: CGFloat = 0
     @State private var workbenchHeight: CGFloat = 0
-    @State private var browserOpen = false
-    @State private var restoreSidebarAfterCompanion = false
+    private var browserOpen: Bool {
+        session.presentation.companion != nil && session.presentation.focus != "chat"
+    }
+    private var restoreSidebarAfterCompanion: Bool {
+        get { session.presentation.restoreSidebarAfterCompanion }
+        nonmutating set { session.presentation.restoreSidebarAfterCompanion = newValue }
+    }
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
@@ -130,7 +141,8 @@ private struct ClientChatContent: View {
                     chatSwitcher.modifier(ClientChatSidebarFrame(resize: chatSidebarResize,
                         width: chatSidebarWidth, totalWidth: geometry.size.width))
                     ClientChatSidebarDivider(resize: chatSidebarResize,
-                        width: $chatSidebarWidth, totalWidth: geometry.size.width) {
+                        width: Binding(get: { chatSidebarWidth }, set: { chatSidebarWidth = $0 }),
+                        totalWidth: geometry.size.width) {
                             withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false }
                         }
                 }
@@ -315,12 +327,12 @@ private struct ClientChatContent: View {
     }
 
     private func updateCompanion(open: Bool) {
-        guard browserOpen != open else { return }
         withAnimation(.easeInOut(duration: 0.18)) {
-            browserOpen = open
             if open {
-                restoreSidebarAfterCompanion = showingChatSidebar
-                showingChatSidebar = false
+                if showingChatSidebar {
+                    restoreSidebarAfterCompanion = true
+                    showingChatSidebar = false
+                }
             } else if restoreSidebarAfterCompanion {
                 showingChatSidebar = true
                 restoreSidebarAfterCompanion = false
@@ -675,7 +687,7 @@ private struct ClientReconnectBanner: View {
 
 /// One conversation: setup, transcript, glass composer.
 struct ClientChatThread: View {
-    private enum BrowserFocus { case chat, split, browser }
+    private enum BrowserFocus: String { case chat, split, browser }
     private enum Companion: String { case browser, changes, terminal }
     @Bindable var model: ChatModel
     var session: ClientChatSession? = nil
@@ -767,10 +779,10 @@ struct ClientChatThread: View {
     }
     @State private var browserRequest = UUID()
     @State private var chatWidth: CGFloat = 0
-    @State private var browserFocus: BrowserFocus = .split
-    @State private var chatPaneFraction: CGFloat = 0.5
+    @State private var localBrowserFocus: BrowserFocus = .split
+    @State private var localChatPaneFraction: CGFloat = 0.5
     @State private var chatResize = ClientChatResizeState()
-    @State private var companion: Companion?
+    @State private var localCompanion: Companion?
     @State private var browserLayoutGeneration: UInt64?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ConnectivityModel.self) private var connectivity
@@ -778,6 +790,30 @@ struct ClientChatThread: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var browserFocus: BrowserFocus {
+        get { session.flatMap { BrowserFocus(rawValue: $0.presentation.focus) } ?? localBrowserFocus }
+        nonmutating set {
+            if let session { session.presentation.focus = newValue.rawValue }
+            else { localBrowserFocus = newValue }
+        }
+    }
+
+    private var companion: Companion? {
+        get { session?.presentation.companion.flatMap(Companion.init(rawValue:)) ?? localCompanion }
+        nonmutating set {
+            if let session { session.presentation.companion = newValue?.rawValue }
+            else { localCompanion = newValue }
+        }
+    }
+
+    private var chatPaneFraction: CGFloat {
+        get { session?.presentation.chatFraction ?? localChatPaneFraction }
+        nonmutating set {
+            if let session { session.presentation.chatFraction = newValue }
+            else { localChatPaneFraction = newValue }
+        }
+    }
 
     private var browserOwner: WorkReference? {
         guard let peer = model.peer, let workspace = model.workspaceID else { return nil }
@@ -803,6 +839,20 @@ struct ClientChatThread: View {
 
     private var displayedBrowserFocus: BrowserFocus {
         !wideBrowser && companion != nil && browserFocus == .split ? .browser : browserFocus
+    }
+
+    private var compactBrowserSheet: Binding<ProjectBrowserSession?> {
+        Binding(
+            get: {
+                guard isActive, !showsCompanionTabs else { return nil }
+                if let session, !session.presentation.browserSheetVisible { return nil }
+                return browserSession
+            },
+            set: { next in
+                if next == nil && isActive && !showsCompanionTabs,
+                   browserLayoutGeneration == navigation.stackGeneration { closeBrowser() }
+            }
+        )
     }
 
     private var companionTabs: some View {
@@ -870,7 +920,8 @@ struct ClientChatThread: View {
     }
 
     private var browserDivider: some View {
-        ClientChatResizeDivider(resize: chatResize, fraction: $chatPaneFraction,
+        ClientChatResizeDivider(resize: chatResize,
+                                fraction: Binding(get: { chatPaneFraction }, set: { chatPaneFraction = $0 }),
                                 totalWidth: chatWidth) { proposed in
             let settled = min(max(proposed, 300), max(300, chatWidth - 18 - 280))
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
@@ -1277,24 +1328,25 @@ struct ClientChatThread: View {
         .onChange(of: browserOwner) { _, _ in closeBrowser() }
         .onChange(of: browserSession != nil, initial: true) { _, open in
             if open {
-                companion = .browser
-                browserFocus = .split
+                if companion == nil {
+                    companion = .browser
+                    browserFocus = .split
+                }
             } else if companion == .browser {
                 companion = nil
                 browserFocus = .split
+            }
+        }
+        .onChange(of: isActive && !showsCompanionTabs, initial: true) { _, compactReader in
+            if let session {
+                session.presentation.browserSheetVisible = compactReader && browserSession != nil
             }
         }
         .onChange(of: companion != nil && browserFocus != .chat, initial: true) { _, open in
             onBrowserChange?(open)
         }
         .sheet(isPresented: $showPort) { portSheet }
-        .sheet(item: Binding(
-            get: { isActive && !showsCompanionTabs ? browserSession : nil },
-            set: {
-                if $0 == nil && isActive && !showsCompanionTabs,
-                   browserLayoutGeneration == navigation.stackGeneration { closeBrowser() }
-            }
-        )) { browser in
+        .sheet(item: compactBrowserSheet) { browser in
             ClientBrowserScreen(session: browser) { closeBrowser() }
                 .presentationDetents([.large])
         }
@@ -1378,6 +1430,7 @@ struct ClientChatThread: View {
         suggestedBrowserTarget = nil
         browserSession?.close()
         browserSession = nil
+        session?.presentation.browserSheetVisible = false
         companion = nil
         browserFocus = .split
         onBrowserChange?(false)
@@ -1408,6 +1461,7 @@ struct ClientChatThread: View {
         guard !browser.transportURL.isEmpty else { browser.close(); return }
         browserSession?.close()
         browserSession = browser
+        session?.presentation.browserSheetVisible = isActive && !showsCompanionTabs
         showPort = false
         onBrowserChange?(true)
     }

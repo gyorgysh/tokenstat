@@ -39,6 +39,14 @@ final class ClientNavigationModel {
     var pullHandoff: ClientPullHandoff?
     private(set) var chatSwitchInProgress = false
     var restoredChatReader: ClientChatLayoutHandoff.Reader?
+    /// A Duo fold rebuilds the split view. Keep the person's global column
+    /// choice above that rebuild, just like the current chat route.
+    var sidebarColumns: NavigationSplitViewVisibility = .all
+    /// Split-view callbacks from a disappearing folded layout must not replace
+    /// the person's wide-layout column choice.
+    var sidebarLayoutActive = true
+    var sidebarChatReconciled = false
+    var sidebarCollapsedForChat = false
     @ObservationIgnored private var restoringLayout = false
 
     struct ChatActionTicket {
@@ -391,6 +399,10 @@ final class ClientNavigationModel {
     /// Remove the old account's entire navigation state before showing another.
     func reset() {
         chooseNavigation()
+        sidebarColumns = .all
+        sidebarLayoutActive = true
+        sidebarChatReconciled = false
+        sidebarCollapsedForChat = false
         pendingPlace = nil
         accountRequest = nil
         homeEditorRequested = false

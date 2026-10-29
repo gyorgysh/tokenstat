@@ -3,6 +3,24 @@
 import Foundation
 import Observation
 
+#if !os(macOS)
+/// One repository's visible arrangement survives a Duo fold or the system
+/// rebuilding a navigation column. It is account/session owned, never saved
+/// to disk or carried to another host.
+@MainActor @Observable
+final class ClientChatPresentationState {
+    var sidebarVisible = true
+    var sidebarWidth: CGFloat = 210
+    var restoreSidebarAfterCompanion = false
+    var companion: String?
+    var focus = "split"
+    var chatFraction: CGFloat = 0.5
+    /// A compact reader owns the browser sheet only while it is the active
+    /// layout. The wide successor clears this before drawing its inline pane.
+    var browserSheetVisible = false
+}
+#endif
+
 /// Chat ownership belongs to the signed-in scene, above its changing layout.
 /// A folder list and a standalone recent-chat reader have separate owners:
 /// opening a notification must not select a different chat underneath it.
@@ -14,6 +32,7 @@ final class ClientChatSession {
     var opened: ChatConversation?
     var retainedThread: ChatConversation?
     #if !os(macOS)
+    var presentation = ClientChatPresentationState()
     /// The browser follows the retained reader through a phone/Duo layout
     /// handoff. Its bridge belongs to the session, not a transient view.
     var browserSession: ProjectBrowserSession?
@@ -26,20 +45,24 @@ final class ClientChatSession {
     @ObservationIgnored private var reusable = false
     @ObservationIgnored private var revision: UInt64 = 0
 
-    func appear(_ viewer: UUID) { viewers.insert(viewer) }
+    func appear(_ viewer: UUID) {
+        viewers.insert(viewer)
+    }
     func disappear(_ viewer: UUID) {
         viewers.remove(viewer)
         model.saveDraftNow()
+    }
+
+    func deactivate() {
         #if !os(macOS)
-        if viewers.isEmpty {
-            browserSession?.close()
-            browserSession = nil
-        }
+        browserSession?.close()
+        browserSession = nil
         #endif
     }
 
     var canDiscard: Bool {
-        viewers.isEmpty && !loading.isRunning && !opening.isRunning && selecting == nil && !model.busy && !model.sending
+        return viewers.isEmpty && !loading.isRunning && !opening.isRunning
+            && selecting == nil && !model.busy && !model.sending
             && (opened == nil || opened?.id == model.selected?.id)
             && !model.isCreating && !model.openingConversation
             && model.unconfirmedSend == nil
@@ -132,12 +155,19 @@ final class ClientChatSessions {
         // Bound inactive readers; active work and unsent writing remain owned.
         for candidate in recency.dropLast() where sessions.count >= limit {
             guard let old = sessions[candidate], old.canDiscard else { continue }
+            old.deactivate()
             sessions.removeValue(forKey: candidate)
         }
         recency.removeAll { sessions[$0] == nil && $0 != key }
         let session = ClientChatSession()
         sessions[key] = session
         return session
+    }
+
+    func deactivate() {
+        for session in sessions.values { session.deactivate() }
+        sessions.removeAll()
+        recency.removeAll()
     }
 
     func renamed(_ chat: ChatConversation, peer: String, workspace: String) {

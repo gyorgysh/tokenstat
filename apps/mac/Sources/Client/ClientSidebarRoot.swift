@@ -51,16 +51,23 @@ struct ClientSidebarRoot: View {
     @State private var detailPath = NavigationPath()
     @Environment(ClientProjectChats.self) private var projectChats
     @State private var pendingClose: (peer: String, info: PtySessionInfo)?
-    @State private var columns = NavigationSplitViewVisibility.all
     @State private var sceneWidth: CGFloat = 0
-    @State private var collapsedForChat = false
+    private var columns: NavigationSplitViewVisibility {
+        get { navigation.sidebarColumns }
+        nonmutating set { navigation.sidebarColumns = newValue }
+    }
     /// A path only knows about value-based links. Changes still opens a diff
     /// through a view-based link, so changing the sidebar destination also
     /// needs a fresh stack identity to dismiss that screen.
     @State private var detailGeneration = 0
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columns) {
+        NavigationSplitView(columnVisibility: Binding(
+            get: { columns },
+            set: { next in
+                if navigation.sidebarLayoutActive && sceneWidth >= 600 { columns = next }
+            }
+        )) {
             sidebar
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
         } detail: {
@@ -221,12 +228,20 @@ struct ClientSidebarRoot: View {
     /// for the repository's own chat list. Restore it when leaving the chat;
     /// the person can still reopen the global sidebar at any time.
     private func reconcileChatSpace() {
+        guard navigation.sidebarLayoutActive else { return }
         if navigation.currentRoute?.reference?.kind != .conversation && !navigation.chatSwitchInProgress {
-            if collapsedForChat, columns == .detailOnly { columns = .all }
-            collapsedForChat = false
-        } else if sceneWidth >= 600, sceneWidth < 900, columns != .detailOnly {
-            columns = .detailOnly
-            collapsedForChat = true
+            // The old route is briefly absent while the folded reader is
+            // handed to the new split view. This is not a chat exit.
+            if navigation.chatHandoff.pending != nil { return }
+            if navigation.sidebarCollapsedForChat, columns == .detailOnly { columns = .all }
+            navigation.sidebarCollapsedForChat = false
+            navigation.sidebarChatReconciled = false
+        } else if !navigation.sidebarChatReconciled, sceneWidth >= 600 {
+            navigation.sidebarChatReconciled = true
+            if sceneWidth < 900, columns != .detailOnly {
+                columns = .detailOnly
+                navigation.sidebarCollapsedForChat = true
+            }
         }
     }
 

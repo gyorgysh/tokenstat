@@ -344,13 +344,24 @@ private struct ClientRecentChatContent: View {
     @State private var visible = false
     @State private var loadGeneration: UInt64 = 0
     @State private var showingChatSwitcher = false
-    @State private var showingChatSidebar = true
-    @State private var chatSidebarWidth: CGFloat = 210
+    private var showingChatSidebar: Bool {
+        get { session.presentation.sidebarVisible }
+        nonmutating set { session.presentation.sidebarVisible = newValue }
+    }
+    private var chatSidebarWidth: CGFloat {
+        get { session.presentation.sidebarWidth }
+        nonmutating set { session.presentation.sidebarWidth = newValue }
+    }
     @State private var chatSidebarResize = ClientChatSidebarResizeState()
     @State private var workbenchWidth: CGFloat = 0
     @State private var workbenchHeight: CGFloat = 0
-    @State private var browserOpen = false
-    @State private var restoreSidebarAfterCompanion = false
+    private var browserOpen: Bool {
+        session.presentation.companion != nil && session.presentation.focus != "chat"
+    }
+    private var restoreSidebarAfterCompanion: Bool {
+        get { session.presentation.restoreSidebarAfterCompanion }
+        nonmutating set { session.presentation.restoreSidebarAfterCompanion = newValue }
+    }
     @State private var presentationScope: WorkReference.Scope?
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
@@ -440,11 +451,16 @@ private struct ClientRecentChatContent: View {
     private var thread: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
-                if showsChatSidebar {
+                if model.savedCopy == nil,
+                   geometry.size.width >= 600, geometry.size.height >= 500,
+                   verticalSizeClass != .compact, !dynamicTypeSize.isAccessibilitySize,
+                   (!browserOpen || geometry.size.width >= 900), showingChatSidebar,
+                   model.chats.contains(where: { $0.id == chatID }) {
                     chatSwitcher.modifier(ClientChatSidebarFrame(resize: chatSidebarResize,
                         width: chatSidebarWidth, totalWidth: geometry.size.width))
                     ClientChatSidebarDivider(resize: chatSidebarResize,
-                        width: $chatSidebarWidth, totalWidth: geometry.size.width) {
+                        width: Binding(get: { chatSidebarWidth }, set: { chatSidebarWidth = $0 }),
+                        totalWidth: geometry.size.width) {
                             withAnimation(.easeInOut(duration: 0.18)) { showingChatSidebar = false }
                         }
                 }
@@ -486,10 +502,6 @@ private struct ClientRecentChatContent: View {
         model.savedCopy == nil && workbenchWidth >= 600 && workbenchHeight >= 500
             && verticalSizeClass != .compact && !dynamicTypeSize.isAccessibilitySize
             && (!browserOpen || workbenchWidth >= 900)
-    }
-
-    private var showsChatSidebar: Bool {
-        canShowChatSidebar && showingChatSidebar && model.chats.contains(where: { $0.id == chatID })
     }
 
     private var threadContent: some View {
@@ -607,12 +619,12 @@ private struct ClientRecentChatContent: View {
     }
 
     private func updateCompanion(open: Bool) {
-        guard browserOpen != open else { return }
         withAnimation(.easeInOut(duration: 0.18)) {
-            browserOpen = open
             if open {
-                restoreSidebarAfterCompanion = showingChatSidebar
-                showingChatSidebar = false
+                if showingChatSidebar {
+                    restoreSidebarAfterCompanion = true
+                    showingChatSidebar = false
+                }
             } else if restoreSidebarAfterCompanion {
                 showingChatSidebar = true
                 restoreSidebarAfterCompanion = false

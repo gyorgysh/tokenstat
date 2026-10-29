@@ -276,7 +276,8 @@ struct ClientRootView: View {
             }
         }
         .onChange(of: navigation.currentRoute) { _, _ in navigation.saveRoute() }
-        .onChange(of: layout) { _, _ in
+        .onChange(of: layout) { _, newLayout in
+            navigation.sidebarLayoutActive = newLayout == .sidebar
             navigation.layoutGeneration &+= 1
             navigation.stackGeneration &+= 1
             // An opening without a selected chat still belongs to this root
@@ -868,7 +869,7 @@ final class ClientSessionModels {
             ssh = ClientSSHWorkbench(scope: scope)
             setup = ClientSetupSession(scope: scope)
         }
-        func deactivate() { workspaces.deactivate(); ssh.deactivate(); setup.deactivate() }
+        func deactivate() { workspaces.deactivate(); chats.deactivate(); ssh.deactivate(); setup.deactivate() }
     }
 
     private var scope: WorkReference.Scope?
