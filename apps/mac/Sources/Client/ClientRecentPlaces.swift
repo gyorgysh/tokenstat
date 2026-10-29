@@ -59,6 +59,20 @@ final class ClientRecentPlaces {
             .sorted { $0.openedAt > $1.openedAt }.prefix(Self.capacity))
     }
 
+    /// Keep the last conversation reachable even when recent folders and
+    /// terminals would otherwise fill the short Home list.
+    func continuePlaces(in scope: Scope?, limit: Int = 4) -> [Place] {
+        guard limit > 0 else { return [] }
+        let recent = places(in: scope)
+        var shown = Array(recent.prefix(limit))
+        if !shown.contains(where: { $0.id.kind == .chat }),
+           let chat = recent.first(where: { $0.id.kind == .chat }) {
+            if shown.count == limit { shown.removeLast() }
+            shown.append(chat)
+        }
+        return shown
+    }
+
     func record(
         in scope: Scope?, peer: String, workspaceID: String?,
         workspaceName: String, kind: Kind, itemID: String? = nil,
@@ -71,7 +85,12 @@ final class ClientRecentPlaces {
         var recent = places(in: scope).filter { $0.id != id }
         recent.append(place)
         recent.sort { $0.openedAt > $1.openedAt }
-        recent = Array(recent.prefix(Self.capacity))
+        if let lastChat = recent.first(where: { $0.id.kind == .chat }),
+           !recent.prefix(Self.capacity).contains(where: { $0.id == lastChat.id }) {
+            recent = Array(recent.prefix(Self.capacity - 1)) + [lastChat]
+        } else {
+            recent = Array(recent.prefix(Self.capacity))
+        }
         guard let data = try? JSONEncoder().encode(recent) else { return }
         defaults.set(data, forKey: scope.key)
         revision += 1

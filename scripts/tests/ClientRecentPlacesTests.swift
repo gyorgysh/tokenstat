@@ -51,6 +51,17 @@ import Foundation
         assert(Set(records[0].keys) == ["id", "workspaceName", "openedAt"])
         store.record(in: bob, peer: "peer", workspaceID: nil, workspaceName: "", kind: .terminal, itemID: "tty")
         assert(store.places(in: bob).count == 1)
+        // A busy device still offers its last chat after many other places.
+        for n in 1...25 {
+            store.record(in: unclaimed, peer: "peer", workspaceID: "folder-\(n)",
+                         workspaceName: "Garden", kind: .workspace,
+                         at: Date(timeIntervalSince1970: Date().timeIntervalSince1970 + Double(n)))
+        }
+        let continued = store.continuePlaces(in: unclaimed)
+        assert(continued.count == 4 && continued.last?.id.itemID == "chat-1")
+        assert(store.places(in: unclaimed).count == ClientRecentPlaces.capacity)
+        assert(store.continuePlaces(in: alice, limit: 0).isEmpty)
+        assert(store.continuePlaces(in: nil).isEmpty)
         store.record(in: bob, peer: "", workspaceID: "w", workspaceName: "W", kind: .workspace)
         store.record(in: bob, peer: "p", workspaceID: nil, workspaceName: "W", kind: .chat)
         assert(store.places(in: bob).count == 1)

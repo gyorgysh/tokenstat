@@ -15,7 +15,7 @@ struct ClientContinueSection: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
     private var places: [ClientRecentPlaces.Place] {
-        Array(ClientRecentPlaces.shared.places(in: account.account?.recentPlacesScope).prefix(4))
+        ClientRecentPlaces.shared.continuePlaces(in: account.account?.recentPlacesScope)
     }
 
     var body: some View {
