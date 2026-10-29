@@ -1103,10 +1103,13 @@ private final class PullsModel {
         nextCursor = cachedLists[query]?.cursor
         supportsPagination = cachedLists[query]?.supportsPagination ?? true
         reachedLimit = cachedLists[query]?.reachedLimit ?? false
-        if !refresh, let cached = cachedLists[query], Date().timeIntervalSince(cached.date) < 30 {
-            isLoadingList = false
-            listError = nil
-            return
+        if !refresh, let cached = cachedLists[query] {
+            let age = Date().timeIntervalSince(cached.date)
+            if age >= 0 && age < 30 {
+                isLoadingList = false
+                listError = nil
+                return
+            }
         }
         isLoadingList = true
         listError = nil

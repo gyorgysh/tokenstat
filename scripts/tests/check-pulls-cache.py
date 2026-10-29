@@ -9,7 +9,13 @@ root = Path(__file__).resolve().parents[2]
 source = (root / 'apps/mac/Sources/Features/Workspaces/Pulls/PullsView.swift').read_text()
 start = source.index('@MainActor\n@Observable\nprivate final class PullsModel')
 end = source.index('    func beginLogin()', start)
-model = source[start:end] + '}\n'
+model = source[start:end] + '''
+    // Fixture-only clock adjustment; exercise the unchanged production freshness check.
+    func setCachedDatesForTest(_ date: Date) {
+        for key in cachedLists.keys { cachedLists[key]?.date = date }
+    }
+}
+'''
 harness = r'''
 import Foundation
 import Observation
@@ -83,6 +89,11 @@ checks = r'''
         let model = PullsModel()
         await model.load(workspaceID: "repo", peer: "host")
         precondition(model.rows == [PullSummary(number: 1)] && model.lastLoadedAt != nil)
+        let callsBeforeClockChange = Bridge.calls.count
+        model.setCachedDatesForTest(Date().addingTimeInterval(60))
+        await model.loadList(workspaceID: "repo", peer: "host")
+        precondition(Bridge.calls.count == callsBeforeClockChange + 1 && Bridge.calls.last == true,
+                     "a clock moving backward forces a real refresh")
         Bridge.unavailable = true
         await model.load(workspaceID: "repo", peer: "host")
         precondition(model.errorMessage != nil && model.rows.count == 1 && model.lastLoadedAt != nil)
