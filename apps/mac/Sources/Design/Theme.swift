@@ -1693,14 +1693,15 @@ struct AccentButtonStyle: ButtonStyle {
 struct DestructiveButtonStyle: ButtonStyle {
     /// Dense variant for rows and card accessories.
     var small = false
+    var comfortable = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .labelStyle(ActionLabelStyle(small: small))
-            .font(.system(size: small ? 12 : 13, weight: .medium))
+            .labelStyle(ActionLabelStyle(small: small && !comfortable))
+            .font(.system(size: comfortable ? 15 : (small ? 12 : 13), weight: .medium))
             .foregroundStyle(Theme.danger)
-            .padding(.horizontal, small ? 10 : 14)
-            .frame(height: small ? Theme.Control.heightSmall : Theme.Control.height)
+            .padding(.horizontal, comfortable ? 16 : (small ? 10 : 14))
+            .frame(height: comfortable ? Theme.Control.heightComfortable : (small ? Theme.Control.heightSmall : Theme.Control.height))
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(configuration.isPressed ? Theme.danger.opacity(0.16) : Theme.danger.opacity(0.08))

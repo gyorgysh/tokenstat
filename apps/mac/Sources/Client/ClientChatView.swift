@@ -106,18 +106,22 @@ private struct ClientChatContent: View {
     @State private var showingChatSwitcher = false
     @State private var showingChatSidebar = true
     @State private var workbenchWidth: CGFloat = 0
+    @State private var workbenchHeight: CGFloat = 0
     @State private var browserOpen = false
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private var place: String { folderName.isEmpty ? L10n.text("apple.clientchatview.this_folder.9d6325c8") : folderName }
 
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
-                if geometry.size.width >= 600, !dynamicTypeSize.isAccessibilitySize,
+                if geometry.size.width >= 600, geometry.size.height >= 500,
+                   verticalSizeClass != .compact,
+                   !dynamicTypeSize.isAccessibilitySize,
                    showingChatSidebar, opened != nil,
                    !browserOpen || geometry.size.width >= 900 {
                     chatSwitcher.frame(width: 210)
@@ -127,6 +131,9 @@ private struct ClientChatContent: View {
             }
             .onChange(of: geometry.size.width, initial: true) { _, width in
                 workbenchWidth = width
+            }
+            .onChange(of: geometry.size.height, initial: true) { _, height in
+                workbenchHeight = height
             }
         }
         .clientTabBarHidden(opened != nil)
@@ -200,13 +207,16 @@ private struct ClientChatContent: View {
                         retainedThread = opened; self.opened = nil
                     },
                     onShowChats: {
-                        if workbenchWidth >= 600 && !dynamicTypeSize.isAccessibilitySize
+                        if workbenchWidth >= 600 && workbenchHeight >= 500
+                            && verticalSizeClass != .compact
+                            && !dynamicTypeSize.isAccessibilitySize
                             && (!browserOpen || workbenchWidth >= 900) {
                             showingChatSidebar.toggle()
                         }
                         else { showingChatSwitcher = true }
                     },
                     availableWorkbenchWidth: workbenchWidth,
+                    availableWorkbenchHeight: workbenchHeight,
                     onBrowserChange: { browserOpen = $0 },
                     onFork: { copied in
                         guard visible, publicationLayout == navigation.stackGeneration,
@@ -660,6 +670,7 @@ struct ClientChatThread: View {
     var onBack: (() -> Void)?
     var onShowChats: (() -> Void)? = nil
     var availableWorkbenchWidth: CGFloat? = nil
+    var availableWorkbenchHeight: CGFloat? = nil
     var onBrowserChange: ((Bool) -> Void)? = nil
     var onFork: ((ChatConversation) -> Void)?
     var onDelete: ((ChatConversation) -> Void)?
@@ -753,7 +764,10 @@ struct ClientChatThread: View {
     }
 
     private var wideBrowser: Bool {
-        (availableWorkbenchWidth ?? chatWidth) >= 600 && !dynamicTypeSize.isAccessibilitySize
+        (availableWorkbenchWidth ?? chatWidth) >= 600
+            && (availableWorkbenchHeight ?? .infinity) >= 500
+            && verticalSizeClass != .compact
+            && !dynamicTypeSize.isAccessibilitySize
     }
 
     private var companionTabs: some View {

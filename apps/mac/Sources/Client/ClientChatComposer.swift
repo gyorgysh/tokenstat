@@ -49,6 +49,9 @@ struct ClientChatComposer: View {
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var compactHeight: Bool { verticalSizeClass == .compact }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -72,45 +75,15 @@ struct ClientChatComposer: View {
                 ChatDraftNotice(unconfirmed: unconfirmed,
                                 checkAgain: { Task { await model.checkUnconfirmedSend() } })
             }
-            ChatComposerControls(
-                model: model,
-                chat: chat,
-                locked: setupLocked,
-                compact: true
-            ) {
-                HStack(spacing: Theme.Space.s) {
-                    // Show Hide only when the keyboard can be dismissed.
-                    if focused {
-                        Button(L10n.text("apple.clientchatcomposer.hide_keyboard.f6b0718e"), .hideKeyboard, action: hideKeyboard)
-                            .modifier(ComposerChromeButton())
-                            .transition(controlTransition)
-                    }
-                    // Stop stays here even when a queued draft enables Send.
-                    if running {
-                        Button(L10n.text("common.stop"), .stop, action: onStop)
-                            .modifier(ComposerChromeButton())
-                            .transition(controlTransition)
-                    }
-                    expandToggle
+            if !attachments.isEmpty { strip }
+            if compactHeight && !dynamicTypeSize.isAccessibilitySize {
+                HStack(alignment: .bottom, spacing: Theme.Space.s) {
+                    composerControls
+                    inputRow
                 }
-            }
-            if !attachments.isEmpty {
-                strip
-            }
-            HStack(alignment: .bottom, spacing: Theme.Space.s) {
-                attachControl
-                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
-                ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
-                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
-                field
-                // The send button earns its 44 points only when there is
-                // something to send. A permanently greyed one is a control
-                // that has never done anything, taking the width a message
-                // could have had.
-                if canSend {
-                    sendControl
-                        .transition(controlTransition)
-                }
+            } else {
+                composerControls
+                inputRow
             }
         }
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
@@ -144,6 +117,9 @@ struct ClientChatComposer: View {
         .onChange(of: model.currentReference) { _, _ in
             importing = false; importOwner = nil; pickingPhotos = false; photoOwner = nil; photos = []
         }
+        .onChange(of: compactHeight) { _, isCompact in
+            if isCompact { expanded = false }
+        }
         .fileImporter(
             isPresented: $importing,
             allowedContentTypes: [.item],
@@ -165,6 +141,50 @@ struct ClientChatComposer: View {
             Task { await ingest(photos: items, owner: owner) }
         }
         // Paste is offered from the attach menu. `onPasteCommand` is Mac-only.
+    }
+
+    private var composerControls: some View {
+        ChatComposerControls(
+            model: model,
+            chat: chat,
+            locked: setupLocked,
+            compact: true,
+            condensed: compactHeight
+        ) {
+            HStack(spacing: Theme.Space.s) {
+                // Show Hide only when the keyboard can be dismissed.
+                if focused {
+                    Button(L10n.text("apple.clientchatcomposer.hide_keyboard.f6b0718e"), .hideKeyboard, action: hideKeyboard)
+                        .modifier(ComposerChromeButton())
+                        .transition(controlTransition)
+                }
+                // Stop stays here even when a queued draft enables Send.
+                if running {
+                    Button(L10n.text("common.stop"), .stop, action: onStop)
+                        .modifier(ComposerChromeButton())
+                        .transition(controlTransition)
+                }
+                expandToggle
+            }
+        }
+    }
+
+    private var inputRow: some View {
+        HStack(alignment: .bottom, spacing: Theme.Space.s) {
+            attachControl
+                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
+            ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
+                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
+            field
+            // The send button earns its 44 points only when there is
+            // something to send. A permanently greyed one is a control
+            // that has never done anything, taking the width a message
+            // could have had.
+            if canSend {
+                sendControl
+                    .transition(controlTransition)
+            }
+        }
     }
 
     private var strip: some View {
@@ -236,7 +256,7 @@ struct ClientChatComposer: View {
         TextField(placeholder, text: $draft, axis: .vertical)
             .textFieldStyle(.plain)
             .font(ClientType.body)
-            .lineLimit(expanded ? 8...18 : 1...6)
+            .lineLimit(expanded ? 8...18 : compactHeight ? 1...2 : 1...6)
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: expanded ? 180 : 0, alignment: .topLeading)
             .focused($focused)
             .disabled(model.landingDraft?.isSubmitting == true)

@@ -346,11 +346,13 @@ private struct ClientRecentChatContent: View {
     @State private var showingChatSwitcher = false
     @State private var showingChatSidebar = true
     @State private var workbenchWidth: CGFloat = 0
+    @State private var workbenchHeight: CGFloat = 0
     @State private var browserOpen = false
     @State private var presentationScope: WorkReference.Scope?
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private struct LoadIdentity: Equatable {
         let scope: WorkReference.Scope?
@@ -444,6 +446,9 @@ private struct ClientRecentChatContent: View {
             .onChange(of: geometry.size.width, initial: true) { _, width in
                 workbenchWidth = width
             }
+            .onChange(of: geometry.size.height, initial: true) { _, height in
+                workbenchHeight = height
+            }
         }
         .background(Theme.background)
         .clientTabBarHidden(!loaded || model.chats.contains(where: { $0.id == chatID }))
@@ -471,7 +476,8 @@ private struct ClientRecentChatContent: View {
     }
 
     private var canShowChatSidebar: Bool {
-        model.savedCopy == nil && workbenchWidth >= 600 && !dynamicTypeSize.isAccessibilitySize
+        model.savedCopy == nil && workbenchWidth >= 600 && workbenchHeight >= 500
+            && verticalSizeClass != .compact && !dynamicTypeSize.isAccessibilitySize
             && (!browserOpen || workbenchWidth >= 900)
     }
 
@@ -497,6 +503,7 @@ private struct ClientRecentChatContent: View {
                         else { showingChatSwitcher = true }
                     } : nil,
                     availableWorkbenchWidth: workbenchWidth,
+                    availableWorkbenchHeight: workbenchHeight,
                     onBrowserChange: { browserOpen = $0 },
                     onDelete: { deleted in
                         guard visible, deleted.id == chatID else { return }

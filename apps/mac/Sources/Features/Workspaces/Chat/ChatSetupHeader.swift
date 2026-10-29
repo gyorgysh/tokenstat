@@ -341,6 +341,9 @@ struct ChatComposerControls<Chrome: View>: View {
     /// Phones use the two-row arrangement directly; desktops fit the
     /// horizontal controls first, then use the same compact arrangement.
     var compact = false
+    /// A landscape phone needs its transcript more than a permanently open
+    /// second setup row. The same controls remain available in a sheet.
+    var condensed = false
     let chrome: Chrome
 
     @State private var pickingAgent = false
@@ -349,11 +352,13 @@ struct ChatComposerControls<Chrome: View>: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(model: ChatModel, chat: ChatConversation, locked: Bool, compact: Bool = false,
+         condensed: Bool = false,
          @ViewBuilder chrome: () -> Chrome) {
         self.model = model
         self.chat = chat
         self.locked = locked || (model.landingDraft != nil && !model.landingCanSubmit)
         self.compact = compact
+        self.condensed = condensed
         self.chrome = chrome()
     }
 
@@ -425,6 +430,17 @@ struct ChatComposerControls<Chrome: View>: View {
                 chrome
             }
             .dynamicTypeSize(.large)
+        } else if compact && condensed {
+            HStack(spacing: Theme.Space.s) {
+                Button { showingAccessibleSetup = true } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .frame(width: Theme.Control.heightComfortable, height: Theme.Control.heightComfortable)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.text("apple.clientchatview.chat_setup.9fa79d00"))
+                chrome
+            }
+            .fixedSize(horizontal: true, vertical: false)
         } else if compact {
             // Keyboard and expansion actions share only the agent's row.
             // Putting them beside the whole stack subtracts their width

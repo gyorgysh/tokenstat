@@ -314,7 +314,7 @@ struct PullDetailView: View {
                 Button {
                     Task { await model.moreTimeline(workspaceID: workspaceID, peer: peer, number: summary.number) }
                 } label: { ActionIcon.more.label(L10n.text("apple.pulldetailview.earlier_activity.2e9839ac")) }
-                .buttonStyle(SecondaryButtonStyle(small: true))
+                .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .frame(maxWidth: .infinity)
             }
             PullCommentComposer(
@@ -364,7 +364,7 @@ struct PullDetailView: View {
                                 }
                                 .font(Theme.caption.weight(model.selectedPath == diff.path ? .semibold : .medium))
                                 .foregroundStyle(model.selectedPath == diff.path ? Theme.accent : Color.secondary)
-                                .padding(.horizontal, 10).frame(height: Theme.Control.height)
+                                .padding(.horizontal, 10).frame(height: Theme.Control.heightComfortable)
                                 .background(model.selectedPath == diff.path ? Theme.accentSoft : Theme.panel, in: Capsule())
                                 .overlay(Capsule().strokeBorder(model.selectedPath == diff.path ? Theme.accent.opacity(0.3) : Theme.border))
                             }.buttonStyle(.plain)
@@ -436,7 +436,7 @@ struct PullDetailView: View {
             inlineError(message)
             Button { Task { await model.load(workspaceID: workspaceID, peer: peer, number: summary.number, refresh: true) } }
                 label: { ActionIcon.refresh.label(L10n.text("apple.pulldetailview.try_again.d8b8392e")) }
-                .buttonStyle(AccentButtonStyle(small: true))
+                .buttonStyle(AccentButtonStyle(comfortable: true))
         }
     }
     private func inlineError(_ message: String) -> some View {
@@ -709,7 +709,7 @@ private struct PullCommentComposer: View {
                     .foregroundStyle(.tertiary)
                 Spacer()
                 Button(L10n.text("apple.pulldetailview.comment.44f5e3fb"), .comment, action: send)
-                    .buttonStyle(AccentButtonStyle(small: true))
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
             }
         }
@@ -741,18 +741,18 @@ private struct PullActionPanel: View {
                     Button(L10n.text("apple.pulldetailview.ready_for_review.75c2a5c8"), .done) {
                         Task { await model.ready(workspaceID: workspaceID, peer: peer, number: detail.number) }
                     }
-                    .buttonStyle(AccentButtonStyle(small: true))
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
                     .disabled(model.actionBusy)
                 }
                 mergeActions
                 Button(L10n.text("apple.pulldetailview.close_pull_request.672e174d"), .dismiss) { model.confirmingClose = true }
-                    .buttonStyle(DestructiveButtonStyle(small: true))
+                    .buttonStyle(DestructiveButtonStyle(comfortable: true))
                     .disabled(model.actionBusy)
             } else if detail.state == "closed" {
                 Button(L10n.text("apple.pulldetailview.reopen_pull_request.6126288e"), .reopen) {
                     Task { await model.setOpen(true, workspaceID: workspaceID, peer: peer, number: detail.number) }
                 }
-                .buttonStyle(AccentButtonStyle(small: true))
+                .buttonStyle(AccentButtonStyle(comfortable: true))
                 .disabled(model.actionBusy)
             }
 
@@ -771,13 +771,13 @@ private struct PullActionPanel: View {
             Button(L10n.text("apple.pulldetailview.approve.6007acbe"), .approve) {
                 Task { await model.review(.approve, workspaceID: workspaceID, peer: peer, number: detail.number) }
             }
-            .buttonStyle(SecondaryButtonStyle(small: true))
+            .buttonStyle(SecondaryButtonStyle(comfortable: true))
             .disabled(model.actionBusy)
             Button(L10n.text("apple.pulldetailview.request_changes.cb5d9f98"), .edit) { model.beginReview(.requestChanges) }
-                .buttonStyle(SecondaryButtonStyle(small: true))
+                .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(model.actionBusy)
             Button(L10n.text("apple.pulldetailview.comment_review.f8950d66"), .comment) { model.beginReview(.comment) }
-                .buttonStyle(SecondaryButtonStyle(small: true))
+                .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(model.actionBusy)
             if let mode = model.reviewMode {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -788,12 +788,12 @@ private struct PullActionPanel: View {
                     )
                     HStack {
                         Button(L10n.text("common.cancel"), .dismiss) { model.cancelReview() }
-                            .buttonStyle(SecondaryButtonStyle(small: true))
+                            .buttonStyle(SecondaryButtonStyle(comfortable: true))
                         Spacer()
                         Button(L10n.text("apple.pulldetailview.send_review.e61e3577"), .send) {
                             Task { await model.review(mode, workspaceID: workspaceID, peer: peer, number: detail.number) }
                         }
-                        .buttonStyle(AccentButtonStyle(small: true))
+                        .buttonStyle(AccentButtonStyle(comfortable: true))
                         .disabled(model.reviewDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.actionBusy)
                     }
                 }
@@ -810,10 +810,11 @@ private struct PullActionPanel: View {
             SegmentedTabs(
                 options: PullMergeMethod.allCases,
                 selection: $model.mergeMethod,
-                title: \PullMergeMethod.title
+                title: \PullMergeMethod.title,
+                comfortable: true
             )
             Button(L10n.text("apple.pulldetailview.merge_pull_request.4aa62232"), .merge) { model.confirmingMerge = true }
-                .buttonStyle(AccentButtonStyle(small: true))
+                .buttonStyle(AccentButtonStyle(comfortable: true))
                 .disabled(detail.draft || model.actionBusy)
         }
         .padding(.top, Theme.Space.xs)
@@ -827,13 +828,13 @@ private struct PullActionPanel: View {
                 .textFieldStyle(.plain)
                 .font(Theme.monoText(11, weight: .medium, relativeTo: .caption))
                 .padding(.horizontal, 10)
-                .frame(height: Theme.Control.height)
+                .frame(height: Theme.Control.heightComfortable)
                 .background(Theme.background, in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
             Button(L10n.text("apple.pulldetailview.check_out_locally.433de9bf"), .checkout) {
                 Task { await model.checkout(workspaceID: workspaceID, peer: peer, number: detail.number) }
             }
-            .buttonStyle(SecondaryButtonStyle(small: true))
+            .buttonStyle(SecondaryButtonStyle(comfortable: true))
             .disabled(model.checkoutBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.actionBusy)
         }
         .padding(.top, Theme.Space.xs)
@@ -886,7 +887,16 @@ private struct CheckRow: View {
             }
             Spacer()
             Text(check.state.capitalized).font(Theme.caption.weight(.semibold)).foregroundStyle(tint)
-            if let raw = check.url, let url = URL(string: raw) { Button { openURL(url) } label: { Image(systemName: ActionIcon.external.symbol).accessibilityLabel(L10n.text("apple.pulldetailview.open_check.130779b8")) }.buttonStyle(.plain).foregroundStyle(Theme.accent) }
+            if let raw = check.url, let url = URL(string: raw) {
+                Button { openURL(url) } label: {
+                    Image(systemName: ActionIcon.external.symbol)
+                        .frame(width: Theme.Control.heightComfortable, height: Theme.Control.heightComfortable)
+                        .contentShape(Rectangle())
+                        .accessibilityLabel(L10n.text("apple.pulldetailview.open_check.130779b8"))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+            }
         }
         .padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))

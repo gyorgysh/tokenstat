@@ -350,7 +350,7 @@ struct PullsView: View {
                 if model.availability?.state == "ready" {
                     #if os(macOS)
                     Button(L10n.text("apple.pullcreate.new"), .create) { creatingPull = true }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
                     #else
                     Button { creatingPull = true } label: {
                         Image(systemName: ActionIcon.create.symbol)
@@ -537,7 +537,7 @@ struct PullsView: View {
                 // anybody looks for it.
                 if canConnectHere, let url = installationURL {
                     Button(L10n.text("apple.pullsview.repositories.1e32af87"), .external) { openURL(url) }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
                         .help(L10n.text("apple.pullsview.choose_which_repositories_tokenstat_may_op.7bbe0dd9"))
                 }
             }
@@ -601,7 +601,7 @@ struct PullsView: View {
                     if model.isLoadingMore { ProgressView().controlSize(.small) }
                     else { Text(L10n.text("apple.worksearchsheet.show_more_results.b27dc424")) }
                 }
-                .buttonStyle(SecondaryButtonStyle(small: true))
+                .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(model.isLoadingMore || model.isLoadingList)
                 .frame(maxWidth: .infinity)
             } else if !model.supportsPagination && model.rows.count >= 40 {
@@ -629,7 +629,7 @@ struct PullsView: View {
                 } label: {
                     Label(L10n.text("apple.pullsview.show_open_pull_requests.b5b4db36"), systemImage: "arrow.counterclockwise")
                 }
-                .buttonStyle(AccentButtonStyle(small: true))
+                .buttonStyle(AccentButtonStyle(comfortable: true))
             }
         }
         .padding(Theme.Space.l)
@@ -676,7 +676,7 @@ struct PullsView: View {
                         else { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
                     }
                 }
-                    .buttonStyle(AccentButtonStyle(small: true))
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
             }
         }
         .padding(Theme.Space.m)
