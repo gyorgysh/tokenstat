@@ -43,7 +43,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/Tokenstat-Bridging-Header.h
-    MARKETING_VERSION: "1.8.0"
+    MARKETING_VERSION: "1.9.0"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -286,7 +286,7 @@ settings:
     # 204 is 1.8.0 without free trials, with the grid behind sign-in and the
     # Patron card describing what it adds.
     # 205 includes the Plus, Pro and Elite display names.
-    CURRENT_PROJECT_VERSION: "205"
+    CURRENT_PROJECT_VERSION: "206"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

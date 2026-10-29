@@ -32,6 +32,7 @@ struct DesktopWorkSearchPresentation: View {
                 .modalFrame(width: 680, height: 720)
             }
         }
+        .background(SheetOutsideDismiss { dismiss() })
         // `visible` is set here as well as in `onAppear`, because the task
         // can run first: it guards every step of the preparation, and a task
         // that starts with it false gives up before doing anything and never
