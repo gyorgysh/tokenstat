@@ -102,7 +102,21 @@ struct ClientFolderSplit: View {
         .onChange(of: folder.id) { _, _ in closeBrowser() }
     }
 
-    private var split: some View {
+    @ViewBuilder private var split: some View {
+        if chatChromeCollapsed {
+            splitContent
+        } else {
+            splitContent.clientTopBar {
+                VStack(spacing: 0) {
+                    sectionsStrip
+                    ThemeRule()
+                }
+                .background(Theme.background)
+            }
+        }
+    }
+
+    private var splitContent: some View {
         VStack(spacing: 0) {
             if section == .sessions {
                 ClientFolderBranchRow(peer: peer, workspaceID: workspaceID, folder: current,
@@ -117,15 +131,6 @@ struct ClientFolderSplit: View {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .clientHideScrollEdgeEffect(for: .top)
-        }
-        .clientTopBar {
-            if !chatChromeCollapsed {
-                VStack(spacing: 0) {
-                    sectionsStrip
-                    ThemeRule()
-                }
-                .background(Theme.background)
-            }
         }
     }
 

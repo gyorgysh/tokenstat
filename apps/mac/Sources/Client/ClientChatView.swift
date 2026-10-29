@@ -1087,6 +1087,23 @@ struct ClientChatThread: View {
 
     private var chatPresentation: some View {
         VStack(spacing: 0) {
+            if isActive && chromeCollapsed && !(displayedBrowserFocus == .browser && companion == .browser) {
+                HStack {
+                    Button {
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                            chromeCollapsed = false
+                        }
+                    } label: {
+                        Image(systemName: "rectangle.topthird.inset.filled")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .clientFloatingBar(cornerRadius: 14)
+                    .accessibilityLabel(L10n.text("apple.clientchatview.show_controls"))
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Theme.Space.s)
+            }
             if let chat {
                 if model.savedCopy == nil {
                     WorkHandoffOffer(chat: model) { showingHandoff = true }
@@ -1106,7 +1123,6 @@ struct ClientChatThread: View {
                         showPort = true
                         return .handled
                     })
-                    .padding(.top, isActive && chromeCollapsed ? 60 : 0)
                     .clientBottomBar(separated: true) {
                         bar(chat)
                             .padding(.top, Theme.Space.s)
@@ -1195,22 +1211,6 @@ struct ClientChatThread: View {
         .overlay(alignment: .top) {
             if refreshing || connectivity.status == .offline {
                 ClientReconnectBanner(offline: !refreshing && connectivity.status == .offline)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            if isActive && chromeCollapsed && !(displayedBrowserFocus == .browser && companion == .browser) {
-                Button {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                        chromeCollapsed = false
-                    }
-                } label: {
-                    Image(systemName: "rectangle.topthird.inset.filled")
-                        .frame(minWidth: 44, minHeight: 44)
-                }
-                .buttonStyle(.plain)
-                .clientFloatingBar(cornerRadius: 14)
-                .accessibilityLabel(L10n.text("apple.clientchatview.show_controls"))
-                .padding(Theme.Space.s)
             }
         }
         .onChange(of: scenePhase) { _, phase in
