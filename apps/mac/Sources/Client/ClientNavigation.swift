@@ -8,6 +8,20 @@
 #if !os(macOS)
 import SwiftUI
 
+/// A live pull detail survives an adaptive presentation change in memory.
+/// It is never written to the stored mobile route.
+struct ClientPullHandoff {
+    let id: UUID
+    var owner: UUID
+    let reference: WorkReference
+    let sessionGeneration: UInt64
+    let availability: PullAvailability?
+    let summary: PullSummary
+    let model: PullDetailModel
+    let listScope: PullScope
+    let listState: PullStateFilter
+}
+
 /// Where the person is, held above the layout rather than inside it.
 ///
 /// The client can be drawn two ways (see `ClientLayoutMode`), and detaching a
@@ -22,6 +36,7 @@ import SwiftUI
 @Observable
 final class ClientNavigationModel {
     let chatHandoff = ClientChatLayoutHandoff()
+    var pullHandoff: ClientPullHandoff?
     var restoredChatReader: ClientChatLayoutHandoff.Reader?
     @ObservationIgnored private var restoringLayout = false
 
@@ -44,6 +59,7 @@ final class ClientNavigationModel {
     func chooseNavigation() {
         guard !restoringLayout else { return }
         chatHandoff.navigate()
+        pullHandoff = nil
         showingNewChat = false
         newChatDraft.retire()
         pushedChat = nil
@@ -184,6 +200,10 @@ final class ClientNavigationModel {
         }
         if let chat = visibleChat, chat.scope == scope {
             return WorkMobileRoute(scope: scope, tab: destination.rawValue, reference: chat, section: "chat")
+        }
+        if let pull = pullHandoff, pull.reference.scope == scope,
+           pull.sessionGeneration == WorkSessionContext.shared.generation {
+            return WorkMobileRoute(scope: scope, tab: destination.rawValue, reference: pull.reference, section: "pulls")
         }
         if let restoredRoute, restoredRoute.scope == scope,
            restoredChatReader?.matches(restoredRoute) == true { return restoredRoute }

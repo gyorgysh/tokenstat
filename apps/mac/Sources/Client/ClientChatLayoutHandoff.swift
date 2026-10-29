@@ -176,6 +176,7 @@ struct ClientOwnedPushDestination: ViewModifier {
     let tab: ClientTab
     var depth: Int = 0
     @Environment(ClientNavigationModel.self) private var navigation
+    @State private var presentedPush: UUID?
 
     func body(content: Content) -> some View {
         let generation = navigation.pushedChatGeneration
@@ -183,7 +184,12 @@ struct ClientOwnedPushDestination: ViewModifier {
         return content.navigationDestination(isPresented: Binding(
             get: { navigation.destination == tab && navigation.pushedChats.indices.contains(depth) },
             set: { shown in
-                if !shown, navigation.destination == tab {
+                // A newly mounted stack can report false before it has shown
+                // its destination; that callback is not a Back action.
+                if !shown, navigation.destination == tab,
+                   navigation.pushedChats.indices.contains(depth),
+                   presentedPush == navigation.pushedChats[depth].id {
+                    presentedPush = nil
                     navigation.dismissPushedChat(generation: generation, layout: layout, depth: depth)
                 }
             }
@@ -192,6 +198,9 @@ struct ClientOwnedPushDestination: ViewModifier {
                 let push = navigation.pushedChats[depth]
                 AnyView(push.content.id(push.id)
                     .modifier(ClientOwnedPushDestination(tab: tab, depth: depth + 1)))
+                    .onAppear {
+                        presentedPush = push.id
+                    }
             }
         }
     }

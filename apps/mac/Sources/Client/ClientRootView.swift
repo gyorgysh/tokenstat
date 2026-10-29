@@ -281,7 +281,8 @@ struct ClientRootView: View {
             navigation.stackGeneration &+= 1
             // An opening without a selected chat still belongs to this root
             // push. Keep its snapshot while its shared producer finishes.
-            if navigation.pushedChat != nil, navigation.chatHandoff.reader == nil {
+            if navigation.pushedChat != nil, navigation.chatHandoff.reader == nil,
+               navigation.pullHandoff == nil {
                 layoutHandoff = nil
                 return
             }
@@ -302,6 +303,13 @@ struct ClientRootView: View {
             // A compact/regular project swap can happen without changing
             // the root's tab/sidebar mode. Async launch handoffs follow both.
             navigation.layoutGeneration &+= 1
+            if layoutHandoff == nil, let pull = navigation.pullHandoff,
+               let route = navigation.currentRoute, route.reference == pull.reference,
+               route.section == "pulls", navigation.restoredRoute != route {
+                navigation.restoreLayout { navigation.restoredRoute = route }
+                layoutHandoffIntent = navigation.chatHandoff.intent
+                layoutHandoff = route
+            }
         }
         // And put it back once the new layout is mounted. Set only in the
         // same update as the swap, the route could be cleared by the old

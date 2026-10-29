@@ -58,6 +58,7 @@ struct ClientRestoredRouteView: View {
 struct ClientRestoredDestination: ViewModifier {
     let tab: ClientTab
     @Environment(ClientNavigationModel.self) private var navigation
+    @State private var presentedGeneration: UInt64?
 
     func body(content: Content) -> some View {
         let generation = navigation.restoredRouteGeneration
@@ -65,13 +66,21 @@ struct ClientRestoredDestination: ViewModifier {
         return content.navigationDestination(isPresented: Binding(
             get: { navigation.destination == tab && navigation.restoredRoute != nil },
             set: { shown in
-                if !shown, layout == navigation.stackGeneration, navigation.destination == tab {
+                // Ignore a teardown callback from a stack which never
+                // presented this generation of the restored route.
+                if !shown, presentedGeneration == generation,
+                   layout == navigation.stackGeneration, navigation.destination == tab {
+                    presentedGeneration = nil
                     navigation.dismissRestoredRoute(generation: generation)
                 }
             }
         )) {
             if let route = navigation.restoredRoute {
                 ClientRestoredRouteView(route: route)
+                    .id(generation)
+                    .onAppear {
+                        presentedGeneration = generation
+                    }
             }
         }
     }

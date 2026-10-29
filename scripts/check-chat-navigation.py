@@ -22,6 +22,10 @@ struct ClientAppDestination {}
 struct ClientAccountRequest {}
 struct ClientProjectChatAction {}
 struct ClientOwnedPush: Identifiable { let id: UUID }
+struct ClientPullHandoff {
+    let reference: WorkReference
+    let sessionGeneration: UInt64
+}
 struct WorkspaceFolder: Hashable { let id: String; var name: String = "P" }
 struct ClientFolderPush: Hashable {
     let peerKey: String; let hostName: String; let folder: WorkspaceFolder; let section: WorkspaceSection
@@ -52,6 +56,16 @@ tests = '''
         WorkSessionContext.shared.scope = scope
         let nav = ClientNavigationModel()
         nav.destination = .workspaces
+        let pullReference = WorkReference(scope: scope, hostIdentity: "mac", workspaceID: "p", kind: .workspace, itemID: nil)
+        nav.pullHandoff = ClientPullHandoff(reference: pullReference, sessionGeneration: WorkSessionContext.shared.generation)
+        precondition(nav.currentRoute?.reference == pullReference && nav.currentRoute?.section == "pulls")
+        nav.restoreLayout { nav.section = .changes }
+        precondition(nav.currentRoute?.section == "pulls", "layout restoration retains pull selection")
+        WorkSessionContext.shared.generation += 1
+        precondition(nav.currentRoute?.reference == nil, "a previous account session cannot restore a pull")
+        WorkSessionContext.shared.generation -= 1
+        nav.chooseNavigation()
+        precondition(nav.pullHandoff == nil, "explicit navigation retires the pull selection")
         let session = ClientChatSession(), owner = UUID(), push = UUID()
         let b = WorkReference(scope: scope, hostIdentity: "mac", workspaceID: "p", kind: .conversation, itemID: "b")
         let key = ClientChatSessions.Key(peer: "mac", workspace: "p", conversation: "b")

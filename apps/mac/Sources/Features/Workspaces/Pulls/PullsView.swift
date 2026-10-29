@@ -51,11 +51,11 @@ final class PullDetailCache {
     private var models: [UInt32: PullDetailModel] = [:]
     private var order: [UInt32] = []
 
-    func model(number: UInt32, owner: Owner) -> PullDetailModel {
+    func model(number: UInt32, owner: Owner, retained: PullDetailModel? = nil) -> PullDetailModel {
         if self.owner != owner { clear(); self.owner = owner }
         order.removeAll { $0 == number }
         order.append(number)
-        let result = models[number] ?? PullDetailModel()
+        let result = models[number] ?? retained ?? PullDetailModel()
         models[number] = result
         while order.count > 2 {
             let evicted = order.removeFirst()
@@ -91,6 +91,11 @@ struct PullsView: View {
 
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    #if !os(macOS)
+    @Environment(ClientNavigationModel.self) private var navigation
+    @State private var pullPresentationID: UUID?
+    @State private var pullPresentationOwner = UUID()
+    #endif
     @State private var model = PullsModel()
     @State private var detailCache = PullDetailCache()
     @State private var selectedPull: PullSummary?
@@ -115,6 +120,7 @@ struct PullsView: View {
                     summary: selectedPull,
                     scope: scopeChip,
                     onBack: {
+                        retirePullHandoff()
                         selectedDetail.prepareForCache()
                         self.selectedPull = nil
                         self.selectedDetail = nil
@@ -154,6 +160,11 @@ struct PullsView: View {
                 }
             }
             }
+            #if !os(macOS)
+            // Restore after the host gate mounts its content, so the new
+            // view's selection is observed by the active presentation.
+            .onAppear { restorePullHandoff() }
+            #endif
             .background(Theme.background)
             // What every other section gets from `ClientCardList`, which this
             // screen does not use because it is shared with the Mac. Without
@@ -185,7 +196,7 @@ struct PullsView: View {
                 .id("\(workspaceID):\(peer ?? "local")")
             }
             .onChange(of: model.availability) { old, new in
-                if old != new { clearDetailSelection() }
+                if old != new && !matchesRestoredAvailability(old: old, new: new) { clearDetailSelection() }
             }
             .onChange(of: selectedDetail?.accessLost) { _, lost in
                 guard lost == true else { return }
@@ -207,6 +218,7 @@ struct PullsView: View {
     }
 
     private func clearDetailSelection() {
+        retirePullHandoff()
         detailCache.clear()
         selectedPull = nil
         selectedDetail = nil
@@ -225,7 +237,55 @@ struct PullsView: View {
                                           availability: model.availability)
         selectedDetail = detailCache.model(number: pull.number, owner: owner)
         selectedPull = pull
+        #if !os(macOS)
+        if let peer, let scope = WorkSessionContext.shared.scope, let selectedDetail {
+            let id = UUID()
+            pullPresentationID = id
+            let reference = WorkReference(scope: scope, hostIdentity: peer, workspaceID: workspaceID,
+                                          kind: .workspace, itemID: nil)
+            navigation.pullHandoff = ClientPullHandoff(id: id, owner: pullPresentationOwner, reference: reference,
+                sessionGeneration: WorkSessionContext.shared.generation, availability: model.availability,
+                summary: pull, model: selectedDetail, listScope: model.scope, listState: model.state)
+        }
+        #endif
     }
+
+    private func retirePullHandoff() {
+        #if !os(macOS)
+        if navigation.pullHandoff?.id == pullPresentationID,
+           navigation.pullHandoff?.owner == pullPresentationOwner { navigation.pullHandoff = nil }
+        pullPresentationID = nil
+        #endif
+    }
+
+    private func matchesRestoredAvailability(old: PullAvailability?, new: PullAvailability?) -> Bool {
+        #if !os(macOS)
+        return old == nil && navigation.pullHandoff?.id == pullPresentationID
+            && navigation.pullHandoff?.availability == new
+        #else
+        return false
+        #endif
+    }
+
+    #if !os(macOS)
+    private func restorePullHandoff() {
+        guard let handoff = navigation.pullHandoff, let peer,
+              handoff.reference.scope == WorkSessionContext.shared.scope,
+              handoff.sessionGeneration == WorkSessionContext.shared.generation,
+              handoff.reference.hostIdentity == peer, handoff.reference.workspaceID == workspaceID,
+              model.availability == nil || model.availability == handoff.availability else { return }
+        let owner = PullDetailCache.Owner(workspace: workspaceID, peer: peer,
+                                          sessionGeneration: handoff.sessionGeneration,
+                                          availability: handoff.availability)
+        pullPresentationID = handoff.id
+        navigation.pullHandoff?.owner = pullPresentationOwner
+        model.scope = handoff.listScope
+        model.state = handoff.listState
+        selectedDetail = detailCache.model(number: handoff.summary.number, owner: owner, retained: handoff.model)
+        selectedPull = handoff.summary
+    }
+
+    #endif
 
     private var scopeChip: ScopeChip? {
         guard let workspaceName, !workspaceName.isEmpty else { return nil }
