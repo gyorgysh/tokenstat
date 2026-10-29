@@ -981,6 +981,7 @@ private struct PullListSkeleton: View {
 @MainActor
 @Observable
 private final class PullsModel {
+    @ObservationIgnored private let sessionGeneration = WorkSessionContext.shared.generation
     var availability: PullAvailability?
     var login: PullDeviceLogin?
     var isLoading = false
@@ -1017,10 +1018,14 @@ private final class PullsModel {
         rows = []; lastLoadedAt = nil; nextCursor = nil; moreError = nil; listError = nil
         supportsPagination = true; reachedLimit = false
         isLoadingList = false; isLoadingMore = false
-        PullCountStore.shared.clear(workspaceID: workspaceID, peer: peer)
+        if sessionGeneration == WorkSessionContext.shared.generation {
+            PullCountStore.shared.clear(workspaceID: workspaceID, peer: peer)
+        }
     }
 
     func load(workspaceID: String, peer: String?, refresh: Bool = false) async {
+        guard sessionGeneration == WorkSessionContext.shared.generation else { return }
+        let session = WorkSessionContext.shared.generation
         availabilityGeneration += 1
         let generation = availabilityGeneration
         if owner != workspaceID || ownerPeer != peer {
@@ -1041,7 +1046,8 @@ private final class PullsModel {
         defer { if generation == availabilityGeneration { isLoading = false } }
         do {
             let loaded = try await Bridge.pullAvailability(workspaceID: workspaceID, peer: peer)
-            guard generation == availabilityGeneration, !Task.isCancelled else { return }
+            guard generation == availabilityGeneration, !Task.isCancelled,
+                  session == WorkSessionContext.shared.generation else { return }
             accessLost = false
             if availability?.login != loaded.login || availability?.repositoryName != loaded.repositoryName
                 || availability?.host != loaded.host || availability?.source != loaded.source
@@ -1070,7 +1076,8 @@ private final class PullsModel {
                 isLoadingList = false
             }
         } catch {
-            guard generation == availabilityGeneration, !Task.isCancelled else { return }
+            guard generation == availabilityGeneration, !Task.isCancelled,
+                  session == WorkSessionContext.shared.generation else { return }
             if PullDetailModel.isAccessLoss(error) {
                 forgetCachedLists(workspaceID: workspaceID, peer: peer)
                 accessLost = true
@@ -1080,7 +1087,9 @@ private final class PullsModel {
     }
 
     func loadList(workspaceID: String, peer: String?, refresh: Bool = false) async {
-        guard availability?.state == "ready" else { return }
+        guard sessionGeneration == WorkSessionContext.shared.generation,
+              availability?.state == "ready" else { return }
+        let session = WorkSessionContext.shared.generation
         listGeneration += 1
         let generation = listGeneration
         isLoadingMore = false
@@ -1101,6 +1110,7 @@ private final class PullsModel {
         }
         isLoadingList = true
         listError = nil
+        defer { if generation == listGeneration { isLoadingList = false } }
         do {
             let result = try await Bridge.pullListPage(
                 workspaceID: workspaceID,
@@ -1111,7 +1121,8 @@ private final class PullsModel {
                 // relabel the host's longer-lived cached copy as fresh.
                 refresh: refresh || cachedLists[query] != nil
             )
-            guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
+            guard generation == listGeneration, scope == requestedScope, state == requestedState,
+                  !Task.isCancelled, session == WorkSessionContext.shared.generation else { return }
             rows = result.page.rows
             accessLost = false
             nextCursor = result.page.nextCursor
@@ -1131,18 +1142,20 @@ private final class PullsModel {
                 }
             }
         } catch {
-            guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
+            guard generation == listGeneration, scope == requestedScope, state == requestedState,
+                  !Task.isCancelled, session == WorkSessionContext.shared.generation else { return }
             if PullDetailModel.isAccessLoss(error) {
                 forgetCachedLists(workspaceID: workspaceID, peer: peer)
                 accessLost = true
             }
             listError = error.localizedDescription
         }
-        if generation == listGeneration { isLoadingList = false }
     }
 
     func loadMore(workspaceID: String, peer: String?) async {
-        guard let cursor = nextCursor, !isLoadingMore, !isLoadingList, rows.count < 1000 else { return }
+        guard sessionGeneration == WorkSessionContext.shared.generation,
+              let cursor = nextCursor, !isLoadingMore, !isLoadingList, rows.count < 1000 else { return }
+        let session = WorkSessionContext.shared.generation
         let generation = listGeneration
         let requestedScope = scope
         let requestedState = state
@@ -1155,7 +1168,8 @@ private final class PullsModel {
                 workspaceID: workspaceID, peer: peer, scope: requestedScope,
                 state: requestedState, cursor: cursor
             )
-            guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
+            guard generation == listGeneration, scope == requestedScope, state == requestedState,
+                  !Task.isCancelled, session == WorkSessionContext.shared.generation else { return }
             guard result.page.nextCursor != cursor else {
                 throw BridgeError.core(code: "invalid_page", message: L10n.text("apple.pullsview.invalid_page"))
             }
@@ -1169,7 +1183,8 @@ private final class PullsModel {
                 cachedLists[query] = (rows, date, nextCursor, supportsPagination, reachedLimit)
             }
         } catch {
-            guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
+            guard generation == listGeneration, scope == requestedScope, state == requestedState,
+                  !Task.isCancelled, session == WorkSessionContext.shared.generation else { return }
             if PullDetailModel.isAccessLoss(error) {
                 forgetCachedLists(workspaceID: workspaceID, peer: peer)
                 accessLost = true

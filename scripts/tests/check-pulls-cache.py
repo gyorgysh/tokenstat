@@ -22,6 +22,10 @@ struct PullAvailability {
     var host: String? = "github.com"; var source: String? = "app"; var installationId: UInt64? = 1
 }
 struct PullDeviceLogin { }
+@MainActor final class WorkSessionContext {
+    static let shared = WorkSessionContext()
+    var generation: UInt64 = 1
+}
 @MainActor final class PullCountStore {
     static let shared = PullCountStore()
     var value: Int?
@@ -47,8 +51,12 @@ enum L10n { static func text(_ key: String) -> String { key } }
     static var firstCursor: String?
     static var next = PullListPage(rows: [], nextCursor: nil)
     static var pauseMore = false
+    static var pauseFirst = false
+    static var pauseAvailability = false
     static var pending: CheckedContinuation<PullListPage, Error>?
+    static var pendingAvailability: CheckedContinuation<PullAvailability, Error>?
     static func pullAvailability(workspaceID: String, peer: String?) async throws -> PullAvailability {
+        if pauseAvailability { return try await withCheckedThrowingContinuation { pendingAvailability = $0 } }
         if unavailable { throw Failure.offline }; return availability
     }
     static func pullListPage(workspaceID: String, peer: String?, scope: PullScope,
@@ -56,6 +64,9 @@ enum L10n { static func text(_ key: String) -> String { key } }
         calls.append(refresh)
         if revoked { throw Failure.revoked }
         if listUnavailable { throw Failure.offline }
+        if cursor == nil && pauseFirst {
+            return (try await withCheckedThrowingContinuation { pending = $0 }, true)
+        }
         if cursor != nil {
             if pauseMore {
                 return (try await withCheckedThrowingContinuation { pending = $0 }, true)
@@ -126,7 +137,55 @@ checks = r'''
         Bridge.revoked = true
         await model.loadList(workspaceID: "repo", peer: "host", refresh: true)
         precondition(model.accessLost && model.rows.isEmpty && model.listError != nil && model.lastLoadedAt == nil)
-        print("Pull list: cache isolation, pagination, duplicate rows and stale page rejection passed")
+        Bridge.revoked = false; Bridge.pauseFirst = true
+        let previous = PullsModel()
+        let pending = Task { await previous.load(workspaceID: "repo", peer: "host", refresh: true) }
+        while Bridge.pending == nil { await Task.yield() }
+        WorkSessionContext.shared.generation = 2
+        PullCountStore.shared.value = 99
+        Bridge.pending?.resume(returning: PullListPage(rows: [PullSummary(number: 77)], nextCursor: nil))
+        Bridge.pending = nil
+        await pending.value
+        precondition(previous.rows.isEmpty && PullCountStore.shared.value == 99 && !previous.isLoadingList)
+        let oldCallCount = Bridge.calls.count
+        Bridge.pauseFirst = false
+        await previous.loadList(workspaceID: "repo", peer: "host", refresh: true)
+        previous.forgetCachedLists(workspaceID: "repo", peer: "host")
+        precondition(Bridge.calls.count == oldCallCount && PullCountStore.shared.value == 99)
+        let current = PullsModel()
+        Bridge.result = [PullSummary(number: 88)]
+        await current.load(workspaceID: "repo", peer: "host", refresh: true)
+        precondition(current.rows == [PullSummary(number: 88)] && PullCountStore.shared.value == 1)
+        Bridge.firstCursor = "next"
+        await current.load(workspaceID: "repo", peer: "host", refresh: true)
+        Bridge.pauseMore = true
+        let oldMore = Task { await current.loadMore(workspaceID: "repo", peer: "host") }
+        while Bridge.pending == nil { await Task.yield() }
+        Bridge.pauseAvailability = true
+        let retiredAvailability = PullsModel()
+        let oldAvailability = Task { await retiredAvailability.load(workspaceID: "repo", peer: "host") }
+        while Bridge.pendingAvailability == nil { await Task.yield() }
+        WorkSessionContext.shared.generation = 3
+        PullCountStore.shared.value = 42
+        Bridge.pendingAvailability?.resume(throwing: Failure.revoked)
+        Bridge.pendingAvailability = nil
+        Bridge.pending?.resume(throwing: Failure.revoked)
+        Bridge.pending = nil
+        await oldAvailability.value
+        await oldMore.value
+        precondition(!retiredAvailability.accessLost && !current.accessLost && !current.isLoadingMore
+            && PullCountStore.shared.value == 42)
+        Bridge.pauseAvailability = false; Bridge.pauseFirst = true
+        let cancelledModel = PullsModel()
+        let cancelled = Task { await cancelledModel.load(workspaceID: "repo", peer: "host") }
+        while Bridge.pending == nil { await Task.yield() }
+        PullCountStore.shared.value = 42
+        cancelled.cancel()
+        Bridge.pending?.resume(returning: PullListPage(rows: [PullSummary(number: 1)], nextCursor: nil))
+        Bridge.pending = nil
+        await cancelled.value
+        precondition(cancelledModel.rows.isEmpty && !cancelledModel.isLoadingList && PullCountStore.shared.value == 42)
+        print("Pull list: cache isolation, pagination, stale responses and account-session fencing passed")
     }
 }
 '''
