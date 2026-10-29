@@ -21,6 +21,7 @@ enum PullDetailTab { case conversation, changes }
 enum PullReviewVerdict { case approve }
 enum PullMergeMethod { case squash }
 enum Failure: Error { case offline }
+enum L10n { static func text(_ key: String) -> String { key } }
 enum MarkdownText { static func warm(_ text: [String]) {} }
 @MainActor enum Bridge {
     static var details: [CheckedContinuation<PullDetail, Error>] = []
@@ -99,6 +100,10 @@ checks = r'''
         Bridge.diffs.removeFirst().resume(throwing: Failure.offline)
         await failedDiff.value
         precondition(model.diffs.first?.path == "new" && model.diffError != nil)
+        model.diffError = "GitHub rejected the request: HTTP 406: {\"field\":\"diff\",\"code\":\"too_large\"}"
+        precondition(model.displayDiffError == "apple.pulldetailview.diff_too_large")
+        model.diffError = "Network unavailable"
+        precondition(model.displayDiffError == "Network unavailable")
         print("Pull detail: partial failures, overlapping refresh, pagination and diff retention passed")
     }
 }

@@ -258,11 +258,31 @@ struct PullDetailView: View {
 
     private var changes: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            if let error = model.diffError { inlineError(error) }
+            if let error = model.displayDiffError { inlineError(error) }
             if model.loadingDiff && model.diffs.isEmpty { contentSkeleton }
             else if model.diffs.isEmpty && model.diffError == nil {
                 EmptyState(symbol: "doc.text.magnifyingglass", title: L10n.text("apple.pulldetailview.no_text_changes.08722a9e"), message: L10n.text("apple.pulldetailview.this_pull_request_has_no_line_by_line_diff.680bf131"))
-            } else {
+            } else if model.diffs.isEmpty, let detail = model.detail, !detail.files.isEmpty {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Text(L10n.text("apple.pulldetailview.file_summaries"))
+                        .font(Theme.callout.weight(.semibold))
+                    if Int(detail.changedFiles) > detail.files.count {
+                        Text(L10n.text("apple.pulldetailview.some_file_summaries"))
+                            .font(Theme.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(detail.files) { file in
+                        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                            Text(file.path).font(Theme.monoText(11, relativeTo: .caption)).textSelection(.enabled)
+                            Spacer(minLength: Theme.Space.s)
+                            changeCount("+\(file.additions)", tint: Theme.diffAdded)
+                            changeCount("−\(file.deletions)", tint: Theme.diffRemoved)
+                        }
+                        .padding(Theme.Space.m)
+                        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+                    }
+                }
+            } else if !model.diffs.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: Theme.Space.xs) {
                         ForEach(model.diffs, id: \.path) { diff in
@@ -450,7 +470,7 @@ private struct DetailTabs: View {
                 ForEach(PullDetailTab.allCases) { tab in
                     Button { withAnimation(.snappy(duration: 0.22)) { selection = tab } } label: {
                         HStack(spacing: 7) {
-                            Image(systemName: tab.symbol)
+                            Image(systemName: tab.symbol).accessibilityHidden(true)
                             Text(L10n.enumLabel(tab))
                             if tab == .checks, checks > 0 {
                                 Text("\(checks)")
@@ -461,7 +481,10 @@ private struct DetailTabs: View {
                         .foregroundStyle(selection == tab ? Theme.accent : Color.secondary)
                         .padding(.horizontal, Theme.Space.m).frame(height: 34)
                         .background { if selection == tab { RoundedRectangle(cornerRadius: 9).fill(Theme.accentSoft).matchedGeometryEffect(id: "tab", in: slide) } }
-                    }.buttonStyle(.plain).accessibilityAddTraits(selection == tab ? .isSelected : [])
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityRemoveTraits(selection == tab ? [] : .isSelected)
+                    .accessibilityAddTraits(selection == tab ? .isSelected : [])
                 }
             }.padding(3)
         }
@@ -806,6 +829,14 @@ private final class PullDetailModel {
     var error: String?
     var timelineError: String?
     var diffError: String?
+    var displayDiffError: String? {
+        guard let diffError else { return nil }
+        let lower = diffError.lowercased()
+        if lower.contains("http 406") && lower.contains("too_large") && lower.contains("diff") {
+            return L10n.text("apple.pulldetailview.diff_too_large")
+        }
+        return diffError
+    }
     var commentDraft = ""
     var reviewDraft = ""
     var reviewMode: PullReviewVerdict?

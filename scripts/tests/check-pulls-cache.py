@@ -16,6 +16,7 @@ import Observation
 enum PullScope: Hashable { case all, mine }
 enum PullStateFilter: Hashable { case open, closed }
 struct PullSummary: Equatable { var number: Int }
+struct PullListPage { var rows: [PullSummary]; var nextCursor: String? }
 struct PullAvailability {
     var state = "ready"; var login: String? = "alice"; var repositoryName: String? = "org/repo"
     var host: String? = "github.com"; var source: String? = "app"; var installationId: UInt64? = 1
@@ -23,22 +24,37 @@ struct PullAvailability {
 struct PullDeviceLogin { }
 @MainActor final class PullCountStore {
     static let shared = PullCountStore()
-    func set(_ count: Int, workspaceID: String, peer: String?) {}
+    var value: Int?
+    func set(_ count: Int, workspaceID: String, peer: String?) { value = count }
+    func clear(workspaceID: String, peer: String?) { value = nil }
 }
 enum Failure: Error { case offline }
+enum BridgeError: Error { case core(code: String, message: String) }
+enum L10n { static func text(_ key: String) -> String { key } }
 @MainActor enum Bridge {
     static var availability = PullAvailability()
     static var unavailable = false
     static var listUnavailable = false
     static var calls: [Bool] = []
     static var result = [PullSummary(number: 1)]
+    static var firstCursor: String?
+    static var next = PullListPage(rows: [], nextCursor: nil)
+    static var pauseMore = false
+    static var pending: CheckedContinuation<PullListPage, Error>?
     static func pullAvailability(workspaceID: String, peer: String?) async throws -> PullAvailability {
         if unavailable { throw Failure.offline }; return availability
     }
-    static func pullList(workspaceID: String, peer: String?, scope: PullScope,
-                         state: PullStateFilter, refresh: Bool) async throws -> [PullSummary] {
+    static func pullListPage(workspaceID: String, peer: String?, scope: PullScope,
+                             state: PullStateFilter, cursor: String? = nil, refresh: Bool = false) async throws -> (page: PullListPage, supportsPagination: Bool) {
         calls.append(refresh)
-        if listUnavailable { throw Failure.offline }; return result
+        if listUnavailable { throw Failure.offline }
+        if cursor != nil {
+            if pauseMore {
+                return (try await withCheckedThrowingContinuation { pending = $0 }, true)
+            }
+            return (next, true)
+        }
+        return (PullListPage(rows: result, nextCursor: firstCursor), true)
     }
 }
 '''
@@ -66,7 +82,36 @@ checks = r'''
         Bridge.unavailable = true
         await model.load(workspaceID: "other", peer: "host")
         precondition(model.rows.isEmpty && model.lastLoadedAt == nil)
-        print("Pull list: cached failure, forced retry, connection identity and workspace isolation passed")
+        Bridge.unavailable = false; Bridge.firstCursor = "next"
+        Bridge.result = [PullSummary(number: 1)]
+        await model.load(workspaceID: "repo", peer: "host", refresh: true)
+        precondition(PullCountStore.shared.value == nil)
+        Bridge.next = PullListPage(rows: [PullSummary(number: 1), PullSummary(number: 2)], nextCursor: nil)
+        await model.loadMore(workspaceID: "repo", peer: "host")
+        precondition(model.rows == [PullSummary(number: 1), PullSummary(number: 2)] && model.nextCursor == nil)
+        // Search ordering can change between pages, so a paginated list is not
+        // an authoritative total even when it reaches its last cursor.
+        precondition(PullCountStore.shared.value == nil)
+        await model.load(workspaceID: "repo", peer: "host", refresh: true)
+        Bridge.pauseMore = true
+        let oldPage = Task { await model.loadMore(workspaceID: "repo", peer: "host") }
+        while Bridge.pending == nil { await Task.yield() }
+        Bridge.result = [PullSummary(number: 3)]
+        await model.load(workspaceID: "repo", peer: "host", refresh: true)
+        Bridge.pending?.resume(returning: PullListPage(rows: [PullSummary(number: 4)], nextCursor: nil))
+        Bridge.pending = nil
+        await oldPage.value
+        precondition(model.rows == [PullSummary(number: 3)] && !model.isLoadingMore)
+        Bridge.pauseMore = false
+        Bridge.next = PullListPage(rows: [], nextCursor: "next")
+        await model.loadMore(workspaceID: "repo", peer: "host")
+        precondition(model.moreError != nil && model.nextCursor == "next")
+        Bridge.result = (1...999).map { PullSummary(number: $0) }
+        Bridge.next = PullListPage(rows: [PullSummary(number: 1000), PullSummary(number: 1001)], nextCursor: nil)
+        await model.load(workspaceID: "repo", peer: "host", refresh: true)
+        await model.loadMore(workspaceID: "repo", peer: "host")
+        precondition(model.rows.count == 1000 && model.reachedLimit)
+        print("Pull list: cache isolation, pagination, duplicate rows and stale page rejection passed")
     }
 }
 '''

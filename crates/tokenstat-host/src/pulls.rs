@@ -49,13 +49,14 @@ struct ListKey {
     scope: tokenstat_sync::forge::Scope,
     state: tokenstat_sync::forge::State,
     limit: u32,
+    cursor: Option<String>,
 }
 
 #[derive(Clone)]
 struct ListEntry {
     epoch: u64,
     at: Instant,
-    rows: Vec<tokenstat_sync::forge::PullSummary>,
+    page: tokenstat_sync::forge::PullListPage,
 }
 
 fn list_cache() -> &'static Mutex<HashMap<ListKey, ListEntry>> {
@@ -66,19 +67,28 @@ fn list_cache() -> &'static Mutex<HashMap<ListKey, ListEntry>> {
 /// The complete open list already fetched for this workspace, if one is still
 /// fresh. Sidebar summaries call this instead of making a forge request.
 pub(crate) fn cached_open_count(workspace_id: &str) -> Option<usize> {
-    list_cache()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+    let cache = list_cache().lock().unwrap_or_else(PoisonError::into_inner);
+    open_count_from(&cache, workspace_id, cache_epoch())
+}
+
+fn open_count_from(
+    cache: &HashMap<ListKey, ListEntry>,
+    workspace_id: &str,
+    epoch: u64,
+) -> Option<usize> {
+    cache
         .iter()
         .filter(|(key, entry)| {
             key.workspace_id == workspace_id
                 && key.scope == tokenstat_sync::forge::Scope::All
                 && key.state == tokenstat_sync::forge::State::Open
-                && entry.epoch == cache_epoch()
+                && key.cursor.is_none()
+                && entry.epoch == epoch
                 && entry.at.elapsed() < Duration::from_secs(60)
         })
         .max_by_key(|(_, entry)| entry.at)
-        .map(|(_, entry)| entry.rows.len())
+        .filter(|(_, entry)| entry.page.next_cursor.is_none())
+        .map(|(_, entry)| entry.page.rows.len())
 }
 
 /// What the forge last said about one branch. `None` is an answer too: the
@@ -444,6 +454,8 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             Ok(json!({"stored": true}))
         }
         "pulls.list" => list(&p),
+        "pulls.listPage" => list_page(&p)
+            .and_then(|page| serde_json::to_value(page).map_err(|error| error.to_string())),
         "pulls.branch" => branch(&p),
         "pulls.commitAvatars" => commit_avatars(&p),
         "pulls.prepareCreate" => prepare_create(&p),
@@ -790,6 +802,11 @@ fn availability(workspace_id: &str) -> Result<Value, String> {
 }
 
 fn list(p: &Params) -> Result<Value, String> {
+    let page = list_page(p)?;
+    serde_json::to_value(page.rows).map_err(|error| error.to_string())
+}
+
+fn list_page(p: &Params) -> Result<tokenstat_sync::forge::PullListPage, String> {
     let epoch = cache_epoch();
     if p.workspace_id.trim().is_empty() {
         return Err("pulls.list needs workspaceId".into());
@@ -801,12 +818,19 @@ fn list(p: &Params) -> Result<Value, String> {
     let scope = p.scope.unwrap_or(tokenstat_sync::forge::Scope::All);
     let state = p.state.unwrap_or(tokenstat_sync::forge::State::Open);
     let limit = p.limit.unwrap_or(40).clamp(1, 40);
+    if p.cursor
+        .as_ref()
+        .is_some_and(|cursor| cursor.is_empty() || cursor.len() > 4096)
+    {
+        return Err("invalid pull-request page cursor".into());
+    }
     let key = ListKey {
         workspace_id: p.workspace_id.clone(),
         repo: repo.clone(),
         scope,
         state,
         limit,
+        cursor: p.cursor.clone(),
     };
     if !p.refresh {
         let hit = list_cache()
@@ -818,22 +842,50 @@ fn list(p: &Params) -> Result<Value, String> {
             })
             .cloned();
         if let Some(hit) = hit {
-            return serde_json::to_value(hit.rows).map_err(|error| error.to_string());
+            return Ok(hit.page);
         }
     }
-    let rows = tokenstat_sync::forge::list(&repo, scope, state, limit)
+    let started = Instant::now();
+    let page = tokenstat_sync::forge::list_page(&repo, scope, state, limit, p.cursor.as_deref())
         .map_err(|error| error.to_string())?;
     let mut cache = list_cache().lock().unwrap_or_else(PoisonError::into_inner);
+    if epoch == cache_epoch() {
+        remember_list(&mut cache, key, page.clone(), epoch, started);
+    }
+    Ok(page)
+}
+
+fn remember_list(
+    cache: &mut HashMap<ListKey, ListEntry>,
+    key: ListKey,
+    page: tokenstat_sync::forge::PullListPage,
+    epoch: u64,
+    started: Instant,
+) {
     cache.retain(|_, entry| entry.at.elapsed() < Duration::from_secs(60));
+    // A slow older refresh must not replace a newer response or reset its age.
+    if cache
+        .get(&key)
+        .is_some_and(|entry| entry.epoch == epoch && entry.at >= started)
+    {
+        return;
+    }
     cache.insert(
         key,
         ListEntry {
             epoch,
-            at: Instant::now(),
-            rows: rows.clone(),
+            at: started,
+            page,
         },
     );
-    serde_json::to_value(rows).map_err(|error| error.to_string())
+    if cache.len() > 128
+        && let Some(oldest) = cache
+            .iter()
+            .min_by_key(|(_, entry)| entry.at)
+            .map(|(key, _)| key.clone())
+    {
+        cache.remove(&oldest);
+    }
 }
 
 fn forge_repo(remote: tokenstat_workspace::git::Remote) -> tokenstat_sync::forge::Repo {
@@ -859,6 +911,110 @@ fn local_credentials_only() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incomplete_or_later_pages_do_not_claim_to_be_an_open_count() {
+        let workspace = "pull-count-incomplete-page-test";
+        let key = ListKey {
+            workspace_id: workspace.into(),
+            repo: tokenstat_sync::forge::Repo {
+                host: "github.com".into(),
+                owner: "owner".into(),
+                repo: "repo".into(),
+            },
+            scope: tokenstat_sync::forge::Scope::All,
+            state: tokenstat_sync::forge::State::Open,
+            limit: 40,
+            cursor: None,
+        };
+        let epoch = 42;
+        let entry = ListEntry {
+            epoch,
+            at: Instant::now(),
+            page: tokenstat_sync::forge::PullListPage {
+                rows: vec![],
+                next_cursor: Some("next".into()),
+            },
+        };
+        let mut cache = HashMap::new();
+        cache.insert(key.clone(), entry);
+        assert_eq!(open_count_from(&cache, workspace, epoch), None);
+        let later = ListKey {
+            cursor: Some("next".into()),
+            ..key.clone()
+        };
+        cache.insert(
+            later,
+            ListEntry {
+                epoch,
+                at: Instant::now(),
+                page: tokenstat_sync::forge::PullListPage {
+                    rows: vec![],
+                    next_cursor: None,
+                },
+            },
+        );
+        assert_eq!(open_count_from(&cache, workspace, epoch), None);
+        cache.get_mut(&key).unwrap().page.next_cursor = None;
+        assert_eq!(open_count_from(&cache, workspace, epoch), Some(0));
+        assert_eq!(open_count_from(&cache, workspace, epoch + 1), None);
+        let newer = ListKey {
+            limit: 20,
+            ..key.clone()
+        };
+        cache.get_mut(&key).unwrap().at = Instant::now() - Duration::from_secs(1);
+        cache.insert(
+            newer,
+            ListEntry {
+                epoch,
+                at: Instant::now(),
+                page: tokenstat_sync::forge::PullListPage {
+                    rows: vec![],
+                    next_cursor: Some("next".into()),
+                },
+            },
+        );
+        assert_eq!(open_count_from(&cache, workspace, epoch), None);
+    }
+
+    #[test]
+    fn slow_list_response_does_not_replace_a_newer_page() {
+        let key = ListKey {
+            workspace_id: "workspace".into(),
+            repo: tokenstat_sync::forge::Repo {
+                host: "github.com".into(),
+                owner: "owner".into(),
+                repo: "repo".into(),
+            },
+            scope: tokenstat_sync::forge::Scope::All,
+            state: tokenstat_sync::forge::State::Open,
+            limit: 40,
+            cursor: None,
+        };
+        let mut cache = HashMap::new();
+        let now = Instant::now();
+        remember_list(
+            &mut cache,
+            key.clone(),
+            tokenstat_sync::forge::PullListPage {
+                rows: vec![],
+                next_cursor: Some("new".into()),
+            },
+            1,
+            now,
+        );
+        remember_list(
+            &mut cache,
+            key.clone(),
+            tokenstat_sync::forge::PullListPage {
+                rows: vec![],
+                next_cursor: Some("old".into()),
+            },
+            1,
+            now - Duration::from_secs(1),
+        );
+        assert_eq!(cache[&key].page.next_cursor.as_deref(), Some("new"));
+    }
 
     #[test]
     fn retired_reads_and_other_repositories_do_not_satisfy_a_pull_detail() {

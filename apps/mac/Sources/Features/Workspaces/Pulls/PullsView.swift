@@ -20,6 +20,10 @@ final class PullCountStore {
         values[key(workspaceID: workspaceID, peer: peer)] = count
     }
 
+    func clear(workspaceID: String, peer: String?) {
+        values.removeValue(forKey: key(workspaceID: workspaceID, peer: peer))
+    }
+
     private func key(workspaceID: String, peer: String?) -> String {
         guard let peer, !workspaceID.hasPrefix("remote:") else { return workspaceID }
         return "remote:\(peer):\(workspaceID)"
@@ -379,11 +383,6 @@ struct PullsView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer()
-                if !model.rows.isEmpty {
-                    Text(L10n.text("apple.pullsview.0_shown.c67ec9a7", "\(model.rows.count)"))
-                        .font(Theme.caption)
-                        .foregroundStyle(.tertiary)
-                }
                 // Choosing repositories existed only while the connection was
                 // incomplete, and the card offering it disappeared the moment
                 // this repository worked. Adding a second one then meant
@@ -405,7 +404,7 @@ struct PullsView: View {
                     ProgressView().controlSize(.mini)
                     Text(model.rows.isEmpty ? L10n.text("apple.pullsview.loading.ba3bbbe1") : L10n.text("apple.pullsview.updating.dfe40efe"))
                 } else {
-                    Text(L10n.text("apple.pullsview.0_results.84cbe8d0", "\(model.rows.count)"))
+                    Text(L10n.text("apple.pullsview.0_shown.c67ec9a7", "\(model.rows.count)"))
                 }
             }
             .font(Theme.caption)
@@ -421,11 +420,14 @@ struct PullsView: View {
             if let error = model.listError {
                 errorCard(error)
             }
+            if let error = model.moreError {
+                errorCard(error) { await model.loadMore(workspaceID: workspaceID, peer: peer) }
+            }
             if model.isLoadingList && model.rows.isEmpty {
                 PullListSkeleton()
                     .transition(.smoothIn(reduceMotion: reduceMotion))
             } else if model.rows.isEmpty {
-                if model.listError == nil {
+                if model.listError == nil && model.nextCursor == nil {
                     filteredEmpty
                         .transition(.smoothIn(reduceMotion: reduceMotion))
                 }
@@ -440,6 +442,23 @@ struct PullsView: View {
                     }
                 }
                 .transition(.smoothIn(reduceMotion: reduceMotion))
+            }
+            if model.reachedLimit {
+                Text(L10n.text("apple.pullsview.page_limit"))
+                    .font(Theme.caption).foregroundStyle(.secondary)
+            } else if model.nextCursor != nil {
+                Button {
+                    Task { await model.loadMore(workspaceID: workspaceID, peer: peer) }
+                } label: {
+                    if model.isLoadingMore { ProgressView().controlSize(.small) }
+                    else { Text(L10n.text("apple.worksearchsheet.show_more_results.b27dc424")) }
+                }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .disabled(model.isLoadingMore || model.isLoadingList)
+                .frame(maxWidth: .infinity)
+            } else if !model.supportsPagination && model.rows.count >= 40 {
+                Text(L10n.text("apple.pullsview.limited_old_host"))
+                    .font(Theme.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -494,7 +513,7 @@ struct PullsView: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
-    private func errorCard(_ message: String) -> some View {
+    private func errorCard(_ message: String, retry: (() async -> Void)? = nil) -> some View {
         HStack(alignment: .top, spacing: Theme.Space.m) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Theme.warning)
@@ -502,7 +521,10 @@ struct PullsView: View {
                 Text(FriendlyError.from(message).message)
                     .font(Theme.callout)
                 Button(L10n.text("apple.pullsview.try_again.d8b8392e")) {
-                    Task { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
+                    Task {
+                        if let retry { await retry() }
+                        else { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
+                    }
                 }
                     .buttonStyle(AccentButtonStyle(small: true))
             }
@@ -593,8 +615,6 @@ private struct PullFilters: View {
             ForEach(PullStateFilter.allCases) { stateButton($0) }
         }
         .fixedSize()
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(L10n.text("apple.pullsview.pull_request_state.45faa7b6"))
     }
 
     private var scopePicker: some View {
@@ -614,7 +634,7 @@ private struct PullFilters: View {
             state = option
         } label: {
             HStack(spacing: 6) {
-                Circle().fill(tint).frame(width: 7, height: 7)
+                Circle().fill(tint).frame(width: 7, height: 7).accessibilityHidden(true)
                 Text(option.label)
             }
             .font(Theme.caption.weight(selected ? .semibold : .medium))
@@ -632,6 +652,7 @@ private struct PullFilters: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(option.label)
+        .accessibilityRemoveTraits(selected ? [] : .isSelected)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
@@ -828,8 +849,13 @@ private final class PullsModel {
     var isLoading = false
     var isConnecting = false
     var isLoadingList = false
+    var isLoadingMore = false
     var errorMessage: String?
     var listError: String?
+    var moreError: String?
+    private(set) var nextCursor: String?
+    private(set) var supportsPagination = true
+    private(set) var reachedLimit = false
     private(set) var lastLoadedAt: Date?
     var loginError: String?
     var rows: [PullSummary] = []
@@ -843,7 +869,7 @@ private final class PullsModel {
         let scope: PullScope
         let state: PullStateFilter
     }
-    private var cachedLists: [Query: (rows: [PullSummary], date: Date)] = [:]
+    private var cachedLists: [Query: (rows: [PullSummary], date: Date, cursor: String?, supportsPagination: Bool, reachedLimit: Bool)] = [:]
     private var owner: String?
     private var ownerPeer: String?
 
@@ -852,6 +878,9 @@ private final class PullsModel {
         let generation = availabilityGeneration
         if owner != workspaceID || ownerPeer != peer {
             listGeneration += 1
+            isLoadingMore = false
+            nextCursor = nil
+            moreError = nil
             rows = []
             lastLoadedAt = nil
             availability = nil
@@ -869,6 +898,9 @@ private final class PullsModel {
                 || availability?.host != loaded.host || availability?.source != loaded.source
                 || availability?.installationId != loaded.installationId {
                 listGeneration += 1
+                isLoadingMore = false
+                nextCursor = nil
+                moreError = nil
                 cachedLists = [:]
                 rows = []
                 lastLoadedAt = nil
@@ -878,6 +910,9 @@ private final class PullsModel {
                 await loadList(workspaceID: workspaceID, peer: peer, refresh: refresh)
             } else {
                 listGeneration += 1
+                isLoadingMore = false
+                nextCursor = nil
+                moreError = nil
                 cachedLists = [:]
                 rows = []
                 lastLoadedAt = nil
@@ -893,12 +928,17 @@ private final class PullsModel {
         guard availability?.state == "ready" else { return }
         listGeneration += 1
         let generation = listGeneration
+        isLoadingMore = false
+        moreError = nil
         let requestedScope = scope
         let requestedState = state
         let query = Query(workspace: workspaceID, peer: peer, scope: requestedScope, state: requestedState)
         // Never show one filter's results under another filter's heading.
         rows = cachedLists[query]?.rows ?? []
         lastLoadedAt = cachedLists[query]?.date
+        nextCursor = cachedLists[query]?.cursor
+        supportsPagination = cachedLists[query]?.supportsPagination ?? true
+        reachedLimit = cachedLists[query]?.reachedLimit ?? false
         if !refresh, let cached = cachedLists[query], Date().timeIntervalSince(cached.date) < 30 {
             isLoadingList = false
             listError = nil
@@ -907,29 +947,71 @@ private final class PullsModel {
         isLoadingList = true
         listError = nil
         do {
-            let loaded = try await Bridge.pullList(
+            let result = try await Bridge.pullListPage(
                 workspaceID: workspaceID,
                 peer: peer,
                 scope: requestedScope,
                 state: requestedState,
-                refresh: refresh
+                // Once this client knows its copy has aged out, do not
+                // relabel the host's longer-lived cached copy as fresh.
+                refresh: refresh || cachedLists[query] != nil
             )
-            guard generation == listGeneration else { return }
-            rows = loaded
+            guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
+            rows = result.page.rows
+            nextCursor = result.page.nextCursor
+            supportsPagination = result.supportsPagination
+            reachedLimit = false
             let loadedAt = Date()
-            cachedLists[query] = (loaded, loadedAt)
+            cachedLists[query] = (rows, loadedAt, nextCursor, supportsPagination, reachedLimit)
             lastLoadedAt = loadedAt
             if cachedLists.count > 8, let oldest = cachedLists.min(by: { $0.value.date < $1.value.date })?.key {
                 cachedLists.removeValue(forKey: oldest)
             }
             if requestedScope == .all, requestedState == .open {
-                PullCountStore.shared.set(loaded.count, workspaceID: workspaceID, peer: peer)
+                if nextCursor == nil && (supportsPagination || rows.count < 40) {
+                    PullCountStore.shared.set(rows.count, workspaceID: workspaceID, peer: peer)
+                } else {
+                    PullCountStore.shared.clear(workspaceID: workspaceID, peer: peer)
+                }
             }
         } catch {
-            guard generation == listGeneration else { return }
+            guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
             listError = error.localizedDescription
         }
         if generation == listGeneration { isLoadingList = false }
+    }
+
+    func loadMore(workspaceID: String, peer: String?) async {
+        guard let cursor = nextCursor, !isLoadingMore, !isLoadingList, rows.count < 1000 else { return }
+        let generation = listGeneration
+        let requestedScope = scope
+        let requestedState = state
+        let query = Query(workspace: workspaceID, peer: peer, scope: requestedScope, state: requestedState)
+        isLoadingMore = true
+        moreError = nil
+        defer { if generation == listGeneration { isLoadingMore = false } }
+        do {
+            let result = try await Bridge.pullListPage(
+                workspaceID: workspaceID, peer: peer, scope: requestedScope,
+                state: requestedState, cursor: cursor
+            )
+            guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
+            guard result.page.nextCursor != cursor else {
+                throw BridgeError.core(code: "invalid_page", message: L10n.text("apple.pullsview.invalid_page"))
+            }
+            var known = Set(rows.map(\.number))
+            let newRows = result.page.rows.filter { known.insert($0.number).inserted }
+            let remaining = 1000 - rows.count
+            rows.append(contentsOf: newRows.prefix(remaining))
+            nextCursor = result.page.nextCursor
+            reachedLimit = newRows.count > remaining || (rows.count == 1000 && nextCursor != nil)
+            if let date = lastLoadedAt {
+                cachedLists[query] = (rows, date, nextCursor, supportsPagination, reachedLimit)
+            }
+        } catch {
+            guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
+            moreError = error.localizedDescription
+        }
     }
 
     func beginLogin() async -> URL? {

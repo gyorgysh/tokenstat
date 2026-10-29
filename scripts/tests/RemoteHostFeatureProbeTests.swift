@@ -62,6 +62,12 @@ struct RemoteHostFeatureProbeTests {
         Bridge.version = 25
         let localForkSupport = await RemoteHostFeature.chatFork.isSupported(peer: nil)
         check(localForkSupport, "the bundled local host does not need a peer probe")
+        Bridge.version = 51
+        let oldPullPageSupport = await RemoteHostFeature.pullListPages.isSupported(peer: "peer")
+        check(!oldPullPageSupport, "a protocol 51 host must use the legacy pull list")
+        Bridge.version = 52
+        let newPullPageSupport = await RemoteHostFeature.pullListPages.isSupported(peer: "peer")
+        check(newPullPageSupport, "a protocol 52 host supports cursor pages")
         Bridge.version = 27
         let oldPullSupport = await RemoteHostFeature.pullCreation.isSupported(peer: "peer")
         check(!oldPullSupport, "an older host cannot receive pulls.create")

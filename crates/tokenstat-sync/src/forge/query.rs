@@ -3,13 +3,14 @@
 use serde::Deserialize;
 
 use super::{
-    BranchPull, CheckState, ForgeError, PullActor, PullCheck, PullDetail, PullFile, PullReview,
-    PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage,
+    BranchPull, CheckState, ForgeError, PullActor, PullCheck, PullDetail, PullFile, PullListPage,
+    PullReview, PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage,
 };
 
 pub(super) const LIST: &str = r#"
-query PullRequestList($query: String!, $limit: Int!) {
-  search(type: ISSUE, query: $query, first: $limit) {
+query PullRequestList($query: String!, $limit: Int!, $cursor: String) {
+  search(type: ISSUE, query: $query, first: $limit, after: $cursor) {
+    pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
         number
@@ -183,6 +184,15 @@ struct Data {
 #[derive(Deserialize)]
 struct Search {
     nodes: Vec<Option<Node>>,
+    #[serde(default, rename = "pageInfo")]
+    page_info: Option<SearchPageInfo>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchPageInfo {
+    has_next_page: bool,
+    end_cursor: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -255,7 +265,7 @@ struct Rollup {
 pub(super) fn decode_list(
     raw: &str,
     rate_limit_reset: Option<u64>,
-) -> Result<Vec<PullSummary>, ForgeError> {
+) -> Result<PullListPage, ForgeError> {
     let body: Envelope = serde_json::from_str(raw)?;
     if !body.errors.is_empty() {
         if body.errors.iter().any(|error| {
@@ -279,7 +289,22 @@ pub(super) fn decode_list(
     let data = body
         .data
         .ok_or_else(|| ForgeError::Api("GitHub returned no pull-request data".into()))?;
-    Ok(data
+    let page_info = data.search.page_info.ok_or_else(|| {
+        ForgeError::Api("GitHub returned a pull-request page without pagination information".into())
+    })?;
+    let next_cursor = match page_info {
+        info if info.has_next_page => Some(
+            info.end_cursor
+                .filter(|cursor| !cursor.is_empty())
+                .ok_or_else(|| {
+                    ForgeError::Api(
+                        "GitHub returned a pull-request page without its next cursor".into(),
+                    )
+                })?,
+        ),
+        _ => None,
+    };
+    let rows = data
         .search
         .nodes
         .into_iter()
@@ -325,7 +350,8 @@ pub(super) fn decode_list(
                 checks,
             }
         })
-        .collect())
+        .collect();
+    Ok(PullListPage { rows, next_cursor })
 }
 
 /// The branch's open pull request, or failing that its newest one.
@@ -769,7 +795,7 @@ mod tests {
     #[test]
     fn list_decodes_absent_checks_and_bot_or_deleted_authors() {
         let raw = r#"{
-          "data":{"search":{"nodes":[
+          "data":{"search":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
             {"number":12,"title":"Ready","author":{"login":"renovate[bot]","avatarUrl":"https://avatars.test/1"},
              "createdAt":"2026-08-27T01:02:03Z","updatedAt":"2026-08-28T04:05:06Z",
              "headRefName":"deps","baseRefName":"main","additions":3,"deletions":1,"changedFiles":2,
@@ -783,7 +809,9 @@ mod tests {
              "labels":{"nodes":[]},"comments":{"totalCount":0},"commits":{"nodes":[]}}
           ]}}}
         "#;
-        let rows = decode_list(raw, None).unwrap();
+        let page = decode_list(raw, None).unwrap();
+        assert!(page.next_cursor.is_none());
+        let rows = page.rows;
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].checks, Some(CheckState::Passing));
         assert_eq!(rows[0].author, "renovate[bot]");
@@ -793,6 +821,20 @@ mod tests {
             rows[1].review_decision.as_deref(),
             Some("changes_requested")
         );
+    }
+
+    #[test]
+    fn list_requires_a_valid_cursor_when_another_page_exists() {
+        let raw = r#"{"data":{"search":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":"next"}}}}"#;
+        assert_eq!(
+            decode_list(raw, None).unwrap().next_cursor.as_deref(),
+            Some("next")
+        );
+        let missing =
+            r#"{"data":{"search":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":null}}}}"#;
+        assert!(decode_list(missing, None).is_err());
+        let absent = r#"{"data":{"search":{"nodes":[]}}}"#;
+        assert!(decode_list(absent, None).is_err());
     }
 
     #[test]

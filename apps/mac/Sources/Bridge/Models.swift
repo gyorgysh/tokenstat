@@ -2231,6 +2231,11 @@ struct PullSummary: Codable, Sendable, Hashable, Identifiable {
     var updatedDate: Date? { parseServerDate(updatedAt) }
 }
 
+struct PullListPage: Codable, Sendable {
+    var rows: [PullSummary]
+    var nextCursor: String?
+}
+
 struct PullActor: Codable, Sendable, Hashable, Identifiable {
     var login: String
     var avatar: String?

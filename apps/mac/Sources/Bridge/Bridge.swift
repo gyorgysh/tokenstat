@@ -2225,6 +2225,26 @@ extension Bridge {
         return try await background("pulls.list", params, as: [PullSummary].self)
     }
 
+    /// Older hosts keep their existing first-page response; never send them a
+    /// cursor they would ignore and then mistake that response for another page.
+    static func pullListPage(
+        workspaceID: String, peer: String?, scope: PullScope, state: PullStateFilter,
+        cursor: String? = nil, refresh: Bool = false
+    ) async throws -> (page: PullListPage, supportsPagination: Bool) {
+        let targetPeer = peer ?? remoteWorkspace(workspaceID)?.peer
+        guard await RemoteHostFeature.pullListPages.isSupported(peer: targetPeer) else {
+            guard cursor == nil else {
+                throw BridgeError.core(code: "host_incompatible", message: L10n.text("apple.pullsview.update_for_more"))
+            }
+            let rows = try await pullList(workspaceID: workspaceID, peer: peer, scope: scope, state: state, refresh: refresh)
+            return (PullListPage(rows: rows, nextCursor: nil), false)
+        }
+        var values: [String: Any] = ["scope": scope.rawValue, "state": state.rawValue, "limit": 40, "refresh": refresh]
+        if let cursor { values["cursor"] = cursor }
+        let page = try await pullRead(workspaceID: workspaceID, peer: peer, method: "pulls.listPage", values: values, as: PullListPage.self)
+        return (page, true)
+    }
+
     /// Public author pictures for a history list.
     ///
     /// An older paired computer returns an empty index, because it has no

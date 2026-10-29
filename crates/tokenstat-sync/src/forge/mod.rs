@@ -16,8 +16,8 @@ pub use auth::{
 pub use avatars::{CommitAvatars, commit_avatars};
 pub use model::{
     Availability, BranchPull, CheckState, ForgeConnection, MergeMethod, PullActor, PullCheck,
-    PullDetail, PullFile, PullReview, PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage,
-    Verdict,
+    PullDetail, PullFile, PullListPage, PullReview, PullSummary, Repo, Scope, State, TimelineEvent,
+    TimelinePage, Verdict,
 };
 pub use write::{
     CreatedPull, close, comment, create, default_branch, merge, ready, reopen, review,
@@ -39,13 +39,24 @@ pub fn list(
     state: State,
     limit: u32,
 ) -> Result<Vec<PullSummary>, ForgeError> {
+    Ok(list_page(repo, scope, state, limit, None)?.rows)
+}
+
+/// Read a cursor-addressed search page without changing the legacy list API.
+pub fn list_page(
+    repo: &Repo,
+    scope: Scope,
+    state: State,
+    limit: u32,
+    cursor: Option<&str>,
+) -> Result<PullListPage, ForgeError> {
     let Some(credential) = credential(&repo.host) else {
         return Err(ForgeError::NotSignedIn);
     };
-    match list_once(repo, scope, state, limit, &credential) {
+    match list_once(repo, scope, state, limit, cursor, &credential) {
         Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
             let refreshed = auth::refresh_stored(&repo.host, credential.bearer())?;
-            list_once(repo, scope, state, limit, &refreshed).map_err(Into::into)
+            list_once(repo, scope, state, limit, cursor, &refreshed).map_err(Into::into)
         }
         result => result.map_err(Into::into),
     }
@@ -56,13 +67,15 @@ fn list_once(
     scope: Scope,
     state: State,
     limit: u32,
+    cursor: Option<&str>,
     credential: &Credential,
-) -> Result<Vec<PullSummary>, HttpFailure> {
+) -> Result<PullListPage, HttpFailure> {
     let body = serde_json::json!({
         "query": query::LIST,
         "variables": {
             "query": query::search_query(repo, scope, state),
             "limit": limit.clamp(1, 40),
+            "cursor": cursor,
         }
     });
     let endpoint = if repo.host.eq_ignore_ascii_case("github.com") {

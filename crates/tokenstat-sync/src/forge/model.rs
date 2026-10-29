@@ -93,6 +93,14 @@ pub enum Verdict {
     Comment,
 }
 
+/// One cursor-addressed page of pull requests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullListPage {
+    pub rows: Vec<PullSummary>,
+    pub next_cursor: Option<String>,
+}
+
 /// One pull request in the workspace list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
