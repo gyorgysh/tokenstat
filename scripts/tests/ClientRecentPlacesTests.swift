@@ -51,6 +51,17 @@ import Foundation
         assert(Set(records[0].keys) == ["id", "workspaceName", "openedAt"])
         store.record(in: bob, peer: "peer", workspaceID: nil, workspaceName: "", kind: .terminal, itemID: "tty")
         assert(store.places(in: bob).count == 1)
+        // Real hosts may identify workspaces by their canonical paths, on
+        // either platform. Preserve the ID for routing without displaying it.
+        store.record(in: bob, peer: "peer", workspaceID: "/Users/example/project", workspaceName: "Project",
+                     kind: .chat, itemID: "unix-chat")
+        store.record(in: bob, peer: "peer", workspaceID: "C:\\Users\\example\\project", workspaceName: "Project",
+                     kind: .chat, itemID: "windows-chat")
+        let pathPlaces = ClientRecentPlaces(defaults: defaults).places(in: bob)
+        assert(pathPlaces.contains { $0.id.workspaceID == "/Users/example/project" && $0.id.itemID == "unix-chat" })
+        assert(pathPlaces.contains { $0.id.workspaceID == "C:\\Users\\example\\project" && $0.id.itemID == "windows-chat" })
+        assert(pathPlaces.filter { $0.id.kind == .chat }.allSatisfy { $0.workspaceName == "Project" })
+        assert(!store.places(in: alice).contains { $0.id.itemID == "unix-chat" })
         // A busy device still offers its last chat after many other places.
         for n in 1...25 {
             store.record(in: unclaimed, peer: "peer", workspaceID: "folder-\(n)",
@@ -64,7 +75,8 @@ import Foundation
         assert(store.continuePlaces(in: nil).isEmpty)
         store.record(in: bob, peer: "", workspaceID: "w", workspaceName: "W", kind: .workspace)
         store.record(in: bob, peer: "p", workspaceID: nil, workspaceName: "W", kind: .chat)
-        assert(store.places(in: bob).count == 1)
+        store.record(in: bob, peer: "p", workspaceID: "/bad\npath", workspaceName: "W", kind: .workspace)
+        assert(store.places(in: bob).count == 3)
         // A damaged record must not prevent opening Home or another account.
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("client.recentPlaces.v1.") {
             defaults.set(Data("broken".utf8), forKey: key)

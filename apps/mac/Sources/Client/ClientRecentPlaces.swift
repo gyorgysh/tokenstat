@@ -39,7 +39,7 @@ final class ClientRecentPlaces {
         }
         let id: ID
         /// A workspace label only. Chat titles can contain the first prompt;
-        /// commands and working directories are never accepted by this API.
+        /// paths and commands are never accepted as display labels.
         let workspaceName: String
         let openedAt: Date
     }
@@ -97,7 +97,14 @@ final class ClientRecentPlaces {
     }
 
     private static func valid(_ id: Place.ID) -> Bool {
-        let identifiers = [id.peer, id.workspaceID, id.itemID].compactMap { $0 }
+        // Hosts use a canonical path as the workspace identifier. It must
+        // round-trip unchanged to reach the folder, but is never used as a
+        // display label. Peer and conversation IDs are not paths.
+        if let workspace = id.workspaceID {
+            guard !workspace.isEmpty, workspace.count <= 4096,
+                  workspace.rangeOfCharacter(from: .controlCharacters) == nil else { return false }
+        }
+        let identifiers = [id.peer, id.itemID].compactMap { $0 }
         guard identifiers.allSatisfy({
             !$0.isEmpty && $0.count <= 256 && !$0.contains("/") && !$0.contains("\\")
                 && $0.rangeOfCharacter(from: .controlCharacters) == nil

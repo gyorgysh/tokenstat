@@ -59,8 +59,8 @@ struct ClientPlaceAvailability<Content: View>: View {
     }
 }
 
-/// Resolves IDs only after navigation. Paths and terminal commands come from
-/// the peer here, never from the saved history or Home.
+/// Resolves saved identifiers only after navigation. Workspace IDs may be
+/// paths; folder metadata and terminal commands are fetched from the peer.
 struct ClientSavedPlaceView: View {
     let place: ClientRecentPlaces.Place
     var restoredSection: WorkspaceSection? = nil
