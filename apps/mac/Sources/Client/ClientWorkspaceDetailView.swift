@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 #if !os(macOS)
+import Observation
 import SwiftUI
 import UIKit
 import WebKit
@@ -1286,11 +1287,17 @@ struct ClientFileEditor: View {
 
 // MARK: - Browser
 
+@MainActor @Observable
+private final class ClientBrowserPresentation {
+    var error: String?
+    var loading = false
+}
+
 struct ClientBrowserScreen: View {
     @Bindable var session: ProjectBrowserSession
     var onClose: () -> Void
     @State private var address: String
-    @State private var loadError: String?
+    @State private var presentation = ClientBrowserPresentation()
     @State private var reloadToken = 0
 
     init(session: ProjectBrowserSession, onClose: @escaping () -> Void) {
@@ -1301,144 +1308,262 @@ struct ClientBrowserScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                TextField(L10n.text("apple.clientworkspacedetailview.url_or_port.8de6b795"), text: $address)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.go)
-                    .onSubmit { openAddress() }
-                    .font(ClientType.caption)
-                    .padding(Theme.Space.s)
-                    .background(Color.secondary.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                Menu {
-                    ForEach(session.recentPorts, id: \.self) { port in
-                        Button(String(port), .browser) { address = "http://127.0.0.1:\(port)/" }
-                    }
-                } label: {
-                    Image(systemName: "clock.arrow.circlepath")
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    addressField.frame(minWidth: 150)
+                    browserControls
                 }
-                .disabled(session.recentPorts.isEmpty)
-                .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.recent_project_ports.b18529b8"))
-                Button(action: openAddress) {
-                    Image(systemName: "arrow.right.circle")
-                        .frame(minWidth: 32, minHeight: 44)
+                VStack(spacing: Theme.Space.xs) {
+                    addressField
+                    HStack { Spacer(); browserControls }
                 }
-                    .font(ClientType.caption.weight(.semibold))
-                    .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.open_address.abc6bf46"))
-                    .disabled(session.isOpening)
-                Button {
-                    loadError = nil
-                    reloadToken += 1
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .frame(minWidth: 32, minHeight: 44)
-                }
-                .font(ClientType.caption.weight(.semibold))
-                .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.reload.bdc090ec"))
-                Button(L10n.text("common.done"), .done, action: onClose)
-                    .font(ClientType.caption.weight(.semibold))
             }
             .padding(Theme.Space.m)
-            if let error = session.error ?? loadError {
+            if let error = session.error ?? presentation.error {
                 Text(error)
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.Space.m)
             }
-            ClientWebView(urlString: session.transportURL, reloadToken: reloadToken, navigationGeneration: session.navigationGeneration, loadRevision: session.loadRevision,
-                onError: { loadError = $0 }, onURLChange: { actual, completion in
-                    session.observed(actual, generation: completion.generation, registered: completion.registered,
-                        nativeHistoryID: completion.nativeHistoryID)
+            ClientWebView(session: session, urlString: session.transportURL, reloadToken: reloadToken, navigationGeneration: session.navigationGeneration, loadRevision: session.loadRevision,
+                onError: { [weak presentation] in presentation?.error = $0 }, onLoadingChange: { [weak presentation] loading in
+                    presentation?.loading = loading
+                    if loading { presentation?.error = nil }
+                }, onURLChange: { [weak session] actual, completion in
+                    session?.observed(actual, generation: completion.generation, registered: completion.registered,
+                        nativeHistoryID: completion.nativeHistoryID) ?? false
                 },
-                onLocalNavigation: { request, isMainFrame, traversal in
-                    session.intercept(request, isMainFrame: isMainFrame, historyItemID: traversal?.id,
-                        historyDirection: traversal?.direction ?? 0)
+                onLocalNavigation: { [weak session] request, isMainFrame, traversal in
+                    session?.intercept(request, isMainFrame: isMainFrame, historyItemID: traversal?.id,
+                        historyDirection: traversal?.direction ?? 0) ?? true
                 },
                 historyItemToRestore: session.historyItemToRestore,
-                onPageHistoryChange: { mutation, items, id, generation in
-                    session.observedHistory(mutation, items: items, currentID: id, generation: generation)
+                onPageHistoryChange: { [weak session] mutation, items, id, generation in
+                    session?.observedHistory(mutation, items: items, currentID: id, generation: generation) ?? false
                 },
-                onPageHistoryTraverse: { delta, generation in session.traverseHistory(delta, generation: generation) })
+                onPageHistoryTraverse: { [weak session] delta, generation in session?.traverseHistory(delta, generation: generation) ?? false })
                 .id(session.id)
+                .overlay(alignment: .top) {
+                    if presentation.loading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(L10n.text("common.loading"))
+                            .padding(Theme.Space.s)
+                            .background(Theme.background, in: Capsule())
+                            .padding(Theme.Space.s)
+                    }
+                }
         }
         .background(Theme.background)
         .onChange(of: session.targetURL) { _, target in address = target }
     }
 
+    private var addressField: some View {
+        TextField(L10n.text("apple.clientworkspacedetailview.url_or_port.8de6b795"), text: $address)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .submitLabel(.go)
+            .onSubmit { openAddress() }
+            .font(ClientType.caption)
+            .padding(Theme.Space.s)
+            .background(Color.secondary.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder private var browserControls: some View {
+        Menu {
+            ForEach(session.recentPorts, id: \.self) { port in
+                Button(String(port), .browser) { address = "http://127.0.0.1:\(port)/" }
+            }
+        } label: {
+            Image(systemName: "clock.arrow.circlepath").frame(minWidth: 32, minHeight: 44)
+        }
+        .disabled(session.recentPorts.isEmpty)
+        .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.recent_project_ports.b18529b8"))
+        Button(action: openAddress) {
+            Image(systemName: "arrow.right.circle").frame(minWidth: 32, minHeight: 44)
+        }
+        .font(ClientType.caption.weight(.semibold))
+        .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.open_address.abc6bf46"))
+        .disabled(session.isOpening)
+        Button {
+            presentation.error = nil
+            reloadToken += 1
+        } label: {
+            Image(systemName: "arrow.clockwise").frame(minWidth: 32, minHeight: 44)
+        }
+        .font(ClientType.caption.weight(.semibold))
+        .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.reload.bdc090ec"))
+        Button(L10n.text("common.done"), .done, action: onClose)
+            .font(ClientType.caption.weight(.semibold))
+    }
+
     private func openAddress() {
-        loadError = nil
+        presentation.error = nil
         Task { await session.open(address) }
     }
 }
 
 struct ClientWebView: UIViewRepresentable {
+    let session: ProjectBrowserSession
     let urlString: String
     var reloadToken = 0
     var navigationGeneration = 0
     var loadRevision = 0
     var onError: (String) -> Void = { _ in }
+    var onLoadingChange: (Bool) -> Void = { _ in }
     var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool = { _, _ in true }
     var onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)?
     var historyItemToRestore: UUID?
     var onPageHistoryChange: ((BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool)?
     var onPageHistoryTraverse: ((Int, Int) -> Bool)?
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onError: onError, onURLChange: onURLChange, onLocalNavigation: onLocalNavigation,
-            onPageHistoryChange: onPageHistoryChange, onPageHistoryTraverse: onPageHistoryTraverse)
-    }
+    /// SwiftUI may replace the host during a fold; the session owns the actual
+    /// WebKit document, including its history and unsaved page state.
+    @MainActor final class Surface {
+        private struct WeakHost { weak var value: Host? }
+        let view: WKWebView
+        let coordinator: WebCoordinator
+        private var hosts: [WeakHost] = []
 
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        context.coordinator.pageHistory.install(in: configuration)
-        let view = WKWebView(frame: .zero, configuration: configuration)
-        view.navigationDelegate = context.coordinator
-        view.uiDelegate = context.coordinator
-        context.coordinator.requestedURL = urlString
-        context.coordinator.reloadToken = reloadToken
-        context.coordinator.loadRevision = loadRevision
-        context.coordinator.epochs.current = navigationGeneration
-        context.coordinator.pageHistory.attach(view, generation: navigationGeneration)
-        if let url = URL(string: urlString), !urlString.isEmpty {
-            context.coordinator.epochs.register(view.load(URLRequest(url: url)), generation: navigationGeneration)
+        init(coordinator: WebCoordinator) {
+            self.coordinator = coordinator
+            let configuration = WKWebViewConfiguration()
+            coordinator.pageHistory.install(in: configuration)
+            view = WKWebView(frame: .zero, configuration: configuration)
+            view.navigationDelegate = coordinator
+            view.uiDelegate = coordinator
         }
-        return view
+
+        func invalidate() {
+            hosts.removeAll()
+            view.stopLoading()
+            view.navigationDelegate = nil
+            view.uiDelegate = nil
+            coordinator.pageHistory.dismantle(view)
+            view.removeFromSuperview()
+        }
+
+        func register(_ host: Host) {
+            hosts.removeAll { $0.value == nil || $0.value === host }
+            hosts.append(WeakHost(value: host))
+            reconcileHost()
+        }
+
+        func unregister(_ host: Host) {
+            hosts.removeAll { $0.value == nil || $0.value === host }
+            if view.superview === host { view.removeFromSuperview() }
+            reconcileHost()
+        }
+
+        func reconcileHost() {
+            hosts.removeAll { $0.value == nil }
+            let candidates = hosts.compactMap(\.value)
+            guard let host = candidates.last(where: { $0.window != nil }) ?? candidates.last,
+                  view.superview !== host else { return }
+            view.removeFromSuperview()
+            view.frame = host.bounds
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            host.addSubview(view)
+            host.onAttach?()
+        }
     }
 
-    func updateUIView(_ view: WKWebView, context: Context) {
-        context.coordinator.onError = onError
-        context.coordinator.onURLChange = onURLChange
-        context.coordinator.onLocalNavigation = onLocalNavigation
-        context.coordinator.onPageHistoryChange = onPageHistoryChange
-        context.coordinator.pageHistory.onTraverse = onPageHistoryTraverse
-        context.coordinator.epochs.current = navigationGeneration
-        context.coordinator.pageHistory.attach(view, generation: navigationGeneration)
-        let explicitLoad = context.coordinator.loadRevision != loadRevision
-        if explicitLoad || context.coordinator.requestedURL != urlString {
-            context.coordinator.requestedURL = urlString
-            context.coordinator.loadRevision = loadRevision
-            if let url = URL(string: urlString), !urlString.isEmpty, explicitLoad || view.url?.absoluteString != urlString {
-                let navigation = context.coordinator.pageHistory.load(view, url: url, restoring: historyItemToRestore)
-                context.coordinator.epochs.register(navigation, generation: navigationGeneration)
+    final class Host: UIView {
+        var surface: Surface?
+        var onAttach: (() -> Void)?
+        var reloadToken = 0
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            surface?.reconcileHost()
+        }
+    }
+
+    func makeUIView(context: Context) -> Host {
+        let host = Host()
+        let surface: Surface
+        if let existing = session.clientWebSurface {
+            surface = existing
+        } else {
+            let coordinator = WebCoordinator(onError: onError, onLoadingChange: onLoadingChange,
+                onURLChange: onURLChange, onLocalNavigation: onLocalNavigation,
+                onPageHistoryChange: onPageHistoryChange, onPageHistoryTraverse: onPageHistoryTraverse)
+            surface = Surface(coordinator: coordinator)
+            coordinator.requestedURL = urlString
+            coordinator.loadRevision = loadRevision
+            coordinator.epochs.current = navigationGeneration
+            coordinator.pageHistory.attach(surface.view, generation: navigationGeneration)
+            if let url = URL(string: urlString), !urlString.isEmpty {
+                coordinator.epochs.register(surface.view.load(URLRequest(url: url)), generation: navigationGeneration)
+            }
+            session.clientWebSurface = surface
+        }
+        host.surface = surface
+        host.reloadToken = reloadToken
+        host.onAttach = { [weak host, weak surface] in
+            guard let host, let surface else { return }
+            updateHost(host)
+            DispatchQueue.main.async { [weak host, weak surface] in
+                guard let host, let surface, surface.view.superview === host else { return }
+                onLoadingChange(surface.view.isLoading)
+                if let error = surface.coordinator.lastError { onError(error) }
             }
         }
-        if context.coordinator.reloadToken != reloadToken {
-            context.coordinator.reloadToken = reloadToken
-            context.coordinator.epochs.register(view.reload(), generation: navigationGeneration)
+        surface.register(host)
+        return host
+    }
+
+    func updateUIView(_ host: Host, context: Context) {
+        host.onAttach = { [weak host, weak surface = host.surface] in
+            guard let host, let surface else { return }
+            updateHost(host)
+            DispatchQueue.main.async { [weak host, weak surface] in
+                guard let host, let surface, surface.view.superview === host else { return }
+                onLoadingChange(surface.view.isLoading)
+                if let error = surface.coordinator.lastError { onError(error) }
+            }
+        }
+        updateHost(host)
+    }
+
+    private func updateHost(_ host: Host) {
+        guard let surface = host.surface, surface.view.superview === host else { return }
+        let view = surface.view
+        let coordinator = surface.coordinator
+        coordinator.onError = onError
+        coordinator.onLoadingChange = onLoadingChange
+        coordinator.onURLChange = onURLChange
+        coordinator.onLocalNavigation = onLocalNavigation
+        coordinator.onPageHistoryChange = onPageHistoryChange
+        coordinator.pageHistory.onTraverse = onPageHistoryTraverse
+        coordinator.epochs.current = navigationGeneration
+        coordinator.pageHistory.attach(view, generation: navigationGeneration)
+        let explicitLoad = coordinator.loadRevision != loadRevision
+        if explicitLoad || coordinator.requestedURL != urlString {
+            coordinator.requestedURL = urlString
+            coordinator.loadRevision = loadRevision
+            if let url = URL(string: urlString), !urlString.isEmpty, explicitLoad || view.url?.absoluteString != urlString {
+                let navigation = coordinator.pageHistory.load(view, url: url, restoring: historyItemToRestore)
+                coordinator.epochs.register(navigation, generation: navigationGeneration)
+            }
+        }
+        if host.reloadToken != reloadToken {
+            host.reloadToken = reloadToken
+            coordinator.epochs.register(view.reload(), generation: navigationGeneration)
         }
     }
 
-    static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
-        view.stopLoading()
-        view.navigationDelegate = nil
-        view.uiDelegate = nil
-        coordinator.pageHistory.dismantle(view)
+    static func dismantleUIView(_ host: Host, coordinator: ()) {
+        host.surface?.unregister(host)
+        host.onAttach = nil
+        host.surface = nil
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var onError: (String) -> Void
+        var onLoadingChange: (Bool) -> Void
         var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool
         var onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)?
         var onPageHistoryChange: ((BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool)?
@@ -1451,15 +1576,17 @@ struct ClientWebView: UIViewRepresentable {
             self?.epochs.abandonIfNotStarted(navigation)
         })
         var requestedURL = ""
-        var reloadToken = 0
         var loadRevision = 0
         var epochs = BrowserNavigationEpoch()
+        var lastError: String?
 
-        init(onError: @escaping (String) -> Void, onURLChange: @escaping (String, BrowserNavigationEpoch.Completion) -> Bool,
+        init(onError: @escaping (String) -> Void, onLoadingChange: @escaping (Bool) -> Void,
+             onURLChange: @escaping (String, BrowserNavigationEpoch.Completion) -> Bool,
              onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)?,
              onPageHistoryChange: ((BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool)?,
              onPageHistoryTraverse: ((Int, Int) -> Bool)?) {
             self.onError = onError
+            self.onLoadingChange = onLoadingChange
             self.onURLChange = onURLChange
             self.onLocalNavigation = onLocalNavigation
             self.onPageHistoryChange = onPageHistoryChange
@@ -1483,11 +1610,16 @@ struct ClientWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            _ = epochs.started(navigation)
+            if epochs.started(navigation) {
+                lastError = nil
+                onLoadingChange(true)
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard var completion = epochs.finish(navigation) else { return }
+            lastError = nil
+            onLoadingChange(false)
             completion.nativeHistoryID = pageHistory.report(.pop, in: webView, generation: completion.generation)
             if let url = webView.url?.absoluteString {
                 if onURLChange(url, completion) { requestedURL = url }
@@ -1497,12 +1629,20 @@ struct ClientWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             guard epochs.finish(navigation) != nil else { return }
-            if (error as NSError).code != NSURLErrorCancelled { onError(error.localizedDescription) }
+            onLoadingChange(false)
+            if (error as NSError).code != NSURLErrorCancelled {
+                lastError = error.localizedDescription
+                onError(error.localizedDescription)
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             guard epochs.finish(navigation) != nil else { return }
-            if (error as NSError).code != NSURLErrorCancelled { onError(error.localizedDescription) }
+            onLoadingChange(false)
+            if (error as NSError).code != NSURLErrorCancelled {
+                lastError = error.localizedDescription
+                onError(error.localizedDescription)
+            }
         }
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,

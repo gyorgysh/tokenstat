@@ -103,55 +103,45 @@ private struct ClientChatContent: View {
     /// rows in silence reads as broken sync; the strip says what is happening
     /// until the fresh answer lands.
     @State private var refreshing = false
+    @State private var showingChatSwitcher = false
+    @State private var showingChatSidebar = true
+    @State private var workbenchWidth: CGFloat = 0
+    @State private var browserOpen = false
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var place: String { folderName.isEmpty ? L10n.text("apple.clientchatview.this_folder.9d6325c8") : folderName }
 
     var body: some View {
-        ZStack {
-            if let thread = opened ?? retainedThread {
-                ClientChatThread(
-                    model: model,
-                    session: session,
-                    chatID: thread.id,
-                    folderName: folderName,
-                    hostName: hostName,
-                    folder: folder,
-                    isActive: opened != nil && ChatViewportAttachment.isCurrentPresentation(visible: visible,
-                        layout: publicationLayout, currentLayout: navigation.stackGeneration),
-                    onBack: {
-                        guard visible, publicationLayout == navigation.stackGeneration else { return }
-                        navigation.leaveThread(session: session, presentationID: presentationID)
-                        publicationIntent = navigation.chatHandoff.intent
-                        publicationLayout = navigation.stackGeneration
-                        retainedThread = opened; self.opened = nil
-                    },
-                    onFork: { copied in
-                        guard visible, publicationLayout == navigation.stackGeneration,
-                              opened?.id == thread.id else { return }
-                        navigation.chooseWithinChat(session: session, presentationID: presentationID)
-                        publicationIntent = navigation.chatHandoff.intent
-                        publicationLayout = navigation.stackGeneration
-                        retainedThread = nil
-                        opened = copied
-                    },
-                    onDelete: didDeleteChat
-                )
-                .opacity(opened == nil ? 0 : 1)
-                .allowsHitTesting(opened != nil)
-                .accessibilityHidden(opened == nil)
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                if geometry.size.width >= 600, !dynamicTypeSize.isAccessibilitySize,
+                   showingChatSidebar, opened != nil,
+                   !browserOpen || geometry.size.width >= 900 {
+                    chatSwitcher.frame(width: 210)
+                    ThemeRule.vertical
+                }
+                chatContent.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if opened == nil {
-                list
+            .onChange(of: geometry.size.width, initial: true) { _, width in
+                workbenchWidth = width
             }
         }
-        // The floating tab bar sits under the composer. SwiftUI's toolbar
-        // hide only minimises it on iOS 26. Bound here so Back to the list
-        // is an update on the same prober, not a teardown after this view
-        // has left the window.
         .clientTabBarHidden(opened != nil)
+        .sheet(isPresented: $showingChatSwitcher) {
+            NavigationStack {
+                chatSwitcher
+                    .navigationTitle(L10n.text("apple.clientchatview.conversations.1d432f58"))
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(L10n.text("common.close")) { showingChatSwitcher = false }
+                        }
+                    }
+            }
+        }
         .onAppear {
             visible = true
             session.appear(viewer)
@@ -188,6 +178,104 @@ private struct ClientChatContent: View {
             await openRequestedChat()
         }
         .onChange(of: model.selected?.id) { _, _ in publishChat() }
+    }
+
+    private var chatContent: some View {
+        ZStack {
+            if let thread = opened ?? retainedThread {
+                ClientChatThread(
+                    model: model,
+                    session: session,
+                    chatID: thread.id,
+                    folderName: folderName,
+                    hostName: hostName,
+                    folder: folder,
+                    isActive: opened != nil && ChatViewportAttachment.isCurrentPresentation(visible: visible,
+                        layout: publicationLayout, currentLayout: navigation.stackGeneration),
+                    onBack: {
+                        guard visible, publicationLayout == navigation.stackGeneration else { return }
+                        navigation.leaveThread(session: session, presentationID: presentationID)
+                        publicationIntent = navigation.chatHandoff.intent
+                        publicationLayout = navigation.stackGeneration
+                        retainedThread = opened; self.opened = nil
+                    },
+                    onShowChats: {
+                        if workbenchWidth >= 600 && !dynamicTypeSize.isAccessibilitySize
+                            && (!browserOpen || workbenchWidth >= 900) {
+                            showingChatSidebar.toggle()
+                        }
+                        else { showingChatSwitcher = true }
+                    },
+                    availableWorkbenchWidth: workbenchWidth,
+                    onBrowserChange: { browserOpen = $0 },
+                    onFork: { copied in
+                        guard visible, publicationLayout == navigation.stackGeneration,
+                              opened?.id == thread.id else { return }
+                        navigation.chooseWithinChat(session: session, presentationID: presentationID)
+                        publicationIntent = navigation.chatHandoff.intent
+                        publicationLayout = navigation.stackGeneration
+                        retainedThread = nil
+                        opened = copied
+                    },
+                    onDelete: didDeleteChat
+                )
+                .opacity(opened == nil ? 0 : 1)
+                .allowsHitTesting(opened != nil)
+                .accessibilityHidden(opened == nil)
+            }
+            if opened == nil {
+                list
+            }
+        }
+    }
+
+    private var chatSwitcher: some View {
+        List {
+            ForEach(model.chats.sorted {
+                ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
+            }) { chat in
+                Button {
+                    guard visible, publicationLayout == navigation.stackGeneration,
+                          let scope = WorkSessionContext.shared.scope,
+                          model.draftReference(for: chat.id, in: workspaceID)?.scope == scope else { return }
+                    showingChatSwitcher = false
+                    guard opened?.id != chat.id else { return }
+                    model.saveDraftNow()
+                    navigation.chooseWithinChat(session: session, presentationID: presentationID)
+                    publicationIntent = navigation.chatHandoff.intent
+                    publicationLayout = navigation.stackGeneration
+                    retainedThread = nil
+                    opened = chat
+                } label: {
+                    HStack(alignment: .top, spacing: Theme.Space.s) {
+                        HarnessMark(id: chat.backend, size: 24)
+                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                            HStack {
+                                Text(chat.title).font(ClientType.label.weight(.medium)).lineLimit(2)
+                                ChatDraftMark(reference: model.draftReference(for: chat.id, in: workspaceID),
+                                              size: 10, scalesWithText: true)
+                            }
+                            Text(rowDetail(chat)).font(ClientType.caption).foregroundStyle(.secondary).lineLimit(1)
+                            if chat.running {
+                                Text(L10n.text("common.running")).font(ClientType.caption).foregroundStyle(Theme.accent)
+                            }
+                            if ClientChatReadState.shared.isUnread(peer: peer, chat: chat) {
+                                Text(L10n.text("apple.clientrecentchats.unread.1b9f384c"))
+                                    .font(ClientType.caption.weight(.semibold)).foregroundStyle(Theme.accent)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if opened?.id == chat.id {
+                            Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityHidden(true)
+                        }
+                    }
+                    .padding(.vertical, Theme.Space.xs)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(opened?.id == chat.id ? .isSelected : [])
+            }
+        }
+        .listStyle(.plain)
     }
 
     private func publishChat(_ id: String? = nil) {
@@ -388,6 +476,11 @@ private struct ClientChatContent: View {
                             .fill(Theme.accent)
                             .frame(width: 7, height: 7)
                     }
+                    if ClientChatReadState.shared.isUnread(peer: peer, chat: chat) {
+                        Text(L10n.text("apple.clientrecentchats.unread.1b9f384c"))
+                            .font(ClientType.caption.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
                     Text(chat.title)
                         .font(ClientType.label.weight(.medium))
                         .foregroundStyle(.primary)
@@ -544,6 +637,9 @@ struct ClientChatThread: View {
     /// same reason.
     var isActive = true
     var onBack: (() -> Void)?
+    var onShowChats: (() -> Void)? = nil
+    var availableWorkbenchWidth: CGFloat? = nil
+    var onBrowserChange: ((Bool) -> Void)? = nil
     var onFork: ((ChatConversation) -> Void)?
     var onDelete: ((ChatConversation) -> Void)?
     @Environment(AccountModel.self) private var account
@@ -603,11 +699,37 @@ struct ClientChatThread: View {
     /// Same strip as the list: reopening onto a stale transcript says what
     /// is happening until the explicit poll below answers.
     @State private var refreshing = false
+    @State private var showPort = false
+    @State private var portText = "5173"
+    @State private var openingPort = false
+    @State private var portError: String?
+    @State private var suggestedBrowserTarget: BrowserTarget?
+    @State private var localBrowserSession: ProjectBrowserSession?
+    private var browserSession: ProjectBrowserSession? {
+        get { session?.browserSession ?? localBrowserSession }
+        nonmutating set {
+            if let session { session.browserSession = newValue }
+            else { localBrowserSession = newValue }
+        }
+    }
+    @State private var browserRequest = UUID()
+    @State private var chatWidth: CGFloat = 0
+    @State private var browserLayoutGeneration: UInt64?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var browserOwner: WorkReference? {
+        guard let peer = model.peer, let workspace = model.workspaceID else { return nil }
+        return WorkViewedChange.owner(folderID: workspace, peer: peer)
+    }
+
+    private var wideBrowser: Bool {
+        (availableWorkbenchWidth ?? chatWidth) >= 600 && !dynamicTypeSize.isAccessibilitySize
+    }
 
     /// The folder's uncommitted work and the branch's pull request, above
     /// the composer, as on the Mac.
@@ -748,6 +870,15 @@ struct ClientChatThread: View {
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                 transcript(chat)
+                    .environment(\.openURL, OpenURLAction { url in
+                        guard isActive, model.savedCopy == nil, browserOwner != nil,
+                              let target = BrowserTarget(url.absoluteString) else { return .systemAction }
+                        suggestedBrowserTarget = target
+                        portText = String(target.port)
+                        portError = nil
+                        showPort = true
+                        return .handled
+                    })
                     .clientBottomBar(separated: true) {
                         bar(chat)
                             .padding(.top, Theme.Space.s)
@@ -758,10 +889,15 @@ struct ClientChatThread: View {
                             ChatDropExperience()
                         }
                     }
-                    if showsToolsPane, let peer = model.peer, let workspace = model.workspaceID {
+                    if browserSession == nil, showsToolsPane, let peer = model.peer, let workspace = model.workspaceID {
                         ThemeRule.vertical
                         toolsPane(peer: peer, workspaceID: workspace)
                             .frame(width: 320)
+                    }
+                    if isActive, wideBrowser, let browserSession {
+                        ThemeRule.vertical
+                        ClientBrowserScreen(session: browserSession) { closeBrowser() }
+                            .frame(minWidth: 280, maxWidth: .infinity)
                     }
                 }
             } else {
@@ -818,11 +954,32 @@ struct ClientChatThread: View {
                     Button(action: onBack) { ActionIcon.back.label(L10n.text("common.chats")) }
                 }
             }
+            if isActive, let onShowChats {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: onShowChats) {
+                        Image(systemName: "list.bullet")
+                    }
+                    .accessibilityLabel(L10n.text("apple.clientchatview.conversations.1d432f58"))
+                }
+            }
+            if isActive, model.savedCopy == nil, browserOwner != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        suggestedBrowserTarget = nil
+                        portText = BrowserHistory.shared.portSuggestion(for: browserOwner)
+                        portError = nil
+                        showPort = true
+                    } label: {
+                        Image(systemName: "globe")
+                    }
+                    .accessibilityLabel(L10n.text("apple.clientfoldersplit.browse_port.d3b57f13"))
+                }
+            }
             if isActive, let chat, pinReference != nil || model.savedCopy == nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     PinToggleButton(reference: pinReference, label: chat.title, folderName: folderName)
                 }
-                if toolsIdentity != nil {
+                if toolsIdentity != nil && onShowChats == nil {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(L10n.text("apple.clientchatview.project_tools.c50826a7"), .source) {
                             if ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass) {
@@ -841,6 +998,13 @@ struct ClientChatThread: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         ClientChatMenu(model: model, conversation: chat, peer: tools.peer,
                             workspaceID: tools.workspaceID, hostName: hostName, onFork: onFork,
+                            onTools: onShowChats == nil ? nil : {
+                                if ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass) {
+                                    showingToolsPane.toggle()
+                                } else {
+                                    pushingTools = true
+                                }
+                            },
                             onSetup: { showingSetup = true }, onHandoff: { showingHandoff = true },
                             onDelete: onDelete, onViewportChoice: beginViewportChoice)
                             .id(chat.id)
@@ -884,7 +1048,10 @@ struct ClientChatThread: View {
     }
 
     var body: some View {
-        chatPresentation
+        GeometryReader { geometry in
+            chatPresentation
+                .onChange(of: geometry.size.width, initial: true) { _, width in chatWidth = width }
+        }
         .task(id: chatID) { await loadChat() }
         .task(id: "live-\(chatID)-\(scenePhase == .active)-\(isActive)") {
             guard scenePhase == .active, isActive else { return }
@@ -905,15 +1072,14 @@ struct ClientChatThread: View {
         // `isWatching()` is always false on iOS and on-device banners are
         // never suppressed (host push suppression still works via heartbeat).
         .onChange(of: chatID, initial: true) { _, id in
-            if let peer = model.peer, let workspace = model.workspaceID {
-                ClientRecentPlaces.shared.record(
-                    in: account.account?.recentPlacesScope, peer: peer,
-                    workspaceID: workspace, workspaceName: folderName, kind: .chat, itemID: id
-                )
-            }
+            rememberChat(id)
             updatePresence()
         }
-        .onAppear { updatePresence() }
+        .onChange(of: model.currentReference) { _, _ in rememberChat(chatID) }
+        .onAppear {
+            browserLayoutGeneration = navigation.stackGeneration
+            updatePresence()
+        }
         .onChange(of: scenePhase) { _, _ in
             updatePresence()
             scrollAccess.refreshAttachment(retryVisibility: true)
@@ -921,7 +1087,24 @@ struct ClientChatThread: View {
         .onChange(of: isActive) { _, active in
             dropPresentation &+= 1
             updatePresence()
-            if !active { model.saveDraftNow() }
+            if active { rememberChat(chatID) }
+            if !active {
+                model.saveDraftNow()
+                if session == nil { closeBrowser() }
+            }
+        }
+        .onChange(of: browserOwner) { _, _ in closeBrowser() }
+        .onChange(of: browserSession != nil, initial: true) { _, open in onBrowserChange?(open) }
+        .sheet(isPresented: $showPort) { portSheet }
+        .sheet(item: Binding(
+            get: { isActive && !wideBrowser ? browserSession : nil },
+            set: {
+                if $0 == nil && isActive && !wideBrowser,
+                   browserLayoutGeneration == navigation.stackGeneration { closeBrowser() }
+            }
+        )) { browser in
+            ClientBrowserScreen(session: browser) { closeBrowser() }
+                .presentationDetents([.large])
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             guard isActive else { return }
@@ -940,6 +1123,8 @@ struct ClientChatThread: View {
         .chatImageViewer(model: model)
         .chatActivityPresentation(model: model, active: isActive)
         .onDisappear {
+            browserRequest = UUID()
+            if session == nil { closeBrowser() }
             dropPresentation &+= 1
             model.saveDraftNow()
             traceViewport("disappear")
@@ -965,9 +1150,86 @@ struct ClientChatThread: View {
         }
     }
 
+    private var portSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField(L10n.text("apple.clientfoldersplit.port.72e9a59f"), text: $portText)
+                        .keyboardType(.numberPad)
+                    ClientRecentBrowserPorts(owner: browserOwner, portText: $portText)
+                    if let target = suggestedBrowserTarget, String(target.port) == portText {
+                        Text(target.url).font(ClientType.caption).textSelection(.enabled)
+                    }
+                    if let portError { Text(portError).foregroundStyle(Theme.danger) }
+                } footer: {
+                    Text(L10n.text("apple.clientfoldersplit.opens_a_loopback_bridge_to_that_port_on_0.53f0e3cb", "\(hostName)"))
+                }
+            }
+            .navigationTitle(L10n.text("apple.clientfoldersplit.browse_port.d3b57f13"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.text("common.cancel")) { showPort = false; browserRequest = UUID() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.text("common.open")) { Task { await openPort() } }
+                        .disabled(openingPort || BrowserTarget.parsePort(portText) == nil)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func closeBrowser() {
+        browserRequest = UUID()
+        showPort = false
+        suggestedBrowserTarget = nil
+        browserSession?.close()
+        browserSession = nil
+        onBrowserChange?(false)
+    }
+
+    private func openPort() async {
+        guard !openingPort, isActive, let owner = browserOwner,
+              let peer = model.peer, let workspace = model.workspaceID,
+              let port = BrowserTarget.parsePort(portText),
+              let target = (suggestedBrowserTarget.flatMap { $0.port == port ? $0 : nil }
+                ?? BrowserHistory.shared.target(for: owner, port: port)) else { return }
+        let request = UUID()
+        browserRequest = request
+        openingPort = true
+        defer { openingPort = false }
+        let browser = ProjectBrowserOwner.make(workspaceID: workspace, peer: peer)
+        await browser.open(target.url)
+        guard !Task.isCancelled, browserRequest == request, isActive,
+              showPort, browserOwner == owner, browser.owner == owner else {
+            browser.close()
+            return
+        }
+        if let error = browser.error {
+            portError = ClientTunnelCopy.display(error, host: hostName)
+            browser.close()
+            return
+        }
+        guard !browser.transportURL.isEmpty else { browser.close(); return }
+        browserSession?.close()
+        browserSession = browser
+        showPort = false
+        onBrowserChange?(true)
+    }
+
     private func updatePresence() {
         UserPresence.shared.chatSurface(showing: isActive ? chatID : nil,
             owner: presenceOwner, sceneActive: scenePhase == .active)
+    }
+
+    private func rememberChat(_ id: String) {
+        guard isActive, let reference = model.currentReference,
+              reference.scope == WorkSessionContext.shared.scope,
+              reference.itemID == id, let peer = model.peer, let workspace = model.workspaceID,
+              reference.hostIdentity == peer, reference.workspaceID == workspace else { return }
+        ClientRecentPlaces.shared.record(in: account.account?.recentPlacesScope, peer: peer,
+            workspaceID: workspace, workspaceName: folderName, kind: .chat, itemID: id)
     }
 
     private func loadChat() async {

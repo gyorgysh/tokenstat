@@ -51,6 +51,8 @@ struct ClientSidebarRoot: View {
     @Environment(ClientProjectChats.self) private var projectChats
     @State private var pendingClose: (peer: String, info: PtySessionInfo)?
     @State private var columns = NavigationSplitViewVisibility.all
+    @State private var sceneWidth: CGFloat = 0
+    @State private var collapsedForChat = false
     /// A path only knows about value-based links. Changes still opens a diff
     /// through a view-based link, so changing the sidebar destination also
     /// needs a fresh stack identity to dismiss that screen.
@@ -133,6 +135,17 @@ struct ClientSidebarRoot: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.onChange(of: geometry.size.width, initial: true) { _, width in
+                    sceneWidth = width
+                    reconcileChatSpace()
+                }
+            }
+        }
+        .onChange(of: navigation.currentRoute?.reference?.kind == .conversation, initial: true) { _, _ in
+            reconcileChatSpace()
+        }
         // `NavigationSplitView` retains its detail controller independently
         // of the `NavigationStack` declared in its closure. Re-keying only
         // that stack can therefore leave an already-presented diff or chat
@@ -201,6 +214,19 @@ struct ClientSidebarRoot: View {
             } message: {
                 Text(L10n.text("apple.clientworkspacesview.stops_the_process_on_the_computer.c5651cd1"))
             }
+    }
+
+    /// On a compact wide screen the global sidebar consumes the space needed
+    /// for the repository's own chat list. Restore it when leaving the chat;
+    /// the person can still reopen the global sidebar at any time.
+    private func reconcileChatSpace() {
+        if navigation.currentRoute?.reference?.kind != .conversation {
+            if collapsedForChat, columns == .detailOnly { columns = .all }
+            collapsedForChat = false
+        } else if sceneWidth >= 600, sceneWidth < 900, columns != .detailOnly {
+            columns = .detailOnly
+            collapsedForChat = true
+        }
     }
 
     private func reload() async {

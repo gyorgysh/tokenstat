@@ -287,14 +287,30 @@ struct ClientRecentChatView: View {
     @Environment(ClientChatSessions.self) private var sessions
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.clientChatHandoffID) private var handoffID
+    @State private var switchedChatID: String?
 
     var body: some View {
-        ClientRecentChatContent(peer: peer, workspaceID: workspaceID, folderName: folderName,
-            hostName: hostName, chatID: chatID, rootChatReference: rootChatReference,
-            session: sessions.session(peer: peer, workspace: workspaceID, conversation: chatID, retaining: retainedSession),
+        let currentID = switchedChatID ?? chatID
+        return ClientRecentChatContent(peer: peer, workspaceID: workspaceID, folderName: folderName,
+            hostName: hostName, chatID: currentID, rootChatReference: rootChatReference,
+            session: sessions.session(peer: peer, workspace: workspaceID, conversation: currentID,
+                                      retaining: currentID == chatID ? retainedSession : nil),
             publicationIntent: navigation.chatHandoff.intent, handoffID: handoffID,
-            publicationLayout: navigation.stackGeneration)
-            .id(ClientChatSessions.Key(peer: peer, workspace: workspaceID, conversation: chatID))
+            publicationLayout: navigation.stackGeneration, onSwitch: { id in
+                if var presented = navigation.presentedChat,
+                   rootChatReference != nil,
+                   WorkDestinationResolver.sameConversation(presented.reference, rootChatReference) {
+                    presented.chatID = id
+                    navigation.presentedChat = presented
+                } else {
+                    switchedChatID = id
+                }
+            })
+            .id(ClientChatSessions.Key(peer: peer, workspace: workspaceID, conversation: currentID))
+            .onChange(of: chatID) { _, _ in switchedChatID = nil }
+            .onChange(of: peer) { _, _ in switchedChatID = nil }
+            .onChange(of: workspaceID) { _, _ in switchedChatID = nil }
+            .onChange(of: WorkSessionContext.shared.scope) { _, _ in switchedChatID = nil }
     }
 }
 
@@ -309,6 +325,7 @@ private struct ClientRecentChatContent: View {
     @State var publicationIntent: UInt64
     @State var handoffID: UUID?
     @State var publicationLayout: UInt64
+    let onSwitch: (String) -> Void
     @State private var viewer = UUID()
     @Environment(\.clientChatPresentationID) private var presentationID
     private var model: ChatModel {
@@ -326,6 +343,8 @@ private struct ClientRecentChatContent: View {
     @State private var loadingLive = false
     @State private var visible = false
     @State private var loadGeneration: UInt64 = 0
+    @State private var showingChatSwitcher = false
+    @State private var presentationScope: WorkReference.Scope?
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
 
@@ -400,7 +419,12 @@ private struct ClientRecentChatContent: View {
             loadGeneration &+= 1
             loadingLive = false
         }
-        .onAppear { visible = true; session.appear(viewer); publishChat() }
+        .onAppear {
+            visible = true
+            presentationScope = WorkSessionContext.shared.scope
+            session.appear(viewer)
+            publishChat()
+        }
         .onDisappear { session.disappear(viewer) }
     }
 
@@ -417,6 +441,7 @@ private struct ClientRecentChatContent: View {
                         layout: publicationLayout, currentLayout: navigation.stackGeneration,
                         rootCover: rootChatReference, currentCover: navigation.presentedChat?.reference,
                         scope: WorkSessionContext.shared.scope),
+                    onShowChats: model.savedCopy == nil ? { showingChatSwitcher = true } : nil,
                     onDelete: { deleted in
                         guard visible, deleted.id == chatID else { return }
                         let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
@@ -459,6 +484,46 @@ private struct ClientRecentChatContent: View {
         // for. Back pops this whole screen to Workspaces, so restore has to
         // run on the way out.
         .clientTabBarHidden(!loaded || model.chats.contains(where: { $0.id == chatID }))
+        .sheet(isPresented: $showingChatSwitcher) {
+            NavigationStack {
+                List(model.chats.sorted {
+                    ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
+                }) { chat in
+                    Button {
+                        guard visible, publicationLayout == navigation.stackGeneration,
+                              let presentationScope, presentationScope == WorkSessionContext.shared.scope,
+                              model.draftReference(for: chat.id, in: workspaceID)?.scope == presentationScope,
+                              rootChatReference == nil || rootChatReference == navigation.presentedChat?.reference
+                        else { return }
+                        showingChatSwitcher = false
+                        guard chat.id != chatID else { return }
+                        model.saveDraftNow()
+                        navigation.chooseWithinChat(session: session, presentationID: presentationID)
+                        onSwitch(chat.id)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(chat.title)
+                                if chat.running { Text(L10n.text("common.running")).font(ClientType.caption) }
+                                if ClientChatReadState.shared.isUnread(peer: peer, chat: chat) {
+                                    Text(L10n.text("apple.clientrecentchats.unread.1b9f384c")).font(ClientType.caption)
+                                }
+                            }
+                            Spacer()
+                            if chat.id == chatID { Image(systemName: "checkmark").accessibilityHidden(true) }
+                        }
+                    }
+                    .accessibilityAddTraits(chat.id == chatID ? .isSelected : [])
+                }
+                .navigationTitle(L10n.text("apple.clientchatview.conversations.1d432f58"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(L10n.text("common.close")) { showingChatSwitcher = false }
+                    }
+                }
+            }
+        }
         .onAppear {
             // The notification cover is `presentedChat`. Writing here would
             // hide the folder thread sitting under it.

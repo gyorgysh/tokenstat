@@ -13,6 +13,11 @@ final class ClientChatSession {
     var loaded = false
     var opened: ChatConversation?
     var retainedThread: ChatConversation?
+    #if !os(macOS)
+    /// The browser follows the retained reader through a phone/Duo layout
+    /// handoff. Its bridge belongs to the session, not a transient view.
+    var browserSession: ProjectBrowserSession?
+    #endif
 
     @ObservationIgnored private let loading = Singleflight<Void>()
     @ObservationIgnored private let opening = Singleflight<Void>()
@@ -25,6 +30,12 @@ final class ClientChatSession {
     func disappear(_ viewer: UUID) {
         viewers.remove(viewer)
         model.saveDraftNow()
+        #if !os(macOS)
+        if viewers.isEmpty {
+            browserSession?.close()
+            browserSession = nil
+        }
+        #endif
     }
 
     var canDiscard: Bool {

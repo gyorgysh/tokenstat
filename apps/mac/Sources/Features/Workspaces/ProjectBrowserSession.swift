@@ -85,6 +85,10 @@ final class ProjectBrowserSession: Identifiable {
     private(set) var isClosed = false
     private(set) var navigationGeneration = 0
     private(set) var loadRevision = 0
+    #if os(iOS)
+    /// Keep the same native document when a compact sheet becomes a pane.
+    @ObservationIgnored var clientWebSurface: ClientWebView.Surface?
+    #endif
     @ObservationIgnored private let isCurrent: () -> Bool
     @ObservationIgnored private let history: BrowserHistory
     @ObservationIgnored private var leases: [String: ProjectBrowserBridges.Lease] = [:]
@@ -375,6 +379,10 @@ final class ProjectBrowserSession: Identifiable {
 
     func close() {
         isClosed = true
+        #if os(iOS)
+        clientWebSurface?.invalidate()
+        clientWebSurface = nil
+        #endif
         navigationGeneration += 1
         isOpening = false
         transportURL = ""

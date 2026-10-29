@@ -9,6 +9,7 @@ struct ClientChatMenu: View {
     let workspaceID: String
     var hostName = ""
     var onFork: ((ChatConversation) -> Void)?
+    var onTools: (() -> Void)?
     var onSetup: (() -> Void)?
     var onHandoff: (() -> Void)?
     var onDelete: ((ChatConversation) -> Void)?
@@ -29,6 +30,9 @@ struct ClientChatMenu: View {
 
     var body: some View {
         Menu {
+            if let onTools {
+                Button(L10n.text("apple.clientchatview.project_tools.c50826a7"), .source, action: onTools)
+            }
             Button(L10n.text("apple.clientchatmenu.rename_chat.26076241"), .edit) { rename = true }
                 .disabled(conversation.teamShare != nil || conversation.running || !ownsProject)
             if supportsFork {
