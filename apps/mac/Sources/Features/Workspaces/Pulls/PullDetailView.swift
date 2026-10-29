@@ -862,6 +862,8 @@ private struct CheckRow: View {
 
 @MainActor @Observable
 final class PullDetailModel {
+    @ObservationIgnored private let sessionGeneration = WorkSessionContext.shared.generation
+    private var isCurrentSession: Bool { sessionGeneration == WorkSessionContext.shared.generation }
     var detail: PullDetail?
     var events: [PullTimelineEvent] = []
     var nextCursor: String?
@@ -903,13 +905,14 @@ final class PullDetailModel {
     private var timelineNeedsRefresh = true
 
     var canReuseDetails: Bool {
-        guard detail != nil, firstTimelineCount != nil, !timelineNeedsRefresh, error == nil, timelineError == nil,
+        guard isCurrentSession, detail != nil, firstTimelineCount != nil, !timelineNeedsRefresh, error == nil, timelineError == nil,
               let lastLoadedAt else { return false }
         let age = Date().timeIntervalSince(lastLoadedAt)
         return age >= 0 && age < 30
     }
 
     func open(workspaceID: String, peer: String?, number: UInt32) async {
+        guard isCurrentSession else { return }
         if canReuseDetails {
             if tab == .changes { await loadDiff(workspaceID: workspaceID, peer: peer, number: number) }
         } else {
@@ -918,6 +921,7 @@ final class PullDetailModel {
     }
 
     func load(workspaceID: String, peer: String?, number: UInt32, refresh: Bool = false) async {
+        guard isCurrentSession else { return }
         loadGeneration &+= 1
         let generation = loadGeneration
         // A first-page refresh supersedes any in-flight older timeline page.
@@ -930,7 +934,7 @@ final class PullDetailModel {
         async let timeline = Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
         do {
             let loaded = try await detail
-            guard generation == loadGeneration else { return }
+            guard generation == loadGeneration, isCurrentSession else { return }
             self.detail = loaded
             lastLoadedAt = Date()
             // Turn the prose into blocks now, off the main thread, rather than
@@ -938,62 +942,62 @@ final class PullDetailModel {
             MarkdownText.warm([loaded.body])
             if checkoutBranch.isEmpty { checkoutBranch = loaded.headRef }
         } catch {
-            if generation == loadGeneration {
+            if generation == loadGeneration && isCurrentSession {
                 if Self.isAccessLoss(error) { discardForAccessLoss(error) }
                 else { self.error = error.localizedDescription }
             }
         }
         do {
             let page = try await timeline
-            guard generation == loadGeneration, !accessLost else { return }
+            guard generation == loadGeneration, isCurrentSession, !accessLost else { return }
             events = page.events; nextCursor = page.nextCursor; timelineError = nil
             timelineNeedsRefresh = false
             firstTimelineCount = page.events.count
             firstTimelineCursor = page.nextCursor
             MarkdownText.warm(page.events.compactMap(\.body))
         } catch {
-            if generation == loadGeneration && !accessLost {
+            if generation == loadGeneration && isCurrentSession && !accessLost {
                 if Self.isAccessLoss(error) { discardForAccessLoss(error) }
                 else { timelineError = error.localizedDescription }
             }
         }
-        guard generation == loadGeneration, !accessLost else { return }
+        guard generation == loadGeneration, isCurrentSession, !accessLost else { return }
         if tab == .changes { await loadDiff(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh) }
     }
     func moreTimeline(workspaceID: String, peer: String?, number: UInt32) async {
-        guard let cursor = nextCursor, !loadingTimeline, !loading else { return }
+        guard isCurrentSession, let cursor = nextCursor, !loadingTimeline, !loading else { return }
         timelineGeneration &+= 1
         let generation = timelineGeneration
         loadingTimeline = true; timelineError = nil
         defer { if generation == timelineGeneration { loadingTimeline = false } }
         do {
             let page = try await Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, cursor: cursor)
-            guard generation == timelineGeneration else { return }
+            guard generation == timelineGeneration, isCurrentSession else { return }
             events += page.events
             nextCursor = page.nextCursor
             MarkdownText.warm(page.events.compactMap(\.body))
         }
         catch {
-            if generation == timelineGeneration {
+            if generation == timelineGeneration && isCurrentSession {
                 if Self.isAccessLoss(error) { discardForAccessLoss(error) }
                 else { timelineError = error.localizedDescription }
             }
         }
     }
     func loadDiff(workspaceID: String, peer: String?, number: UInt32, refresh: Bool = false) async {
-        guard refresh || (!didLoadDiff && !loadingDiff) else { return }
+        guard isCurrentSession, refresh || (!didLoadDiff && !loadingDiff) else { return }
         diffGeneration &+= 1
         let generation = diffGeneration
         loadingDiff = true; diffError = nil
         defer { if generation == diffGeneration { loadingDiff = false } }
         do {
             let loaded = try await Bridge.pullDiff(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
-            guard generation == diffGeneration else { return }
+            guard generation == diffGeneration, isCurrentSession else { return }
             diffs = loaded
             didLoadDiff = true
             if !loaded.contains(where: { $0.path == selectedPath }) { selectedPath = loaded.first?.path }
         } catch {
-            if generation == diffGeneration {
+            if generation == diffGeneration && isCurrentSession {
                 if Self.isAccessLoss(error) { discardForAccessLoss(error) }
                 else { diffError = error.localizedDescription }
             }
@@ -1095,7 +1099,7 @@ final class PullDetailModel {
     }
 
     func checkout(workspaceID: String, peer: String?, number: UInt32) async {
-        guard !actionBusy else { return }
+        guard isCurrentSession, !actionBusy else { return }
         actionBusy = true
         actionError = nil
         actionNotice = nil
@@ -1104,13 +1108,14 @@ final class PullDetailModel {
             let outcome = try await Bridge.pullCheckout(
                 workspaceID: workspaceID, peer: peer, number: number, branch: checkoutBranch
             )
+            guard isCurrentSession else { return }
             if outcome.ok {
                 actionNotice = L10n.text("apple.pulldetailview.checked_out_0.d61914af", "\(checkoutBranch)")
             } else {
                 actionError = outcome.message
             }
         } catch {
-            actionError = error.localizedDescription
+            if isCurrentSession { actionError = error.localizedDescription }
         }
     }
 
@@ -1122,20 +1127,21 @@ final class PullDetailModel {
         number: UInt32,
         action: () async throws -> Void
     ) async -> Bool {
-        guard !actionBusy else { return false }
+        guard isCurrentSession, !actionBusy else { return false }
         actionBusy = true
         actionError = nil
         actionNotice = nil
         defer { actionBusy = false }
         do {
             try await action()
+            guard isCurrentSession else { return false }
             actionNotice = success
             if refresh {
                 await load(workspaceID: workspaceID, peer: peer, number: number, refresh: true)
             }
-            return true
+            return isCurrentSession
         } catch {
-            actionError = error.localizedDescription
+            if isCurrentSession { actionError = error.localizedDescription }
             return false
         }
     }

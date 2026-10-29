@@ -9,10 +9,19 @@ root = Path(__file__).resolve().parents[2]
 source = (root / 'apps/mac/Sources/Features/Workspaces/Pulls/PullDetailView.swift').read_text()
 start = source.index('@MainActor @Observable\nfinal class PullDetailModel')
 end = source.index('    func beginReview(', start)
-model = source[start:end] + '}\n'
+action_start = source.index('    private func perform(', end)
+action_end = source.index('\n}', action_start)
+# Expose only this production action helper to the fixture so a delayed write
+# can be completed after the account changes.
+action = source[action_start:action_end].replace('    private func perform(', '    func perform(', 1)
+model = source[start:end] + action + '\n}\n'
 harness = r'''
 import Foundation
 import Observation
+@MainActor final class WorkSessionContext {
+    static let shared = WorkSessionContext()
+    var generation: UInt64 = 1
+}
 struct PullDetail { var body = ""; var headRef = "branch"; var title: String }
 struct PullTimelineEvent { var body: String? }
 struct PullTimelinePage { var events: [PullTimelineEvent]; var nextCursor: String? }
@@ -42,6 +51,7 @@ enum MarkdownText { static func warm(_ text: [String]) {} }
         try await withCheckedThrowingContinuation { diffs.append($0) }
     }
 }
+@MainActor enum PendingAction { static var reply: CheckedContinuation<Void, Error>? }
 '''
 checks = r'''
 @main struct Check {
@@ -146,6 +156,54 @@ checks = r'''
         Bridge.timelines.removeFirst().resume(returning: page("must not return"))
         await revoked.value
         precondition(model.accessLost && model.detail == nil && model.events.isEmpty && model.error != nil && !model.loading)
+        let old = PullDetailModel()
+        let oldRead = Task { await old.load(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        WorkSessionContext.shared.generation += 1
+        Bridge.details.removeFirst().resume(returning: .init(title: "Other account"))
+        Bridge.timelines.removeFirst().resume(returning: page("other account"))
+        await oldRead.value
+        precondition(old.detail == nil && old.events.isEmpty && !old.loading && !old.canReuseDetails)
+        await old.open(workspaceID: "repo", peer: "host", number: 1)
+        precondition(Bridge.details.isEmpty && Bridge.timelines.isEmpty)
+        let paged = PullDetailModel()
+        let initial = Task { await paged.load(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        Bridge.details.removeFirst().resume(returning: .init(title: "Original"))
+        Bridge.timelines.removeFirst().resume(returning: page("original", "older"))
+        await initial.value
+        let oldPage = Task { await paged.moreTimeline(workspaceID: "repo", peer: "host", number: 1) }
+        let oldDiffAfterSwitch = Task { await paged.loadDiff(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.timelines.count == 1 && Bridge.diffs.count == 1 }
+        WorkSessionContext.shared.generation += 1
+        Bridge.timelines.removeFirst().resume(returning: page("wrong account"))
+        Bridge.diffs.removeFirst().resume(throwing: Failure.revoked)
+        await oldPage.value; await oldDiffAfterSwitch.value
+        precondition(paged.events.count == 1 && paged.events[0].body == "original"
+            && paged.diffs.isEmpty && !paged.accessLost && !paged.loadingTimeline && !paged.loadingDiff)
+        let writer = PullDetailModel()
+        let write = Task {
+            await writer.perform("Done", refresh: true, workspaceID: "repo", peer: "host", number: 1) {
+                try await withCheckedThrowingContinuation { PendingAction.reply = $0 }
+            }
+        }
+        await waitFor { PendingAction.reply != nil }
+        WorkSessionContext.shared.generation += 1
+        PendingAction.reply?.resume(); PendingAction.reply = nil
+        let succeeded = await write.value
+        precondition(!succeeded && writer.actionNotice == nil && !writer.actionBusy)
+        precondition(Bridge.details.isEmpty && Bridge.timelines.isEmpty,
+                     "a retired action must not launch a refresh in the next account")
+        let refreshingWriter = PullDetailModel()
+        let refreshingWrite = Task {
+            await refreshingWriter.perform("Done", refresh: true, workspaceID: "repo", peer: "host", number: 1) {}
+        }
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        WorkSessionContext.shared.generation += 1
+        Bridge.details.removeFirst().resume(returning: .init(title: "Retired"))
+        Bridge.timelines.removeFirst().resume(returning: page("retired"))
+        let refreshedInCurrentSession = await refreshingWrite.value
+        precondition(!refreshedInCurrentSession && refreshingWriter.detail == nil && refreshingWriter.events.isEmpty)
         print("Pull detail: partial failures, overlapping refresh, pagination and diff retention passed")
     }
 }
