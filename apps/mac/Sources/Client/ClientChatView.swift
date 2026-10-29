@@ -1898,6 +1898,12 @@ struct ClientChatThread: View {
                         busy: model.busy,
                         paused: follow.paused,
                         resume: {
+                            if chromeCollapsed {
+                                chromeScroll.reset()
+                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                                    chromeCollapsed = false
+                                }
+                            }
                             showNewest()
                             resumeLatest()
                             Task { await returnToLatest(proxy) }
