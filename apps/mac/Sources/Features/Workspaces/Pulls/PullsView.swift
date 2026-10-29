@@ -226,7 +226,13 @@ struct PullsView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let error = model.errorMessage {
+        if let error = model.errorMessage, let availability = model.availability,
+           availability.state == "ready", model.lastLoadedAt != nil {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                errorCard(error)
+                pullList(availability)
+            }
+        } else if let error = model.errorMessage {
             errorCard(error)
         } else if let availability = model.availability {
             switch availability.state {
@@ -362,7 +368,7 @@ struct PullsView: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(spacing: Theme.Space.s) {
                 Circle()
-                    .fill(Theme.success)
+                    .fill(model.errorMessage == nil && model.listError == nil ? Theme.success : Theme.warning)
                     .frame(width: 7, height: 7)
                     .accessibilityHidden(true)
                 Text("@\(availability.login ?? L10n.text("apple.pullsview.connected.12a7bd86"))")
@@ -405,6 +411,12 @@ struct PullsView: View {
             .font(Theme.caption)
             .foregroundStyle(.secondary)
             .frame(height: 20)
+
+            if (model.errorMessage != nil || model.listError != nil), let date = model.lastLoadedAt {
+                Text(L10n.text("apple.models.stale_last_updated_0.72c66d79", date.formatted(.relative(presentation: .named))))
+                    .font(Theme.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             if let error = model.listError {
                 errorCard(error)
@@ -490,7 +502,7 @@ struct PullsView: View {
                 Text(FriendlyError.from(message).message)
                     .font(Theme.callout)
                 Button(L10n.text("apple.pullsview.try_again.d8b8392e")) {
-                    Task { await model.load(workspaceID: workspaceID, peer: peer) }
+                    Task { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
                 }
                     .buttonStyle(AccentButtonStyle(small: true))
             }
@@ -816,6 +828,7 @@ private final class PullsModel {
     var isLoadingList = false
     var errorMessage: String?
     var listError: String?
+    private(set) var lastLoadedAt: Date?
     var loginError: String?
     var rows: [PullSummary] = []
     var scope: PullScope = .all
@@ -838,6 +851,7 @@ private final class PullsModel {
         if owner != workspaceID || ownerPeer != peer {
             listGeneration += 1
             rows = []
+            lastLoadedAt = nil
             availability = nil
             cachedLists = [:]
             owner = workspaceID
@@ -849,10 +863,13 @@ private final class PullsModel {
         do {
             let loaded = try await Bridge.pullAvailability(workspaceID: workspaceID, peer: peer)
             guard generation == availabilityGeneration, !Task.isCancelled else { return }
-            if availability?.login != loaded.login || availability?.repositoryName != loaded.repositoryName {
+            if availability?.login != loaded.login || availability?.repositoryName != loaded.repositoryName
+                || availability?.host != loaded.host || availability?.source != loaded.source
+                || availability?.installationId != loaded.installationId {
                 listGeneration += 1
                 cachedLists = [:]
                 rows = []
+                lastLoadedAt = nil
             }
             availability = loaded
             if availability?.state == "ready" {
@@ -861,6 +878,7 @@ private final class PullsModel {
                 listGeneration += 1
                 cachedLists = [:]
                 rows = []
+                lastLoadedAt = nil
                 isLoadingList = false
             }
         } catch {
@@ -878,6 +896,7 @@ private final class PullsModel {
         let query = Query(workspace: workspaceID, peer: peer, scope: requestedScope, state: requestedState)
         // Never show one filter's results under another filter's heading.
         rows = cachedLists[query]?.rows ?? []
+        lastLoadedAt = cachedLists[query]?.date
         if !refresh, let cached = cachedLists[query], Date().timeIntervalSince(cached.date) < 30 {
             isLoadingList = false
             listError = nil
@@ -895,7 +914,9 @@ private final class PullsModel {
             )
             guard generation == listGeneration else { return }
             rows = loaded
-            cachedLists[query] = (loaded, Date())
+            let loadedAt = Date()
+            cachedLists[query] = (loaded, loadedAt)
+            lastLoadedAt = loadedAt
             if cachedLists.count > 8, let oldest = cachedLists.min(by: { $0.value.date < $1.value.date })?.key {
                 cachedLists.removeValue(forKey: oldest)
             }
