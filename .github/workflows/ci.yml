@@ -173,6 +173,13 @@ jobs:
       - name: Native macOS simulator models and video framing
         run: python3 scripts/check-simulator.py
 
+      - name: Pull request cache and coverage
+        run: |
+          python3 scripts/tests/check-pulls-cache.py
+          python3 scripts/tests/check-pull-detail.py
+          python3 scripts/tests/check-pull-detail-cache.py
+          python3 scripts/tests/check-pull-check-coverage.py
+
       - name: Chat navigation and transcript continuity
         run: |
           python3 scripts/check-chat-navigation.py
