@@ -14,7 +14,8 @@ action_end = source.index('\n}', action_start)
 # Expose only this production action helper to the fixture so a delayed write
 # can be completed after the account changes.
 action = source[action_start:action_end].replace('    private func perform(', '    func perform(', 1)
-model = source[start:end] + action + '\n}\n'
+draft_actions = source[end:source.index('    func ready(', end)]
+model = source[start:end] + draft_actions + action + '\n}\n'
 harness = r'''
 import Foundation
 import Observation
@@ -27,7 +28,7 @@ struct PullTimelineEvent { var body: String? }
 struct PullTimelinePage { var events: [PullTimelineEvent]; var nextCursor: String? }
 struct FileDiff { var path: String }
 enum PullDetailTab { case conversation, changes }
-enum PullReviewVerdict { case approve }
+enum PullReviewVerdict { case approve, requestChanges, comment }
 enum PullMergeMethod { case squash }
 enum Failure: LocalizedError {
     case offline, revoked
@@ -41,6 +42,7 @@ enum MarkdownText { static func warm(_ text: [String]) {} }
     static var details: [CheckedContinuation<PullDetail, Error>] = []
     static var timelines: [CheckedContinuation<PullTimelinePage, Error>] = []
     static var diffs: [CheckedContinuation<[FileDiff], Error>] = []
+    static var writes: [CheckedContinuation<Void, Error>] = []
     static func pullView(workspaceID: String, peer: String?, number: UInt32, refresh: Bool) async throws -> PullDetail {
         try await withCheckedThrowingContinuation { details.append($0) }
     }
@@ -49,6 +51,12 @@ enum MarkdownText { static func warm(_ text: [String]) {} }
     }
     static func pullDiff(workspaceID: String, peer: String?, number: UInt32, refresh: Bool) async throws -> [FileDiff] {
         try await withCheckedThrowingContinuation { diffs.append($0) }
+    }
+    static func pullComment(workspaceID: String, peer: String?, number: UInt32, body: String) async throws {
+        try await withCheckedThrowingContinuation { writes.append($0) }
+    }
+    static func pullReview(workspaceID: String, peer: String?, number: UInt32, verdict: PullReviewVerdict, body: String) async throws {
+        try await withCheckedThrowingContinuation { writes.append($0) }
     }
 }
 @MainActor enum PendingAction { static var reply: CheckedContinuation<Void, Error>? }
@@ -204,6 +212,86 @@ checks = r'''
         Bridge.timelines.removeFirst().resume(returning: page("retired"))
         let refreshedInCurrentSession = await refreshingWrite.value
         precondition(!refreshedInCurrentSession && refreshingWriter.detail == nil && refreshingWriter.events.isEmpty)
+        let leaving = PullDetailModel()
+        let ready = Task { await leaving.load(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        Bridge.details.removeFirst().resume(returning: .init(title: "Before write"))
+        Bridge.timelines.removeFirst().resume(returning: page("before write"))
+        await ready.value
+        precondition(leaving.canReuseDetails)
+        let leavingWrite = Task {
+            await leaving.perform("Done", refresh: true, workspaceID: "repo", peer: "host", number: 1) {
+                try await withCheckedThrowingContinuation { PendingAction.reply = $0 }
+            }
+        }
+        await waitFor { PendingAction.reply != nil }
+        leaving.prepareForCache()
+        let reopened = Task { await leaving.open(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        Bridge.details.removeFirst().resume(returning: .init(title: "While writing"))
+        Bridge.timelines.removeFirst().resume(returning: page("while writing"))
+        await reopened.value
+        PendingAction.reply?.resume(); PendingAction.reply = nil
+        let finishedAfterLeaving = await leavingWrite.value
+        precondition(finishedAfterLeaving && leaving.actionNotice == "Done" && !leaving.actionBusy && !leaving.canReuseDetails,
+                     "a confirmed write keeps its outcome after returning to the same account")
+        precondition(Bridge.details.isEmpty && Bridge.timelines.isEmpty,
+                     "a retired view does not refresh until it is opened again")
+        let losingAccess = PullDetailModel()
+        let pendingWrite = Task {
+            await losingAccess.perform("Done", refresh: true, workspaceID: "repo", peer: "host", number: 1) {
+                try await withCheckedThrowingContinuation { PendingAction.reply = $0 }
+            }
+        }
+        await waitFor { PendingAction.reply != nil }
+        let accessRead = Task { await losingAccess.load(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        Bridge.details.removeFirst().resume(throwing: Failure.revoked)
+        Bridge.timelines.removeFirst().resume(returning: page("inaccessible"))
+        await accessRead.value
+        PendingAction.reply?.resume(); PendingAction.reply = nil
+        let doneAfterRevocation = await pendingWrite.value
+        precondition(doneAfterRevocation && losingAccess.accessLost && losingAccess.detail == nil)
+        precondition(Bridge.details.isEmpty && Bridge.timelines.isEmpty,
+                     "a write finishing after access loss cannot restart reads")
+        let drafts = PullDetailModel()
+        drafts.commentDraft = "sent comment"
+        let comment = Task { await drafts.comment(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.writes.count == 1 }
+        drafts.commentDraft = "new comment"
+        Bridge.writes.removeFirst().resume()
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        Bridge.details.removeFirst().resume(returning: .init(title: "After comment"))
+        Bridge.timelines.removeFirst().resume(returning: page("after comment"))
+        await comment.value
+        precondition(drafts.commentDraft == "new comment", "a late post cannot erase a newer draft")
+        let unchanged = Task { await drafts.comment(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.writes.count == 1 }
+        Bridge.writes.removeFirst().resume()
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        Bridge.details.removeFirst().resume(returning: .init(title: "Posted"))
+        Bridge.timelines.removeFirst().resume(returning: page("posted"))
+        await unchanged.value
+        precondition(drafts.commentDraft.isEmpty, "the submitted draft clears when it is unchanged")
+        drafts.beginReview(.comment); drafts.reviewDraft = "sent review"
+        let review = Task { await drafts.review(.comment, workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.writes.count == 1 }
+        drafts.reviewDraft = "new review"
+        Bridge.writes.removeFirst().resume()
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        Bridge.details.removeFirst().resume(returning: .init(title: "After review"))
+        Bridge.timelines.removeFirst().resume(returning: page("after review"))
+        await review.value
+        precondition(drafts.reviewMode == .comment && drafts.reviewDraft == "new review")
+        let approve = Task { await drafts.review(.approve, workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.writes.count == 1 }
+        Bridge.writes.removeFirst().resume()
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        Bridge.details.removeFirst().resume(returning: .init(title: "Approved"))
+        Bridge.timelines.removeFirst().resume(returning: page("approved"))
+        await approve.value
+        precondition(drafts.reviewMode == .comment && drafts.reviewDraft == "new review",
+                     "approving does not discard an unrelated review draft")
         print("Pull detail: partial failures, overlapping refresh, pagination and diff retention passed")
     }
 }

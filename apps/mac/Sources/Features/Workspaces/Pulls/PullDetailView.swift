@@ -900,6 +900,7 @@ final class PullDetailModel {
     private var loadGeneration: UInt64 = 0
     private var timelineGeneration: UInt64 = 0
     private var diffGeneration: UInt64 = 0
+    private var retirementGeneration: UInt64 = 0
     private var firstTimelineCount: Int?
     private var firstTimelineCursor: String?
     private var timelineNeedsRefresh = true
@@ -1007,6 +1008,7 @@ final class PullDetailModel {
     /// Keep a quick first-page return and drafts, but not potentially huge
     /// diffs or every older timeline page while this detail is off screen.
     func prepareForCache() {
+        retirementGeneration &+= 1
         loadGeneration &+= 1
         timelineGeneration &+= 1
         diffGeneration &+= 1
@@ -1027,6 +1029,7 @@ final class PullDetailModel {
     }
 
     private func discardForAccessLoss(_ failure: Error) {
+        retirementGeneration &+= 1
         loadGeneration &+= 1; timelineGeneration &+= 1; diffGeneration &+= 1
         loading = false; loadingTimeline = false; loadingDiff = false
         accessLost = true
@@ -1052,7 +1055,7 @@ final class PullDetailModel {
         if await perform(L10n.text("apple.pulldetailview.comment_posted.f79769cc"), refresh: true, workspaceID: workspaceID, peer: peer, number: number, action: {
             try await Bridge.pullComment(workspaceID: workspaceID, peer: peer, number: number, body: body)
         }) {
-            commentDraft = ""
+            if commentDraft == body { commentDraft = "" }
         }
     }
 
@@ -1074,7 +1077,7 @@ final class PullDetailModel {
                 verdict: verdict, body: body
             )
         }) {
-            cancelReview()
+            if verdict != .approve, reviewMode == verdict, reviewDraft == body { cancelReview() }
         }
     }
 
@@ -1128,15 +1131,24 @@ final class PullDetailModel {
         action: () async throws -> Void
     ) async -> Bool {
         guard isCurrentSession, !actionBusy else { return false }
+        let retirement = retirementGeneration
         actionBusy = true
         actionError = nil
         actionNotice = nil
-        defer { actionBusy = false }
+        // If this view retires while the write is in flight, its next open
+        // must not reuse a pre-write timeline as though it were current.
+        if refresh { timelineNeedsRefresh = true }
+        defer {
+            actionBusy = false
+            if refresh && isCurrentSession && retirement != retirementGeneration {
+                timelineNeedsRefresh = true
+            }
+        }
         do {
             try await action()
             guard isCurrentSession else { return false }
             actionNotice = success
-            if refresh {
+            if refresh && retirement == retirementGeneration {
                 await load(workspaceID: workspaceID, peer: peer, number: number, refresh: true)
             }
             return isCurrentSession
