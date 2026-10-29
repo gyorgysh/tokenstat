@@ -22,7 +22,6 @@ struct ClientSidebarRoot: View {
     @Binding var showAccount: Bool
 
     @Environment(AccountModel.self) private var account
-    @Environment(TeamStore.self) private var teams
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(ClientTabCustomization.self) private var tabCustomization
     /// A pointer means a person aiming, not a thumb landing. Rows tighten and
@@ -53,8 +52,8 @@ struct ClientSidebarRoot: View {
     @State private var pendingClose: (peer: String, info: PtySessionInfo)?
     @State private var sceneWidth: CGFloat = 0
     private var columns: NavigationSplitViewVisibility {
-        get { navigation.sidebarColumns }
-        nonmutating set { navigation.sidebarColumns = newValue }
+        get { navigation.sidebarVisible ? .all : .detailOnly }
+        nonmutating set { navigation.sidebarVisible = newValue != .detailOnly }
     }
     /// A path only knows about value-based links. Changes still opens a diff
     /// through a view-based link, so changing the sidebar destination also
@@ -396,12 +395,6 @@ struct ClientSidebarRoot: View {
                         machineCount
                     }
                 }
-            }
-            Section {
-                TeamSidebarLinks(store: teams, isTeamSelected: navigation.destination == .team, open: { section in
-                    teams.show(section); navigation.chooseNavigation(); navigation.restoredRoute = nil
-                    navigation.destination = .team; navigation.folderID = nil
-                }).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
             }
         }
         .listStyle(.sidebar)

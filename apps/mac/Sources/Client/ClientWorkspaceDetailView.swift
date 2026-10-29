@@ -1297,16 +1297,19 @@ struct ClientBrowserScreen: View {
     @Bindable var session: ProjectBrowserSession
     var onClose: () -> Void
     var onToggleFullScreen: (() -> Void)? = nil
+    var onShowControls: (() -> Void)? = nil
     var isFullScreen = false
     @State private var address: String
     @State private var presentation = ClientBrowserPresentation()
     @State private var reloadToken = 0
 
     init(session: ProjectBrowserSession, onClose: @escaping () -> Void,
-         onToggleFullScreen: (() -> Void)? = nil, isFullScreen: Bool = false) {
+         onToggleFullScreen: (() -> Void)? = nil,
+         onShowControls: (() -> Void)? = nil, isFullScreen: Bool = false) {
         self.session = session
         self.onClose = onClose
         self.onToggleFullScreen = onToggleFullScreen
+        self.onShowControls = onShowControls
         self.isFullScreen = isFullScreen
         _address = State(initialValue: session.targetURL)
     }
@@ -1377,6 +1380,13 @@ struct ClientBrowserScreen: View {
     }
 
     @ViewBuilder private var browserControls: some View {
+        if let onShowControls {
+            Button(action: onShowControls) {
+                Image(systemName: "rectangle.topthird.inset.filled")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel(L10n.text("apple.clientchatview.show_controls"))
+        }
         if let onToggleFullScreen {
             Button(action: onToggleFullScreen) {
                 Image(systemName: isFullScreen ? "rectangle.split.2x1" : "arrow.up.left.and.arrow.down.right")

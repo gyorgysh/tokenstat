@@ -17,6 +17,7 @@ struct ClientFolderSplit: View {
 
     var selection: Binding<WorkspaceSection>? = nil
     @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(ClientChatSessions.self) private var chatSessions
     @State private var owner = WorkSessionContext.shared.scope
     @State private var reloadRevision = UUID()
     @State private var live: WorkspaceFolder?
@@ -52,6 +53,12 @@ struct ClientFolderSplit: View {
             navigation.projectSections[.init(peer: peer, workspace: workspaceID)] = newValue
             selection?.wrappedValue = newValue
         }
+    }
+
+    private var chatChromeCollapsed: Bool {
+        guard section == .chat else { return false }
+        let chat = chatSessions.session(peer: peer, workspace: workspaceID)
+        return chat.opened != nil && chat.presentation.chromeCollapsed
     }
 
     var body: some View {
@@ -112,11 +119,13 @@ struct ClientFolderSplit: View {
                 .clientHideScrollEdgeEffect(for: .top)
         }
         .clientTopBar {
-            VStack(spacing: 0) {
-                sectionsStrip
-                ThemeRule()
+            if !chatChromeCollapsed {
+                VStack(spacing: 0) {
+                    sectionsStrip
+                    ThemeRule()
+                }
+                .background(Theme.background)
             }
-            .background(Theme.background)
         }
     }
 

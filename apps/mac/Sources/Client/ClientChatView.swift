@@ -220,6 +220,7 @@ private struct ClientChatContent: View {
                         layout: publicationLayout, currentLayout: navigation.stackGeneration),
                     onBack: {
                         guard visible, publicationLayout == navigation.stackGeneration else { return }
+                        session.presentation.chromeCollapsed = false
                         navigation.leaveThread(session: session, presentationID: presentationID)
                         publicationIntent = navigation.chatHandoff.intent
                         publicationLayout = navigation.stackGeneration
@@ -781,6 +782,8 @@ struct ClientChatThread: View {
     @State private var chatWidth: CGFloat = 0
     @State private var localBrowserFocus: BrowserFocus = .split
     @State private var localChatPaneFraction: CGFloat = 0.5
+    @State private var localChromeCollapsed = false
+    @State private var chromeScroll = ClientChatChromeScroll()
     @State private var chatResize = ClientChatResizeState()
     @State private var localCompanion: Companion?
     @State private var browserLayoutGeneration: UInt64?
@@ -812,6 +815,14 @@ struct ClientChatThread: View {
         nonmutating set {
             if let session { session.presentation.chatFraction = newValue }
             else { localChatPaneFraction = newValue }
+        }
+    }
+
+    private var chromeCollapsed: Bool {
+        get { session?.presentation.chromeCollapsed ?? localChromeCollapsed }
+        nonmutating set {
+            if let session { session.presentation.chromeCollapsed = newValue }
+            else { localChromeCollapsed = newValue }
         }
     }
 
@@ -876,7 +887,10 @@ struct ClientChatThread: View {
     private func browserTab(_ focus: BrowserFocus, title: String, icon: String) -> some View {
         let selected = displayedBrowserFocus == focus || focus == .chat && companion == nil
         return Button {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { browserFocus = focus }
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                browserFocus = focus
+                chromeCollapsed = focus == .browser
+            }
         } label: {
             Label(title, systemImage: icon)
                 .font(ClientType.caption.weight(selected ? .semibold : .regular))
@@ -925,11 +939,17 @@ struct ClientChatThread: View {
                                 totalWidth: chatWidth) { proposed in
             let settled = min(max(proposed, 300), max(300, chatWidth - 18 - 280))
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                if proposed < 190 { browserFocus = .browser }
-                else if proposed > chatWidth - 170 { browserFocus = .chat }
+                if proposed < 190 {
+                    browserFocus = .browser
+                    chromeCollapsed = true
+                } else if proposed > chatWidth - 170 {
+                    browserFocus = .chat
+                    chromeCollapsed = false
+                }
                 else {
                     chatPaneFraction = settled / max(chatWidth - 18, 1)
                     browserFocus = .split
+                    chromeCollapsed = false
                 }
             }
         }
@@ -1071,7 +1091,8 @@ struct ClientChatThread: View {
                 if model.savedCopy == nil {
                     WorkHandoffOffer(chat: model) { showingHandoff = true }
                 }
-                if isActive, showsCompanionTabs, model.savedCopy == nil, toolsIdentity != nil { companionTabs }
+                if isActive, showsCompanionTabs, !chromeCollapsed,
+                   model.savedCopy == nil, toolsIdentity != nil { companionTabs }
                 HStack(spacing: 0) {
                     if displayedBrowserFocus != .browser || companion == nil || !showsCompanionTabs {
                         VStack(spacing: 0) {
@@ -1085,6 +1106,7 @@ struct ClientChatThread: View {
                         showPort = true
                         return .handled
                     })
+                    .padding(.top, isActive && chromeCollapsed ? 60 : 0)
                     .clientBottomBar(separated: true) {
                         bar(chat)
                             .padding(.top, Theme.Space.s)
@@ -1114,7 +1136,14 @@ struct ClientChatThread: View {
                                 onClose: { closeBrowser() },
                                 onToggleFullScreen: wideBrowser ? {
                                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                                        browserFocus = displayedBrowserFocus == .browser ? .split : .browser
+                                        let showingBrowser = displayedBrowserFocus != .browser
+                                        browserFocus = showingBrowser ? .browser : .split
+                                        chromeCollapsed = showingBrowser
+                                    }
+                                } : nil,
+                                onShowControls: chromeCollapsed && displayedBrowserFocus == .browser ? {
+                                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                                        chromeCollapsed = false
                                     }
                                 } : nil,
                                 isFullScreen: displayedBrowserFocus == .browser)
@@ -1168,6 +1197,22 @@ struct ClientChatThread: View {
                 ClientReconnectBanner(offline: !refreshing && connectivity.status == .offline)
             }
         }
+        .overlay(alignment: .topLeading) {
+            if isActive && chromeCollapsed && !(displayedBrowserFocus == .browser && companion == .browser) {
+                Button {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                        chromeCollapsed = false
+                    }
+                } label: {
+                    Image(systemName: "rectangle.topthird.inset.filled")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .clientFloatingBar(cornerRadius: 14)
+                .accessibilityLabel(L10n.text("apple.clientchatview.show_controls"))
+                .padding(Theme.Space.s)
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { model.saveDraftNow() }
             else if isActive { Task { await model.resumeWaitingConnection() } }
@@ -1180,7 +1225,20 @@ struct ClientChatThread: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
         .navigationTitle(isActive ? (chat?.title ?? L10n.text("apple.clientchatview.chat.460b3a7d")) : L10n.text("apple.clientchatview.chat.460b3a7d"))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(isActive && chromeCollapsed ? .hidden : .visible, for: .navigationBar)
         .toolbar {
+            if isActive && !chromeCollapsed && browserFocus == .browser {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                            chromeCollapsed = true
+                        }
+                    } label: {
+                        Image(systemName: "rectangle.topthird.inset.filled")
+                    }
+                    .accessibilityLabel(L10n.text("apple.clientchatview.hide_controls"))
+                }
+            }
             if isActive, let onBack {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: onBack) { ActionIcon.back.label(L10n.text("common.chats")) }
@@ -1303,7 +1361,9 @@ struct ClientChatThread: View {
         // What is on screen, for the local notifier. Without this,
         // `isWatching()` is always false on iOS and on-device banners are
         // never suppressed (host push suppression still works via heartbeat).
-        .onChange(of: chatID, initial: true) { _, id in
+        .onChange(of: chatID, initial: true) { old, id in
+            chromeScroll.reset()
+            if old != nil && old != id { chromeCollapsed = false }
             rememberChat(id)
             updatePresence()
         }
@@ -1433,6 +1493,7 @@ struct ClientChatThread: View {
         session?.presentation.browserSheetVisible = false
         companion = nil
         browserFocus = .split
+        chromeCollapsed = false
         onBrowserChange?(false)
     }
 
@@ -1796,6 +1857,13 @@ struct ClientChatThread: View {
             ))
             .chatScrollMetrics { metrics in
                 guard isActive, follow.active else { return }
+                if let collapse = chromeScroll.update(offset: metrics.distanceFromTop,
+                                                      touching: scrollAccess.readerIsTouching,
+                                                      collapsed: chromeCollapsed) {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                        chromeCollapsed = collapse
+                    }
+                }
                 if scrollAccess.readerIsMoving {
                     if readingFrames.captureReady || !readerMoved {
                         readingFrames.cancelCapture()
@@ -3458,6 +3526,46 @@ private struct ClientTranscriptScrollReporter: UIViewRepresentable {
         private func report() {
             access?.refreshAttachment(from: self)
         }
+    }
+}
+
+/// One chrome transition per user gesture. Programmatic transcript placement
+/// and the viewport's height change after collapsing do not trigger a bounce.
+@MainActor
+private final class ClientChatChromeScroll {
+    private var start: CGFloat?
+    private var lastSettledOffset: CGFloat?
+    private var changed = false
+
+    func reset() {
+        start = nil
+        lastSettledOffset = nil
+        changed = false
+    }
+
+    func update(offset: CGFloat, touching: Bool, collapsed: Bool) -> Bool? {
+        guard touching else {
+            start = nil
+            lastSettledOffset = offset
+            changed = false
+            return nil
+        }
+        if start == nil {
+            // A short touch can deliver its entire movement in the first
+            // geometry update. Compare it with the last idle frame.
+            start = lastSettledOffset ?? offset
+        }
+        guard let start else { return nil }
+        guard !changed else { return nil }
+        if !collapsed && offset > 80 && offset - start > 36 {
+            changed = true
+            return true
+        }
+        if collapsed && (offset < 20 || start - offset > 28) {
+            changed = true
+            return false
+        }
+        return nil
     }
 }
 

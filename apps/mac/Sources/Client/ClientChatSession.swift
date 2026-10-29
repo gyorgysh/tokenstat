@@ -18,6 +18,7 @@ final class ClientChatPresentationState {
     /// A compact reader owns the browser sheet only while it is the active
     /// layout. The wide successor clears this before drawing its inline pane.
     var browserSheetVisible = false
+    var chromeCollapsed = false
 }
 #endif
 
