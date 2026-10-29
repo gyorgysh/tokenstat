@@ -2232,6 +2232,12 @@ extension Bridge {
         cursor: String? = nil, refresh: Bool = false
     ) async throws -> (page: PullListPage, supportsPagination: Bool) {
         let targetPeer = peer ?? remoteWorkspace(workspaceID)?.peer
+        if state == .all, let targetPeer {
+            let version = try await peerProtocolVersion(targetPeer)
+            if version < RemoteHostFeature.pullAllState.minimumProtocol {
+                throw BridgeError.core(code: "host_incompatible", message: L10n.text("apple.pullsview.update_for_all"))
+            }
+        }
         guard await RemoteHostFeature.pullListPages.isSupported(peer: targetPeer) else {
             guard cursor == nil else {
                 throw BridgeError.core(code: "host_incompatible", message: L10n.text("apple.pullsview.update_for_more"))
@@ -2243,6 +2249,12 @@ extension Bridge {
         if let cursor { values["cursor"] = cursor }
         let page = try await pullRead(workspaceID: workspaceID, peer: peer, method: "pulls.listPage", values: values, as: PullListPage.self)
         return (page, true)
+    }
+
+    static func supportsPullAll(workspaceID: String, peer: String?) async -> Bool? {
+        guard let targetPeer = peer ?? remoteWorkspace(workspaceID)?.peer else { return true }
+        guard let version = try? await peerProtocolVersion(targetPeer) else { return nil }
+        return version >= RemoteHostFeature.pullAllState.minimumProtocol
     }
 
     /// Public author pictures for a history list.

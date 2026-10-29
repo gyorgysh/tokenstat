@@ -2191,13 +2191,14 @@ enum PullScope: String, Codable, Sendable, Hashable, CaseIterable, Identifiable 
 }
 
 enum PullStateFilter: String, Codable, Sendable, Hashable, CaseIterable, Identifiable {
+    case all
     case open
     case merged
     case closed
     case draft
 
     var id: String { rawValue }
-    var label: String { rawValue.capitalized }
+    var label: String { self == .all ? L10n.text("apple.models.all.a52ace42") : rawValue.capitalized }
 }
 
 enum PullCheckState: String, Codable, Sendable, Hashable {

@@ -60,6 +60,7 @@ pub enum Scope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum State {
+    All,
     Open,
     Merged,
     Closed,

@@ -13,6 +13,7 @@ enum RemoteHostFeature: Hashable {
     case chat
     case pulls
     case pullListPages
+    case pullAllState
     case pullCreation
     case chatQuestions
     case modelRefresh
@@ -57,7 +58,7 @@ enum RemoteHostFeature: Hashable {
     var title: String {
         switch self {
         case .chat: L10n.text("apple.clientremotefeaturegate.chat.460b3a7d")
-        case .pulls, .pullCreation, .pullListPages: L10n.text("apple.clientremotefeaturegate.pull_requests.d9e3f260")
+        case .pulls, .pullCreation, .pullListPages, .pullAllState: L10n.text("apple.clientremotefeaturegate.pull_requests.d9e3f260")
         case .chatQuestions, .chatRecovery: L10n.text("apple.clientremotefeaturegate.chat.460b3a7d")
         case .modelRefresh: L10n.text("apple.clientremotefeaturegate.model_list_refresh.7113bd00")
         case .folderPicker: L10n.text("apple.clientremotefeaturegate.choosing_a_folder.5e3303d0")
@@ -126,6 +127,7 @@ enum RemoteHostFeature: Hashable {
         case .chat: 4
         case .pulls: 3
         case .pullListPages: 52
+        case .pullAllState: 53
         case .pullCreation: 28
         case .chatQuestions: 29
         case .modelRefresh: 6
@@ -174,7 +176,7 @@ enum RemoteHostFeature: Hashable {
     var symbol: String {
         switch self {
         case .chat: "bubble.left.and.bubble.right.fill"
-        case .pulls, .pullCreation, .pullListPages: "arrow.triangle.merge"
+        case .pulls, .pullCreation, .pullListPages, .pullAllState: "arrow.triangle.merge"
         case .chatQuestions: "questionmark.bubble"
         case .modelRefresh: "arrow.clockwise"
         case .folderPicker: "folder.badge.plus"

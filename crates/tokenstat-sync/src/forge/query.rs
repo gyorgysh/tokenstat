@@ -140,10 +140,11 @@ query PullRequestTimeline($owner: String!, $repo: String!, $number: Int!, $curso
 
 pub(super) fn search_query(repo: &Repo, scope: Scope, state: State) -> String {
     let lifecycle = match state {
-        State::Open => "is:open is:unmerged",
-        State::Merged => "is:merged",
-        State::Closed => "is:closed is:unmerged",
-        State::Draft => "is:open is:draft",
+        State::All => "",
+        State::Open => " is:open is:unmerged",
+        State::Merged => " is:merged",
+        State::Closed => " is:closed is:unmerged",
+        State::Draft => " is:open is:draft",
     };
     let relationship = match scope {
         Scope::All => "",
@@ -152,7 +153,7 @@ pub(super) fn search_query(repo: &Repo, scope: Scope, state: State) -> String {
         Scope::ReviewRequested => " review-requested:@me",
     };
     format!(
-        "repo:{}/{} is:pr {lifecycle}{relationship} sort:updated-desc",
+        "repo:{}/{} is:pr{lifecycle}{relationship} sort:updated-desc",
         repo.owner, repo.repo
     )
 }
@@ -793,6 +794,14 @@ mod tests {
             "repo:pueev/tokenstat is:pr is:open is:draft review-requested:@me sort:updated-desc"
         );
         assert!(search_query(&repo, Scope::All, State::Closed).contains("is:closed is:unmerged"));
+        assert_eq!(
+            search_query(&repo, Scope::All, State::All),
+            "repo:pueev/tokenstat is:pr sort:updated-desc"
+        );
+        assert_eq!(
+            search_query(&repo, Scope::Mine, State::All),
+            "repo:pueev/tokenstat is:pr author:@me sort:updated-desc"
+        );
     }
 
     #[test]

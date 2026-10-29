@@ -15,20 +15,31 @@ import Foundation
 struct PullSummary { var number: Int }
 struct PullListPage { var rows: [PullSummary]; var nextCursor: String? }
 enum PullScope: String { case all }
-enum PullStateFilter: String { case open }
+enum PullStateFilter: String { case all, open }
 enum BridgeError: Error { case core(code: String, message: String) }
 enum L10n { static func text(_ key: String) -> String { key } }
 struct RemoteTarget { var peer: String }
 @MainActor enum RemoteHostFeature {
-    case pullListPages
-    static var supported = false
+    case pullListPages, pullAllState
+    var minimumProtocol: Int { self == .pullAllState ? 53 : 52 }
+    static var pagesSupported = false
+    static var allSupported = false
     static var checkedPeer: String?
-    func isSupported(peer: String?) async -> Bool { Self.checkedPeer = peer; return Self.supported }
+    func isSupported(peer: String?) async -> Bool {
+        Self.checkedPeer = peer
+        return self == .pullAllState ? Self.allSupported : Self.pagesSupported
+    }
 }
 @MainActor enum Bridge {
     static var oldCalls = 0
     static var method = ""
     static var values: [String: Any] = [:]
+    static var protocolVersion = 52
+    static var protocolUnavailable = false
+    static func peerProtocolVersion(_ peer: String) async throws -> Int {
+        if protocolUnavailable { throw BridgeError.core(code: "offline", message: "offline") }
+        return protocolVersion
+    }
     static func remoteWorkspace(_ workspace: String) -> RemoteTarget? {
         workspace == "remote" ? RemoteTarget(peer: "remote-peer") : nil
     }
@@ -51,12 +62,32 @@ checks = r'''
             fatalError("An old host must not be asked for a second page")
         } catch BridgeError.core(let code, _) { precondition(code == "host_incompatible") }
         precondition(Bridge.oldCalls == 1)
-        RemoteHostFeature.supported = true
+        RemoteHostFeature.pagesSupported = true
         let modern = try await Bridge.pullListPage(workspaceID: "remote", peer: "explicit-peer", scope: .all, state: .open, cursor: "next", refresh: true)
         precondition(modern.supportsPagination && modern.page.rows[0].number == 2)
         precondition(RemoteHostFeature.checkedPeer == "explicit-peer" && Bridge.method == "pulls.listPage")
         precondition(Bridge.values["cursor"] as? String == "next" && Bridge.values["refresh"] as? Bool == true)
-        print("Pull pages: old-host fallback, cursor rejection and peer routing passed")
+        let oldAll = await Bridge.supportsPullAll(workspaceID: "remote", peer: "explicit-peer")
+        precondition(oldAll == false)
+        Bridge.protocolUnavailable = true
+        let unknownAll = await Bridge.supportsPullAll(workspaceID: "remote", peer: "explicit-peer")
+        precondition(unknownAll == nil)
+        do {
+            _ = try await Bridge.pullListPage(workspaceID: "remote", peer: "explicit-peer", scope: .all, state: .all)
+            fatalError("An offline host must report its connection error")
+        } catch BridgeError.core(let code, _) { precondition(code == "offline") }
+        Bridge.protocolUnavailable = false
+        do {
+            _ = try await Bridge.pullListPage(workspaceID: "remote", peer: "explicit-peer", scope: .all, state: .all)
+            fatalError("A protocol-52 host must not receive the All state")
+        } catch BridgeError.core(let code, _) { precondition(code == "host_incompatible") }
+        RemoteHostFeature.allSupported = true
+        Bridge.protocolVersion = 53
+        let mixed = try await Bridge.pullListPage(workspaceID: "remote", peer: "explicit-peer", scope: .all, state: .all)
+        precondition(mixed.supportsPagination && Bridge.values["state"] as? String == "all")
+        let newAll = await Bridge.supportsPullAll(workspaceID: "remote", peer: "explicit-peer")
+        precondition(newAll == true)
+        print("Pull pages: old-host fallback, All-state gate, cursor rejection and peer routing passed")
     }
 }
 '''

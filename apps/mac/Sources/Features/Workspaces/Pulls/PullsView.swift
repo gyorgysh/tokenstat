@@ -542,7 +542,8 @@ struct PullsView: View {
                 }
             }
 
-            PullFilters(scope: $model.scope, state: $model.state)
+            PullFilters(scope: $model.scope, state: $model.state,
+                        workspaceID: workspaceID, peer: peer)
 
             HStack(spacing: Theme.Space.s) {
                 Text("\(model.state.label) · \(model.scope.filterLabel)")
@@ -614,7 +615,9 @@ struct PullsView: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             EmptyState(
                 symbol: model.state == .draft ? "pencil.line" : "arrow.triangle.merge",
-                title: L10n.text("apple.pullsview.no_0_pull_requests.980f0d9c", "\(model.state.label.lowercased())"),
+                title: model.state == .all
+                    ? L10n.text("apple.pullsview.no_pull_requests")
+                    : L10n.text("apple.pullsview.no_0_pull_requests.980f0d9c", "\(model.state.label.lowercased())"),
                 message: emptyMessage
             )
             if model.scope != .all || model.state != .open {
@@ -743,6 +746,9 @@ struct PullsView: View {
 private struct PullFilters: View {
     @Binding var scope: PullScope
     @Binding var state: PullStateFilter
+    let workspaceID: String
+    let peer: String?
+    @State private var supportsAll: Bool?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -755,7 +761,9 @@ private struct PullFilters: View {
                             if state == option { Label(option.label, systemImage: "checkmark") }
                             else { Text(option.label) }
                         }
+                        .disabled(option == .all && supportsAll != true)
                     }
+                    if supportsAll == false { Text(L10n.text("apple.pullsview.update_for_all")) }
                 }
                 filterMenu(title: scope.filterLabel, icon: "person.crop.circle") {
                     ForEach(PullScope.allCases) { option in
@@ -769,6 +777,10 @@ private struct PullFilters: View {
                 }
             }
             .padding(.horizontal, 1)
+        }
+        .task(id: "\(workspaceID)-\(peer ?? "local")") {
+            supportsAll = await Bridge.supportsPullAll(workspaceID: workspaceID, peer: peer)
+            if supportsAll == false && state == .all { state = .open }
         }
     }
 
