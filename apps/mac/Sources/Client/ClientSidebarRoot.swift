@@ -144,7 +144,7 @@ struct ClientSidebarRoot: View {
                 }
             }
         }
-        .onChange(of: navigation.currentRoute?.reference?.kind == .conversation, initial: true) { _, _ in
+        .onChange(of: navigation.currentRoute?.reference?.kind == .conversation || navigation.chatSwitchInProgress, initial: true) { _, _ in
             reconcileChatSpace()
         }
         // `NavigationSplitView` retains its detail controller independently
@@ -221,7 +221,7 @@ struct ClientSidebarRoot: View {
     /// for the repository's own chat list. Restore it when leaving the chat;
     /// the person can still reopen the global sidebar at any time.
     private func reconcileChatSpace() {
-        if navigation.currentRoute?.reference?.kind != .conversation {
+        if navigation.currentRoute?.reference?.kind != .conversation && !navigation.chatSwitchInProgress {
             if collapsedForChat, columns == .detailOnly { columns = .all }
             collapsedForChat = false
         } else if sceneWidth >= 600, sceneWidth < 900, columns != .detailOnly {

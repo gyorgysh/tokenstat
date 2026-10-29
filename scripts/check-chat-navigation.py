@@ -77,6 +77,16 @@ tests = '''
         nav.showChat(b, owner: owner, sessionKey: key, session: session, folderName: "P", hostName: "Mac",
             presentationID: push, intent: initialIntent, handoffID: nil, layout: 0)
         precondition(nav.visibleChat == b && nav.currentRoute?.reference == b)
+        let switching = ClientNavigationModel()
+        switching.chooseWithinChat(session: session, presentationID: nil, preserveChatSpace: true)
+        precondition(switching.chatSwitchInProgress, "the chat layout stays reserved while the new reader mounts")
+        switching.showChat(b, owner: UUID(), sessionKey: key, session: session, folderName: "P", hostName: "Mac",
+            presentationID: nil, intent: switching.chatHandoff.intent, handoffID: nil, layout: 0)
+        precondition(!switching.chatSwitchInProgress && switching.currentRoute?.reference == b,
+                     "the new reader takes over the reserved space")
+        switching.chooseWithinChat(session: session, presentationID: nil, preserveChatSpace: true)
+        switching.chooseNavigation()
+        precondition(!switching.chatSwitchInProgress, "leaving the chat cancels a pending switch")
         let route = nav.currentRoute!
         let delivery = nav.chatHandoff.begin(route: route)!
         nav.restoreLayout {

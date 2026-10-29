@@ -37,6 +37,7 @@ struct ClientPullHandoff {
 final class ClientNavigationModel {
     let chatHandoff = ClientChatLayoutHandoff()
     var pullHandoff: ClientPullHandoff?
+    private(set) var chatSwitchInProgress = false
     var restoredChatReader: ClientChatLayoutHandoff.Reader?
     @ObservationIgnored private var restoringLayout = false
 
@@ -59,6 +60,7 @@ final class ClientNavigationModel {
     func chooseNavigation() {
         guard !restoringLayout else { return }
         chatHandoff.navigate()
+        chatSwitchInProgress = false
         pullHandoff = nil
         showingNewChat = false
         newChatDraft.retire()
@@ -79,10 +81,11 @@ final class ClientNavigationModel {
 
     /// Choosing a row/New/Fork inside a folder advances chat intent without
     /// dismissing the folder presentation that contains those controls.
-    func chooseWithinChat(session: ClientChatSession, presentationID: UUID?) {
+    func chooseWithinChat(session: ClientChatSession, presentationID: UUID?, preserveChatSpace: Bool = false) {
         let pushes = presentationID != nil && pushedChat?.id == presentationID ? pushedChats : []
         let fallback = restoredChatReader.flatMap { $0.session === session && $0.key.conversation == nil ? $0 : nil }
         chooseNavigation()
+        chatSwitchInProgress = preserveChatSpace
         pushedChats = pushes
         restoredChatReader = fallback
     }
@@ -334,6 +337,7 @@ final class ClientNavigationModel {
         visibleChat = reference
         visibleChatOwner = owner
         visibleChatSessionKey = sessionKey
+        chatSwitchInProgress = false
     }
 
     func leaveChat(owner: UUID) {
