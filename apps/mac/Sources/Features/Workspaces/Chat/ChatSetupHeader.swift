@@ -344,7 +344,9 @@ struct ChatComposerControls<Chrome: View>: View {
     let chrome: Chrome
 
     @State private var pickingAgent = false
+    @State private var showingAccessibleSetup = false
     @Environment(\.chatAgentPickerFocus) private var agentPickerFocus
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(model: ChatModel, chat: ChatConversation, locked: Bool, compact: Bool = false,
          @ViewBuilder chrome: () -> Chrome) {
@@ -357,23 +359,49 @@ struct ChatComposerControls<Chrome: View>: View {
 
     var body: some View {
         layout
+            .sheet(isPresented: $showingAccessibleSetup, onDismiss: { pickingAgent = false }) {
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Theme.Space.m) {
+                            agentField
+                            VStack(alignment: .leading, spacing: Theme.Space.s) { pills(fitsWidth: true) }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Theme.Space.m)
+                    }
+                    .navigationTitle(L10n.text("apple.clientchatview.chat_setup.9fa79d00"))
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button(L10n.text("common.done")) { showingAccessibleSetup = false }
+                        }
+                    }
+                }
+                .pickerPanelSurface(
+                    title: L10n.text("apple.chatsetupheader.agent_model_and_effort.217ff8ae"),
+                    isPresented: $pickingAgent,
+                    anchorsToLeadingEdge: true
+                ) { agentPanel }
+            }
             .pickerPanelSurface(
                 title: L10n.text("apple.chatsetupheader.agent_model_and_effort.217ff8ae"),
-                isPresented: $pickingAgent,
+                isPresented: Binding(get: { pickingAgent && !showingAccessibleSetup }, set: { pickingAgent = $0 }),
                 anchorsToLeadingEdge: true
-            ) {
-                ChatAgentPanel(model: model, chat: chat, locked: locked) {
-                    pickingAgent = false
-                }
-            }
+            ) { agentPanel }
             .onAppear { enforceBypassOnly() }
             .onChange(of: pickingAgent) { _, presented in agentPickerFocus(presented) }
             .onDisappear { if pickingAgent { agentPickerFocus(false) } }
             .onChange(of: chat.backend) { _, _ in enforceBypassOnly() }
-            .onChange(of: model.currentReference) { _, _ in pickingAgent = false }
-            .onChange(of: model.savedCopy != nil) { _, saved in
-                if saved { pickingAgent = false }
+            .onChange(of: model.currentReference) { _, _ in
+                pickingAgent = false
+                showingAccessibleSetup = false
             }
+            .onChange(of: model.savedCopy != nil) { _, saved in
+                if saved { pickingAgent = false; showingAccessibleSetup = false }
+            }
+    }
+
+    private var agentPanel: some View {
+        ChatAgentPanel(model: model, chat: chat, locked: locked) { pickingAgent = false }
     }
 
     @ViewBuilder
@@ -388,6 +416,17 @@ struct ChatComposerControls<Chrome: View>: View {
             } else {
                 savedCopyLabel
             }
+        } else if compact && dynamicTypeSize.isAccessibilitySize {
+            HStack(spacing: Theme.Space.s) {
+                Button { showingAccessibleSetup = true } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel(L10n.text("apple.clientchatview.chat_setup.9fa79d00"))
+                Spacer(minLength: 0)
+                chrome
+            }
+            .dynamicTypeSize(.large)
         } else if compact {
             // Keyboard and expansion actions share only the agent's row.
             // Putting them beside the whole stack subtracts their width

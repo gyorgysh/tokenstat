@@ -48,6 +48,7 @@ struct ClientChatComposer: View {
     @State private var expanded = false
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -98,7 +99,9 @@ struct ClientChatComposer: View {
             }
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 attachControl
+                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
                 ChatFastModeButton(model: model, chat: chat, locked: setupLocked)
+                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .large : dynamicTypeSize)
                 field
                 // The send button earns its 44 points only when there is
                 // something to send. A permanently greyed one is a control

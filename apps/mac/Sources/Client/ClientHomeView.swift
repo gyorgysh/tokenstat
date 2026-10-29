@@ -21,6 +21,7 @@ struct ClientHomeView: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.openClientAccount) private var openAccount
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// The session's, from `ClientSessionModels`, so a layout swap keeps it.
     @Environment(HomeModel.self) private var model
     @State private var layout = HomeLayout.shared
@@ -283,7 +284,17 @@ struct ClientHomeView: View {
     }
 
     private func totals(_ calendar: ActivityCalendar) -> some View {
-        HStack(spacing: Theme.Space.s) {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: Theme.Space.s) { totalTiles(calendar) }
+            } else {
+                HStack(spacing: Theme.Space.s) { totalTiles(calendar) }
+            }
+        }
+    }
+
+    private func totalTiles(_ calendar: ActivityCalendar) -> some View {
+        Group {
             TotalTile(label: L10n.text("common.today"), micros: todayValue(calendar), mark: "mark_day")
             TotalTile(label: L10n.text("apple.homeview.last_7_days.0603deca"), micros: weekValue(calendar), mark: "mark_week")
         }
