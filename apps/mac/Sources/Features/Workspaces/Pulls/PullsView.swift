@@ -593,6 +593,7 @@ private struct PullFilters: View {
             ForEach(PullStateFilter.allCases) { stateButton($0) }
         }
         .fixedSize()
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(L10n.text("apple.pullsview.pull_request_state.45faa7b6"))
     }
 
@@ -630,6 +631,7 @@ private struct PullFilters: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(option.label)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 

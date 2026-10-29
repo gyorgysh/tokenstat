@@ -35,6 +35,7 @@ struct PullDetailView: View {
                         errorCard(error)
                     } else if let detail = model.detail {
                         hero(detail)
+                        if let error = model.error { inlineError(error) }
                         DetailTabs(selection: $model.tab, checks: detail.checks.count)
                         if let notice = model.actionNotice {
                             actionBanner(notice, tint: Theme.success, symbol: "checkmark.circle.fill") { model.actionNotice = nil }
@@ -257,9 +258,9 @@ struct PullDetailView: View {
 
     private var changes: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            if model.loadingDiff { contentSkeleton }
-            else if let error = model.diffError { inlineError(error) }
-            else if model.diffs.isEmpty {
+            if let error = model.diffError { inlineError(error) }
+            if model.loadingDiff && model.diffs.isEmpty { contentSkeleton }
+            else if model.diffs.isEmpty && model.diffError == nil {
                 EmptyState(symbol: "doc.text.magnifyingglass", title: L10n.text("apple.pulldetailview.no_text_changes.08722a9e"), message: L10n.text("apple.pulldetailview.this_pull_request_has_no_line_by_line_diff.680bf131"))
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -815,40 +816,69 @@ private final class PullDetailModel {
     var actionError: String?
     var confirmingClose = false
     var confirmingMerge = false
+    private var loadGeneration: UInt64 = 0
+    private var timelineGeneration: UInt64 = 0
+    private var diffGeneration: UInt64 = 0
 
     func load(workspaceID: String, peer: String?, number: UInt32, refresh: Bool = false) async {
-        loading = true; error = nil; defer { loading = false }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        // A first-page refresh supersedes any in-flight older timeline page.
+        timelineGeneration &+= 1
+        loadingTimeline = false
+        loading = true; error = nil; timelineError = nil
+        defer { if generation == loadGeneration { loading = false } }
+        async let detail = Bridge.pullView(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
+        async let timeline = Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
         do {
-            async let detail = Bridge.pullView(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
-            async let timeline = Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
             let loaded = try await detail
+            guard generation == loadGeneration else { return }
             self.detail = loaded
             // Turn the prose into blocks now, off the main thread, rather than
             // on the frame each card first scrolls into view.
             MarkdownText.warm([loaded.body])
             if checkoutBranch.isEmpty { checkoutBranch = loaded.headRef }
+        } catch {
+            if generation == loadGeneration { self.error = error.localizedDescription }
+        }
+        do {
             let page = try await timeline
+            guard generation == loadGeneration else { return }
             events = page.events; nextCursor = page.nextCursor; timelineError = nil
             MarkdownText.warm(page.events.compactMap(\.body))
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            if generation == loadGeneration { timelineError = error.localizedDescription }
+        }
+        guard generation == loadGeneration else { return }
         if tab == .changes { await loadDiff(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh) }
     }
     func moreTimeline(workspaceID: String, peer: String?, number: UInt32) async {
-        guard let cursor = nextCursor, !loadingTimeline else { return }
-        loadingTimeline = true; timelineError = nil; defer { loadingTimeline = false }
+        guard let cursor = nextCursor, !loadingTimeline, !loading else { return }
+        timelineGeneration &+= 1
+        let generation = timelineGeneration
+        loadingTimeline = true; timelineError = nil
+        defer { if generation == timelineGeneration { loadingTimeline = false } }
         do {
             let page = try await Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, cursor: cursor)
+            guard generation == timelineGeneration else { return }
             events += page.events
             nextCursor = page.nextCursor
             MarkdownText.warm(page.events.compactMap(\.body))
         }
-        catch { timelineError = error.localizedDescription }
+        catch { if generation == timelineGeneration { timelineError = error.localizedDescription } }
     }
     func loadDiff(workspaceID: String, peer: String?, number: UInt32, refresh: Bool = false) async {
-        guard diffs.isEmpty || refresh, !loadingDiff else { return }
-        loadingDiff = true; diffError = nil; defer { loadingDiff = false }
-        do { diffs = try await Bridge.pullDiff(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh); selectedPath = diffs.first?.path }
-        catch { diffError = error.localizedDescription }
+        guard refresh || (diffs.isEmpty && !loadingDiff) else { return }
+        diffGeneration &+= 1
+        let generation = diffGeneration
+        loadingDiff = true; diffError = nil
+        defer { if generation == diffGeneration { loadingDiff = false } }
+        do {
+            let loaded = try await Bridge.pullDiff(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
+            guard generation == diffGeneration else { return }
+            diffs = loaded
+            if !loaded.contains(where: { $0.path == selectedPath }) { selectedPath = loaded.first?.path }
+        } catch { if generation == diffGeneration { diffError = error.localizedDescription } }
     }
 
     func beginReview(_ verdict: PullReviewVerdict) {
