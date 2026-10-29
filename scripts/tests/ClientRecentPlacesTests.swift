@@ -38,6 +38,9 @@ import Foundation
                      kind: .chat, itemID: "chat-6", at: Date(timeIntervalSince1970: 30))
         assert(store.places(in: alice).first?.workspaceName == "Renamed")
         assert(store.places(in: alice).count == 20)
+        let onePerRepository = store.continuePlaces(in: alice)
+        assert(onePerRepository.count == 1 && onePerRepository[0].id.itemID == "chat-6")
+        assert(store.places(in: alice).count == 20, "Continue must not delete older chat history")
         let reloaded = ClientRecentPlaces(defaults: defaults)
         assert(reloaded.places(in: alice) == store.places(in: alice))
         record(40, name: "/Users/private/secret")
@@ -61,6 +64,8 @@ import Foundation
         assert(pathPlaces.contains { $0.id.workspaceID == "/Users/example/project" && $0.id.itemID == "unix-chat" })
         assert(pathPlaces.contains { $0.id.workspaceID == "C:\\Users\\example\\project" && $0.id.itemID == "windows-chat" })
         assert(pathPlaces.filter { $0.id.kind == .chat }.allSatisfy { $0.workspaceName == "Project" })
+        assert(store.continuePlaces(in: bob).filter { $0.id.kind == .chat }.count == 2,
+               "distinct repository identities each keep their latest chat")
         assert(!store.places(in: alice).contains { $0.id.itemID == "unix-chat" })
         // A busy device still offers its last chat after many other places.
         for n in 1...25 {
