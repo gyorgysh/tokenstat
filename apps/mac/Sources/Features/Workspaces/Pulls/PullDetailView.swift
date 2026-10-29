@@ -16,6 +16,7 @@ struct PullDetailView: View {
 
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var descriptionExpanded = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,6 +84,7 @@ struct PullDetailView: View {
         .task(id: summary.number) {
             await model.open(workspaceID: workspaceID, peer: peer, number: summary.number)
         }
+        .onChange(of: summary.number) { _, _ in descriptionExpanded = false }
         .onChange(of: model.tab) { _, tab in
             guard tab == .changes else { return }
             Task { await model.loadDiff(workspaceID: workspaceID, peer: peer, number: summary.number) }
@@ -154,46 +156,42 @@ struct PullDetailView: View {
 
     private func hero(_ detail: PullDetail) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .top, spacing: Theme.Space.m) {
+            HStack(spacing: Theme.Space.s) {
                 PullStateMark(detail: detail)
+                Text("#\(detail.number)")
+                    .font(Theme.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            Text(detail.title)
+                .font(Theme.title3.weight(.semibold))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.s) { authorIdentity(detail); openingTime(detail) }
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text(detail.title)
-                        .font(Theme.title3.weight(.semibold))
-                        .textSelection(.enabled)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: Theme.Space.s) {
-                            authorIdentity(detail)
-                            openingTime(detail)
-                        }
-                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                            authorIdentity(detail)
-                            openingTime(detail)
-                                .padding(.leading, 22 + Theme.Space.s)
-                        }
-                    }
-                    .font(Theme.callout)
+                    authorIdentity(detail)
+                    openingTime(detail)
                 }
             }
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    pullState(detail)
-                    branch(detail.headRef)
-                    Image(systemName: "arrow.down").font(Theme.caption2).foregroundStyle(.tertiary).accessibilityHidden(true)
-                    branch(detail.baseRef)
-                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        changeCounts(detail)
-                    }
-                }
-            } else {
+            HStack(spacing: Theme.Space.s) {
+                pullState(detail)
+                    .padding(.horizontal, Theme.Space.s)
+                    .frame(minHeight: 30)
+                    .background(Theme.secondary.opacity(0.12), in: Capsule())
+                Spacer(minLength: 0)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Space.s) {
-                    pullState(detail)
-                    branch(detail.headRef)
-                    Image(systemName: "arrow.right").font(Theme.caption2).foregroundStyle(.tertiary).accessibilityHidden(true)
                     branch(detail.baseRef)
-                    Spacer()
-                    changeCounts(detail)
+                    Image(systemName: "arrow.left")
+                        .font(Theme.caption2)
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                    branch(detail.headRef)
                 }
             }
+            HStack(spacing: Theme.Space.s) { changeCounts(detail) }
         }
         .padding(Theme.cardPadding)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -234,8 +232,8 @@ struct PullDetailView: View {
 
     private func branch(_ value: String) -> some View {
         Text(value).font(Theme.monoText(11, weight: .medium, relativeTo: .caption))
-            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 9).padding(.vertical, 5)
             .background(Theme.accent.opacity(0.08), in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.16)))
@@ -285,7 +283,29 @@ struct PullDetailView: View {
             PullConversationCard(actor: detail.author, date: detail.createdDate) {
                 if detail.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(L10n.text("apple.pulldetailview.no_description_was_added.68442d50")).font(Theme.body).foregroundStyle(.tertiary)
-                } else { MarkdownText(detail.body) }
+                } else if detail.body.count > 650 && !descriptionExpanded {
+                    MarkdownText(detail.body)
+                        .frame(height: dynamicTypeSize.isAccessibilitySize ? 340 : 260, alignment: .top)
+                        .clipped()
+                        .overlay(alignment: .bottom) {
+                            LinearGradient(colors: [.clear, Theme.panel], startPoint: .top, endPoint: .bottom)
+                                .frame(height: 64)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    Button(L10n.text("apple.pulldetailview.read_more"), .more) {
+                        withAnimation(.easeInOut(duration: 0.18)) { descriptionExpanded = true }
+                    }
+                    .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                } else {
+                    MarkdownText(detail.body)
+                    if detail.body.count > 650 {
+                        Button(L10n.text("apple.pulldetailview.show_less"), .collapse) {
+                            withAnimation(.easeInOut(duration: 0.18)) { descriptionExpanded = false }
+                        }
+                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                    }
+                }
             }
             ForEach(model.events) { event in TimelineCard(event: event) }
             if model.loadingTimeline { ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding() }

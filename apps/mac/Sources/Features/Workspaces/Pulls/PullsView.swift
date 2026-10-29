@@ -348,8 +348,18 @@ struct PullsView: View {
                 #endif
                 Spacer()
                 if model.availability?.state == "ready" {
+                    #if os(macOS)
                     Button(L10n.text("apple.pullcreate.new"), .create) { creatingPull = true }
                         .buttonStyle(SecondaryButtonStyle(small: true))
+                    #else
+                    Button { creatingPull = true } label: {
+                        Image(systemName: ActionIcon.create.symbol)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.text("apple.pullcreate.new"))
+                    #endif
                 }
                 if model.isLoading && model.availability == nil {
                     ProgressView().controlSize(.small)
@@ -535,7 +545,7 @@ struct PullsView: View {
             PullFilters(scope: $model.scope, state: $model.state)
 
             HStack(spacing: Theme.Space.s) {
-                Text("\(model.state.label) · \(model.scope.label)")
+                Text("\(model.state.label) · \(model.scope.filterLabel)")
                 Spacer()
                 if model.isLoadingList {
                     ProgressView().controlSize(.mini)
@@ -728,77 +738,68 @@ struct PullsView: View {
     }
 }
 
-/// The two questions are separate: whose pull requests, and which lifecycle
-/// state. Keeping both visible avoids a menu whose current answer is hidden.
+/// Keep the two independent filters visible, even on a narrow phone. Each
+/// menu names its current answer and the row scrolls instead of clipping it.
 private struct PullFilters: View {
     @Binding var scope: PullScope
     @Binding var state: PullStateFilter
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Theme.Space.l) { states; Spacer(minLength: 0); scopePicker }
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                scopePicker
-                ScrollView(.horizontal, showsIndicators: false) { states }
-            }
-        }
-        .padding(Theme.Space.m)
-        .background(Theme.accent.opacity(0.035), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
-    }
-
-    private var states: some View {
-        HStack(spacing: Theme.Space.xs) {
-            ForEach(PullStateFilter.allCases) { stateButton($0) }
-        }
-        .fixedSize()
-    }
-
-    private var scopePicker: some View {
-        HStack(spacing: Theme.Space.s) {
-            Text(L10n.text("apple.pullsview.show.0df6f1ca")).font(Theme.caption).foregroundStyle(.secondary)
-            AppMenuPicker(options: PullScope.allCases.map { (value: $0, label: $0.label) }, selection: $scope)
-        }
-        .fixedSize()
-        .accessibilityLabel(L10n.text("apple.pullsview.pull_request_scope.663baf42"))
-    }
-
-    private func stateButton(_ option: PullStateFilter) -> some View {
-        let selected = state == option
-        let tint = tint(for: option)
-        return Button {
-            guard !selected else { return }
-            state = option
-        } label: {
-            HStack(spacing: 6) {
-                Circle().fill(tint).frame(width: 7, height: 7).accessibilityHidden(true)
-                Text(option.label)
-            }
-            .font(Theme.caption.weight(selected ? .semibold : .medium))
-            .foregroundStyle(selected ? tint : Color.secondary)
-            .padding(.horizontal, 11)
-            .frame(height: Theme.Control.heightSmall)
-            .background {
-                if selected {
-                    Capsule()
-                        .fill(tint.opacity(0.13))
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Theme.Space.s) {
+                filterMenu(title: state.label, icon: "line.3.horizontal.decrease") {
+                    ForEach(PullStateFilter.allCases) { option in
+                        Button {
+                            state = option
+                        } label: {
+                            if state == option { Label(option.label, systemImage: "checkmark") }
+                            else { Text(option.label) }
+                        }
+                    }
+                }
+                filterMenu(title: scope.filterLabel, icon: "person.crop.circle") {
+                    ForEach(PullScope.allCases) { option in
+                        Button {
+                            scope = option
+                        } label: {
+                            if scope == option { Label(option.filterLabel, systemImage: "checkmark") }
+                            else { Text(option.filterLabel) }
+                        }
+                    }
                 }
             }
-            .overlay(Capsule().strokeBorder(selected ? tint.opacity(0.34) : Theme.border))
-            .contentShape(.rect)
+            .padding(.horizontal, 1)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(option.label)
-        .accessibilityRemoveTraits(selected ? [] : .isSelected)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
-    private func tint(for state: PullStateFilter) -> Color {
-        switch state {
-        case .open: return Theme.accent
-        case .merged: return Theme.secondary
-        case .closed: return Theme.danger
-        case .draft: return Theme.stateIdle
+    private func filterMenu<Content: View>(title: String, icon: String,
+                                            @ViewBuilder content: () -> Content) -> some View {
+        Menu(content: content) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: icon)
+                Text(title)
+                Image(systemName: "chevron.down").font(Theme.caption2)
+            }
+            .font(Theme.caption.weight(.semibold))
+            .foregroundStyle(Theme.controlGlyph)
+            .padding(.horizontal, Theme.Space.m)
+            .frame(minHeight: 44)
+            .background(Theme.panel, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.border))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+private extension PullScope {
+    var filterLabel: String {
+        switch self {
+        case .all: L10n.text("apple.pullsview.everyone")
+        case .mine: L10n.text("apple.pullsview.created_by_me")
+        case .assigned: L10n.text("apple.pullsview.assigned_to_me")
+        case .reviewRequested: label
         }
     }
 }
@@ -808,21 +809,41 @@ private struct PullRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                Text("#\(pull.number)")
-                    .font(Theme.numeric(12, weight: .semibold))
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: stateSymbol)
                     .foregroundStyle(stateTint)
-                Text(pull.title)
-                    .font(Theme.body.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
+                    .accessibilityHidden(true)
+                Text(stateLabel)
+                    .foregroundStyle(stateTint)
+                Text("#\(pull.number)")
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: Theme.Space.s)
+                if let date = pull.updatedDate {
+                    RelativeTimeText(date: date, unitsStyle: .abbreviated)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(Theme.caption.weight(.medium))
+
+            Text(pull.title)
+                .font(Theme.body.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+
+            HStack(spacing: Theme.Space.s) {
+                Avatar(url: pull.authorAvatar, handle: pull.author, size: 22,
+                       tint: Avatar.tint(for: pull.author))
+                Text(pull.author).lineLimit(1)
                 Spacer(minLength: Theme.Space.s)
                 if let checks = pull.checks { PullChecksPill(state: checks) }
             }
+            .font(Theme.caption)
+            .foregroundStyle(.secondary)
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: Theme.Space.s) { identity; branchAndCounts }
-                VStack(alignment: .leading, spacing: Theme.Space.xs) { identity; branchAndCounts }
+            if let review = reviewLabel {
+                Label(review.text, systemImage: review.symbol)
+                    .font(Theme.caption)
+                    .foregroundStyle(review.tint)
             }
 
             if !pull.labels.isEmpty {
@@ -843,54 +864,18 @@ private struct PullRow: View {
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(stateTint)
-                .frame(width: 3)
-                .padding(.vertical, 9)
-        }
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
         .accessibilityElement(children: .combine)
     }
 
-    private var identity: some View {
-        HStack(spacing: 6) {
-            Avatar(
-                url: pull.authorAvatar,
-                handle: pull.author,
-                size: 18,
-                tint: Avatar.tint(for: pull.author)
-            )
-            Text(pull.author).lineLimit(1)
-            if let date = pull.updatedDate {
-                Text("·").foregroundStyle(.tertiary)
-                RelativeTimeText(date: date, unitsStyle: .abbreviated)
-            }
-            if pull.comments > 0 {
-                Label("\(pull.comments)", systemImage: "bubble.left")
-                    .labelStyle(.titleAndIcon)
-            }
-            if let review = reviewLabel {
-                Label(review.text, systemImage: review.symbol)
-                    .foregroundStyle(review.tint)
-            }
+    private var stateLabel: String { pull.draft ? PullStateFilter.draft.label : pull.state.capitalized }
+    private var stateSymbol: String {
+        if pull.draft { return "pencil.line" }
+        switch pull.state {
+        case "merged": return "arrow.triangle.merge"
+        case "closed": return "xmark.circle"
+        default: return "arrow.triangle.branch"
         }
-        .font(Theme.caption)
-        .foregroundStyle(.secondary)
-    }
-
-    private var branchAndCounts: some View {
-        HStack(spacing: Theme.Space.s) {
-            Text("\(pull.headRef) → \(pull.baseRef)")
-                .font(Theme.monoText(10, relativeTo: .caption))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            Text("+\(pull.additions)").foregroundStyle(Theme.diffAdded)
-            Text("−\(pull.deletions)").foregroundStyle(Theme.diffRemoved)
-            Text(L10n.text("apple.pullsview.0_files.fb42ce4d", "\(pull.changedFiles)")).foregroundStyle(.tertiary)
-        }
-        .font(Theme.caption2.weight(.medium))
     }
 
     private var stateTint: Color {
