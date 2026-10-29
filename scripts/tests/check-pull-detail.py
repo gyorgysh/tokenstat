@@ -15,7 +15,8 @@ action_end = source.index('\n}', action_start)
 # can be completed after the account changes.
 action = source[action_start:action_end].replace('    private func perform(', '    func perform(', 1)
 draft_actions = source[end:source.index('    func ready(', end)]
-model = source[start:end] + draft_actions + action + '\n}\n'
+checkout = source[source.index('    func checkout(', end):action_start]
+model = source[start:end] + draft_actions + checkout + action + '\n}\n'
 harness = r'''
 import Foundation
 import Observation
@@ -30,19 +31,22 @@ struct FileDiff { var path: String }
 enum PullDetailTab { case conversation, changes }
 enum PullReviewVerdict { case approve, requestChanges, comment }
 enum PullMergeMethod { case squash }
+struct CheckoutResult { var ok: Bool; var message: String }
 enum Failure: LocalizedError {
     case offline, revoked
     var errorDescription: String? {
         self == .revoked ? "GitHub rejected the request: access was not granted" : "Offline"
     }
 }
-enum L10n { static func text(_ key: String) -> String { key } }
+enum L10n { static func text(_ key: String, _ args: String...) -> String { key + args.joined() } }
 enum MarkdownText { static func warm(_ text: [String]) {} }
 @MainActor enum Bridge {
     static var details: [CheckedContinuation<PullDetail, Error>] = []
     static var timelines: [CheckedContinuation<PullTimelinePage, Error>] = []
     static var diffs: [CheckedContinuation<[FileDiff], Error>] = []
     static var writes: [CheckedContinuation<Void, Error>] = []
+    static var checkouts: [CheckedContinuation<CheckoutResult, Error>] = []
+    static var checkoutBranch: String?
     static func pullView(workspaceID: String, peer: String?, number: UInt32, refresh: Bool) async throws -> PullDetail {
         try await withCheckedThrowingContinuation { details.append($0) }
     }
@@ -57,6 +61,10 @@ enum MarkdownText { static func warm(_ text: [String]) {} }
     }
     static func pullReview(workspaceID: String, peer: String?, number: UInt32, verdict: PullReviewVerdict, body: String) async throws {
         try await withCheckedThrowingContinuation { writes.append($0) }
+    }
+    static func pullCheckout(workspaceID: String, peer: String?, number: UInt32, branch: String) async throws -> CheckoutResult {
+        checkoutBranch = branch
+        return try await withCheckedThrowingContinuation { checkouts.append($0) }
     }
 }
 @MainActor enum PendingAction { static var reply: CheckedContinuation<Void, Error>? }
@@ -292,6 +300,15 @@ checks = r'''
         await approve.value
         precondition(drafts.reviewMode == .comment && drafts.reviewDraft == "new review",
                      "approving does not discard an unrelated review draft")
+        drafts.checkoutBranch = "original-branch"
+        let checkout = Task { await drafts.checkout(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.checkouts.count == 1 }
+        drafts.checkoutBranch = "new-branch"
+        Bridge.checkouts.removeFirst().resume(returning: .init(ok: true, message: ""))
+        await checkout.value
+        precondition(Bridge.checkoutBranch == "original-branch" && drafts.checkoutBranch == "new-branch"
+            && drafts.actionNotice?.contains("original-branch") == true,
+            "checkout feedback names the branch actually submitted")
         print("Pull detail: partial failures, overlapping refresh, pagination and diff retention passed")
     }
 }

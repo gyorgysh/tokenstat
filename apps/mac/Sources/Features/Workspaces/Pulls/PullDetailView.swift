@@ -1103,17 +1103,18 @@ final class PullDetailModel {
 
     func checkout(workspaceID: String, peer: String?, number: UInt32) async {
         guard isCurrentSession, !actionBusy else { return }
+        let branch = checkoutBranch
         actionBusy = true
         actionError = nil
         actionNotice = nil
         defer { actionBusy = false }
         do {
             let outcome = try await Bridge.pullCheckout(
-                workspaceID: workspaceID, peer: peer, number: number, branch: checkoutBranch
+                workspaceID: workspaceID, peer: peer, number: number, branch: branch
             )
             guard isCurrentSession else { return }
             if outcome.ok {
-                actionNotice = L10n.text("apple.pulldetailview.checked_out_0.d61914af", "\(checkoutBranch)")
+                actionNotice = L10n.text("apple.pulldetailview.checked_out_0.d61914af", "\(branch)")
             } else {
                 actionError = outcome.message
             }
