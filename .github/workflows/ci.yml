@@ -179,6 +179,7 @@ jobs:
           python3 scripts/tests/check-pull-detail.py
           python3 scripts/tests/check-pull-detail-cache.py
           python3 scripts/tests/check-pull-check-coverage.py
+          python3 scripts/tests/check-pull-page-compatibility.py
 
       - name: Chat navigation and transcript continuity
         run: |
