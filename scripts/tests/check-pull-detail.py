@@ -7,7 +7,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'apps/mac/Sources/Features/Workspaces/Pulls/PullDetailView.swift').read_text()
-start = source.index('@MainActor @Observable\nprivate final class PullDetailModel')
+start = source.index('@MainActor @Observable\nfinal class PullDetailModel')
 end = source.index('    func beginReview(', start)
 model = source[start:end] + '}\n'
 harness = r'''
@@ -20,7 +20,12 @@ struct FileDiff { var path: String }
 enum PullDetailTab { case conversation, changes }
 enum PullReviewVerdict { case approve }
 enum PullMergeMethod { case squash }
-enum Failure: Error { case offline }
+enum Failure: LocalizedError {
+    case offline, revoked
+    var errorDescription: String? {
+        self == .revoked ? "GitHub rejected the request: access was not granted" : "Offline"
+    }
+}
 enum L10n { static func text(_ key: String) -> String { key } }
 enum MarkdownText { static func warm(_ text: [String]) {} }
 @MainActor enum Bridge {
@@ -74,6 +79,21 @@ checks = r'''
         Bridge.timelines.removeFirst().resume(returning: page("obsolete"))
         await older.value
         precondition(model.detail?.title == "Newest" && model.events.first?.body == "newest" && !model.loading)
+        precondition(model.canReuseDetails)
+        await model.open(workspaceID: "repo", peer: "host", number: 1)
+        precondition(Bridge.details.isEmpty && Bridge.timelines.isEmpty)
+        model.timelineError = "Offline"
+        precondition(!model.canReuseDetails)
+        model.timelineError = nil
+
+        let pageBeforeLeave = Task { await model.moreTimeline(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.timelines.count == 1 }
+        Bridge.timelines.removeFirst().resume(returning: page("later", "another"))
+        await pageBeforeLeave.value
+        precondition(model.events.count == 2 && model.nextCursor == "another")
+        model.commentDraft = "keep draft"
+        model.prepareForCache()
+        precondition(model.events.count == 1 && model.nextCursor == "older" && model.commentDraft == "keep draft")
 
         let more = Task { await model.moreTimeline(workspaceID: "repo", peer: "host", number: 1) }
         await waitFor { Bridge.timelines.count == 1 }
@@ -104,6 +124,28 @@ checks = r'''
         precondition(model.displayDiffError == "apple.pulldetailview.diff_too_large")
         model.diffError = "Network unavailable"
         precondition(model.displayDiffError == "Network unavailable")
+        model.prepareForCache()
+        precondition(model.diffs.isEmpty && !model.didLoadDiff && model.selectedPath == "new")
+        let emptyDiff = Task { await model.loadDiff(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.diffs.count == 1 }
+        Bridge.diffs.removeFirst().resume(returning: [])
+        await emptyDiff.value
+        await model.loadDiff(workspaceID: "repo", peer: "host", number: 1)
+        precondition(model.didLoadDiff && Bridge.diffs.isEmpty)
+        let detached = Task { await model.load(workspaceID: "repo", peer: "host", number: 1, refresh: true) }
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        model.prepareForCache()
+        precondition(!model.canReuseDetails)
+        Bridge.details.removeFirst().resume(returning: .init(title: "Late response"))
+        Bridge.timelines.removeFirst().resume(returning: page("late"))
+        await detached.value
+        precondition(model.detail?.title == "Refreshed" && model.events.first?.body == "refreshed" && !model.loading)
+        let revoked = Task { await model.load(workspaceID: "repo", peer: "host", number: 1, refresh: true) }
+        await waitFor { Bridge.details.count == 1 && Bridge.timelines.count == 1 }
+        Bridge.details.removeFirst().resume(throwing: Failure.revoked)
+        Bridge.timelines.removeFirst().resume(returning: page("must not return"))
+        await revoked.value
+        precondition(model.accessLost && model.detail == nil && model.events.isEmpty && model.error != nil && !model.loading)
         print("Pull detail: partial failures, overlapping refresh, pagination and diff retention passed")
     }
 }

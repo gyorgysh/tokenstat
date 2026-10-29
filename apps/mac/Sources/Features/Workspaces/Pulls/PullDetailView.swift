@@ -12,9 +12,9 @@ struct PullDetailView: View {
     let summary: PullSummary
     let scope: ScopeChip?
     let onBack: () -> Void
+    @Bindable var model: PullDetailModel
 
     @Environment(\.openURL) private var openURL
-    @State private var model = PullDetailModel()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,6 +35,10 @@ struct PullDetailView: View {
                         errorCard(error)
                     } else if let detail = model.detail {
                         hero(detail)
+                        if let date = model.lastLoadedAt {
+                            Text(L10n.text("apple.pulldetailview.loaded_at", date.formatted(.relative(presentation: .named))))
+                                .font(Theme.caption).foregroundStyle(.secondary)
+                        }
                         if let error = model.error { inlineError(error) }
                         DetailTabs(selection: $model.tab, checks: detail.checks.count)
                         if let notice = model.actionNotice {
@@ -76,7 +80,7 @@ struct PullDetailView: View {
         }
         .background(Theme.background)
         .task(id: summary.number) {
-            await model.load(workspaceID: workspaceID, peer: peer, number: summary.number)
+            await model.open(workspaceID: workspaceID, peer: peer, number: summary.number)
         }
         .onChange(of: model.tab) { _, tab in
             guard tab == .changes else { return }
@@ -259,7 +263,7 @@ struct PullDetailView: View {
     private var changes: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             if let error = model.displayDiffError { inlineError(error) }
-            if model.loadingDiff && model.diffs.isEmpty { contentSkeleton }
+            if model.diffs.isEmpty && model.diffError == nil && (model.loadingDiff || !model.didLoadDiff) { contentSkeleton }
             else if model.diffs.isEmpty && model.diffError == nil {
                 EmptyState(symbol: "doc.text.magnifyingglass", title: L10n.text("apple.pulldetailview.no_text_changes.08722a9e"), message: L10n.text("apple.pulldetailview.this_pull_request_has_no_line_by_line_diff.680bf131"))
             } else if model.diffs.isEmpty, let detail = model.detail, !detail.files.isEmpty {
@@ -454,7 +458,7 @@ struct PullDetailView: View {
     }
 }
 
-private enum PullDetailTab: String, CaseIterable, Identifiable {
+enum PullDetailTab: String, CaseIterable, Identifiable {
     case conversation = "Conversation", changes = "Changes", checks = "Checks"
     var id: String { rawValue }
     var symbol: String { switch self { case .conversation: "bubble.left.and.bubble.right"; case .changes: "doc.text"; case .checks: "checkmark.circle" } }
@@ -816,11 +820,14 @@ private struct CheckRow: View {
 }
 
 @MainActor @Observable
-private final class PullDetailModel {
+final class PullDetailModel {
     var detail: PullDetail?
     var events: [PullTimelineEvent] = []
     var nextCursor: String?
     var diffs: [FileDiff] = []
+    private(set) var didLoadDiff = false
+    private(set) var lastLoadedAt: Date?
+    private(set) var accessLost = false
     var selectedPath: String?
     var tab: PullDetailTab = .conversation
     var loading = false
@@ -850,14 +857,33 @@ private final class PullDetailModel {
     private var loadGeneration: UInt64 = 0
     private var timelineGeneration: UInt64 = 0
     private var diffGeneration: UInt64 = 0
+    private var firstTimelineCount: Int?
+    private var firstTimelineCursor: String?
+    private var timelineNeedsRefresh = true
+
+    var canReuseDetails: Bool {
+        guard detail != nil, firstTimelineCount != nil, !timelineNeedsRefresh, error == nil, timelineError == nil,
+              let lastLoadedAt else { return false }
+        let age = Date().timeIntervalSince(lastLoadedAt)
+        return age >= 0 && age < 30
+    }
+
+    func open(workspaceID: String, peer: String?, number: UInt32) async {
+        if canReuseDetails {
+            if tab == .changes { await loadDiff(workspaceID: workspaceID, peer: peer, number: number) }
+        } else {
+            await load(workspaceID: workspaceID, peer: peer, number: number, refresh: detail != nil)
+        }
+    }
 
     func load(workspaceID: String, peer: String?, number: UInt32, refresh: Bool = false) async {
         loadGeneration &+= 1
         let generation = loadGeneration
         // A first-page refresh supersedes any in-flight older timeline page.
         timelineGeneration &+= 1
+        timelineNeedsRefresh = true
         loadingTimeline = false
-        loading = true; error = nil; timelineError = nil
+        loading = true; error = nil; timelineError = nil; accessLost = false
         defer { if generation == loadGeneration { loading = false } }
         async let detail = Bridge.pullView(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
         async let timeline = Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
@@ -865,22 +891,32 @@ private final class PullDetailModel {
             let loaded = try await detail
             guard generation == loadGeneration else { return }
             self.detail = loaded
+            lastLoadedAt = Date()
             // Turn the prose into blocks now, off the main thread, rather than
             // on the frame each card first scrolls into view.
             MarkdownText.warm([loaded.body])
             if checkoutBranch.isEmpty { checkoutBranch = loaded.headRef }
         } catch {
-            if generation == loadGeneration { self.error = error.localizedDescription }
+            if generation == loadGeneration {
+                if Self.isAccessLoss(error) { discardForAccessLoss(error) }
+                else { self.error = error.localizedDescription }
+            }
         }
         do {
             let page = try await timeline
-            guard generation == loadGeneration else { return }
+            guard generation == loadGeneration, !accessLost else { return }
             events = page.events; nextCursor = page.nextCursor; timelineError = nil
+            timelineNeedsRefresh = false
+            firstTimelineCount = page.events.count
+            firstTimelineCursor = page.nextCursor
             MarkdownText.warm(page.events.compactMap(\.body))
         } catch {
-            if generation == loadGeneration { timelineError = error.localizedDescription }
+            if generation == loadGeneration && !accessLost {
+                if Self.isAccessLoss(error) { discardForAccessLoss(error) }
+                else { timelineError = error.localizedDescription }
+            }
         }
-        guard generation == loadGeneration else { return }
+        guard generation == loadGeneration, !accessLost else { return }
         if tab == .changes { await loadDiff(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh) }
     }
     func moreTimeline(workspaceID: String, peer: String?, number: UInt32) async {
@@ -896,10 +932,15 @@ private final class PullDetailModel {
             nextCursor = page.nextCursor
             MarkdownText.warm(page.events.compactMap(\.body))
         }
-        catch { if generation == timelineGeneration { timelineError = error.localizedDescription } }
+        catch {
+            if generation == timelineGeneration {
+                if Self.isAccessLoss(error) { discardForAccessLoss(error) }
+                else { timelineError = error.localizedDescription }
+            }
+        }
     }
     func loadDiff(workspaceID: String, peer: String?, number: UInt32, refresh: Bool = false) async {
-        guard refresh || (diffs.isEmpty && !loadingDiff) else { return }
+        guard refresh || (!didLoadDiff && !loadingDiff) else { return }
         diffGeneration &+= 1
         let generation = diffGeneration
         loadingDiff = true; diffError = nil
@@ -908,8 +949,46 @@ private final class PullDetailModel {
             let loaded = try await Bridge.pullDiff(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
             guard generation == diffGeneration else { return }
             diffs = loaded
+            didLoadDiff = true
             if !loaded.contains(where: { $0.path == selectedPath }) { selectedPath = loaded.first?.path }
-        } catch { if generation == diffGeneration { diffError = error.localizedDescription } }
+        } catch {
+            if generation == diffGeneration {
+                if Self.isAccessLoss(error) { discardForAccessLoss(error) }
+                else { diffError = error.localizedDescription }
+            }
+        }
+    }
+
+    /// Keep a quick first-page return and drafts, but not potentially huge
+    /// diffs or every older timeline page while this detail is off screen.
+    func prepareForCache() {
+        loadGeneration &+= 1
+        timelineGeneration &+= 1
+        diffGeneration &+= 1
+        loading = false; loadingTimeline = false; loadingDiff = false
+        diffs = []; didLoadDiff = false
+        if let firstTimelineCount {
+            events = Array(events.prefix(firstTimelineCount))
+            nextCursor = firstTimelineCursor
+        }
+    }
+
+    static func isAccessLoss(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("pull requests are not connected")
+            || message.contains("github authorization expired and could not be refreshed")
+            || message.contains("access was not granted")
+            || message.contains("repository was not found")
+    }
+
+    private func discardForAccessLoss(_ failure: Error) {
+        loadGeneration &+= 1; timelineGeneration &+= 1; diffGeneration &+= 1
+        loading = false; loadingTimeline = false; loadingDiff = false
+        accessLost = true
+        detail = nil; events = []; nextCursor = nil; diffs = []; didLoadDiff = false
+        timelineNeedsRefresh = true
+        lastLoadedAt = nil; firstTimelineCount = nil; firstTimelineCursor = nil
+        error = failure.localizedDescription
     }
 
     func beginReview(_ verdict: PullReviewVerdict) {

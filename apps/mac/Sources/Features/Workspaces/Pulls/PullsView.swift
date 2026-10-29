@@ -9,24 +9,66 @@ import SwiftUI
 final class PullCountStore {
     static let shared = PullCountStore()
     private var values: [String: Int] = [:]
+    private var generation: UInt64?
 
     func count(workspaceID: String, peer: String? = nil) -> Int? {
-        values[key(workspaceID: workspaceID, peer: peer)]
+        guard generation == WorkSessionContext.shared.generation else { return nil }
+        return values[key(workspaceID: workspaceID, peer: peer)]
     }
 
-    func count(key: String) -> Int? { values[key] }
+    func count(key: String) -> Int? {
+        guard generation == WorkSessionContext.shared.generation else { return nil }
+        return values[key]
+    }
 
     func set(_ count: Int, workspaceID: String, peer: String?) {
+        let current = WorkSessionContext.shared.generation
+        if generation != current { values.removeAll(); generation = current }
         values[key(workspaceID: workspaceID, peer: peer)] = count
     }
 
     func clear(workspaceID: String, peer: String?) {
+        guard generation == WorkSessionContext.shared.generation else { return }
         values.removeValue(forKey: key(workspaceID: workspaceID, peer: peer))
     }
 
     private func key(workspaceID: String, peer: String?) -> String {
         guard let peer, !workspaceID.hasPrefix("remote:") else { return workspaceID }
         return "remote:\(peer):\(workspaceID)"
+    }
+}
+
+/// A small, memory-only working set owned by one pull-request workspace.
+@MainActor
+final class PullDetailCache {
+    struct Owner: Hashable {
+        let workspace: String
+        let peer: String?
+        let sessionGeneration: UInt64
+        let availability: PullAvailability?
+    }
+    private var owner: Owner?
+    private var models: [UInt32: PullDetailModel] = [:]
+    private var order: [UInt32] = []
+
+    func model(number: UInt32, owner: Owner) -> PullDetailModel {
+        if self.owner != owner { clear(); self.owner = owner }
+        order.removeAll { $0 == number }
+        order.append(number)
+        let result = models[number] ?? PullDetailModel()
+        models[number] = result
+        while order.count > 2 {
+            let evicted = order.removeFirst()
+            models.removeValue(forKey: evicted)?.prepareForCache()
+        }
+        return result
+    }
+
+    func clear() {
+        for model in models.values { model.prepareForCache() }
+        models.removeAll()
+        order.removeAll()
+        owner = nil
     }
 }
 
@@ -50,7 +92,9 @@ struct PullsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model = PullsModel()
+    @State private var detailCache = PullDetailCache()
     @State private var selectedPull: PullSummary?
+    @State private var selectedDetail: PullDetailModel?
     @State private var creatingPull = false
 
     private var canConnectHere: Bool { connectionHostName == nil }
@@ -64,16 +108,19 @@ struct PullsView: View {
         } else {
         RemoteHostFeatureGate(feature: .pulls, peer: peer, hostName: connectionHostName) {
             Group {
-            if let selectedPull {
+            if let selectedPull, let selectedDetail {
                 PullDetailView(
                     workspaceID: workspaceID,
                     peer: peer,
                     summary: selectedPull,
                     scope: scopeChip,
                     onBack: {
+                        selectedDetail.prepareForCache()
                         self.selectedPull = nil
+                        self.selectedDetail = nil
                         Task { await model.loadList(workspaceID: workspaceID, peer: peer, refresh: true) }
-                    }
+                    },
+                    model: selectedDetail
                 )
             } else {
                 VStack(spacing: 0) {
@@ -137,17 +184,47 @@ struct PullsView: View {
                 }
                 .id("\(workspaceID):\(peer ?? "local")")
             }
-            .onChange(of: workspaceID) { _, _ in selectedPull = nil; creatingPull = false }
-            .onChange(of: peer) { _, _ in selectedPull = nil; creatingPull = false }
-            .onChange(of: WorkSessionContext.shared.scope) { _, _ in
-                selectedPull = nil
-                creatingPull = false
-                model = PullsModel()
-                Task { if isActive { await model.load(workspaceID: workspaceID, peer: peer) } }
+            .onChange(of: model.availability) { old, new in
+                if old != new { clearDetailSelection() }
+            }
+            .onChange(of: selectedDetail?.accessLost) { _, lost in
+                guard lost == true else { return }
+                detailCache.clear()
+                model.forgetCachedLists(workspaceID: workspaceID, peer: peer)
+            }
+            .onChange(of: model.accessLost) { _, lost in
+                if lost { clearDetailSelection() }
             }
         }
         }
         }
+        .onChange(of: workspaceID) { _, _ in resetWorkspace() }
+        .onChange(of: peer) { _, _ in resetWorkspace() }
+        .onChange(of: WorkSessionContext.shared.generation) { _, _ in resetWorkspace() }
+        .onChange(of: isActive) { _, active in
+            if !active { selectedDetail?.prepareForCache() }
+        }
+    }
+
+    private func clearDetailSelection() {
+        detailCache.clear()
+        selectedPull = nil
+        selectedDetail = nil
+    }
+
+    private func resetWorkspace() {
+        clearDetailSelection()
+        creatingPull = false
+        model = PullsModel()
+        Task { if isActive { await model.load(workspaceID: workspaceID, peer: peer) } }
+    }
+
+    private func select(_ pull: PullSummary) {
+        let owner = PullDetailCache.Owner(workspace: workspaceID, peer: peer,
+                                          sessionGeneration: WorkSessionContext.shared.generation,
+                                          availability: model.availability)
+        selectedDetail = detailCache.model(number: pull.number, owner: owner)
+        selectedPull = pull
     }
 
     private var scopeChip: ScopeChip? {
@@ -434,7 +511,7 @@ struct PullsView: View {
             } else {
                 LazyVStack(spacing: Theme.Space.s) {
                     ForEach(model.rows) { pull in
-                        Button { selectedPull = pull } label: {
+                        Button { select(pull) } label: {
                             PullRow(pull: pull)
                         }
                         .buttonStyle(.plain)
@@ -853,6 +930,7 @@ private final class PullsModel {
     var errorMessage: String?
     var listError: String?
     var moreError: String?
+    private(set) var accessLost = false
     private(set) var nextCursor: String?
     private(set) var supportsPagination = true
     private(set) var reachedLimit = false
@@ -873,11 +951,21 @@ private final class PullsModel {
     private var owner: String?
     private var ownerPeer: String?
 
+    func forgetCachedLists(workspaceID: String, peer: String?) {
+        listGeneration += 1
+        cachedLists = [:]
+        rows = []; lastLoadedAt = nil; nextCursor = nil; moreError = nil; listError = nil
+        supportsPagination = true; reachedLimit = false
+        isLoadingList = false; isLoadingMore = false
+        PullCountStore.shared.clear(workspaceID: workspaceID, peer: peer)
+    }
+
     func load(workspaceID: String, peer: String?, refresh: Bool = false) async {
         availabilityGeneration += 1
         let generation = availabilityGeneration
         if owner != workspaceID || ownerPeer != peer {
             listGeneration += 1
+            PullCountStore.shared.clear(workspaceID: workspaceID, peer: peer)
             isLoadingMore = false
             nextCursor = nil
             moreError = nil
@@ -894,10 +982,12 @@ private final class PullsModel {
         do {
             let loaded = try await Bridge.pullAvailability(workspaceID: workspaceID, peer: peer)
             guard generation == availabilityGeneration, !Task.isCancelled else { return }
+            accessLost = false
             if availability?.login != loaded.login || availability?.repositoryName != loaded.repositoryName
                 || availability?.host != loaded.host || availability?.source != loaded.source
                 || availability?.installationId != loaded.installationId {
                 listGeneration += 1
+                PullCountStore.shared.clear(workspaceID: workspaceID, peer: peer)
                 isLoadingMore = false
                 nextCursor = nil
                 moreError = nil
@@ -910,6 +1000,7 @@ private final class PullsModel {
                 await loadList(workspaceID: workspaceID, peer: peer, refresh: refresh)
             } else {
                 listGeneration += 1
+                PullCountStore.shared.clear(workspaceID: workspaceID, peer: peer)
                 isLoadingMore = false
                 nextCursor = nil
                 moreError = nil
@@ -920,6 +1011,10 @@ private final class PullsModel {
             }
         } catch {
             guard generation == availabilityGeneration, !Task.isCancelled else { return }
+            if PullDetailModel.isAccessLoss(error) {
+                forgetCachedLists(workspaceID: workspaceID, peer: peer)
+                accessLost = true
+            }
             errorMessage = error.localizedDescription
         }
     }
@@ -958,6 +1053,7 @@ private final class PullsModel {
             )
             guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
             rows = result.page.rows
+            accessLost = false
             nextCursor = result.page.nextCursor
             supportsPagination = result.supportsPagination
             reachedLimit = false
@@ -976,6 +1072,10 @@ private final class PullsModel {
             }
         } catch {
             guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
+            if PullDetailModel.isAccessLoss(error) {
+                forgetCachedLists(workspaceID: workspaceID, peer: peer)
+                accessLost = true
+            }
             listError = error.localizedDescription
         }
         if generation == listGeneration { isLoadingList = false }
@@ -1010,6 +1110,12 @@ private final class PullsModel {
             }
         } catch {
             guard generation == listGeneration, scope == requestedScope, state == requestedState else { return }
+            if PullDetailModel.isAccessLoss(error) {
+                forgetCachedLists(workspaceID: workspaceID, peer: peer)
+                accessLost = true
+                listError = error.localizedDescription
+                return
+            }
             moreError = error.localizedDescription
         }
     }

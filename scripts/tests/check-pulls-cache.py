@@ -28,13 +28,20 @@ struct PullDeviceLogin { }
     func set(_ count: Int, workspaceID: String, peer: String?) { value = count }
     func clear(workspaceID: String, peer: String?) { value = nil }
 }
-enum Failure: Error { case offline }
+enum Failure: LocalizedError {
+    case offline, revoked
+    var errorDescription: String? { self == .revoked ? "access was not granted" : "Offline" }
+}
+enum PullDetailModel {
+    static func isAccessLoss(_ error: Error) -> Bool { error.localizedDescription.contains("access was not granted") }
+}
 enum BridgeError: Error { case core(code: String, message: String) }
 enum L10n { static func text(_ key: String) -> String { key } }
 @MainActor enum Bridge {
     static var availability = PullAvailability()
     static var unavailable = false
     static var listUnavailable = false
+    static var revoked = false
     static var calls: [Bool] = []
     static var result = [PullSummary(number: 1)]
     static var firstCursor: String?
@@ -47,6 +54,7 @@ enum L10n { static func text(_ key: String) -> String { key } }
     static func pullListPage(workspaceID: String, peer: String?, scope: PullScope,
                              state: PullStateFilter, cursor: String? = nil, refresh: Bool = false) async throws -> (page: PullListPage, supportsPagination: Bool) {
         calls.append(refresh)
+        if revoked { throw Failure.revoked }
         if listUnavailable { throw Failure.offline }
         if cursor != nil {
             if pauseMore {
@@ -111,6 +119,13 @@ checks = r'''
         await model.load(workspaceID: "repo", peer: "host", refresh: true)
         await model.loadMore(workspaceID: "repo", peer: "host")
         precondition(model.rows.count == 1000 && model.reachedLimit)
+        model.forgetCachedLists(workspaceID: "repo", peer: "host")
+        precondition(model.rows.isEmpty && model.lastLoadedAt == nil && model.nextCursor == nil && PullCountStore.shared.value == nil)
+        Bridge.result = [PullSummary(number: 1)]; Bridge.firstCursor = nil
+        await model.load(workspaceID: "repo", peer: "host", refresh: true)
+        Bridge.revoked = true
+        await model.loadList(workspaceID: "repo", peer: "host", refresh: true)
+        precondition(model.accessLost && model.rows.isEmpty && model.listError != nil && model.lastLoadedAt == nil)
         print("Pull list: cache isolation, pagination, duplicate rows and stale page rejection passed")
     }
 }

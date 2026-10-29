@@ -3551,6 +3551,7 @@
   "apple.pulldetailview.earlier_activity.2e9839ac": "More activity",
   "apple.pulldetailview.diff_too_large": "GitHub cannot provide this diff because it is too large. You can open the pull request on GitHub.",
   "apple.pulldetailview.file_summaries": "Changed files",
+  "apple.pulldetailview.loaded_at": "Loaded {0}",
   "apple.pulldetailview.some_file_summaries": "Some file summaries are not available.",
   "apple.pulldetailview.everything_reported_by_the_head_commit_is.6083342c": "Everything reported by the head commit is green.",
   "apple.pulldetailview.explain_what_needs_to_change.5e9e1223": "Explain what needs to change…",
