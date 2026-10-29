@@ -360,19 +360,16 @@ struct ChatComposerControls<Chrome: View>: View {
     var body: some View {
         layout
             .sheet(isPresented: $showingAccessibleSetup, onDismiss: { pickingAgent = false }) {
-                NavigationStack {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: Theme.Space.m) {
-                            agentField
-                            VStack(alignment: .leading, spacing: Theme.Space.s) { pills(fitsWidth: true) }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(Theme.Space.m)
-                    }
-                    .navigationTitle(L10n.text("apple.clientchatview.chat_setup.9fa79d00"))
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button(L10n.text("common.done")) { showingAccessibleSetup = false }
+                ThemedSheet(
+                    title: L10n.text("apple.clientchatview.chat_setup.9fa79d00"),
+                    subtitle: "",
+                    scrolls: true,
+                    onClose: { showingAccessibleSetup = false }
+                ) {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        agentField
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
+                            pills(fitsWidth: true)
                         }
                     }
                 }
@@ -381,6 +378,7 @@ struct ChatComposerControls<Chrome: View>: View {
                     isPresented: $pickingAgent,
                     anchorsToLeadingEdge: true
                 ) { agentPanel }
+                .modalFrame(width: 600, height: 640)
             }
             .pickerPanelSurface(
                 title: L10n.text("apple.chatsetupheader.agent_model_and_effort.217ff8ae"),
