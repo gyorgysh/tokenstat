@@ -104,6 +104,16 @@ final class ClientRecentPlaces {
         revision += 1
     }
 
+    func remove(in scope: Scope?, peer: String, workspaceID: String?, kind: Kind, itemID: String?) {
+        guard let scope else { return }
+        let id = Place.ID(peer: peer, workspaceID: workspaceID, kind: kind, itemID: itemID)
+        let recent = places(in: scope)
+        guard recent.contains(where: { $0.id == id }),
+              let data = try? JSONEncoder().encode(recent.filter { $0.id != id }) else { return }
+        defaults.set(data, forKey: scope.key)
+        revision += 1
+    }
+
     private static func valid(_ id: Place.ID) -> Bool {
         // Hosts use a canonical path as the workspace identifier. It must
         // round-trip unchanged to reach the folder, but is never used as a

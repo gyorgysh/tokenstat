@@ -537,7 +537,25 @@ private struct ClientRecentChatContent: View {
     }
 
     private var chatSwitcher: some View {
-        List(model.chats.sorted {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.text("apple.clientchatview.conversations.1d432f58"))
+                    .font(ClientType.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    if showingChatSwitcher { showingChatSwitcher = false }
+                    else { showingChatSidebar = false }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .accessibilityLabel(L10n.text("apple.clientchatview.hide_conversations"))
+            }
+            .padding(.leading, Theme.Space.m)
+            List(model.chats.sorted {
             ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
         }) { chat in
             Button {
@@ -553,7 +571,8 @@ private struct ClientRecentChatContent: View {
                                             preserveChatSpace: rootChatReference == nil)
                 onSwitch(chat.id)
             } label: {
-                HStack {
+                HStack(spacing: Theme.Space.s) {
+                    HarnessMark(id: chat.backend, size: 24)
                     VStack(alignment: .leading) {
                         Text(chat.title)
                         if chat.running { Text(L10n.text("common.running")).font(ClientType.caption) }
@@ -568,6 +587,7 @@ private struct ClientRecentChatContent: View {
             .accessibilityAddTraits(chat.id == chatID ? .isSelected : [])
         }
         .listStyle(.plain)
+        }
     }
 
     private func publishChat() {

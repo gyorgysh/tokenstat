@@ -22,6 +22,8 @@ struct ClientDiffView: View {
     let workspaceID: String
     let hostName: String
     let file: FileChange
+    var showsNavigationTitle = true
+    var showsEditAction = true
 
     @State private var diff: FileDiff?
     @State private var errorMessage: String?
@@ -53,15 +55,17 @@ struct ClientDiffView: View {
             }
         }
         .background(Theme.background)
-        .navigationTitle(name)
+        .modifier(ClientOptionalNavigationTitle(showsNavigationTitle ? name : nil))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(L10n.text("apple.clientdiffview.edit_file.9608dd14"), .edit) {
-                    Task { await openEditor() }
+            if showsEditAction {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(L10n.text("apple.clientdiffview.edit_file.9608dd14"), .edit) {
+                        Task { await openEditor() }
+                    }
+                    .labelStyle(.iconOnly)
+                    .disabled(!loaded || diff == nil || diff?.binary == true || openingEditor)
                 }
-                .labelStyle(.iconOnly)
-                .disabled(!loaded || diff == nil || diff?.binary == true || openingEditor)
             }
         }
         .sheet(item: $editorContent, onDismiss: {

@@ -594,6 +594,7 @@ struct ClientTerminalScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     let session: ClientTerminalSession
     var hostName: String = ""
+    var embedded = false
     var onClose: (() -> Void)?
     var onClosedProcess: (() -> Void)?
 
@@ -617,7 +618,7 @@ struct ClientTerminalScreen: View {
     private func rememberTerminal() {
         guard session.ownerScope != nil, session.ownerScope == WorkSessionContext.shared.scope,
               !session.hostID.hasPrefix("pending-") else { return }
-        if let reference = session.workReference, reference.scope.kind == .account {
+        if !embedded, let reference = session.workReference, reference.scope.kind == .account {
             navigation.showTerminal(reference, owner: session.id)
         }
         // A basename is a label. Never hand the working directory or command
@@ -682,7 +683,7 @@ struct ClientTerminalScreen: View {
                 Button(L10n.text("common.done"), .done) {
                     navigation.leaveTerminal(owner: session.id)
                     onClose?()
-                    dismiss()
+                    if !embedded { dismiss() }
                 }
                 .font(ClientType.caption.weight(.semibold))
             }
@@ -717,7 +718,7 @@ struct ClientTerminalScreen: View {
             )
         }
         .background(TerminalPalette.surface.ignoresSafeArea())
-        .navigationBarHidden(true)
+        .navigationBarHidden(!embedded)
         .onAppear {
             session.setForeground(true)
             rememberTerminal()
@@ -753,9 +754,12 @@ struct ClientTerminalScreen: View {
                     do {
                         try await session.close()
                         navigation.leaveTerminal(owner: session.id)
+                        ClientRecentPlaces.shared.remove(in: account.account?.recentPlacesScope,
+                            peer: session.peer, workspaceID: session.workspaceID,
+                            kind: .terminal, itemID: session.hostID)
                         onClosedProcess?()
                         onClose?()
-                        dismiss()
+                        if !embedded { dismiss() }
                     } catch {
                         // Keep the screen. The process is still running.
                     }

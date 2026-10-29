@@ -66,6 +66,11 @@ import Foundation
         assert(pathPlaces.filter { $0.id.kind == .chat }.allSatisfy { $0.workspaceName == "Project" })
         assert(store.continuePlaces(in: bob).filter { $0.id.kind == .chat }.count == 2,
                "distinct repository identities each keep their latest chat")
+        store.remove(in: alice, peer: "peer", workspaceID: nil, kind: .terminal, itemID: "tty")
+        assert(store.places(in: bob).contains { $0.id.itemID == "tty" }, "another account cannot remove it")
+        store.remove(in: bob, peer: "peer", workspaceID: nil, kind: .terminal, itemID: "tty")
+        assert(!store.places(in: bob).contains { $0.id.itemID == "tty" }, "closed terminal leaves Continue")
+        assert(store.places(in: bob).count == 2, "chat history survives terminal removal")
         assert(!store.places(in: alice).contains { $0.id.itemID == "unix-chat" })
         // A busy device still offers its last chat after many other places.
         for n in 1...25 {
@@ -81,7 +86,7 @@ import Foundation
         store.record(in: bob, peer: "", workspaceID: "w", workspaceName: "W", kind: .workspace)
         store.record(in: bob, peer: "p", workspaceID: nil, workspaceName: "W", kind: .chat)
         store.record(in: bob, peer: "p", workspaceID: "/bad\npath", workspaceName: "W", kind: .workspace)
-        assert(store.places(in: bob).count == 3)
+        assert(store.places(in: bob).count == 2)
         // A damaged record must not prevent opening Home or another account.
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("client.recentPlaces.v1.") {
             defaults.set(Data("broken".utf8), forKey: key)

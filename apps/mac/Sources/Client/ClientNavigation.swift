@@ -337,7 +337,9 @@ final class ClientNavigationModel {
         visibleChat = reference
         visibleChatOwner = owner
         visibleChatSessionKey = sessionKey
-        chatSwitchInProgress = false
+        // A standalone reader is replaced when a row is chosen. Keep the
+        // compact chat space through the old reader's disappearance and the
+        // new reader's first layout; the transient route is not an exit.
     }
 
     func leaveChat(owner: UUID) {
@@ -345,6 +347,7 @@ final class ClientNavigationModel {
         visibleChatOwner = nil
         visibleChat = nil
         visibleChatSessionKey = nil
+        chatSwitchInProgress = false
     }
 
     /// Back from a retained folder fallback still lands on that folder's list.

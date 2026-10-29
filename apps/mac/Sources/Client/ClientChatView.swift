@@ -230,7 +230,25 @@ private struct ClientChatContent: View {
     }
 
     private var chatSwitcher: some View {
-        List {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.text("apple.clientchatview.conversations.1d432f58"))
+                    .font(ClientType.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    if showingChatSwitcher { showingChatSwitcher = false }
+                    else { showingChatSidebar = false }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .accessibilityLabel(L10n.text("apple.clientchatview.hide_conversations"))
+            }
+            .padding(.leading, Theme.Space.m)
+            List {
             ForEach(model.chats.sorted {
                 ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
             }) { chat in
@@ -276,6 +294,7 @@ private struct ClientChatContent: View {
             }
         }
         .listStyle(.plain)
+        }
     }
 
     private func publishChat(_ id: String? = nil) {
@@ -625,6 +644,8 @@ private struct ClientReconnectBanner: View {
 
 /// One conversation: setup, transcript, glass composer.
 struct ClientChatThread: View {
+    private enum BrowserFocus { case chat, split, browser }
+    private enum Companion: String { case browser, changes, terminal }
     @Bindable var model: ChatModel
     var session: ClientChatSession? = nil
     @State private var detail = ChatDetailPreference.shared
@@ -714,6 +735,11 @@ struct ClientChatThread: View {
     }
     @State private var browserRequest = UUID()
     @State private var chatWidth: CGFloat = 0
+    @State private var browserFocus: BrowserFocus = .split
+    @State private var chatPaneFraction: CGFloat = 0.5
+    @State private var dividerDragOrigin: CGFloat?
+    @State private var dividerDragWidth: CGFloat?
+    @State private var companion: Companion?
     @State private var browserLayoutGeneration: UInt64?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ConnectivityModel.self) private var connectivity
@@ -729,6 +755,114 @@ struct ClientChatThread: View {
 
     private var wideBrowser: Bool {
         (availableWorkbenchWidth ?? chatWidth) >= 600 && !dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var splitChatWidth: CGFloat {
+        let available = max(0, chatWidth - 18)
+        let preferred = dividerDragWidth ?? available * chatPaneFraction
+        return min(max(preferred, 300), max(300, available - 280))
+    }
+
+    private var companionTabs: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: Theme.Space.xs) {
+                browserTab(.chat, title: L10n.text("apple.clientchatview.chat.460b3a7d"), icon: "bubble.left")
+                if companion != nil {
+                    browserTab(.split, title: L10n.text("apple.terminalpane.split.32afaa78"), icon: "rectangle.split.2x1")
+                }
+                companionTab(.changes, title: L10n.text("apple.clientworkspacesections.changes.bbd4b6a8"), icon: "plusminus")
+                companionTab(.terminal, title: L10n.text("apple.clientterminalsession.terminal.e0926fda"), icon: "terminal")
+                companionTab(.browser, title: L10n.text("common.browser"), icon: "globe")
+            }
+        }
+        .scrollIndicators(.hidden)
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.xs)
+        .background(Theme.background)
+    }
+
+    private func browserTab(_ focus: BrowserFocus, title: String, icon: String) -> some View {
+        let selected = browserFocus == focus || focus == .chat && companion == nil
+        return Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { browserFocus = focus }
+        } label: {
+            Label(title, systemImage: icon)
+                .font(ClientType.caption.weight(selected ? .semibold : .regular))
+                .padding(.horizontal, Theme.Space.s)
+                .padding(.vertical, Theme.Space.xs)
+                .background(selected ? Theme.accent.opacity(0.16) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: Theme.Space.xs))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selected ? Theme.accent : Theme.controlGlyph)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func companionTab(_ choice: Companion, title: String, icon: String) -> some View {
+        Button {
+            if choice == .browser && browserSession == nil {
+                suggestedBrowserTarget = nil
+                portText = BrowserHistory.shared.portSuggestion(for: browserOwner)
+                portError = nil
+                showPort = true
+                return
+            }
+            showingToolsPane = false
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                companion = choice
+                browserFocus = .split
+            }
+        } label: {
+            Label(title, systemImage: icon)
+                .font(ClientType.caption.weight(companion == choice && browserFocus != .chat ? .semibold : .regular))
+                .padding(.horizontal, Theme.Space.s)
+                .padding(.vertical, Theme.Space.xs)
+                .background(companion == choice && browserFocus != .chat ? Theme.accent.opacity(0.16) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: Theme.Space.xs))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(companion == choice && browserFocus != .chat ? Theme.accent : Theme.controlGlyph)
+        .accessibilityAddTraits(companion == choice && browserFocus != .chat ? .isSelected : [])
+    }
+
+    private var browserDivider: some View {
+        Rectangle()
+            .fill(Theme.controlGlyph.opacity(0.18))
+            .frame(width: 2)
+            .frame(width: 18)
+            .overlay {
+                Capsule()
+                    .fill(Theme.controlGlyph.opacity(0.7))
+                    .frame(width: 4, height: 42)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { withAnimation { chatPaneFraction = 0.5 } }
+            .gesture(DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                    if dividerDragOrigin == nil { dividerDragOrigin = splitChatWidth }
+                    dividerDragWidth = (dividerDragOrigin ?? splitChatWidth) + value.translation.width
+                }
+                .onEnded { value in
+                    let proposed = (dividerDragOrigin ?? splitChatWidth) + value.translation.width
+                    let settled = min(max(proposed, 300), max(300, chatWidth - 18 - 280))
+                    dividerDragOrigin = nil
+                    dividerDragWidth = nil
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                        if proposed < 190 { browserFocus = .browser }
+                        else if proposed > chatWidth - 170 { browserFocus = .chat }
+                        else {
+                            chatPaneFraction = settled / max(chatWidth - 18, 1)
+                            browserFocus = .split
+                        }
+                    }
+                })
+            .accessibilityRepresentation {
+                Slider(value: Binding(
+                    get: { Double(chatPaneFraction) },
+                    set: { chatPaneFraction = CGFloat($0) }
+                ), in: 0.3...0.7)
+                .accessibilityLabel(L10n.text("apple.workbench.resize"))
+            }
     }
 
     /// The folder's uncommitted work and the branch's pull request, above
@@ -867,8 +1001,10 @@ struct ClientChatThread: View {
                 if model.savedCopy == nil {
                     WorkHandoffOffer(chat: model) { showingHandoff = true }
                 }
+                if isActive, wideBrowser, model.savedCopy == nil, toolsIdentity != nil { companionTabs }
                 HStack(spacing: 0) {
-                    VStack(spacing: 0) {
+                    if browserFocus != .browser || companion == nil || !wideBrowser {
+                        VStack(spacing: 0) {
                 transcript(chat)
                     .environment(\.openURL, OpenURLAction { url in
                         guard isActive, model.savedCopy == nil, browserOwner != nil,
@@ -883,21 +1019,39 @@ struct ClientChatThread: View {
                         bar(chat)
                             .padding(.top, Theme.Space.s)
                     }
-                    }
-                    .overlay {
-                        if dropExperienceVisible {
-                            ChatDropExperience()
+                        }
+                        .frame(width: isActive && wideBrowser && companion != nil && browserFocus == .split
+                            ? splitChatWidth : nil)
+                        .overlay {
+                            if dropExperienceVisible {
+                                ChatDropExperience()
+                            }
                         }
                     }
-                    if browserSession == nil, showsToolsPane, let peer = model.peer, let workspace = model.workspaceID {
+                    if companion == nil, showsToolsPane, let peer = model.peer, let workspace = model.workspaceID {
                         ThemeRule.vertical
                         toolsPane(peer: peer, workspaceID: workspace)
                             .frame(width: 320)
                     }
-                    if isActive, wideBrowser, let browserSession {
-                        ThemeRule.vertical
-                        ClientBrowserScreen(session: browserSession) { closeBrowser() }
-                            .frame(minWidth: 280, maxWidth: .infinity)
+                    if isActive, wideBrowser, browserFocus != .chat, let companion,
+                       let peer = model.peer, let workspace = model.workspaceID {
+                        if browserFocus == .split { browserDivider }
+                        switch companion {
+                        case .browser:
+                            if let browserSession {
+                            ClientBrowserScreen(session: browserSession) { closeBrowser() }
+                                .frame(minWidth: browserFocus == .split ? 280 : 0, maxWidth: .infinity)
+                            }
+                        case .changes:
+                            ClientChatChangesCompanion(peer: peer, workspaceID: workspace,
+                                hostName: hostName)
+                                .frame(minWidth: browserFocus == .split ? 280 : 0, maxWidth: .infinity)
+                        case .terminal:
+                            ClientChatTerminalCompanion(peer: peer, workspaceID: workspace,
+                                folderPath: folder?.path ?? (workspace.hasPrefix("/") ? workspace : ""),
+                                hostName: hostName)
+                                .frame(minWidth: browserFocus == .split ? 280 : 0, maxWidth: .infinity)
+                        }
                     }
                 }
             } else {
@@ -957,7 +1111,7 @@ struct ClientChatThread: View {
             if isActive, let onShowChats {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: onShowChats) {
-                        Image(systemName: "list.bullet")
+                        Image(systemName: "sidebar.left")
                     }
                     .accessibilityLabel(L10n.text("apple.clientchatview.conversations.1d432f58"))
                 }
@@ -1094,7 +1248,18 @@ struct ClientChatThread: View {
             }
         }
         .onChange(of: browserOwner) { _, _ in closeBrowser() }
-        .onChange(of: browserSession != nil, initial: true) { _, open in onBrowserChange?(open) }
+        .onChange(of: browserSession != nil, initial: true) { _, open in
+            if open {
+                companion = .browser
+                browserFocus = .split
+            } else if companion == .browser {
+                companion = nil
+                browserFocus = .split
+            }
+        }
+        .onChange(of: companion != nil && browserFocus != .chat, initial: true) { _, open in
+            onBrowserChange?(open)
+        }
         .sheet(isPresented: $showPort) { portSheet }
         .sheet(item: Binding(
             get: { isActive && !wideBrowser ? browserSession : nil },
@@ -1186,6 +1351,8 @@ struct ClientChatThread: View {
         suggestedBrowserTarget = nil
         browserSession?.close()
         browserSession = nil
+        companion = nil
+        browserFocus = .split
         onBrowserChange?(false)
     }
 
@@ -2698,6 +2865,308 @@ private enum ClientViewportTrace {
     }
 }
 #endif
+
+/// A compact review surface beside the transcript. The full Changes screen
+/// owns commit and sync controls; this one gives the diff the available space.
+private struct ClientChatChangesCompanion: View {
+    let peer: String
+    let workspaceID: String
+    let hostName: String
+
+    @State private var files: [FileChange] = []
+    @State private var branch: String?
+    @State private var selectedPath: String?
+    @State private var loaded = false
+    @State private var error: String?
+    @State private var loadID = UUID()
+    @State private var diffRevision = UUID()
+    @State private var owner = WorkSessionContext.shared.scope
+
+    private var selectedFile: FileChange? { files.first { $0.path == selectedPath } }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: Theme.Space.s) {
+                if selectedPath != nil {
+                    Button { selectedPath = nil } label: {
+                        Image(systemName: "chevron.left").frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel(L10n.text("common.back"))
+                }
+                Text(selectedFile?.fileName ?? L10n.text("apple.clientworkspacesections.changes.bbd4b6a8"))
+                    .font(ClientType.label.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if selectedPath == nil, let branch {
+                    Text(branch).font(ClientType.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Button { Task { await load() } } label: {
+                    Image(systemName: "arrow.clockwise").frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel(L10n.text("common.refresh"))
+            }
+            .padding(.horizontal, Theme.Space.m)
+            ThemeRule()
+            if let file = selectedFile {
+                VStack(spacing: 0) {
+                    if let error {
+                        ClientErrorCard(message: error) { Task { await load() } }
+                            .padding(Theme.Space.s)
+                    }
+                    ClientDiffView(peer: peer, workspaceID: workspaceID, hostName: hostName, file: file,
+                        showsNavigationTitle: false, showsEditAction: false)
+                        .id("\(file.path):\(diffRevision)")
+                }
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: Theme.Space.s) {
+                        if let error {
+                            ClientErrorCard(message: error) { Task { await load() } }
+                        }
+                        if !loaded { ProgressView().frame(maxWidth: .infinity, minHeight: 80) }
+                        if loaded && files.isEmpty && error == nil {
+                            ClientSectionEmpty(text: L10n.text("apple.clientworkspacesections.nothing_to_commit.f377a9f6"),
+                                art: .changes,
+                                message: L10n.text("apple.clientworkspacesections.every_file_in_this_folder_matches_the_last.fffbaf63"))
+                        }
+                        ForEach(files) { file in
+                            Button { selectedPath = file.path } label: {
+                                HStack(spacing: Theme.Space.s) {
+                                    Image(systemName: file.kind.symbol).foregroundStyle(file.kind.tint)
+                                        .frame(width: 24)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(file.fileName).font(ClientType.label).lineLimit(1)
+                                        if !file.directory.isEmpty {
+                                            Text(file.directory).font(ClientType.caption)
+                                                .foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                    }
+                                    Spacer(minLength: 0)
+                                    if let added = file.added, added > 0 {
+                                        Text("+\(added)").foregroundStyle(Theme.diffAdded)
+                                    }
+                                    if let removed = file.removed, removed > 0 {
+                                        Text("−\(removed)").foregroundStyle(Theme.diffRemoved)
+                                    }
+                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                }
+                                .font(ClientType.caption)
+                                .padding(Theme.Space.m)
+                                .cardSurface()
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(Theme.Space.m)
+                }
+                .refreshable { await load() }
+            }
+        }
+        .background(Theme.background)
+        .task(id: "\(peer):\(workspaceID)") { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: GitCommitTarget.didChange)) { note in
+            guard note.object as? GitCommitTarget == GitCommitTarget(peer: peer, workspaceID: workspaceID) else { return }
+            Task { await load() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .clientFileDidChange)) { note in
+            guard let change = note.object as? ClientFileChangeNotice,
+                  change.peer == peer, change.workspace == workspaceID else { return }
+            Task { await load() }
+        }
+        .onChange(of: WorkSessionContext.shared.scope) { _, next in
+            if next != owner {
+                files = []; selectedPath = nil; branch = nil; error = nil; loaded = false; loadID = UUID()
+            }
+        }
+    }
+
+    private func load() async {
+        guard let owner, owner == WorkSessionContext.shared.scope else { return }
+        let request = UUID()
+        loadID = request
+        do {
+            let status = try await GitCommitTarget(peer: peer, workspaceID: workspaceID).status()
+            guard !Task.isCancelled, request == loadID, owner == WorkSessionContext.shared.scope else { return }
+            files = status.git?.files ?? []
+            branch = status.git?.branch
+            diffRevision = UUID()
+            if selectedPath != nil && !files.contains(where: { $0.path == selectedPath }) { selectedPath = nil }
+            error = nil
+            loaded = true
+        } catch {
+            guard !Task.isCancelled, request == loadID, owner == WorkSessionContext.shared.scope else { return }
+            self.error = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+            loaded = true
+        }
+    }
+}
+
+/// Attach an existing host session or start any installed launcher beside a
+/// chat. Leaving the pane detaches its view without stopping the host process.
+private struct ClientChatTerminalCompanion: View {
+    let peer: String
+    let workspaceID: String
+    let folderPath: String
+    let hostName: String
+
+    @State private var sessions: [PtySessionInfo] = []
+    @State private var catalog: [RemoteLaunchProfile] = []
+    @State private var selected: ClientTerminalSession?
+    @State private var error: String?
+    @State private var loading = false
+    @State private var creating = false
+    @State private var owner = WorkSessionContext.shared.scope
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var launchers: [RemoteLaunchProfile] {
+        let available = catalog.filter { $0.installed && $0.hidden != true }
+        guard catalog.isEmpty else { return available }
+        return [RemoteLaunchProfile(id: "shell", name: L10n.text("apple.clientworkspacedetailview.shell.a7332854"),
+            command: "/bin/zsh", args: ["-l"], bypassArgs: [], harnessId: nil,
+            symbol: "terminal", openUrl: nil, installed: true, hidden: false, installCommand: nil)]
+    }
+
+    var body: some View {
+        Group {
+            if let selected {
+                ClientTerminalScreen(session: selected, hostName: hostName, embedded: true,
+                    onClose: { self.selected = nil; Task { await reload() } },
+                    onClosedProcess: { Task { await reload() } })
+            } else {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text(L10n.text("apple.clientterminalsession.terminal.e0926fda"))
+                            .font(ClientType.label.weight(.semibold))
+                        Spacer()
+                        Button { Task { await reload() } } label: {
+                            Image(systemName: "arrow.clockwise").frame(minWidth: 44, minHeight: 44)
+                        }
+                        .accessibilityLabel(L10n.text("common.refresh"))
+                    }
+                    .padding(.horizontal, Theme.Space.m)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Theme.Space.m) {
+                            if let error {
+                                ClientErrorCard(message: error) { Task { await reload() } }
+                            }
+                            if loading { ProgressView().frame(maxWidth: .infinity) }
+                            Text(L10n.text("apple.chatterminalpane.sessions.6fa3cbf4"))
+                                .font(ClientType.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            ForEach(sessions, id: \.id) { info in
+                                Button {
+                                    guard owner != nil, owner == WorkSessionContext.shared.scope else { return }
+                                    selected = ClientTerminalSession(peer: peer, info: info)
+                                } label: {
+                                    HStack {
+                                        if let profile = catalog.first(where: { $0.command == info.command }),
+                                           let harness = profile.harnessId {
+                                            HarnessMark(id: harness, size: 24)
+                                        } else {
+                                            Image(systemName: "terminal").frame(width: 24)
+                                        }
+                                        Text(catalog.first(where: { $0.command == info.command })?.name
+                                            ?? URL(fileURLWithPath: info.command).lastPathComponent)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                    }
+                                    .padding(Theme.Space.m)
+                                    .cardSurface()
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            if !loading && sessions.isEmpty && error == nil {
+                                Text(L10n.text("apple.clientworkspacedetailview.nothing_running_here.58794718"))
+                                    .font(ClientType.caption).foregroundStyle(.secondary)
+                            }
+                            Text(L10n.text("apple.chatterminalpane.open_beside_this_chat.aaf2b9ed"))
+                                .font(ClientType.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.top, Theme.Space.s)
+                            ForEach(launchers, id: \.id) { profile in
+                                Button { Task { await create(profile) } } label: {
+                                    HStack(spacing: Theme.Space.s) {
+                                        if let harness = profile.harnessId {
+                                            HarnessMark(id: harness, size: 24)
+                                        } else {
+                                            Image(systemName: profile.symbol ?? "terminal")
+                                                .frame(width: 24)
+                                        }
+                                        Text(profile.name).lineLimit(1)
+                                        Spacer()
+                                        Image(systemName: "plus")
+                                    }
+                                    .padding(Theme.Space.m)
+                                    .cardSurface()
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(creating || owner == nil || owner != WorkSessionContext.shared.scope)
+                            }
+                            if !loading && launchers.isEmpty {
+                                Text(L10n.text("apple.chatterminalpane.no_terminal_launchers_are_available_on_thi.6e800543"))
+                                    .font(ClientType.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(Theme.Space.m)
+                    }
+                }
+                .background(Theme.background)
+            }
+        }
+        .task(id: "\(peer):\(workspaceID)") { await reload() }
+        .onChange(of: WorkSessionContext.shared.scope) { _, next in
+            if next != owner { selected?.stop(); selected = nil; sessions = []; catalog = []; error = nil }
+        }
+        .onDisappear { selected = nil }
+    }
+
+    private func reload() async {
+        guard let owner, owner == WorkSessionContext.shared.scope else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            let listed = try await ClientRemote.ptyList(peer: peer)
+            guard !Task.isCancelled, owner == WorkSessionContext.shared.scope else { return }
+            sessions = listed.filter {
+                $0.alive && $0.hidden != true
+                    && ($0.workspaceID == workspaceID || ($0.workspaceID == nil && !folderPath.isEmpty
+                        && ($0.cwd == folderPath || $0.cwd.hasPrefix(folderPath + "/"))))
+            }
+            error = nil
+        } catch {
+            guard owner == WorkSessionContext.shared.scope else { return }
+            self.error = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
+        let discovered = try? await ClientRemote.launcherCatalog(peer: peer)
+        guard !Task.isCancelled, owner == WorkSessionContext.shared.scope else { return }
+        if let discovered { catalog = discovered }
+    }
+
+    private func create(_ profile: RemoteLaunchProfile) async {
+        guard !creating, let owner, owner == WorkSessionContext.shared.scope else { return }
+        creating = true
+        defer { creating = false }
+        error = nil
+        let pending = ClientTerminalSession(peer: peer, pendingCommand: profile.command,
+            cwd: folderPath, rows: 40, cols: 100)
+        selected = pending
+        do {
+            let info = try await ClientRemote.ptySpawn(peer: peer, workspaceID: workspaceID,
+                command: profile.command, args: profile.args, rows: 40, cols: 100,
+                dark: colorScheme == .dark)
+            guard owner == WorkSessionContext.shared.scope, selected === pending else {
+                try? await ClientRemote.ptyClose(peer: peer, id: info.id)
+                return
+            }
+            pending.attach(info: info)
+        } catch {
+            guard owner == WorkSessionContext.shared.scope else { return }
+            if selected === pending { selected = nil }
+            self.error = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
+    }
+}
 
 private struct ClientTranscriptScrollReporter: UIViewRepresentable {
     let access: ClientTranscriptScrollAccess

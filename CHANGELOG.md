@@ -9,6 +9,19 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.9.0]
+
+### Improved
+
+- iPhone and iPad Home can return directly to the latest conversation in a repository. Repository chats are easier to switch, with a persistent list on wider layouts and a conversation picker on a compact iPhone.
+- On an open iPhone Duo or iPad, chat can sit beside a resizable browser, changed-file review, or terminal. The Changes pane opens file diffs beside the conversation; Terminal can reattach a running repository session or start a chosen installed tool.
+- Pull requests open from a faster, clearer overview, with paged lists, richer review details and visible partial check results. Previously loaded data stays available while a background refresh runs or the connection fails.
+
+### Fixed
+
+- Switching chats on an open iPhone Duo no longer pulls the global sidebar over the conversation.
+- Pull request and chat refreshes cannot apply late results from another account or replace a newer selection.
+
 ## [1.8.0] - 2026-10-28
 
 ### Added

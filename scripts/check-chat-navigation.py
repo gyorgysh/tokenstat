@@ -80,10 +80,15 @@ tests = '''
         let switching = ClientNavigationModel()
         switching.chooseWithinChat(session: session, presentationID: nil, preserveChatSpace: true)
         precondition(switching.chatSwitchInProgress, "the chat layout stays reserved while the new reader mounts")
-        switching.showChat(b, owner: UUID(), sessionKey: key, session: session, folderName: "P", hostName: "Mac",
+        let replacementOwner = UUID()
+        switching.showChat(b, owner: replacementOwner, sessionKey: key, session: session, folderName: "P", hostName: "Mac",
             presentationID: nil, intent: switching.chatHandoff.intent, handoffID: nil, layout: 0)
-        precondition(!switching.chatSwitchInProgress && switching.currentRoute?.reference == b,
-                     "the new reader takes over the reserved space")
+        precondition(switching.chatSwitchInProgress && switching.currentRoute?.reference == b,
+                     "a late old-reader disappearance cannot reopen the global sidebar")
+        switching.leaveChat(owner: UUID())
+        precondition(switching.chatSwitchInProgress, "a previous reader cannot end the chat layout")
+        switching.leaveChat(owner: replacementOwner)
+        precondition(!switching.chatSwitchInProgress, "leaving the replacement reader restores navigation")
         switching.chooseWithinChat(session: session, presentationID: nil, preserveChatSpace: true)
         switching.chooseNavigation()
         precondition(!switching.chatSwitchInProgress, "leaving the chat cancels a pending switch")

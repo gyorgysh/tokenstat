@@ -1124,6 +1124,7 @@
   "apple.clientchatview.ask_an_agent_to_explore_plan_or_work_in_0.c1ba0fc2": "Ask an agent to explore, plan, or work in {0}.",
   "apple.clientchatview.attach_files_not_folders.9039f9a4": "Attach files, not folders",
   "apple.clientchatview.chat.460b3a7d": "Chat",
+  "apple.clientchatview.hide_conversations": "Hide conversations",
   "apple.clientchatview.chat_list_actions.43ea56ad": "Chat list actions",
   "apple.clientchatview.chat_setup.9fa79d00": "Chat setup",
   "apple.clientchatview.chat_unavailable.a45aae80": "Chat unavailable",
