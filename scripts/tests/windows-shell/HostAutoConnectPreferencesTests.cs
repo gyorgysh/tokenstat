@@ -33,6 +33,11 @@ internal static class HostAutoConnectPreferencesTests
         var raw = JsonNode.Parse(File.ReadAllText(path))!;
         Check(raw["claimedLegacyPeers"]?["host-a"]?.GetValue<bool>() == true,
             "Old preference can be replayed by another account");
+        File.WriteAllText(path, "{\"scopes\":false}");
+        Check(reopened.IsEnabled("account-a", "host-a"), "Malformed scoped settings blocked a safe default");
+        reopened.Set("account-a", "host-a", false);
+        Check(!new HostAutoConnectPreferences(path, oldPath).IsEnabled("account-a", "host-a"),
+            "Malformed scoped settings could not be repaired");
         Console.WriteLine("Host auto-connect preferences: account isolation, safe migration and restart passed");
     }
 }

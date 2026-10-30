@@ -11,7 +11,8 @@ internal sealed class HostAutoConnectPreferences(string path, string legacyPath)
     {
         if (string.IsNullOrEmpty(scope) || string.IsNullOrEmpty(peer)) return false;
         var root = Read();
-        return root["scopes"]?[scope]?[peer] is not JsonValue value
+        var account = (root["scopes"] as JsonObject)?[scope] as JsonObject;
+        return account?[peer] is not JsonValue value
             || value.GetValueKind() is not (JsonValueKind.True or JsonValueKind.False)
             || value.GetValue<bool>();
     }
