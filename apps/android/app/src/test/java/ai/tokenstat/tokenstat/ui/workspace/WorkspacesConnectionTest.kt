@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import ai.tokenstat.tokenstat.ui.home.HomeStores
 
 class WorkspacesConnectionTest {
     @Test fun explicit_host_choice_replaces_home_warmup_without_late_publication() {
@@ -81,5 +82,19 @@ class WorkspacesConnectionTest {
         assertFalse(state.publishBackground("allowed", "account-a", allowed,
             JsonArray(listOf(JsonPrimitive("late"))), JsonArray(emptyList()), JsonArray(emptyList())))
         assertTrue(state.connectedHosts.value.isEmpty())
+    }
+
+    @Test fun background_owner_matches_the_home_host_scope() {
+        val account = buildJsonObject {
+            put("signedIn", true)
+            put("host", "https://account.example")
+            put("accountId", "person-1")
+        }
+        val owner = HomeStores.pinIdentity(account)
+        assertTrue(owner.isNotBlank())
+        val state = WorkspacesConnectionState()
+        state.setAccountOwner(owner)
+        state.setKnownHosts(setOf("secondary-host"))
+        assertTrue(state.beginBackground("secondary-host", HomeStores.pinIdentity(account)) != null)
     }
 }

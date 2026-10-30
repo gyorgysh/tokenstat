@@ -493,11 +493,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun syncWorkspaceAccount(account: JsonObject) {
-        workspacesConnection.setAccountOwner(ai.tokenstat.tokenstat.ecosystem.UsageSnapshot.owner(account))
+        // Background host warmup uses HomeStores.pinIdentity as its owner.
+        // Keep this lease in the same account scope or every secondary host
+        // loses its ticket before it can publish a snapshot.
+        workspacesConnection.setAccountOwner(ai.tokenstat.tokenstat.ui.home.HomeStores.pinIdentity(account).ifBlank { null })
         (account["machines"] as? JsonArray)?.let { machines ->
+            val thisId = account["thisMachineId"]?.jsonPrimitive?.contentOrNull
             workspacesConnection.setKnownHosts(machines.mapNotNull { machine ->
                 val entry = machine as? JsonObject ?: return@mapNotNull null
-                if (entry["kind"]?.jsonPrimitive?.contentOrNull == "client") return@mapNotNull null
+                if (entry["kind"]?.jsonPrimitive?.contentOrNull == "client" ||
+                    (thisId != null && entry["id"]?.jsonPrimitive?.contentOrNull == thisId)) return@mapNotNull null
                 entry["publicIdentity"]?.jsonPrimitive?.contentOrNull
             }.toSet())
         }
