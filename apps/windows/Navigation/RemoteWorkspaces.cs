@@ -65,6 +65,22 @@ internal static class RemoteWorkspaces
     private static readonly HashSet<string> AskedWorkspace = new(StringComparer.Ordinal);
     private static readonly HashSet<string> Connected = new(StringComparer.Ordinal);
 
+    /// <summary>Forget every host snapshot when the account identity changes.</summary>
+    public static void ResetForAccountChange()
+    {
+        lock (Gate)
+        {
+            FoldersByPeer.Clear();
+            Suppressed.Clear();
+            Failures.Clear();
+            NextDial.Clear();
+            EverAnswered.Clear();
+            AskedWorkspace.Clear();
+            Connected.Clear();
+        }
+        Changed?.Invoke();
+    }
+
     private static readonly TimeSpan RefreshAfter = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RetryAfter = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ColdRetryAfter = TimeSpan.FromMinutes(10);
@@ -215,6 +231,7 @@ internal static class RemoteWorkspaces
     public static async Task<RemoteConnectResult> ConnectAsync(
         string peerKey, string label, bool tunnelOn, bool? online)
     {
+        var account = AppServices.AccountGeneration;
         var name = string.IsNullOrEmpty(label) ? L10n.Text("windows.remoteworkspaces.that_machine.1c4194c9") : label;
         if (!tunnelOn)
         {
@@ -227,8 +244,12 @@ internal static class RemoteWorkspaces
             // at login, rather than immediately reusing that startup failure.
             await AppServices.Host.CallAsync("remote.nudge");
             var folders = await ReadPeerFoldersAsync(peerKey, label);
+            if (account != AppServices.AccountGeneration)
+                return AccountChangedResult();
             lock (Gate)
             {
+                if (account != AppServices.AccountGeneration)
+                    return AccountChangedResult();
                 Suppressed.Remove(peerKey);
                 Failures.Remove(peerKey);
                 NextDial.Remove(peerKey);
@@ -246,6 +267,8 @@ internal static class RemoteWorkspaces
             var text = ex.Message;
             lock (Gate)
             {
+                if (account != AppServices.AccountGeneration)
+                    return AccountChangedResult();
                 Connected.Remove(peerKey);
             }
             if (text.Contains("has not approved", StringComparison.OrdinalIgnoreCase)
@@ -292,6 +315,9 @@ internal static class RemoteWorkspaces
         }
     }
 
+    private static RemoteConnectResult AccountChangedResult() =>
+        new(false, L10n.Text("windows.remoteworkspaces.account_changed"), false);
+
     /// <summary>
     /// Drop the peer's folders from the sidebar now. The connection itself is
     /// a tunnel channel that ends when its last use does; what was asked for
@@ -307,6 +333,9 @@ internal static class RemoteWorkspaces
             Failures.Remove(peerKey);
             Connected.Remove(peerKey);
         }
+        // A manual Disconnect must survive restart. An explicit Connect or
+        // newly registered project opts this host back into auto-connect.
+        SetAutoConnect(false, peerKey);
         Changed?.Invoke();
     }
 
@@ -353,6 +382,7 @@ internal static class RemoteWorkspaces
 
     private static async Task SweepCoreAsync()
     {
+        var account = AppServices.AccountGeneration;
         bool tunnelOn;
         List<(string Key, string Label, string? Address)> peers;
         try
@@ -394,6 +424,7 @@ internal static class RemoteWorkspaces
         HashSet<string> live;
         lock (Gate)
         {
+            if (account != AppServices.AccountGeneration) return;
             live = new HashSet<string>(peers.Select(p => p.Key), StringComparer.Ordinal);
             foreach (var key in FoldersByPeer.Keys.ToList())
             {
@@ -406,107 +437,119 @@ internal static class RemoteWorkspaces
                 }
             }
         }
-        foreach (var (key, label, _) in peers)
+        if (changed) Changed?.Invoke();
+        // Each host has its own transport slot and retry clock. A serial
+        // sweep made one sleeping host hold up every healthy host behind it.
+        // Bound the dials so a ten-host account does not start ten handshakes
+        // at once, while still letting independent hosts make progress.
+        await BoundedHostSweep.RunAsync(peers, 4, async peer =>
         {
-            DateTime? next;
+            if (await SweepPeerAsync(peer.Key, peer.Label, now, account))
+                Changed?.Invoke();
+        });
+    }
+
+    private static async Task<bool> SweepPeerAsync(string key, string label, DateTime now, long account)
+    {
+        var changed = false;
+        DateTime? next;
+        lock (Gate)
+        {
+            if (account != AppServices.AccountGeneration) return false;
+            if (Suppressed.Contains(key) || !IsAutoConnectEnabledLocked(key))
+            {
+                return false;
+            }
+            next = NextDial.TryGetValue(key, out var at) ? at : null;
+        }
+        if (next.HasValue && now < next.Value)
+        {
+            return false;
+        }
+        try
+        {
+            var folders = await ReadPeerFoldersAsync(key, label);
             lock (Gate)
             {
-                if (Suppressed.Contains(key) || !IsAutoConnectEnabledLocked(key))
+                if (account != AppServices.AccountGeneration) return false;
+                if (Suppressed.Contains(key))
                 {
-                    continue;
+                    return false;
                 }
-                next = NextDial.TryGetValue(key, out var at) ? at : null;
-            }
-            if (next.HasValue && now < next.Value)
-            {
-                continue;
-            }
-            try
-            {
-                var folders = await ReadPeerFoldersAsync(key, label);
-                lock (Gate)
+                // A steady refresh must not rebuild the sidebar: the
+                // folders are records, so a value compare says whether
+                // anything actually moved.
+                var newlySeen = !FoldersByPeer.ContainsKey(key);
+                var same = !newlySeen
+                    && FoldersByPeer[key].Count == folders.Count
+                    && FoldersByPeer[key].Zip(folders).All(pair =>
+                        (pair.First with { Git = null }) == (pair.Second with { Git = null })
+                        && JsonNode.DeepEquals(pair.First.Git, pair.Second.Git));
+                FoldersByPeer[key] = folders;
+                NextDial[key] = now + RefreshAfter;
+                Failures[key] = 0;
+                EverAnswered.Add(key);
+                if (newlySeen)
                 {
-                    if (Suppressed.Contains(key))
-                    {
-                        continue;
-                    }
-                    // A steady refresh must not rebuild the sidebar: the
-                    // folders are records, so a value compare says whether
-                    // anything actually moved.
-                    var newlySeen = !FoldersByPeer.ContainsKey(key);
-                    var same = !newlySeen
-                        && FoldersByPeer[key].Count == folders.Count
-                        && FoldersByPeer[key].Zip(folders).All(pair =>
-                            (pair.First with { Git = null }) == (pair.Second with { Git = null })
-                            && JsonNode.DeepEquals(pair.First.Git, pair.Second.Git));
-                    FoldersByPeer[key] = folders;
-                    NextDial[key] = now + RefreshAfter;
-                    Failures[key] = 0;
-                    EverAnswered.Add(key);
-                    if (newlySeen)
-                    {
-                        Connected.Add(key);
-                    }
-                    if (newlySeen || !same)
-                    {
-                        changed = true;
-                    }
+                    Connected.Add(key);
                 }
-            }
-            catch (Exception ex)
-            {
-                var text = ex.Message;
-                lock (Gate)
+                if (newlySeen || !same)
                 {
-                    if (IsWorkspaceRefusal(text))
-                    {
-                        // Reached a host that has not let this device in. Ask
-                        // once per session, then back off like any refusal, so
-                        // a machine whose owner said no is not asked twice a
-                        // minute for the rest of the session. Its folders stay:
-                        // the host is reachable, it has simply not said yes.
-                        if (AskedWorkspace.Add(key))
-                        {
-                            var askKey = key;
-                            _ = Task.Run(async () =>
-                            {
-                                try
-                                {
-                                    await CallOnPeerAsync(askKey, "workspace.access.ask");
-                                }
-                                catch
-                                {
-                                }
-                            });
-                        }
-                        Failures[key] = Failures.TryGetValue(key, out var refusals) ? refusals + 1 : 1;
-                        var neverOpened = !EverAnswered.Contains(key);
-                        NextDial[key] = now + (neverOpened && Failures[key] >= BackOffAfter
-                            ? ColdRetryAfter : RetryAfter);
-                        continue;
-                    }
-                    var failures = Failures.TryGetValue(key, out var n) ? n + 1 : 1;
-                    Failures[key] = failures;
-                    // A machine that answered before is worth asking again
-                    // soon: it is probably asleep and will be back. One that
-                    // never answered is usually a phone or a tablet, which
-                    // cannot host a folder, and asking it every thirty seconds
-                    // is three pointless tunnel dials a minute, forever.
-                    var neverAnswered = !EverAnswered.Contains(key);
-                    NextDial[key] = now + (neverAnswered && failures >= BackOffAfter
-                        ? ColdRetryAfter : RetryAfter);
-                    if (failures >= DropAfter && FoldersByPeer.Remove(key))
-                    {
-                        Connected.Remove(key);
-                        changed = true;
-                    }
+                    changed = true;
                 }
             }
         }
-        if (changed)
+        catch (Exception ex)
         {
-            Changed?.Invoke();
+            var text = ex.Message;
+            lock (Gate)
+            {
+                if (account != AppServices.AccountGeneration) return false;
+                if (IsWorkspaceRefusal(text))
+                {
+                    // Reached a host that has not let this device in. Ask
+                    // once per session, then back off like any refusal, so
+                    // a machine whose owner said no is not asked twice a
+                    // minute for the rest of the session. Its folders stay:
+                    // the host is reachable, it has simply not said yes.
+                    if (AskedWorkspace.Add(key))
+                    {
+                        var askKey = key;
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await CallOnPeerAsync(askKey, "workspace.access.ask");
+                            }
+                            catch
+                            {
+                            }
+                        });
+                    }
+                    Failures[key] = Failures.TryGetValue(key, out var refusals) ? refusals + 1 : 1;
+                    var neverOpened = !EverAnswered.Contains(key);
+                    NextDial[key] = now + (neverOpened && Failures[key] >= BackOffAfter
+                        ? ColdRetryAfter : RetryAfter);
+                    return false;
+                }
+                var failures = Failures.TryGetValue(key, out var n) ? n + 1 : 1;
+                Failures[key] = failures;
+                // A machine that answered before is worth asking again
+                // soon: it is probably asleep and will be back. One that
+                // never answered is usually a phone or a tablet, which
+                // cannot host a folder, and asking it every thirty seconds
+                // is three pointless tunnel dials a minute, forever.
+                var neverAnswered = !EverAnswered.Contains(key);
+                NextDial[key] = now + (neverAnswered && failures >= BackOffAfter
+                    ? ColdRetryAfter : RetryAfter);
+                if (failures >= DropAfter && FoldersByPeer.Remove(key))
+                {
+                    Connected.Remove(key);
+                    changed = true;
+                }
+            }
         }
+        return changed;
     }
 
     private static async Task<List<RemoteFolder>> ReadPeerFoldersAsync(string peerKey, string peerLabel)

@@ -974,6 +974,9 @@ final class ClientWorkspacesModel {
                 Task { await LiveWorkController.shared.refreshOverview(peers: overviewPeers, names: overviewNames) }
                 #endif
                 UserDefaults.standard.set(host.peerKey, forKey: "client.lastConnectedHost")
+                if chosenPeer == host.peerKey {
+                    UserDefaults.standard.set(true, forKey: Self.autoConnectKey(for: host.peerKey))
+                }
                 errorMessage = nil
                 infoMessage = nil
                 return
@@ -1078,10 +1081,15 @@ final class ClientWorkspacesModel {
         refreshGeneration = UUID()
         remoteRefresh?.task.cancel()
         remoteRefresh = nil
-        disconnect()
+        disconnect(manual: false)
     }
 
-    func disconnect() {
+    func disconnect(manual: Bool = true) {
+        // A tapped Disconnect is a persistent choice. Teardown for account
+        // change only retires this model and must not change that choice.
+        if manual, let peer = connectedKey ?? isConnecting ?? pendingPeer ?? chosenPeer {
+            UserDefaults.standard.set(false, forKey: Self.autoConnectKey(for: peer))
+        }
         remoteRefresh?.task.cancel()
         remoteRefresh = nil
         remoteLoadGeneration = UUID()

@@ -1445,6 +1445,7 @@
   "windows.remoteworkspaceadddialog.update_tokenstat_on_this_computer_to_brows.6ed19d6c": "Update tokenstat on this computer to browse folders and clone repositories.",
   "windows.remoteworkspaceadddialog.waiting_for_the_computer_0.030a34a1": "Waiting for the computer. {0}",
   "windows.remoteworkspaces.0_is_offline_or_not_reachable_right_now_wa.b6a9fae4": "{0} is offline or not reachable right now. Wait until it is awake, then try Connect again.",
+  "windows.remoteworkspaces.account_changed": "The account changed before this computer finished connecting.",
   "windows.remoteworkspaces.approval_requested": "{0} has been asked to let this device in. Approve it on the other device and its workspaces will appear here.",
   "windows.remoteworkspaces.connected_to_0_its_workspaces_are_now_avai.c79dc8f5": "Connected to {0}. Its workspaces are now available in the sidebar.",
   "windows.remoteworkspaces.that_machine.1c4194c9": "That machine",

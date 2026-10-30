@@ -10,6 +10,7 @@ Directory.CreateDirectory(directory);
 try
 {
     DesktopOpenRequestTests.Run();
+    await BoundedHostSweepTests.RunAsync();
     var fresh = new DesktopWorkbenchState();
     fresh.Open(DesktopWorkbenchTool.Browser);
     Check(fresh.Tabs.SequenceEqual(new[] { DesktopWorkbenchTool.Inspector, DesktopWorkbenchTool.Browser })

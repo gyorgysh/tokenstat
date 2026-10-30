@@ -3074,6 +3074,7 @@ private fun WorkspacesScreen(
     val requestNotice by session.requestNotice.collectAsStateWithLifecycle()
     val host = hosts.find { it.string("publicIdentity") == storedHost?.string("publicIdentity") } ?: storedHost
     var connectingPeer by remember { mutableStateOf<String?>(null) }
+    var connectionEpoch by remember { mutableIntStateOf(0) }
     var requesting by remember { mutableStateOf(false) }
     // Automatic dials fail silently into the log until they settle. The
     // account refreshes every couple of minutes and each one redials, so a
@@ -3121,6 +3122,8 @@ private fun WorkspacesScreen(
     suspend fun connect(machine: JsonObject, automatic: Boolean = false) {
         val peer = machine.string("publicIdentity") ?: return
         if (connectingPeer != null) return
+        val epoch = ++connectionEpoch
+        fun current() = epoch == connectionEpoch
         connectingPeer = peer
         // Cleared in `finally`, because this dial does not always run to
         // the last line. Setting `connectingPeer` changes a key of the
@@ -3146,10 +3149,12 @@ private fun WorkspacesScreen(
             session.clearLists()
             runCatching {
                 model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
+                if (!current()) return@runCatching
                 // Asked before anything is loaded. Being paired is not being let
                 // in: that computer allows each device to open its work
                 // explicitly.
                 val check = model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
+                if (!current()) return@runCatching
                 session.setAllowed(check?.bool("allowed"))
                 if (check?.bool("allowed") != true) {
                     if (session.requestNotice.value == null) requestAccess(peer)
@@ -3158,15 +3163,21 @@ private fun WorkspacesScreen(
                 val loadedSessions = runCatching {
                     model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
                 }.getOrNull() ?: JsonArray(emptyList())
+                if (!current()) return@runCatching
                 val loadedChats = runCatching {
                     model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
                 }.getOrNull() ?: JsonArray(emptyList())
-                session.setLists(model.workspaces(peer), loadedSessions, loadedChats)
+                if (!current()) return@runCatching
+                val loadedFolders = model.workspaces(peer)
+                if (!current()) return@runCatching
+                session.setLists(loadedFolders, loadedSessions, loadedChats)
                 session.setConnected(peer, true)
                 autoFailures = 0
                 session.setError(null)
                 layoutStore.setLastConnectedHost(peer)
+                if (!automatic) layoutStore.setAutoConnectEnabled(peer, true)
             }.onFailure {
+                if (!current()) return@onFailure
                 // Leaving the screen mid-dial cancels the scope. That is not a
                 // failure worth recording: the session keeps whatever it had.
                 if (it is CancellationException) throw it
@@ -3181,13 +3192,18 @@ private fun WorkspacesScreen(
                 session.setConnected(null, null)
             }
         } finally {
-            connectingPeer = null
+            if (current()) connectingPeer = null
         }
     }
 
     fun disconnect() {
+        val peer = connectedPeer ?: connectingPeer ?: host?.string("publicIdentity")
+        connectionEpoch++
+        if (peer != null) layoutStore.setAutoConnectEnabled(peer, false)
         session.disconnect()
+        connectingPeer = null
         selectedFolderId = null
+        autoTick++
     }
 
     fun refreshHost() {

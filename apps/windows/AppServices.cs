@@ -20,7 +20,12 @@ internal static class AppServices
     public static event Action? AccountChanged;
     private static long _accountGeneration;
     public static long AccountGeneration => Interlocked.Read(ref _accountGeneration);
-    public static void NotifyAccountChanged() { Interlocked.Increment(ref _accountGeneration); AccountChanged?.Invoke(); }
+    public static void NotifyAccountChanged()
+    {
+        Interlocked.Increment(ref _accountGeneration);
+        RemoteWorkspaces.ResetForAccountChange();
+        AccountChanged?.Invoke();
+    }
     public static event Action? ConversationsChanged;
     public static void NotifyConversationsChanged() => ConversationsChanged?.Invoke();
     public static event Action? TeamProjectsChanged;

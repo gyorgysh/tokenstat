@@ -6,6 +6,7 @@
     <Content Include="../desktop-actions.json" Link="desktop-actions.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../../../apps/windows/Pages/DesktopWorkbenchState.cs" Link="DesktopWorkbenchState.cs" />
     <Compile Include="../../../apps/windows/Navigation/RemoteWorkspaceParameters.cs" Link="RemoteWorkspaceParameters.cs" />
+    <Compile Include="../../../apps/windows/Navigation/BoundedHostSweep.cs" Link="BoundedHostSweep.cs" />
     <Compile Include="../../../apps/windows/Navigation/SidebarPreferences.cs" Link="SidebarPreferences.cs" />
     <Compile Include="../../../apps/windows/Pages/TerminalPaneSelection.cs" Link="TerminalPaneSelection.cs" />
     <Compile Include="../../../apps/windows/Pages/WorkspaceSshTabs.cs" Link="WorkspaceSshTabs.cs" />
