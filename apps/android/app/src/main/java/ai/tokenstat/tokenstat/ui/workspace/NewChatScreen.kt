@@ -205,7 +205,10 @@ fun NewChatScreen(
     }
     val pageScroll = rememberScrollState()
     Box(Modifier.fillMaxSize().background(colors.background).then(drops)) {
-        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+        // The parent Scaffold already applies the system-bar insets. Adding
+        // safeDrawingPadding here a second time pushed the form down and left
+        // unused space above the header on a phone.
+        Column(Modifier.fillMaxSize()) {
             // The way out holds its place at the top while the page under it
             // reflows. No keyboard button here: the app's own bar above this
             // page already grows one whenever the keyboard is up.
@@ -250,18 +253,12 @@ fun NewChatScreen(
                     if (hosts.isEmpty() && draft.isBlank() && staged.isEmpty()) {
                         NoComputerConnected(onSetupMachine)
                     } else {
-                        Box(Modifier.fillMaxWidth()) {
-                            TsPickerField(
-                                summary = hosts.firstOrNull { it.newChatText("publicIdentity") == connectedPeer }
-                                    ?.newChatText("label")?.takeIf { it.isNotBlank() } ?: newChatCopy("choose_host"),
-                                onOpen = { hostMenu = true }, enabled = !connecting,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            DropdownMenu(expanded = hostMenu, onDismissRequest = { hostMenu = false }) {
-                                hosts.forEach { host -> DropdownMenuItem(text = { Text(host.newChatText("label")) }, onClick = { hostMenu = false; onHost(host) }) }
-                                DropdownMenuItem(text = { Text(L10n.text("common.devices")) }, onClick = { hostMenu = false; onManageDevices() })
-                            }
-                        }
+                        TsPickerField(
+                            summary = hosts.firstOrNull { it.newChatText("publicIdentity") == connectedPeer }
+                                ?.newChatText("label")?.takeIf { it.isNotBlank() } ?: newChatCopy("choose_host"),
+                            onOpen = { hostMenu = true }, enabled = !connecting,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                         // Lit until the choice is made, the way the Apple page lights
                         // it: it is the one control on this page a send cannot
                         // happen without.
@@ -272,15 +269,9 @@ fun NewChatScreen(
                                 onOpen = { repositoryMenu = true }, enabled = connectedPeer != null && !connecting,
                                 modifier = Modifier.fillMaxWidth().testTag("newChat.repository"),
                             )
-                            // Over the button, not under it: the button draws its
-                            // own quiet outline on top of anything behind it. The
-                            // ring carries no input, so the button still takes the
-                            // tap through it.
+                            // Keep the required choice visible without shrinking
+                            // its touch target or intercepting its tap.
                             if (litRepository) Box(Modifier.matchParentSize().border(1.dp, colors.accent, RoundedCornerShape(Space.s)))
-                            DropdownMenu(expanded = repositoryMenu, onDismissRequest = { repositoryMenu = false }) {
-                                folders.forEach { folder -> DropdownMenuItem(text = { Column { Text(folder.newChatText("name")); Text(folder.newChatText("path"), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary) } },
-                                    onClick = { repositoryMenu = false; onRepository(folder.newChatText("id")) }) }
-                            }
                         }
                         TextButton(onClick = onAdd, enabled = connectedPeer != null && !connecting,
                             modifier = Modifier.align(Alignment.Start).heightIn(min = 48.dp)) {
@@ -319,6 +310,30 @@ fun NewChatScreen(
                 }
             }
         }
+    }
+    if (hostMenu) TsPickerSheet(newChatCopy("choose_host"), { hostMenu = false }) {
+        TsPickerOptionList(
+            choices = hosts.map { PickerChoice(it, it.newChatText("label")) },
+            isSelected = { it.newChatText("publicIdentity") == connectedPeer },
+            prompt = newChatCopy("choose_host"),
+            emptyMessage = newChatCopy("connect_host_message"),
+            monospaced = false,
+            pick = { host -> hostMenu = false; onHost(host) },
+        )
+        TextButton(onClick = { hostMenu = false; onManageDevices() },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Text(L10n.text("common.devices"))
+        }
+    }
+    if (repositoryMenu) TsPickerSheet(newChatCopy("choose_repository"), { repositoryMenu = false }) {
+        TsPickerOptionList(
+            choices = folders.map { PickerChoice(it, it.newChatText("name"), it.newChatText("path")) },
+            isSelected = { it.newChatText("id") == selectedRepository },
+            prompt = newChatCopy("choose_repository"),
+            emptyMessage = newChatCopy("empty"),
+            monospaced = false,
+            pick = { folder -> repositoryMenu = false; onRepository(folder.newChatText("id")) },
+        )
     }
     if (agentMenu) {
         val chat = setup?.chat()

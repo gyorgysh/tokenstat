@@ -40,6 +40,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -112,6 +113,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -3485,12 +3487,26 @@ internal fun ChatComposer(
                         }
                     }
                 }
-                OutlinedTextField(
-                    draft,
-                    onDraft,
-                    Modifier.weight(1f).then(fieldModifier),
-                    placeholder = { Text(hint, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                BasicTextField(
+                    value = draft,
+                    onValueChange = onDraft,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                        .padding(horizontal = Space.xs, vertical = Space.s).then(fieldModifier),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textPrimary),
+                    cursorBrush = SolidColor(colors.accent),
                     maxLines = if (expanded) 18 else 5,
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (draft.isEmpty()) Text(
+                                hint,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = colors.textTertiary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            innerTextField()
+                        }
+                    },
                 )
                 if (sending) {
                     IconButton(onClick = onStop) {
