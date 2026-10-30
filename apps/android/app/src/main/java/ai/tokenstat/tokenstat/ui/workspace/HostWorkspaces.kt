@@ -134,6 +134,7 @@ class WorkspaceLayoutStore(context: Context, private val accountScope: String) {
     private val prefs = context.getSharedPreferences("tokenstat.workspaces.v1", Context.MODE_PRIVATE)
 
     private fun lastHostKey() = "lastConnectedHost.${accountScope.length}:$accountScope"
+    private fun rememberedHostsKey() = "connectedHosts.${accountScope.length}:$accountScope"
     private fun autoConnectKey(peer: String) =
         "autoConnect.${accountScope.length}:$accountScope${peer.length}:$peer"
 
@@ -158,8 +159,23 @@ class WorkspaceLayoutStore(context: Context, private val accountScope: String) {
     fun lastConnectedHost(): String? =
         if (accountScope.isBlank()) null else prefs.getString(lastHostKey(), null)
 
+    /// Every host this account has connected to or explicitly enabled. The
+    /// last active one comes first for navigation; callers still apply the
+    /// per-host auto-connect switch and live account directory before dialing.
+    fun rememberedHosts(knownPeers: Set<String>): List<String> {
+        if (accountScope.isBlank()) return emptyList()
+        return (listOfNotNull(lastConnectedHost()) +
+            prefs.getStringSet(rememberedHostsKey(), emptySet()).orEmpty().sorted())
+            .distinct().filter { it in knownPeers }
+    }
+
     fun setLastConnectedHost(peer: String?) {
-        if (accountScope.isNotBlank()) prefs.edit().putString(lastHostKey(), peer).apply()
+        if (accountScope.isBlank()) return
+        val editor = prefs.edit().putString(lastHostKey(), peer)
+        if (peer != null) editor.putStringSet(
+            rememberedHostsKey(), prefs.getStringSet(rememberedHostsKey(), emptySet()).orEmpty() + peer
+        )
+        editor.apply()
     }
 
     /// Carry the old single-account choice forward only when that host is
@@ -171,6 +187,7 @@ class WorkspaceLayoutStore(context: Context, private val accountScope: String) {
         if (legacy !in knownPeers || prefs.contains(lastHostKey())) return
         val editor = prefs.edit()
         editor.putString(lastHostKey(), legacy)
+        editor.putStringSet(rememberedHostsKey(), prefs.getStringSet(rememberedHostsKey(), emptySet()).orEmpty() + legacy)
         val oldAutoKey = "autoConnect.$legacy"
         if (prefs.contains(oldAutoKey) && !prefs.contains(autoConnectKey(legacy))) {
             editor.putBoolean(autoConnectKey(legacy), prefs.getBoolean(oldAutoKey, true))
@@ -185,7 +202,12 @@ class WorkspaceLayoutStore(context: Context, private val accountScope: String) {
         accountScope.isNotBlank() && prefs.getBoolean(autoConnectKey(peer), true)
 
     fun setAutoConnectEnabled(peer: String, enabled: Boolean) {
-        if (accountScope.isNotBlank()) prefs.edit().putBoolean(autoConnectKey(peer), enabled).apply()
+        if (accountScope.isBlank()) return
+        val editor = prefs.edit().putBoolean(autoConnectKey(peer), enabled)
+        if (enabled) editor.putStringSet(
+            rememberedHostsKey(), prefs.getStringSet(rememberedHostsKey(), emptySet()).orEmpty() + peer
+        )
+        editor.apply()
     }
 }
 

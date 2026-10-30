@@ -41,13 +41,21 @@ class WorkspaceHostPreferencesTest {
             second.setLastConnectedHost("peer-two")
             second.setAutoConnectEnabled("peer-two", false)
             first.setAutoConnectEnabled("peer-one", true)
+            first.setLastConnectedHost("peer-three")
 
-            assertEquals("peer-one", WorkspaceLayoutStore(context, "account-one").lastConnectedHost())
+            assertEquals("peer-three", WorkspaceLayoutStore(context, "account-one").lastConnectedHost())
             assertTrue(WorkspaceLayoutStore(context, "account-one").isAutoConnectEnabled("peer-one"))
+            assertEquals(listOf("peer-three", "peer-one"),
+                WorkspaceLayoutStore(context, "account-one").rememberedHosts(setOf("peer-one", "peer-three")))
+            assertEquals(listOf("peer-one"),
+                WorkspaceLayoutStore(context, "account-one").rememberedHosts(setOf("peer-one")))
             assertEquals("peer-two", WorkspaceLayoutStore(context, "account-two").lastConnectedHost())
             assertFalse(WorkspaceLayoutStore(context, "account-two").isAutoConnectEnabled("peer-two"))
+            assertEquals(listOf("peer-two"),
+                WorkspaceLayoutStore(context, "account-two").rememberedHosts(setOf("peer-one", "peer-two", "peer-three")))
             assertNull(WorkspaceLayoutStore(context, "").lastConnectedHost())
             assertFalse(WorkspaceLayoutStore(context, "").isAutoConnectEnabled("peer-one"))
+            assertTrue(WorkspaceLayoutStore(context, "").rememberedHosts(setOf("peer-one")).isEmpty())
         } finally {
             base.deleteSharedPreferences(testName)
         }
