@@ -232,6 +232,7 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
@@ -651,6 +652,8 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     val warmConnected by warmSession.connectedPeer.collectAsStateWithLifecycle()
     val warmConnecting by warmSession.connectingPeer.collectAsStateWithLifecycle()
     val warmAllowed by warmSession.allowed.collectAsStateWithLifecycle()
+    val warmPathEpoch by model.networkRecoveryEpoch.collectAsStateWithLifecycle()
+    var seenWarmPathEpoch by remember(warmOwner) { mutableLongStateOf(warmPathEpoch) }
     val warmMachines = state.account?.get("machines") as? JsonArray
     val warmScope = rememberCoroutineScope()
     var warmFailures by remember(warmOwner) { mutableIntStateOf(0) }
@@ -744,77 +747,142 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             }
         }
     }
+    // The tunnel redials on a network route change. Recheck the selected
+    // host's access and lists after that redial, even if the account's machine
+    // directory is unchanged and the user never opens Repositories.
+    LaunchedEffect(warmPathEpoch, warmOwner, state.canRemote) {
+        if (warmPathEpoch == 0L || !state.canRemote || warmOwner.isBlank()) return@LaunchedEffect
+        val peer = warmSession.connectedPeer.value ?: return@LaunchedEffect
+        if (warmSession.connectingPeer.value != null || !warmStore.isAutoConnectEnabled(peer)) return@LaunchedEffect
+        val machine = (model.state.value.account?.get("machines") as? JsonArray)
+            ?.filterIsInstance<JsonObject>()?.find { it.string("publicIdentity") == peer }
+            ?: return@LaunchedEffect
+        fun current() = HomeStores.pinIdentity(model.state.value.account) == warmOwner &&
+            model.state.value.canRemote && warmSession.connectedPeer.value == peer &&
+            warmSession.connectingPeer.value == null && warmStore.isAutoConnectEnabled(peer)
+        try {
+            val check = retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
+                model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
+                model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
+            }
+            if (!current()) return@LaunchedEffect
+            if (check?.bool("allowed") == false) {
+                warmSession.setAllowed(false)
+                warmSession.setConnected(null, false)
+                warmSession.clearLists()
+                ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                    context, peer, JsonArray(emptyList()), ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                )
+                return@LaunchedEffect
+            }
+            if (check?.bool("allowed") != true) error("No workspace access response")
+            val folders = model.workspaceSection(peer, "workspace.list", buildJsonObject {}) as? JsonArray
+                ?: error("No workspace list response")
+            val sessions = runCatching {
+                model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
+            }.getOrNull() ?: warmSession.sessions.value
+            val chats = runCatching {
+                model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
+            }.getOrNull() ?: warmSession.chats.value
+            if (!current()) return@LaunchedEffect
+            warmSession.setLists(folders, sessions, chats)
+            warmSession.setError(null)
+            ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                context, peer, folders, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            android.util.Log.w("ts-workspaces", "selected host route refresh failed", error)
+            if (current()) {
+                warmSession.setConnected(null, null)
+                warmFailures = 0
+            }
+        }
+    }
     // The selected host's warmup above owns one slot. Load the other saved
     // hosts in at most three more slots, without changing the selected host or
     // its visible lists. One sleeping or denied host cannot hold up the rest.
-    ForegroundEffect(warmOwner, warmMachines, state.canRemote) {
+    ForegroundEffect(warmOwner, warmMachines, state.canRemote, warmPathEpoch) {
         if (!state.canRemote || warmOwner.isBlank()) return@ForegroundEffect
-        val machines = warmMachines?.filterIsInstance<JsonObject>().orEmpty()
-        val thisId = state.account?.string("thisMachineId")
-        val byPeer = machines.mapNotNull { machine ->
-            val peer = machine.string("publicIdentity") ?: return@mapNotNull null
-            if (machine.string("kind") == "client" || (thisId != null && machine.string("id") == thisId) ||
-                machine.get("online")?.jsonPrimitive?.booleanOrNull == false) return@mapNotNull null
-            peer to machine
-        }.toMap()
-        warmStore.migrateLegacyHost(byPeer.keys)
-        val last = warmStore.lastConnectedHost()
-        val eligible = warmStore.rememberedHosts(byPeer.keys)
-            .filter { it != last && warmStore.isAutoConnectEnabled(it) }
+        var forceRefresh = warmPathEpoch != seenWarmPathEpoch
         val slots = Semaphore(3)
-        for (peer in eligible) launch {
-            slots.withPermit {
-                val machine = byPeer[peer] ?: return@withPermit
-                if (!warmSession.beginBackground(peer, warmOwner)) return@withPermit
-                var published = false
-                var cancelled = false
-                try {
-                    fun current() = HomeStores.pinIdentity(model.state.value.account) == warmOwner &&
-                        model.state.value.canRemote && warmStore.isAutoConnectEnabled(peer)
-                    for (delayMs in listOf(0L, 2_000L, 4_000L)) {
-                        if (delayMs > 0) delay(delayMs)
-                        if (!current()) break
+        while (true) {
+            // Refresh saved peers while the app stays open, too. A host may
+            // wake without this phone changing networks or leaving the app.
+            val latestAccount = model.state.value.account
+            val machines = (latestAccount?.get("machines") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+            val thisId = latestAccount?.string("thisMachineId")
+            val byPeer = machines.mapNotNull { machine ->
+                val peer = machine.string("publicIdentity") ?: return@mapNotNull null
+                if (machine.string("kind") == "client" || (thisId != null && machine.string("id") == thisId) ||
+                    machine.get("online")?.jsonPrimitive?.booleanOrNull == false) return@mapNotNull null
+                peer to machine
+            }.toMap()
+            warmStore.migrateLegacyHost(byPeer.keys)
+            val last = warmStore.lastConnectedHost()
+            val eligible = warmStore.rememberedHosts(byPeer.keys)
+                .filter { it != last && warmStore.isAutoConnectEnabled(it) }
+            val jobs = eligible.map { peer ->
+                launch {
+                    slots.withPermit {
+                        val machine = byPeer[peer] ?: return@withPermit
+                        if (!warmSession.beginBackground(peer, warmOwner, forceRefresh = forceRefresh)) return@withPermit
+                        var published = false
+                        var cancelled = false
                         try {
-                            val check = retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
-                                model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
-                                model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
-                            }
-                            if (check?.bool("allowed") != true || !current()) {
-                                if (current() && check?.bool("allowed") == false) {
-                                    warmSession.dropBackgroundHost(peer, warmOwner)
-                                    ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
-                                        context, peer, JsonArray(emptyList()), ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
-                                    )
+                            fun current() = HomeStores.pinIdentity(model.state.value.account) == warmOwner &&
+                                model.state.value.canRemote && warmStore.isAutoConnectEnabled(peer)
+                            for (delayMs in listOf(0L, 2_000L, 4_000L)) {
+                                if (delayMs > 0) delay(delayMs)
+                                if (!current()) break
+                                try {
+                                    val check = retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
+                                        model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
+                                        model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
+                                    }
+                                    if (check?.bool("allowed") != true || !current()) {
+                                        if (current() && check?.bool("allowed") == false) {
+                                            warmSession.dropBackgroundHost(peer, warmOwner)
+                                            ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                                                context, peer, JsonArray(emptyList()), ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                                            )
+                                        }
+                                        break
+                                    }
+                                    val folders = model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
+                                        ?: JsonArray(emptyList())
+                                    val sessions = runCatching {
+                                        model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
+                                    }.getOrNull() ?: JsonArray(emptyList())
+                                    val chats = runCatching {
+                                        model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
+                                    }.getOrNull() ?: JsonArray(emptyList())
+                                    if (!current()) break
+                                    published = warmSession.publishBackground(peer, warmOwner, folders, sessions, chats)
+                                    if (published) {
+                                        ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                                            context, peer, folders, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                                        )
+                                    }
+                                    break
+                                } catch (error: CancellationException) {
+                                    cancelled = true
+                                    throw error
+                                } catch (error: Exception) {
+                                    android.util.Log.w("ts-workspaces", "saved host background connect failed", error)
                                 }
-                                break
                             }
-                            val folders = model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
-                                ?: JsonArray(emptyList())
-                            val sessions = runCatching {
-                                model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
-                            }.getOrNull() ?: JsonArray(emptyList())
-                            val chats = runCatching {
-                                model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
-                            }.getOrNull() ?: JsonArray(emptyList())
-                            if (!current()) break
-                            published = warmSession.publishBackground(peer, warmOwner, folders, sessions, chats)
-                            if (published) {
-                                ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
-                                    context, peer, folders, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
-                                )
-                            }
-                            break
-                        } catch (error: CancellationException) {
-                            cancelled = true
-                            throw error
-                        } catch (error: Exception) {
-                            android.util.Log.w("ts-workspaces", "saved host background connect failed", error)
+                        } finally {
+                            warmSession.finishBackground(peer, warmOwner, published, cancelled = cancelled)
                         }
                     }
-                } finally {
-                    warmSession.finishBackground(peer, warmOwner, published, cancelled = cancelled)
                 }
             }
+            jobs.joinAll()
+            seenWarmPathEpoch = warmPathEpoch
+            forceRefresh = false
+            delay(30_000)
         }
     }
     val billing = remember { PlayBillingManager(context) }
@@ -3333,6 +3401,7 @@ private fun WorkspacesScreen(
                 session.setAllowed(false)
                 requestAccess(peer)
             } else if (stillAllowed == true) {
+                layoutStore.setLastConnectedHost(peer)
                 val freshFolders = runCatching {
                     model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
                 }.getOrNull()

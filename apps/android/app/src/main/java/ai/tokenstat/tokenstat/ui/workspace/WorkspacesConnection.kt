@@ -64,12 +64,12 @@ class WorkspacesConnectionState {
     private val mutableBackgroundConnecting = MutableStateFlow<Set<String>>(emptySet())
     val backgroundConnecting: StateFlow<Set<String>> = mutableBackgroundConnecting.asStateFlow()
 
-    fun beginBackground(peer: String, owner: String, nowMs: Long = System.currentTimeMillis()): Boolean {
+    fun beginBackground(peer: String, owner: String, nowMs: Long = System.currentTimeMillis(), forceRefresh: Boolean = false): Boolean {
         if (accountOwner != owner || (knownHosts != null && peer !in knownHosts.orEmpty()) ||
             peer == mutableConnectedPeer.value || peer == mutableConnectingPeer.value ||
-            hostSnapshots[peer]?.let { nowMs - it.loadedAtMs < 60_000L } == true ||
+            (!forceRefresh && hostSnapshots[peer]?.let { nowMs - it.loadedAtMs < 60_000L } == true) ||
             peer in mutableBackgroundConnecting.value ||
-            nowMs < (backgroundNextAt[peer] ?: 0L)) return false
+            (!forceRefresh && nowMs < (backgroundNextAt[peer] ?: 0L))) return false
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value + peer
         return true
     }

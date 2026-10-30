@@ -159,6 +159,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /// not dial again on return. See `WorkspacesConnectionState`.
     val workspacesConnection = ai.tokenstat.tokenstat.ui.workspace.WorkspacesConnectionState()
 
+    private val mutableNetworkRecoveryEpoch = MutableStateFlow(0L)
+    val networkRecoveryEpoch = mutableNetworkRecoveryEpoch.asStateFlow()
+
     /// What the app believes about the network, folded from the platform's
     /// route and from every call that leaves this process. One tracker, so
     /// two screens cannot say different things about one failure.
@@ -199,6 +202,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 publishConnection()
                 refresh()
                 nudgeTunnel(reconnect = true)
+                mutableNetworkRecoveryEpoch.value += 1
             }
         }
         refresh()
