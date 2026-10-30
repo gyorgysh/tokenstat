@@ -237,6 +237,15 @@ class WorkspacesConnectionState {
         clearLists()
     }
 
+    fun disconnectHost(peer: String) {
+        hostSnapshots.remove(peer)
+        mutableConnectedHosts.value = hostSnapshots.keys.toSet()
+        mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
+        backgroundAttempts.remove(peer)
+        backgroundNextAt.remove(peer)
+        if (mutableConnectedPeer.value == peer || mutableConnectingPeer.value == peer) disconnect()
+    }
+
     fun clearAll() {
         hostSnapshots.clear()
         backgroundAttempts.clear()

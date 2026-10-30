@@ -3307,16 +3307,49 @@ private fun WorkspacesScreen(
         if (!forceRefresh && !automatic &&
             machine.get("online")?.jsonPrimitive?.booleanOrNull != false &&
             session.activateConnectedHost(machine)) {
+            val owner = navigationOwner
             val stillAllowed = runCatching {
                 (model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject)?.bool("allowed")
             }.getOrNull()
             if (stillAllowed == false &&
-                HomeStores.pinIdentity(model.state.value.account) == navigationOwner &&
+                HomeStores.pinIdentity(model.state.value.account) == owner &&
                 session.connectedPeer.value == peer) {
                 session.disconnect()
                 session.setHost(machine)
                 session.setAllowed(false)
                 requestAccess(peer)
+            } else if (stillAllowed == true) {
+                val freshFolders = runCatching {
+                    model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
+                }.getOrNull()
+                if (freshFolders != null && HomeStores.pinIdentity(model.state.value.account) == owner &&
+                    session.connectedPeer.value == peer) {
+                    val freshSessions = runCatching {
+                        model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
+                    }.getOrNull() ?: session.sessionsFor(peer)
+                    val freshChats = runCatching {
+                        model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
+                    }.getOrNull() ?: session.chatsFor(peer)
+                    if (HomeStores.pinIdentity(model.state.value.account) == owner &&
+                        session.connectedPeer.value == peer) {
+                        session.setLists(freshFolders, freshSessions, freshChats)
+                        ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                            context, peer, freshFolders, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                        )
+                        if (freshFolders.any { (it as? JsonObject)?.bool("gitStatusPending") == true }) {
+                            val withGit = runCatching {
+                                model.workspaceSection(peer, "workspace.list", buildJsonObject {}) as? JsonArray
+                            }.getOrNull()
+                            if (withGit != null && HomeStores.pinIdentity(model.state.value.account) == owner &&
+                                session.connectedPeer.value == peer) {
+                                session.setFolders(withGit)
+                                ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                                    context, peer, withGit, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                                )
+                            }
+                        }
+                    }
+                }
             }
             return
         }
@@ -3422,14 +3455,16 @@ private fun WorkspacesScreen(
         }
     }
 
-    fun disconnect() {
-        val peer = connectedPeer ?: connectingPeer ?: host?.string("publicIdentity")
-        connectionEpoch++
+    fun disconnect(targetPeer: String? = null) {
+        val peer = targetPeer ?: connectedPeer ?: connectingPeer ?: host?.string("publicIdentity")
         if (peer != null) layoutStore.setAutoConnectEnabled(peer, false)
-        session.disconnect()
-        localConnectingPeer = null
-        selectedFolderId = null
-        selectedFolderPeer = null
+        if (peer != null) session.disconnectHost(peer) else session.disconnect()
+        if (peer == connectedPeer || peer == connectingPeer || peer == host?.string("publicIdentity")) {
+            connectionEpoch++
+            localConnectingPeer = null
+            selectedFolderId = null
+            selectedFolderPeer = null
+        }
         autoTick++
     }
 
@@ -3718,7 +3753,7 @@ private fun WorkspacesScreen(
                 autoTick += 1
             },
             onConnect = { scope.launch { connect(it) } },
-            onDisconnect = { disconnect() },
+            onDisconnect = { peer -> disconnect(peer) },
             onFolder = { selectedFolderId = it.string("id"); selectedFolderPeer = connectedPeer; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
             onOtherFolder = { machine, folder ->
                 if (session.activateConnectedHost(machine)) {
@@ -3938,7 +3973,7 @@ private fun WorkspaceList(
     autoConnect: (String) -> Boolean,
     onAutoConnect: (String, Boolean) -> Unit,
     onConnect: (JsonObject) -> Unit,
-    onDisconnect: () -> Unit,
+    onDisconnect: (String) -> Unit,
     onFolder: (JsonObject) -> Unit,
     onOtherFolder: (JsonObject, JsonObject) -> Unit,
     onOtherChat: (JsonObject, JsonObject) -> Unit,
@@ -4040,7 +4075,7 @@ private fun WorkspaceList(
                 connecting = connectingPeer == peer,
                 autoConnect = autoConnect(peer),
                 onConnect = { onConnect(machine) },
-                onDisconnect = onDisconnect,
+                onDisconnect = { onDisconnect(peer) },
                 onOpenDevice = machine.string("id")?.let { id -> { onOpenDevice(id) } },
                 onAutoConnect = { onAutoConnect(peer, it) },
             )
@@ -4145,6 +4180,17 @@ private fun WorkspaceList(
         val host = connectedHost ?: return@LazyColumn
         val hostName = DeviceCopy.displayName(host.string("label"), host.string("platform"), true)
         val peer = host.string("publicIdentity") ?: ""
+        if (host.get("online")?.jsonPrimitive?.booleanOrNull == false) {
+            item {
+                EmptyState(
+                    icon = ActionIcon.Connect.vector,
+                    title = L10n.text("common.offline"),
+                    message = L10n.text("android.homelogic.asleep_it_has_a_connection_key_so_it_can_b.8982cace"),
+                    art = { EmptyArt(EmptyArtKind.Connect) },
+                )
+            }
+            return@LazyColumn
+        }
         if (connectingPeer != null || loadingFolders) {
             item { SkeletonRows(count = 3) }
             return@LazyColumn

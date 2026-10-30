@@ -486,6 +486,25 @@ fun HostCard(
                         modifier = Modifier.scale(0.82f),
                     )
                 }
+            } else if (available) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        L10n.text("android.hostworkspaces.auto_connect.45b6d201"),
+                        style = TsType.caption, color = colors.textSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(checked = autoConnect, onCheckedChange = onAutoConnect)
+                    TsSecondaryButton(
+                        label = L10n.text("common.disconnect"),
+                        icon = ActionIcon.Disconnect.vector,
+                        small = true,
+                        onClick = onDisconnect,
+                    )
+                }
             }
         }
     }

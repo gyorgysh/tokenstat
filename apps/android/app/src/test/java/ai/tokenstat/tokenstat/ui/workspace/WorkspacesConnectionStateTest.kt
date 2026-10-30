@@ -59,13 +59,15 @@ class WorkspacesConnectionStateTest {
         assertFalse(state.beginBackground("peer-c", "account-one", nowMs = 2_099))
         assertTrue(state.beginBackground("peer-c", "account-one", nowMs = 2_100))
         assertEquals(setOf("peer-a", "peer-b"), state.connectedHosts.value)
+        state.disconnectHost("peer-a")
+        assertEquals(setOf("peer-b"), state.connectedHosts.value)
         assertTrue(state.activateConnectedHost(host("peer-b")))
         assertEquals("Beta", (state.folders.value.single() as kotlinx.serialization.json.JsonObject).str("name"))
 
-        state.setKnownHosts(setOf("peer-a"))
-        assertEquals(setOf("peer-a"), state.connectedHosts.value)
+        state.setKnownHosts(emptySet())
+        assertTrue(state.connectedHosts.value.isEmpty())
         assertFalse(state.activateConnectedHost(host("peer-b")))
-        assertTrue(state.activateConnectedHost(host("peer-a")))
+        assertFalse(state.activateConnectedHost(host("peer-a")))
 
         state.setAccountOwner("account-two")
         assertFalse(state.publishBackground("peer-c", "account-one", JsonArray(emptyList()), JsonArray(emptyList()), JsonArray(emptyList())))
