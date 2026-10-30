@@ -288,8 +288,9 @@ settings:
     # 205 includes the Plus, Pro and Elite display names.
     # 206 begins 1.9.0. 207 includes the mobile chat and pull review,
     # Android phone parity and the combined host access prompt. 208 follows up
-    # with compact iPhone browser presentation and host reconnect fixes.
-    CURRENT_PROJECT_VERSION: "208"
+    # with compact iPhone browser presentation. 209 includes account-scoped
+    # mobile reconnect choices and the latest shared client fixes.
+    CURRENT_PROJECT_VERSION: "209"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
