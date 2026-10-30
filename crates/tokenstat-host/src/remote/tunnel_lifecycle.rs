@@ -364,6 +364,13 @@ pub(super) fn ensure(
                 inbound_owned.live.socket.clone(),
                 channel,
             );
+            // Keep the account directory and the tunnel's control socket alive,
+            // but never accept a new metered work channel in direct-only mode.
+            // This also covers team channels, which are identified below.
+            if !load_settings().relay_fallback {
+                drop(transport);
+                continue;
+            }
             if let Some(team) = transport.team_authorization() {
                 crate::teams::accept_channel(
                     transport,
@@ -383,8 +390,14 @@ pub(super) fn ensure(
                     tokenstat_remote::handshake_responder(Box::new(transport), &identity)
                         .map_err(|error| error.to_string())?;
                 inbound_owned.ensure_current()?;
-                if !load_settings().tunnel {
+                let settings = load_settings();
+                if !settings.tunnel {
                     return Err("Personal remote reach is off.".into());
+                }
+                if !settings.relay_fallback {
+                    return Err(
+                        "This device accepts remote work only over direct connections.".into(),
+                    );
                 }
                 authorize_with(connection, "tunnel", Some(&account_peer_label)).map_err(|refused| {
                     report(&refused);
@@ -392,9 +405,17 @@ pub(super) fn ensure(
                 })
             });
             match accepted {
-                Ok(connection)
-                    if load_settings().tunnel && inbound_owned.ensure_current().is_ok() =>
-                {
+                Ok(connection) => {
+                    let settings = load_settings();
+                    if !settings.tunnel || inbound_owned.ensure_current().is_err() {
+                        break;
+                    }
+                    if !settings.relay_fallback {
+                        // A preference change during the handshake must not
+                        // retire the shared account/control socket.
+                        drop(connection);
+                        continue;
+                    }
                     let _ = inbound_owned.update(|state| {
                         state.connected = true;
                         state.error = None;
@@ -402,7 +423,6 @@ pub(super) fn ensure(
                     let peer_session = Arc::clone(&session);
                     thread::spawn(move || serve_peer(connection, &peer_session, Route::Relay));
                 }
-                Ok(_) => break,
                 Err(error) => eprintln!("remote: inbound tunnel connection refused: {error}"),
             }
         }

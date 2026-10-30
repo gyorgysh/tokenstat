@@ -418,6 +418,12 @@ impl Link {
         let transport = if proof.host_key() == &identity.public_key() {
             Transport::Local
         } else {
+            if !load_settings().relay_fallback {
+                return Err(DispatchError::new(
+                    "relay_disabled",
+                    "This device uses direct connections only. Remote shared work needs the relay until a direct Team route is available.",
+                ));
+            }
             let scope =
                 current_team_scope(&owner).map_err(|_| api_error(TeamError::AccountChanged))?;
             if scope.key != identity.public_key() {

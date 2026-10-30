@@ -72,7 +72,8 @@ pub struct RemoteSettings {
     pub tunnel: bool,
     #[serde(default = "default_tunnel_endpoint")]
     pub tunnel_endpoint: String,
-    /// Outbound peer calls may use the metered relay when direct access fails.
+    /// New outbound and inbound work channels may use the metered relay.
+    /// Account sync, presence and the directory do not use this setting.
     /// Older settings files retain their existing fallback behavior.
     #[serde(default = "default_relay_fallback")]
     pub relay_fallback: bool,

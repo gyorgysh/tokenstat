@@ -46,6 +46,11 @@ pub(crate) fn accept(
             else {
                 return;
             };
+            // A direct-only change while the handshake was in flight must not
+            // turn that pending channel into a new relayed Team session.
+            if !crate::remote::load_settings().relay_fallback {
+                return;
+            }
             super::serve(connection, channel, owner, identity.public_key(), &session);
         });
 }
