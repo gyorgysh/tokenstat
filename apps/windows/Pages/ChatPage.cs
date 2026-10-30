@@ -1960,6 +1960,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             // Setup reveals its native agent and working-style controls.
             _statsExpanded["setup/" + L10n.Text("common.chat_agent_behavior")] = true;
             PaintConversation();
+            // This ScrollViewer survives chat reloads. Its old offset can
+            // leave the newly opened agent picker and Done button above the
+            // visible viewport, even though Setup was just tapped.
+            DispatcherQueue.TryEnqueue(() => _setupScroll.ChangeView(null, 0, null, true));
         });
         AutomationProperties.SetAutomationId(setup, "chat.setup");
         row.Children.Add(setup);
