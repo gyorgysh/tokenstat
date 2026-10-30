@@ -1022,6 +1022,12 @@ final class ClientWorkspacesModel {
         await autoDial(host)
     }
 
+    /// Revisit saved hosts while this app stays in the foreground. The sweep
+    /// still applies each host's snapshot age and retry clock.
+    func revisitRememberedHosts() {
+        warmRememberedHosts()
+    }
+
     /// Keep saved computers ready behind the currently selected one. The
     /// foreground dial owns one slot; this sweep uses at most three more.
     /// Each peer retains its own loaded lists and retry clock.

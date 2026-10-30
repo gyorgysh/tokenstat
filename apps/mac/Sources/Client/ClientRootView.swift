@@ -429,6 +429,16 @@ struct ClientRootView: View {
             Task { await Bridge.nudgeTunnelOnForeground() }
             if navigation.destination == .team || teams.phase == .authorization { Task { await teams.reloadAfterChange() } }
         }
+        .task(id: scenePhase == .active && account.signedIn) {
+            guard scenePhase == .active, account.signedIn else { return }
+            while !Task.isCancelled {
+                if let scope = WorkSessionContext.shared.scope {
+                    sessionModels.models(for: scope).workspaces.revisitRememberedHosts()
+                }
+                do { try await Task.sleep(for: .seconds(30)) }
+                catch { return }
+            }
+        }
     }
 
     private var teamAccountOwner: TeamAccountOwner? {
