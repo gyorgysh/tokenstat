@@ -202,7 +202,7 @@ struct ClientSidebarRoot: View {
                 Task { await workspaces.autoConnectLastHost() }
                 return
             }
-            guard ClientWorkspacesModel.isAutoConnectEnabled(for: key) else { return }
+            guard workspaces.isAutoConnectEnabled(for: key) else { return }
             Task { await workspaces.recoverAfterNetworkChange(account: account.account) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in

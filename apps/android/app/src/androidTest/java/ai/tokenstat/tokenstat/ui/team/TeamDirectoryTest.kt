@@ -42,7 +42,7 @@ class TeamDirectoryTest {
         compose.setContent {
             TsTheme(DarkColors) {
                 MaterialTheme(colorScheme = DarkColors.toColorScheme(), typography = TsType.typography) {
-                    Surface(Modifier.fillMaxSize().safeDrawingPadding()) { TeamScreen(account, request) }
+                    Surface(Modifier.fillMaxSize().safeDrawingPadding()) { TeamScreen(account, request = request) }
                 }
             }
         }
@@ -100,7 +100,7 @@ class TeamDirectoryTest {
         compose.setContent {
             TsTheme(DarkColors) {
                 MaterialTheme(colorScheme = DarkColors.toColorScheme(), typography = TsType.typography) {
-                    Surface(Modifier.fillMaxSize().safeDrawingPadding()) { TeamScreen(current.value, request) }
+                    Surface(Modifier.fillMaxSize().safeDrawingPadding()) { TeamScreen(current.value, request = request) }
                 }
             }
         }

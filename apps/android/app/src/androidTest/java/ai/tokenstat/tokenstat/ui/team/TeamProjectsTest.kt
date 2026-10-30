@@ -54,7 +54,7 @@ class TeamProjectsTest {
         compose.setContent {
             TsTheme(DarkColors) {
                 MaterialTheme(colorScheme = DarkColors.toColorScheme(), typography = TsType.typography) {
-                    Surface(Modifier.fillMaxSize().safeDrawingPadding()) { TeamScreen(account, request) }
+                    Surface(Modifier.fillMaxSize().safeDrawingPadding()) { TeamScreen(account, request = request) }
                 }
             }
         }

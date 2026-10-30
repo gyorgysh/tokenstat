@@ -62,7 +62,7 @@ struct TeamSharedChatReader: View {
                                     .environment(\.teamAttachmentLoader, { id in try await attachment(id) })
                             }
                             if events.isEmpty && !loading {
-                                EmptyState(symbol: "bubble.left.and.bubble.right", title: summary.title ?? L10n.text("common.teams.shared_chat"), message: L10n.text("common.teams.no_chat_messages"))
+                                EmptyState(symbol: "bubble.left.and.bubble.right", title: summary.title, message: L10n.text("common.teams.no_chat_messages"))
                             }
                             Color.clear.frame(height: 1).id("team-history-end")
                         }

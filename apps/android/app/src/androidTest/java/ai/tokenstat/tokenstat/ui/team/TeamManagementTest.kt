@@ -40,7 +40,7 @@ class TeamManagementTest {
     private fun show(account: () -> JsonObject, bridge: suspend (String, JsonObject) -> JsonElement) {
         compose.setContent {
             TsTheme(DarkColors) { MaterialTheme(colorScheme = DarkColors.toColorScheme(), typography = TsType.typography) {
-                Surface(Modifier.fillMaxSize().safeDrawingPadding()) { TeamScreen(account(), bridge) }
+                Surface(Modifier.fillMaxSize().safeDrawingPadding()) { TeamScreen(account(), request = bridge) }
             } }
         }
     }

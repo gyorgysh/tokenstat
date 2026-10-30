@@ -3040,7 +3040,8 @@ private fun WorkspacesScreen(
         .filter { !it.string("publicIdentity").isNullOrEmpty() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val layoutStore = remember(context) { WorkspaceLayoutStore(context) }
+    val layoutStore = remember(context, navigationOwner) { WorkspaceLayoutStore(context, navigationOwner) }
+    layoutStore.migrateLegacyHost(hosts.mapNotNull { it.string("publicIdentity") }.toSet())
     var layoutOrder by remember { mutableStateOf(layoutStore.order()) }
     var layoutHidden by remember { mutableStateOf(layoutStore.hidden()) }
     // The session lives on the model, so leaving the tab does not dial

@@ -40,17 +40,13 @@ struct ClientWorkspacesView: View {
     // sidebar owns a model without ever mounting this view.
     private func autoConnectBinding(for peerKey: String) -> Binding<Bool> {
         Binding(
-            get: { ClientWorkspacesModel.isAutoConnectEnabled(for: peerKey) },
-            set: {
-                UserDefaults.standard.set(
-                    $0, forKey: ClientWorkspacesModel.autoConnectKey(for: peerKey)
-                )
-            }
+            get: { model.isAutoConnectEnabled(for: peerKey) },
+            set: { model.setAutoConnect($0, for: peerKey) }
         )
     }
 
     private func isAutoConnectEnabled(for peerKey: String) -> Bool {
-        ClientWorkspacesModel.isAutoConnectEnabled(for: peerKey)
+        model.isAutoConnectEnabled(for: peerKey)
     }
 
     /// Both layouts pass the root's model, so the sidebar's tree and this
@@ -264,7 +260,7 @@ struct ClientWorkspacesView: View {
                 openFolderHandoff()
             }
             .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
-                guard let key = model.connectedKey ?? UserDefaults.standard.string(forKey: "client.lastConnectedHost"),
+                guard let key = model.connectedKey ?? model.lastConnectedHost,
                       isAutoConnectEnabled(for: key) else { return }
                 Task { await model.recoverAfterNetworkChange(account: account.account) }
             }
@@ -743,6 +739,7 @@ final class ClientWorkspacesModel {
             )
         }
         if hosts != nextHosts { hosts = nextHosts }
+        migrateLegacyHost()
         #if os(iOS)
         let overviewNames = Dictionary(nextHosts.map { ($0.peerKey, $0.name) }, uniquingKeysWith: { first, _ in first })
         Task { await LiveWorkController.shared.refreshOverview(peers: nextHosts.map(\.peerKey), names: overviewNames) }
@@ -800,8 +797,41 @@ final class ClientWorkspacesModel {
         await dial(host, recovering: false)
     }
 
-    static func autoConnectKey(for peerKey: String) -> String {
-        "client.autoConnectHost.\(peerKey)"
+    private var hostPreferencePrefix: String? {
+        guard let scope = ownerScope else { return nil }
+        return "client.host.v2.\([scope.kind.rawValue, scope.origin, scope.identity].map(WorkReferenceKey.encode).joined(separator: "|"))"
+    }
+
+    private var lastConnectedHostKey: String? {
+        hostPreferencePrefix.map { "\($0).last" }
+    }
+
+    var lastConnectedHost: String? {
+        guard let key = lastConnectedHostKey else { return nil }
+        return UserDefaults.standard.string(forKey: key)
+    }
+
+    private func autoConnectKey(for peerKey: String) -> String? {
+        hostPreferencePrefix.map { "\($0).auto.\(WorkReferenceKey.encode(peerKey))" }
+    }
+
+    /// An older build used one global preference. Move it to the first
+    /// signed-in account that actually lists this host, and remove the
+    /// global copy so another account cannot inherit its disconnect choice.
+    private func migrateLegacyHost() {
+        guard let key = lastConnectedHostKey,
+              UserDefaults.standard.object(forKey: key) == nil,
+              let legacy = UserDefaults.standard.string(forKey: "client.lastConnectedHost"),
+              hosts.contains(where: { $0.peerKey == legacy }) else { return }
+        UserDefaults.standard.set(legacy, forKey: key)
+        let oldAutoKey = "client.autoConnectHost.\(legacy)"
+        if let auto = UserDefaults.standard.object(forKey: oldAutoKey) as? Bool,
+           let newAutoKey = autoConnectKey(for: legacy),
+           UserDefaults.standard.object(forKey: newAutoKey) == nil {
+            UserDefaults.standard.set(auto, forKey: newAutoKey)
+        }
+        UserDefaults.standard.removeObject(forKey: "client.lastConnectedHost")
+        UserDefaults.standard.removeObject(forKey: oldAutoKey)
     }
 
     /// Whether this host may be dialled without being asked.
@@ -809,11 +839,17 @@ final class ClientWorkspacesModel {
     /// Missing means on, and that is the intended default rather than an
     /// oversight: nothing dials on its own until somebody has connected to a
     /// machine by hand once, because the auto path needs
-    /// `client.lastConnectedHost` and only a successful connection writes it.
+    /// the account's last connected host and only a successful connection writes it.
     /// So the switch is an opt out of redialling the machine you were last
     /// on, not an opt in to being dialled.
-    static func isAutoConnectEnabled(for peerKey: String) -> Bool {
-        UserDefaults.standard.object(forKey: autoConnectKey(for: peerKey)) as? Bool ?? true
+    func isAutoConnectEnabled(for peerKey: String) -> Bool {
+        guard let key = autoConnectKey(for: peerKey) else { return false }
+        return UserDefaults.standard.object(forKey: key) as? Bool ?? true
+    }
+
+    func setAutoConnect(_ on: Bool, for peerKey: String) {
+        guard let key = autoConnectKey(for: peerKey) else { return }
+        UserDefaults.standard.set(on, forKey: key)
     }
 
     /// The one place that dials without being asked.
@@ -835,9 +871,9 @@ final class ClientWorkspacesModel {
     /// the last peer that was connected is remembered on disk instead.
     func autoConnectLastHost() async {
         guard connectedKey == nil, isConnecting == nil, pendingPeer == nil else { return }
-        guard let last = UserDefaults.standard.string(forKey: "client.lastConnectedHost"),
+        guard let last = lastConnectedHost,
               chosenPeer == nil || chosenPeer == last,
-              Self.isAutoConnectEnabled(for: last),
+              isAutoConnectEnabled(for: last),
               let host = hosts.first(where: { $0.peerKey == last }),
               host.online != false
         else { return }
@@ -973,9 +1009,11 @@ final class ClientWorkspacesModel {
                 let overviewNames = Dictionary(hosts.map { ($0.peerKey, $0.name) }, uniquingKeysWith: { first, _ in first })
                 Task { await LiveWorkController.shared.refreshOverview(peers: overviewPeers, names: overviewNames) }
                 #endif
-                UserDefaults.standard.set(host.peerKey, forKey: "client.lastConnectedHost")
+                if let key = lastConnectedHostKey {
+                    UserDefaults.standard.set(host.peerKey, forKey: key)
+                }
                 if chosenPeer == host.peerKey {
-                    UserDefaults.standard.set(true, forKey: Self.autoConnectKey(for: host.peerKey))
+                    setAutoConnect(true, for: host.peerKey)
                 }
                 errorMessage = nil
                 infoMessage = nil
@@ -1088,7 +1126,7 @@ final class ClientWorkspacesModel {
         // A tapped Disconnect is a persistent choice. Teardown for account
         // change only retires this model and must not change that choice.
         if manual, let peer = connectedKey ?? isConnecting ?? pendingPeer ?? chosenPeer {
-            UserDefaults.standard.set(false, forKey: Self.autoConnectKey(for: peer))
+            setAutoConnect(false, for: peer)
         }
         remoteRefresh?.task.cancel()
         remoteRefresh = nil

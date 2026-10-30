@@ -54,6 +54,7 @@ enum ClientRemote {
     var dialCount = 0
     func dial(_ host: ClientHost, recovering: Bool) async { dialCount += 1 }
     func disconnect(manual: Bool = true) { remoteLoadGeneration = UUID(); connectedKey = nil }
+    func migrateLegacyHost() {}
     var folders: [WorkspaceFolder] = [] { didSet { folderWrites += 1 } }; var folderWrites = 0
     var sessions: [PtySessionInfo] = [], recentChats: [ChatRecentConversation] = []
     var remoteRefresh: (ticket: UUID, peer: String, generation: UUID, task: Task<Void, Never>)?

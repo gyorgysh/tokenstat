@@ -129,8 +129,12 @@ enum class WorkSection(val key: String, val label: String, val detail: String) {
 /// How this device arranges the three work blocks once a host is connected.
 /// Device furniture, same idea as Home: the layout is not per host. Backed
 /// by SharedPreferences the way the Apple client uses UserDefaults.
-class WorkspaceLayoutStore(context: Context) {
+class WorkspaceLayoutStore(context: Context, private val accountScope: String) {
     private val prefs = context.getSharedPreferences("tokenstat.workspaces.v1", Context.MODE_PRIVATE)
+
+    private fun lastHostKey() = "lastConnectedHost.${accountScope.length}:$accountScope"
+    private fun autoConnectKey(peer: String) =
+        "autoConnect.${accountScope.length}:$accountScope${peer.length}:$peer"
 
     fun order(): List<WorkSection> {
         val keys = prefs.getString("order", null)
@@ -150,20 +154,37 @@ class WorkspaceLayoutStore(context: Context) {
             .apply()
     }
 
-    fun lastConnectedHost(): String? = prefs.getString("lastConnectedHost", null)
+    fun lastConnectedHost(): String? =
+        if (accountScope.isBlank()) null else prefs.getString(lastHostKey(), null)
 
     fun setLastConnectedHost(peer: String?) {
-        prefs.edit().putString("lastConnectedHost", peer).apply()
+        if (accountScope.isNotBlank()) prefs.edit().putString(lastHostKey(), peer).apply()
+    }
+
+    /// Carry the old single-account choice forward only when that host is
+    /// actually on the signed-in account. Remove the legacy keys after the
+    /// transfer so a later account cannot inherit the first account's host.
+    fun migrateLegacyHost(knownPeers: Set<String>) {
+        if (accountScope.isBlank()) return
+        val legacy = prefs.getString("lastConnectedHost", null) ?: return
+        if (legacy !in knownPeers || prefs.contains(lastHostKey())) return
+        val editor = prefs.edit()
+        editor.putString(lastHostKey(), legacy)
+        val oldAutoKey = "autoConnect.$legacy"
+        if (prefs.contains(oldAutoKey) && !prefs.contains(autoConnectKey(legacy))) {
+            editor.putBoolean(autoConnectKey(legacy), prefs.getBoolean(oldAutoKey, true))
+        }
+        editor.remove("lastConnectedHost").remove(oldAutoKey).apply()
     }
 
     /// Missing means on. Nothing dials on its own until somebody has
     /// connected by hand once, because the auto path needs the last host and
     /// only a successful connection writes it.
     fun isAutoConnectEnabled(peer: String): Boolean =
-        prefs.getBoolean("autoConnect.$peer", true)
+        accountScope.isNotBlank() && prefs.getBoolean(autoConnectKey(peer), true)
 
     fun setAutoConnectEnabled(peer: String, enabled: Boolean) {
-        prefs.edit().putBoolean("autoConnect.$peer", enabled).apply()
+        if (accountScope.isNotBlank()) prefs.edit().putBoolean(autoConnectKey(peer), enabled).apply()
     }
 }
 
