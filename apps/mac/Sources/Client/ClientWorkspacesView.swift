@@ -1031,7 +1031,7 @@ final class ClientWorkspacesModel {
             host.peerKey != lastConnectedHost && host.peerKey != connectedKey &&
                 host.online != false && isAutoConnectEnabled(for: host.peerKey) &&
                 (forceRefresh || hostSnapshots[host.peerKey].map { Date().timeIntervalSince($0.loadedAt) > 60 } ?? true) &&
-                Date() >= (nextBackgroundAttempt[host.peerKey] ?? .distantPast)
+                (forceRefresh || Date() >= (nextBackgroundAttempt[host.peerKey] ?? .distantPast))
         }
         guard !candidates.isEmpty else { return }
         backgroundSweep = Task { [weak self] in
