@@ -2256,9 +2256,9 @@ private fun ChatAgentMenuItem(label: String, checked: Boolean, onClick: () -> Un
     )
 }
 
-/// One conversation row: harness mark, running dot, the title, and one quiet
-/// line with the agent and how long ago. Plan or Execute is the chat's own
-/// setting and shows inside it; on the list it was a third line to read past.
+/// Keep the agent, mode and recency on separate lines, as in the iPhone list.
+/// The mode changes what the next turn may do and should be visible before
+/// opening a conversation.
 @Composable
 private fun ChatRow(chat: JsonObject) {
     val colors = LocalTsColors.current
@@ -2281,19 +2281,20 @@ private fun ChatRow(chat: JsonObject) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    harnessName(chat.str("backend") ?: "?"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (atMs != null) {
-                    Text("·", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                    RelativeTimeText(atMs, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, compact = true)
-                }
-            }
+            val mode = if (chat.str("mode") == "plan")
+                L10n.text("android.chatpullssections.plan.fa8ed0bd")
+            else L10n.text("android.chatpullssections.execute.e3a67d95")
+            Text(
+                "${harnessName(chat.str("backend") ?: "?")} · $mode",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.accent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (atMs != null) RelativeTimeText(
+                atMs, style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary, compact = true,
+            )
         }
         (chat["pull"] as? JsonObject)?.let { BranchPullBadge(it) }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.controlGlyph)
