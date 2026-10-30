@@ -17,6 +17,8 @@ dependency and its license notice. Its WebView has no browsing profile, blocks
 network loads, and accepts only the selected attachment bytes. A 12 MB limit
 bounds inline preview work; the original file remains downloadable. Drag to
 orbit, pinch or scroll to zoom, and drag with the secondary pointer to pan.
+The viewer draws only while the camera or viewport changes. Its 44-point
+Reset view control returns to the initial framing.
 
 Next steps: verify the Windows view on Windows hardware; test real project
 exports from each engine, especially FBX materials and GLB skinning; make
