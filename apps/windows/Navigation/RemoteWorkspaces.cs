@@ -66,6 +66,10 @@ internal static class RemoteWorkspaces
     private static readonly HashSet<string> EverAnswered = new(StringComparer.Ordinal);
     private static readonly HashSet<string> AskedWorkspace = new(StringComparer.Ordinal);
     private static readonly HashSet<string> Connected = new(StringComparer.Ordinal);
+    private static readonly HostAutoConnectPreferences AutoConnect = new(
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "remote-autoconnect-scoped.json"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "remote-autoconnect.json"));
+    private static string? _accountScope;
 
     /// <summary>Forget every host snapshot when the account identity changes.</summary>
     public static void ResetForAccountChange()
@@ -79,6 +83,7 @@ internal static class RemoteWorkspaces
             EverAnswered.Clear();
             AskedWorkspace.Clear();
             Connected.Clear();
+            _accountScope = null;
         }
         Changed?.Invoke();
     }
@@ -235,6 +240,15 @@ internal static class RemoteWorkspaces
     {
         var account = AppServices.AccountGeneration;
         var name = string.IsNullOrEmpty(label) ? L10n.Text("windows.remoteworkspaces.that_machine.1c4194c9") : label;
+        try
+        {
+            SetAccountScope(await AppServices.Host.CallAsync("account.status"), account);
+            lock (Gate) { if (account != AppServices.AccountGeneration || _accountScope is null) return AccountChangedResult(); }
+        }
+        catch (Exception ex)
+        {
+            return new RemoteConnectResult(false, FriendlyError.Display(ex.Message), false);
+        }
         if (!tunnelOn)
         {
             return new RemoteConnectResult(
@@ -259,7 +273,7 @@ internal static class RemoteWorkspaces
                 FoldersByPeer[peerKey] = folders;
                 Connected.Add(peerKey);
             }
-            SetAutoConnect(true, peerKey);
+            SetAutoConnect(true, peerKey, account);
             Changed?.Invoke();
             return new RemoteConnectResult(
                 true, L10n.Text("windows.remoteworkspaces.connected_to_0_its_workspaces_are_now_avai.c79dc8f5", $"{name}"), true);
@@ -319,6 +333,23 @@ internal static class RemoteWorkspaces
 
     private static RemoteConnectResult AccountChangedResult() =>
         new(false, L10n.Text("windows.remoteworkspaces.account_changed"), false);
+
+    /// <summary>Set the verified account before reading or writing reconnect choices.</summary>
+    public static void SetAccountScope(JsonNode status, long accountGeneration)
+    {
+        var scope = BrowserProjectMemory.Scope(status);
+        var account = status["account"] ?? status;
+        var members = (account["machines"] as JsonArray ?? new JsonArray())
+            .OfType<JsonNode>()
+            .Select(machine => Format.Text(machine, "publicIdentity"))
+            .Where(key => key.Length > 0);
+        lock (Gate)
+        {
+            if (accountGeneration != AppServices.AccountGeneration) return;
+            _accountScope = scope;
+            AutoConnect.Migrate(scope, members);
+        }
+    }
 
     /// <summary>
     /// Drop the peer's folders from the sidebar now. The connection itself is
@@ -389,6 +420,9 @@ internal static class RemoteWorkspaces
         List<(string Key, string Label, string? Address)> peers;
         try
         {
+            var accountStatus = await AppServices.Host.CallAsync("account.status");
+            SetAccountScope(accountStatus, account);
+            lock (Gate) { if (account != AppServices.AccountGeneration || _accountScope is null) return; }
             var status = await AppServices.Host.CallAsync("remote.status");
             tunnelOn = status?["tunnel"]?.GetValue<bool>() ?? false;
             var listed = await AppServices.Host.CallAsync("machine.peers") as JsonArray ?? new();
@@ -583,11 +617,6 @@ internal static class RemoteWorkspaces
         return folders;
     }
 
-    private static string PrefsPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "tokenstat",
-        "remote-autoconnect.json");
-
     /// <summary>
     /// Whether the sweep dials this peer on its own. On by default, like the
     /// desktop Mac and the phone: an explicit Connect turns it back on, the
@@ -602,66 +631,17 @@ internal static class RemoteWorkspaces
         }
     }
 
-    public static void SetAutoConnect(bool on, string peerKey)
+    public static void SetAutoConnect(bool on, string peerKey, long? accountGeneration = null)
     {
         lock (Gate)
         {
-            var prefs = ReadPrefsLocked();
-            prefs[peerKey] = on;
-            WritePrefsLocked(prefs);
+            if (accountGeneration.HasValue && accountGeneration != AppServices.AccountGeneration) return;
+            AutoConnect.Set(_accountScope, peerKey, on);
         }
     }
 
     private static bool IsAutoConnectEnabledLocked(string peerKey)
     {
-        var prefs = ReadPrefsLocked();
-        return !prefs.TryGetValue(peerKey, out var on) || on;
-    }
-
-    private static Dictionary<string, bool> ReadPrefsLocked()
-    {
-        try
-        {
-            if (!File.Exists(PrefsPath))
-            {
-                return new Dictionary<string, bool>(StringComparer.Ordinal);
-            }
-            var parsed = JsonNode.Parse(File.ReadAllText(PrefsPath)) as JsonObject;
-            var prefs = new Dictionary<string, bool>(StringComparer.Ordinal);
-            if (parsed is not null)
-            {
-                foreach (var (key, value) in parsed)
-                {
-                    if (value is JsonValue v
-                        && v.GetValueKind() is JsonValueKind.True or JsonValueKind.False)
-                    {
-                        prefs[key] = v.GetValue<bool>();
-                    }
-                }
-            }
-            return prefs;
-        }
-        catch
-        {
-            return new Dictionary<string, bool>(StringComparer.Ordinal);
-        }
-    }
-
-    private static void WritePrefsLocked(Dictionary<string, bool> prefs)
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(PrefsPath)!);
-            var obj = new JsonObject();
-            foreach (var (key, value) in prefs)
-            {
-                obj[key] = value;
-            }
-            File.WriteAllText(PrefsPath, obj.ToJsonString());
-        }
-        catch
-        {
-            // The toggle simply does not survive a restart.
-        }
+        return AutoConnect.IsEnabled(_accountScope, peerKey);
     }
 }

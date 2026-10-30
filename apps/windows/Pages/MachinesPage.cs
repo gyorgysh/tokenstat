@@ -167,6 +167,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             try
             {
                 _account = await AppServices.Host.CallAsync("account.status");
+                RemoteWorkspaces.SetAccountScope(_account, accountGeneration);
                 if (!(_account?["signedIn"]?.GetValue<bool>() ?? false))
                 {
                     _selectedId = null;
@@ -284,6 +285,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             return;
         }
         _account = account;
+        RemoteWorkspaces.SetAccountScope(account, accountGeneration);
 
         try
         {

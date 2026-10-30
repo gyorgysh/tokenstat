@@ -47,6 +47,7 @@ try
         "Already-native workspace ownership changed on forwarding");
     TerminalPaneSelectionTests.Run(directory);
     SidebarPreferencesTests.Run(directory);
+    HostAutoConnectPreferencesTests.Run(directory);
     await TerminalSessionTests.RunAsync();
     var path = Path.Combine(directory, "widths.json");
     var widths = new ShellWidths(path);
