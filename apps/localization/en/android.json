@@ -20,6 +20,8 @@
   "android.appviewmodel.the_sign_in_code_expired_before_it_was_con.84ac1b4b": "The sign-in code expired before it was confirmed.",
   "android.appviewmodel.this_device_is_offline.84b7cf97": "This device is offline.",
   "android.appviewmodel.waiting_for_the_network.76a08f16": "Waiting for the network.",
+  "android.chatmodel.preview": "Preview 3D",
+  "android.chatmodel.preview_unavailable": "This model is too large or could not be read for an inline preview. Save the original file instead.",
   "android.automationeditor.0_unavailable.1212b25c": "{0} · Unavailable",
   "android.automationeditor.automation.d909750b": "Automation",
   "android.automationeditor.changed_on_the_computer.aefb92cf": "Changed on the computer",

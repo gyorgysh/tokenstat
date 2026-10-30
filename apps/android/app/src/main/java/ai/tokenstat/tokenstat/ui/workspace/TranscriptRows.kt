@@ -859,7 +859,7 @@ private fun AttachmentRow(
             if (failure != null) {
                 Text(failure!!, style = TextStyle(fontSize = 12.sp), color = colors.danger)
             }
-            TsSecondaryButton(label = if (downloadedFile != null) L10n.text("common.save") else if (busy) "${(progress * 100).toInt()}%" else L10n.text("android.transcriptrows.download.d6eafe82"),
+            TsSecondaryButton(label = if (downloadedFile != null) L10n.text("common.save") else if (busy) "${(progress * 100).toInt()}%" else if (canPreviewModel(item.name)) L10n.text("android.chatmodel.preview") else L10n.text("android.transcriptrows.download.d6eafe82"),
                 small = true, enabled = !busy, onClick = {
                     if (downloadedFile != null) { save.launch(item.name) }
                     else {

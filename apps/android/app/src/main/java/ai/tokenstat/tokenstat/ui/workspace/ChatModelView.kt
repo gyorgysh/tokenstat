@@ -10,6 +10,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -20,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,24 +30,41 @@ import java.io.File
 internal fun canPreviewModel(name: String): Boolean =
     name.substringAfterLast('.', "").lowercase() in setOf("glb", "gltf", "fbx", "obj", "stl", "ply")
 
+private sealed interface ModelPayload {
+    data object Loading : ModelPayload
+    data object Unavailable : ModelPayload
+    data class Ready(val base64: String) : ModelPayload
+}
+
 @Composable
 internal fun ChatModelView(name: String, file: File) {
-    val dark = LocalTsColors.current.background.luminance() < 0.5f
-    var encoded by remember(file.path, file.lastModified()) { mutableStateOf<String?>(null) }
+    val colors = LocalTsColors.current
+    val dark = colors.background.luminance() < 0.5f
+    var payload by remember(file.path, file.lastModified()) { mutableStateOf<ModelPayload>(ModelPayload.Loading) }
     LaunchedEffect(file.path, file.lastModified()) {
-        encoded = withContext(Dispatchers.IO) {
-            if (file.length() !in 1..12L * 1024 * 1024) null
-            else Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
+        payload = withContext(Dispatchers.IO) {
+            runCatching {
+                if (file.length() !in 1..12L * 1024 * 1024) ModelPayload.Unavailable
+                else ModelPayload.Ready(Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
+            }.getOrDefault(ModelPayload.Unavailable)
         }
     }
-    val data = encoded ?: return
-    AndroidView(
-        factory = { ModelWebSurface(it) },
-        modifier = Modifier.fillMaxWidth().height(260.dp),
-        onReset = null,
-        onRelease = { it.shutdown() },
-        update = { it.render(data, name.substringAfterLast('.', "").lowercase(), if (dark) "#08070d" else "#fbfbfd") },
-    )
+    when (val result = payload) {
+        ModelPayload.Loading -> return
+        ModelPayload.Unavailable -> {
+            Text(L10n.text("android.chatmodel.preview_unavailable"), color = colors.textSecondary)
+            return
+        }
+        is ModelPayload.Ready -> {
+            AndroidView(
+                factory = { ModelWebSurface(it) },
+                modifier = Modifier.fillMaxWidth().height(260.dp),
+                onReset = null,
+                onRelease = { it.shutdown() },
+                update = { it.render(result.base64, name.substringAfterLast('.', "").lowercase(), if (dark) "#08070d" else "#fbfbfd") },
+            )
+        }
+    }
 }
 
 @SuppressLint("SetJavaScriptEnabled")
