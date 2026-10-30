@@ -27,6 +27,20 @@ let model = null;
 let active = true;
 let initialPosition = null;
 let initialTarget = null;
+let renderPending = false;
+
+function requestRender() {
+    if (!active || renderPending) return;
+    renderPending = true;
+    requestAnimationFrame(() => {
+        renderPending = false;
+        if (!active) return;
+        // Damping emits another change event until the orbit settles.
+        controls.update();
+        renderer.render(scene, camera);
+    });
+}
+controls.addEventListener("change", requestRender);
 
 reset.addEventListener("click", () => {
     if (!initialPosition || !initialTarget) return;
@@ -41,17 +55,10 @@ function resize() {
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    requestRender();
 }
 new ResizeObserver(resize).observe(canvas);
 resize();
-
-function animate() {
-    if (!active) return;
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
-}
-animate();
 
 function decode(base64) {
     const binary = atob(base64);
@@ -119,6 +126,7 @@ export async function load(base64, extension, background) {
         model = next;
         scene.add(model);
         frame(model);
+        requestRender();
         status.hidden = true;
         reset.hidden = false;
         return true;
