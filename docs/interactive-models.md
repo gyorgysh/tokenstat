@@ -13,10 +13,11 @@ Status: portable model preview implemented on Apple, Android, and Windows
 | Godot `.tscn`, Unity `.prefab`/`.unity`, Unreal `.uasset` | Download only | These are project assets with engine-specific references. A faithful preview needs export through the owning engine. |
 
 The renderer is bundled in `apps/charts/runtime` with a pinned Three.js
-dependency and its license notice. Its WebView has no browsing profile, blocks
-network loads, and accepts only the selected attachment bytes. A 12 MB limit
-bounds inline preview work; the original file remains downloadable. Drag to
-orbit, pinch or scroll to zoom, and drag with the secondary pointer to pan.
+dependency and its license notice. It loads from a local virtual origin with a
+restrictive content policy; clients block navigation and external network
+loads. A 12 MB limit bounds inline preview work; the original file remains
+downloadable. Drag to orbit, pinch or scroll to zoom, and drag with the
+secondary pointer to pan.
 The viewer draws only while the camera or viewport changes. Its 44-point
 Reset view control returns to the initial framing.
 
