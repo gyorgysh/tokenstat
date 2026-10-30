@@ -37,6 +37,7 @@ class WorkspacesConnectionState {
         backgroundNextAt.keys.retainAll(peers)
         backgroundTickets.keys.retainAll(peers)
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value.intersect(peers)
+        mutableConnectingPeer.value?.takeIf { it !in peers }?.let(::cancelConnecting)
         if (mutableConnectedPeer.value?.let { it !in peers } == true) {
             disconnect()
             mutableHost.value = null
@@ -146,6 +147,23 @@ class WorkspacesConnectionState {
 
     fun finishConnecting(ticket: Long) {
         if (isCurrentConnection(ticket)) mutableConnectingPeer.value = null
+    }
+
+    private fun cancelConnecting(peer: String) {
+        if (mutableConnectingPeer.value != peer) return
+        // The caller checks this ticket after every remote step. Revoking a
+        // host while its access check is in flight must invalidate the answer
+        // before it can publish folders for a machine no longer on the account.
+        connectionTicket++
+        mutableConnectingPeer.value = null
+        if (mutableConnectedPeer.value == null) {
+            if (mutableHost.value?.str("publicIdentity") == peer) mutableHost.value = null
+            mutableAllowed.value = null
+            mutableLoadingFolders.value = false
+            mutableRequestNotice.value = null
+            mutableError.value = null
+            clearLists()
+        }
     }
 
     private val mutableHost = MutableStateFlow<JsonObject?>(null)
@@ -296,7 +314,8 @@ class WorkspacesConnectionState {
         invalidateBackground(peer)
         backgroundAttempts.remove(peer)
         backgroundNextAt.remove(peer)
-        if (mutableConnectedPeer.value == peer || mutableConnectingPeer.value == peer) disconnect()
+        if (mutableConnectedPeer.value == peer) disconnect()
+        else cancelConnecting(peer)
     }
 
     fun clearAll() {

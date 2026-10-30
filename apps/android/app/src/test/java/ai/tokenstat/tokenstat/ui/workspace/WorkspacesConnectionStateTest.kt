@@ -75,6 +75,29 @@ class WorkspacesConnectionStateTest {
         assertTrue(state.connectedHosts.value.isEmpty())
     }
 
+    @Test fun removingAHostCancelsItsForegroundDialWithoutDroppingAnotherHost() {
+        val state = WorkspacesConnectionState()
+        state.setAccountOwner("account-one")
+        state.setKnownHosts(setOf("peer-a", "peer-b"))
+        state.setHost(host("peer-a"))
+        state.setConnected("peer-a", true)
+        state.setLists(JsonArray(listOf(folder("Alpha"))), JsonArray(emptyList()), JsonArray(emptyList()))
+
+        val first = state.beginConnecting("peer-b", explicit = true)!!
+        state.disconnectHost("peer-b")
+        assertFalse(state.isCurrentConnection(first))
+        assertEquals(null, state.connectingPeer.value)
+        assertEquals("peer-a", state.connectedPeer.value)
+        assertEquals("Alpha", (state.folders.value.single() as kotlinx.serialization.json.JsonObject).str("name"))
+
+        val removed = state.beginConnecting("peer-b", explicit = true)!!
+        state.setKnownHosts(setOf("peer-a"))
+        assertFalse(state.isCurrentConnection(removed))
+        assertEquals(null, state.connectingPeer.value)
+        assertEquals("peer-a", state.connectedPeer.value)
+        assertEquals(setOf("peer-a"), state.connectedHosts.value)
+    }
+
     @Test fun retainedHostRefreshKeepsWorkUntilSuccessAndClearsItWhenAccessIsRevoked() {
         val state = WorkspacesConnectionState()
         state.setAccountOwner("account-one")
