@@ -3291,9 +3291,17 @@ internal fun ChatComposer(
                     }
                 }
             }
+            OutlinedTextField(
+                draft,
+                onDraft,
+                Modifier.fillMaxWidth().then(fieldModifier),
+                placeholder = { Text(hint) },
+                maxLines = if (expanded) 18 else 5,
+            )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 IconButton(onClick = onPick, enabled = !sending && attachmentEnabled) {
                     Icon(
@@ -3326,13 +3334,7 @@ internal fun ChatComposer(
                         }
                     }
                 }
-                OutlinedTextField(
-                    draft,
-                    onDraft,
-                    Modifier.weight(1f).then(fieldModifier),
-                    placeholder = { Text(hint) },
-                    maxLines = if (expanded) 18 else 5,
-                )
+                Spacer(Modifier.weight(1f))
                 if (sending) {
                     IconButton(onClick = onStop) {
                         Icon(ActionIcon.Stop.vector, L10n.text("common.stop"), tint = colors.danger)

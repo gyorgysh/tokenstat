@@ -39,7 +39,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -258,7 +257,7 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
         when (val state = phase) {
             Phase.Loading -> CircularProgressIndicator()
             Phase.Unavailable -> EmptyState(title = L10n.text("common.teams.load_failed"), message = L10n.text("common.teams.retry_detail"))
-            Phase.Authorize -> AuthorizeCard(calls) { scope.launch { load() } }
+            Phase.Authorize -> AuthorizeCard { scope.launch { load() } }
             is Phase.Failed -> EmptyState(title = L10n.text("common.teams.load_failed"), message = state.message, action = {
                 TsAccentButton(L10n.text("common.retry"), onClick = { scope.launch { load() } }, icon = ActionIcon.Refresh.vector)
             })
@@ -305,35 +304,10 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
 }
 
 @Composable
-private fun AuthorizeCard(calls: TeamCalls, onDone: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    val uri = LocalUriHandler.current
-    var error by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
+private fun AuthorizeCard(onDone: () -> Unit) {
     TsCard(title = L10n.text("common.teams.enable_title"), subtitle = L10n.text("common.teams.device_consent_detail")) {
-        Text(L10n.text("common.teams.metadata_disclosure"), color = LocalTsColors.current.textSecondary)
-        error?.let { Text(it, color = LocalTsColors.current.danger) }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TsAccentButton(L10n.text("common.teams.continue_browser"), enabled = !busy, icon = ActionIcon.External.vector, onClick = {
-                scope.launch {
-                    busy = true
-                    try {
-                        val preview = calls.call("teams.authorizationPreview")
-                        val prepared = calls.call("teams.prepareAuthorization", buildJsonObject {
-                            put("confirmMetadata", true); put("expectedDeviceKey", preview.str("deviceKey") ?: "")
-                        })
-                        prepared.str("authorizationURL")?.let { uri.openUri(it) }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (failure: Throwable) {
-                        error = failure.message
-                    } finally {
-                        busy = false
-                    }
-                }
-            })
-            TsSecondaryButton(L10n.text("common.refresh"), onClick = onDone, icon = ActionIcon.Refresh.vector)
-        }
+        Text(L10n.text("common.teams.retry_detail"), color = LocalTsColors.current.textSecondary)
+        TsSecondaryButton(L10n.text("common.retry"), onClick = onDone, icon = ActionIcon.Refresh.vector)
     }
 }
 

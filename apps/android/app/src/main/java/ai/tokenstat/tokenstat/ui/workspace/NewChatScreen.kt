@@ -11,14 +11,15 @@ import ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions
 import ai.tokenstat.tokenstat.ui.logic.LaunchDefaults
 import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
 import ai.tokenstat.tokenstat.ui.logic.SharedPrefsLaunchChoice
+import ai.tokenstat.tokenstat.ui.marks.LogoMark
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
+import ai.tokenstat.tokenstat.ui.theme.Space
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -30,6 +31,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.*
@@ -205,9 +207,13 @@ fun NewChatScreen(
             // The way out holds its place at the top while the page under it
             // reflows. No keyboard button here: the app's own bar above this
             // page already grows one whenever the keyboard is up.
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) { Icon(ActionIcon.Dismiss.vector, L10n.text("common.close"), tint = colors.textPrimary) }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(L10n.text("android.tokenstatapp.new_chat.db18382a"), style = MaterialTheme.typography.titleMedium,
+                    color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) {
+                    Icon(ActionIcon.Dismiss.vector, L10n.text("common.close"), tint = colors.textPrimary)
+                }
             }
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 // What is left after the keyboard has taken its share, and
@@ -231,13 +237,9 @@ fun NewChatScreen(
                     // leaves most of the page still leaves room for the
                     // heading, and dropping it there was what left a third of
                     // the screen empty above the composer.
-                    if (roomForHeading) {
-                        Row(Modifier.height(44.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                            listOf(22, 36, 28).forEach { height -> Box(Modifier.width(7.dp).height(height.dp).background(colors.accent, RoundedCornerShape(3.dp))) }
-                        }
-                    }
+                    if (roomForHeading) LogoMark(size = 36)
                     if (roomForTitle) {
-                        Text(newChatCopy("title"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold,
+                        Text(newChatCopy("title"), style = MaterialTheme.typography.headlineSmall.copy(fontSize = 24.sp), fontWeight = FontWeight.Medium,
                             color = colors.textPrimary, textAlign = TextAlign.Center)
                     }
                     if (roomForHeading && hosts.isNotEmpty()) {
@@ -247,9 +249,12 @@ fun NewChatScreen(
                         NoComputerConnected(onSetupMachine)
                     } else {
                         Box(Modifier.fillMaxWidth()) {
-                            OutlinedButton(onClick = { hostMenu = true }, enabled = !connecting, modifier = Modifier.fillMaxWidth()) {
-                                Text(hosts.firstOrNull { it.newChatText("publicIdentity") == connectedPeer }?.newChatText("label")?.takeIf { it.isNotBlank() } ?: newChatCopy("choose_host"))
-                            }
+                            TsPickerField(
+                                summary = hosts.firstOrNull { it.newChatText("publicIdentity") == connectedPeer }
+                                    ?.newChatText("label")?.takeIf { it.isNotBlank() } ?: newChatCopy("choose_host"),
+                                onOpen = { hostMenu = true }, enabled = !connecting,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                             DropdownMenu(expanded = hostMenu, onDismissRequest = { hostMenu = false }) {
                                 hosts.forEach { host -> DropdownMenuItem(text = { Text(host.newChatText("label")) }, onClick = { hostMenu = false; onHost(host) }) }
                                 DropdownMenuItem(text = { Text(L10n.text("common.devices")) }, onClick = { hostMenu = false; onManageDevices() })
@@ -260,21 +265,27 @@ fun NewChatScreen(
                         // happen without.
                         val litRepository = connectedPeer != null && !connecting && selected == null
                         Box(Modifier.fillMaxWidth()) {
-                            OutlinedButton(onClick = { repositoryMenu = true }, enabled = connectedPeer != null && !connecting,
-                                modifier = Modifier.fillMaxWidth().testTag("newChat.repository")) {
-                                Text(selected?.newChatText("name") ?: newChatCopy("choose_repository"))
-                            }
+                            TsPickerField(
+                                summary = selected?.newChatText("name") ?: newChatCopy("choose_repository"),
+                                onOpen = { repositoryMenu = true }, enabled = connectedPeer != null && !connecting,
+                                modifier = Modifier.fillMaxWidth().testTag("newChat.repository"),
+                            )
                             // Over the button, not under it: the button draws its
                             // own quiet outline on top of anything behind it. The
                             // ring carries no input, so the button still takes the
                             // tap through it.
-                            if (litRepository) Box(Modifier.matchParentSize().border(1.dp, colors.accent, CircleShape))
+                            if (litRepository) Box(Modifier.matchParentSize().border(1.dp, colors.accent, RoundedCornerShape(Space.s)))
                             DropdownMenu(expanded = repositoryMenu, onDismissRequest = { repositoryMenu = false }) {
                                 folders.forEach { folder -> DropdownMenuItem(text = { Column { Text(folder.newChatText("name")); Text(folder.newChatText("path"), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary) } },
                                     onClick = { repositoryMenu = false; onRepository(folder.newChatText("id")) }) }
                             }
                         }
-                        TextButton(onClick = onAdd, enabled = connectedPeer != null && !connecting) { Icon(ActionIcon.Create.vector, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text(newChatCopy("add_repository")) }
+                        TextButton(onClick = onAdd, enabled = connectedPeer != null && !connecting,
+                            modifier = Modifier.align(Alignment.Start).heightIn(min = 48.dp)) {
+                            Icon(ActionIcon.Create.vector, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(newChatCopy("add_repository"))
+                        }
                         if (connectedPeer == null) {
                             Text(newChatCopy("connect_host_message"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                         } else if (folders.isEmpty() && !connecting) {
