@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.workspace
 
 import java.io.File
+import java.security.MessageDigest
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -16,6 +17,24 @@ import org.junit.rules.TemporaryFolder
 
 class ChatFileTransfersTest {
     @get:Rule val temporary = TemporaryFolder()
+
+    @Test fun completedCachedDownloadDoesNotAskForRelayAgain() = runBlocking {
+        val directory = temporary.newFolder()
+        val bytes = "a small GLB".toByteArray()
+        fun sha(value: ByteArray) = MessageDigest.getInstance("SHA-256").digest(value).joinToString("") { "%02x".format(it.toInt() and 255) }
+        val checksum = sha(bytes)
+        val key = sha("owner|chat|attachment|$checksum".toByteArray())
+        val cached = File(File(directory, key).apply { mkdirs() }, "rocket.glb").apply { writeBytes(bytes) }
+        val result = downloadChatFile(directory, "chat", "attachment", "owner",
+            call = { method, _ -> when (method) {
+                "protocol" -> buildJsonObject { put("protocolVersion", 34) }
+                "chat.fileCapabilities" -> buildJsonObject { put("maxFileBytes", FILE_MAX); put("relay", true); put("relayRemainingBytes", 1234) }
+                "chat.fileDownloadInfo" -> buildJsonObject { put("sha256", checksum); put("attachment", buildJsonObject { put("name", "rocket.glb"); put("size", bytes.size) }) }
+                else -> error("A completed cache entry must not request a chunk: $method")
+            } },
+            confirm = { error("A completed cache entry must not ask for relay allowance") }, progress = {})
+        assertEquals(cached, result)
+    }
 
     @Test
     fun automaticPreviewLimitIsCheckedAgainstTheHostDescriptorBeforeDownloading() = runBlocking {

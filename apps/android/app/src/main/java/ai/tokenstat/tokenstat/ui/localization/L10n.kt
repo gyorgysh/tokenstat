@@ -31,13 +31,17 @@ internal class LanguageCatalog(private val strings: Map<String, String>) {
     fun text(key: String, arguments: List<String> = emptyList()): String {
         val template = strings[key] ?: return key
         if (arguments.isEmpty()) return template
-        return placeholder.replace(template) { match ->
+        val indexed = placeholder.replace(template) { match ->
             match.groupValues[1].toIntOrNull()?.let(arguments::getOrNull) ?: match.value
+        }
+        return applePlaceholder.replace(indexed) { match ->
+            match.groupValues[1].toIntOrNull()?.minus(1)?.let(arguments::getOrNull) ?: match.value
         }
     }
 
     companion object {
         private val placeholder = Regex("\\{([0-9]+)\\}")
+        private val applePlaceholder = Regex("%([0-9]+)\\$@")
 
         internal fun decode(source: String): Map<String, String> = runCatching {
             Json.parseToJsonElement(source).jsonObject.mapValues {

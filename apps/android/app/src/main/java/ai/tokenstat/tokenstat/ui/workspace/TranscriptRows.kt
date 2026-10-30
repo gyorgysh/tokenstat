@@ -60,7 +60,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -833,55 +832,115 @@ private fun AttachmentRow(
     androidx.compose.runtime.DisposableEffect(item.attachmentId, fileOwner) { onDispose { relayAnswer?.complete(false); job?.cancel() } }
     relayAnswer?.let { answer ->
         androidx.compose.material3.AlertDialog(onDismissRequest = { answer.complete(false) },
-            title = { Text(L10n.text("common.chat_files_relay_title")) }, text = { Column { Text(L10n.text("common.chat_files_relay_message", item.name, "${(item.size ?: 0) / 1048576} MB")); relayRemaining?.let { Text(L10n.text("common.chat_files_remaining", "${it / 1048576} MB")) } } },
+            title = { Text(L10n.text("common.chat_files_relay_title")) },
+            text = {
+                Column {
+                    Text(L10n.text("common.chat_files_relay_message", item.name,
+                        ai.tokenstat.tokenstat.ui.connection.formatTrafficBytes(item.size ?: 0)))
+                    relayRemaining?.let {
+                        Text(L10n.text("common.chat_files_remaining",
+                            ai.tokenstat.tokenstat.ui.connection.formatTrafficBytes(it)))
+                    }
+                }
+            },
             confirmButton = { androidx.compose.material3.TextButton(onClick = { answer.complete(true) }) { Text(L10n.text("common.continue")) } },
             dismissButton = { androidx.compose.material3.TextButton(onClick = { answer.complete(false) }) { Text(L10n.text("common.cancel")) } })
     }
-    Card {
-        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-            Text(
-                item.name,
-                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                color = colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            val detail = listOfNotNull(
-                item.mediaType,
-                item.size?.let { L10n.text("android.transcriptrows.0_bytes.5ad0649b", "${it}") },
-            ).joinToString(" · ")
-            if (detail.isNotBlank()) {
-                Text(detail, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
+    val isModel = canPreviewModel(item.name)
+    LaunchedEffect(item.attachmentId, fileOwner) {
+        val owner = fileOwner ?: return@LaunchedEffect
+        val size = item.size ?: return@LaunchedEffect
+        if (!isModel || size !in 1..1_048_576L) return@LaunchedEffect
+        // Small previews arrive quietly over a direct route. Relay transfers
+        // still wait for the explicit Preview action and its allowance prompt.
+        repeat(5) {
+            if (downloadedFile != null || busy) return@LaunchedEffect
+            if (model.peerRoute(peer) == "direct") {
+                busy = true
+                try {
+                    val file = downloadChatFile(java.io.File(context.cacheDir, "chat-downloads"), chatId, item.attachmentId, owner.key,
+                        call = { method, request -> check(ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == owner); model.workspaceSection(peer, method, request) },
+                        confirm = { false }, progress = {}, byteLimit = 1_048_576L)
+                    if (ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == owner) downloadedFile = file
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { /* Keep the manual Preview action available. */ }
+                finally { busy = false }
+                return@LaunchedEffect
             }
-            if (downloadedFile != null && canPreviewModel(item.name)) {
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
+    val attachmentShape = RoundedCornerShape(18.dp)
+    Column(
+        Modifier.fillMaxWidth().clip(attachmentShape).background(colors.panel)
+            .border(1.dp, colors.border, attachmentShape).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.m),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            if (isModel) {
+                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(colors.accentSoft).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    Text("3D", style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold), color = colors.accent)
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                Text(item.name, style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                    color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val detail = listOfNotNull(
+                    if (isModel) item.name.substringAfterLast('.', "").uppercase() else item.mediaType,
+                    item.size?.let { ai.tokenstat.tokenstat.ui.connection.formatTrafficBytes(it) },
+                ).joinToString(" · ")
+                if (detail.isNotBlank()) {
+                    Text(detail, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
+                }
+            }
+        }
+        if (downloadedFile != null && isModel) {
+            val previewShape = RoundedCornerShape(14.dp)
+            Box(Modifier.fillMaxWidth().clip(previewShape).background(colors.background)
+                .border(1.dp, colors.border, previewShape)) {
                 ChatModelView(item.name, downloadedFile!!)
             }
-            if (failure != null) {
-                Text(failure!!, style = TextStyle(fontSize = 12.sp), color = colors.danger)
+        }
+        failure?.let { Text(it, style = TextStyle(fontSize = 12.sp), color = colors.danger) }
+        val action = when {
+            downloadedFile != null -> L10n.text("common.save")
+            busy -> "${(progress * 100).toInt()}%"
+            isModel -> L10n.text("android.chatmodel.preview")
+            else -> L10n.text("android.transcriptrows.download.d6eafe82")
+        }
+        val onAction: () -> Unit = {
+            if (downloadedFile != null) save.launch(item.name)
+            else {
+                busy = true
+                job = scope.launch {
+                    try {
+                        val owner = ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId)
+                            ?: error("Sign in before downloading this file")
+                        downloadedFile = downloadChatFile(java.io.File(context.cacheDir, "chat-downloads"), chatId, item.attachmentId, owner.key,
+                            call = { method, request -> check(ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == owner); model.workspaceSection(peer, method, request) },
+                            confirm = { remaining -> relayRemaining = remaining; val answer = kotlinx.coroutines.CompletableDeferred<Boolean>(); relayAnswer = answer; try { answer.await() } finally { relayAnswer = null } },
+                            progress = { progress = it })
+                        check(ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == owner)
+                        failure = null
+                        if (!isModel) save.launch(item.name)
+                    } catch (error: Exception) {
+                        if (error !is kotlinx.coroutines.CancellationException) failure = TunnelCopy.display(error.message ?: "", hostLabel)
+                    } finally { busy = false }
+                }
             }
-            TsSecondaryButton(label = if (downloadedFile != null) L10n.text("common.save") else if (busy) "${(progress * 100).toInt()}%" else if (canPreviewModel(item.name)) L10n.text("android.chatmodel.preview") else L10n.text("android.transcriptrows.download.d6eafe82"),
-                small = true, enabled = !busy, onClick = {
-                    if (downloadedFile != null) { save.launch(item.name) }
-                    else {
-                        busy = true
-                        job = scope.launch {
-                            try {
-                                val owner = ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId)
-                                    ?: error("Sign in before downloading this file")
-                                downloadedFile = downloadChatFile(java.io.File(context.cacheDir, "chat-downloads"), chatId, item.attachmentId, owner.key,
-                                    call = { method, request -> check(ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == owner); model.workspaceSection(peer, method, request) },
-                                    confirm = { remaining -> relayRemaining = remaining; val answer = kotlinx.coroutines.CompletableDeferred<Boolean>(); relayAnswer = answer; try { answer.await() } finally { relayAnswer = null } },
-                                    progress = { progress = it })
-                                check(ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == owner)
-                                failure = null
-                                if (!canPreviewModel(item.name)) save.launch(item.name)
-                            } catch (error: Exception) { if (error !is kotlinx.coroutines.CancellationException) failure = TunnelCopy.display(error.message ?: "", hostLabel) }
-                            finally { busy = false }
-                        }
-                    }
-                })
-            if (busy) androidx.compose.material3.TextButton(onClick = { job?.cancel(); relayAnswer?.complete(false) }) { Text(L10n.text("common.cancel")) }
-
+        }
+        if (isModel && downloadedFile == null) {
+            TsAccentButton(label = action, modifier = Modifier.fillMaxWidth(), enabled = !busy, onClick = onAction)
+        } else {
+            TsSecondaryButton(label = action, modifier = if (isModel) Modifier.fillMaxWidth() else Modifier,
+                enabled = !busy, onClick = onAction)
+        }
+        if (busy) androidx.compose.material3.TextButton(onClick = { job?.cancel(); relayAnswer?.complete(false) }) {
+            Text(L10n.text("common.cancel"))
         }
     }
 }

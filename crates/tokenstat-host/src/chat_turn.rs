@@ -197,6 +197,8 @@ fn standing_text(persona_name: &str, persona_brief: &str, output_dir: &Path) -> 
     );
     text.push_str(&file_rule(output_dir));
     text.push_str("\n\n");
+    text.push_str(model_rule());
+    text.push_str("\n\n");
     text.push_str(browser_rule());
     text.push_str("\n\n");
     text.push_str(chart_rule());
@@ -333,6 +335,19 @@ pub fn file_rule(output_dir: &Path) -> String {
     )
 }
 
+/// An agent-generated model becomes an ordinary chat file with an optional
+/// inline viewer. Keep this conditional so routine coding turns do not spend
+/// time producing 3D assets nobody asked for.
+pub fn model_rule() -> &'static str {
+    "When the user asks to create or show a 3D asset, you can make an interactive preview in this chat. \
+     Prefer a self-contained GLB under 12 MB, then attach it using the local-file link rule above; \
+     preserve the original asset too when converting. FBX, OBJ, STL and PLY can also preview when \
+     self-contained, and Apple clients can preview USDZ. Native Godot, Unity and Unreal project \
+     files need an export from their engine, not a renamed extension. If a useful 3D preview was \
+     not requested, offer it briefly when relevant instead of generating one unasked. \
+     Do not claim a preview worked unless you inspected the resulting file."
+}
+
 /// The person's message, plus the paths of anything they attached to it.
 ///
 /// Stated as a fact rather than an instruction ("Files attached", not "read
@@ -443,6 +458,8 @@ mod tests {
         assert!(composed.standing_text.contains("tokenstat-chat-output"));
         assert!(composed.standing_text.contains(browser_rule()));
         assert!(!composed.user_text.contains(browser_rule()));
+        assert!(composed.standing_text.contains(model_rule()));
+        assert!(!composed.user_text.contains(model_rule()));
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         {
             assert!(composed.standing_text.contains(desktop_rule()));

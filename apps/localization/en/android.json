@@ -21,6 +21,8 @@
   "android.appviewmodel.this_device_is_offline.84b7cf97": "This device is offline.",
   "android.appviewmodel.waiting_for_the_network.76a08f16": "Waiting for the network.",
   "android.chatmodel.preview": "Preview 3D",
+  "android.chatmodel.loading": "Loading 3D preview…",
+  "android.chatmodel.preview_timed_out": "The 3D preview did not load. Save the model to open it elsewhere.",
   "android.chatmodel.preview_unavailable": "This model is too large or could not be read for an inline preview. Save the original file instead.",
   "android.automationeditor.0_unavailable.1212b25c": "{0} · Unavailable",
   "android.automationeditor.automation.d909750b": "Automation",

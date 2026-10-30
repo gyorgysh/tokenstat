@@ -3,13 +3,19 @@ package ai.tokenstat.tokenstat.ui.workspace
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +30,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -41,6 +48,12 @@ internal fun ChatModelView(name: String, file: File) {
     val colors = LocalTsColors.current
     val dark = colors.background.luminance() < 0.5f
     var payload by remember(file.path, file.lastModified()) { mutableStateOf<ModelPayload>(ModelPayload.Loading) }
+    var failure by remember(file.path, file.lastModified()) { mutableStateOf<String?>(null) }
+    var ready by remember(file.path, file.lastModified()) { mutableStateOf(false) }
+    LaunchedEffect(file.path, file.lastModified()) {
+        delay(10_000)
+        if (!ready && failure == null) failure = L10n.text("android.chatmodel.preview_timed_out")
+    }
     LaunchedEffect(file.path, file.lastModified()) {
         payload = withContext(Dispatchers.IO) {
             runCatching {
@@ -56,20 +69,31 @@ internal fun ChatModelView(name: String, file: File) {
             return
         }
         is ModelPayload.Ready -> {
-            AndroidView(
-                factory = { ModelWebSurface(it) },
-                modifier = Modifier.fillMaxWidth().height(260.dp),
-                onReset = null,
-                onRelease = { it.shutdown() },
-                update = { it.render(result.base64, name.substringAfterLast('.', "").lowercase(), if (dark) "#08070d" else "#fbfbfd") },
-            )
+            Box(Modifier.fillMaxWidth().height(320.dp), contentAlignment = Alignment.Center) {
+                AndroidView(
+                    factory = { ModelWebSurface(it) },
+                    modifier = Modifier.fillMaxWidth().height(320.dp),
+                    onReset = null,
+                    onRelease = { it.shutdown() },
+                    update = {
+                        it.onResult = { message ->
+                            if (message == null) ready = true else failure = message
+                        }
+                        it.render(result.base64, name.substringAfterLast('.', "").lowercase(), if (dark) "#08070d" else "#fbfbfd")
+                    },
+                )
+                if (!ready) Text(failure ?: L10n.text("android.chatmodel.loading"), modifier = Modifier.padding(20.dp), color = colors.textSecondary)
+            }
         }
     }
 }
 
 @SuppressLint("SetJavaScriptEnabled")
 private class ModelWebSurface(context: Context) : WebView(context) {
+    var onResult: (String?) -> Unit = {}
+    private val main = Handler(Looper.getMainLooper())
     private var loaded = false
+    private var pageRequested = false
     private var stopped = false
     private var script = ""
     private var rendered = ""
@@ -84,7 +108,15 @@ private class ModelWebSurface(context: Context) : WebView(context) {
         settings.javaScriptCanOpenWindowsAutomatically = false
         settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
         settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
+        addJavascriptInterface(object {
+            @JavascriptInterface fun report(message: String) {
+                main.post { if (!stopped) onResult(message.ifEmpty { null }) }
+            }
+        }, "TokenstatModelHost")
         webViewClient = object : WebViewClient() {
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
+                if (request.isForMainFrame) main.post { if (!stopped) onResult(L10n.text("android.chatmodel.preview_unavailable")) }
+            }
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = request.url.toString() != PAGE
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse {
                 val name = request.url.toString().removePrefix(BASE)
@@ -94,15 +126,32 @@ private class ModelWebSurface(context: Context) : WebView(context) {
                 } catch (_: Exception) { denied() }
             }
             override fun onPageFinished(view: WebView, url: String) {
-                if (!stopped && url == PAGE) { loaded = true; applyScript() }
+                if (!stopped && url == PAGE) {
+                    loaded = true
+                    evaluateJavascript("typeof TokenstatModel", { result ->
+                        if (!stopped) {
+                            if (result == "\"object\"") applyScript()
+                            else onResult(L10n.text("android.chatmodel.preview_unavailable"))
+                        }
+                    })
+                }
             }
         }
-        loadUrl(PAGE)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (!pageRequested && w > 0 && h > 0) {
+            pageRequested = true
+            loadUrl(PAGE)
+        } else if (loaded && !stopped && h > 0) {
+            evaluateJavascript(VIEWPORT_SCRIPT, null)
+        }
     }
 
     fun render(data: String, extension: String, background: String) {
         if (stopped) return
-        script = "TokenstatModel.load('$data','$extension','$background')"
+        script = "$VIEWPORT_SCRIPT TokenstatModel.load('$data','$extension','$background').then(ok => TokenstatModelHost.report(ok ? '' : (document.getElementById('status').textContent || '3D preview failed'))).catch(error => TokenstatModelHost.report(String(error)))"
         applyScript()
     }
 
@@ -115,6 +164,7 @@ private class ModelWebSurface(context: Context) : WebView(context) {
 
     fun shutdown() {
         stopped = true
+        onResult = {}
         stopLoading()
         destroy()
     }
@@ -124,5 +174,8 @@ private class ModelWebSurface(context: Context) : WebView(context) {
     companion object {
         private const val BASE = "https://models.tokenstat.invalid/"
         private const val PAGE = BASE + "model.html"
+        // Android WebView can report innerHeight while CSS 100vh is still zero
+        // during its first layout. Set the canvas height in CSS pixels before loading.
+        private const val VIEWPORT_SCRIPT = "var modelHeight=Math.max(1,innerHeight); document.documentElement.style.height=modelHeight+'px'; document.body.style.height=modelHeight+'px'; document.getElementById('model').style.height=modelHeight+'px';"
     }
 }

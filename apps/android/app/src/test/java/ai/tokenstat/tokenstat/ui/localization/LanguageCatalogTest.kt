@@ -5,6 +5,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class LanguageCatalogTest {
+    @Test fun sharedApplePlaceholdersRenderOnAndroid() {
+        val catalog = LanguageCatalog(mapOf("relay" to "Transfer %1$@ (%2$@) through the relay?"))
+        assertEquals("Transfer rocket.glb (1 MB) through the relay?", catalog.text("relay", listOf("rocket.glb", "1 MB")))
+    }
     @Test fun languagePreferenceAndRegionalFallback() {
         val tables = mapOf(
             "en/common" to mapOf("shared" to "English", "fallback" to "Still English", "platform" to "Common"),

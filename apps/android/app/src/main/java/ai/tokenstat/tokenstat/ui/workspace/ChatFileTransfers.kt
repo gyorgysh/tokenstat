@@ -317,10 +317,6 @@ internal suspend fun downloadChatFile(
         L10n.text("common.chat_files_too_large")
     }
     var allowRelay = false
-    if ((caps["relay"] as? JsonPrimitive)?.booleanOrNull == true) {
-        check(confirm((caps["relayRemainingBytes"] as? JsonPrimitive)?.longOrNull))
-        allowRelay = true
-    }
     val key =
         digest(
             MessageDigest.getInstance("SHA-256")
@@ -353,6 +349,12 @@ internal suspend fun downloadChatFile(
                         }
                     }
                 }
+            }
+            // A verified, completed cache entry needs no transfer and must
+            // not ask to spend relay allowance again after app relaunch.
+            if (offset < size && (caps["relay"] as? JsonPrimitive)?.booleanOrNull == true) {
+                check(confirm((caps["relayRemainingBytes"] as? JsonPrimitive)?.longOrNull))
+                allowRelay = true
             }
             java.io.FileOutputStream(target, true).use { output ->
                 while (offset < size) {
