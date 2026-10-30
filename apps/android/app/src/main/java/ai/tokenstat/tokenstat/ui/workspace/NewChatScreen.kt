@@ -14,6 +14,7 @@ import ai.tokenstat.tokenstat.ui.logic.SharedPrefsLaunchChoice
 import ai.tokenstat.tokenstat.ui.marks.LogoMark
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -105,6 +106,7 @@ fun NewChatScreen(
     onHost: (JsonObject) -> Unit, onAdd: () -> Unit, onSend: () -> Unit, onClose: () -> Unit, error: String? = null,
     onManageDevices: () -> Unit = {}, onSetupMachine: () -> Unit = onManageDevices,
 ) {
+    BackHandler(onBack = onClose)
     HideTopBar()
     HideTabBar()
     val colors = LocalTsColors.current

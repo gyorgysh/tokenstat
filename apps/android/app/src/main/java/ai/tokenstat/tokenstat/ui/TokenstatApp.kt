@@ -4003,7 +4003,11 @@ private fun WorkspacesScreen(
                     openConversationOnAppear = pendingOpenConversation,
                     newChatRequest = newChatRequest,
                     onNewChatHandled = { token -> if (newChatRequest?.id == token) newChatRequest = null },
-                    onNewChat = { selectNewChatRepository(boundFolder.string("id")); newChatOpen = true },
+                    onNewChat = {
+                        selectNewChatRepository(boundFolder.string("id"))
+                        initialSection = "Chat"
+                        newChatOpen = true
+                    },
                 )
             }
         }
