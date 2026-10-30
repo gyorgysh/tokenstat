@@ -3230,8 +3230,12 @@ private fun WorkspacesScreen(
         }
     }
 
-    suspend fun connect(machine: JsonObject, automatic: Boolean = false) {
+    suspend fun connect(machine: JsonObject, automatic: Boolean = false, forceRefresh: Boolean = false) {
         val peer = machine.string("publicIdentity") ?: return
+        // Switching back to a host that has already loaded is immediate. The
+        // lists remain keyed by peer in the model, so a raw folder id from
+        // another machine can never be shown under this host.
+        if (!forceRefresh && !automatic && session.activateConnectedHost(machine)) return
         if (localConnectingPeer != null || (connectingPeer != null && automatic)) return
         val connectionTicket = session.beginConnecting(peer, explicit = !automatic) ?: return
         val epoch = ++connectionEpoch
@@ -3345,7 +3349,7 @@ private fun WorkspacesScreen(
     }
 
     fun refreshHost() {
-        host?.let { scope.launch { connect(it) } }
+        host?.let { scope.launch { connect(it, forceRefresh = true) } }
     }
 
     // The one place that dials without being asked: the last host, when it
@@ -3450,7 +3454,7 @@ private fun WorkspacesScreen(
     }
     LaunchedEffect(folderRefresh) {
         if (folderRefresh == 0) return@LaunchedEffect
-        host?.let { connect(it) }
+        host?.let { connect(it, forceRefresh = true) }
     }
     val boundHost = host
     val boundFolder = selectedFolder
@@ -3581,7 +3585,7 @@ private fun WorkspacesScreen(
                     wsRefreshing = true
                     TsRefresh.run("workspaces") {
                         model.refresh()
-                        host?.let { connect(it) }
+                        host?.let { connect(it, forceRefresh = true) }
                     }
                     wsRefreshing = false
                 }
@@ -3625,7 +3629,7 @@ private fun WorkspacesScreen(
             onCustomize = { customizing = true },
             onOpenDevice = onOpenDevice,
             onSetup = onSetupWizard,
-            onRetry = host?.let { h -> { scope.launch { connect(h) } } },
+            onRetry = host?.let { h -> { scope.launch { connect(h, forceRefresh = true) } } },
             modifier = Modifier.fillMaxSize(),
             )
         }

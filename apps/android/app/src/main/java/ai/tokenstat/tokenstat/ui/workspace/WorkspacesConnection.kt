@@ -16,6 +16,28 @@ import kotlinx.serialization.json.JsonObject
 /// Only the session lives here. Screens keep their own UI state (search,
 /// selection, sheets), which is correctly ephemeral.
 class WorkspacesConnectionState {
+    private var accountOwner: String? = null
+
+    fun setAccountOwner(owner: String?) {
+        if (accountOwner == owner) return
+        accountOwner = owner
+        clearAll()
+        mutableHost.value = null
+    }
+
+    private data class HostSnapshot(
+        val folders: JsonArray,
+        val sessions: JsonArray,
+        val chats: JsonArray,
+    )
+
+    // Keep loaded work under its peer key when navigation focuses another
+    // machine. Raw workspace ids can overlap between hosts, so callers must
+    // always select a peer before using one of these lists.
+    private val hostSnapshots = mutableMapOf<String, HostSnapshot>()
+    private val mutableConnectedHosts = MutableStateFlow<Set<String>>(emptySet())
+    val connectedHosts: StateFlow<Set<String>> = mutableConnectedHosts.asStateFlow()
+
     private val mutableConnectingPeer = MutableStateFlow<String?>(null)
     val connectingPeer: StateFlow<String?> = mutableConnectingPeer.asStateFlow()
     private var connectionTicket = 0L
@@ -69,6 +91,23 @@ class WorkspacesConnectionState {
         mutableHost.value = machine
     }
 
+    fun activateConnectedHost(machine: JsonObject): Boolean {
+        val peer = machine.str("publicIdentity") ?: return false
+        val snapshot = hostSnapshots[peer] ?: return false
+        connectionTicket++
+        mutableConnectingPeer.value = null
+        mutableHost.value = machine
+        mutableConnectedPeer.value = peer
+        mutableAllowed.value = true
+        mutableLoadingFolders.value = false
+        mutableFolders.value = snapshot.folders
+        mutableSessions.value = snapshot.sessions
+        mutableChats.value = snapshot.chats
+        mutableError.value = null
+        mutableRequestNotice.value = null
+        return true
+    }
+
     fun setConnected(peer: String?, allowed: Boolean?) {
         mutableConnectedPeer.value = peer
         mutableAllowed.value = allowed
@@ -76,6 +115,10 @@ class WorkspacesConnectionState {
 
     fun setAllowed(allowed: Boolean?) {
         mutableAllowed.value = allowed
+        if (allowed == false) {
+            mutableHost.value?.str("publicIdentity")?.let { hostSnapshots.remove(it) }
+            mutableConnectedHosts.value = hostSnapshots.keys.toSet()
+        }
     }
 
     fun setLoadingFolders(loading: Boolean) {
@@ -95,10 +138,18 @@ class WorkspacesConnectionState {
                 id = chat.str("id"),
             )
         })
+        saveSelectedSnapshot()
     }
 
     fun setFolders(folders: JsonArray) {
         mutableFolders.value = folders
+        saveSelectedSnapshot()
+    }
+
+    private fun saveSelectedSnapshot() {
+        val peer = mutableConnectedPeer.value ?: return
+        hostSnapshots[peer] = HostSnapshot(mutableFolders.value, mutableSessions.value, mutableChats.value)
+        mutableConnectedHosts.value = hostSnapshots.keys.toSet()
     }
 
     fun clearLists() {
@@ -118,6 +169,8 @@ class WorkspacesConnectionState {
     /// What Disconnect does on every client: forget the session. The tunnel
     /// underneath is the host's to reap, exactly like iOS.
     fun disconnect() {
+        mutableConnectedPeer.value?.let { hostSnapshots.remove(it) }
+        mutableConnectedHosts.value = hostSnapshots.keys.toSet()
         connectionTicket++
         mutableConnectingPeer.value = null
         mutableConnectedPeer.value = null
@@ -126,5 +179,10 @@ class WorkspacesConnectionState {
         mutableRequestNotice.value = null
         mutableError.value = null
         clearLists()
+    }
+
+    fun clearAll() {
+        hostSnapshots.clear()
+        disconnect()
     }
 }

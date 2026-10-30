@@ -249,6 +249,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val accountObject = account.jsonObject
                 if (signingOut || !UsageWidgetStore.verifyForeground(getApplication(), accountObject, widgetEpoch)) return@onSuccess
                 ai.tokenstat.tokenstat.ecosystem.SystemProjects.verify(getApplication(), accountObject)
+                workspacesConnection.setAccountOwner(ai.tokenstat.tokenstat.ecosystem.UsageSnapshot.owner(accountObject))
                 mutableState.value = mutableState.value.copy(
                     account = accountObject,
                     authChecked = true,
@@ -460,8 +461,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             dashboardJob?.cancelAndJoin()
             ai.tokenstat.tokenstat.ecosystem.SystemProjects.flush()
             PushRegistrar.unregister { CoreClient.call("account.logout") }
-            workspacesConnection.disconnect()
-            workspacesConnection.setHost(null)
+            workspacesConnection.setAccountOwner(null)
             ai.tokenstat.tokenstat.notifications.VisibleChat.hidden()
             mutableState.value = ClientState(loading = false, authChecked = true,
                 connection = mutableState.value.connection)
