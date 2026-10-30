@@ -17,8 +17,11 @@ class WorkspacesConnectionTest {
         session.finishConnecting(warmup)
         assertEquals("chosen-host", session.connectingPeer.value)
         assertTrue(session.isCurrentConnection(chosen))
+        session.setLoadingFolders(true)
+        assertTrue(session.loadingFolders.value)
         session.disconnect()
         assertFalse(session.isCurrentConnection(chosen))
         assertNull(session.connectingPeer.value)
+        assertFalse(session.loadingFolders.value)
     }
 }

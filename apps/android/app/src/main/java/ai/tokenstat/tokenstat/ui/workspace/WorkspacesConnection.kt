@@ -44,6 +44,9 @@ class WorkspacesConnectionState {
     private val mutableAllowed = MutableStateFlow<Boolean?>(null)
     val allowed: StateFlow<Boolean?> = mutableAllowed.asStateFlow()
 
+    private val mutableLoadingFolders = MutableStateFlow(false)
+    val loadingFolders: StateFlow<Boolean> = mutableLoadingFolders.asStateFlow()
+
     private val mutableFolders = MutableStateFlow(JsonArray(emptyList()))
     val folders: StateFlow<JsonArray> = mutableFolders.asStateFlow()
 
@@ -73,6 +76,10 @@ class WorkspacesConnectionState {
 
     fun setAllowed(allowed: Boolean?) {
         mutableAllowed.value = allowed
+    }
+
+    fun setLoadingFolders(loading: Boolean) {
+        mutableLoadingFolders.value = loading
     }
 
     fun setLists(folders: JsonArray, sessions: JsonArray, chats: JsonArray) {
@@ -111,6 +118,7 @@ class WorkspacesConnectionState {
         mutableConnectingPeer.value = null
         mutableConnectedPeer.value = null
         mutableAllowed.value = null
+        mutableLoadingFolders.value = false
         mutableRequestNotice.value = null
         mutableError.value = null
         clearLists()

@@ -686,31 +686,48 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 if (!current()) return@launch
                 warmSession.setAllowed(check?.bool("allowed"))
                 if (check?.bool("allowed") != true) return@launch
-                val sessions = runCatching {
-                    model.workspaceSection(last, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
-                }.getOrNull() ?: JsonArray(emptyList())
-                val chats = runCatching {
-                    model.workspaceSection(last, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
-                }.getOrNull() ?: JsonArray(emptyList())
-                // The explicit host picker can supersede this fetch. Do not
-                // publish its folders into system search until it still owns
-                // the connection ticket after the remote call returns.
+                // Access is confirmed now; the host's workspace scan may
+                // still spend seconds collecting Git status for every folder.
+                // Show the live connection and a separate loading state.
+                warmSession.setLoadingFolders(true)
+                warmSession.setConnected(last, true)
+                warmSession.setError(null)
+                warmSession.finishConnecting(ticket)
                 val folders = model.workspaceSection(last, "workspace.list", buildJsonObject {}) as? JsonArray
                     ?: JsonArray(emptyList())
                 if (!current() || !warmStore.isAutoConnectEnabled(last)) return@launch
+                warmSession.setLists(folders, JsonArray(emptyList()), JsonArray(emptyList()))
+                warmSession.setLoadingFolders(false)
+                warmFailures = 0
+                // The explicit picker or Disconnect can supersede even these
+                // background summaries. Keep that ticket check after each
+                // remote call and before publishing anything account-scoped.
+                if (!current()) return@launch
                 ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
                     context, last, folders, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
                 )
-                warmSession.setLists(folders, sessions, chats)
-                warmSession.setConnected(last, true)
-                warmSession.setError(null)
-                warmFailures = 0
+                val sessions = runCatching {
+                    model.workspaceSection(last, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
+                }.getOrNull() ?: JsonArray(emptyList())
+                if (!current()) return@launch
+                val chats = runCatching {
+                    model.workspaceSection(last, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
+                }.getOrNull() ?: JsonArray(emptyList())
+                if (current()) warmSession.setLists(folders, sessions, chats)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 android.util.Log.w("ts-workspaces", "saved host warmup failed", error)
-                if (current()) warmFailures += 1
+                if (current()) {
+                    warmSession.setLoadingFolders(false)
+                    warmSession.setConnected(null, null)
+                    warmFailures += 1
+                }
             } finally {
+                if (current() && warmSession.loadingFolders.value) {
+                    warmSession.setLoadingFolders(false)
+                    warmSession.setConnected(null, null)
+                }
                 warmSession.finishConnecting(ticket)
             }
         }
@@ -3145,6 +3162,7 @@ private fun WorkspacesScreen(
     }
     val allowed by session.allowed.collectAsStateWithLifecycle()
     val folders by session.folders.collectAsStateWithLifecycle()
+    val loadingFolders by session.loadingFolders.collectAsStateWithLifecycle()
     val sessions by session.sessions.collectAsStateWithLifecycle()
     val chats by session.chats.collectAsStateWithLifecycle()
     val error by session.error.collectAsStateWithLifecycle()
@@ -3221,6 +3239,7 @@ private fun WorkspacesScreen(
             session.setHost(machine)
             session.setConnected(null, null)
             session.setAllowed(null)
+            session.setLoadingFolders(false)
             // An explicit dial clears the readable failure it retries. An
             // automatic one leaves it: clearing on every account refresh is
             // what made failures flash past unreadably.
@@ -3246,6 +3265,17 @@ private fun WorkspacesScreen(
                     if (session.requestNotice.value == null) requestAccess(peer)
                     return@runCatching
                 }
+                session.setLoadingFolders(true)
+                session.setConnected(peer, true)
+                session.finishConnecting(connectionTicket)
+                val loadedFolders = model.workspaces(peer)
+                if (!current()) return@runCatching
+                session.setLists(loadedFolders, JsonArray(emptyList()), JsonArray(emptyList()))
+                session.setLoadingFolders(false)
+                autoFailures = 0
+                session.setError(null)
+                layoutStore.setLastConnectedHost(peer)
+                if (!automatic) layoutStore.setAutoConnectEnabled(peer, true)
                 val loadedSessions = runCatching {
                     model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
                 }.getOrNull() ?: JsonArray(emptyList())
@@ -3253,15 +3283,7 @@ private fun WorkspacesScreen(
                 val loadedChats = runCatching {
                     model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
                 }.getOrNull() ?: JsonArray(emptyList())
-                if (!current()) return@runCatching
-                val loadedFolders = model.workspaces(peer)
-                if (!current()) return@runCatching
-                session.setLists(loadedFolders, loadedSessions, loadedChats)
-                session.setConnected(peer, true)
-                autoFailures = 0
-                session.setError(null)
-                layoutStore.setLastConnectedHost(peer)
-                if (!automatic) layoutStore.setAutoConnectEnabled(peer, true)
+                if (current()) session.setLists(loadedFolders, loadedSessions, loadedChats)
             }.onFailure {
                 if (!current()) return@onFailure
                 // Leaving the screen mid-dial cancels the scope. That is not a
@@ -3275,9 +3297,14 @@ private fun WorkspacesScreen(
                     session.setError(it.message)
                     autoFailures = 0
                 }
+                session.setLoadingFolders(false)
                 session.setConnected(null, null)
             }
         } finally {
+            if (current() && session.loadingFolders.value) {
+                session.setLoadingFolders(false)
+                session.setConnected(null, null)
+            }
             session.finishConnecting(connectionTicket)
             if (localConnectingPeer == peer) localConnectingPeer = null
         }
@@ -3544,6 +3571,7 @@ private fun WorkspacesScreen(
             dialledHost = host,
             connectedPeer = connectedPeer,
             connectingPeer = connectingPeer,
+            loadingFolders = loadingFolders,
             folders = folders,
             sessions = sessions,
             chats = chats,
@@ -3725,6 +3753,7 @@ private fun WorkspaceList(
     dialledHost: JsonObject?,
     connectedPeer: String?,
     connectingPeer: String?,
+    loadingFolders: Boolean,
     folders: JsonArray,
     sessions: JsonArray,
     chats: JsonArray,
@@ -3907,7 +3936,7 @@ private fun WorkspaceList(
         val host = connectedHost ?: return@LazyColumn
         val hostName = DeviceCopy.displayName(host.string("label"), host.string("platform"), true)
         val peer = host.string("publicIdentity") ?: ""
-        if (connectingPeer != null) {
+        if (connectingPeer != null || loadingFolders) {
             item { SkeletonRows(count = 3) }
             return@LazyColumn
         }
