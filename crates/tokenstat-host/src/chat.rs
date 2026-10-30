@@ -6130,6 +6130,13 @@ fn media_type_for_path(path: &Path) -> Option<String> {
             "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "glb" => "model/gltf-binary",
+            "gltf" => "model/gltf+json",
+            "usdz" => "model/vnd.usdz+zip",
+            "usd" | "usda" | "usdc" => "model/vnd.usd",
+            "obj" => "model/obj",
+            "stl" => "model/stl",
+            "ply" => "model/ply",
             "xml" => "application/xml",
             "rs" | "py" | "js" | "ts" | "swift" | "kt" | "c" | "h" | "cpp" | "cs" | "sh"
             | "yaml" | "yml" => "text/plain",

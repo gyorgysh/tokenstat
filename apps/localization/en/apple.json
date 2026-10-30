@@ -5732,6 +5732,7 @@
   "apple.workbench.patch_unavailable": "The agent did not record a patch for this edit.",
   "apple.workbench.resize": "Drag to resize the side workbench. Double-click to reset.",
   "apple.simulator.title": "Simulator",
+  "apple.clientchatmodelpreview.unavailable": "This model cannot be previewed here. Open the original file.",
   "apple.simulator.setup_title": "Set up your simulators",
   "apple.simulator.setup_help": "Connect an iPhone, iPad or Android virtual device to see and use your app beside your work.",
   "apple.simulator.checking": "Looking for installed devices…",

@@ -396,6 +396,11 @@ private struct ChatResponseAttachment: View {
     @State private var hovering = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if (file != nil || data != nil), ClientChatModelPreview.canPreview(attachment.name) {
+                ClientChatModelPreview(name: attachment.name, id: attachment.id, data: data, file: file)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
         Button(action: data == nil && file == nil ? onDownload : open) {
             VStack(alignment: .leading, spacing: 0) {
                 if let file, attachment.mediaType?.hasPrefix("video/") == true { ChatVideoPreview(file: file) }
@@ -456,6 +461,7 @@ private struct ChatResponseAttachment: View {
         // after the last moved frame.
         .onHover { hovering = $0 }
         .help(data == nil && file == nil ? L10n.text("apple.chateventrow.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.chateventrow.open_0.e71b4013", "\(attachment.name)"))
+        }
         .task(id: imageSource) {
             guard attachment.mediaType?.hasPrefix("image/") == true else { return }
             let source = imageSource
@@ -506,6 +512,7 @@ private struct ChatResponseAttachment: View {
         if type.hasPrefix("image/") { return "photo" }
         if type.hasPrefix("audio/") { return "waveform" }
         if type.hasPrefix("video/") { return "film" }
+        if type.hasPrefix("model/") || ClientChatModelPreview.canPreview(attachment.name) { return "cube" }
         if type == "application/pdf" { return "doc.richtext" }
         if type.hasPrefix("text/") || type.contains("json") { return "doc.text" }
         return "doc"

@@ -67,6 +67,29 @@ writeFileSync(
 );
 console.log(`Bundled chart engine: ${bytes.length} bytes`);
 
+const modelResult = await build({
+    entryPoints: [fileURLToPath(new URL("model-engine.mjs", import.meta.url))],
+    bundle: true,
+    minify: true,
+    format: "iife",
+    globalName: "TokenstatModel",
+    target: ["safari15", "chrome100"],
+    legalComments: "external",
+    outfile: "model-engine.js",
+    write: false,
+});
+const modelCode = modelResult.outputFiles.find((file) => file.path.endsWith("model-engine.js"));
+const modelNotices = modelResult.outputFiles.find((file) => file.path.endsWith(".LEGAL.txt"));
+if (!modelCode || !modelNotices) throw new Error("The model engine or its license notice is missing");
+const modelBytes = Buffer.from("/*! Three.js. Dependency notices: MODEL-LICENSE.txt */\n" +
+    modelCode.text.replace(/[ \t]+$/gm, "").replace(/^ +\t/gm, "\t"));
+if (modelBytes.length > 2 * 1024 * 1024) throw new Error("The model engine exceeds the bundled asset limit");
+writeFileSync(new URL("runtime/model-engine.js", import.meta.url), modelBytes);
+writeFileSync(new URL("runtime/MODEL-LICENSE.txt", import.meta.url),
+    "\n\n## Three.js 0.186.1 (MIT)\n" + modelNotices.text + "\n" +
+    readFileSync(new URL("node_modules/three/LICENSE", import.meta.url), "utf8"));
+console.log(`Bundled model engine: ${modelBytes.length} bytes`);
+
 // Reuse the app's existing interface face, including its redistribution notice.
 for (const [source, target] of [
     ["Manrope-Variable.ttf", "Manrope.ttf"],

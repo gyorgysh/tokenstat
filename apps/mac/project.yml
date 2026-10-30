@@ -335,6 +335,7 @@ targets:
           cargo run -q -p xtask -- notices "apps/mac/Resources/THIRD_PARTY_NOTICES.md" tokenstat-host
           cat "apps/mac/Resources/SwiftTerm-LICENSE.txt" >> "apps/mac/Resources/THIRD_PARTY_NOTICES.md"
           cat "apps/charts/runtime/ENGINE-LICENSE.txt" >> "apps/mac/Resources/THIRD_PARTY_NOTICES.md"
+          cat "apps/charts/runtime/MODEL-LICENSE.txt" >> "apps/mac/Resources/THIRD_PARTY_NOTICES.md"
           {
             printf '\n\n## Manrope\n\nBundled as the interface typeface.\n\n'
             cat "apps/mac/Resources/Fonts/Manrope-OFL.txt"

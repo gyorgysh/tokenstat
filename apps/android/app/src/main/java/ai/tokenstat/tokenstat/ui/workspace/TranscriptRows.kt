@@ -853,6 +853,9 @@ private fun AttachmentRow(
             if (detail.isNotBlank()) {
                 Text(detail, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
             }
+            if (downloadedFile != null && canPreviewModel(item.name)) {
+                ChatModelView(item.name, downloadedFile!!)
+            }
             if (failure != null) {
                 Text(failure!!, style = TextStyle(fontSize = 12.sp), color = colors.danger)
             }
@@ -871,7 +874,7 @@ private fun AttachmentRow(
                                     progress = { progress = it })
                                 check(ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == owner)
                                 failure = null
-                                save.launch(item.name)
+                                if (!canPreviewModel(item.name)) save.launch(item.name)
                             } catch (error: Exception) { if (error !is kotlinx.coroutines.CancellationException) failure = TunnelCopy.display(error.message ?: "", hostLabel) }
                             finally { busy = false }
                         }

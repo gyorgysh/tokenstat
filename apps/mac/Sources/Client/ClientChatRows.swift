@@ -237,19 +237,32 @@ private struct ClientChatResponseAttachment: View {
     var onOpenFile: (URL) -> Void
 
     var body: some View {
-        // One tappable card in every state, and it presents nothing itself.
+        // File actions stay on a stable card rather than a lazy row's own
+        // presentation. A model's orbit gestures sit beside that action.
         // It used to own both a Quick Look presentation and the staged copy
         // that presentation needed, from inside a lazy stack that is free to
         // tear a row down mid-tap, and it disabled itself the moment the bytes
         // arrived. A downloaded file was a grey rectangle, then a card that
         // did nothing at all. Opening is the chat view's job now; this is a
         // button.
-        Button { if let file { onOpenFile(file) } else if let data { onOpen(data) } else { onDownload() } } label: { content }
-            .buttonStyle(.plain)
-            .disabled(isLoading)
-            .accessibilityLabel(
-                data == nil && file == nil ? L10n.text("apple.clientchatrows.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.clientchatrows.open_0.e71b4013", "\(attachment.name)")
-            )
+        VStack(alignment: .leading, spacing: 0) {
+            if (file != nil || data != nil), ClientChatModelPreview.canPreview(attachment.name) {
+                ClientChatModelPreview(name: attachment.name, id: attachment.id, data: data, file: file)
+                ThemeRule()
+            }
+            Button { if let file { onOpenFile(file) } else if let data { onOpen(data) } else { onDownload() } } label: { content }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+                .accessibilityLabel(
+                    data == nil && file == nil ? L10n.text("apple.clientchatrows.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.clientchatrows.open_0.e71b4013", "\(attachment.name)")
+                )
+        }
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            }
             .task(id: imageSource) {
                 guard attachment.mediaType?.hasPrefix("image/") == true else { return }
                 // SwiftUI restarts a row's task when it re-enters the viewport.
@@ -314,11 +327,6 @@ private struct ClientChatResponseAttachment: View {
             }
             .padding(Theme.Space.m)
         }
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
-        }
     }
 
     @State private var decodedImage: UIImage?
@@ -351,6 +359,7 @@ private struct ClientChatResponseAttachment: View {
         if type.hasPrefix("image/") { return "photo" }
         if type.hasPrefix("audio/") { return "waveform" }
         if type.hasPrefix("video/") { return "film" }
+        if type.hasPrefix("model/") || ClientChatModelPreview.canPreview(attachment.name) { return "cube" }
         if type == "application/pdf" { return "doc.richtext" }
         if type.hasPrefix("text/") || type.contains("json") { return "doc.text" }
         return "doc"
