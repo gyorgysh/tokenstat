@@ -127,7 +127,7 @@ struct ClientProjectChatRows: View {
     private func load(refresh: Bool = false) async {
         let owner = owner
         await entry.load(refresh: refresh, isCurrent: {
-            owner != nil && owner == WorkSessionContext.shared.scope && workspaces.connectedKey == peer
+            owner != nil && owner == WorkSessionContext.shared.scope && workspaces.loadedHostKeys.contains(peer)
         }, read: { try await ClientRemote.chats(peer: peer, workspaceID: workspaceID) })
     }
 

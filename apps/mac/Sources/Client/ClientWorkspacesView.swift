@@ -167,6 +167,25 @@ struct ClientWorkspacesView: View {
                             customizeWorkspacesButton
                         }
                     }
+                    ForEach(model.hosts.filter { model.loadedHostKeys.contains($0.peerKey) && $0.peerKey != model.connectedKey }) { host in
+                        let hostFolders = model.folders(for: host.peerKey)
+                        if !hostFolders.isEmpty {
+                            ClientSectionTitle(title: host.name, mark: "mark_host")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 2)
+                                .padding(.top, Theme.Space.s)
+                            ClientAdaptiveCards {
+                                ForEach(hostFolders) { folder in
+                                    NavigationLink {
+                                        ClientWorkspaceDetailView(peer: host.peerKey, hostName: host.name, folder: folder)
+                                    } label: {
+                                        ClientFolderRow(folder: folder)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
                 }
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.top, Theme.Space.s)
@@ -684,6 +703,19 @@ final class ClientWorkspacesModel {
     @ObservationIgnored private var backgroundSweep: Task<Void, Never>?
     @ObservationIgnored private var backgroundFailures: [String: Int] = [:]
     @ObservationIgnored private var nextBackgroundAttempt: [String: Date] = [:]
+
+    func folders(for peer: String) -> [WorkspaceFolder] { hostSnapshots[peer]?.folders ?? [] }
+    func sessions(for peer: String) -> [PtySessionInfo] { hostSnapshots[peer]?.sessions ?? [] }
+    func chats(for peer: String) -> [ChatRecentConversation] { hostSnapshots[peer]?.chats ?? [] }
+
+    func folderReference(id: String) -> (peer: String, folder: WorkspaceFolder)? {
+        for host in hosts where loadedHostKeys.contains(host.peerKey) {
+            if let folder = hostSnapshots[host.peerKey]?.folders.first(where: { $0.id == id }) {
+                return (host.peerKey, folder)
+            }
+        }
+        return nil
+    }
     private(set) var hosts: [ClientHost] = []
     private(set) var folders: [WorkspaceFolder] = []
     private(set) var sessions: [PtySessionInfo] = []

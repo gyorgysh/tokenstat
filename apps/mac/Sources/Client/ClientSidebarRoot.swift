@@ -350,8 +350,10 @@ struct ClientSidebarRoot: View {
                 }
                 ForEach(workspaces.hosts) { host in
                     hostRow(host)
-                    if workspaces.connectedKey == host.peerKey {
-                        if workspaces.folders.isEmpty, workspaces.isConnecting == nil, workspaces.errorMessage == nil {
+                    if workspaces.loadedHostKeys.contains(host.peerKey) {
+                        let hostFolders = workspaces.folders(for: host.peerKey)
+                        if workspaces.connectedKey == host.peerKey, hostFolders.isEmpty,
+                           workspaces.isConnecting == nil, workspaces.errorMessage == nil {
                             FirstProjectPrompt(compact: true) { addingFirstProject = true }
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
@@ -359,12 +361,12 @@ struct ClientSidebarRoot: View {
                         if workspacesLayout.allTasksVisible {
                             ClientAllTasksLink(peer: host.peerKey, hostName: host.name)
                         }
-                        ForEach(workspaces.folders) { folder in
+                        ForEach(hostFolders) { folder in
                             folderRow(folder, peer: host.peerKey)
                             // Keep the last opened folder expanded when the
                             // detail column moves to a different destination.
                             if navigation.sidebarFolderID == folder.id {
-                                ForEach(sessions(in: folder)) { session in
+                                ForEach(sessions(in: folder, peer: host.peerKey)) { session in
                                     sessionRow(session, in: folder, peer: host.peerKey)
                                 }
                                 ClientProjectChatRows(peer: host.peerKey, hostName: host.name,
@@ -698,9 +700,9 @@ struct ClientSidebarRoot: View {
 
     /// The sessions running in one folder, matched on the directory rather
     /// than on a label: two checkouts can share a basename.
-    private func sessions(in folder: WorkspaceFolder) -> [PtySessionInfo] {
+    private func sessions(in folder: WorkspaceFolder, peer: String) -> [PtySessionInfo] {
         let workspace = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
-        return workspaces.sessions.filter {
+        return workspaces.sessions(for: peer).filter {
             guard $0.hidden != true else { return false }
             if let id = $0.workspaceID, !id.isEmpty { return id == workspace }
             return $0.cwd == folder.path || $0.cwd.hasPrefix(folder.path + "/")
@@ -730,12 +732,11 @@ struct ClientSidebarRoot: View {
                 }
         } else if let id = navigation.folderID,
            navigation.destination == .workspaces,
-           let folder = workspaces.folders.first(where: { $0.id == id }),
-           let peer = workspaces.connectedKey
+           let selected = workspaces.folderReference(id: id)
         {
-            ClientFolderSplit(peer: peer,
-                hostName: workspaces.hosts.first { $0.peerKey == peer }?.name ?? "",
-                folder: folder,
+            ClientFolderSplit(peer: selected.peer,
+                hostName: workspaces.hosts.first { $0.peerKey == selected.peer }?.name ?? "",
+                folder: selected.folder,
                 selection: Binding(get: { navigation.section }, set: { navigation.section = $0 }))
         } else {
             switch navigation.destination {
