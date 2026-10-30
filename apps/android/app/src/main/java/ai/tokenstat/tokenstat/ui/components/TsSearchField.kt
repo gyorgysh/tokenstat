@@ -5,8 +5,6 @@ import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
@@ -16,6 +14,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -80,17 +79,13 @@ fun TsSearchField(
         }
         if (focused) KeyboardDismissButton()
         if (query.isNotEmpty()) {
-            Icon(
-                ActionIcon.Dismiss.vector,
-                L10n.text("android.tssearchfield.clear_filter.ba59e2d4"),
-                tint = colors.textTertiary,
-                modifier = Modifier
-                    .padding(vertical = Space.xs)
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                    ) { onQueryChange("") },
-            )
+            IconButton(onClick = { onQueryChange("") }) {
+                Icon(
+                    ActionIcon.Dismiss.vector,
+                    L10n.text("android.tssearchfield.clear_filter.ba59e2d4"),
+                    tint = colors.textTertiary,
+                )
+            }
         }
     }
 }
