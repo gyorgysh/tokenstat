@@ -1335,6 +1335,8 @@ final class ClientWorkspacesModel {
         backgroundSweep = nil
         remoteRefresh?.task.cancel()
         remoteRefresh = nil
+        activeTerminal?.stop()
+        activeTerminal = nil
         disconnect(manual: false)
         hostSnapshots.removeAll()
         loadedHostKeys = []
@@ -1343,7 +1345,8 @@ final class ClientWorkspacesModel {
     func disconnect(manual: Bool = true) {
         // A tapped Disconnect is a persistent choice. Teardown for account
         // change only retires this model and must not change that choice.
-        if manual, let peer = connectedKey ?? isConnecting ?? pendingPeer ?? chosenPeer {
+        let peer = connectedKey ?? isConnecting ?? pendingPeer ?? chosenPeer
+        if manual, let peer {
             setAutoConnect(false, for: peer)
             hostSnapshots.removeValue(forKey: peer)
             loadedHostKeys = Set(hostSnapshots.keys)
@@ -1355,8 +1358,10 @@ final class ClientWorkspacesModel {
         pendingPeer = nil
         chosenPeer = nil
         stopWatchingForAccess()
-        activeTerminal?.stop()
-        activeTerminal = nil
+        if let peer, activeTerminal?.peer == peer {
+            activeTerminal?.stop()
+            activeTerminal = nil
+        }
         connectedKey = nil
         folders = []
         sessions = []
@@ -1368,6 +1373,10 @@ final class ClientWorkspacesModel {
         hostSnapshots.removeValue(forKey: peer)
         loadedHostKeys = Set(hostSnapshots.keys)
         publishEcosystem([], peer: peer, host: "", lease: EcosystemPublisher.lease)
+        if activeTerminal?.peer == peer {
+            activeTerminal?.stop()
+            activeTerminal = nil
+        }
         if connectedKey == peer {
             disconnect(manual: false)
         } else if isConnecting == peer || pendingPeer == peer {
@@ -1453,6 +1462,7 @@ final class ClientWorkspacesModel {
             hostSnapshots.removeValue(forKey: peerKey)
             loadedHostKeys = Set(hostSnapshots.keys)
             let host = hosts.first { $0.peerKey == peerKey }
+            publishEcosystem([], peer: peerKey, host: "", lease: ecosystemLease)
             disconnect(manual: false)
             awaitingAccessHost = host?.name
             if let host { watchForAccess(host) }
