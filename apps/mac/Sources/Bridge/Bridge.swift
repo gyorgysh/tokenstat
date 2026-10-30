@@ -3958,6 +3958,14 @@ extension Bridge {
         try await background("remote.status", as: RemoteStatus.self)
     }
 
+    static func setRelayFallback(_ enabled: Bool) async throws -> RemoteStatus {
+        struct Changed: Codable, Sendable { let relayFallback: Bool }
+        _ = try await background(
+            "remote.relayFallback", ["enabled": enabled], as: Changed.self
+        )
+        return try await remoteStatus()
+    }
+
     static func hostPolicy() async throws -> HostPolicy {
         try await background("host.policy", as: HostPolicy.self)
     }

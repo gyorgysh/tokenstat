@@ -4420,6 +4420,9 @@ struct Peer: Codable, Sendable, Identifiable, Hashable {
 struct RemoteStatus: Codable, Sendable {
     /// Whether this machine keeps an outbound connection to the blind tunnel.
     let tunnel: Bool
+    /// Outbound calls can use the metered relay when direct access fails.
+    /// Nil means the local core predates this setting.
+    let relayFallback: Bool?
     /// What the tunnel is actually doing. The toggle can be on while the
     /// daemon is being refused (plan gate, revoked token, endpoint down), so
     /// the screen has to read these rather than trust the setting.

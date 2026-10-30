@@ -183,6 +183,9 @@ struct AccountView: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             identity(account)
             RelayUsageCard(usage: account.relayUsage) { await model.load() }
+            RelayFallbackSetting(enabled: model.remoteStatus?.relayFallback) {
+                try await model.setRelayFallback($0)
+            }
             syncCard(account)
             machinesCard(account)
         }

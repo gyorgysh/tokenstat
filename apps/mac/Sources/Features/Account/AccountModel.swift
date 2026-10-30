@@ -201,6 +201,10 @@ final class AccountModel {
         }
     }
 
+    func setRelayFallback(_ enabled: Bool) async throws {
+        remoteStatus = try await Bridge.setRelayFallback(enabled)
+    }
+
     #if os(macOS)
     func setAlwaysOnHost(_ on: Bool) async {
         isSavingHostPolicy = true

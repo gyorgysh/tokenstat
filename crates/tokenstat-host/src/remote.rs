@@ -72,6 +72,14 @@ pub struct RemoteSettings {
     pub tunnel: bool,
     #[serde(default = "default_tunnel_endpoint")]
     pub tunnel_endpoint: String,
+    /// Outbound peer calls may use the metered relay when direct access fails.
+    /// Older settings files retain their existing fallback behavior.
+    #[serde(default = "default_relay_fallback")]
+    pub relay_fallback: bool,
+}
+
+fn default_relay_fallback() -> bool {
+    true
 }
 
 fn default_tunnel_endpoint() -> String {
@@ -83,6 +91,7 @@ impl Default for RemoteSettings {
         Self {
             tunnel: false,
             tunnel_endpoint: default_tunnel_endpoint(),
+            relay_fallback: true,
         }
     }
 }
@@ -2824,6 +2833,11 @@ fn tunnel_dial(
     purpose: ChannelPurpose,
     direct_error: impl std::fmt::Display,
 ) -> Result<tokenstat_remote::Connection, String> {
+    if !settings.relay_fallback {
+        return Err(format!(
+            "could not reach {label} directly. Relay fallback is off on this device"
+        ));
+    }
     if !settings.tunnel {
         return Err(format!("could not reach {label} directly: {direct_error}"));
     }
@@ -3009,8 +3023,14 @@ fn round_trip(
 }
 
 fn checkout(peer: &str, purpose: ChannelPurpose) -> Option<tokenstat_remote::Connection> {
+    let relay_fallback = settings().relay_fallback;
     let mut map = pool().lock().ok()?;
     reap(&mut map);
+    if !relay_fallback {
+        for idle in map.values_mut() {
+            idle.retain(|held| !held.connection.is_relay());
+        }
+    }
     // Not `get_mut(peer)?`: a peer nobody has dialled yet would return before
     // the empty keys the reap above left behind were dropped.
     let taken = map
@@ -3086,6 +3106,9 @@ fn claim_relay_direct_check(peer: &str) -> bool {
 }
 
 fn checkin(peer: &str, purpose: ChannelPurpose, connection: tokenstat_remote::Connection) {
+    if connection.is_relay() && !settings().relay_fallback {
+        return;
+    }
     if let Ok(mut map) = pool().lock() {
         reap(&mut map);
         let idle = map.entry((peer.to_string(), purpose)).or_default();
@@ -3142,6 +3165,7 @@ pub(crate) fn call(
         (match method {
             "remote.status" => status(),
             "remote.serve" => serve(params),
+            "remote.relayFallback" => set_relay_fallback(params),
             "remote.nudge" => nudge(params),
             "remote.reconsiderPlan" => reconsider_plan(),
             // Authenticated peers ask this of the machine they are reaching, so
@@ -3161,6 +3185,12 @@ struct ServeParams {
     port: Option<u16>,
     tunnel: Option<bool>,
     tunnel_endpoint: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RelayFallbackParams {
+    enabled: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -3315,7 +3345,28 @@ fn status() -> Result<Value, String> {
         "directCandidates": direct_candidates,
         // This device only. Direct bytes are not the account relay allowance.
         "traffic": traffic_json(),
+        "relayFallback": settings.relay_fallback,
     }))
+}
+
+fn set_relay_fallback(params: &str) -> Result<Value, String> {
+    crate::request_context::refuse_remote("relay fallback settings")?;
+    let request: RelayFallbackParams =
+        serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+    let mut settings = load_settings();
+    settings.relay_fallback = request.enabled;
+    save_settings(&settings)?;
+    if !request.enabled {
+        // A disabled fallback must not revive a pooled relay connection on
+        // the next call. In-flight calls finish on the route they already own.
+        if let Ok(mut held) = pool().lock() {
+            for idle in held.values_mut() {
+                idle.retain(|item| !item.connection.is_relay());
+            }
+            held.retain(|_, idle| !idle.is_empty());
+        }
+    }
+    Ok(json!({"relayFallback": settings.relay_fallback}))
 }
 
 fn validate_tunnel_endpoint(raw: &str) -> Result<String, String> {
@@ -3994,10 +4045,40 @@ mod tests {
     #[test]
     fn remote_reach_is_off_unless_a_file_says_otherwise() {
         assert!(!RemoteSettings::default().tunnel);
+        assert!(RemoteSettings::default().relay_fallback);
         assert_eq!(
             RemoteSettings::default().tunnel_endpoint,
             "wss://tunnel.tokenstat.ai"
         );
+        let older: RemoteSettings = serde_json::from_str(r#"{"tunnel":true}"#).unwrap();
+        assert!(
+            older.relay_fallback,
+            "older settings keep their existing routing"
+        );
+        let direct_only: RemoteSettings =
+            serde_json::from_str(r#"{"tunnel":true,"relay_fallback":false}"#).unwrap();
+        assert!(!direct_only.relay_fallback);
+    }
+
+    #[test]
+    fn direct_only_refuses_a_relay_dial_before_opening_a_tunnel() {
+        let identity = MachineIdentity::from_secret([42; 32]);
+        let settings = RemoteSettings {
+            tunnel: true,
+            relay_fallback: false,
+            ..RemoteSettings::default()
+        };
+        let failure = tunnel_dial(
+            &settings,
+            identity.public_key(),
+            &identity,
+            "other Mac",
+            ChannelPurpose::Workspace,
+            "no direct address",
+        )
+        .err()
+        .expect("relay dial must be refused");
+        assert!(failure.contains("Relay fallback is off"), "{failure}");
     }
 
     /// Trust is not transitive. An approved peer must not be able to use this
@@ -4078,6 +4159,8 @@ mod tests {
     fn a_remote_peer_cannot_change_tunnel_settings() {
         crate::request_context::with_remote_peer("phone", || {
             let refused = serve(r#"{"tunnel":false}"#).expect_err("must refuse");
+            assert!(refused.contains("local-only"), "{refused}");
+            let refused = set_relay_fallback(r#"{"enabled":false}"#).expect_err("must refuse");
             assert!(refused.contains("local-only"), "{refused}");
         });
     }

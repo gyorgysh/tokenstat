@@ -187,6 +187,9 @@ private struct ClientAccountContent: View {
             ClientTeamAccountLink()
             planCard(account)
             RelayUsageCard(usage: account.relayUsage) { await model.load() }
+            RelayFallbackSetting(enabled: model.remoteStatus?.relayFallback) {
+                try await model.setRelayFallback($0)
+            }
             lastSync(account)
             devices(account)
             signOutButton

@@ -4576,6 +4576,7 @@ private fun AccountDialog(
                     }
                     AccountPlanCard(state = state, onPlans = { paywall = true })
                     RelayUsageCard(state.account, onRefresh = { scope.launch { TsRefresh.run("relay") { model.refresh() } } })
+                    RelayFallbackCard(model)
                     // Sync privacy lives under Legal now, with the documents
                     // it belongs to. Leaving a copy here would be the same
                     // claim in two places, free to drift apart.
@@ -4871,6 +4872,50 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
                 )
             }
             TsSecondaryButton(label = L10n.text("android.tokenstatapp.refresh_usage.8d3a136d"), onClick = onRefresh, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun RelayFallbackCard(model: AppViewModel) {
+    val colors = LocalTsColors.current
+    val scope = rememberCoroutineScope()
+    var enabled by remember { mutableStateOf<Boolean?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(model) {
+        enabled = runCatching {
+            (model.core("remote.status") as? JsonObject)
+                ?.get("relayFallback")?.jsonPrimitive?.booleanOrNull
+        }.getOrNull()
+    }
+    val current = enabled ?: return
+    TsCard(title = L10n.text("common.connection_route"), mark = "mark_activity") {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(L10n.text("common.relay_fallback"), color = colors.textPrimary, modifier = Modifier.weight(1f))
+                TsBrandSwitch(
+                    checked = current,
+                    onCheckedChange = { requested ->
+                        if (!saving) scope.launch {
+                            saving = true
+                            error = null
+                            runCatching {
+                                val result = model.core("remote.relayFallback", buildJsonObject { put("enabled", requested) }) as? JsonObject
+                                result?.get("relayFallback")?.jsonPrimitive?.booleanOrNull
+                                    ?: throw IllegalStateException("Invalid relay preference response")
+                            }.onSuccess { enabled = it }
+                                .onFailure { error = it.message }
+                            saving = false
+                        }
+                    },
+                )
+            }
+            Text(L10n.text("common.relay_fallback_detail"), color = colors.textSecondary)
+            if (error != null) Text(error.orEmpty(), color = colors.danger)
         }
     }
 }

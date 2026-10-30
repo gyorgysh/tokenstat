@@ -207,6 +207,8 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             content.Children.Add(IdentityCard(account));
             content.Children.Add(RelayUsageCard(account));
+            if (await RelayFallbackCardAsync() is { } relayFallback)
+                content.Children.Add(relayFallback);
             content.Children.Add(SyncCard(account));
             content.Children.Add(DevicesCard(account));
         }
@@ -1346,6 +1348,55 @@ internal sealed class AccountPage : Page, IToolbarItems
         });
         body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.refresh_usage.8d3a136d"), ActionIcon.Refresh, async (_, _) => await LoadAsync()));
         return Chrome.Card(L10n.Text("windows.accountpage.relay_usage.1addb713"), body, L10n.Text("windows.accountpage.one_allowance_across_your_devices.608bfc41"));
+    }
+
+    private async Task<UIElement?> RelayFallbackCardAsync()
+    {
+        JsonNode status;
+        try { status = await AppServices.Host.CallAsync("remote.status"); }
+        catch { return null; }
+        if (status["relayFallback"] is not JsonValue preference ||
+            !preference.TryGetValue<bool>(out var enabled)) return null;
+
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        var toggle = new ToggleSwitch
+        {
+            Header = L10n.Text("common.relay_fallback"),
+            IsOn = enabled,
+            OnContent = "",
+            OffContent = "",
+            MinHeight = 44,
+        };
+        body.Children.Add(toggle);
+        body.Children.Add(new TextBlock
+        {
+            Text = L10n.Text("common.relay_fallback_detail"),
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var failure = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        body.Children.Add(failure);
+        var reverting = false;
+        toggle.Toggled += async (_, _) =>
+        {
+            if (reverting) return;
+            toggle.IsEnabled = false;
+            failure.Visibility = Visibility.Collapsed;
+            try
+            {
+                await AppServices.Host.CallAsync("remote.relayFallback", new JsonObject { ["enabled"] = toggle.IsOn });
+            }
+            catch (Exception error)
+            {
+                reverting = true;
+                toggle.IsOn = !toggle.IsOn;
+                reverting = false;
+                failure.Text = error.Message;
+                failure.Visibility = Visibility.Visible;
+            }
+            finally { toggle.IsEnabled = true; }
+        };
+        return Chrome.Card(L10n.Text("common.connection_route"), body);
     }
 
     private static UIElement UsageRow(string label, long bytes)
