@@ -126,6 +126,7 @@ import ai.tokenstat.tokenstat.ui.logic.insightFactPanels
 import ai.tokenstat.tokenstat.ui.logic.money
 import ai.tokenstat.tokenstat.ui.logic.moneyValue
 import ai.tokenstat.tokenstat.ui.logic.shortDate
+import ai.tokenstat.tokenstat.ui.logic.retryTunnelStartup
 import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
 import ai.tokenstat.tokenstat.ui.devices.DeviceDetailScreen
 import ai.tokenstat.tokenstat.ui.devices.DevicesHeader
@@ -3105,19 +3106,24 @@ private fun WorkspacesScreen(
 
     suspend fun requestAccess(peer: String) {
         requesting = true
-        runCatching {
-            model.workspaceSection(peer, "workspace.access.ask", buildJsonObject {}) as JsonObject
-        }.onSuccess { answer ->
-            session.setRequestNotice(if (answer.bool("granted")) {
-                L10n.text("android.tokenstatapp.this_device_already_has_access_pull_to_ref.06b896c9")
-            } else {
-                L10n.text("android.tokenstatapp.asked_on_that_computer_run_tokenstat_host.40af0490")
-            })
-        }.onFailure {
-            if (it is CancellationException) throw it
-            session.setRequestNotice(it.message)
+        try {
+            runCatching {
+                retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
+                    model.workspaceSection(peer, "workspace.access.ask", buildJsonObject {}) as JsonObject
+                }
+            }.onSuccess { answer ->
+                session.setRequestNotice(if (answer.bool("granted")) {
+                    L10n.text("android.tokenstatapp.this_device_already_has_access_pull_to_ref.06b896c9")
+                } else {
+                    L10n.text("android.tokenstatapp.asked_on_that_computer_run_tokenstat_host.40af0490")
+                })
+            }.onFailure {
+                if (it is CancellationException) throw it
+                session.setRequestNotice(it.message)
+            }
+        } finally {
+            requesting = false
         }
-        requesting = false
     }
 
     suspend fun connect(machine: JsonObject, automatic: Boolean = false) {
@@ -3149,12 +3155,13 @@ private fun WorkspacesScreen(
             // beside the new host's name is one lie waiting to be clicked.
             session.clearLists()
             runCatching {
-                model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
-                if (!current()) return@runCatching
-                // Asked before anything is loaded. Being paired is not being let
-                // in: that computer allows each device to open its work
-                // explicitly.
-                val check = model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
+                // The first dial can beat tunnel startup on a newly signed-in
+                // phone. Wake it and retry that transport failure before
+                // presenting an error or asking the person to tap again.
+                val check = retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
+                    model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
+                    model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
+                }
                 if (!current()) return@runCatching
                 session.setAllowed(check?.bool("allowed"))
                 if (check?.bool("allowed") != true) {
@@ -3214,8 +3221,12 @@ private fun WorkspacesScreen(
     // The one place that dials without being asked: the last host, when it
     // is awake and its switch is on. Fires as the host list arrives and as
     // machines wake, which is what makes "keep trying until online" work.
-    LaunchedEffect(hosts, connectedPeer, connectingPeer, autoFailures) {
+    LaunchedEffect(hosts, connectedPeer, connectingPeer, autoFailures, allowed) {
         if (connectedPeer != null || connectingPeer != null) return@LaunchedEffect
+        // A refused host is waiting for its owner, not another automatic
+        // dial. That dial created a fresh pending request and consumed the
+        // host's ask limit each time `connectingPeer` cleared.
+        if (allowed == false) return@LaunchedEffect
         // Three silent failures already surfaced as a readable error with a
         // retry. Dialling on behind it would flash that card on every
         // account refresh; the next dial is the user's tap.

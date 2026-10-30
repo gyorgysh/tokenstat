@@ -1821,7 +1821,7 @@
   "android.tokenstatapp.appears_when_your_account_has_linked_devic.8a84c464": "Appears when your account has linked devices.",
   "android.tokenstatapp.approve_this_device_on_tokenstat_ai_this_s.bad8690a": "Approve this device on tokenstat.ai. This screen updates by itself.",
   "android.tokenstatapp.as_of_0_relay_reporting_can_lag_by_about_1.f028d9ec": "As of {0}. Relay reporting can lag by about {1} seconds.",
-  "android.tokenstatapp.asked_on_that_computer_run_tokenstat_host.40af0490": "Asked. On that computer run `tokenstat host access approve` (over SSH is fine) and pick this device.",
+  "android.tokenstatapp.asked_on_that_computer_run_tokenstat_host.40af0490": "Request sent. Review it in tokenstat on that computer. If it no longer appears, request access again.",
   "android.tokenstatapp.asks_for_0.35d5d9fa": "Asks for: {0}",
   "android.tokenstatapp.at_api_list_price_across_every_device.956db3fc": "at API list price, across every device",
   "android.tokenstatapp.authentication.66880d2d": "Authentication",

@@ -73,10 +73,9 @@ final class DeviceAccessRequests {
         "\(request.id):\(request.control):\(request.askedAt)"
     }
 
-    /// How often to look. A request is answered by a person walking to their
-    /// Mac, so seconds of latency cost nothing and a tighter loop would spend
-    /// a wake-up on a question that is almost never there.
-    private static let pollInterval: Duration = .seconds(5)
+    /// New requests should appear before the person concludes the first tap
+    /// did nothing. These are local host reads, so a two-second poll is cheap.
+    private static let pollInterval: Duration = .seconds(2)
 
     private init() {}
 

@@ -22,7 +22,6 @@ struct DeviceAccessRequestSheet: View {
     let request: DeviceAccessPending
     let model: DeviceAccessRequests
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAnswering = false
     @State private var selection = DeviceAccessSelection()
     @State private var original = DeviceAccessSelection()
@@ -37,32 +36,9 @@ struct DeviceAccessRequestSheet: View {
             scrolls: true,
             onClose: { deny() }
         ) {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                DeviceAccessScene(kind: request.kind, reduceMotion: reduceMotion)
-                    .frame(maxWidth: .infinity)
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text(L10n.text("apple.deviceaccessrequestsheet.approve_only_a_device_you_recognise_everyt.97e32c7d"))
-                        .font(Theme.callout)
-                        .foregroundStyle(Theme.controlGlyph)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if loaded {
-                    VStack(alignment: .leading, spacing: Theme.Space.m) {
-                        Toggle(L10n.text("apple.deviceaccessrequestsheet.open_projects"), isOn: $selection.workspace)
-                            .frame(minHeight: 44)
-                        Text(L10n.text("apple.deviceaccessrequestsheet.it_will_be_able_to_read_and_change_files_i.511878d6"))
-                            .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
-                        Toggle(L10n.text("apple.deviceaccessrequestsheet.view_screen"), isOn: $selection.view)
-                            .frame(minHeight: 44)
-                        Toggle(L10n.text("apple.deviceaccessrequestsheet.control_screen"), isOn: $selection.control)
-                            .frame(minHeight: 44)
-                            .disabled(!selection.view)
-                        Text(L10n.text("apple.deviceaccessrequestsheet.capture_runs_in_the_app_so_tokenstat_has_t.e2be3644"))
-                            .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
-                    }
-                    .onChange(of: selection.view) { _, view in
-                        if !view { selection.control = false }
-                    }
+                    DeviceAccessChoices(selection: $selection)
                 } else if loadError == nil {
                     ProgressView()
                 }
@@ -81,12 +57,9 @@ struct DeviceAccessRequestSheet: View {
         } actions: {
             answers
         }
-        // The choices scroll at larger text sizes while the decision buttons
-        // remain visible in the footer.
-        .frame(width: 540)
-        .frame(minHeight: 520)
-        .background(Theme.background)
-        .presentationBackground(Theme.background)
+        // Every choice fits at the normal type size; larger text scrolls in
+        // the body while the decision buttons remain fixed and visible.
+        .modalFrame(width: 600, height: 560)
         .task(id: "\(request.id):\(request.askedAt)") { await loadSelection() }
     }
 
@@ -112,7 +85,14 @@ struct DeviceAccessRequestSheet: View {
             guard !Task.isCancelled else { return }
             let loadedSelection = DeviceAccessSelection(workspace: workspace,
                 view: screen?.view == true, control: screen?.control == true)
-            selection = loadedSelection
+            var proposed = loadedSelection
+            switch request.kind {
+            case .workspace: proposed.workspace = true
+            case .screen:
+                proposed.view = true
+                if request.control { proposed.control = true }
+            }
+            selection = proposed
             original = loadedSelection
             loaded = true
         } catch {
@@ -138,67 +118,87 @@ struct DeviceAccessRequestSheet: View {
     }
 }
 
-/// The picture over the question: a device reaching for a machine.
-///
-/// The rules the client's empty-state art follows, in the app's own colours:
-/// one stroke weight, one small loop, and a resting frame that Reduce Motion
-/// lands on and stays at.
-private struct DeviceAccessScene: View {
-    let kind: DeviceAccessKind
-    let reduceMotion: Bool
-
-    @State private var reaching = false
-
-    private var style: StrokeStyle {
-        StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round)
-    }
+private struct DeviceAccessChoices: View {
+    @Binding var selection: DeviceAccessSelection
 
     var body: some View {
-        ZStack {
-            // The machine being asked.
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Theme.border, style: style)
-                .frame(width: 96, height: 62)
-                .overlay {
-                    Image(systemName: kind == .screen ? "eye" : "folder")
-                        .font(Theme.fixed(20))
-                        .foregroundStyle(Theme.accent.opacity(0.65))
-                }
-                .offset(x: -58)
-
-            // The device doing the asking.
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .strokeBorder(Theme.border, style: style)
-                .frame(width: 38, height: 62)
-                .offset(x: 78)
-
-            // Three steps closing the gap, one after another, so the picture
-            // reads as a request travelling rather than a thing blinking.
-            HStack(spacing: 9) {
-                ForEach(0..<3, id: \.self) { step in
-                    Circle()
-                        .fill(step == 1 ? Theme.secondary : Theme.accent)
-                        .frame(width: 6, height: 6)
-                        .opacity(reaching ? 1 : 0.25)
-                        .animation(
-                            reduceMotion
-                                ? nil
-                                : .easeInOut(duration: 1.1)
-                                    .repeatForever(autoreverses: true)
-                                    .delay(Double(2 - step) * 0.22),
-                            value: reaching
-                        )
-                }
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Text(L10n.text("apple.deviceaccessrequestsheet.choose_access"))
+                .font(Theme.callout.weight(.semibold))
+            VStack(spacing: 0) {
+                permissionRow(
+                    L10n.text("apple.deviceaccessrequestsheet.open_projects"),
+                    detail: L10n.text("apple.deviceaccessrequestsheet.projects_detail"),
+                    isOn: $selection.workspace
+                )
+                ThemeRule()
+                permissionRow(
+                    L10n.text("apple.deviceaccessrequestsheet.view_screen"),
+                    detail: L10n.text("apple.deviceaccessrequestsheet.view_detail"),
+                    isOn: $selection.view
+                )
+                ThemeRule()
+                permissionRow(
+                    L10n.text("apple.deviceaccessrequestsheet.control_screen"),
+                    detail: L10n.text("apple.deviceaccessrequestsheet.control_detail"),
+                    isOn: $selection.control
+                )
             }
-            .offset(x: 20)
-        }
-        .frame(height: 96)
-        .accessibilityHidden(true)
-        .onAppear {
-            guard !reduceMotion else { return }
-            reaching = true
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+            .onChange(of: selection.view) { _, view in
+                if !view { selection.control = false }
+            }
+            .onChange(of: selection.control) { _, control in
+                if control { selection.view = true }
+            }
+            Text(L10n.text("apple.deviceaccessrequestsheet.security_note"))
+                .font(Theme.caption)
+                .foregroundStyle(Theme.controlGlyph)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    private func permissionRow(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                Text(title)
+                    .font(Theme.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .toggleStyle(.checkbox)
+        .frame(minHeight: 64)
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.xs)
+    }
+}
+
+#Preview("Device access") {
+    @Previewable @State var selection = DeviceAccessSelection(workspace: true)
+    ThemedSheet(
+        title: "Android phone wants to open your work",
+        subtitle: "Folders, files, terminals and the agents running in them.",
+        icon: .reveal,
+        scrolls: true,
+        onClose: {}
+    ) {
+        DeviceAccessChoices(selection: $selection)
+    } actions: {
+        HStack {
+            Button("Deny") {}
+                .buttonStyle(SecondaryButtonStyle())
+            Spacer()
+            Button("Allow selected access") {}
+                .buttonStyle(AccentButtonStyle())
+        }
+    }
+    .modalFrame(width: 600, height: 560)
 }
 
 #endif
