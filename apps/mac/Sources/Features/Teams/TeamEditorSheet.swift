@@ -70,46 +70,24 @@ struct TeamEditorFrame<Content: View>: View {
 }
 struct TeamAuthorizationEditor: View {
     @Bindable var store: TeamStore
-    @Environment(\.openURL) private var openURL
-    @State private var confirmed = false
-    @State private var saving = false
-    @State private var error: String?
-    @State private var preview: TeamAuthorizationPreview?
+    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        TeamEditorFrame(title: L10n.text("common.teams.enable_title"), subtitle: L10n.text("common.teams.device_consent_detail"),
-            submitTitle: L10n.text("common.teams.continue_browser"), submitIcon: .external, valid: confirmed && preview != nil, saving: saving || store.isMutating, error: error, submit: enable) {
-            TeamNotice(message: L10n.text("common.teams.metadata_disclosure"))
-            Text(L10n.text("common.teams.content_disclosure")).font(Theme.body).foregroundStyle(.secondary)
-            if let preview {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text(preview.deviceName).font(Theme.headline)
-                    DisclosureGroup(L10n.text("common.teams.connection_key")) {
-                        Text(L10n.text("common.teams.check_device_key")).font(Theme.callout).foregroundStyle(.secondary)
-                        Text(preview.deviceKey).font(Theme.mono(12)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        let removed = store.capabilities?.deviceRemoved == true
+        ThemedSheet(title: removed ? L10n.text("common.teams.device_removed_title") : L10n.text("common.teams.enable_title"),
+            subtitle: L10n.text("common.teams.title"), icon: .team, onClose: { dismiss() }) {
+            TeamNotice(message: removed ? L10n.text("common.teams.device_removed_detail")
+                : store.capabilities?.setupIssue?.message ?? L10n.text("common.teams.retry_detail"), warning: true)
+        } actions: {
+            Button(L10n.text("common.close"), .dismiss) { dismiss() }.buttonStyle(TeamButtonStyle())
+            Spacer()
+            if !removed {
+                Button(L10n.text("common.retry"), .refresh) {
+                    Task {
+                        await store.reloadAfterChange()
+                        if store.phase == .ready { dismiss() }
                     }
-                    Toggle(L10n.text("common.teams.metadata_confirm"), isOn: $confirmed).toggleStyle(.checkboxForTeam).accessibilityIdentifier("team.authorization.confirm")
-                }
-            } else if error != nil {
-                Button(L10n.text("common.retry"), .refresh) { Task { await loadPreview() } }.buttonStyle(TeamButtonStyle())
-            } else { ProgressView().controlSize(.small) }
-        }
-        .task { await loadPreview() }
-    }
-    private func loadPreview() async {
-        error = nil
-        do { preview = try await store.authorizationPreview() }
-        catch is CancellationError {} catch { self.error = error.localizedDescription }
-    }
-    private func enable() {
-        guard let preview else { return }
-        saving = true; error = nil
-        Task {
-            do {
-                let authorization = try await store.prepareAuthorization(expectedDeviceKey: preview.deviceKey)
-                guard let url = URL(string: authorization.authorizationURL) else { throw TeamRequestFailure(code: "invalid_response", message: L10n.text("common.teams.invalid_link")) }
-                openURL(url) { accepted in if !accepted { error = L10n.text("common.teams.browser_failed") } }
-            } catch is CancellationError {} catch { self.error = error.localizedDescription }
-            saving = false
+                }.buttonStyle(TeamButtonStyle(primary: true))
+            }
         }
     }
 }

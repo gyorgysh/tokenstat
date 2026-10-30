@@ -176,8 +176,11 @@ struct TeamManagementView: View {
                             .textSelection(.enabled)
                             .accessibilityIdentifier("team.authorization.issue")
                     }
-                    Button(L10n.text("common.teams.enable_action"), .team) { sheet = .authorize }.buttonStyle(TeamButtonStyle(primary: true))
-                        .accessibilityIdentifier("team.authorization.open")
+                    if !removed {
+                        Button(L10n.text("common.retry"), .refresh) { refresh() }
+                            .buttonStyle(TeamButtonStyle(primary: true))
+                            .accessibilityIdentifier("team.authorization.retry")
+                    }
                 }
             }
         case .failed:

@@ -248,27 +248,20 @@ final class TeamFixtureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["team.project.team"].isEnabled)
         capture(app, "Unavailable team setup can be stopped after a review")
     }
-    func testAuthorizationRequiresConsentWithLargeText() {
+    func testAuthorizationRetriesInAppWithLargeText() {
         let app = launch("authorization", largeText: true)
-        let setup = app.buttons["team.authorization.open"]
-        let ready = setup.waitForExistence(timeout: 15)
+        let retry = app.buttons["team.authorization.retry"]
+        let ready = retry.waitForExistence(timeout: 15)
         if !ready {
             capture(app, "Teams setup did not appear")
             let tree = XCTAttachment(string: app.debugDescription); tree.name = "Teams setup accessibility"; tree.lifetime = .keepAlways; add(tree)
         }
         XCTAssertTrue(ready)
-        if !setup.isHittable, app.scrollViews.firstMatch.exists { reveal(setup, in: app) }
-        XCTAssertTrue(setup.isHittable); setup.tap()
-        let submit = app.buttons["team.editor.submit"]
-        XCTAssertTrue(submit.waitForExistence(timeout: 5))
-        XCTAssertFalse(submit.isEnabled)
-        capture(app, "Device consent large text")
-        let consent = app.switches["team.authorization.confirm"]
-        if !consent.isHittable { app.scrollViews.firstMatch.swipeUp() }
-        XCTAssertTrue(consent.waitForExistence(timeout: 5))
-        consent.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
-        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: submit)
-        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
+        if !retry.isHittable, app.scrollViews.firstMatch.exists { reveal(retry, in: app) }
+        XCTAssertTrue(retry.isHittable)
+        XCTAssertFalse(app.buttons["team.authorization.open"].exists)
+        XCTAssertFalse(app.buttons["Continue in browser"].exists)
+        capture(app, "Teams retries in app at large text")
     }
     func testInvitationReviewShowsExactAccessAndRefusesExpiredInvitations() {
         let app = launch("invitation")

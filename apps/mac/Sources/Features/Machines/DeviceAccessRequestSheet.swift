@@ -24,13 +24,18 @@ struct DeviceAccessRequestSheet: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAnswering = false
+    @State private var selection = DeviceAccessSelection()
+    @State private var original = DeviceAccessSelection()
+    @State private var loaded = false
+    @State private var loadError: String?
 
     var body: some View {
         ThemedSheet(
             title: request.headline,
             subtitle: request.detail,
             icon: request.kind == .screen ? .preview : .reveal,
-            onClose: { answer(view: false, control: false) }
+            scrolls: true,
+            onClose: { deny() }
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 DeviceAccessScene(kind: request.kind, reduceMotion: reduceMotion)
@@ -40,10 +45,31 @@ struct DeviceAccessRequestSheet: View {
                         .font(Theme.callout)
                         .foregroundStyle(Theme.controlGlyph)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(scope)
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.controlGlyph)
-                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if loaded {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        Toggle(L10n.text("apple.deviceaccessrequestsheet.open_projects"), isOn: $selection.workspace)
+                            .frame(minHeight: 44)
+                        Text(L10n.text("apple.deviceaccessrequestsheet.it_will_be_able_to_read_and_change_files_i.511878d6"))
+                            .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+                        Toggle(L10n.text("apple.deviceaccessrequestsheet.view_screen"), isOn: $selection.view)
+                            .frame(minHeight: 44)
+                        Toggle(L10n.text("apple.deviceaccessrequestsheet.control_screen"), isOn: $selection.control)
+                            .frame(minHeight: 44)
+                            .disabled(!selection.view)
+                        Text(L10n.text("apple.deviceaccessrequestsheet.capture_runs_in_the_app_so_tokenstat_has_t.e2be3644"))
+                            .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+                    }
+                    .onChange(of: selection.view) { _, view in
+                        if !view { selection.control = false }
+                    }
+                } else if loadError == nil {
+                    ProgressView()
+                }
+                if let loadError {
+                    Text(loadError).font(Theme.caption).foregroundStyle(Theme.danger)
+                    Button(L10n.text("common.retry"), .refresh) { Task { await loadSelection() } }
+                        .buttonStyle(SecondaryButtonStyle())
                 }
                 if let error = model.errorMessage {
                     Text(error)
@@ -55,52 +81,58 @@ struct DeviceAccessRequestSheet: View {
         } actions: {
             answers
         }
-        // A minimum, not a size. The copy wraps, and at an accessibility text
-        // size a fixed height would put the answers off the bottom of a sheet
-        // that cannot scroll.
+        // The choices scroll at larger text sizes while the decision buttons
+        // remain visible in the footer.
         .frame(width: 540)
         .frame(minHeight: 520)
         .background(Theme.background)
         .presentationBackground(Theme.background)
-    }
-
-    private var scope: String {
-        switch request.kind {
-        case .screen:
-            return L10n.text("apple.deviceaccessrequestsheet.capture_runs_in_the_app_so_tokenstat_has_t.e2be3644")
-        case .workspace:
-            return L10n.text("apple.deviceaccessrequestsheet.it_will_be_able_to_read_and_change_files_i.511878d6")
-        }
+        .task(id: "\(request.id):\(request.askedAt)") { await loadSelection() }
     }
 
     private var answers: some View {
         HStack(spacing: Theme.Space.s) {
-            Button(L10n.text("apple.deviceaccessrequestsheet.deny.05a2d733"), .revoke, role: .destructive) { answer(view: false, control: false) }
+            Button(L10n.text("apple.deviceaccessrequestsheet.deny.05a2d733"), .revoke, role: .destructive) { deny() }
                 .buttonStyle(SecondaryButtonStyle())
             Spacer(minLength: Theme.Space.s)
-            // Both answers, always, for a screen. Offering only what the
-            // device happened to ask for left no way to hand over the mouse
-            // without making somebody go back to their phone and ask again for
-            // the wider thing, which is a dead end rather than a safeguard.
-            // The person at this machine is the one deciding, so they get the
-            // whole decision.
-            if request.kind == .screen {
-                Button(L10n.text("apple.deviceaccessrequestsheet.view_only.9b4c6c85"), .preview) { answer(view: true, control: false) }
-                    .buttonStyle(SecondaryButtonStyle())
-                Button(L10n.text("apple.deviceaccessrequestsheet.full_access.f19611c6"), .approve) { answer(view: true, control: true) }
-                    .buttonStyle(AccentButtonStyle())
-            } else {
-                Button(L10n.text("apple.deviceaccessrequestsheet.allow.e213c161"), .approve) { answer(view: true, control: false) }
-                    .buttonStyle(AccentButtonStyle())
-            }
+            Button(L10n.text("apple.deviceaccessrequestsheet.allow_selected"), .approve) { apply() }
+                .buttonStyle(AccentButtonStyle())
+                .disabled(!loaded || !(selection.workspace || selection.view))
         }
         .disabled(isAnswering || model.answeringIDs.contains(request.id))
     }
 
-    private func answer(view: Bool, control: Bool) {
+    private func loadSelection() async {
+        loaded = false; loadError = nil
+        do {
+            async let workspaces = Bridge.workspaceAccessList()
+            async let screens = Bridge.screenPermissions()
+            let workspace = (try await workspaces).contains(request.peerID)
+            let screen = (try await screens).first { $0.peerID == request.peerID }
+            guard !Task.isCancelled else { return }
+            let loadedSelection = DeviceAccessSelection(workspace: workspace,
+                view: screen?.view == true, control: screen?.control == true)
+            selection = loadedSelection
+            original = loadedSelection
+            loaded = true
+        } catch {
+            if !Task.isCancelled { loadError = error.localizedDescription }
+        }
+    }
+
+    private func apply() {
         isAnswering = true
         Task {
-            await model.answer(request, view: view, control: control)
+            await model.answerConfigured(request, selection: selection, original: original)
+            isAnswering = false
+            if model.errorMessage != nil { await loadSelection() }
+        }
+    }
+
+    private func deny() {
+        isAnswering = true
+        Task {
+            await model.denyPending(request)
             isAnswering = false
         }
     }

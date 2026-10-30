@@ -13,6 +13,12 @@ import AppKit
 import SwiftUI
 import UserNotifications
 
+struct DeviceAccessSelection: Equatable {
+    var workspace = false
+    var view = false
+    var control = false
+}
+
 /// Devices asking this computer for something, and the answer.
 ///
 /// Two grants, one queue: watching this screen, and opening the work on this
@@ -158,6 +164,81 @@ final class DeviceAccessRequests {
         if asking?.id == request.id { asking = nil }
         withdraw(request)
         await refresh()
+    }
+
+    /// The host can configure all three scopes from the first request. Read
+    /// current grants again at submission so an answer from Devices or a
+    /// notification cannot be silently overwritten by an older sheet.
+    func answerConfigured(_ request: DeviceAccessPending, selection: DeviceAccessSelection,
+                          original: DeviceAccessSelection) async {
+        let peerIDs = ["screen:\(request.peerID)", "workspace:\(request.peerID)"]
+        guard peerIDs.allSatisfy({ !answeringIDs.contains($0) }) else { return }
+        answeringIDs.formUnion(peerIDs)
+        defer { answeringIDs.subtract(peerIDs) }
+        do {
+            await refresh()
+            guard pending.contains(where: { $0.id == request.id && $0.askedAt == request.askedAt }) else {
+                errorMessage = L10n.text("apple.deviceaccessrequestsheet.request_expired")
+                return
+            }
+            async let workspaces = Bridge.workspaceAccessList()
+            async let screens = Bridge.screenPermissions()
+            let currentWorkspace = (try await workspaces).contains(request.peerID)
+            let currentScreen = (try await screens).first { $0.peerID == request.peerID }
+            // An untouched switch follows the newest Devices value. Only an
+            // explicit choice in this sheet may replace a concurrent change.
+            let workspace = selection.workspace == original.workspace ? currentWorkspace : selection.workspace
+            let selectedView = selection.view == original.view ? (currentScreen?.view ?? false) : selection.view
+            let control = selection.control == original.control ? (currentScreen?.control ?? false) : selection.control
+            let view = selectedView || control
+            if view && currentScreen?.view != true {
+                _ = screenAccess.requestScreenRecording()
+            }
+            if control && currentScreen?.control != true {
+                _ = screenAccess.requestAccessibility()
+            }
+            let screenChanged = (currentScreen?.view ?? false) != view
+                || (currentScreen?.control ?? false) != control
+            let pendingScreen = pending.contains { $0.peerID == request.peerID && $0.kind == .screen }
+            let pendingWorkspace = pending.contains { $0.peerID == request.peerID && $0.kind == .workspace }
+            if pendingScreen || screenChanged {
+                try await Bridge.answerScreenAccess(peerID: request.peerID, view: view, control: control)
+            }
+            if pendingWorkspace || currentWorkspace != workspace {
+                try await Bridge.setWorkspaceAccess(peerID: request.peerID, allow: workspace)
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+            await refresh()
+            return
+        }
+        if asking?.id == request.id { asking = nil }
+        for row in pending where row.peerID == request.peerID { withdraw(row) }
+        await refresh()
+    }
+
+    /// Deny every outstanding question from this device while retaining any
+    /// other access the owner previously gave it in Devices.
+    func denyPending(_ request: DeviceAccessPending) async {
+        do {
+            await refresh()
+            let pendingWorkspace = pending.contains { $0.peerID == request.peerID && $0.kind == .workspace }
+            let pendingScreen = pending.contains { $0.peerID == request.peerID && $0.kind == .screen }
+            async let workspaces = Bridge.workspaceAccessList()
+            async let screens = Bridge.screenPermissions()
+            let currentWorkspace = (try await workspaces).contains(request.peerID)
+            let screen = (try await screens).first { $0.peerID == request.peerID }
+            let current = DeviceAccessSelection(workspace: currentWorkspace,
+                view: screen?.view == true, control: screen?.control == true)
+            await answerConfigured(request, selection: DeviceAccessSelection(
+                workspace: pendingWorkspace ? false : current.workspace,
+                view: current.view,
+                control: pendingScreen ? false : current.control
+            ), original: current)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     /// Take the banner back once the question has been answered, wherever it
