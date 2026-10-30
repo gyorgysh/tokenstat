@@ -4006,11 +4006,6 @@ private fun WorkspaceList(
                             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                                 SectionTitle(L10n.text("android.tokenstatapp.recent_chats.2ccfecbc"), "mark_activity")
                             }
-                            if (folderRows.isNotEmpty()) {
-                                TextButton(onClick = onNewChat) {
-                                    Text(L10n.text("android.tokenstatapp.new_chat.db18382a"), style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
-                                }
-                            }
                         }
                     }
                     val shown = if (chatsExpanded) chatRows else chatRows.take(5)

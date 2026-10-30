@@ -552,26 +552,52 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         var draft = Format.Flag(pull, "draft");
         var tint = StateTint(state, draft);
         var body = new StackPanel { Spacing = Theme.SpaceS };
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        heading.Children.Add(new TextBlock
-        {
-            Text = $"#{number}", Foreground = Theme.Brush(tint),
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-        });
-        heading.Children.Add(new TextBlock
+        body.Children.Add(new TextBlock
         {
             Text = Format.Text(pull, "title"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 680,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxLines = 2,
         });
-        body.Children.Add(heading);
+        var author = Format.Text(pull, "author");
+        var byline = new Grid { ColumnSpacing = Theme.SpaceS };
+        byline.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        byline.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        byline.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        byline.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        byline.Children.Add(Marks.Avatar(url: Format.Text(pull, "authorAvatar"), name: author, size: 24));
+        var authorLabel = new TextBlock
+        {
+            Text = author, VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0.78, TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        Grid.SetColumn(authorLabel, 1);
+        byline.Children.Add(authorLabel);
+        var numberLabel = new TextBlock { Text = $"#{number}", VerticalAlignment = VerticalAlignment.Center, Opacity = 0.58 };
+        Grid.SetColumn(numberLabel, 2);
+        byline.Children.Add(numberLabel);
+        var statusLabel = new TextBlock
+        {
+            Text = draft ? L10n.Text("windows.pullspage.draft.ebf12ef4") : state switch
+            {
+                "merged" => L10n.Text("windows.pullspage.merged.bd0a0620"),
+                "closed" => L10n.Text("windows.pullspage.closed.c21ead06"),
+                _ => L10n.Text("common.open"),
+            },
+            Foreground = Theme.Brush(tint),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(statusLabel, 3);
+        byline.Children.Add(statusLabel);
+        body.Children.Add(byline);
         body.Children.Add(new TextBlock
         {
-            Text = $"{Format.Text(pull, "author")}  ·  {Format.Text(pull, "headRef")} → {Format.Text(pull, "baseRef")}",
+            Text = $"{Format.Text(pull, "headRef")} → {Format.Text(pull, "baseRef")}",
             FontSize = 12,
             Opacity = 0.68,
-            TextWrapping = TextWrapping.Wrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap,
         });
         body.Children.Add(Fonts.Tabular(new TextBlock
         {
