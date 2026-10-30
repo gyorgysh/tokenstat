@@ -691,6 +691,21 @@ struct ClientWorkspacesView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(L10n.text("apple.clientworkspacesview.auto_connect_0.3bbf847e", "\(host.name)"))
                 .accessibilityValue(isAutoConnectEnabled(for: host.peerKey) ? L10n.text("apple.clientworkspacesview.on.13001175") : L10n.text("apple.clientworkspacesview.off.ca7981b4"))
+            } else if model.loadedHostKeys.contains(host.peerKey) {
+                HStack(spacing: Theme.Space.s) {
+                    Text(L10n.text("apple.clientworkspacesview.auto_connect.45b6d201"))
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: Theme.Space.s)
+                    Toggle("", isOn: autoConnectBinding(for: host.peerKey))
+                        .labelsHidden()
+                        .tint(Theme.accent)
+                    Button(L10n.text("common.disconnect"), .disconnect) {
+                        model.disconnectHost(host.peerKey)
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(minHeight: 44)
+                }
             }
         }
         .padding(Theme.Space.m)
@@ -1332,6 +1347,7 @@ final class ClientWorkspacesModel {
             setAutoConnect(false, for: peer)
             hostSnapshots.removeValue(forKey: peer)
             loadedHostKeys = Set(hostSnapshots.keys)
+            publishEcosystem([], peer: peer, host: "", lease: EcosystemPublisher.lease)
         }
         remoteRefresh?.task.cancel()
         remoteRefresh = nil
@@ -1345,6 +1361,20 @@ final class ClientWorkspacesModel {
         folders = []
         sessions = []
         recentChats = []
+    }
+
+    func disconnectHost(_ peer: String) {
+        setAutoConnect(false, for: peer)
+        hostSnapshots.removeValue(forKey: peer)
+        loadedHostKeys = Set(hostSnapshots.keys)
+        publishEcosystem([], peer: peer, host: "", lease: EcosystemPublisher.lease)
+        if connectedKey == peer {
+            disconnect(manual: false)
+        } else if isConnecting == peer || pendingPeer == peer {
+            remoteLoadGeneration = UUID()
+            if pendingPeer == peer { pendingPeer = nil }
+            if chosenPeer == peer { chosenPeer = nil }
+        }
     }
 
     func openSession(_ info: PtySessionInfo, peer: String? = nil) {
