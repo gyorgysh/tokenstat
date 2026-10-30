@@ -218,7 +218,11 @@ final class ClientNavigationModel {
         }
         if let restoredRoute, restoredRoute.scope == scope,
            restoredChatReader?.matches(restoredRoute) == true { return restoredRoute }
-        if let folder = rememberedWorkspace, folder.scope == scope {
+        // The folder tree remains expanded when leaving Repositories, but its
+        // remembered detail is no longer the active screen. Saving it under
+        // Home made a later Duo layout swap reopen that old conversation.
+        if destination == .workspaces,
+           let folder = rememberedWorkspace, folder.scope == scope {
             return WorkMobileRoute(scope: scope, tab: destination.rawValue,
                                    reference: folder, section: rememberedSection?.rawValue)
         }

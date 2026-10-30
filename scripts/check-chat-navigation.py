@@ -66,6 +66,21 @@ tests = '''
         WorkSessionContext.shared.generation -= 1
         nav.chooseNavigation()
         precondition(nav.pullHandoff == nil, "explicit navigation retires the pull selection")
+        // A repository detail can stay expanded in the sidebar without
+        // becoming Home's saved destination during a Duo layout swap.
+        let remembered = ClientNavigationModel()
+        remembered.destination = .workspaces
+        let rememberedOwner = UUID()
+        remembered.rememberWorkspace(peer: "mac", workspaceID: "p", section: .chat,
+            owner: rememberedOwner)
+        precondition(remembered.currentRoute?.reference?.workspaceID == "p")
+        remembered.destination = .home
+        precondition(remembered.currentRoute?.tab == ClientTab.home.rawValue
+                     && remembered.currentRoute?.reference == nil,
+                     "Home must not inherit an expanded repository detail")
+        remembered.destination = .workspaces
+        precondition(remembered.currentRoute?.reference?.workspaceID == "p",
+                     "returning to Repositories retains its expanded folder")
         let session = ClientChatSession(), owner = UUID(), push = UUID()
         let b = WorkReference(scope: scope, hostIdentity: "mac", workspaceID: "p", kind: .conversation, itemID: "b")
         let key = ClientChatSessions.Key(peer: "mac", workspace: "p", conversation: "b")
