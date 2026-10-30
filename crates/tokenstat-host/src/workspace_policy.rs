@@ -555,6 +555,17 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             if store.allowed.iter().any(|held| held == &peer) {
                 return Ok(json!({"pending": false, "granted": true}));
             }
+            // A second tap while the owner is deciding is the same question.
+            // Replacing it changes the sheet's request timestamp and spends
+            // another rate-limit slot without giving the owner new information.
+            if store.pending.iter().any(|request| request.peer_id == peer) {
+                if review_demo {
+                    drop(store);
+                    set_allowed_locked_with_label(&peer, true, Authority::Console, label)?;
+                    return Ok(json!({"pending": false, "granted": true, "reviewDemo": true}));
+                }
+                return Ok(json!({"pending": true}));
+            }
             let asked_at = now_secs();
             // A device that has already asked five times this hour is told to
             // wait. It keeps whatever request it has standing, so this costs
@@ -1179,11 +1190,40 @@ mod tests {
                     .unwrap())
                     .is_ok()
                 );
+                // An answered or expired question is a new request. Repeated
+                // taps on the standing one do not spend the hourly budget.
+                let mut store = load().unwrap();
+                store.pending.clear();
+                save(&store).unwrap();
             }
             let refused = crate::request_context::with_remote_peer(&asker, || {
                 call("workspace.access.ask", "{}").unwrap().unwrap_err()
             });
             assert!(refused.contains("asked several times"), "{refused}");
+        });
+    }
+
+    #[test]
+    fn repeated_ask_keeps_the_pending_request_and_hourly_budget() {
+        crate::test_identity::isolated(|| {
+            let peer = peer_key("57");
+            account_holds(&peer, "Phone");
+            let ask = || {
+                crate::request_context::with_remote_peer(&peer, || {
+                    call("workspace.access.ask", "{}").unwrap().unwrap()
+                })
+            };
+            assert_eq!(ask()["pending"], true);
+            let first = load().unwrap();
+            assert_eq!(first.pending.len(), 1);
+            assert_eq!(first.recent(&peer, "ask"), 1);
+            for _ in 0..MAX_ASKS_PER_HOUR + 1 {
+                assert_eq!(ask()["pending"], true);
+            }
+            let after = load().unwrap();
+            assert_eq!(after.pending.len(), 1);
+            assert_eq!(after.pending[0].asked_at, first.pending[0].asked_at);
+            assert_eq!(after.recent(&peer, "ask"), 1);
         });
     }
 

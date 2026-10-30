@@ -3355,10 +3355,10 @@ private fun WorkspacesScreen(
         folders.mapNotNull { it as? JsonObject }.find { it.string("id") == selectedFolderId }
     } else null
 
-    suspend fun requestAccess(peer: String) {
+    suspend fun requestAccess(peer: String): Boolean {
         requesting = true
         try {
-            runCatching {
+            return runCatching {
                 retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
                     model.workspaceSection(peer, "workspace.access.ask", buildJsonObject {}) as JsonObject
                 }
@@ -3371,7 +3371,7 @@ private fun WorkspacesScreen(
             }.onFailure {
                 if (it is CancellationException) throw it
                 session.setRequestNotice(it.message)
-            }
+            }.getOrNull()?.bool("granted") == true
         } finally {
             requesting = false
         }
@@ -3486,8 +3486,14 @@ private fun WorkspacesScreen(
                 if (!current()) return@runCatching
                 session.setAllowed(check?.bool("allowed"))
                 if (check?.bool("allowed") != true) {
-                    if (session.requestNotice.value == null) requestAccess(peer)
-                    return@runCatching
+                    // The host may grant the request before this call returns
+                    // (and the App Review demo grants it immediately). Keep
+                    // this tap moving into the workspace instead of making
+                    // the person tap Connect again or wait for the poll.
+                    val granted = session.requestNotice.value == null && requestAccess(peer)
+                    if (!current() || !granted) return@runCatching
+                    session.setAllowed(true)
+                    session.setRequestNotice(null)
                 }
                 session.setLoadingFolders(true)
                 session.setConnected(peer, true)
@@ -3903,7 +3909,12 @@ private fun WorkspacesScreen(
             onNewSession = { choosingFor = "Sessions" },
             onChooseFolder = { picking = true },
             onClone = { cloning = true },
-            onRequestAccess = { peer -> scope.launch { requestAccess(peer) } },
+            onRequestAccess = { peer -> scope.launch {
+                if (requestAccess(peer)) {
+                    hosts.firstOrNull { it.string("publicIdentity") == peer }
+                        ?.let { connect(it, forceRefresh = true) }
+                }
+            } },
             onCustomize = { customizing = true },
             onOpenDevice = onOpenDevice,
             onSetup = onSetupWizard,

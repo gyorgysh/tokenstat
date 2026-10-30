@@ -1238,8 +1238,15 @@ final class ClientWorkspacesModel {
                 if !allowed {
                     dropHostSnapshot(host.peerKey)
                     deniedHostKeys.insert(host.peerKey)
-                    _ = try? await Bridge.askWorkspaceAccess(peer: host.peerKey)
+                    // A failed ask must run through the dial's retry ladder.
+                    // Swallowing it left this screen saying it was waiting on
+                    // the host even though no request had reached the host.
+                    let request = try await Bridge.askWorkspaceAccess(peer: host.peerKey)
                     guard stillCurrent() else { return }
+                    // A grant can land before the ask replies, and the review
+                    // demo host grants during the ask. Finish this Connect tap
+                    // without making the person return and try again.
+                    if request.granted == true { continue }
                     // Its own state, not `infoMessage`. Waiting on a person at
                     // another computer is the one thing on this screen where
                     // nothing will change until they act, and a line of grey

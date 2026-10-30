@@ -515,6 +515,16 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                     }) {
                         return true;
                     }
+                    // Keep the host sheet stable while the owner decides.
+                    // A later request for mouse control may strengthen a
+                    // view-only question, but a repeat must not replace it.
+                    if store
+                        .pending
+                        .iter()
+                        .any(|request| request.peer_id == peer && (request.control || !p.control))
+                    {
+                        return false;
+                    }
                     let asked_at = now();
                     store.pending.retain(|request| request.peer_id != peer);
                     store.pending.push(PendingRequest {
@@ -841,6 +851,39 @@ mod tests {
         assert!(!quiet.control);
         let asked: AskParams = serde_json::from_str(r#"{"control":true}"#).unwrap();
         assert!(asked.control);
+    }
+
+    #[test]
+    fn repeated_screen_request_keeps_the_host_question_until_access_expands() {
+        crate::test_identity::isolated(|| {
+            let peer = "58".repeat(32);
+            let ask = |control| {
+                crate::request_context::with_remote_peer(&peer, || {
+                    call(
+                        "screen.access.ask",
+                        if control { r#"{"control":true}"# } else { "{}" },
+                    )
+                    .unwrap()
+                    .unwrap()
+                })
+            };
+            assert_eq!(ask(false)["pending"], true);
+            let first = load().unwrap();
+            assert_eq!(first.pending.len(), 1);
+            for _ in 0..3 {
+                assert_eq!(ask(false)["pending"], true);
+            }
+            let repeated = load().unwrap();
+            assert_eq!(repeated.pending.len(), 1);
+            assert_eq!(repeated.pending[0].asked_at, first.pending[0].asked_at);
+            assert!(!repeated.pending[0].control);
+            assert_eq!(ask(true)["pending"], true);
+            let expanded = load().unwrap();
+            assert_eq!(expanded.pending.len(), 1);
+            assert!(expanded.pending[0].control);
+            assert_eq!(ask(false)["pending"], true);
+            assert!(load().unwrap().pending[0].control);
+        });
     }
 
     #[test]
