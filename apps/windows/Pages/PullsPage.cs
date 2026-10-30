@@ -29,6 +29,15 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly ComboBox _scope = new() { MinWidth = 145 };
     private readonly ComboBox _state = new() { MinWidth = 120 };
+    private static readonly string[] LegacyStates = ["open", "merged", "closed", "draft"];
+    private static readonly string[] PagedStates = ["all", "open", "merged", "closed", "draft"];
+    private bool _updatingStates;
+    private long? _hostProtocol;
+    private StackPanel? _listRows;
+    private string? _nextCursor;
+    private UIElement? _pageError;
+    private readonly HashSet<long> _seenPulls = [];
+    private bool _loadingMore;
     private CancellationTokenSource? _loginPoll;
     private int _loadGeneration;
     private string _folderName = "";
@@ -44,7 +53,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         _workspaceId = workspaceId;
         _scope.ItemsSource = new[] { L10n.Text("windows.pullspage.all.a52ace42"), L10n.Text("windows.pullspage.mine.f57afb7d"), L10n.Text("windows.pullspage.assigned.8191888d"), L10n.Text("windows.pullspage.review_requested.744f7028") };
         _scope.SelectedIndex = 0;
-        _state.ItemsSource = new[] { L10n.Text("common.open"), L10n.Text("windows.pullspage.merged.bd0a0620"), L10n.Text("windows.pullspage.closed.c21ead06"), L10n.Text("windows.pullspage.draft.ebf12ef4") };
+        _state.ItemsSource = StateLabels(false);
         _state.SelectedIndex = 0;
         _scope.SelectionChanged += async (_, _) => await LoadListAsync();
         _state.SelectionChanged += async (_, _) => await LoadListAsync();
@@ -206,6 +215,12 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
     private async Task LoadAsync(bool refresh = false)
     {
         var generation = ++_loadGeneration;
+        if (refresh) _hostProtocol = null;
+        _listRows = null;
+        _nextCursor = null;
+        _pageError = null;
+        _seenPulls.Clear();
+        _listCount = 0;
         _root.Children.Clear();
         _openNumber = null;
         _detail = null;
@@ -217,6 +232,20 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         _folderName = folderName;
         RaiseToolbarChanged();
         RenderInspector();
+        // The list page and mixed-state query are separate host capabilities.
+        // Keep older hosts on the original first-page method and omit All.
+        if (_hostProtocol is null)
+        {
+            try
+            {
+                _hostProtocol = RemoteWorkspaces.TrySplit(_workspaceId, out var peer, out _)
+                    ? await RemoteFeatureGate.PeerProtocolAsync(peer)
+                    : RemoteFeatureGate.ProtocolOf(await AppServices.Host.CallAsync("protocol"));
+            }
+            catch { /* An unknown protocol takes the legacy path. */ }
+            if (generation != _loadGeneration || !IsLoaded) return;
+            UpdateStateChoices();
+        }
         UIElement? rows = null;
         try
         {
@@ -387,7 +416,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task LoadListAsync()
     {
-        if (!IsLoaded)
+        if (!IsLoaded || _updatingStates)
         {
             return;
         }
@@ -397,23 +426,26 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
     private async Task AppendListAsync(bool refresh, int generation)
     {
         var scopes = new[] { "all", "mine", "assigned", "reviewRequested" };
-        var states = new[] { "open", "merged", "closed", "draft" };
-        var listed = await CallPullsAsync("pulls.list", new JsonObject
+        var state = SelectedState();
+        var paged = _hostProtocol >= 52;
+        var listed = await CallPullsAsync(paged ? "pulls.listPage" : "pulls.list", new JsonObject
         {
             ["workspaceId"] = _workspaceId,
             ["scope"] = scopes[Math.Max(0, _scope.SelectedIndex)],
-            ["state"] = states[Math.Max(0, _state.SelectedIndex)],
+            ["state"] = state,
             ["limit"] = 40,
             ["refresh"] = refresh,
         });
         if (generation != _loadGeneration || !IsLoaded) return;
-        var rows = listed as JsonArray;
+        var rows = paged ? listed["rows"] as JsonArray : listed as JsonArray;
+        _nextCursor = paged ? Format.Text(listed, "nextCursor") : null;
+        if (string.IsNullOrEmpty(_nextCursor)) _nextCursor = null;
         _listCount = rows?.Count ?? 0;
         RenderInspector();
         if (rows is null || rows.Count == 0)
         {
             _root.Children.Add(Chrome.Empty(
-                L10n.Text("windows.pullspage.no_0_pull_requests.980f0d9c", $"{states[Math.Max(0, _state.SelectedIndex)]}"),
+                L10n.Text("windows.pullspage.no_0_pull_requests.980f0d9c", state),
                 L10n.Text("windows.pullspage.nothing_in_this_repository_matches_the_sel.667ebd03"),
                 ActionIcon.Merge));
             return;
@@ -422,9 +454,95 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         foreach (var pull in rows)
         {
             if (pull is null) continue;
+            _seenPulls.Add(Format.Long(pull, "number"));
             list.Children.Add(PullRow(pull));
         }
+        _listRows = list;
         _root.Children.Add(list);
+        AddMoreControl(generation);
+    }
+
+    private static string[] StateLabels(bool all) => all
+        ? [L10n.Text("windows.pullspage.all.a52ace42"), L10n.Text("common.open"), L10n.Text("windows.pullspage.merged.bd0a0620"), L10n.Text("windows.pullspage.closed.c21ead06"), L10n.Text("windows.pullspage.draft.ebf12ef4")]
+        : [L10n.Text("common.open"), L10n.Text("windows.pullspage.merged.bd0a0620"), L10n.Text("windows.pullspage.closed.c21ead06"), L10n.Text("windows.pullspage.draft.ebf12ef4")];
+
+    private string SelectedState()
+    {
+        var states = _hostProtocol >= 53 ? PagedStates : LegacyStates;
+        return states[Math.Clamp(_state.SelectedIndex, 0, states.Length - 1)];
+    }
+
+    private void UpdateStateChoices()
+    {
+        var all = _hostProtocol >= 53;
+        var oldState = LegacyStates[Math.Clamp(_state.SelectedIndex, 0, LegacyStates.Length - 1)];
+        _updatingStates = true;
+        _state.ItemsSource = StateLabels(all);
+        _state.SelectedIndex = Array.IndexOf(all ? PagedStates : LegacyStates, oldState);
+        _updatingStates = false;
+    }
+
+    private void AddMoreControl(int generation)
+    {
+        if (_nextCursor is null) return;
+        if (_listCount >= 1000)
+        {
+            _root.Children.Add(new TextBlock { Text = L10n.Text("windows.pullspage.page_limit"), Opacity = 0.7 });
+            return;
+        }
+        _root.Children.Add(ActionIconGlyph.Button(L10n.Text("common.teams.load_more"), ActionIcon.More,
+            async (_, _) => await LoadMoreAsync(generation)));
+    }
+
+    private async Task LoadMoreAsync(int generation)
+    {
+        if (_loadingMore || _nextCursor is null || _listRows is null || generation != _loadGeneration) return;
+        _loadingMore = true;
+        var cursor = _nextCursor;
+        if (_root.Children.Count > 0) _root.Children.RemoveAt(_root.Children.Count - 1);
+        if (_pageError is not null) _root.Children.Remove(_pageError);
+        _pageError = null;
+        var spinner = Motion.SkeletonCard();
+        _root.Children.Add(spinner);
+        try
+        {
+            var scopes = new[] { "all", "mine", "assigned", "reviewRequested" };
+            var page = await CallPullsAsync("pulls.listPage", new JsonObject
+            {
+                ["workspaceId"] = _workspaceId,
+                ["scope"] = scopes[Math.Max(0, _scope.SelectedIndex)],
+                ["state"] = SelectedState(),
+                ["limit"] = 40,
+                ["cursor"] = cursor,
+            });
+            if (generation != _loadGeneration || !IsLoaded) return;
+            var next = Format.Text(page, "nextCursor");
+            if (next == cursor) throw new InvalidOperationException(L10n.Text("windows.pullspage.invalid_page"));
+            foreach (var pull in page["rows"] as JsonArray ?? new JsonArray())
+            {
+                if (pull is null || _listCount >= 1000) break;
+                if (!_seenPulls.Add(Format.Long(pull, "number"))) continue;
+                _listRows.Children.Add(PullRow(pull));
+                _listCount++;
+            }
+            _nextCursor = string.IsNullOrEmpty(next) ? null : next;
+            RenderInspector();
+        }
+        catch (Exception ex)
+        {
+            if (generation != _loadGeneration || !IsLoaded) return;
+            _pageError = Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important);
+            _root.Children.Add(_pageError);
+        }
+        finally
+        {
+            _loadingMore = false;
+            if (generation == _loadGeneration && IsLoaded)
+            {
+                _root.Children.Remove(spinner);
+                AddMoreControl(generation);
+            }
+        }
     }
 
     private UIElement PullRow(JsonNode pull)
