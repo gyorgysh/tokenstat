@@ -62,6 +62,11 @@ class WorkspacesConnectionStateTest {
         assertTrue(state.activateConnectedHost(host("peer-b")))
         assertEquals("Beta", (state.folders.value.single() as kotlinx.serialization.json.JsonObject).str("name"))
 
+        state.setKnownHosts(setOf("peer-a"))
+        assertEquals(setOf("peer-a"), state.connectedHosts.value)
+        assertFalse(state.activateConnectedHost(host("peer-b")))
+        assertTrue(state.activateConnectedHost(host("peer-a")))
+
         state.setAccountOwner("account-two")
         assertFalse(state.publishBackground("peer-c", "account-one", JsonArray(emptyList()), JsonArray(emptyList()), JsonArray(emptyList())))
         assertTrue(state.backgroundConnecting.value.isEmpty())

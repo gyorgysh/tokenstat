@@ -249,7 +249,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val accountObject = account.jsonObject
                 if (signingOut || !UsageWidgetStore.verifyForeground(getApplication(), accountObject, widgetEpoch)) return@onSuccess
                 ai.tokenstat.tokenstat.ecosystem.SystemProjects.verify(getApplication(), accountObject)
-                workspacesConnection.setAccountOwner(ai.tokenstat.tokenstat.ecosystem.UsageSnapshot.owner(accountObject))
+                syncWorkspaceAccount(accountObject)
                 mutableState.value = mutableState.value.copy(
                     account = accountObject,
                     authChecked = true,
@@ -480,10 +480,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (ai.tokenstat.tokenstat.ecosystem.UsageSnapshot.owner(account) != state.value.account?.let(ai.tokenstat.tokenstat.ecosystem.UsageSnapshot::owner)) return@launch
         if (!UsageWidgetStore.verifyForeground(getApplication(), account, UsageWidgetStore.epoch())) return@launch
         ai.tokenstat.tokenstat.ecosystem.SystemProjects.verify(getApplication(), account)
+        syncWorkspaceAccount(account)
         mutableState.value = mutableState.value.copy(account = account)
         if (account["signedIn"]?.jsonPrimitive?.content == "true") {
             dashboardJob?.cancel()
             dashboardJob = viewModelScope.launch { loadDashboard() }
+        }
+    }
+
+    private fun syncWorkspaceAccount(account: JsonObject) {
+        workspacesConnection.setAccountOwner(ai.tokenstat.tokenstat.ecosystem.UsageSnapshot.owner(account))
+        (account["machines"] as? JsonArray)?.let { machines ->
+            workspacesConnection.setKnownHosts(machines.mapNotNull { machine ->
+                val entry = machine as? JsonObject ?: return@mapNotNull null
+                if (entry["kind"]?.jsonPrimitive?.contentOrNull == "client") return@mapNotNull null
+                entry["publicIdentity"]?.jsonPrimitive?.contentOrNull
+            }.toSet())
         }
     }
 

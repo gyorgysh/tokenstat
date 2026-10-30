@@ -3304,7 +3304,22 @@ private fun WorkspacesScreen(
         // Switching back to a host that has already loaded is immediate. The
         // lists remain keyed by peer in the model, so a raw folder id from
         // another machine can never be shown under this host.
-        if (!forceRefresh && !automatic && session.activateConnectedHost(machine)) return
+        if (!forceRefresh && !automatic &&
+            machine.get("online")?.jsonPrimitive?.booleanOrNull != false &&
+            session.activateConnectedHost(machine)) {
+            val stillAllowed = runCatching {
+                (model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject)?.bool("allowed")
+            }.getOrNull()
+            if (stillAllowed == false &&
+                HomeStores.pinIdentity(model.state.value.account) == navigationOwner &&
+                session.connectedPeer.value == peer) {
+                session.disconnect()
+                session.setHost(machine)
+                session.setAllowed(false)
+                requestAccess(peer)
+            }
+            return
+        }
         if (localConnectingPeer != null || (connectingPeer != null && automatic)) return
         val connectionTicket = session.beginConnecting(peer, explicit = !automatic) ?: return
         val epoch = ++connectionEpoch

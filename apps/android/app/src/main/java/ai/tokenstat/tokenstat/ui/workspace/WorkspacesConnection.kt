@@ -17,12 +17,27 @@ import kotlinx.serialization.json.JsonObject
 /// selection, sheets), which is correctly ephemeral.
 class WorkspacesConnectionState {
     private var accountOwner: String? = null
+    private var knownHosts: Set<String>? = null
 
     fun setAccountOwner(owner: String?) {
         if (accountOwner == owner) return
         accountOwner = owner
         clearAll()
         mutableHost.value = null
+        knownHosts = null
+    }
+
+    fun setKnownHosts(peers: Set<String>) {
+        knownHosts = peers
+        hostSnapshots.keys.retainAll(peers)
+        mutableConnectedHosts.value = hostSnapshots.keys.toSet()
+        backgroundAttempts.keys.retainAll(peers)
+        backgroundNextAt.keys.retainAll(peers)
+        mutableBackgroundConnecting.value = mutableBackgroundConnecting.value.intersect(peers)
+        if (mutableConnectedPeer.value?.let { it !in peers } == true) {
+            disconnect()
+            mutableHost.value = null
+        }
     }
 
     private data class HostSnapshot(
@@ -43,7 +58,7 @@ class WorkspacesConnectionState {
     val backgroundConnecting: StateFlow<Set<String>> = mutableBackgroundConnecting.asStateFlow()
 
     fun beginBackground(peer: String, owner: String, nowMs: Long = System.currentTimeMillis()): Boolean {
-        if (accountOwner != owner || peer in hostSnapshots ||
+        if (accountOwner != owner || (knownHosts != null && peer !in knownHosts.orEmpty()) || peer in hostSnapshots ||
             peer in mutableBackgroundConnecting.value ||
             nowMs < (backgroundNextAt[peer] ?: 0L)) return false
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value + peer
@@ -64,7 +79,8 @@ class WorkspacesConnectionState {
     }
 
     fun publishBackground(peer: String, owner: String, folders: JsonArray, sessions: JsonArray, chats: JsonArray): Boolean {
-        if (accountOwner != owner || peer !in mutableBackgroundConnecting.value) return false
+        if (accountOwner != owner || (knownHosts != null && peer !in knownHosts.orEmpty()) ||
+            peer !in mutableBackgroundConnecting.value) return false
         // A foreground dial owns the visible lists. Background results never
         // overwrite that selected host, even when the two requests overlap.
         if (mutableConnectedPeer.value == peer || mutableConnectingPeer.value == peer) return false
