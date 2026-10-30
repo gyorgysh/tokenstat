@@ -3315,6 +3315,9 @@ private fun WorkspacesScreen(
                 HomeStores.pinIdentity(model.state.value.account) == owner &&
                 session.connectedPeer.value == peer) {
                 session.disconnect()
+                ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                    context, peer, JsonArray(emptyList()), ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                )
                 session.setHost(machine)
                 session.setAllowed(false)
                 requestAccess(peer)
@@ -3459,6 +3462,9 @@ private fun WorkspacesScreen(
         val peer = targetPeer ?: connectedPeer ?: connectingPeer ?: host?.string("publicIdentity")
         if (peer != null) layoutStore.setAutoConnectEnabled(peer, false)
         if (peer != null) session.disconnectHost(peer) else session.disconnect()
+        if (peer != null) ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+            context, peer, JsonArray(emptyList()), ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+        )
         if (peer == connectedPeer || peer == connectingPeer || peer == host?.string("publicIdentity")) {
             connectionEpoch++
             localConnectingPeer = null
@@ -3525,6 +3531,12 @@ private fun WorkspacesScreen(
     }
     var terminalSession by remember { mutableStateOf<WorkspaceTerminalRequest?>(null) }
     var browser by remember { mutableStateOf<BrowserOpenRequest?>(null) }
+    LaunchedEffect(retainedHosts, connectedPeer, hosts) {
+        val known = hosts.mapNotNull { it.string("publicIdentity") }.toSet()
+        val active = retainedHosts + listOfNotNull(connectedPeer)
+        if (terminalSession?.peer?.let { it !in active || it !in known } == true) terminalSession = null
+        if (browser?.peer?.let { it !in active || it !in known } == true) browser = null
+    }
     var cloning by remember { mutableStateOf(false) }
     var folderRefresh by remember { mutableStateOf(0) }
     var pendingSelectFolderId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -3544,7 +3556,8 @@ private fun WorkspacesScreen(
         pendingChatId = if (pendingKind == "CHAT") pendingItem else null
         pendingOpenConversation = false
         if (pendingKind == "TERMINAL" && !pendingItem.isNullOrBlank()) {
-            terminalSession = WorkspaceTerminalRequest(pendingItem, folderId, host?.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
+            terminalSession = WorkspaceTerminalRequest(connectedPeer ?: return@LaunchedEffect,
+                pendingItem, folderId, host?.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
         }
         onPendingConsumed()
     }
@@ -3625,9 +3638,10 @@ private fun WorkspacesScreen(
     fun openSession(session: JsonObject) {
         val workspaceId = session.string("workspaceId") ?: boundFolder?.string("id") ?: ""
         terminalSession = WorkspaceTerminalRequest(
+            boundHost?.string("publicIdentity") ?: return,
             session.string("id"),
             workspaceId,
-            boundHost?.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"),
+            boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"),
         )
     }
     fun openChat(chat: JsonObject) {
@@ -3781,6 +3795,7 @@ private fun WorkspacesScreen(
             onOtherSession = { machine, info ->
                 if (session.activateConnectedHost(machine)) {
                     terminalSession = WorkspaceTerminalRequest(
+                        machine.string("publicIdentity").orEmpty(),
                         info.string("id"), info.string("workspaceId") ?: "",
                         machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"),
                     )
@@ -3860,10 +3875,10 @@ private fun WorkspacesScreen(
                 }
             },
         )
-    } else if (request != null && boundHost != null) {
+    } else if (request != null && (request.peer == connectedPeer || request.peer in retainedHosts)) {
         TerminalScreen(
             model = model,
-            peer = boundHost.string("publicIdentity") ?: "",
+            peer = request.peer,
             hostLabel = request.hostLabel,
             workspaceId = request.workspaceId,
             existingSessionId = request.sessionId,
@@ -3885,7 +3900,10 @@ private fun WorkspacesScreen(
                     initialSection = initialSection,
                     wideNavigation = expanded,
                     onBack = { selectedFolderId = null; selectedFolderPeer = null; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
-                    onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2")) },
+                    onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(
+                        boundHost.string("publicIdentity").orEmpty(), id,
+                        boundFolder.string("id") ?: "",
+                        boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2")) },
                     onOpenBrowser = { browser = it },
                     onRecordChat = ::recordChatOpened,
                     onOpenProject = ::openRegisteredProject,
@@ -3937,7 +3955,7 @@ private fun WorkspacesScreen(
     }
 }
 
-private data class WorkspaceTerminalRequest(val sessionId: String?, val workspaceId: String, val hostLabel: String)
+private data class WorkspaceTerminalRequest(val peer: String, val sessionId: String?, val workspaceId: String, val hostLabel: String)
 private data class OtherHostWork(
     val machine: JsonObject,
     val folders: List<JsonObject>,
