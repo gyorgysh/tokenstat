@@ -139,7 +139,8 @@ struct ClientWorkspacesView: View {
 
                     if model.connectedKey != nil {
                         if let peer = model.connectedKey,
-                           let host = model.hosts.first(where: { $0.peerKey == peer }) {
+                           let host = model.hosts.first(where: { $0.peerKey == peer }),
+                           host.online != false {
                             if model.folders.isEmpty, model.isConnecting == nil, model.errorMessage == nil {
                                 ClientEmptyState(
                                     kind: .nothingYet,
@@ -167,19 +168,41 @@ struct ClientWorkspacesView: View {
                             customizeWorkspacesButton
                         }
                     }
-                    ForEach(model.hosts.filter { model.loadedHostKeys.contains($0.peerKey) && $0.peerKey != model.connectedKey }) { host in
+                    ForEach(model.hosts.filter { model.loadedHostKeys.contains($0.peerKey) &&
+                        $0.peerKey != model.connectedKey && $0.online != false }) { host in
                         let hostFolders = model.folders(for: host.peerKey)
-                        if !hostFolders.isEmpty {
+                        let hostChats = model.chats(for: host.peerKey)
+                        let hostSessions = model.sessions(for: host.peerKey)
+                        if !hostFolders.isEmpty || !hostChats.isEmpty || !hostSessions.isEmpty {
                             ClientSectionTitle(title: host.name, mark: "mark_host")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 2)
                                 .padding(.top, Theme.Space.s)
-                            ClientAdaptiveCards {
-                                ForEach(hostFolders) { folder in
-                                    NavigationLink {
-                                        ClientWorkspaceDetailView(peer: host.peerKey, hostName: host.name, folder: folder)
+                            if !hostFolders.isEmpty {
+                                ClientAdaptiveCards {
+                                    ForEach(Array(hostFolders.prefix(5))) { folder in
+                                        NavigationLink {
+                                            ClientWorkspaceDetailView(peer: host.peerKey, hostName: host.name, folder: folder)
+                                        } label: {
+                                            ClientFolderRow(folder: folder)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                            ClientRecentChatsSection(peer: host.peerKey, hostName: host.name,
+                                folders: hostFolders, chats: hostChats)
+                            if !hostSessions.isEmpty {
+                                ClientSectionTitle(title: L10n.text("apple.clientworkspacesview.all_sessions.78648d4d"), mark: "mark_terminal")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                ForEach(Array(hostSessions.prefix(5))) { session in
+                                    Button {
+                                        model.openSession(session, peer: host.peerKey)
                                     } label: {
-                                        ClientFolderRow(folder: folder)
+                                        ClientSessionRow(session: session,
+                                            displayName: SidebarTerminalNames.shared.name(peer: host.peerKey,
+                                                workspaceID: session.workspaceID, sessionID: session.id))
+                                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -709,7 +732,7 @@ final class ClientWorkspacesModel {
     func chats(for peer: String) -> [ChatRecentConversation] { hostSnapshots[peer]?.chats ?? [] }
 
     func folderReference(id: String) -> (peer: String, folder: WorkspaceFolder)? {
-        for host in hosts where loadedHostKeys.contains(host.peerKey) {
+        for host in hosts where loadedHostKeys.contains(host.peerKey) && host.online != false {
             if let folder = hostSnapshots[host.peerKey]?.folders.first(where: { $0.id == id }) {
                 return (host.peerKey, folder)
             }

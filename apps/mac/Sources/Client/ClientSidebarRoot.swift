@@ -350,7 +350,7 @@ struct ClientSidebarRoot: View {
                 }
                 ForEach(workspaces.hosts) { host in
                     hostRow(host)
-                    if workspaces.loadedHostKeys.contains(host.peerKey) {
+                    if workspaces.loadedHostKeys.contains(host.peerKey), host.online != false {
                         let hostFolders = workspaces.folders(for: host.peerKey)
                         if workspaces.connectedKey == host.peerKey, hostFolders.isEmpty,
                            workspaces.isConnecting == nil, workspaces.errorMessage == nil {
