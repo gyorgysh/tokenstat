@@ -127,6 +127,10 @@ final class MachinesModel {
         connectedPeerKeys.remove(peerKey)
     }
 
+    func syncConnectedPeers(_ keys: Set<String>) {
+        connectedPeerKeys = keys
+    }
+
     func peer(for machine: Machine) -> Peer? {
         let identity = machine.publicIdentity ?? machine.machineID
         return peers.first { peer in

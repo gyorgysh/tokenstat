@@ -759,6 +759,9 @@ struct RootView: View {
                 isOverlayVisible = false
                 overlayHeldByPress = false
                 applyScope(from: next)
+                if next.isGlobal(.machines) {
+                    machines.syncConnectedPeers(workspaces.connectedRemotePeerKeys)
+                }
                 guard next.isGlobal(.home) else { return }
                 Task {
                     await BridgeLaunch.wait()
@@ -767,6 +770,9 @@ struct RootView: View {
             }
             .onChange(of: workspaces.front(in: route.workspaceID ?? "")) { _, front in
                 syncRouteToFront(front)
+            }
+            .onChange(of: workspaces.connectedRemotePeerKeys) { _, peers in
+                machines.syncConnectedPeers(peers)
             }
             // A sync landed, so the archive underneath every reporting screen
             // has moved. The counter is on AccountModel and the re-reads are
@@ -919,6 +925,10 @@ struct RootView: View {
             // sweep to show its folders.
             .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { note in
                 if let key = note.object as? String {
+                    // Devices is usually closed during the startup sweep. Its
+                    // row still needs to reflect the live sidebar connection
+                    // when the user opens it later.
+                    machines.markConnected(key)
                     // A sweep has already published this peer's folders.
                     // Reconnecting it here would restart the whole sweep and
                     // cancel the slower peers still in flight.
@@ -936,7 +946,13 @@ struct RootView: View {
             // waiting for the failure sweep to notice.
             .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidDisconnect)) { note in
                 if let key = note.object as? String {
+                    machines.markDisconnected(key)
                     workspaces.disconnect(peer: key)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .remotePeerBecameUnreachable)) { note in
+                if let key = note.object as? String {
+                    machines.markDisconnected(key)
                 }
             }
             .task {

@@ -909,6 +909,13 @@ final class WorkspacesModel {
     /// last-known folders stay; a machine that keeps failing is gone, and its
     /// folders must not linger in the sidebar pretending to be reachable.
     private var remotePeerFailures: [String: Int] = [:]
+    /// Live remote workspace sessions, including hosts with an empty folder
+    /// list. Devices reads this when it opens after the startup sweep.
+    var connectedRemotePeerKeys: Set<String> {
+        Set(remoteFolders.keys.filter {
+            !suppressedPeers.contains($0) && (remotePeerFailures[$0] ?? 0) == 0
+        })
+    }
     /// The peer missed a refresh, but its saved folders remain visible until
     /// the next failed attempt. Keep that state explicit in the workbench.
     func isRemoteStale(_ peer: String) -> Bool {
@@ -980,6 +987,26 @@ final class WorkspacesModel {
             UserDefaults.standard.set(old, forKey: key)
             UserDefaults.standard.removeObject(forKey: legacy)
         }
+    }
+    /// A previous workspace answer is a stronger launch hint than a pairing.
+    /// Phones can be approved peers too, but cannot serve workspaces. Keep the
+    /// hint scoped to the signed-in account so one account never dials another
+    /// account's remembered machine.
+    private static func knownWorkspaceHostsKey() -> String? {
+        guard let scope = WorkSessionContext.shared.scope else { return nil }
+        let owner = [scope.kind.rawValue, scope.origin, scope.identity]
+            .map(WorkReferenceKey.encode).joined(separator: "|")
+        return "workspace.knownHosts.v1.\(owner)"
+    }
+    private static func knownWorkspaceHosts() -> Set<String> {
+        guard let key = knownWorkspaceHostsKey() else { return [] }
+        return Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+    private static func rememberWorkspaceHost(_ peerKey: String) {
+        guard let key = knownWorkspaceHostsKey() else { return }
+        var known = knownWorkspaceHosts()
+        guard known.insert(peerKey).inserted else { return }
+        UserDefaults.standard.set(known.sorted(), forKey: key)
     }
     /// Hosts we have already asked to open their work this session, so a
     /// refusal is not re-asked on every peer sweep.
@@ -1112,10 +1139,20 @@ final class WorkspacesModel {
                     stagedSummaries = stagedSummaries.filter { !$0.key.hasPrefix("remote:\(key):") }
                 }
             }
+            let knownHosts = Self.knownWorkspaceHosts()
             let candidates = peers.filter { peer in
                 !suppressedPeers.contains(peer.key)
                     && Self.isAutoConnectEnabled(for: peer.key)
                     && (stagedNextDial[peer.key].map { Date() >= $0 } ?? true)
+            }.sorted { lhs, rhs in
+                // A recently seen host should not sit behind a queue of old
+                // phone pairings, each waiting for a network timeout. Once a
+                // host has answered, put it first on the next cold launch.
+                let lhsKnown = knownHosts.contains(lhs.key) || stagedEverAnswered.contains(lhs.key)
+                let rhsKnown = knownHosts.contains(rhs.key) || stagedEverAnswered.contains(rhs.key)
+                if lhsKnown != rhsKnown { return lhsKnown }
+                if lhs.lastSeen != rhs.lastSeen { return lhs.lastSeen > rhs.lastSeen }
+                return lhs.key < rhs.key
             }
             let candidateRevisions = Dictionary(uniqueKeysWithValues: candidates.map {
                 ($0.key, Self.autoConnectRevision(for: $0.key))
@@ -1153,6 +1190,7 @@ final class WorkspacesModel {
                         stagedNextDial[key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
                         stagedFailures[key] = 0
                         stagedEverAnswered.insert(key)
+                        Self.rememberWorkspaceHost(key)
                         // A different peer may have been disconnected while
                         // this one was answering. Never restore its old row
                         // from the staged snapshot during an early publish.
@@ -1233,6 +1271,7 @@ final class WorkspacesModel {
                     stagedNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
                     stagedFailures[peer.key] = 0
                     stagedEverAnswered.insert(peer.key)
+                    Self.rememberWorkspaceHost(peer.key)
                     if newlySeen {
                         NotificationCenter.default.post(
                             name: .remotePeerDidConnect,

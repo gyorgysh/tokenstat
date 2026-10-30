@@ -66,9 +66,13 @@ struct MachinesView: View {
                     Spacer(minLength: 0)
                     Button(L10n.text("common.add_device"), .create) { addingDevice = true }
                         .buttonStyle(AccentButtonStyle(small: true))
+                        .frame(minHeight: Theme.Control.heightComfortable)
+                        .contentShape(.rect)
                     #if os(macOS)
                     Button("Set up Linux host", .connect) { addingServer = true }
-                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .frame(minHeight: Theme.Control.heightComfortable)
+                        .contentShape(.rect)
                     #endif
                 }
                 .padding(Theme.Space.m)
@@ -127,23 +131,6 @@ struct MachinesView: View {
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { break }
                 await model.refresh()
-            }
-        }
-        // The sidebar sweep is the source of truth for who is actually
-        // connected; keep the Connect/Disconnect buttons in step with it.
-        .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { note in
-            if let key = note.object as? String {
-                model.markConnected(key)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidDisconnect)) { note in
-            if let key = note.object as? String {
-                model.markDisconnected(key)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .remotePeerBecameUnreachable)) { note in
-            if let key = note.object as? String {
-                model.markDisconnected(key)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .tokenstatEntitlementDidChange)) { _ in
