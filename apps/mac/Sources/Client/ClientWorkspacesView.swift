@@ -747,6 +747,7 @@ final class ClientWorkspacesModel {
     private(set) var staleHostKeys: Set<String> = []
     @ObservationIgnored private var backgroundSweep: Task<Void, Never>?
     @ObservationIgnored private var refreshBackgroundAfterSweep = false
+    @ObservationIgnored private var backgroundTickets: [String: UUID] = [:]
     @ObservationIgnored private var backgroundFailures: [String: Int] = [:]
     @ObservationIgnored private var nextBackgroundAttempt: [String: Date] = [:]
 
@@ -836,6 +837,9 @@ final class ClientWorkspacesModel {
             staleHostKeys.remove(peer)
             publishEcosystem([], peer: peer, host: "", lease: EcosystemPublisher.lease)
         }
+        for peer in backgroundTickets.keys.filter({ !available.contains($0) }) {
+            backgroundTickets.removeValue(forKey: peer)
+        }
         loadedHostKeys = Set(hostSnapshots.keys)
         if let connectedKey, !available.contains(connectedKey) { disconnect(manual: false) }
         migrateLegacyHost()
@@ -869,6 +873,7 @@ final class ClientWorkspacesModel {
     /// dialling or already queued is a no-op.
     func connect(_ host: ClientHost) async {
         guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
+        backgroundTickets.removeValue(forKey: host.peerKey)
         chosenPeer = host.peerKey
         if host.online != false, let snapshot = hostSnapshots[host.peerKey] {
             remoteLoadGeneration = UUID()
@@ -1066,9 +1071,15 @@ final class ClientWorkspacesModel {
     private func warm(_ host: ClientHost) async {
         let scope = ownerScope
         let lease = EcosystemPublisher.lease
+        let ticket = UUID()
+        backgroundTickets[host.peerKey] = ticket
+        defer {
+            if backgroundTickets[host.peerKey] == ticket { backgroundTickets.removeValue(forKey: host.peerKey) }
+        }
         func current() -> Bool {
             !Task.isCancelled && !retired && scope != nil && scope == ownerScope &&
                 scope == WorkSessionContext.shared.scope && lease == EcosystemPublisher.lease &&
+                backgroundTickets[host.peerKey] == ticket &&
                 hosts.contains(where: { $0.peerKey == host.peerKey }) &&
                 isAutoConnectEnabled(for: host.peerKey) &&
                 connectedKey != host.peerKey && isConnecting != host.peerKey && chosenPeer != host.peerKey
@@ -1152,6 +1163,7 @@ final class ClientWorkspacesModel {
     /// drops. Both end up here, never two at once.
     private func dial(_ host: ClientHost, recovering: Bool) async {
         guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
+        backgroundTickets.removeValue(forKey: host.peerKey)
         let ecosystemLease = EcosystemPublisher.lease
         let ownerScope = WorkSessionContext.shared.scope
         let loadGeneration = UUID()
@@ -1366,6 +1378,7 @@ final class ClientWorkspacesModel {
         backgroundSweep?.cancel()
         backgroundSweep = nil
         refreshBackgroundAfterSweep = false
+        backgroundTickets.removeAll()
         remoteRefresh?.task.cancel()
         remoteRefresh = nil
         activeTerminal?.stop()
@@ -1404,6 +1417,7 @@ final class ClientWorkspacesModel {
     }
 
     func disconnectHost(_ peer: String) {
+        backgroundTickets.removeValue(forKey: peer)
         setAutoConnect(false, for: peer)
         dropHostSnapshot(peer)
         if connectedKey == peer {
