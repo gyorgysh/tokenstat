@@ -191,10 +191,10 @@ private struct DeviceAccessChoices: View {
         DeviceAccessChoices(selection: $selection)
     } actions: {
         HStack {
-            Button("Deny") {}
+            Button("Deny", .revoke, role: .destructive) {}
                 .buttonStyle(SecondaryButtonStyle())
             Spacer()
-            Button("Allow selected access") {}
+            Button("Allow selected access", .approve) {}
                 .buttonStyle(AccentButtonStyle())
         }
     }
