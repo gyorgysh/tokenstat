@@ -23,7 +23,6 @@ internal static class AppServices
     public static void NotifyAccountChanged()
     {
         Interlocked.Increment(ref _accountGeneration);
-        RemoteWorkspaces.ResetForAccountChange();
         AccountChanged?.Invoke();
     }
     public static event Action? ConversationsChanged;

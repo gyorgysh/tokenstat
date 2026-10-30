@@ -49,6 +49,8 @@ internal sealed record RemoteConnectResult(bool Connected, string Message, bool 
 /// </summary>
 internal static class RemoteWorkspaces
 {
+    static RemoteWorkspaces() => AppServices.AccountChanged += ResetForAccountChange;
+
     public const string Prefix = "remote:";
 
     /// <summary>Raised on a background thread when the cached list changes.</summary>

@@ -768,6 +768,7 @@ struct ClientChatThread: View {
     @State private var showPort = false
     @State private var portText = "5173"
     @State private var openingPort = false
+    @State private var presentBrowserAfterPortDismiss = false
     @State private var portError: String?
     @State private var suggestedBrowserTarget: BrowserTarget?
     @State private var localBrowserSession: ProjectBrowserSession?
@@ -855,7 +856,8 @@ struct ClientChatThread: View {
     private var compactBrowserSheet: Binding<ProjectBrowserSession?> {
         Binding(
             get: {
-                guard isActive, !showsCompanionTabs else { return nil }
+                guard isActive, !showsCompanionTabs, !showPort,
+                      !presentBrowserAfterPortDismiss else { return nil }
                 if let session, !session.presentation.browserSheetVisible { return nil }
                 return browserSession
             },
@@ -1087,23 +1089,6 @@ struct ClientChatThread: View {
 
     private var chatPresentation: some View {
         VStack(spacing: 0) {
-            if isActive && chromeCollapsed && !(displayedBrowserFocus == .browser && companion == .browser) {
-                HStack {
-                    Button {
-                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                            chromeCollapsed = false
-                        }
-                    } label: {
-                        Image(systemName: "rectangle.topthird.inset.filled")
-                            .frame(minWidth: 44, minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .clientFloatingBar(cornerRadius: 14)
-                    .accessibilityLabel(L10n.text("apple.clientchatview.show_controls"))
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, Theme.Space.s)
-            }
             if let chat {
                 if model.savedCopy == nil {
                     WorkHandoffOffer(chat: model) { showingHandoff = true }
@@ -1211,6 +1196,23 @@ struct ClientChatThread: View {
         .overlay(alignment: .top) {
             if refreshing || connectivity.status == .offline {
                 ClientReconnectBanner(offline: !refreshing && connectivity.status == .offline)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if isActive && chromeCollapsed && !(displayedBrowserFocus == .browser && companion == .browser) {
+                Button {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                        chromeCollapsed = false
+                    }
+                } label: {
+                    Image(systemName: "rectangle.topthird.inset.filled")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .clientFloatingBar(cornerRadius: 14)
+                .accessibilityLabel(L10n.text("apple.clientchatview.show_controls"))
+                .padding(.leading, Theme.Space.s)
+                .padding(.top, Theme.Space.xs)
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -1363,7 +1365,7 @@ struct ClientChatThread: View {
         // never suppressed (host push suppression still works via heartbeat).
         .onChange(of: chatID, initial: true) { old, id in
             chromeScroll.reset()
-            if old != nil && old != id { chromeCollapsed = false }
+            if old != id { chromeCollapsed = false }
             rememberChat(id)
             updatePresence()
         }
@@ -1405,7 +1407,13 @@ struct ClientChatThread: View {
         .onChange(of: companion != nil && browserFocus != .chat, initial: true) { _, open in
             onBrowserChange?(open)
         }
-        .sheet(isPresented: $showPort) { portSheet }
+        .sheet(isPresented: $showPort, onDismiss: {
+            guard presentBrowserAfterPortDismiss else { return }
+            presentBrowserAfterPortDismiss = false
+            if isActive && !showsCompanionTabs {
+                session?.presentation.browserSheetVisible = true
+            }
+        }) { portSheet }
         .sheet(item: compactBrowserSheet) { browser in
             ClientBrowserScreen(session: browser) { closeBrowser() }
                 .presentationDetents([.large])
@@ -1476,7 +1484,12 @@ struct ClientChatThread: View {
                     Button(L10n.text("common.cancel")) { showPort = false; browserRequest = UUID() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.text("common.open")) { Task { await openPort() } }
+                    Button {
+                        Task { await openPort() }
+                    } label: {
+                        if openingPort { ProgressView() }
+                        else { Text(L10n.text("common.open")) }
+                    }
                         .disabled(openingPort || BrowserTarget.parsePort(portText) == nil)
                 }
             }
@@ -1486,6 +1499,7 @@ struct ClientChatThread: View {
 
     private func closeBrowser() {
         browserRequest = UUID()
+        presentBrowserAfterPortDismiss = false
         showPort = false
         suggestedBrowserTarget = nil
         browserSession?.close()
@@ -1519,10 +1533,19 @@ struct ClientChatThread: View {
             browser.close()
             return
         }
-        guard !browser.transportURL.isEmpty else { browser.close(); return }
+        guard !browser.transportURL.isEmpty else {
+            portError = L10n.text("apple.clientchatview.browser_did_not_open")
+            browser.close()
+            return
+        }
         browserSession?.close()
         browserSession = browser
-        session?.presentation.browserSheetVisible = isActive && !showsCompanionTabs
+        companion = .browser
+        browserFocus = showsCompanionTabs && wideBrowser ? .split : .browser
+        if !showsCompanionTabs {
+            session?.presentation.browserSheetVisible = false
+            presentBrowserAfterPortDismiss = true
+        }
         showPort = false
         onBrowserChange?(true)
     }

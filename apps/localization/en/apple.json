@@ -1123,6 +1123,7 @@
   "apple.clientchatview.ask_about_0.35c322e7": "Ask about {0}",
   "apple.clientchatview.ask_an_agent_to_explore_plan_or_work_in_0.c1ba0fc2": "Ask an agent to explore, plan, or work in {0}.",
   "apple.clientchatview.attach_files_not_folders.9039f9a4": "Attach files, not folders",
+  "apple.clientchatview.browser_did_not_open": "The browser did not open. Check that the port is still running and try again.",
   "apple.clientchatview.chat.460b3a7d": "Chat",
   "apple.clientchatview.hide_conversations": "Hide conversations",
   "apple.clientchatview.hide_controls": "Hide controls",
