@@ -852,7 +852,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                                         break
                                     }
                                     val folders = model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
-                                        ?: JsonArray(emptyList())
+                                        ?: error("No workspace list response")
                                     val sessions = runCatching {
                                         model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
                                     }.getOrNull() ?: JsonArray(emptyList())

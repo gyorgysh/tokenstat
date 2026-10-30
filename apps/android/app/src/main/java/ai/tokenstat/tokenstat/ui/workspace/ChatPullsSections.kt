@@ -3034,7 +3034,10 @@ fun PullsSection(
             if (activeFilter == filter) error = friendlyError(failure.message).message
         } finally { loadingMore = false }
     }
-    LaunchedEffect(peer, workspace, scopeName, stateName) { load() }
+    LaunchedEffect(peer, workspace, protocol) {
+        if (stateName == "all" && !HostContracts.supportsPullAllState(protocol)) stateName = "open"
+    }
+    LaunchedEffect(peer, workspace, scopeName, stateName, protocol) { load() }
     if (creatingPull) PullCreateDialog(model, peer, workspace, protocol, folderName, hostLabel,
         onDismiss = { creatingPull = false }, onCreated = { scope.launch { load() } })
     if (showingFilters) PullFilterSheet(

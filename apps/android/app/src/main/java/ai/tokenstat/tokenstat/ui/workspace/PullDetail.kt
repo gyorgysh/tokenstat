@@ -434,7 +434,7 @@ private fun PullHero(view: JsonObject, number: Long) {
                     color = colors.textPrimary,
                     maxLines = if (titleExpanded) Int.MAX_VALUE else 3,
                     overflow = TextOverflow.Ellipsis,
-                    onTextLayout = { if (!titleExpanded && it.hasVisualOverflow) titleCanExpand = true },
+                    onTextLayout = { if (!titleExpanded) titleCanExpand = it.hasVisualOverflow },
                 )
                 if (titleCanExpand) {
                     TextButton(onClick = { titleExpanded = !titleExpanded }) {

@@ -839,9 +839,7 @@ final class ClientWorkspacesModel {
         let available = Set(nextHosts.map(\.peerKey))
         deniedHostKeys.formIntersection(available)
         for peer in hostSnapshots.keys.filter({ !available.contains($0) }) {
-            hostSnapshots.removeValue(forKey: peer)
-            staleHostKeys.remove(peer)
-            publishEcosystem([], peer: peer, host: "", lease: EcosystemPublisher.lease)
+            dropHostSnapshot(peer)
         }
         for peer in backgroundTickets.keys.filter({ !available.contains($0) }) {
             backgroundTickets.removeValue(forKey: peer)
@@ -1472,7 +1470,7 @@ final class ClientWorkspacesModel {
 
     func closeSession(_ info: PtySessionInfo, expectedPeer: String? = nil) async {
         guard let peer = expectedPeer ?? connectedKey,
-              peer == connectedKey, let owner = ownerScope,
+              (peer == connectedKey || loadedHostKeys.contains(peer)), let owner = ownerScope,
               owner == WorkSessionContext.shared.scope else { return }
         let closing = activeTerminal.flatMap { $0.peer == peer && $0.hostID == info.id ? $0 : nil }
         do {
@@ -1481,8 +1479,13 @@ final class ClientWorkspacesModel {
             guard owner == WorkSessionContext.shared.scope else { return }
             if let closing, activeTerminal === closing { activeTerminal = nil }
             if connectedKey == peer { sessions.removeAll { $0.id == info.id } }
+            if let snapshot = hostSnapshots[peer] {
+                hostSnapshots[peer] = HostSnapshot(folders: snapshot.folders,
+                    sessions: snapshot.sessions.filter { $0.id != info.id },
+                    chats: snapshot.chats, loadedAt: snapshot.loadedAt)
+            }
         } catch {
-            guard owner == WorkSessionContext.shared.scope, connectedKey == peer else { return }
+            guard owner == WorkSessionContext.shared.scope else { return }
             let host = hosts.first { $0.peerKey == peer }?.name
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: host)
         }
@@ -1548,7 +1551,11 @@ final class ClientWorkspacesModel {
             if let host { watchForAccess(host) }
             return
         }
-        if accessAllowed == true { deniedHostKeys.remove(peerKey) }
+        guard accessAllowed == true else {
+            staleHostKeys.insert(peerKey)
+            return
+        }
+        deniedHostKeys.remove(peerKey)
         async let loadedFolders = try? Bridge.remoteWorkspaces(peer: peer)
         async let loadedSessions = try? ClientRemote.ptyList(peer: peer.key)
         async let loadedChats = try? ClientRemote.recentChats(peer: peer.key)
@@ -1556,6 +1563,10 @@ final class ClientWorkspacesModel {
         guard !Task.isCancelled, !retired, self.ownerScope == ownerScope, ownerScope == WorkSessionContext.shared.scope,
               EcosystemPublisher.lease == ecosystemLease, connectedKey == peerKey,
               chosenPeer == nil || chosenPeer == peerKey, remoteLoadGeneration == loadGeneration else { return }
+        guard newFolders != nil else {
+            staleHostKeys.insert(peerKey)
+            return
+        }
         if let newFolders {
             publishEcosystem(newFolders, peer: peerKey, host: hosts.first { $0.peerKey == peerKey }?.name ?? "Computer", lease: ecosystemLease)
             if folders != newFolders { folders = newFolders }

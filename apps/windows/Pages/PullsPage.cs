@@ -475,10 +475,12 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
     private void UpdateStateChoices()
     {
         var all = _hostProtocol >= 53;
-        var oldState = LegacyStates[Math.Clamp(_state.SelectedIndex, 0, LegacyStates.Length - 1)];
+        var previousStates = (_state.ItemsSource as string[])?.Length == PagedStates.Length
+            ? PagedStates : LegacyStates;
+        var oldState = previousStates[Math.Clamp(_state.SelectedIndex, 0, previousStates.Length - 1)];
         _updatingStates = true;
         _state.ItemsSource = StateLabels(all);
-        _state.SelectedIndex = Array.IndexOf(all ? PagedStates : LegacyStates, oldState);
+        _state.SelectedIndex = Math.Max(0, Array.IndexOf(all ? PagedStates : LegacyStates, oldState));
         _updatingStates = false;
     }
 

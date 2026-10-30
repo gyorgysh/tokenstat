@@ -647,7 +647,7 @@ internal static class RemoteWorkspaces
         var folders = new List<RemoteFolder>();
         if (array is null)
         {
-            return folders;
+            throw new InvalidDataException("The host returned no workspace list.");
         }
         foreach (var folder in array.OfType<JsonNode>())
         {

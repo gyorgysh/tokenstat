@@ -605,7 +605,7 @@ struct ClientSidebarRoot: View {
 
     private func sessionRow(_ session: PtySessionInfo, in folder: WorkspaceFolder, peer: String) -> some View {
         Button {
-            workspaces.openSession(session)
+            workspaces.openSession(session, peer: peer)
         } label: {
             sessionLabel(session, peer: peer, workspaceID: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id)
                 .clientSidebarRowSurface(isSelected: false, height: rowHeight)
