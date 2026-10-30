@@ -314,6 +314,10 @@ final class ClientNavigationModel {
         chooseNavigation()
         restoredChatReader = fallback
         pushedChats = prefix
+        // The last system Back retires an exact restored chat as well as its
+        // pushed screen. Otherwise a later rotation sees that old route and
+        // reopens the conversation over Home.
+        if prefix.isEmpty && fallback == nil { restoredRoute = nil }
     }
 
     /// Conversation a notification asked to open, consumed by the chat list

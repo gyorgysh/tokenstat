@@ -1019,6 +1019,10 @@ final class PullDetailModel {
         do {
             let page = try await Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, cursor: cursor)
             guard generation == timelineGeneration, isCurrentSession else { return }
+            guard page.nextCursor != cursor else {
+                timelineError = L10n.text("apple.pullsview.invalid_page")
+                return
+            }
             events += page.events
             nextCursor = page.nextCursor
             MarkdownText.warm(page.events.compactMap(\.body))

@@ -148,6 +148,13 @@ tests = '''
         nav.dismissPushedChat(generation: currentGeneration, layout: 2)
         precondition(nav.pushedChat == nil && nav.chatHandoff.reader == nil)
         precondition(nav.chatHandoff.begin(route: route) == nil, "Back then fold does not reopen")
+        // A route restored into a pushed chat must leave with that push. A
+        // subsequent Duo rotation must not promote it over the Home screen.
+        nav.pushOwned(ClientOwnedPush(id: UUID()), from: nil)
+        nav.restoreLayout { nav.restoredRoute = route }
+        nav.dismissPushedChat(generation: nav.pushedChatGeneration, layout: 2)
+        precondition(nav.restoredRoute == nil && nav.currentRoute?.reference == nil,
+                     "Back to Home then rotate cannot resurrect a restored chat")
         // Continue workspace -> launcher chat -> system Back returns to workspace.
         let project = UUID(), chat = UUID()
         nav.pushOwned(ClientOwnedPush(id: project), from: nil)

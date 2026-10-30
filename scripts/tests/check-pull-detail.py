@@ -117,6 +117,12 @@ checks = r'''
         Bridge.timelines.removeFirst().resume(returning: page("later", "another"))
         await pageBeforeLeave.value
         precondition(model.events.count == 2 && model.nextCursor == "another")
+        let repeatedPage = Task { await model.moreTimeline(workspaceID: "repo", peer: "host", number: 1) }
+        await waitFor { Bridge.timelines.count == 1 }
+        Bridge.timelines.removeFirst().resume(returning: page("duplicate", "another"))
+        await repeatedPage.value
+        precondition(model.events.count == 2 && model.nextCursor == "another" && model.timelineError != nil,
+                     "a repeated cursor must not duplicate events or loop")
         model.commentDraft = "keep draft"
         model.prepareForCache()
         precondition(model.events.count == 1 && model.nextCursor == "older" && model.commentDraft == "keep draft")
