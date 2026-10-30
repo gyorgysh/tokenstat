@@ -88,6 +88,21 @@ async function parse(bytes, extension) {
     }
 }
 
+function release(object) {
+    if (!object) return;
+    const resources = new Set();
+    object.traverse((node) => {
+        if (node.geometry) resources.add(node.geometry);
+        for (const material of [node.material].flat().filter(Boolean)) {
+            for (const value of Object.values(material)) {
+                if (value?.isTexture) resources.add(value);
+            }
+            resources.add(material);
+        }
+    });
+    for (const resource of resources) resource.dispose();
+}
+
 function frame(object) {
     let vertices = 0;
     object.traverse((node) => {
@@ -122,10 +137,11 @@ export async function load(base64, extension, background) {
         scene.background = new THREE.Color(background);
         renderer.setClearColor(background);
         const next = await parse(decode(base64), extension.toLowerCase());
-        if (model) scene.remove(model);
+        try { frame(next); }
+        catch (error) { release(next); throw error; }
+        if (model) { scene.remove(model); release(model); }
         model = next;
         scene.add(model);
-        frame(model);
         requestRender();
         status.hidden = true;
         reset.hidden = false;
@@ -139,5 +155,6 @@ export async function load(base64, extension, background) {
 export function dispose() {
     active = false;
     controls.dispose();
+    release(model);
     renderer.dispose();
 }
