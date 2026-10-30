@@ -34,6 +34,7 @@ class WorkspacesConnectionState {
         mutableStaleHosts.value = mutableStaleHosts.value.intersect(peers)
         backgroundAttempts.keys.retainAll(peers)
         backgroundNextAt.keys.retainAll(peers)
+        backgroundTickets.keys.retainAll(peers)
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value.intersect(peers)
         if (mutableConnectedPeer.value?.let { it !in peers } == true) {
             disconnect()
@@ -61,21 +62,29 @@ class WorkspacesConnectionState {
     fun chatsFor(peer: String): JsonArray = hostSnapshots[peer]?.chats ?: JsonArray(emptyList())
     private val backgroundAttempts = mutableMapOf<String, Int>()
     private val backgroundNextAt = mutableMapOf<String, Long>()
+    private val backgroundTickets = mutableMapOf<String, Long>()
+    private var nextBackgroundTicket = 0L
     private val mutableBackgroundConnecting = MutableStateFlow<Set<String>>(emptySet())
     val backgroundConnecting: StateFlow<Set<String>> = mutableBackgroundConnecting.asStateFlow()
 
-    fun beginBackground(peer: String, owner: String, nowMs: Long = System.currentTimeMillis(), forceRefresh: Boolean = false): Boolean {
+    fun beginBackground(peer: String, owner: String, nowMs: Long = System.currentTimeMillis(), forceRefresh: Boolean = false): Long? {
         if (accountOwner != owner || (knownHosts != null && peer !in knownHosts.orEmpty()) ||
             peer == mutableConnectedPeer.value || peer == mutableConnectingPeer.value ||
             (!forceRefresh && hostSnapshots[peer]?.let { nowMs - it.loadedAtMs < 60_000L } == true) ||
             peer in mutableBackgroundConnecting.value ||
-            (!forceRefresh && nowMs < (backgroundNextAt[peer] ?: 0L))) return false
+            (!forceRefresh && nowMs < (backgroundNextAt[peer] ?: 0L))) return null
+        val ticket = ++nextBackgroundTicket
+        backgroundTickets[peer] = ticket
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value + peer
-        return true
+        return ticket
     }
 
-    fun finishBackground(peer: String, owner: String, success: Boolean, nowMs: Long = System.currentTimeMillis(), cancelled: Boolean = false) {
-        if (accountOwner != owner) return
+    fun isCurrentBackground(peer: String, owner: String, ticket: Long): Boolean =
+        accountOwner == owner && backgroundTickets[peer] == ticket
+
+    fun finishBackground(peer: String, owner: String, ticket: Long, success: Boolean, nowMs: Long = System.currentTimeMillis(), cancelled: Boolean = false) {
+        if (accountOwner != owner || backgroundTickets[peer] != ticket) return
+        backgroundTickets.remove(peer)
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
         if (success) {
             backgroundAttempts.remove(peer)
@@ -89,10 +98,10 @@ class WorkspacesConnectionState {
         }
     }
 
-    fun publishBackground(peer: String, owner: String, folders: JsonArray, sessions: JsonArray, chats: JsonArray,
+    fun publishBackground(peer: String, owner: String, ticket: Long, folders: JsonArray, sessions: JsonArray, chats: JsonArray,
                           nowMs: Long = System.currentTimeMillis()): Boolean {
         if (accountOwner != owner || (knownHosts != null && peer !in knownHosts.orEmpty()) ||
-            peer !in mutableBackgroundConnecting.value) return false
+            backgroundTickets[peer] != ticket) return false
         // A foreground dial owns the visible lists. Background results never
         // overwrite that selected host, even when the two requests overlap.
         if (mutableConnectedPeer.value == peer || mutableConnectingPeer.value == peer) return false
@@ -102,11 +111,12 @@ class WorkspacesConnectionState {
         return true
     }
 
-    fun dropBackgroundHost(peer: String, owner: String) {
-        if (accountOwner != owner || peer !in mutableBackgroundConnecting.value) return
+    fun dropBackgroundHost(peer: String, owner: String, ticket: Long): Boolean {
+        if (!isCurrentBackground(peer, owner, ticket)) return false
         hostSnapshots.remove(peer)
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
         mutableStaleHosts.value = mutableStaleHosts.value - peer
+        return true
     }
 
     private val mutableConnectingPeer = MutableStateFlow<String?>(null)
@@ -117,6 +127,8 @@ class WorkspacesConnectionState {
     /// replace a background warmup; the old result then loses its ticket.
     fun beginConnecting(peer: String, explicit: Boolean = false): Long? {
         if (mutableConnectingPeer.value != null && !explicit) return null
+        backgroundTickets.remove(peer)
+        mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
         connectionTicket++
         mutableConnectingPeer.value = peer
         return connectionTicket
@@ -165,6 +177,8 @@ class WorkspacesConnectionState {
     fun activateConnectedHost(machine: JsonObject): Boolean {
         val peer = machine.str("publicIdentity") ?: return false
         val snapshot = hostSnapshots[peer] ?: return false
+        backgroundTickets.remove(peer)
+        mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
         connectionTicket++
         mutableConnectingPeer.value = null
         mutableHost.value = machine
@@ -264,6 +278,7 @@ class WorkspacesConnectionState {
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
         mutableStaleHosts.value = mutableStaleHosts.value - peer
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
+        backgroundTickets.remove(peer)
         backgroundAttempts.remove(peer)
         backgroundNextAt.remove(peer)
         if (mutableConnectedPeer.value == peer || mutableConnectingPeer.value == peer) disconnect()
@@ -274,6 +289,7 @@ class WorkspacesConnectionState {
         mutableStaleHosts.value = emptySet()
         backgroundAttempts.clear()
         backgroundNextAt.clear()
+        backgroundTickets.clear()
         mutableBackgroundConnecting.value = emptySet()
         disconnect()
     }

@@ -827,12 +827,13 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 launch {
                     slots.withPermit {
                         val machine = byPeer[peer] ?: return@withPermit
-                        if (!warmSession.beginBackground(peer, warmOwner, forceRefresh = forceRefresh)) return@withPermit
+                        val ticket = warmSession.beginBackground(peer, warmOwner, forceRefresh = forceRefresh) ?: return@withPermit
                         var published = false
                         var cancelled = false
                         try {
                             fun current() = HomeStores.pinIdentity(model.state.value.account) == warmOwner &&
-                                model.state.value.canRemote && warmStore.isAutoConnectEnabled(peer)
+                                model.state.value.canRemote && warmStore.isAutoConnectEnabled(peer) &&
+                                warmSession.isCurrentBackground(peer, warmOwner, ticket)
                             for (delayMs in listOf(0L, 2_000L, 4_000L)) {
                                 if (delayMs > 0) delay(delayMs)
                                 if (!current()) break
@@ -843,10 +844,11 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                                     }
                                     if (check?.bool("allowed") != true || !current()) {
                                         if (current() && check?.bool("allowed") == false) {
-                                            warmSession.dropBackgroundHost(peer, warmOwner)
-                                            ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
-                                                context, peer, JsonArray(emptyList()), ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
-                                            )
+                                            if (warmSession.dropBackgroundHost(peer, warmOwner, ticket)) {
+                                                ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                                                    context, peer, JsonArray(emptyList()), ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                                                )
+                                            }
                                         }
                                         break
                                     }
@@ -859,7 +861,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                                         model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
                                     }.getOrNull() ?: JsonArray(emptyList())
                                     if (!current()) break
-                                    published = warmSession.publishBackground(peer, warmOwner, folders, sessions, chats)
+                                    published = warmSession.publishBackground(peer, warmOwner, ticket, folders, sessions, chats)
                                     if (published) {
                                         ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
                                             context, peer, folders, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
@@ -874,7 +876,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                                 }
                             }
                         } finally {
-                            warmSession.finishBackground(peer, warmOwner, published, cancelled = cancelled)
+                            warmSession.finishBackground(peer, warmOwner, ticket, published, cancelled = cancelled)
                         }
                     }
                 }
