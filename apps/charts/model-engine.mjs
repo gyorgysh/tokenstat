@@ -9,6 +9,7 @@ import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
 
 const canvas = document.getElementById("model");
 const status = document.getElementById("status");
+const reset = document.getElementById("reset");
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 100000);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "low-power" });
@@ -24,6 +25,15 @@ key.position.set(3, 6, 8);
 scene.add(key);
 let model = null;
 let active = true;
+let initialPosition = null;
+let initialTarget = null;
+
+reset.addEventListener("click", () => {
+    if (!initialPosition || !initialTarget) return;
+    camera.position.copy(initialPosition);
+    controls.target.copy(initialTarget);
+    controls.update();
+});
 
 function resize() {
     const width = Math.max(1, canvas.clientWidth);
@@ -92,11 +102,14 @@ function frame(object) {
     controls.minDistance = diameter * 0.05;
     controls.maxDistance = diameter * 30;
     controls.update();
+    initialPosition = camera.position.clone();
+    initialTarget = controls.target.clone();
 }
 
 export async function load(base64, extension, background) {
     status.textContent = "Loading model…";
     status.hidden = false;
+    reset.hidden = true;
     try {
         if (base64.length > 17 * 1024 * 1024) throw new Error("The model is too large to preview");
         scene.background = new THREE.Color(background);
@@ -107,6 +120,7 @@ export async function load(base64, extension, background) {
         scene.add(model);
         frame(model);
         status.hidden = true;
+        reset.hidden = false;
         return true;
     } catch (error) {
         status.textContent = error?.message || "The model could not be previewed";
