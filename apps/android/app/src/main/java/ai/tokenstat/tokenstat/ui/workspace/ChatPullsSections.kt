@@ -3038,16 +3038,15 @@ fun PullsSection(
             selectedContainerColor = LocalTsColors.current.accent.copy(alpha = 0.18f),
             selectedLabelColor = LocalTsColors.current.accent,
         )
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             pullScopes.forEach { value ->
                 FilterChip(
                     selected = scopeName == value,
                     onClick = { scopeName = value },
-                    label = { Text(pullScopeLabel(value), maxLines = 1) },
+                    label = { Text(pullScopeLabel(value), maxLines = 1, fontWeight = FontWeight.Medium) },
                     modifier = Modifier.heightIn(min = 48.dp),
                     colors = filterColors,
                 )
@@ -3062,7 +3061,7 @@ fun PullsSection(
                     selected = stateName == value,
                     onClick = { stateName = value },
                     enabled = value != "all" || HostContracts.supportsPullAllState(protocol),
-                    label = { Text(pullStateLabel(value), maxLines = 1) },
+                    label = { Text(pullStateLabel(value), maxLines = 1, fontWeight = FontWeight.Medium) },
                     modifier = Modifier.heightIn(min = 48.dp),
                     colors = filterColors,
                 )
