@@ -2897,13 +2897,15 @@ fun PullsSection(
             error = null
         }
         loading = true
-        try {
-            val available = model.workspaceSection(peer, "pulls.availability", buildJsonObject { put("workspaceId", workspace) }) as? JsonObject
-            if (activeFilter == filter) availability = available
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            // Keep the last known connection state while the list retries.
+        if (availability == null || refresh) {
+            try {
+                val available = model.workspaceSection(peer, "pulls.availability", buildJsonObject { put("workspaceId", workspace) }) as? JsonObject
+                if (activeFilter == filter) availability = available
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Keep the last known connection state while the list retries.
+            }
         }
         try {
             val response = model.workspaceSection(peer, if (HostContracts.supportsPullPages(protocol)) "pulls.listPage" else "pulls.list", buildJsonObject {
