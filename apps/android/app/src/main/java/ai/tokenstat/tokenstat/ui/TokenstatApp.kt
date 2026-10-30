@@ -3688,10 +3688,16 @@ private fun WorkspacesScreen(
             dialledHost = host,
             connectedPeer = connectedPeer,
             retainedHosts = retainedHosts,
-            otherHostFolders = hosts.mapNotNull { machine ->
+            otherHostWork = hosts.mapNotNull { machine ->
                 val peer = machine.string("publicIdentity") ?: return@mapNotNull null
-                if (peer !in retainedHosts || peer == connectedPeer) return@mapNotNull null
-                machine to session.foldersFor(peer).filterIsInstance<JsonObject>()
+                if (peer !in retainedHosts || peer == connectedPeer ||
+                    machine.get("online")?.jsonPrimitive?.booleanOrNull == false) return@mapNotNull null
+                OtherHostWork(
+                    machine,
+                    session.foldersFor(peer).filterIsInstance<JsonObject>(),
+                    session.sessionsFor(peer).filterIsInstance<JsonObject>(),
+                    session.chatsFor(peer).filterIsInstance<JsonObject>(),
+                )
             },
             connectingPeer = connectingPeer,
             loadingFolders = loadingFolders,
@@ -3721,6 +3727,28 @@ private fun WorkspacesScreen(
                     initialSection = null
                     pendingChatId = null
                     pendingOpenConversation = false
+                    scope.launch { connect(machine) }
+                }
+            },
+            onOtherChat = { machine, chat ->
+                val peer = machine.string("publicIdentity")
+                val folder = peer?.let { session.foldersFor(it).filterIsInstance<JsonObject>() }
+                    ?.firstOrNull { it.string("id") == chat.string("workspaceId") }
+                if (folder != null && session.activateConnectedHost(machine)) {
+                    selectedFolderId = folder.string("id")
+                    selectedFolderPeer = peer
+                    initialSection = "Chat"
+                    pendingChatId = chat.string("id")
+                    pendingOpenConversation = false
+                    scope.launch { connect(machine) }
+                }
+            },
+            onOtherSession = { machine, info ->
+                if (session.activateConnectedHost(machine)) {
+                    terminalSession = WorkspaceTerminalRequest(
+                        info.string("id"), info.string("workspaceId") ?: "",
+                        machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"),
+                    )
                     scope.launch { connect(machine) }
                 }
             },
@@ -3875,6 +3903,12 @@ private fun WorkspacesScreen(
 }
 
 private data class WorkspaceTerminalRequest(val sessionId: String?, val workspaceId: String, val hostLabel: String)
+private data class OtherHostWork(
+    val machine: JsonObject,
+    val folders: List<JsonObject>,
+    val sessions: List<JsonObject>,
+    val chats: List<JsonObject>,
+)
 
 @Composable
 private fun WorkspaceList(
@@ -3887,7 +3921,7 @@ private fun WorkspaceList(
     dialledHost: JsonObject?,
     connectedPeer: String?,
     retainedHosts: Set<String>,
-    otherHostFolders: List<Pair<JsonObject, List<JsonObject>>>,
+    otherHostWork: List<OtherHostWork>,
     connectingPeer: String?,
     loadingFolders: Boolean,
     folders: JsonArray,
@@ -3907,6 +3941,8 @@ private fun WorkspaceList(
     onDisconnect: () -> Unit,
     onFolder: (JsonObject) -> Unit,
     onOtherFolder: (JsonObject, JsonObject) -> Unit,
+    onOtherChat: (JsonObject, JsonObject) -> Unit,
+    onOtherSession: (JsonObject, JsonObject) -> Unit,
     onSession: (JsonObject) -> Unit,
     onChat: (JsonObject) -> Unit,
     onNewChat: () -> Unit,
@@ -4046,14 +4082,17 @@ private fun WorkspaceList(
                 }
             }
         }
-        for ((machine, hostFolders) in otherHostFolders) {
+        for (work in otherHostWork) {
+            val machine = work.machine
             val peer = machine.string("publicIdentity") ?: continue
-            val shown = hostFolders.filter { folder ->
+            val shown = work.folders.filter { folder ->
                 search.isBlank() ||
                     (folder.string("name") ?: "").contains(search, ignoreCase = true) ||
                     (folder.string("path") ?: "").contains(search, ignoreCase = true)
-            }
-            if (shown.isEmpty()) continue
+            }.take(5)
+            val otherChats = work.chats.take(5)
+            val otherSessions = work.sessions.take(5)
+            if (shown.isEmpty() && otherChats.isEmpty() && otherSessions.isEmpty()) continue
             item {
                 SectionTitle(
                     DeviceCopy.displayName(machine.string("label"), machine.string("platform"), true),
@@ -4062,6 +4101,20 @@ private fun WorkspaceList(
             }
             items(shown, key = { "$peer:${it.string("id")}" }) { folder ->
                 WorkspaceFolderRow(folder = folder, peer = peer, onOpen = { onOtherFolder(machine, folder) })
+            }
+            items(otherChats, key = { "$peer:chat:${it.string("id")}" }) { chat ->
+                val folderName = work.folders.firstOrNull { it.string("id") == chat.string("workspaceId") }
+                    ?.string("name") ?: L10n.text("android.tokenstatapp.project.98595978")
+                WorkspaceChatRow(chat = chat, folderName = folderName,
+                    onOpen = { onOtherChat(machine, chat) })
+            }
+            items(otherSessions, key = { "$peer:session:${it.string("id")}" }) { info ->
+                val owner = info.string("workspaceId")?.let {
+                    ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(client.account, peer, it)
+                }
+                WorkspaceSessionRow(info,
+                    displayName = terminalNames.name(owner, info.string("id").orEmpty()),
+                    onOpen = { onOtherSession(machine, info) })
             }
         }
         // Above the `connectedHost` gate, and resolved against the dialled
