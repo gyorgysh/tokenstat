@@ -41,7 +41,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,12 +76,14 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
@@ -2848,6 +2849,69 @@ private fun pullStateLabel(value: String) = when (value) {
     else -> L10n.text("android.pullfilter.open")
 }
 
+/** Keep the list itself readable on a phone; filtering lives in one touch-sized sheet. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PullFilterSheet(
+    scopeName: String,
+    stateName: String,
+    supportsAllState: Boolean,
+    onScope: (String) -> Unit,
+    onState: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = LocalTsColors.current
+    val chipColors = FilterChipDefaults.filterChipColors(
+        selectedContainerColor = colors.accent.copy(alpha = 0.18f),
+        selectedLabelColor = colors.accent,
+    )
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = colors.panel,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(horizontal = Space.m).padding(bottom = Space.l),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            Text(L10n.text("android.pullfilter.title"), style = MaterialTheme.typography.titleLarge,
+                color = colors.textPrimary)
+            Text(L10n.text("android.pullfilter.people"), style = MaterialTheme.typography.titleSmall,
+                color = colors.textSecondary)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                pullScopes.forEach { value ->
+                    FilterChip(
+                        selected = scopeName == value,
+                        onClick = { onScope(value) },
+                        label = { Text(pullScopeLabel(value), maxLines = 1) },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        colors = chipColors,
+                    )
+                }
+            }
+            Text(L10n.text("android.pullfilter.status"), style = MaterialTheme.typography.titleSmall,
+                color = colors.textSecondary)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                pullStates.forEach { value ->
+                    FilterChip(
+                        selected = stateName == value,
+                        onClick = { onState(value) },
+                        enabled = value != "all" || supportsAllState,
+                        label = { Text(pullStateLabel(value), maxLines = 1) },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        colors = chipColors,
+                    )
+                }
+            }
+            TsSecondaryButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector,
+                modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
+        }
+    }
+}
+
 private data class AndroidPullSnapshot(val rows: List<JsonObject>, val next: String?)
 
 /// New hosts return a page; older hosts return an array. A few older
@@ -2886,6 +2950,7 @@ fun PullsSection(
     var activeFilter by remember(peer, workspace) { mutableStateOf("") }
     var openNumber by remember { mutableStateOf<Long?>(null) }
     var creatingPull by remember(peer, workspace) { mutableStateOf(false) }
+    var showingFilters by remember(peer, workspace) { mutableStateOf(false) }
 
     suspend fun load(refresh: Boolean = false) {
         val selectedScope = scopeName
@@ -2972,6 +3037,14 @@ fun PullsSection(
     LaunchedEffect(peer, workspace, scopeName, stateName) { load() }
     if (creatingPull) PullCreateDialog(model, peer, workspace, protocol, folderName, hostLabel,
         onDismiss = { creatingPull = false }, onCreated = { scope.launch { load() } })
+    if (showingFilters) PullFilterSheet(
+        scopeName = scopeName,
+        stateName = stateName,
+        supportsAllState = HostContracts.supportsPullAllState(protocol),
+        onScope = { scopeName = it },
+        onState = { stateName = it },
+        onDismiss = { showingFilters = false },
+    )
     val opened = openNumber
     if (opened != null) {
         PullDetailPage(
@@ -3039,44 +3112,18 @@ fun PullsSection(
                 onDismiss = { error = null },
             )
         }
-        val filterColors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = LocalTsColors.current.accent.copy(alpha = 0.18f),
-            selectedLabelColor = LocalTsColors.current.accent,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            pullScopes.forEach { value ->
-                FilterChip(
-                    selected = scopeName == value,
-                    onClick = { scopeName = value },
-                    label = { Text(pullScopeLabel(value), maxLines = 1, fontWeight = FontWeight.Medium) },
-                    modifier = Modifier.heightIn(min = 48.dp),
-                    colors = filterColors,
-                )
-            }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            TsSecondaryButton(label = L10n.text("android.pullfilter.filter"), icon = ActionIcon.Filter.vector,
+                onClick = { showingFilters = true })
+            Text("${pullScopeLabel(scopeName)} · ${pullStateLabel(stateName)}",
+                style = TsType.caption, color = LocalTsColors.current.textSecondary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (!loading || pulls.isNotEmpty()) Text(
+                L10n.text("android.chatpullssections.0_shown.c67ec9a7", "${pulls.size}"),
+                style = TsType.caption, color = LocalTsColors.current.textSecondary,
+            )
         }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            pullStates.forEach { value ->
-                FilterChip(
-                    selected = stateName == value,
-                    onClick = { stateName = value },
-                    enabled = value != "all" || HostContracts.supportsPullAllState(protocol),
-                    label = { Text(pullStateLabel(value), maxLines = 1, fontWeight = FontWeight.Medium) },
-                    modifier = Modifier.heightIn(min = 48.dp),
-                    colors = filterColors,
-                )
-            }
-        }
-        if (!loading || pulls.isNotEmpty()) Text(
-            L10n.text("android.chatpullssections.0_shown.c67ec9a7", "${pulls.size}"),
-            style = TextStyle(fontSize = 12.sp),
-            color = LocalTsColors.current.textSecondary,
-        )
         if (loading && pulls.isEmpty()) { CircularProgressIndicator(Modifier, strokeWidth = 2.dp); return }
         if (pulls.isEmpty() && error == null) {
             EmptyState(Icons.Default.ChatBubbleOutline,
