@@ -72,11 +72,17 @@ async function parse(bytes, extension) {
 }
 
 function frame(object) {
+    let vertices = 0;
+    object.traverse((node) => {
+        if (node.geometry?.getAttribute) vertices += node.geometry.getAttribute("position")?.count || 0;
+    });
+    if (vertices > 2_000_000) throw new Error("The model is too detailed to preview");
     const bounds = new THREE.Box3().setFromObject(object);
     if (bounds.isEmpty()) throw new Error("The model contains no visible geometry");
     const center = bounds.getCenter(new THREE.Vector3());
     const size = bounds.getSize(new THREE.Vector3());
     const diameter = Math.max(size.x, size.y, size.z, 0.01);
+    if (![center.x, center.y, center.z, diameter].every(Number.isFinite)) throw new Error("The model has invalid geometry");
     controls.target.copy(center);
     const distance = diameter / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.4;
     camera.position.copy(center).add(new THREE.Vector3(distance * 0.6, distance * 0.4, distance));
