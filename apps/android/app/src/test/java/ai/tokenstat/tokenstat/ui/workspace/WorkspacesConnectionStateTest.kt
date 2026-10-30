@@ -40,4 +40,31 @@ class WorkspacesConnectionStateTest {
         assertTrue(state.connectedHosts.value.isEmpty())
         assertFalse(state.activateConnectedHost(host("peer-a")))
     }
+
+    @Test fun backgroundHostsAreIndependentAndRespectCooldownAndForegroundOwner() {
+        val state = WorkspacesConnectionState()
+        state.setAccountOwner("account-one")
+        state.setHost(host("peer-a"))
+        state.setConnected("peer-a", true)
+        state.setLists(JsonArray(listOf(folder("Alpha"))), JsonArray(emptyList()), JsonArray(emptyList()))
+
+        assertTrue(state.beginBackground("peer-b", "account-one", nowMs = 100))
+        assertTrue(state.beginBackground("peer-c", "account-one", nowMs = 100))
+        assertFalse(state.beginBackground("peer-b", "account-one", nowMs = 100))
+        assertFalse(state.publishBackground("peer-a", "account-one", JsonArray(emptyList()), JsonArray(emptyList()), JsonArray(emptyList())))
+        assertTrue(state.publishBackground("peer-b", "account-one", JsonArray(listOf(folder("Beta"))), JsonArray(emptyList()), JsonArray(emptyList())))
+        assertEquals("Alpha", (state.folders.value.single() as kotlinx.serialization.json.JsonObject).str("name"))
+        state.finishBackground("peer-b", "account-one", success = true, nowMs = 100)
+        state.finishBackground("peer-c", "account-one", success = false, nowMs = 100)
+        assertFalse(state.beginBackground("peer-c", "account-one", nowMs = 2_099))
+        assertTrue(state.beginBackground("peer-c", "account-one", nowMs = 2_100))
+        assertEquals(setOf("peer-a", "peer-b"), state.connectedHosts.value)
+        assertTrue(state.activateConnectedHost(host("peer-b")))
+        assertEquals("Beta", (state.folders.value.single() as kotlinx.serialization.json.JsonObject).str("name"))
+
+        state.setAccountOwner("account-two")
+        assertFalse(state.publishBackground("peer-c", "account-one", JsonArray(emptyList()), JsonArray(emptyList()), JsonArray(emptyList())))
+        assertTrue(state.backgroundConnecting.value.isEmpty())
+        assertTrue(state.connectedHosts.value.isEmpty())
+    }
 }

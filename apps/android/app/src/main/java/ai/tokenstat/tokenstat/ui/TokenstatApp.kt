@@ -234,6 +234,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.*
 
 /// The brand accent from the shared token system.
@@ -739,6 +741,69 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     warmSession.setConnected(null, null)
                 }
                 warmSession.finishConnecting(ticket)
+            }
+        }
+    }
+    // The selected host's warmup above owns one slot. Load the other saved
+    // hosts in at most three more slots, without changing the selected host or
+    // its visible lists. One sleeping or denied host cannot hold up the rest.
+    LaunchedEffect(warmOwner, warmMachines, state.canRemote) {
+        if (!state.canRemote || warmOwner.isBlank()) return@LaunchedEffect
+        val machines = warmMachines?.filterIsInstance<JsonObject>().orEmpty()
+        val thisId = state.account?.string("thisMachineId")
+        val byPeer = machines.mapNotNull { machine ->
+            val peer = machine.string("publicIdentity") ?: return@mapNotNull null
+            if (machine.string("kind") == "client" || (thisId != null && machine.string("id") == thisId) ||
+                machine.get("online")?.jsonPrimitive?.booleanOrNull == false) return@mapNotNull null
+            peer to machine
+        }.toMap()
+        warmStore.migrateLegacyHost(byPeer.keys)
+        val last = warmStore.lastConnectedHost()
+        val eligible = warmStore.rememberedHosts(byPeer.keys)
+            .filter { it != last && warmStore.isAutoConnectEnabled(it) }
+        val slots = Semaphore(3)
+        for (peer in eligible) launch {
+            slots.withPermit {
+                val machine = byPeer[peer] ?: return@withPermit
+                if (!warmSession.beginBackground(peer, warmOwner)) return@withPermit
+                var published = false
+                try {
+                    fun current() = HomeStores.pinIdentity(model.state.value.account) == warmOwner &&
+                        model.state.value.canRemote && warmStore.isAutoConnectEnabled(peer)
+                    for (delayMs in listOf(0L, 2_000L, 4_000L)) {
+                        if (delayMs > 0) delay(delayMs)
+                        if (!current()) break
+                        try {
+                            val check = retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
+                                model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
+                                model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
+                            }
+                            if (check?.bool("allowed") != true || !current()) break
+                            val folders = model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
+                                ?: JsonArray(emptyList())
+                            val sessions = runCatching {
+                                model.workspaceSection(peer, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
+                            }.getOrNull() ?: JsonArray(emptyList())
+                            val chats = runCatching {
+                                model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
+                            }.getOrNull() ?: JsonArray(emptyList())
+                            if (!current()) break
+                            published = warmSession.publishBackground(peer, warmOwner, folders, sessions, chats)
+                            if (published) {
+                                ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                                    context, peer, folders, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                                )
+                            }
+                            break
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            android.util.Log.w("ts-workspaces", "saved host background connect failed", error)
+                        }
+                    }
+                } finally {
+                    warmSession.finishBackground(peer, warmOwner, published)
+                }
             }
         }
     }
@@ -3155,6 +3220,7 @@ private fun WorkspacesScreen(
     val session = model.workspacesConnection
     val storedHost by session.host.collectAsStateWithLifecycle()
     val connectedPeer by session.connectedPeer.collectAsStateWithLifecycle()
+    val retainedHosts by session.connectedHosts.collectAsStateWithLifecycle()
     var newChatRepository by rememberSaveable(navigationOwner, connectedPeer) { mutableStateOf<String?>(null) }
     val newChatOwner = ai.tokenstat.tokenstat.ui.workspace.newChatDraftOwner(newChatAccount, connectedPeer, newChatRepository)
     val newChatDraft = remember(newChatOwner, newChatDraftRevision) { model.chatComposers.snapshot(newChatOwner) }
@@ -3205,8 +3271,11 @@ private fun WorkspacesScreen(
     // return: the tunnel underneath never dropped, and a reconnect
     // re-reading the same folders reopens it. Saveable, so a process death
     // restores it once the folders reload.
-    var selectedFolderId by rememberSaveable { mutableStateOf<String?>(null) }
-    val selectedFolder = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == selectedFolderId }
+    var selectedFolderId by rememberSaveable(navigationOwner) { mutableStateOf<String?>(null) }
+    var selectedFolderPeer by rememberSaveable(navigationOwner) { mutableStateOf<String?>(null) }
+    val selectedFolder = if (selectedFolderPeer == connectedPeer) {
+        folders.mapNotNull { it as? JsonObject }.find { it.string("id") == selectedFolderId }
+    } else null
 
     suspend fun requestAccess(peer: String) {
         requesting = true
@@ -3345,6 +3414,7 @@ private fun WorkspacesScreen(
         session.disconnect()
         localConnectingPeer = null
         selectedFolderId = null
+        selectedFolderPeer = null
         autoTick++
     }
 
@@ -3415,6 +3485,7 @@ private fun WorkspacesScreen(
         val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == folderId }
             ?: return@LaunchedEffect
         selectedFolderId = match.string("id")
+        selectedFolderPeer = connectedPeer
         initialSection = when (pendingKind) {
             "CHAT" -> ai.tokenstat.tokenstat.ui.logic.HubSection.CHAT.key
             "TERMINAL" -> ai.tokenstat.tokenstat.ui.logic.HubSection.SESSIONS.key
@@ -3450,6 +3521,7 @@ private fun WorkspacesScreen(
         val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == id }
             ?: return@LaunchedEffect
         selectedFolderId = match.string("id")
+        selectedFolderPeer = connectedPeer
         pendingSelectFolderId = null
     }
     LaunchedEffect(folderRefresh) {
@@ -3480,6 +3552,7 @@ private fun WorkspacesScreen(
         val id = folder.string("id") ?: return
         session.setLists(JsonArray(folders.filter { (it as? JsonObject)?.string("id") != id } + folder), sessions, chats)
         selectedFolderId = id
+        selectedFolderPeer = connectedPeer
         initialSection = null
         pendingChatId = null
         pendingOpenConversation = false
@@ -3511,6 +3584,7 @@ private fun WorkspacesScreen(
         val folder = folders.mapNotNull { it as? JsonObject }
             .find { it.string("id") == chat.string("workspaceId") } ?: return
         selectedFolderId = folder.string("id")
+        selectedFolderPeer = connectedPeer
         initialSection = "Chat"
         pendingChatId = chat.string("id")
         pendingOpenConversation = false
@@ -3598,6 +3672,7 @@ private fun WorkspacesScreen(
             thisMachine = thisMachine,
             dialledHost = host,
             connectedPeer = connectedPeer,
+            retainedHosts = retainedHosts,
             connectingPeer = connectingPeer,
             loadingFolders = loadingFolders,
             folders = folders,
@@ -3618,7 +3693,7 @@ private fun WorkspacesScreen(
             },
             onConnect = { scope.launch { connect(it) } },
             onDisconnect = { disconnect() },
-            onFolder = { selectedFolderId = it.string("id"); initialSection = null; pendingChatId = null; pendingOpenConversation = false },
+            onFolder = { selectedFolderId = it.string("id"); selectedFolderPeer = connectedPeer; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
             onSession = { openSession(it) },
             onChat = { openChat(it) },
             onNewChat = { newChatOpen = true },
@@ -3688,7 +3763,7 @@ private fun WorkspacesScreen(
                 if (owner != null && peer != null && repository != null && newChatSetup != null &&
                     newChatOwner == ai.tokenstat.tokenstat.ui.workspace.newChatDraftOwner(owner.accountScope, peer, repository.string("id")) && source.owner == newChatOwner) {
                     newChatRequest = ai.tokenstat.tokenstat.ui.workspace.NewChatRequest(peer, repository.string("id").orEmpty(), owner.accountScope, source, setup = newChatSetup)
-                    selectedFolderId = repository.string("id"); initialSection = "Chat"; pendingChatId = null; pendingOpenConversation = false; newChatOpen = false
+                    selectedFolderId = repository.string("id"); selectedFolderPeer = connectedPeer; initialSection = "Chat"; pendingChatId = null; pendingOpenConversation = false; newChatOpen = false
                 }
             },
         )
@@ -3716,7 +3791,7 @@ private fun WorkspacesScreen(
                     model, boundHost, boundFolder, Modifier.weight(1f),
                     initialSection = initialSection,
                     wideNavigation = expanded,
-                    onBack = { selectedFolderId = null; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
+                    onBack = { selectedFolderId = null; selectedFolderPeer = null; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
                     onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2")) },
                     onOpenBrowser = { browser = it },
                     onRecordChat = ::recordChatOpened,
@@ -3758,6 +3833,7 @@ private fun WorkspacesScreen(
             folders = folders.mapNotNull { it as? JsonObject },
             onPick = { folder ->
                 selectedFolderId = folder.string("id")
+                selectedFolderPeer = connectedPeer
                 initialSection = section
                 pendingChatId = null
                 pendingOpenConversation = section == "Chat"
@@ -3780,6 +3856,7 @@ private fun WorkspaceList(
     /// previous host connected, so the two disagree exactly when it matters.
     dialledHost: JsonObject?,
     connectedPeer: String?,
+    retainedHosts: Set<String>,
     connectingPeer: String?,
     loadingFolders: Boolean,
     folders: JsonArray,
@@ -3891,6 +3968,7 @@ private fun WorkspaceList(
                 machine = machine,
                 name = name,
                 connected = connectedPeer == peer,
+                available = peer in retainedHosts && connectedPeer != peer,
                 connecting = connectingPeer == peer,
                 autoConnect = autoConnect(peer),
                 onConnect = { onConnect(machine) },

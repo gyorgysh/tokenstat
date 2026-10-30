@@ -37,6 +37,41 @@ class WorkspacesConnectionState {
     private val hostSnapshots = mutableMapOf<String, HostSnapshot>()
     private val mutableConnectedHosts = MutableStateFlow<Set<String>>(emptySet())
     val connectedHosts: StateFlow<Set<String>> = mutableConnectedHosts.asStateFlow()
+    private val backgroundAttempts = mutableMapOf<String, Int>()
+    private val backgroundNextAt = mutableMapOf<String, Long>()
+    private val mutableBackgroundConnecting = MutableStateFlow<Set<String>>(emptySet())
+    val backgroundConnecting: StateFlow<Set<String>> = mutableBackgroundConnecting.asStateFlow()
+
+    fun beginBackground(peer: String, owner: String, nowMs: Long = System.currentTimeMillis()): Boolean {
+        if (accountOwner != owner || peer in hostSnapshots ||
+            peer in mutableBackgroundConnecting.value ||
+            nowMs < (backgroundNextAt[peer] ?: 0L)) return false
+        mutableBackgroundConnecting.value = mutableBackgroundConnecting.value + peer
+        return true
+    }
+
+    fun finishBackground(peer: String, owner: String, success: Boolean, nowMs: Long = System.currentTimeMillis()) {
+        if (accountOwner != owner) return
+        mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
+        if (success) {
+            backgroundAttempts.remove(peer)
+            backgroundNextAt.remove(peer)
+        } else {
+            val failures = (backgroundAttempts[peer] ?: 0) + 1
+            backgroundAttempts[peer] = failures
+            backgroundNextAt[peer] = nowMs + minOf(60_000L, 2_000L shl minOf(failures - 1, 5))
+        }
+    }
+
+    fun publishBackground(peer: String, owner: String, folders: JsonArray, sessions: JsonArray, chats: JsonArray): Boolean {
+        if (accountOwner != owner || peer !in mutableBackgroundConnecting.value) return false
+        // A foreground dial owns the visible lists. Background results never
+        // overwrite that selected host, even when the two requests overlap.
+        if (mutableConnectedPeer.value == peer || mutableConnectingPeer.value == peer) return false
+        hostSnapshots[peer] = HostSnapshot(folders, sessions, filteredChats(chats))
+        mutableConnectedHosts.value = hostSnapshots.keys.toSet()
+        return true
+    }
 
     private val mutableConnectingPeer = MutableStateFlow<String?>(null)
     val connectingPeer: StateFlow<String?> = mutableConnectingPeer.asStateFlow()
@@ -129,7 +164,11 @@ class WorkspacesConnectionState {
         mutableFolders.value = folders
         mutableSessions.value = sessions
         // Recent chats leave out the ones opened and never used.
-        mutableChats.value = JsonArray(chats.filterNot { element ->
+        mutableChats.value = filteredChats(chats)
+        saveSelectedSnapshot()
+    }
+
+    private fun filteredChats(chats: JsonArray): JsonArray = JsonArray(chats.filterNot { element ->
             val chat = element as? JsonObject ?: return@filterNot false
             UntouchedChats.isUntouched(
                 title = chat.str("title"),
@@ -138,8 +177,6 @@ class WorkspacesConnectionState {
                 id = chat.str("id"),
             )
         })
-        saveSelectedSnapshot()
-    }
 
     fun setFolders(folders: JsonArray) {
         mutableFolders.value = folders
@@ -183,6 +220,9 @@ class WorkspacesConnectionState {
 
     fun clearAll() {
         hostSnapshots.clear()
+        backgroundAttempts.clear()
+        backgroundNextAt.clear()
+        mutableBackgroundConnecting.value = emptySet()
         disconnect()
     }
 }
