@@ -82,10 +82,14 @@ class WorkspacesConnectionState {
     fun isCurrentBackground(peer: String, owner: String, ticket: Long): Boolean =
         accountOwner == owner && backgroundTickets[peer] == ticket
 
-    fun finishBackground(peer: String, owner: String, ticket: Long, success: Boolean, nowMs: Long = System.currentTimeMillis(), cancelled: Boolean = false) {
-        if (accountOwner != owner || backgroundTickets[peer] != ticket) return
+    fun invalidateBackground(peer: String) {
         backgroundTickets.remove(peer)
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
+    }
+
+    fun finishBackground(peer: String, owner: String, ticket: Long, success: Boolean, nowMs: Long = System.currentTimeMillis(), cancelled: Boolean = false) {
+        if (accountOwner != owner || backgroundTickets[peer] != ticket) return
+        invalidateBackground(peer)
         if (success) {
             backgroundAttempts.remove(peer)
             backgroundNextAt.remove(peer)
@@ -127,8 +131,7 @@ class WorkspacesConnectionState {
     /// replace a background warmup; the old result then loses its ticket.
     fun beginConnecting(peer: String, explicit: Boolean = false): Long? {
         if (mutableConnectingPeer.value != null && !explicit) return null
-        backgroundTickets.remove(peer)
-        mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
+        invalidateBackground(peer)
         connectionTicket++
         mutableConnectingPeer.value = peer
         return connectionTicket
@@ -177,8 +180,7 @@ class WorkspacesConnectionState {
     fun activateConnectedHost(machine: JsonObject): Boolean {
         val peer = machine.str("publicIdentity") ?: return false
         val snapshot = hostSnapshots[peer] ?: return false
-        backgroundTickets.remove(peer)
-        mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
+        invalidateBackground(peer)
         connectionTicket++
         mutableConnectingPeer.value = null
         mutableHost.value = machine
@@ -277,8 +279,7 @@ class WorkspacesConnectionState {
         hostSnapshots.remove(peer)
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
         mutableStaleHosts.value = mutableStaleHosts.value - peer
-        mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
-        backgroundTickets.remove(peer)
+        invalidateBackground(peer)
         backgroundAttempts.remove(peer)
         backgroundNextAt.remove(peer)
         if (mutableConnectedPeer.value == peer || mutableConnectingPeer.value == peer) disconnect()

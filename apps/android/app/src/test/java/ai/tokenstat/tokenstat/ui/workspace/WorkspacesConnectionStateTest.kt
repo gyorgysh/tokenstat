@@ -142,6 +142,16 @@ class WorkspacesConnectionStateTest {
         assertEquals(peers.toSet(), state.connectedHosts.value)
         assertEquals("New", (state.foldersFor("peer-1").single() as kotlinx.serialization.json.JsonObject).str("name"))
 
+        val toggleOld = state.beginBackground("peer-2", "account-one", nowMs = 102, forceRefresh = true)!!
+        state.invalidateBackground("peer-2")
+        val toggleNew = state.beginBackground("peer-2", "account-one", nowMs = 103, forceRefresh = true)!!
+        assertFalse(state.publishBackground("peer-2", "account-one", toggleOld,
+            JsonArray(listOf(folder("Toggled off"))), JsonArray(emptyList()), JsonArray(emptyList())))
+        state.finishBackground("peer-2", "account-one", toggleOld, success = false)
+        assertTrue(state.publishBackground("peer-2", "account-one", toggleNew,
+            JsonArray(listOf(folder("Toggled on"))), JsonArray(emptyList()), JsonArray(emptyList()), nowMs = 103))
+        state.finishBackground("peer-2", "account-one", toggleNew, success = true, nowMs = 103)
+
         val oldAccountTicket = state.beginBackground("peer-1", "account-one", nowMs = 102, forceRefresh = true)!!
         state.setAccountOwner("account-two")
         state.setAccountOwner("account-one")

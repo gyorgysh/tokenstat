@@ -3858,6 +3858,7 @@ private fun WorkspacesScreen(
             autoConnect = { peer -> autoTick.let { layoutStore.isAutoConnectEnabled(peer) } },
             onAutoConnect = { peer, enabled ->
                 layoutStore.setAutoConnectEnabled(peer, enabled)
+                if (!enabled) session.invalidateBackground(peer)
                 autoTick += 1
             },
             onConnect = { scope.launch { connect(it) } },

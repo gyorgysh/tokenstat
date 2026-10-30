@@ -996,6 +996,7 @@ final class ClientWorkspacesModel {
         guard let key = autoConnectKey(for: peerKey) else { return }
         UserDefaults.standard.set(on, forKey: key)
         if on { rememberHost(peerKey) }
+        else { backgroundTickets.removeValue(forKey: peerKey) }
     }
 
     /// The one place that dials without being asked.
