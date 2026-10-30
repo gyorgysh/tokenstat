@@ -1110,6 +1110,7 @@ final class ClientWorkspacesModel {
                     noteBackgroundFailure(host.peerKey)
                     return
                 }
+                deniedHostKeys.remove(host.peerKey)
                 async let loadedFolders = Bridge.remoteWorkspaces(peer: peer)
                 async let loadedSessions = try? ClientRemote.ptyList(peer: peer.key)
                 async let loadedChats = try? ClientRemote.recentChats(peer: peer.key)
@@ -1255,6 +1256,7 @@ final class ClientWorkspacesModel {
                     watchForAccess(host)
                     return
                 }
+                deniedHostKeys.remove(host.peerKey)
                 stopWatchingForAccess()
                 async let loadedFolders = Bridge.remoteWorkspaces(peer: peer)
                 async let loadedSessions = ClientRemote.ptyList(peer: peer.key)
@@ -1520,7 +1522,8 @@ final class ClientWorkspacesModel {
         guard !Task.isCancelled, !retired, self.ownerScope == ownerScope, ownerScope == WorkSessionContext.shared.scope,
               EcosystemPublisher.lease == ecosystemLease, connectedKey == peerKey,
               chosenPeer == nil || chosenPeer == peerKey, remoteLoadGeneration == loadGeneration else { return }
-        if let allowed = try? await Bridge.workspaceAccessAllowed(peer: peerKey), !allowed {
+        let accessAllowed = try? await Bridge.workspaceAccessAllowed(peer: peerKey)
+        if accessAllowed == false {
             guard !Task.isCancelled, !retired, self.ownerScope == ownerScope,
                   ownerScope == WorkSessionContext.shared.scope, connectedKey == peerKey,
                   remoteLoadGeneration == loadGeneration else { return }
@@ -1538,6 +1541,7 @@ final class ClientWorkspacesModel {
             if let host { watchForAccess(host) }
             return
         }
+        if accessAllowed == true { deniedHostKeys.remove(peerKey) }
         async let loadedFolders = try? Bridge.remoteWorkspaces(peer: peer)
         async let loadedSessions = try? ClientRemote.ptyList(peer: peer.key)
         async let loadedChats = try? ClientRemote.recentChats(peer: peer.key)
