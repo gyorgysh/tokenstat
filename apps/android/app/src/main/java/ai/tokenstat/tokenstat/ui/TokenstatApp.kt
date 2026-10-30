@@ -3688,6 +3688,11 @@ private fun WorkspacesScreen(
             dialledHost = host,
             connectedPeer = connectedPeer,
             retainedHosts = retainedHosts,
+            otherHostFolders = hosts.mapNotNull { machine ->
+                val peer = machine.string("publicIdentity") ?: return@mapNotNull null
+                if (peer !in retainedHosts || peer == connectedPeer) return@mapNotNull null
+                machine to session.foldersFor(peer).filterIsInstance<JsonObject>()
+            },
             connectingPeer = connectingPeer,
             loadingFolders = loadingFolders,
             folders = folders,
@@ -3709,6 +3714,16 @@ private fun WorkspacesScreen(
             onConnect = { scope.launch { connect(it) } },
             onDisconnect = { disconnect() },
             onFolder = { selectedFolderId = it.string("id"); selectedFolderPeer = connectedPeer; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
+            onOtherFolder = { machine, folder ->
+                if (session.activateConnectedHost(machine)) {
+                    selectedFolderId = folder.string("id")
+                    selectedFolderPeer = machine.string("publicIdentity")
+                    initialSection = null
+                    pendingChatId = null
+                    pendingOpenConversation = false
+                    scope.launch { connect(machine) }
+                }
+            },
             onSession = { openSession(it) },
             onChat = { openChat(it) },
             onNewChat = { newChatOpen = true },
@@ -3872,6 +3887,7 @@ private fun WorkspaceList(
     dialledHost: JsonObject?,
     connectedPeer: String?,
     retainedHosts: Set<String>,
+    otherHostFolders: List<Pair<JsonObject, List<JsonObject>>>,
     connectingPeer: String?,
     loadingFolders: Boolean,
     folders: JsonArray,
@@ -3890,6 +3906,7 @@ private fun WorkspaceList(
     onConnect: (JsonObject) -> Unit,
     onDisconnect: () -> Unit,
     onFolder: (JsonObject) -> Unit,
+    onOtherFolder: (JsonObject, JsonObject) -> Unit,
     onSession: (JsonObject) -> Unit,
     onChat: (JsonObject) -> Unit,
     onNewChat: () -> Unit,
@@ -4027,6 +4044,24 @@ private fun WorkspaceList(
                         },
                     )
                 }
+            }
+        }
+        for ((machine, hostFolders) in otherHostFolders) {
+            val peer = machine.string("publicIdentity") ?: continue
+            val shown = hostFolders.filter { folder ->
+                search.isBlank() ||
+                    (folder.string("name") ?: "").contains(search, ignoreCase = true) ||
+                    (folder.string("path") ?: "").contains(search, ignoreCase = true)
+            }
+            if (shown.isEmpty()) continue
+            item {
+                SectionTitle(
+                    DeviceCopy.displayName(machine.string("label"), machine.string("platform"), true),
+                    "mark_host",
+                )
+            }
+            items(shown, key = { "$peer:${it.string("id")}" }) { folder ->
+                WorkspaceFolderRow(folder = folder, peer = peer, onOpen = { onOtherFolder(machine, folder) })
             }
         }
         // Above the `connectedHost` gate, and resolved against the dialled

@@ -52,6 +52,7 @@ class WorkspacesConnectionState {
     private val hostSnapshots = mutableMapOf<String, HostSnapshot>()
     private val mutableConnectedHosts = MutableStateFlow<Set<String>>(emptySet())
     val connectedHosts: StateFlow<Set<String>> = mutableConnectedHosts.asStateFlow()
+    fun foldersFor(peer: String): JsonArray = hostSnapshots[peer]?.folders ?: JsonArray(emptyList())
     private val backgroundAttempts = mutableMapOf<String, Int>()
     private val backgroundNextAt = mutableMapOf<String, Long>()
     private val mutableBackgroundConnecting = MutableStateFlow<Set<String>>(emptySet())
