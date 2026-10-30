@@ -640,6 +640,75 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     }
     val context = LocalContext.current
     val homeStores = remember { HomeStores(context) }
+    // Warm the last approved host while Home is visible. The session belongs
+    // to the model, so Workspaces consumes these lists without another dial.
+    // A saved Disconnect turns auto-connect off in this same account store.
+    val warmOwner = HomeStores.pinIdentity(state.account)
+    val warmStore = remember(context, warmOwner) { WorkspaceLayoutStore(context, warmOwner) }
+    val warmSession = model.workspacesConnection
+    val warmConnected by warmSession.connectedPeer.collectAsStateWithLifecycle()
+    val warmConnecting by warmSession.connectingPeer.collectAsStateWithLifecycle()
+    val warmAllowed by warmSession.allowed.collectAsStateWithLifecycle()
+    val warmMachines = state.account?.get("machines") as? JsonArray
+    val warmScope = rememberCoroutineScope()
+    var warmFailedPeer by remember(warmOwner) { mutableStateOf<String?>(null) }
+    LaunchedEffect(warmMachines) { warmFailedPeer = null }
+    LaunchedEffect(warmOwner, warmMachines, warmConnected, warmConnecting, warmAllowed) {
+        if (!state.canRemote || warmConnected != null || warmConnecting != null || warmAllowed == false) return@LaunchedEffect
+        val machines = warmMachines?.mapNotNull { it as? JsonObject }.orEmpty()
+        warmStore.migrateLegacyHost(machines.mapNotNull { it.string("publicIdentity") }.toSet())
+        val last = warmStore.lastConnectedHost() ?: return@LaunchedEffect
+        if (warmFailedPeer == last) return@LaunchedEffect
+        if (!warmStore.isAutoConnectEnabled(last)) return@LaunchedEffect
+        val thisId = state.account?.string("thisMachineId")
+        val machine = machines.find {
+            it.string("publicIdentity") == last && it.string("kind") != "client" &&
+                (thisId == null || it.string("id") != thisId) &&
+                it.get("online")?.jsonPrimitive?.booleanOrNull != false
+        } ?: return@LaunchedEffect
+        val ticket = warmSession.beginConnecting(last) ?: return@LaunchedEffect
+        warmScope.launch {
+            fun current() = warmSession.isCurrentConnection(ticket) &&
+                model.state.value.canRemote &&
+                HomeStores.pinIdentity(model.state.value.account) == warmOwner
+            try {
+                warmSession.setHost(machine)
+                warmSession.setAllowed(null)
+                val check = retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
+                    model.prepareHost(last, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
+                    model.workspaceSection(last, "workspace.access.check", buildJsonObject {}) as? JsonObject
+                }
+                if (!current()) return@launch
+                warmSession.setAllowed(check?.bool("allowed"))
+                if (check?.bool("allowed") != true) return@launch
+                val sessions = runCatching {
+                    model.workspaceSection(last, "pty.list", buildJsonObject { put("includeRemote", false) }) as? JsonArray
+                }.getOrNull() ?: JsonArray(emptyList())
+                val chats = runCatching {
+                    model.workspaceSection(last, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
+                }.getOrNull() ?: JsonArray(emptyList())
+                // The explicit host picker can supersede this fetch. Do not
+                // publish its folders into system search until it still owns
+                // the connection ticket after the remote call returns.
+                val folders = model.workspaceSection(last, "workspace.list", buildJsonObject {}) as? JsonArray
+                    ?: JsonArray(emptyList())
+                if (!current() || !warmStore.isAutoConnectEnabled(last)) return@launch
+                ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                    context, last, folders, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                )
+                warmSession.setLists(folders, sessions, chats)
+                warmSession.setConnected(last, true)
+                warmSession.setError(null)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                android.util.Log.w("ts-workspaces", "saved host warmup failed", error)
+                if (current()) warmFailedPeer = last
+            } finally {
+                warmSession.finishConnecting(ticket)
+            }
+        }
+    }
     val billing = remember { PlayBillingManager(context) }
     billing.appAccountToken = state.appAccountToken
     billing.trialUsed = state.trialUsed
@@ -3075,7 +3144,8 @@ private fun WorkspacesScreen(
     val error by session.error.collectAsStateWithLifecycle()
     val requestNotice by session.requestNotice.collectAsStateWithLifecycle()
     val host = hosts.find { it.string("publicIdentity") == storedHost?.string("publicIdentity") } ?: storedHost
-    var connectingPeer by remember { mutableStateOf<String?>(null) }
+    val connectingPeer by session.connectingPeer.collectAsStateWithLifecycle()
+    var localConnectingPeer by remember { mutableStateOf<String?>(null) }
     var connectionEpoch by remember { mutableIntStateOf(0) }
     var requesting by remember { mutableStateOf(false) }
     // Automatic dials fail silently into the log until they settle. The
@@ -3128,10 +3198,11 @@ private fun WorkspacesScreen(
 
     suspend fun connect(machine: JsonObject, automatic: Boolean = false) {
         val peer = machine.string("publicIdentity") ?: return
-        if (connectingPeer != null) return
+        if (localConnectingPeer != null || (connectingPeer != null && automatic)) return
+        val connectionTicket = session.beginConnecting(peer, explicit = !automatic) ?: return
         val epoch = ++connectionEpoch
-        fun current() = epoch == connectionEpoch
-        connectingPeer = peer
+        fun current() = epoch == connectionEpoch && session.isCurrentConnection(connectionTicket)
+        localConnectingPeer = peer
         // Cleared in `finally`, because this dial does not always run to
         // the last line. Setting `connectingPeer` changes a key of the
         // effect that starts an automatic dial, so that effect cancels
@@ -3142,6 +3213,7 @@ private fun WorkspacesScreen(
         // every host.
         try {
             session.setHost(machine)
+            session.setConnected(null, null)
             session.setAllowed(null)
             // An explicit dial clears the readable failure it retries. An
             // automatic one leaves it: clearing on every account refresh is
@@ -3200,7 +3272,8 @@ private fun WorkspacesScreen(
                 session.setConnected(null, null)
             }
         } finally {
-            if (current()) connectingPeer = null
+            session.finishConnecting(connectionTicket)
+            if (localConnectingPeer == peer) localConnectingPeer = null
         }
     }
 
@@ -3209,7 +3282,7 @@ private fun WorkspacesScreen(
         connectionEpoch++
         if (peer != null) layoutStore.setAutoConnectEnabled(peer, false)
         session.disconnect()
-        connectingPeer = null
+        localConnectingPeer = null
         selectedFolderId = null
         autoTick++
     }

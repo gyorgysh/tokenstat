@@ -16,6 +16,25 @@ import kotlinx.serialization.json.JsonObject
 /// Only the session lives here. Screens keep their own UI state (search,
 /// selection, sheets), which is correctly ephemeral.
 class WorkspacesConnectionState {
+    private val mutableConnectingPeer = MutableStateFlow<String?>(null)
+    val connectingPeer: StateFlow<String?> = mutableConnectingPeer.asStateFlow()
+    private var connectionTicket = 0L
+
+    /// Home and Workspaces share the same dial. An explicit host choice can
+    /// replace a background warmup; the old result then loses its ticket.
+    fun beginConnecting(peer: String, explicit: Boolean = false): Long? {
+        if (mutableConnectingPeer.value != null && !explicit) return null
+        connectionTicket++
+        mutableConnectingPeer.value = peer
+        return connectionTicket
+    }
+
+    fun isCurrentConnection(ticket: Long): Boolean = ticket == connectionTicket
+
+    fun finishConnecting(ticket: Long) {
+        if (isCurrentConnection(ticket)) mutableConnectingPeer.value = null
+    }
+
     private val mutableHost = MutableStateFlow<JsonObject?>(null)
     val host: StateFlow<JsonObject?> = mutableHost.asStateFlow()
 
@@ -88,6 +107,8 @@ class WorkspacesConnectionState {
     /// What Disconnect does on every client: forget the session. The tunnel
     /// underneath is the host's to reap, exactly like iOS.
     fun disconnect() {
+        connectionTicket++
+        mutableConnectingPeer.value = null
         mutableConnectedPeer.value = null
         mutableAllowed.value = null
         mutableRequestNotice.value = null

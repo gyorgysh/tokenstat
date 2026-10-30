@@ -116,6 +116,21 @@ struct ClientRootView: View {
     /// the same one. See `ClientSessionModels`.
     @State private var sessionModels = ClientSessionModels()
 
+    /// Start the saved host while Home is still on screen. The model is
+    /// retained above the tab layout, so Workspaces opens with the same
+    /// in-flight connection and loaded folders instead of starting over.
+    private func prewarmSavedHost() {
+        guard account.signedIn, let signed = account.account,
+              let scope = WorkSessionContext.shared.scope else { return }
+        let workspaces = sessionModels.models(for: scope).workspaces
+        Task {
+            await BridgeLaunch.wait()
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            await workspaces.refresh(account: signed)
+            await workspaces.autoConnectLastHost()
+        }
+    }
+
     /// Where the person was when the layout last swapped, waiting for the
     /// new layout to be on screen. See the `.task(id: layout)` below.
     @State private var layoutHandoff: WorkMobileRoute?
@@ -379,7 +394,9 @@ struct ClientRootView: View {
             navigation.restoreRoute(visibleTabs: tabCustomization.visibleTabs,
                 notificationPending: notificationOpen.request != nil || ecosystemNavigation.hasRequestedNavigation)
             openEcosystemDestination()
+            prewarmSavedHost()
         }
+        .onChange(of: account.account?.machines) { _, _ in prewarmSavedHost() }
         .onContinueUserActivity("ai.tokenstat.open") { activity in
             if let value = activity.userInfo?["url"] as? String, let url = URL(string: value) { ecosystemNavigation.receive(url) }
         }
@@ -393,6 +410,7 @@ struct ClientRootView: View {
             }
             guard signedIn, let signed = account.account else { return }
             Task { await store.finishPendingIntent(with: signed) }
+            prewarmSavedHost()
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             // Cold start offline leaves authNeedsRetry. Signed-in screens also
@@ -401,6 +419,7 @@ struct ClientRootView: View {
             connection.reset()
             Task { await account.load() }
             Task { await Bridge.nudgeTunnel(reconnect: true) }
+            prewarmSavedHost()
         }
         .onChange(of: scenePhase) { _, phase in
             sessionModels.models(for: WorkSessionContext.shared.scope).ssh.setForeground(phase == .active)
