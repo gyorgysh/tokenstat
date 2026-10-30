@@ -806,9 +806,33 @@ final class ClientWorkspacesModel {
         hostPreferencePrefix.map { "\($0).last" }
     }
 
+    private var rememberedHostsKey: String? {
+        hostPreferencePrefix.map { "\($0).remembered" }
+    }
+
     var lastConnectedHost: String? {
         guard let key = lastConnectedHostKey else { return nil }
         return UserDefaults.standard.string(forKey: key)
+    }
+
+    /// Every host this account connected to or explicitly re-enabled. The
+    /// last active host comes first for navigation; the per-host switch and
+    /// current account directory still decide which ones may auto-connect.
+    var rememberedHosts: [ClientHost] {
+        guard let key = rememberedHostsKey else { return [] }
+        let saved = UserDefaults.standard.stringArray(forKey: key) ?? []
+        let ordered = ([lastConnectedHost].compactMap { $0 } + saved.sorted())
+        var seen = Set<String>()
+        return ordered.compactMap { peer in
+            guard seen.insert(peer).inserted else { return nil }
+            return hosts.first { $0.peerKey == peer }
+        }
+    }
+
+    private func rememberHost(_ peerKey: String) {
+        guard let key = rememberedHostsKey else { return }
+        let saved = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        UserDefaults.standard.set(Array(saved.union([peerKey])).sorted(), forKey: key)
     }
 
     private func autoConnectKey(for peerKey: String) -> String? {
@@ -824,6 +848,7 @@ final class ClientWorkspacesModel {
               let legacy = UserDefaults.standard.string(forKey: "client.lastConnectedHost"),
               hosts.contains(where: { $0.peerKey == legacy }) else { return }
         UserDefaults.standard.set(legacy, forKey: key)
+        rememberHost(legacy)
         let oldAutoKey = "client.autoConnectHost.\(legacy)"
         if let auto = UserDefaults.standard.object(forKey: oldAutoKey) as? Bool,
            let newAutoKey = autoConnectKey(for: legacy),
@@ -850,6 +875,7 @@ final class ClientWorkspacesModel {
     func setAutoConnect(_ on: Bool, for peerKey: String) {
         guard let key = autoConnectKey(for: peerKey) else { return }
         UserDefaults.standard.set(on, forKey: key)
+        if on { rememberHost(peerKey) }
     }
 
     /// The one place that dials without being asked.
@@ -1012,6 +1038,7 @@ final class ClientWorkspacesModel {
                 if let key = lastConnectedHostKey {
                     UserDefaults.standard.set(host.peerKey, forKey: key)
                 }
+                rememberHost(host.peerKey)
                 if chosenPeer == host.peerKey {
                     setAutoConnect(true, for: host.peerKey)
                 }
