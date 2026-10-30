@@ -2737,6 +2737,7 @@ struct RootView: View {
                 isCurrent: isCurrent,
                 summary: workspaces.summary(for: folder.id),
                 activeTerminals: activeSessions.count,
+                isStale: folder.machineID.map { workspaces.isRemoteStale($0) } ?? false,
                 isShared: !folder.isRemote && !teams.localProjects(for: folder.id).isEmpty,
                 share: folder.isRemote ? nil : { openSharedProject(folder) },
                 rename: { name in
@@ -3528,6 +3529,7 @@ struct RootView: View {
                 NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
             })
         }
+        if let peer = folder.machineID, workspaces.isRemoteStale(peer) { return items }
         items.append(.separator)
         items.append(.init(L10n.text("apple.rootview.new_chat.db18382a"), icon: .create) { startNewChat(in: folder) })
         items.append(.init(L10n.text("apple.rootview.new_terminal.9456c8eb"), icon: .create) {
@@ -4829,6 +4831,7 @@ private struct WorkspaceRow: View {
     let isCurrent: Bool
     let summary: WorkspaceSummary?
     let activeTerminals: Int
+    var isStale = false
     var isShared = false
     var share: (() -> Void)? = nil
     let rename: (String) async throws -> Void
@@ -4861,6 +4864,12 @@ private struct WorkspaceRow: View {
                     Text(label)
                         .font(Theme.fit(RowMetrics.title, weight: isCurrent ? .semibold : .medium))
                         .lineLimit(1).truncationMode(.middle)
+                    if isStale {
+                        Image(systemName: "wifi.slash")
+                            .foregroundStyle(Theme.warning)
+                            .help("Offline · saved folders")
+                            .accessibilityLabel("Offline · saved folders")
+                    }
                     Spacer(minLength: Theme.Space.xs)
                     changeCounts.opacity(isHovering ? 0 : 1)
                         .frame(minWidth: share == nil ? 52 : 80, alignment: .trailing)
@@ -4886,7 +4895,7 @@ private struct WorkspaceRow: View {
                         .allowsHitTesting(isHovering)
                         .accessibilityHidden(!isHovering)
                 }
-                SidebarRowActions(name: folder.name, visible: isHovering,
+                SidebarRowActions(name: folder.name, visible: isHovering, canDelete: !isStale,
                                   deleteTitle: L10n.text("apple.rootview.remove_project.704e7388"), delete: remove,
                                   hover: { _ in }, actions: { menu })
                 Button(action: newChat) {
@@ -4899,6 +4908,7 @@ private struct WorkspaceRow: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .disabled(isStale)
                 .help(L10n.text("apple.rootview.new_chat_in_0.2436f7d3", "\(folder.name)"))
                 .accessibilityLabel(L10n.text("apple.rootview.new_chat_in_0.2436f7d3", "\(folder.name)"))
                 .opacity(isHovering ? 1 : 0)
@@ -4937,7 +4947,11 @@ private struct WorkspaceRow: View {
     }
 
     private var menu: [NativeMenuItem] {
-        [.init(L10n.text("apple.rootview.rename.6fa62b3d"), icon: .edit) { renaming = true }] + actions()
+        var items = actions()
+        if !isStale {
+            items.insert(.init(L10n.text("apple.rootview.rename.6fa62b3d"), icon: .edit) { renaming = true }, at: 0)
+        }
+        return items
     }
 
     private var detailFields: [SidebarDetailField] {
