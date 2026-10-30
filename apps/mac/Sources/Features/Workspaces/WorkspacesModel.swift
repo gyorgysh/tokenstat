@@ -941,6 +941,13 @@ final class WorkspacesModel {
     /// would re-dial an approved, reachable machine on its next pass and the
     /// Disconnect would last one refresh.
     private var suppressedPeers: Set<String> = []
+    /// A quick off/on can restore the same Boolean while an earlier peer
+    /// request is still in flight. Keep the choice revision separately so
+    /// that older answer cannot publish under the new choice.
+    private static var autoConnectRevisions: [String: UInt64] = [:]
+    private static func autoConnectRevision(for peerKey: String) -> UInt64 {
+        autoConnectRevisions[peerKey] ?? 0
+    }
     /// Per-peer auto-connect, on by default. The same preference the phone
     /// keeps: an explicit Connect turns it back on, the toggle in the folder
     /// header turns it off, and the peer sweep honours it.
@@ -956,6 +963,7 @@ final class WorkspacesModel {
     }
     static func setAutoConnect(_ on: Bool, for peerKey: String) {
         guard let key = autoConnectKey(for: peerKey) else { return }
+        autoConnectRevisions[peerKey, default: 0] &+= 1
         UserDefaults.standard.set(on, forKey: key)
     }
     private static func migrateLegacyAutoConnect(peers: [Peer]) {
@@ -1104,6 +1112,9 @@ final class WorkspacesModel {
                     && Self.isAutoConnectEnabled(for: peer.key)
                     && (stagedNextDial[peer.key].map { Date() >= $0 } ?? true)
             }
+            let candidateRevisions = Dictionary(uniqueKeysWithValues: candidates.map {
+                ($0.key, Self.autoConnectRevision(for: $0.key))
+            })
             let results = await withTaskGroup(of: RemoteFetch.self, returning: [String: RemoteFetch].self) { group in
                 var remaining = candidates.makeIterator()
                 for _ in 0..<min(4, candidates.count) {
@@ -1126,7 +1137,8 @@ final class WorkspacesModel {
                     // the same snapshot and the final pass cannot undo it.
                     if let listed = result.folders,
                        !suppressedPeers.contains(result.peer.key),
-                       Self.isAutoConnectEnabled(for: result.peer.key) {
+                       Self.isAutoConnectEnabled(for: result.peer.key),
+                       candidateRevisions[result.peer.key] == Self.autoConnectRevision(for: result.peer.key) {
                         let key = result.peer.key
                         let newlySeen = stagedFolders[key] == nil
                         stagedFolders[key] = listed
@@ -1182,6 +1194,8 @@ final class WorkspacesModel {
                 if !Self.isAutoConnectEnabled(for: peer.key) {
                     continue
                 }
+                guard let candidateRevision = candidateRevisions[peer.key],
+                      candidateRevision == Self.autoConnectRevision(for: peer.key) else { continue }
                 if let nextDial = stagedNextDial[peer.key], Date() < nextDial { continue }
                 do {
                     guard let result = results[peer.key] else { continue }
