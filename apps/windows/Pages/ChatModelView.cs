@@ -65,7 +65,7 @@ internal sealed class ChatModelView : Grid
             if (_disposed || !File.Exists(_path) || new FileInfo(_path).Length > 12 * 1024 * 1024) return;
             var encoded = Convert.ToBase64String(await File.ReadAllBytesAsync(_path));
             if (_disposed) return;
-            await core.ExecuteScriptAsync($"TokenstatModel.load('{encoded}','{_extension}','#08070d')");
+            await core.ExecuteScriptAsync($"TokenstatModel.load('{encoded}','{_extension}','{(Theme.IsDark ? "#08070d" : "#fbfbfd")}')");
         }
         catch (Exception error)
         {
