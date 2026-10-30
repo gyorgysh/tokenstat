@@ -837,13 +837,13 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         var description = Format.Text(detail, "body");
         stack.Children.Add(Chrome.Card(
             Format.Text(detail["author"], "login", L10n.Text("windows.pullspage.author.d95082a2")),
-            new TextBlock
-            {
-                Text = string.IsNullOrWhiteSpace(description) ? L10n.Text("windows.pullspage.no_description_was_added.68442d50") : description,
-                TextWrapping = TextWrapping.Wrap,
-                IsTextSelectionEnabled = true,
-                Opacity = string.IsNullOrWhiteSpace(description) ? 0.6 : 1,
-            }));
+            string.IsNullOrWhiteSpace(description)
+                ? new TextBlock
+                {
+                    Text = L10n.Text("windows.pullspage.no_description_was_added.68442d50"),
+                    Opacity = 0.6,
+                }
+                : ExpandableText(description)));
         foreach (var entry in Format.Items(timeline, "events") ?? new JsonArray())
         {
             if (entry is null) continue;
@@ -852,12 +852,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             var body = Format.Text(entry, "body", Format.Text(entry, "subject"));
             stack.Children.Add(Chrome.Card(
                 TimelineTitle(actor, kind),
-                new TextBlock
-                {
-                    Text = string.IsNullOrEmpty(body) ? TimelineSentence(kind) : body,
-                    TextWrapping = TextWrapping.Wrap,
-                    IsTextSelectionEnabled = true,
-                }));
+                ExpandableText(string.IsNullOrEmpty(body) ? TimelineSentence(kind) : body)));
         }
         var comment = new TextBox
         {
@@ -902,6 +897,46 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         composer.Children.Add(composerActions);
         stack.Children.Add(Chrome.Card(L10n.Text("windows.pullspage.join_the_conversation.a0a9b316"), composer));
         return new ScrollViewer { MaxHeight = 600, Content = stack };
+    }
+
+    private static UIElement ExpandableText(string text)
+    {
+        var longText = text.Length > 360;
+        var content = new TextBlock
+        {
+            Text = text,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            MaxLines = longText ? 6 : 0,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        if (!longText) return content;
+
+        var expanded = false;
+        var button = new Button
+        {
+            Content = L10n.Text("windows.pullspage.read_more"),
+            MinHeight = 44,
+            Padding = new Thickness(0, 0, 12, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Foreground = Theme.AccentBrush,
+            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button,
+            L10n.Text("windows.pullspage.read_more"));
+        button.Click += (_, _) =>
+        {
+            expanded = !expanded;
+            content.MaxLines = expanded ? 0 : 6;
+            var label = L10n.Text(expanded ? "windows.pullspage.show_less" : "windows.pullspage.read_more");
+            button.Content = label;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, label);
+        };
+        var stack = new StackPanel { Spacing = Theme.SpaceS };
+        stack.Children.Add(content);
+        stack.Children.Add(button);
+        return stack;
     }
 
     private static Grid LazyDiff()
