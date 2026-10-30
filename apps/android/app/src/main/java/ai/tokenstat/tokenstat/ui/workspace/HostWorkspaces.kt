@@ -438,6 +438,7 @@ fun HostCard(
                 } else {
                     TsProminentButton(
                         label = if (connecting) L10n.text("android.hostworkspaces.connecting.72021eb7")
+                            else if (stale) L10n.text("common.refresh")
                             else if (available) L10n.text("common.open") else L10n.text("common.connect"),
                         icon = ActionIcon.Connect.vector,
                         small = true,

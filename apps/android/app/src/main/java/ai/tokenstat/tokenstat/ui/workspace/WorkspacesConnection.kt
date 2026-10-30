@@ -179,6 +179,9 @@ class WorkspacesConnectionState {
 
     fun activateConnectedHost(machine: JsonObject): Boolean {
         val peer = machine.str("publicIdentity") ?: return false
+        // Keep a failed background refresh visible as a host, but never
+        // present its old work as a live connection during a later handoff.
+        if (peer in mutableStaleHosts.value) return false
         val snapshot = hostSnapshots[peer] ?: return false
         invalidateBackground(peer)
         connectionTicket++

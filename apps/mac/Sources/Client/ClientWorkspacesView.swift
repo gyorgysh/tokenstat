@@ -169,6 +169,7 @@ struct ClientWorkspacesView: View {
                         }
                     }
                     ForEach(model.hosts.filter { model.loadedHostKeys.contains($0.peerKey) &&
+                        !model.staleHostKeys.contains($0.peerKey) &&
                         $0.peerKey != model.connectedKey && $0.online != false }) { host in
                         let hostFolders = model.folders(for: host.peerKey)
                         let hostChats = model.chats(for: host.peerKey)
@@ -640,6 +641,7 @@ struct ClientWorkspacesView: View {
                     .controlSize(.small)
                 } else {
                     Button(model.isBusy(with: host.peerKey) ? L10n.text("apple.clientworkspacesview.connecting.72021eb7") :
+                        model.staleHostKeys.contains(host.peerKey) ? L10n.text("common.refresh") :
                         model.loadedHostKeys.contains(host.peerKey) ? L10n.text("common.open") : L10n.text("common.connect"), .connect) {
                         Task { await model.connect(host) }
                     }
@@ -756,7 +758,8 @@ final class ClientWorkspacesModel {
     func chats(for peer: String) -> [ChatRecentConversation] { hostSnapshots[peer]?.chats ?? [] }
 
     func folderReference(id: String) -> (peer: String, folder: WorkspaceFolder)? {
-        for host in hosts where loadedHostKeys.contains(host.peerKey) && host.online != false {
+        for host in hosts where loadedHostKeys.contains(host.peerKey) &&
+            !staleHostKeys.contains(host.peerKey) && host.online != false {
             if let folder = hostSnapshots[host.peerKey]?.folders.first(where: { $0.id == id }) {
                 return (host.peerKey, folder)
             }
@@ -875,7 +878,8 @@ final class ClientWorkspacesModel {
         guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
         backgroundTickets.removeValue(forKey: host.peerKey)
         chosenPeer = host.peerKey
-        if host.online != false, let snapshot = hostSnapshots[host.peerKey] {
+        if host.online != false, !staleHostKeys.contains(host.peerKey),
+            let snapshot = hostSnapshots[host.peerKey] {
             remoteLoadGeneration = UUID()
             pendingPeer = nil
             stopWatchingForAccess()

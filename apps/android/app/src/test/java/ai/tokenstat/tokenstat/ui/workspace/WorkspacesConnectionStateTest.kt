@@ -92,6 +92,7 @@ class WorkspacesConnectionStateTest {
         state.finishBackground("peer-b", "account-one", stale, success = false, nowMs = 60_100)
         assertEquals(setOf("peer-b"), state.staleHosts.value)
         assertEquals("Old", (state.foldersFor("peer-b").single() as kotlinx.serialization.json.JsonObject).str("name"))
+        assertFalse(state.activateConnectedHost(host("peer-b")))
         assertEquals(null, state.beginBackground("peer-b", "account-one", nowMs = 64_099))
         val fresh = state.beginBackground("peer-b", "account-one", nowMs = 64_100)!!
         assertTrue(state.publishBackground("peer-b", "account-one", fresh, JsonArray(listOf(folder("Fresh"))),

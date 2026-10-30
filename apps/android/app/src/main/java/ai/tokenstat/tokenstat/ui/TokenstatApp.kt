@@ -3829,7 +3829,7 @@ private fun WorkspacesScreen(
             staleHosts = staleHosts,
             otherHostWork = hosts.mapNotNull { machine ->
                 val peer = machine.string("publicIdentity") ?: return@mapNotNull null
-                if (peer !in retainedHosts || peer == connectedPeer ||
+                if (peer !in retainedHosts || peer in staleHosts || peer == connectedPeer ||
                     machine.get("online")?.jsonPrimitive?.booleanOrNull == false) return@mapNotNull null
                 OtherHostWork(
                     machine,
@@ -3857,7 +3857,9 @@ private fun WorkspacesScreen(
                 if (!enabled) session.invalidateBackground(peer)
                 autoTick += 1
             },
-            onConnect = { scope.launch { connect(it) } },
+            onConnect = { machine ->
+                scope.launch { connect(machine, forceRefresh = machine.string("publicIdentity") in staleHosts) }
+            },
             onDisconnect = { peer -> disconnect(peer) },
             onFolder = { selectedFolderId = it.string("id"); selectedFolderPeer = connectedPeer; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
             onOtherFolder = { machine, folder ->
