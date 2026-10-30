@@ -14,13 +14,14 @@ struct ClientChatModelPreview: View {
     let data: Data?
     let file: URL?
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var scene: SCNScene?
     @State private var camera: SCNNode?
     @State private var failed = false
 
     private static let inlineByteLimit = 16 * 1024 * 1024
     private var ext: String { (name as NSString).pathExtension.lowercased() }
-    private var sourceKey: String { "\(id)|\(file?.path ?? "")|\(data?.count ?? 0)" }
+    private var sourceKey: String { "\(id)|\(file?.path ?? "")|\(data?.count ?? 0)|\(colorScheme)" }
 
     static func canPreview(_ name: String) -> Bool {
         let ext = (name as NSString).pathExtension.lowercased()
