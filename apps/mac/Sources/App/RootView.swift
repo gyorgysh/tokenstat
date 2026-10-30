@@ -919,9 +919,12 @@ struct RootView: View {
             // sweep to show its folders.
             .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { note in
                 if let key = note.object as? String {
-                    // An explicit Connect undoes a previous Disconnect; the sweep
-                    // notification (same object) is simply an extra reload.
-                    workspaces.reconnect(peer: key)
+                    // A sweep has already published this peer's folders.
+                    // Reconnecting it here would restart the whole sweep and
+                    // cancel the slower peers still in flight.
+                    if note.userInfo?["workspaceFoldersReady"] as? Bool != true {
+                        workspaces.reconnect(peer: key)
+                    }
                 } else {
                     Task {
                         await BridgeLaunch.wait()

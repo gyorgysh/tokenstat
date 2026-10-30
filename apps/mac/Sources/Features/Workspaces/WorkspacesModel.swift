@@ -1084,7 +1084,6 @@ final class WorkspacesModel {
             var stagedNextDial = remotePeerNextDial
             var stagedEverAnswered = remotePeerEverAnswered
             var stagedSummaries = summaries
-            var didConnectKeys: [String] = []
             var unreachableKeys: [String] = []
             let liveKeys = Set(peers.map(\.key))
             for key in stagedFolders.keys where !liveKeys.contains(key) {
@@ -1120,6 +1119,50 @@ final class WorkspacesModel {
                         break
                     }
                     fetched[result.peer.key] = result
+                    // Publish a healthy peer as soon as it answers. Waiting
+                    // for every outstanding dial made one sleeping machine
+                    // hold back folders that were already on this Mac. Keep
+                    // the staged copy in step so a later sweep starts from
+                    // the same snapshot and the final pass cannot undo it.
+                    if let listed = result.folders,
+                       !suppressedPeers.contains(result.peer.key),
+                       Self.isAutoConnectEnabled(for: result.peer.key) {
+                        let key = result.peer.key
+                        let newlySeen = stagedFolders[key] == nil
+                        stagedFolders[key] = listed
+                        if let counts = result.summaries {
+                            for summary in counts { stagedSummaries[summary.id] = summary }
+                        }
+                        stagedNextDial[key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
+                        stagedFailures[key] = 0
+                        stagedEverAnswered.insert(key)
+                        // A different peer may have been disconnected while
+                        // this one was answering. Never restore its old row
+                        // from the staged snapshot during an early publish.
+                        for stopped in suppressedPeers {
+                            if stagedFolders.removeValue(forKey: stopped) != nil {
+                                stagedSummaries = stagedSummaries.filter {
+                                    !$0.key.hasPrefix("remote:\(stopped):")
+                                }
+                            }
+                        }
+                        remoteFolders = stagedFolders
+                        remotePeerFailures = stagedFailures
+                        remotePeerNextDial = stagedNextDial
+                        remotePeerEverAnswered = stagedEverAnswered
+                        summaries = stagedSummaries
+                        EcosystemPublisher.publish(projects: listed.filter(\.exists).map {
+                            EcosystemProject(id: $0.id, name: $0.name, host: $0.machineLabel ?? "Computer")
+                        }, lease: ecosystemLease, replacing: .peer(key))
+                        publishFolders()
+                        if newlySeen {
+                            NotificationCenter.default.post(
+                                name: .remotePeerDidConnect,
+                                object: key,
+                                userInfo: ["workspaceFoldersReady": true]
+                            )
+                        }
+                    }
                     if let peer = remaining.next() {
                         group.addTask { await Self.fetchRemote(peer) }
                     }
@@ -1173,7 +1216,11 @@ final class WorkspacesModel {
                     stagedFailures[peer.key] = 0
                     stagedEverAnswered.insert(peer.key)
                     if newlySeen {
-                        didConnectKeys.append(peer.key)
+                        NotificationCenter.default.post(
+                            name: .remotePeerDidConnect,
+                            object: peer.key,
+                            userInfo: ["workspaceFoldersReady": true]
+                        )
                     }
                 } catch {
                     guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
@@ -1244,9 +1291,6 @@ final class WorkspacesModel {
             remotePeerEverAnswered = stagedEverAnswered
             summaries = stagedSummaries
             publishFolders()
-            for key in didConnectKeys {
-                NotificationCenter.default.post(name: .remotePeerDidConnect, object: key)
-            }
             for key in unreachableKeys {
                 NotificationCenter.default.post(
                     name: .remotePeerBecameUnreachable,
