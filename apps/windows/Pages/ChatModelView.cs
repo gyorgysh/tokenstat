@@ -32,6 +32,7 @@ internal sealed class ChatModelView : Grid
         Children.Add(_web);
         Loaded += async (_, _) => { _disposed = false; await OpenAsync(++_epoch); };
         Unloaded += (_, _) => Dispose();
+        ActualThemeChanged += async (_, _) => { if (IsLoaded) await OpenAsync(++_epoch); };
     }
 
     public static bool CanPreview(string name) => Path.GetExtension(name).ToLowerInvariant() is
