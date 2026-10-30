@@ -433,6 +433,7 @@ fun HostCard(
                         label = L10n.text("common.disconnect"),
                         icon = ActionIcon.Disconnect.vector,
                         small = true,
+                        modifier = Modifier.heightIn(min = 48.dp),
                         onClick = onDisconnect,
                     )
                 } else {
@@ -442,6 +443,7 @@ fun HostCard(
                             else if (available) L10n.text("common.open") else L10n.text("common.connect"),
                         icon = ActionIcon.Connect.vector,
                         small = true,
+                        modifier = Modifier.heightIn(min = 48.dp),
                         enabled = !connecting,
                         onClick = onConnect,
                     )
@@ -461,7 +463,7 @@ fun HostCard(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxWidth().clickable { onOpenDevice() },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onOpenDevice() },
                 ) {
                     Text(
                         L10n.text("android.hostworkspaces.open_device.021a82bd"),
@@ -511,6 +513,7 @@ fun HostCard(
                         label = L10n.text("common.disconnect"),
                         icon = ActionIcon.Disconnect.vector,
                         small = true,
+                        modifier = Modifier.heightIn(min = 48.dp),
                         onClick = onDisconnect,
                     )
                 }

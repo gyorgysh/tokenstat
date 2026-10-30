@@ -638,7 +638,7 @@ struct ClientWorkspacesView: View {
                         model.disconnect()
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .controlSize(.large)
                 } else {
                     Button(model.isBusy(with: host.peerKey) ? L10n.text("apple.clientworkspacesview.connecting.72021eb7") :
                         model.staleHostKeys.contains(host.peerKey) ? L10n.text("common.refresh") :
@@ -646,7 +646,7 @@ struct ClientWorkspacesView: View {
                         Task { await model.connect(host) }
                     }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    .controlSize(.large)
                     .tint(Theme.accent)
                     .disabled(((model.isConnecting != nil || model.pendingPeer != nil) &&
                         !model.loadedHostKeys.contains(host.peerKey)) || host.online == false)
@@ -671,7 +671,7 @@ struct ClientWorkspacesView: View {
                             .font(ClientType.caption)
                             .foregroundStyle(.tertiary)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
