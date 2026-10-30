@@ -8,9 +8,7 @@
 import Observation
 import SwiftUI
 
-#if !os(macOS)
-
-/// Setting up a machine from a phone, one step at a time.
+/// Setting up a machine from this device, one step at a time.
 ///
 /// This is the provisioning plane, and it has one rule: **it may install and
 /// enroll, and it may not do work.** Cloning a folder, installing an agent and
@@ -613,5 +611,3 @@ enum SetupCredential: Equatable {
     /// Typed once, used for this connection, and never written down.
     case password
 }
-
-#endif

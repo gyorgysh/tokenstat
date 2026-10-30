@@ -1216,6 +1216,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ten_distinct_hosts_answer_simultaneous_encrypted_requests() {
+        let hosts: Vec<_> = (1..=10u8)
+            .map(|id| {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let address = listener.local_addr().unwrap();
+                let host = MachineIdentity::from_secret([id; 32]);
+                let key = host.public_key();
+                let worker = std::thread::spawn(move || {
+                    let (stream, _) = listener.accept().unwrap();
+                    let mut connection = handshake_responder(Box::new(stream), &host).unwrap();
+                    assert_eq!(connection.receive(1024).unwrap(), b"workspace.list");
+                    connection.send(format!("host-{id}").as_bytes()).unwrap();
+                });
+                (id, address, key, worker)
+            })
+            .collect();
+        let calls: Vec<_> = hosts
+            .iter()
+            .map(|(id, address, key, _)| {
+                let (id, address, key) = (*id, *address, *key);
+                std::thread::spawn(move || {
+                    let stream = TcpStream::connect(address).unwrap();
+                    let client = MachineIdentity::from_secret([42u8; 32]);
+                    let mut connection = handshake_initiator(
+                        Box::new(stream),
+                        &client,
+                        Some(key),
+                        "multi-host fixture",
+                    )
+                    .unwrap();
+                    assert_eq!(connection.peer_key(), key);
+                    connection.send(b"workspace.list").unwrap();
+                    assert_eq!(
+                        connection.receive(1024).unwrap(),
+                        format!("host-{id}").as_bytes()
+                    );
+                })
+            })
+            .collect();
+        for call in calls {
+            call.join().unwrap();
+        }
+        for (_, _, _, worker) in hosts {
+            worker.join().unwrap();
+        }
+    }
+
+    #[test]
     fn epoch_formats_as_rfc3339() {
         assert_eq!(format_epoch(0), "1970-01-01T00:00:00Z");
         assert_eq!(format_epoch(1_754_300_000), "2025-08-04T09:33:20Z");

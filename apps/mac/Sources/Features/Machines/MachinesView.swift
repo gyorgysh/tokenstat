@@ -34,6 +34,7 @@ struct MachinesView: View {
     var onSignIn: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingDevice = false
+    @State private var addingServer = false
     @State private var encryptionExpanded = false
     private enum DevicePage: String, CaseIterable { case devices = "Devices", access = "Access" }
     @State private var devicePage: DevicePage = .devices
@@ -65,6 +66,10 @@ struct MachinesView: View {
                     Spacer(minLength: 0)
                     Button(L10n.text("common.add_device"), .create) { addingDevice = true }
                         .buttonStyle(AccentButtonStyle(small: true))
+                    #if os(macOS)
+                    Button("Set up Linux host", .connect) { addingServer = true }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                    #endif
                 }
                 .padding(Theme.Space.m)
                 ThemeRule()
@@ -153,6 +158,11 @@ struct MachinesView: View {
                 addingDevice = false
             }
         }
+        #if os(macOS)
+        .sheet(isPresented: $addingServer) {
+            MacServerSetupView()
+        }
+        #endif
     }
 
     /// A way in, not a place. SSH is a section in the sidebar now, and this

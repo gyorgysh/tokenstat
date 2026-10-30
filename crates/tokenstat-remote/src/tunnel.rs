@@ -1539,6 +1539,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ten_host_channels_keep_replies_and_failures_independent() {
+        let session = inert_session();
+        let channels: Vec<_> = (1..=10)
+            .map(|id| {
+                let state = Arc::new(ChannelState::new(id));
+                session
+                    .channels
+                    .lock()
+                    .unwrap()
+                    .insert(id, Arc::clone(&state));
+                ChannelTransport::new(Arc::clone(&session), state)
+            })
+            .collect();
+
+        // Each channel represents a different host on the same relay socket.
+        // Interleave the replies, then fail one host while the others still
+        // have unread work. A channel id must never become another host's row.
+        for id in (1..=10u32).rev() {
+            let mut frame = vec![CH_DATA];
+            frame.extend_from_slice(&id.to_be_bytes());
+            frame.extend_from_slice(format!("host-{id}").as_bytes());
+            dispatch_frame(&session, &frame);
+        }
+        let mut failed = vec![CH_ERROR];
+        failed.extend_from_slice(&5u32.to_be_bytes());
+        failed.extend_from_slice(b"host_offline");
+        dispatch_frame(&session, &failed);
+
+        for (index, mut channel) in channels.into_iter().enumerate() {
+            let id = index + 1;
+            let mut output = [0u8; 32];
+            let count = channel.read(&mut output).unwrap();
+            assert_eq!(&output[..count], format!("host-{id}").as_bytes());
+            if id == 5 {
+                assert!(channel.read(&mut output).is_err());
+            }
+        }
+    }
+
+    #[test]
     fn personal_reach_can_stop_without_closing_team_channels_or_the_shared_socket() {
         let session = inert_session();
         let personal = Arc::new(ChannelState::new(1));

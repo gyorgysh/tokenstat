@@ -485,9 +485,16 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                     return Task.CompletedTask;
                 });
             navigation.Children.Add(sections);
-            var add = Buttons.Primary(L10n.Text("common.add_device"), ActionIcon.Create, async (_, _) => await PairAsync());
-            Grid.SetColumn(add, 1);
-            navigation.Children.Add(add);
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+            var linuxSetup = new Button { Content = "Set up Linux host", MinHeight = 44 };
+            linuxSetup.Click += async (_, _) =>
+            {
+                if (await LinuxHostSetupDialog.ShowAsync(this)) await LoadAsync();
+            };
+            actions.Children.Add(linuxSetup);
+            actions.Children.Add(Buttons.Primary(L10n.Text("common.add_device"), ActionIcon.Create, async (_, _) => await PairAsync()));
+            Grid.SetColumn(actions, 1);
+            navigation.Children.Add(actions);
             _root.Children.Add(navigation);
 
             switch (_devicePage)

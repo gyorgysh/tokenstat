@@ -1085,7 +1085,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
 }
 
 #if os(macOS)
-private struct SSHNativeTerminal: NSViewRepresentable {
+struct SSHNativeTerminal: NSViewRepresentable {
     let session: SSHLiveTerminal
     @Environment(\.colorScheme) private var colorScheme
     func makeNSView(context: Context) -> TerminalView { session.view }
