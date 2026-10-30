@@ -66,6 +66,9 @@ internal static class RemoteWorkspaces
     private static readonly HashSet<string> EverAnswered = new(StringComparer.Ordinal);
     private static readonly HashSet<string> AskedWorkspace = new(StringComparer.Ordinal);
     private static readonly HashSet<string> Connected = new(StringComparer.Ordinal);
+    // A remote.call cannot be cancelled after it has reached the daemon.
+    // Each host revision fences its answer against a newer local decision.
+    private static readonly Dictionary<string, long> Revisions = new(StringComparer.Ordinal);
     private static readonly HostAutoConnectPreferences AutoConnect = new(
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "remote-autoconnect-scoped.json"),
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "remote-autoconnect.json"));
@@ -83,6 +86,7 @@ internal static class RemoteWorkspaces
             EverAnswered.Clear();
             AskedWorkspace.Clear();
             Connected.Clear();
+            Revisions.Clear();
             _accountScope = null;
         }
         Changed?.Invoke();
@@ -121,6 +125,12 @@ internal static class RemoteWorkspaces
     }
 
     public static string Join(string peer, string inner) => Prefix + peer + ":" + inner;
+
+    private static long RevisionLocked(string peer) =>
+        Revisions.TryGetValue(peer, out var revision) ? revision : 0;
+
+    private static long AdvanceRevisionLocked(string peer) =>
+        Revisions[peer] = RevisionLocked(peer) + 1;
 
     /// <summary>
     /// A host answered, and the answer was no. Connection failures and a
@@ -174,6 +184,8 @@ internal static class RemoteWorkspaces
             Format.Text(folder, "path"), peer, hostName, folder["git"]?.DeepClone());
         lock (Gate)
         {
+            if (Suppressed.Contains(peer)) return;
+            AdvanceRevisionLocked(peer);
             if (!FoldersByPeer.TryGetValue(peer, out var folders))
                 FoldersByPeer[peer] = folders = new List<RemoteFolder>();
             folders.RemoveAll(existing => existing.Id == remote.Id);
@@ -189,6 +201,7 @@ internal static class RemoteWorkspaces
         if (!TrySplit(id, out var peer, out _)) return;
         lock (Gate)
         {
+            AdvanceRevisionLocked(peer);
             if (FoldersByPeer.TryGetValue(peer, out var folders))
             {
                 var index = folders.FindIndex(folder => folder.Id == id);
@@ -254,6 +267,12 @@ internal static class RemoteWorkspaces
             return new RemoteConnectResult(
                 false, L10n.Text("windows.remoteworkspaces.turn_on_reach_devices_from_anywhere_before.4930ed6e", $"{name}"), false);
         }
+        long revision;
+        lock (Gate)
+        {
+            if (account != AppServices.AccountGeneration) return AccountChangedResult();
+            revision = AdvanceRevisionLocked(peerKey);
+        }
         try
         {
             // Foreground Connect should repair a relay that failed to start
@@ -266,14 +285,19 @@ internal static class RemoteWorkspaces
             {
                 if (account != AppServices.AccountGeneration)
                     return AccountChangedResult();
+                if (revision != RevisionLocked(peerKey))
+                    return ConnectionChangedResult();
                 Suppressed.Remove(peerKey);
                 Failures.Remove(peerKey);
                 NextDial.Remove(peerKey);
                 EverAnswered.Add(peerKey);
                 FoldersByPeer[peerKey] = folders;
                 Connected.Add(peerKey);
+                // Keep the preference write with the publication. A
+                // Disconnect between these two steps used to re-enable a
+                // host that the person had just disconnected.
+                AutoConnect.Set(_accountScope, peerKey, true);
             }
-            SetAutoConnect(true, peerKey, account);
             Changed?.Invoke();
             return new RemoteConnectResult(
                 true, L10n.Text("windows.remoteworkspaces.connected_to_0_its_workspaces_are_now_avai.c79dc8f5", $"{name}"), true);
@@ -285,6 +309,8 @@ internal static class RemoteWorkspaces
             {
                 if (account != AppServices.AccountGeneration)
                     return AccountChangedResult();
+                if (revision != RevisionLocked(peerKey))
+                    return ConnectionChangedResult();
                 Connected.Remove(peerKey);
             }
             if (text.Contains("has not approved", StringComparison.OrdinalIgnoreCase)
@@ -302,6 +328,8 @@ internal static class RemoteWorkspaces
                 {
                     if (account != AppServices.AccountGeneration)
                         return AccountChangedResult();
+                    if (revision != RevisionLocked(peerKey))
+                        return ConnectionChangedResult();
                     removed = FoldersByPeer.Remove(peerKey);
                 }
                 if (removed) Changed?.Invoke();
@@ -342,6 +370,9 @@ internal static class RemoteWorkspaces
     private static RemoteConnectResult AccountChangedResult() =>
         new(false, L10n.Text("windows.remoteworkspaces.account_changed"), false);
 
+    private static RemoteConnectResult ConnectionChangedResult() =>
+        new(false, L10n.Text("windows.remoteworkspaces.connection_changed"), true);
+
     /// <summary>Set the verified account before reading or writing reconnect choices.</summary>
     public static void SetAccountScope(JsonNode status, long accountGeneration)
     {
@@ -368,15 +399,16 @@ internal static class RemoteWorkspaces
     {
         lock (Gate)
         {
+            AdvanceRevisionLocked(peerKey);
             Suppressed.Add(peerKey);
             FoldersByPeer.Remove(peerKey);
             NextDial.Remove(peerKey);
             Failures.Remove(peerKey);
             Connected.Remove(peerKey);
+            AutoConnect.Set(_accountScope, peerKey, false);
         }
         // A manual Disconnect must survive restart. An explicit Connect or
         // newly registered project opts this host back into auto-connect.
-        SetAutoConnect(false, peerKey);
         Changed?.Invoke();
     }
 
@@ -388,13 +420,14 @@ internal static class RemoteWorkspaces
     {
         lock (Gate)
         {
+            AdvanceRevisionLocked(peerKey);
             // Registering a folder is an explicit return to this computer,
             // even if it was disconnected earlier in the session.
             Suppressed.Remove(peerKey);
             Failures.Remove(peerKey);
             NextDial.Remove(peerKey);
+            AutoConnect.Set(_accountScope, peerKey, true);
         }
-        SetAutoConnect(true, peerKey);
         _ = SweepAsync();
     }
 
@@ -474,6 +507,7 @@ internal static class RemoteWorkspaces
             {
                 if (!live.Contains(key) || Suppressed.Contains(key))
                 {
+                    AdvanceRevisionLocked(key);
                     FoldersByPeer.Remove(key);
                     Failures.Remove(key);
                     Connected.Remove(key);
@@ -497,6 +531,7 @@ internal static class RemoteWorkspaces
     {
         var changed = false;
         DateTime? next;
+        long revision;
         lock (Gate)
         {
             if (account != AppServices.AccountGeneration) return false;
@@ -505,6 +540,7 @@ internal static class RemoteWorkspaces
                 return false;
             }
             next = NextDial.TryGetValue(key, out var at) ? at : null;
+            revision = RevisionLocked(key);
         }
         if (next.HasValue && now < next.Value)
         {
@@ -515,8 +551,9 @@ internal static class RemoteWorkspaces
             var folders = await ReadPeerFoldersAsync(key, label);
             lock (Gate)
             {
-                if (account != AppServices.AccountGeneration) return false;
-                if (Suppressed.Contains(key))
+                if (account != AppServices.AccountGeneration ||
+                    revision != RevisionLocked(key) || Suppressed.Contains(key) ||
+                    !IsAutoConnectEnabledLocked(key))
                 {
                     return false;
                 }
@@ -548,7 +585,9 @@ internal static class RemoteWorkspaces
             var text = ex.Message;
             lock (Gate)
             {
-                if (account != AppServices.AccountGeneration) return false;
+                if (account != AppServices.AccountGeneration ||
+                    revision != RevisionLocked(key) || Suppressed.Contains(key) ||
+                    !IsAutoConnectEnabledLocked(key)) return false;
                 if (IsWorkspaceRefusal(text))
                 {
                     // Reached a host that has not let this device in. Ask
@@ -649,7 +688,13 @@ internal static class RemoteWorkspaces
         lock (Gate)
         {
             if (accountGeneration.HasValue && accountGeneration != AppServices.AccountGeneration) return;
+            AdvanceRevisionLocked(peerKey);
             AutoConnect.Set(_accountScope, peerKey, on);
+            // Turning the switch back on is an explicit reconnect choice.
+            // Without this, a prior manual Disconnect kept the host in the
+            // in-memory suppressed set until app restart even though the
+            // saved preference now said to reconnect.
+            if (on) Suppressed.Remove(peerKey);
         }
     }
 
