@@ -3298,6 +3298,7 @@ private fun WorkspacesScreen(
     val connectedPeer by session.connectedPeer.collectAsStateWithLifecycle()
     val retainedHosts by session.connectedHosts.collectAsStateWithLifecycle()
     val staleHosts by session.staleHosts.collectAsStateWithLifecycle()
+    val accessDeniedHosts by session.accessDeniedHosts.collectAsStateWithLifecycle()
     var newChatRepository by rememberSaveable(navigationOwner, connectedPeer) { mutableStateOf<String?>(null) }
     val newChatOwner = ai.tokenstat.tokenstat.ui.workspace.newChatDraftOwner(newChatAccount, connectedPeer, newChatRepository)
     val newChatDraft = remember(newChatOwner, newChatDraftRevision) { model.chatComposers.snapshot(newChatOwner) }
@@ -3827,6 +3828,7 @@ private fun WorkspacesScreen(
             connectedPeer = connectedPeer,
             retainedHosts = retainedHosts,
             staleHosts = staleHosts,
+            accessDeniedHosts = accessDeniedHosts,
             otherHostWork = hosts.mapNotNull { machine ->
                 val peer = machine.string("publicIdentity") ?: return@mapNotNull null
                 if (peer !in retainedHosts || peer in staleHosts || peer == connectedPeer ||
@@ -4072,6 +4074,7 @@ private fun WorkspaceList(
     connectedPeer: String?,
     retainedHosts: Set<String>,
     staleHosts: Set<String>,
+    accessDeniedHosts: Set<String>,
     otherHostWork: List<OtherHostWork>,
     connectingPeer: String?,
     loadingFolders: Boolean,
@@ -4189,6 +4192,7 @@ private fun WorkspaceList(
                 connected = connectedPeer == peer,
                 available = peer in retainedHosts && connectedPeer != peer,
                 stale = peer in staleHosts,
+                accessDenied = peer in accessDeniedHosts,
                 connecting = connectingPeer == peer,
                 autoConnect = autoConnect(peer),
                 onConnect = { onConnect(machine) },

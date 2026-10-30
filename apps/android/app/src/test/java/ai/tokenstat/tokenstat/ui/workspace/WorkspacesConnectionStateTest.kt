@@ -112,6 +112,9 @@ class WorkspacesConnectionStateTest {
         state.finishBackground("peer-b", "account-one", denied, success = false, nowMs = 124_100)
         assertTrue(state.connectedHosts.value.isEmpty())
         assertTrue(state.foldersFor("peer-b").isEmpty())
+        assertEquals(setOf("peer-b"), state.accessDeniedHosts.value)
+        state.setKnownHosts(emptySet())
+        assertTrue(state.accessDeniedHosts.value.isEmpty())
     }
 
     @Test fun lateReplyCannotReplaceAReconnectedHostOrCrossAnAccountRestart() {

@@ -32,6 +32,7 @@ class WorkspacesConnectionState {
         hostSnapshots.keys.retainAll(peers)
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
         mutableStaleHosts.value = mutableStaleHosts.value.intersect(peers)
+        mutableAccessDeniedHosts.value = mutableAccessDeniedHosts.value.intersect(peers)
         backgroundAttempts.keys.retainAll(peers)
         backgroundNextAt.keys.retainAll(peers)
         backgroundTickets.keys.retainAll(peers)
@@ -57,6 +58,8 @@ class WorkspacesConnectionState {
     val connectedHosts: StateFlow<Set<String>> = mutableConnectedHosts.asStateFlow()
     private val mutableStaleHosts = MutableStateFlow<Set<String>>(emptySet())
     val staleHosts: StateFlow<Set<String>> = mutableStaleHosts.asStateFlow()
+    private val mutableAccessDeniedHosts = MutableStateFlow<Set<String>>(emptySet())
+    val accessDeniedHosts: StateFlow<Set<String>> = mutableAccessDeniedHosts.asStateFlow()
     fun foldersFor(peer: String): JsonArray = hostSnapshots[peer]?.folders ?: JsonArray(emptyList())
     fun sessionsFor(peer: String): JsonArray = hostSnapshots[peer]?.sessions ?: JsonArray(emptyList())
     fun chatsFor(peer: String): JsonArray = hostSnapshots[peer]?.chats ?: JsonArray(emptyList())
@@ -112,6 +115,7 @@ class WorkspacesConnectionState {
         hostSnapshots[peer] = HostSnapshot(folders, sessions, filteredChats(chats), nowMs)
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
         mutableStaleHosts.value = mutableStaleHosts.value - peer
+        mutableAccessDeniedHosts.value = mutableAccessDeniedHosts.value - peer
         return true
     }
 
@@ -120,6 +124,7 @@ class WorkspacesConnectionState {
         hostSnapshots.remove(peer)
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
         mutableStaleHosts.value = mutableStaleHosts.value - peer
+        mutableAccessDeniedHosts.value = mutableAccessDeniedHosts.value + peer
         return true
     }
 
@@ -195,6 +200,7 @@ class WorkspacesConnectionState {
         mutableChats.value = snapshot.chats
         mutableError.value = null
         mutableRequestNotice.value = null
+        mutableAccessDeniedHosts.value = mutableAccessDeniedHosts.value - peer
         return true
     }
 
@@ -205,6 +211,10 @@ class WorkspacesConnectionState {
 
     fun setAllowed(allowed: Boolean?) {
         mutableAllowed.value = allowed
+        mutableHost.value?.str("publicIdentity")?.let { peer ->
+            if (allowed == true) mutableAccessDeniedHosts.value = mutableAccessDeniedHosts.value - peer
+            if (allowed == false) mutableAccessDeniedHosts.value = mutableAccessDeniedHosts.value + peer
+        }
         if (allowed == false) {
             mutableHost.value?.str("publicIdentity")?.let { hostSnapshots.remove(it) }
             mutableConnectedHosts.value = hostSnapshots.keys.toSet()
@@ -282,6 +292,7 @@ class WorkspacesConnectionState {
         hostSnapshots.remove(peer)
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
         mutableStaleHosts.value = mutableStaleHosts.value - peer
+        mutableAccessDeniedHosts.value = mutableAccessDeniedHosts.value - peer
         invalidateBackground(peer)
         backgroundAttempts.remove(peer)
         backgroundNextAt.remove(peer)
@@ -291,6 +302,7 @@ class WorkspacesConnectionState {
     fun clearAll() {
         hostSnapshots.clear()
         mutableStaleHosts.value = emptySet()
+        mutableAccessDeniedHosts.value = emptySet()
         backgroundAttempts.clear()
         backgroundNextAt.clear()
         backgroundTickets.clear()
