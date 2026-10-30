@@ -3069,7 +3069,7 @@ fun PullsSection(
                 )
             }
         }
-        Text(
+        if (!loading || pulls.isNotEmpty()) Text(
             L10n.text("android.chatpullssections.0_shown.c67ec9a7", "${pulls.size}"),
             style = TextStyle(fontSize = 12.sp),
             color = LocalTsColors.current.textSecondary,

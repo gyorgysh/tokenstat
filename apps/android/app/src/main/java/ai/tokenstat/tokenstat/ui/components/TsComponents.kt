@@ -35,8 +35,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,7 +59,20 @@ import ai.tokenstat.tokenstat.ui.theme.TsColors
 /// variable faces under `res/font` from the same files the Mac app ships.
 object TsType {
     /// Manrope. Language: navigation, controls, body text, headings, labels.
-    val interfaceFamily = FontFamily(Font(R.font.manrope_variable))
+    // The bundled variable file's default named face is ExtraLight. Supply
+    // the wght axis for every weight Compose asks for; otherwise regular
+    // navigation and body copy can render at the file's light default.
+    @OptIn(ExperimentalTextApi::class)
+    val interfaceFamily = FontFamily(
+        Font(R.font.manrope_variable, weight = FontWeight.Normal,
+            variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+        Font(R.font.manrope_variable, weight = FontWeight.Medium,
+            variationSettings = FontVariation.Settings(FontVariation.weight(500))),
+        Font(R.font.manrope_variable, weight = FontWeight.SemiBold,
+            variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+        Font(R.font.manrope_variable, weight = FontWeight.Bold,
+            variationSettings = FontVariation.Settings(FontVariation.weight(700))),
+    )
 
     /// JetBrains Mono. Anything read character by character: commands, model
     /// ids, paths, terminals.
