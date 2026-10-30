@@ -40,6 +40,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,6 +71,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -2878,8 +2881,6 @@ fun PullsSection(
     var scopeName by remember(peer, workspace) { mutableStateOf("all") }
     var stateName by remember(peer, workspace) { mutableStateOf("open") }
     var activeFilter by remember(peer, workspace) { mutableStateOf("") }
-    var stateMenu by remember { mutableStateOf(false) }
-    var scopeMenu by remember { mutableStateOf(false) }
     var openNumber by remember { mutableStateOf<Long?>(null) }
     var creatingPull by remember(peer, workspace) { mutableStateOf(false) }
 
@@ -3033,31 +3034,38 @@ fun PullsSection(
                 onDismiss = { error = null },
             )
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.weight(1f)) {
-                TsPickerField(summary = pullStateLabel(stateName),
-                    onOpen = { stateMenu = true }, modifier = Modifier.fillMaxWidth())
-                DropdownMenu(expanded = stateMenu, onDismissRequest = { stateMenu = false }) {
-                    pullStates.forEach { value ->
-                        DropdownMenuItem(text = { Text(pullStateLabel(value)) }, onClick = { stateMenu = false; stateName = value },
-                            enabled = value != "all" || HostContracts.supportsPullAllState(protocol),
-                            leadingIcon = if (value == stateName) {{ Icon(ActionIcon.Done.vector, null) }} else null)
-                    }
-                    if (!HostContracts.supportsPullAllState(protocol)) {
-                        DropdownMenuItem(text = { Text(L10n.text("android.pullfilter.update_for_all")) },
-                            onClick = {}, enabled = false)
-                    }
-                }
+        val filterColors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = LocalTsColors.current.accent.copy(alpha = 0.18f),
+            selectedLabelColor = LocalTsColors.current.accent,
+        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            pullScopes.forEach { value ->
+                FilterChip(
+                    selected = scopeName == value,
+                    onClick = { scopeName = value },
+                    label = { Text(pullScopeLabel(value), maxLines = 1) },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    colors = filterColors,
+                )
             }
-            Box(Modifier.weight(1f)) {
-                TsPickerField(summary = pullScopeLabel(scopeName),
-                    onOpen = { scopeMenu = true }, modifier = Modifier.fillMaxWidth())
-                DropdownMenu(expanded = scopeMenu, onDismissRequest = { scopeMenu = false }) {
-                    pullScopes.forEach { value ->
-                        DropdownMenuItem(text = { Text(pullScopeLabel(value)) }, onClick = { scopeMenu = false; scopeName = value },
-                            leadingIcon = if (value == scopeName) {{ Icon(ActionIcon.Done.vector, null) }} else null)
-                    }
-                }
+        }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            pullStates.forEach { value ->
+                FilterChip(
+                    selected = stateName == value,
+                    onClick = { stateName = value },
+                    enabled = value != "all" || HostContracts.supportsPullAllState(protocol),
+                    label = { Text(pullStateLabel(value), maxLines = 1) },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    colors = filterColors,
+                )
             }
         }
         Text(
@@ -3076,48 +3084,61 @@ fun PullsSection(
         LazyColumn(contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(pulls, key = { it.get("number")?.jsonPrimitive?.longOrNull?.toString() ?: it.hashCode().toString() }) { pr ->
                 val number = pr.get("number")?.jsonPrimitive?.longOrNull ?: return@items
-                Column {
-                    Column(Modifier.fillMaxWidth().clickable { openNumber = number }
-                        .padding(horizontal = 8.dp, vertical = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            pr.str("title").orEmpty(),
-                            style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-                            color = LocalTsColors.current.textPrimary,
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                            Avatar(name = pr.str("author") ?: "?", size = 24,
-                                avatarUrl = pr.str("authorAvatar"), decorative = true)
-                            Text(pr.str("author").orEmpty(), style = TsType.caption,
-                                color = LocalTsColors.current.textPrimary)
-                            Text("#$number", style = TsType.caption,
-                                color = LocalTsColors.current.textSecondary)
-                            Spacer(Modifier.weight(1f))
-                            val status = if (pr.bol("draft")) "Draft" else pr.str("state")?.replaceFirstChar { it.uppercase() } ?: "Open"
-                            Text(status, style = TsType.caption, color = LocalTsColors.current.accent)
+                val colors = LocalTsColors.current
+                Column(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(cardRadiusDp))
+                        .background(colors.panel)
+                        .border(1.dp, colors.border, RoundedCornerShape(cardRadiusDp))
+                        .clickable { openNumber = number }
+                        .padding(Space.m),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        pr.str("title").orEmpty(),
+                        style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                        color = colors.textPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        Avatar(name = pr.str("author") ?: "?", size = 24,
+                            avatarUrl = pr.str("authorAvatar"), decorative = true)
+                        Text(pr.str("author").orEmpty(), style = TsType.caption,
+                            color = colors.textPrimary, modifier = Modifier.weight(1f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("#$number", style = TsType.caption, color = colors.textSecondary)
+                        val status = if (pr.bol("draft")) "Draft" else pr.str("state")?.replaceFirstChar { it.uppercase() } ?: "Open"
+                        val statusColor = when (status.lowercase()) {
+                            "merged" -> colors.accent
+                            "closed" -> colors.warning
+                            "draft" -> colors.textSecondary
+                            else -> colors.diffAdded
                         }
-                        Text("${pr.str("headRef").orEmpty()} → ${pr.str("baseRef").orEmpty()}",
-                            style = TsType.mono(12), color = LocalTsColors.current.textSecondary,
-                            maxLines = 2, overflow = TextOverflow.MiddleEllipsis)
-                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            pr.get("additions")?.jsonPrimitive?.longOrNull?.let {
-                                Text("+$it", style = TsType.numeric(12), color = LocalTsColors.current.diffAdded)
-                            }
-                            pr.get("deletions")?.jsonPrimitive?.longOrNull?.let {
-                                Text("−$it", style = TsType.numeric(12), color = LocalTsColors.current.diffRemoved)
-                            }
-                            pr.get("changedFiles")?.jsonPrimitive?.longOrNull?.let {
-                                Text(L10n.text("android.chatpullssections.0_files.fb42ce4d", "${it}"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
-                            }
-                            pr.str("checks")?.let { check ->
-                                Text(check.replaceFirstChar { it.uppercase() }, style = TsType.caption,
-                                    color = if (check == "failing") LocalTsColors.current.danger else LocalTsColors.current.textSecondary)
-                            }
+                        Text(status, style = TsType.caption, color = statusColor)
+                    }
+                    Text("${pr.str("headRef").orEmpty()} → ${pr.str("baseRef").orEmpty()}",
+                        style = TsType.mono(12), color = colors.textSecondary,
+                        maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        pr.get("additions")?.jsonPrimitive?.longOrNull?.let {
+                            Text("+$it", style = TsType.numeric(12), color = colors.diffAdded)
+                        }
+                        pr.get("deletions")?.jsonPrimitive?.longOrNull?.let {
+                            Text("−$it", style = TsType.numeric(12), color = colors.diffRemoved)
+                        }
+                        pr.get("changedFiles")?.jsonPrimitive?.longOrNull?.let {
+                            val label = if (it == 1L) L10n.text("android.chatdetail.files.one", "$it")
+                                else L10n.text("android.chatpullssections.0_files.fb42ce4d", "$it")
+                            Text(label, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
+                        }
+                        pr.str("checks")?.let { check ->
+                            Text(check.replaceFirstChar { it.uppercase() }, style = TsType.caption,
+                                color = if (check == "failing") colors.danger else colors.textSecondary)
                         }
                     }
-                    HorizontalDivider(color = LocalTsColors.current.border)
                 }
             }
             if (reachedLimit) item(key = "pull-limit") {

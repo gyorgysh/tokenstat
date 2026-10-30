@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
+import ai.tokenstat.tokenstat.ui.chrome.OwnSectionHeader
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.RelativeTimeText
@@ -136,6 +137,7 @@ internal fun PullDetailPage(
     summary: JsonObject? = null,
     onBack: () -> Unit,
 ) {
+    OwnSectionHeader()
     val colors = LocalTsColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -412,6 +414,8 @@ private fun PullHero(view: JsonObject, number: Long) {
     val draft = view.bol("draft")
     val author = view["author"] as? JsonObject
     val login = author?.str("login") ?: view.str("author").orEmpty()
+    var titleExpanded by remember(number) { mutableStateOf(false) }
+    var titleCanExpand by remember(number) { mutableStateOf(false) }
     Column(
         Modifier
             .fillMaxWidth()
@@ -423,12 +427,24 @@ private fun PullHero(view: JsonObject, number: Long) {
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
             PullStateMark(state = state, draft = draft)
-            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 Text(
                     view.str("title").orEmpty(),
                     style = TsType.title3.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.textPrimary,
+                    maxLines = if (titleExpanded) Int.MAX_VALUE else 3,
+                    overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { if (!titleExpanded && it.hasVisualOverflow) titleCanExpand = true },
                 )
+                if (titleCanExpand) {
+                    TextButton(onClick = { titleExpanded = !titleExpanded }) {
+                        Text(
+                            if (titleExpanded) L10n.text("android.pulldetail.show_less")
+                            else L10n.text("android.pulldetail.read_more"),
+                            color = colors.accent,
+                        )
+                    }
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
                     verticalAlignment = Alignment.CenterVertically,
@@ -487,7 +503,8 @@ private fun PullHero(view: JsonObject, number: Long) {
             }
             view.long("changedFiles")?.let {
                 Text(
-                    L10n.text("android.pulldetail.0_files.fb42ce4d", "${it}"),
+                    if (it == 1L) L10n.text("android.chatdetail.files.one", "$it")
+                    else L10n.text("android.pulldetail.0_files.fb42ce4d", "$it"),
                     style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.textSecondary,
                     maxLines = 1,
@@ -495,7 +512,8 @@ private fun PullHero(view: JsonObject, number: Long) {
             }
         }
         Text("${view.str("headRef").orEmpty()} → ${view.str("baseRef").orEmpty()}",
-            style = TsType.mono(12), color = colors.textSecondary)
+            style = TsType.mono(12), color = colors.textSecondary,
+            maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
     }
 }
 
@@ -617,7 +635,7 @@ private fun PullConversationTab(
             if (body.isEmpty()) {
                 Text(L10n.text("android.pulldetail.no_description_was_added.68442d50"), style = TsType.footnote, color = colors.textTertiary)
             } else {
-                MarkdownText(pullBodyMarkdown(body), TsType.chatBody, colors.textPrimary)
+                ExpandablePullMarkdown(body)
             }
         }
         timeline.forEach { event -> PullTimelineEntry(event) }
@@ -714,7 +732,7 @@ private fun PullTimelineEntry(event: JsonObject) {
                 }
             }
             event.str("body")?.takeIf { it.isNotBlank() }?.let {
-                MarkdownText(pullBodyMarkdown(it), TsType.chatBody, colors.textPrimary)
+                ExpandablePullMarkdown(it)
             }
         }
     } else {
@@ -754,6 +772,35 @@ private fun PullTimelineEntry(event: JsonObject) {
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ExpandablePullMarkdown(body: String) {
+    val colors = LocalTsColors.current
+    val markdown = remember(body) { pullBodyMarkdown(body.trim()) }
+    val preview = remember(markdown) {
+        if (markdown.length <= 420) markdown else {
+            // Keep complete opening paragraphs when possible. A single long
+            // paragraph is shortened at a word boundary to avoid a huge card.
+            val paragraphs = markdown.split(Regex("\\n\\s*\\n"), limit = 3)
+            val second = paragraphs.getOrNull(1)
+            val opening = if (second != null && (second.length > 70 || '\n' in second))
+                paragraphs.take(2).joinToString("\n\n") else paragraphs.first()
+            if (opening.length <= 420) opening else
+                opening.take(420).substringBeforeLast(' ').ifBlank { opening.take(420) }
+        }
+    }
+    var expanded by remember(body) { mutableStateOf(false) }
+    MarkdownText(if (expanded) markdown else preview, TsType.chatBody, colors.textPrimary)
+    if (preview != markdown) {
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(
+                if (expanded) L10n.text("android.pulldetail.show_less")
+                else L10n.text("android.pulldetail.read_more"),
+                color = colors.accent,
+            )
         }
     }
 }
