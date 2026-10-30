@@ -3388,7 +3388,10 @@ private fun WorkspacesScreen(
             session.activateConnectedHost(machine)) {
             val owner = navigationOwner
             val stillAllowed = runCatching {
-                (model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject)?.bool("allowed")
+                retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
+                    model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
+                    (model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject)?.bool("allowed")
+                }
             }.getOrNull()
             if (stillAllowed == false &&
                 HomeStores.pinIdentity(model.state.value.account) == owner &&
@@ -3433,6 +3436,14 @@ private fun WorkspacesScreen(
                         }
                     }
                 }
+            } else if (HomeStores.pinIdentity(model.state.value.account) == owner &&
+                session.connectedPeer.value == peer) {
+                // A cached list is not proof that access still exists. If the
+                // check could not answer, make a fresh foreground dial rather
+                // than leaving unverified work marked as connected.
+                session.setConnected(null, null)
+                session.clearLists()
+                connect(machine, forceRefresh = true)
             }
             return
         }
