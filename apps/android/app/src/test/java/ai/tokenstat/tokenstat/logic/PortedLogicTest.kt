@@ -464,6 +464,9 @@ class PortedLogicTest {
         assertEquals(1, stored.size)
         assertEquals(2000L, stored.first().openedAtMs)
         assertEquals("My folder", RecentPlaces.title(stored.first()))
+        val pathId = RecentPlaces.record(emptyList(), "peer1", "/Users/gyorgy/git/tokenstat", "tokenstat",
+            RecentPlaces.Kind.WORKSPACE, null, 2000L)
+        assertEquals("/Users/gyorgy/git/tokenstat", pathId.single().id.workspaceId)
         val chat = RecentPlaces.record(emptyList(), "peer1", "ws1", "My folder", RecentPlaces.Kind.CHAT, "c1", 1000L)
         assertEquals("Chat in My folder", RecentPlaces.title(chat.first()))
         val term = RecentPlaces.record(emptyList(), "peer1", null, "My folder", RecentPlaces.Kind.TERMINAL, "t1", 1000L)
@@ -482,6 +485,19 @@ class PortedLogicTest {
         }
         assertEquals(20, many.size)
         assertEquals("ws24", many.first().id.workspaceId)
+    }
+
+    @Test
+    fun recentPlacesHomeKeepsOneProjectAndOneConversation() {
+        var stored = RecentPlaces.record(emptyList(), "peer", "ws0", "Folder 0", RecentPlaces.Kind.CHAT, "chat0", 1L)
+        for (i in 1..25) {
+            stored = RecentPlaces.record(stored, "peer", "ws$i", "Folder $i", RecentPlaces.Kind.WORKSPACE, null, i.toLong())
+        }
+        assertEquals(20, stored.size)
+        assertEquals(listOf(RecentPlaces.Kind.WORKSPACE, RecentPlaces.Kind.CHAT),
+            RecentPlaces.continuePlaces(stored).map { it.id.kind })
+        val terminal = RecentPlaces.record(emptyList(), "peer", "ws", "Folder", RecentPlaces.Kind.TERMINAL, "term", 1L)
+        assertEquals(terminal, RecentPlaces.continuePlaces(terminal))
     }
 
     // PinnedWork — eight pins, newest first, full shelf refuses.

@@ -26,7 +26,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -467,10 +466,8 @@ private fun PullHero(view: JsonObject, number: Long) {
                 }
             }
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(
                 if (draft) L10n.text("android.pulldetail.draft.ebf12ef4") else state.replaceFirstChar(Char::uppercase),
                 style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
@@ -481,22 +478,7 @@ private fun PullHero(view: JsonObject, number: Long) {
                 },
                 maxLines = 1,
             )
-            // The branches take whatever the counts leave, and truncate
-            // rather than wrap: the row is the shape.
-            Row(
-                Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-            ) {
-                PullBranchChip(view.str("headRef").orEmpty(), Modifier.weight(1f, fill = false))
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowForward,
-                    contentDescription = L10n.text("android.pulldetail.into.6b847a0e"),
-                    tint = colors.textTertiary,
-                    modifier = Modifier.size(12.dp),
-                )
-                PullBranchChip(view.str("baseRef").orEmpty(), Modifier.weight(1f, fill = false))
-            }
+            Spacer(Modifier.weight(1f))
             view.long("additions")?.let {
                 Text("+$it", style = TsType.numeric(12, FontWeight.SemiBold), color = colors.diffAdded, maxLines = 1)
             }
@@ -512,6 +494,8 @@ private fun PullHero(view: JsonObject, number: Long) {
                 )
             }
         }
+        Text("${view.str("headRef").orEmpty()} → ${view.str("baseRef").orEmpty()}",
+            style = TsType.mono(12), color = colors.textSecondary)
     }
 }
 
@@ -544,25 +528,6 @@ private fun PullStateMark(state: String, draft: Boolean) {
             modifier = Modifier.size(18.dp),
         )
     }
-}
-
-/// A branch name, in the face branch names are read in, on an accent-tinted
-/// capsule. Truncates rather than wrapping: the row is the shape.
-@Composable
-private fun PullBranchChip(value: String, modifier: Modifier = Modifier) {
-    val colors = LocalTsColors.current
-    Text(
-        value,
-        style = TsType.mono(11, FontWeight.Medium),
-        color = colors.textPrimary,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = modifier
-            .clip(CircleShape)
-            .background(colors.accent.copy(alpha = 0.08f))
-            .border(1.dp, colors.accent.copy(alpha = 0.16f), CircleShape)
-            .padding(horizontal = 9.dp, vertical = 5.dp),
-    )
 }
 
 /// Conversation, Changes and Checks, the checks carrying their count. Port of

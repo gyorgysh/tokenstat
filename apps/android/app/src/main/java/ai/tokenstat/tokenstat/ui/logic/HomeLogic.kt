@@ -86,6 +86,17 @@ object RecentPlaces {
             .sortedByDescending { it.openedAtMs }
             .take(CAPACITY)
 
+    /// Home is a shortcut to one project and one conversation, like iOS.
+    /// A terminal only fills the shelf when neither anchor has been opened.
+    fun continuePlaces(stored: List<Place>): List<Place> {
+        val recent = places(stored)
+        val anchors = listOfNotNull(
+            recent.firstOrNull { it.id.kind == Kind.WORKSPACE },
+            recent.firstOrNull { it.id.kind == Kind.CHAT },
+        )
+        return if (anchors.isEmpty()) recent.take(1) else anchors.sortedByDescending { it.openedAtMs }
+    }
+
     fun record(
         stored: List<Place>,
         peer: String,
@@ -99,12 +110,20 @@ object RecentPlaces {
         if (!valid(id)) return places(stored)
         val recent = places(stored).filter { it.id != id } +
             Place(id, safeName(workspaceName), atMs)
-        return recent.sortedByDescending { it.openedAtMs }.take(CAPACITY)
+        val sorted = recent.sortedByDescending { it.openedAtMs }
+        val lastChat = sorted.firstOrNull { it.id.kind == Kind.CHAT }
+        val newest = sorted.take(CAPACITY)
+        return if (lastChat != null && lastChat !in newest) {
+            (newest.take(CAPACITY - 1) + lastChat).sortedByDescending { it.openedAtMs }
+        } else newest
     }
 
     fun valid(id: PlaceId): Boolean {
-        val identifiers = listOfNotNull(id.peer, id.workspaceId, id.itemId)
-        if (!identifiers.all { validIdentifier(it) }) return false
+        // Workspace IDs are host paths and must round-trip exactly. Only
+        // peer and item IDs are path-free identifiers.
+        if (id.workspaceId != null && (id.workspaceId.isEmpty() || id.workspaceId.length > 4096 ||
+                id.workspaceId.any { it.isISOControl() })) return false
+        if (!listOfNotNull(id.peer, id.itemId).all { validIdentifier(it) }) return false
         return when (id.kind) {
             Kind.WORKSPACE -> !id.workspaceId.isNullOrEmpty() && id.itemId == null
             Kind.CHAT -> !id.workspaceId.isNullOrEmpty() && !id.itemId.isNullOrEmpty()

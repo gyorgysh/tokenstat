@@ -5,9 +5,19 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HostContractsTest {
+    @Test
+    fun `pull pagination and all state require their host versions`() {
+        assertFalse(HostContracts.supportsPullPages(51))
+        assertTrue(HostContracts.supportsPullPages(52))
+        assertFalse(HostContracts.supportsPullAllState(52))
+        assertTrue(HostContracts.supportsPullAllState(53))
+    }
+
     @Test
     fun `daemon protocol response accepts quoted and numeric versions`() {
         for (response in listOf(

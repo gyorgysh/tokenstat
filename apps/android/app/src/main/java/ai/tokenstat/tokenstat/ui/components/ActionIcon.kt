@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Schedule
@@ -50,6 +51,7 @@ import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.KeyboardHide
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /// One glyph per action. Case names match `ActionIcon.swift` and
@@ -102,9 +104,8 @@ enum class ActionIcon {
             History -> Icons.Default.History
             Archive -> Icons.Outlined.Archive
             Restore -> Icons.Default.History
-            // A pin is a kept favourite. No pin glyph ships in the core set,
-            // so the star stands in until a verified extended-set import lands.
-            Pin, Pinned -> Icons.Default.Star
+            Pin -> Icons.Outlined.PushPin
+            Pinned -> Icons.Default.PushPin
             Browser -> Icons.Default.Language
             Collapse -> Icons.Default.Close
             Merge -> Icons.AutoMirrored.Filled.ArrowForward

@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 
 import ai.tokenstat.tokenstat.ui.marks.EmptyArt
 import ai.tokenstat.tokenstat.ui.marks.EmptyArtKind
+import ai.tokenstat.tokenstat.ui.marks.Avatar
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 
 import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
 import ai.tokenstat.tokenstat.ui.chrome.OwnSectionHeader
@@ -251,6 +253,8 @@ fun ChatSection(
     var actionError by remember(projectOwner) { mutableStateOf<String?>(null) }
     var eventsError by remember(projectOwner, openId) { mutableStateOf<String?>(null) }
     var search by remember(projectOwner) { mutableStateOf("") }
+    var searchVisible by remember(projectOwner) { mutableStateOf(false) }
+    var listActionsOpen by remember(projectOwner) { mutableStateOf(false) }
     var agentFilter by remember(projectOwner) { mutableStateOf("") }
     var runningOnly by remember(projectOwner) { mutableStateOf(false) }
     var alphabetical by remember(projectOwner) { mutableStateOf(false) }
@@ -1366,9 +1370,6 @@ fun ChatSection(
     val chatPane = modifier.then(attachmentInputs.drops).then(if (attachmentInputs.targeted)
         Modifier.border(2.dp, LocalTsColors.current.accent, RoundedCornerShape(12.dp)) else Modifier)
     Column(chatPane, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Only the list wears the section label. A conversation is a screen
-        // of its own and carries its own title.
-        if (openId == null) SectionLabel(L10n.text("android.chatpullssections.conversations.1d432f58"))
         if (openId == null && actionError != null) {
             StickyErrorCard(message = actionError!!, onDismiss = { actionError = null })
         }
@@ -1389,27 +1390,6 @@ fun ChatSection(
             )
         }
         if (openId == null) {
-            // Both as buttons on one baseline. A bordered chip beside a bare
-            // text link, each sized by a different rule, sat at two
-            // different heights and read as a mistake.
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TsAccentButton(
-                    label = if (creating) L10n.text("android.chatpullssections.starting.bbe5fc3b") else L10n.text("android.chatpullssections.new_chat.db18382a"),
-                    icon = ActionIcon.Create.vector,
-                    small = true,
-                    enabled = !creating,
-                    onClick = { if (onNewChat != null) onNewChat() else scope.launch { createAndOpen() } },
-                )
-                TsSecondaryButton(
-                    label = L10n.text("common.refresh"),
-                    icon = ActionIcon.Refresh.vector,
-                    small = true,
-                    onClick = { scope.launch { loadChats() } },
-                )
-            }
             if (loading) { CircularProgressIndicator(Modifier, strokeWidth = 2.dp); return }
             if (chats.isEmpty()) {
                 EmptyState(
@@ -1419,7 +1399,6 @@ fun ChatSection(
                     action = {
                         TsAccentButton(
                             label = if (creating) L10n.text("android.chatpullssections.starting.bbe5fc3b") else L10n.text("android.chatpullssections.new_chat.db18382a"),
-                            small = true,
                             enabled = !creating,
                             onClick = { if (onNewChat != null) onNewChat() else scope.launch { createAndOpen() } },
                         )
@@ -1427,7 +1406,6 @@ fun ChatSection(
                 )
                 return
             }
-            TsSearchField(prompt = L10n.text("android.chatpullssections.titles_agents_or_models.b7ffdc79"), query = search, onQueryChange = { search = it }, modifier = Modifier.fillMaxWidth())
             // Chats opened and never used stay out of the list, apart from
             // the one that is open. Same rule as the desktop sidebar.
             val listed = chats.filterNot {
@@ -1442,6 +1420,32 @@ fun ChatSection(
                 )
             }
             ChatStatPanels(listed)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) {
+                    SectionLabel(L10n.text("android.chatpullssections.conversations.1d432f58"))
+                }
+                IconButton(onClick = { searchVisible = !searchVisible; if (!searchVisible) search = "" },
+                    modifier = Modifier.size(48.dp)) {
+                    Icon(ActionIcon.Search.vector, L10n.text("common.search"), tint = LocalTsColors.current.accent)
+                }
+                IconButton(onClick = { if (onNewChat != null) onNewChat() else scope.launch { createAndOpen() } },
+                    enabled = !creating, modifier = Modifier.size(48.dp)) {
+                    Icon(ActionIcon.Create.vector, L10n.text("android.chatpullssections.new_chat.db18382a"),
+                        tint = LocalTsColors.current.accent)
+                }
+                Box {
+                    IconButton(onClick = { listActionsOpen = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(ActionIcon.More.vector, L10n.text("common.teams.more_actions"), tint = LocalTsColors.current.accent)
+                    }
+                    DropdownMenu(expanded = listActionsOpen, onDismissRequest = { listActionsOpen = false }) {
+                        DropdownMenuItem(text = { Text(L10n.text("common.refresh")) },
+                            onClick = { listActionsOpen = false; scope.launch { loadChats() } },
+                            leadingIcon = { Icon(ActionIcon.Refresh.vector, null) })
+                    }
+                }
+            }
+            if (searchVisible) TsSearchField(prompt = L10n.text("android.chatpullssections.titles_agents_or_models.b7ffdc79"),
+                query = search, onQueryChange = { search = it }, modifier = Modifier.fillMaxWidth())
             val query = search.trim()
             val agentIds = listed.mapNotNull { it.str("backend") }.toSortedSet()
             val filtered = listed.filter {
@@ -1459,12 +1463,14 @@ fun ChatSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box {
-                    TsSecondaryButton(
-                        label = L10n.text("android.chatpullssections.filter_sort.f6606a98"),
-                        icon = ActionIcon.Filter.vector,
-                        small = true,
-                        onClick = { filterOpen = true },
-                    )
+                    Row(Modifier.heightIn(min = 48.dp).clickable { filterOpen = true }
+                        .padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Icon(ActionIcon.Filter.vector, null, tint = LocalTsColors.current.accent,
+                            modifier = Modifier.size(22.dp))
+                        Text(L10n.text("android.chatpullssections.filter_sort.f6606a98"),
+                            style = TsType.callout, color = LocalTsColors.current.accent)
+                    }
                     DropdownMenu(expanded = filterOpen, onDismissRequest = { filterOpen = false }) {
                         ChatAgentMenuItem(L10n.text("android.chatpullssections.all_agents.54c32d3e"), agentFilter.isEmpty()) { agentFilter = ""; filterOpen = false }
                         agentIds.forEach { backend ->
@@ -2818,14 +2824,34 @@ internal fun chatSendParams(
     }
 }
 
-private val pullScopes = listOf(
-    "All" to "all",
-    "Mine" to "mine",
-    "Assigned" to "assigned",
-    "Review requested" to "reviewRequested",
-)
+private val pullScopes = listOf("all", "mine", "assigned", "reviewRequested")
+private val pullStates = listOf("all", "open", "merged", "closed", "draft")
 
-private val pullStates = listOf("Open" to "open", "Merged" to "merged", "Closed" to "closed")
+private fun pullScopeLabel(value: String) = when (value) {
+    "mine" -> L10n.text("android.pullfilter.created_by_me")
+    "assigned" -> L10n.text("android.pullfilter.assigned_to_me")
+    "reviewRequested" -> L10n.text("android.pullfilter.review_requested")
+    else -> L10n.text("android.pullfilter.everyone")
+}
+
+private fun pullStateLabel(value: String) = when (value) {
+    "all" -> L10n.text("android.pullfilter.all")
+    "merged" -> L10n.text("android.pullfilter.merged")
+    "closed" -> L10n.text("android.pullfilter.closed")
+    "draft" -> L10n.text("android.pullfilter.draft")
+    else -> L10n.text("android.pullfilter.open")
+}
+
+private data class AndroidPullSnapshot(val rows: List<JsonObject>, val next: String?)
+
+/// New hosts return a page; older hosts return an array. A few older
+/// Android-era hosts wrapped the array as `pulls`.
+internal fun pullListRows(response: kotlinx.serialization.json.JsonElement): List<JsonObject> {
+    val page = response as? JsonObject
+    val rows = page?.get("rows") as? JsonArray ?: page?.get("pulls") as? JsonArray
+        ?: response as? JsonArray ?: throw IllegalStateException("Invalid pull list")
+    return rows.filterIsInstance<JsonObject>()
+}
 
 /// Pull requests for this folder: availability first (a paired client can
 /// inspect, never connect), then scope and state filters, then rows with
@@ -2841,32 +2867,103 @@ fun PullsSection(
     hostLabel: String = "",
 ) {
     val scope = rememberCoroutineScope()
-    var availability by remember(workspace) { mutableStateOf<JsonObject?>(null) }
-    var pulls by remember(workspace) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var error by remember(workspace) { mutableStateOf<String?>(null) }
-    var loading by remember(workspace) { mutableStateOf(true) }
-    var scopeName by remember { mutableStateOf("all") }
-    var stateName by remember { mutableStateOf("open") }
+    var availability by remember(peer, workspace) { mutableStateOf<JsonObject?>(null) }
+    val snapshots = remember(peer, workspace) { linkedMapOf<String, AndroidPullSnapshot>() }
+    var pulls by remember(peer, workspace) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var nextCursor by remember(peer, workspace) { mutableStateOf<String?>(null) }
+    var error by remember(peer, workspace) { mutableStateOf<String?>(null) }
+    var loading by remember(peer, workspace) { mutableStateOf(true) }
+    var loadingMore by remember(peer, workspace) { mutableStateOf(false) }
+    var reachedLimit by remember(peer, workspace) { mutableStateOf(false) }
+    var scopeName by remember(peer, workspace) { mutableStateOf("all") }
+    var stateName by remember(peer, workspace) { mutableStateOf("open") }
+    var activeFilter by remember(peer, workspace) { mutableStateOf("") }
+    var stateMenu by remember { mutableStateOf(false) }
+    var scopeMenu by remember { mutableStateOf(false) }
     var openNumber by remember { mutableStateOf<Long?>(null) }
     var creatingPull by remember(peer, workspace) { mutableStateOf(false) }
 
-    suspend fun load() {
-        loading = true
-        runCatching {
-            model.workspaceSection(peer, "pulls.availability", buildJsonObject { put("workspaceId", workspace) }) as? JsonObject
-        }.onSuccess { availability = it }
-        runCatching {
-            model.workspaceSection(peer, "pulls.list", buildJsonObject {
-                put("workspaceId", workspace); put("scope", scopeName); put("state", stateName); put("limit", 30)
-            })
-        }.onSuccess {
-            val arr = (it as? JsonObject)?.get("pulls") as? JsonArray ?: (it as? JsonArray)
-            pulls = arr?.filterIsInstance<JsonObject>() ?: emptyList()
+    suspend fun load(refresh: Boolean = false) {
+        val selectedScope = scopeName
+        val selectedState = stateName
+        val filter = "$selectedScope|$selectedState"
+        if (activeFilter != filter) {
+            activeFilter = filter
+            val saved = snapshots[filter]
+            pulls = saved?.rows.orEmpty()
+            nextCursor = saved?.next
+            reachedLimit = pulls.size >= 1000 && nextCursor != null
             error = null
-        }.onFailure { error = friendlyError(it.message).message }
-        loading = false
+        }
+        loading = true
+        try {
+            val available = model.workspaceSection(peer, "pulls.availability", buildJsonObject { put("workspaceId", workspace) }) as? JsonObject
+            if (activeFilter == filter) availability = available
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Keep the last known connection state while the list retries.
+        }
+        try {
+            val response = model.workspaceSection(peer, if (HostContracts.supportsPullPages(protocol)) "pulls.listPage" else "pulls.list", buildJsonObject {
+                put("workspaceId", workspace); put("scope", selectedScope); put("state", selectedState)
+                put("limit", 40); put("refresh", refresh)
+            })
+            if (activeFilter == filter) {
+                val page = response as? JsonObject
+                pulls = pullListRows(response)
+                nextCursor = page?.str("nextCursor")
+                reachedLimit = false
+                snapshots.remove(filter)
+                snapshots[filter] = AndroidPullSnapshot(pulls, nextCursor)
+                if (snapshots.size > 4) snapshots.remove(snapshots.keys.first())
+                error = null
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            if (activeFilter == filter) error = friendlyError(failure.message).message
+        } finally {
+            if (activeFilter == filter) loading = false
+        }
     }
-    LaunchedEffect(workspace, scopeName, stateName) { load() }
+    suspend fun loadMore() {
+        val cursor = nextCursor ?: return
+        if (loadingMore || reachedLimit || !HostContracts.supportsPullPages(protocol)) return
+        val filter = activeFilter
+        val selectedScope = scopeName
+        val selectedState = stateName
+        loadingMore = true
+        try {
+            val result = model.workspaceSection(peer, "pulls.listPage", buildJsonObject {
+                put("workspaceId", workspace); put("scope", selectedScope); put("state", selectedState)
+                put("limit", 40); put("cursor", cursor)
+            }) as? JsonObject ?: throw IllegalStateException("Invalid pull page")
+            if (activeFilter == filter) {
+                val following = result.str("nextCursor")
+                if (following == cursor) error = L10n.text("android.pullfilter.invalid_page")
+                else {
+                    val seen = pulls.mapNotNull { it.long("number") }.toHashSet()
+                    val rows = (result["rows"] as? JsonArray)?.filterIsInstance<JsonObject>()
+                        ?: throw IllegalStateException("Invalid pull page")
+                    val fresh = rows.filter { row -> row.long("number")?.let(seen::add) == true }
+                    val remaining = (1000 - pulls.size).coerceAtLeast(0)
+                    pulls = pulls + fresh.take(remaining)
+                    nextCursor = following
+                    reachedLimit = fresh.size > remaining || (pulls.size == 1000 && following != null)
+                    snapshots.remove(filter)
+                    snapshots[filter] = AndroidPullSnapshot(pulls, nextCursor)
+                    if (snapshots.size > 4) snapshots.remove(snapshots.keys.first())
+                    error = null
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            if (activeFilter == filter) error = friendlyError(failure.message).message
+        } finally { loadingMore = false }
+    }
+    LaunchedEffect(peer, workspace, scopeName, stateName) { load() }
     if (creatingPull) PullCreateDialog(model, peer, workspace, protocol, folderName, hostLabel,
         onDismiss = { creatingPull = false }, onCreated = { scope.launch { load() } })
     val opened = openNumber
@@ -2893,7 +2990,14 @@ fun PullsSection(
         }
         val available = availability
         if (available?.str("state") == "ready") {
-            TsSecondaryButton(label = L10n.text("android.pullcreate.new"), icon = ActionIcon.Create.vector, small = true, onClick = { creatingPull = true })
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                TsSecondaryButton(label = L10n.text("android.pullcreate.new"), icon = ActionIcon.Create.vector,
+                    onClick = { creatingPull = true })
+                IconButton(onClick = { scope.launch { load(refresh = true) } }, modifier = Modifier.size(48.dp)) {
+                    Icon(ActionIcon.Refresh.vector, L10n.text("common.refresh"), tint = LocalTsColors.current.accent)
+                }
+            }
         }
         if (available != null && (available.str("state") ?: "") != "ready") {
             Column(
@@ -2929,21 +3033,30 @@ fun PullsSection(
                 onDismiss = { error = null },
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            pullScopes.forEach { (label, value) ->
-                if (value == scopeName) {
-                    TsAccentButton(label = label, small = true, onClick = {})
-                } else {
-                    TsSecondaryButton(label = label, small = true, onClick = { scopeName = value })
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f)) {
+                TsPickerField(summary = pullStateLabel(stateName),
+                    onOpen = { stateMenu = true }, modifier = Modifier.fillMaxWidth())
+                DropdownMenu(expanded = stateMenu, onDismissRequest = { stateMenu = false }) {
+                    pullStates.forEach { value ->
+                        DropdownMenuItem(text = { Text(pullStateLabel(value)) }, onClick = { stateMenu = false; stateName = value },
+                            enabled = value != "all" || HostContracts.supportsPullAllState(protocol),
+                            leadingIcon = if (value == stateName) {{ Icon(ActionIcon.Done.vector, null) }} else null)
+                    }
+                    if (!HostContracts.supportsPullAllState(protocol)) {
+                        DropdownMenuItem(text = { Text(L10n.text("android.pullfilter.update_for_all")) },
+                            onClick = {}, enabled = false)
+                    }
                 }
             }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            pullStates.forEach { (label, value) ->
-                if (value == stateName) {
-                    TsAccentButton(label = label, small = true, onClick = {})
-                } else {
-                    TsSecondaryButton(label = label, small = true, onClick = { stateName = value })
+            Box(Modifier.weight(1f)) {
+                TsPickerField(summary = pullScopeLabel(scopeName),
+                    onOpen = { scopeMenu = true }, modifier = Modifier.fillMaxWidth())
+                DropdownMenu(expanded = scopeMenu, onDismissRequest = { scopeMenu = false }) {
+                    pullScopes.forEach { value ->
+                        DropdownMenuItem(text = { Text(pullScopeLabel(value)) }, onClick = { scopeMenu = false; scopeName = value },
+                            leadingIcon = if (value == scopeName) {{ Icon(ActionIcon.Done.vector, null) }} else null)
+                    }
                 }
             }
         }
@@ -2952,27 +3065,43 @@ fun PullsSection(
             style = TextStyle(fontSize = 12.sp),
             color = LocalTsColors.current.textSecondary,
         )
-        if (loading) { CircularProgressIndicator(Modifier, strokeWidth = 2.dp); return }
+        if (loading && pulls.isEmpty()) { CircularProgressIndicator(Modifier, strokeWidth = 2.dp); return }
         if (pulls.isEmpty() && error == null) {
-            EmptyState(Icons.Default.ChatBubbleOutline, L10n.text("android.chatpullssections.no_open_pulls.510714cf"), L10n.text("android.chatpullssections.connect_github_on_that_computer_to_review.03a8e2fe"))
+            EmptyState(Icons.Default.ChatBubbleOutline,
+                if (stateName == "all") L10n.text("android.pullfilter.no_pull_requests")
+                else L10n.text("android.pullfilter.no_state_pull_requests", pullStateLabel(stateName).lowercase()),
+                L10n.text("android.chatpullssections.try_another_filter"))
             return
         }
         LazyColumn(contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(pulls, key = { it.get("number")?.jsonPrimitive?.longOrNull?.toString() ?: it.hashCode().toString() }) { pr ->
                 val number = pr.get("number")?.jsonPrimitive?.longOrNull ?: return@items
-                TsCard(Modifier.clickable { openNumber = number }) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column {
+                    Column(Modifier.fillMaxWidth().clickable { openNumber = number }
+                        .padding(horizontal = 8.dp, vertical = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            "#$number ${pr.str("title") ?: ""}",
-                            style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                            pr.str("title").orEmpty(),
+                            style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
                             color = LocalTsColors.current.textPrimary,
                         )
-                        Text(
-                            "${pr.str("headRef") ?: pr.str("head") ?: ""} → ${pr.str("baseRef") ?: pr.str("base") ?: ""}",
-                            style = TsType.mono(12),
-                            color = LocalTsColors.current.textSecondary,
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        Row(verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                            Avatar(name = pr.str("author") ?: "?", size = 24,
+                                avatarUrl = pr.str("authorAvatar"), decorative = true)
+                            Text(pr.str("author").orEmpty(), style = TsType.caption,
+                                color = LocalTsColors.current.textPrimary)
+                            Text("#$number", style = TsType.caption,
+                                color = LocalTsColors.current.textSecondary)
+                            Spacer(Modifier.weight(1f))
+                            val status = if (pr.bol("draft")) "Draft" else pr.str("state")?.replaceFirstChar { it.uppercase() } ?: "Open"
+                            Text(status, style = TsType.caption, color = LocalTsColors.current.accent)
+                        }
+                        Text("${pr.str("headRef").orEmpty()} → ${pr.str("baseRef").orEmpty()}",
+                            style = TsType.mono(12), color = LocalTsColors.current.textSecondary,
+                            maxLines = 2, overflow = TextOverflow.MiddleEllipsis)
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s),
+                            verticalAlignment = Alignment.CenterVertically) {
                             pr.get("additions")?.jsonPrimitive?.longOrNull?.let {
                                 Text("+$it", style = TsType.numeric(12), color = LocalTsColors.current.diffAdded)
                             }
@@ -2982,16 +3111,23 @@ fun PullsSection(
                             pr.get("changedFiles")?.jsonPrimitive?.longOrNull?.let {
                                 Text(L10n.text("android.chatpullssections.0_files.fb42ce4d", "${it}"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
                             }
-                            pr.str("state")?.takeIf { it.isNotBlank() }?.let {
-                                Text(it, style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
-                            }
-                            if (pr.bol("draft")) {
-                                Text(L10n.text("android.chatpullssections.draft.ebf12ef4"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
+                            pr.str("checks")?.let { check ->
+                                Text(check.replaceFirstChar { it.uppercase() }, style = TsType.caption,
+                                    color = if (check == "failing") LocalTsColors.current.danger else LocalTsColors.current.textSecondary)
                             }
                         }
                     }
+                    HorizontalDivider(color = LocalTsColors.current.border)
                 }
             }
+            if (reachedLimit) item(key = "pull-limit") {
+                Text(L10n.text("android.pullfilter.page_limit"), style = TsType.caption,
+                    color = LocalTsColors.current.textSecondary, modifier = Modifier.padding(8.dp))
+            } else if (nextCursor != null) item(key = "more-pulls") {
+                TsSecondaryButton(label = L10n.text("common.teams.load_more"), icon = ActionIcon.More.vector,
+                    enabled = !loadingMore, onClick = { scope.launch { loadMore() } }, modifier = Modifier.fillMaxWidth())
+            }
+            if (loadingMore) item(key = "loading-more-pulls") { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) }
         }
     }
 }

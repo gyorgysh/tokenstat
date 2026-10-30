@@ -611,6 +611,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     var pendingWorkItem by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingWorkOwner by rememberSaveable { mutableStateOf<String?>(null) }
     var accountOpen by remember { mutableStateOf(false) }
+    var teamOpen by rememberSaveable { mutableStateOf(false) }
     var wizardOpen by remember { mutableStateOf(false) }
     var searchOpen by remember { mutableStateOf(false) }
     var pendingDeviceId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -706,7 +707,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         topBar = {
             // A pushed screen brings its own header. Stacking the wordmark
             // above it was two headers and a fifth of the screen.
-            if (tabBarPresence.topHidden) return@Scaffold
+            if (teamOpen || tabBarPresence.topHidden) return@Scaffold
             TopAppBar(
                 // Avatar leading, wordmark centred: the same chrome shape as
                 // the Apple client's toolbar.
@@ -731,7 +732,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     )
                 },
                 actions = {
-                    KeyboardDismissButton()
+                    // Repository search has its own keyboard action. Showing
+                    // another one beside the wordmark duplicated the control.
+                    if (selected != Destination.Workspaces) KeyboardDismissButton()
                     // A chip, not a naked glyph. On iPhone this is a circular
                     // raised surface and it reads as a control; the bare icon
                     // beside a wordmark read as part of the decoration.
@@ -766,6 +769,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             Modifier.fillMaxSize()
                 .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()),
         ) {
+        if (teamOpen) {
+            ai.tokenstat.tokenstat.ui.team.TeamScreen(state.account, onBack = { teamOpen = false })
+        } else {
         Row(Modifier.fillMaxSize().backdropSource(backdrop)) {
             if (expanded) {
                 NavigationRail(containerColor = colors.tabStrip, contentColor = colors.textSecondary) {
@@ -896,6 +902,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             )
         }
         }
+        }
     }
     }
     if (searchOpen) {
@@ -930,7 +937,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             onDismiss = { searchOpen = false },
         )
     }
-    if (accountOpen) AccountDialog(state, model, billing, customization, onDismiss = { accountOpen = false })
+    if (accountOpen) AccountDialog(state, model, billing, customization,
+        onDismiss = { accountOpen = false },
+        onTeam = { accountOpen = false; teamOpen = true })
     // The one paywall for every gate outside the account sheet. Hosted here
     // so a lock anywhere in the app reaches the plans in one tap instead of
     // opening Account and asking somebody to find the card. See `Plans`.
@@ -1069,7 +1078,7 @@ private fun HomeScreen(
     stores.revision.value
     val (order, hidden) = stores.layout()
     val sections = order.filter { it !in hidden }
-    val places = stores.places(accountIdentity, accountHost)
+    val places = RecentPlaces.continuePlaces(stores.places(accountIdentity, accountHost))
     val pinIdentity = HomeStores.pinIdentity(state.account)
     val pins = stores.pins(pinIdentity)
     val machines = ((state.account?.get("machines") as? JsonArray).orEmpty())
@@ -3990,6 +3999,7 @@ private fun AccountDialog(
     billing: PlayBillingManager,
     customization: TabCustomization,
     onDismiss: () -> Unit,
+    onTeam: () -> Unit,
 ) {
     val context = LocalContext.current
     val colors = LocalTsColors.current
@@ -4033,6 +4043,19 @@ private fun AccountDialog(
             when (pane) {
                 0 -> {
                     AccountIdentityCard(state = state, onOpen = ::open)
+                    if (state.signedIn) {
+                        TsCard(
+                            title = L10n.text("common.teams.title"),
+                            subtitle = L10n.text("common.teams.hub_detail"),
+                        ) {
+                            TsSecondaryButton(
+                                label = L10n.text("common.teams.manage_teams"),
+                                icon = ActionIcon.Account.vector,
+                                onClick = onTeam,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
                     AccountPlanCard(state = state, onPlans = { paywall = true })
                     RelayUsageCard(state.account, onRefresh = { scope.launch { TsRefresh.run("relay") { model.refresh() } } })
                     // Sync privacy lives under Legal now, with the documents

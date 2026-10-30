@@ -29,6 +29,10 @@ object HostContracts {
     fun supportsChatRemoveAll(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_REMOVE_ALL_MIN_PROTOCOL
     const val PULLS_MIN_PROTOCOL = 3
     const val PULL_CREATION_MIN_PROTOCOL = 28
+    const val PULL_LIST_PAGES_MIN_PROTOCOL = 52
+    const val PULL_ALL_STATE_MIN_PROTOCOL = 53
+    fun supportsPullPages(protocol: Long?): Boolean = protocol != null && protocol >= PULL_LIST_PAGES_MIN_PROTOCOL
+    fun supportsPullAllState(protocol: Long?): Boolean = protocol != null && protocol >= PULL_ALL_STATE_MIN_PROTOCOL
     const val CHAT_QUESTIONS_MIN_PROTOCOL = 29
 
     /// Version 29 records the agent's questions and takes their answers. An

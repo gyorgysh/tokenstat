@@ -348,8 +348,7 @@ fun machineRowState(linked: Boolean, offline: Boolean, online: Boolean?): String
         else -> L10n.text("android.homesections.status_unknown.e412d872")
     }
 
-/// The work worth going back to: up to four folders and conversations, newest
-/// first. Empty collapses to nothing and keeps its arranged position.
+/// One recent project and conversation; empty collapses to nothing.
 @Composable
 fun ContinueSection(
     places: List<RecentPlaces.Place>,
@@ -361,7 +360,7 @@ fun ContinueSection(
     onTogglePin: (RecentPlaces.Place) -> Boolean,
 ) {
     val colors = LocalTsColors.current
-    val shown = places.take(4)
+    val shown = RecentPlaces.continuePlaces(places)
     if (shown.isEmpty()) return
     var refused by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {

@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.workspace
 
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.longOrNull
@@ -12,6 +13,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatPullsSectionsTest {
+    @Test
+    fun `pull list accepts paged and legacy host shapes`() {
+        val row = """{"number":27,"title":"Review"}"""
+        for (response in listOf(
+            """{"rows":[$row],"nextCursor":"page-2"}""",
+            """[$row]""",
+            """{"pulls":[$row]}""",
+        )) {
+            assertEquals(27L, (pullListRows(Json.parseToJsonElement(response)).single()["number"] as JsonPrimitive).longOrNull)
+        }
+        assertTrue(runCatching { pullListRows(Json.parseToJsonElement("{}")) }.isFailure)
+    }
+
     @Test
     fun `send carries the conversation revision`() {
         val params = chatSendParams("chat-1", "hi", "msg-1", 123L, 7L)

@@ -14,6 +14,7 @@ import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.logic.WatchingOwner
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
@@ -21,12 +22,21 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -122,7 +132,7 @@ private sealed interface Phase {
 /// The Team tab on Android: the member's side of Teams. Publishing a project
 /// and choosing how its work lands happen on the computer that owns it.
 @Composable
-fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> JsonElement = { method, fields -> CoreClient.call(method, fields) }) {
+fun TeamScreen(account: JsonObject?, onBack: () -> Unit = {}, request: suspend (String, JsonObject) -> JsonElement = { method, fields -> CoreClient.call(method, fields) }) {
     // The account object is refreshed often. Only a different login or
     // session starts the screen over.
     val owner = WatchingOwner.from(account)
@@ -142,6 +152,7 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
     var creatingOrganization by remember(identity) { mutableStateOf(false) }
     var showingInbox by remember(identity) { mutableStateOf(false) }
     var showingProjects by remember(identity) { mutableStateOf(false) }
+    var actionsOpen by remember(identity) { mutableStateOf(false) }
     var project by remember(identity) { mutableStateOf<JsonObject?>(null) }
     val projects = remember(calls) { TeamProjectsModel(calls) }
     val context = LocalContext.current.applicationContext
@@ -197,6 +208,7 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
     LaunchedEffect(identity) { load() }
 
     management?.let { selected ->
+        BackHandler { management = null }
         key(identity, selected.str("id")) { TeamManagementScreen(calls, selected, onGone = {
             management = null; organization = null
             organizations = organizations.filterNot { it.str("id") == selected.str("id") }
@@ -210,25 +222,30 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
         return
     }
     if (showingInbox) {
+        BackHandler { showingInbox = false }
         key(identity) { TeamInboxScreen(calls, onBack = { showingInbox = false }, onJoined = { joined ->
             showingInbox = false; organization = joined; scope.launch { load() }
         }) }
         return
     }
     if (drafts) {
+        BackHandler { drafts = false }
         TeamCommentRecoveryList(draftStorage, calls.origin, calls.person, onBack = { drafts = false })
         return
     }
     if (savedAsks) {
+        BackHandler { savedAsks = false }
         key(identity) { TeamAskRecoveryList(askStorage, calls, onBack = { savedAsks = false }) }
         return
     }
     val current = chat
     if (current != null) {
+        BackHandler { chat = null }
         TeamChatReader(calls, current, draftStorage, onBack = { chat = null })
         return
     }
     project?.let { selected ->
+        BackHandler { project = null }
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TsSecondaryButton(L10n.text("common.teams.shared_projects"), icon = ActionIcon.Back.vector, onClick = { project = null })
             Text(selected.teamString("name").orEmpty(), style = TsType.cardTitle)
@@ -242,18 +259,33 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
         return
     }
     if (showingProjects) {
+        BackHandler { showingProjects = false }
         TeamProjectsScreen(projects, onBack = { showingProjects = false }, onOpen = { project = it })
         return
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(L10n.text("common.teams.title"), style = TsType.cardTitle, color = LocalTsColors.current.textPrimary)
+    BackHandler { onBack() }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                Icon(ActionIcon.Back.vector, L10n.text("common.back"), tint = LocalTsColors.current.textPrimary)
+            }
+            Text(L10n.text("common.teams.title"), style = TsType.cardTitle, color = LocalTsColors.current.textPrimary,
+                modifier = Modifier.weight(1f))
             TeamPreviewBadge()
+            Box {
+                IconButton(onClick = { actionsOpen = true }, modifier = Modifier.size(48.dp)) {
+                    Icon(ActionIcon.More.vector, L10n.text("common.teams.more_actions"), tint = LocalTsColors.current.accent)
+                }
+                DropdownMenu(expanded = actionsOpen, onDismissRequest = { actionsOpen = false }) {
+                    if (calls.origin != null && calls.person != null) {
+                        DropdownMenuItem(text = { Text(L10n.text("common.teams.comment_drafts")) }, onClick = { actionsOpen = false; drafts = true })
+                        DropdownMenuItem(text = { Text(L10n.text("common.teams.saved_asks")) }, onClick = { actionsOpen = false; savedAsks = true })
+                    }
+                    DropdownMenuItem(text = { Text(L10n.text("common.refresh")) }, onClick = { actionsOpen = false; scope.launch { load() } })
+                }
+            }
         }
-        if (calls.origin != null && calls.person != null) TsSecondaryButton(L10n.text("common.teams.comment_drafts"),
-            icon = ActionIcon.History.vector, onClick = { drafts = true })
-        if (calls.origin != null && calls.person != null) TsSecondaryButton(L10n.text("common.teams.saved_asks"),
-            icon = ActionIcon.Restore.vector, onClick = { savedAsks = true })
         when (val state = phase) {
             Phase.Loading -> CircularProgressIndicator()
             Phase.Unavailable -> EmptyState(title = L10n.text("common.teams.load_failed"), message = L10n.text("common.teams.retry_detail"))
@@ -262,36 +294,42 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
                 TsAccentButton(L10n.text("common.retry"), onClick = { scope.launch { load() } }, icon = ActionIcon.Refresh.vector)
             })
             Phase.Ready -> {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TsSecondaryButton(L10n.text("common.teams.shared_projects"), icon = ActionIcon.Connect.vector, onClick = { showingProjects = true })
-                    TsSecondaryButton(L10n.text("common.teams.invitations_for_you"), icon = ActionIcon.Send.vector, onClick = { showingInbox = true })
-                    TsSecondaryButton(L10n.text("common.teams.create_organization"), icon = ActionIcon.Create.vector, onClick = { creatingOrganization = true })
-                    TsSecondaryButton(L10n.text("common.refresh"), icon = ActionIcon.Refresh.vector, onClick = { scope.launch { load() } })
-                }
+                TsAccentButton(L10n.text("common.teams.create_organization"), icon = ActionIcon.Create.vector,
+                    onClick = { creatingOrganization = true }, modifier = Modifier.fillMaxWidth())
                 val org = organization
                 if (org == null) {
+                    TsCard(title = L10n.text("common.teams.organizations"), subtitle = L10n.text("common.teams.hub_detail")) {
                     if (organizations.isEmpty() && organizationsNext == null) {
                         EmptyState(title = L10n.text("common.teams.no_organizations"), message = L10n.text("common.teams.no_organizations_detail"))
                     } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(organizations, key = { it.str("id") ?: "" }) { row ->
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            organizations.forEach { row ->
                                 TsSecondaryButton(row.str("name") ?: "", onClick = { organization = row }, icon = ActionIcon.Next.vector)
                             }
-                            organizationsError?.let { failure -> item { Text(failure, color = LocalTsColors.current.danger) } }
-                            if (organizationsNext != null) item {
+                            organizationsError?.let { failure -> Text(failure, color = LocalTsColors.current.danger) }
+                            if (organizationsNext != null) {
                                 TsSecondaryButton(L10n.text("common.teams.more_organizations"), enabled = !loadingOrganizations,
                                     onClick = { scope.launch { moreOrganizations() } }, icon = ActionIcon.More.vector)
                             }
-                            if (loadingOrganizations) item { CircularProgressIndicator() }
+                            if (loadingOrganizations) CircularProgressIndicator()
                         }
+                    }
                     }
                 } else {
                     if (organizations.size > 1 || organizationsNext != null) {
                         TsSecondaryButton(L10n.text("common.teams.organizations"), onClick = { organization = null }, icon = ActionIcon.Back.vector)
                     }
-                    TsSecondaryButton(L10n.text("common.teams.manage_teams"), icon = ActionIcon.Settings.vector, onClick = { management = org })
+                    TeamHubAction(L10n.text("common.teams.manage_teams"), icon = ActionIcon.Settings,
+                        onClick = { management = org })
                     key(identity, org.str("id")) { Repositories(calls, org, onOpenChat = { chat = it }) }
                 }
+                TeamHubAction(L10n.text("common.teams.your_invitations"),
+                    subtitle = L10n.text("common.teams.invitation_inbox_hint"), icon = ActionIcon.Send,
+                    onClick = { showingInbox = true })
+                HorizontalDivider(color = LocalTsColors.current.border)
+                TeamHubAction(L10n.text("common.teams.shared_projects"),
+                    subtitle = L10n.text("common.teams.hub_detail"), icon = ActionIcon.Connect,
+                    onClick = { showingProjects = true })
             }
         }
     }
@@ -300,6 +338,20 @@ fun TeamScreen(account: JsonObject?, request: suspend (String, JsonObject) -> Js
             creatingOrganization = false; organization = created
             scope.launch { load() }
         })
+    }
+}
+
+@Composable
+private fun TeamHubAction(title: String, subtitle: String? = null, icon: ActionIcon, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick)
+        .padding(horizontal = 8.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon.vector, null, tint = LocalTsColors.current.accent)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = TsType.body, color = LocalTsColors.current.textPrimary)
+            if (subtitle != null) Text(subtitle, style = TsType.caption, color = LocalTsColors.current.textSecondary)
+        }
+        Icon(ActionIcon.Next.vector, null, tint = LocalTsColors.current.textTertiary)
     }
 }
 
@@ -348,13 +400,13 @@ private fun Repositories(calls: TeamCalls, org: JsonObject, onOpenChat: (ChatTar
     when {
         rows == null && error == null -> CircularProgressIndicator()
         rows != null && rows.isEmpty() && next == null && error == null -> EmptyState(title = L10n.text("common.teams.no_repositories"), message = L10n.text("common.teams.no_repositories_member"))
-        rows != null -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(rows, key = { it.str("id") ?: "" }) { repo -> RepositoryCard(calls, orgId, repo, onOpenChat) }
-            if (next != null) item {
+        rows != null -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            rows.forEach { repo -> key(repo.str("id")) { RepositoryCard(calls, orgId, repo, onOpenChat) } }
+            if (next != null) {
                 TsSecondaryButton(L10n.text("common.teams.load_more"), enabled = !loading,
                     onClick = { scope.launch { load(true) } }, icon = ActionIcon.More.vector)
             }
-            if (loading) item { CircularProgressIndicator() }
+            if (loading) CircularProgressIndicator()
         }
     }
 }

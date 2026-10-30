@@ -190,7 +190,9 @@ fun WorkspaceSection(
             .onFailure { if (it is CancellationException) throw it; error = TunnelCopy.display(it.message ?: L10n.text("android.workspacesections.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
-    LaunchedEffect(peer, workspace, section) { load() }
+    // PullsSection owns its filtered, cached and paged reads. Loading the
+    // legacy first page here duplicated the request every time it opened.
+    LaunchedEffect(peer, workspace, section) { if (section != "Pulls") load() }
 
     val reload: () -> Unit = { scope.launch { load() } }
     when (section) {
