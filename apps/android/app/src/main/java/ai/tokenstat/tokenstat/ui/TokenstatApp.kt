@@ -651,14 +651,18 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     val warmAllowed by warmSession.allowed.collectAsStateWithLifecycle()
     val warmMachines = state.account?.get("machines") as? JsonArray
     val warmScope = rememberCoroutineScope()
-    var warmFailedPeer by remember(warmOwner) { mutableStateOf<String?>(null) }
-    LaunchedEffect(warmMachines) { warmFailedPeer = null }
-    LaunchedEffect(warmOwner, warmMachines, warmConnected, warmConnecting, warmAllowed) {
+    var warmFailures by remember(warmOwner) { mutableIntStateOf(0) }
+    LaunchedEffect(warmMachines) { warmFailures = 0 }
+    // A cold launch can race the tunnel's first route. Retry briefly from
+    // Home, without making a transient failure a red card or a tight loop.
+    // A later foreground return gets a fresh budget after connectivity moves.
+    ForegroundEffect(warmOwner) { warmFailures = 0 }
+    LaunchedEffect(warmOwner, warmMachines, state.canRemote, warmConnected, warmConnecting, warmAllowed, warmFailures) {
         if (!state.canRemote || warmConnected != null || warmConnecting != null || warmAllowed == false) return@LaunchedEffect
+        if (warmFailures >= 3) return@LaunchedEffect
         val machines = warmMachines?.mapNotNull { it as? JsonObject }.orEmpty()
         warmStore.migrateLegacyHost(machines.mapNotNull { it.string("publicIdentity") }.toSet())
         val last = warmStore.lastConnectedHost() ?: return@LaunchedEffect
-        if (warmFailedPeer == last) return@LaunchedEffect
         if (!warmStore.isAutoConnectEnabled(last)) return@LaunchedEffect
         val thisId = state.account?.string("thisMachineId")
         val machine = machines.find {
@@ -666,6 +670,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 (thisId == null || it.string("id") != thisId) &&
                 it.get("online")?.jsonPrimitive?.booleanOrNull != false
         } ?: return@LaunchedEffect
+        if (warmFailures > 0) delay(if (warmFailures == 1) 2_000 else 4_000)
         val ticket = warmSession.beginConnecting(last) ?: return@LaunchedEffect
         warmScope.launch {
             fun current() = warmSession.isCurrentConnection(ticket) &&
@@ -699,11 +704,12 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 warmSession.setLists(folders, sessions, chats)
                 warmSession.setConnected(last, true)
                 warmSession.setError(null)
+                warmFailures = 0
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 android.util.Log.w("ts-workspaces", "saved host warmup failed", error)
-                if (current()) warmFailedPeer = last
+                if (current()) warmFailures += 1
             } finally {
                 warmSession.finishConnecting(ticket)
             }
