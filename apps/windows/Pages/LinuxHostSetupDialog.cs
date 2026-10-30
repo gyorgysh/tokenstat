@@ -28,40 +28,83 @@ internal static class LinuxHostSetupDialog
     private static async Task<bool> RunAsync(Page owner)
     {
         var accountScope = await SshVaultScope.RequireAsync();
+        var savedHost = new ComboBox { Header = "Saved SSH host", HorizontalAlignment = HorizontalAlignment.Stretch };
+        savedHost.Items.Add("New server");
+        foreach (var record in (Format.Items(await AppServices.Host.CallAsync("ssh.host.list")) ?? new JsonArray()).OfType<JsonNode>())
+            savedHost.Items.Add(new ComboBoxItem { Content = Format.Text(record, "label", Format.Text(record, "hostname")), Tag = record });
+        savedHost.SelectedIndex = 0;
         var address = new TextBox { Header = "Server address", PlaceholderText = "server.example.com" };
         var user = new TextBox { Header = "SSH user", Text = "root" };
         var port = new NumberBox { Header = "SSH port", Value = 22, Minimum = 1, Maximum = 65535,
             SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Hidden };
         var name = new TextBox { Header = "Name on your account", Text = "server" };
-        var method = new ComboBox { Header = "Sign in with", Items = { "Password", "Private key" }, SelectedIndex = 0 };
+        var savedKey = new ComboBox { Header = "Saved SSH key", HorizontalAlignment = HorizontalAlignment.Stretch,
+            Visibility = Visibility.Collapsed };
+        foreach (var key in (Format.Items(await AppServices.Host.CallAsync("ssh.key.list")) ?? new JsonArray()).OfType<JsonNode>())
+        {
+            var available = SshSecrets.Has(Format.Text(key, "secretRef"));
+            savedKey.Items.Add(new ComboBoxItem { Content = Format.Text(key, "label", Format.Text(key, "id")) +
+                (available ? "" : " · unavailable on this PC"), Tag = key, IsEnabled = available });
+            if (available && savedKey.SelectedItem is null) savedKey.SelectedIndex = savedKey.Items.Count - 1;
+        }
+        var method = new ComboBox { Header = "Sign in with", Items = { "Password", "Saved key", "Paste private key" },
+            SelectedIndex = savedKey.SelectedItem is null ? 0 : 1 };
         var password = new PasswordBox { Header = "SSH password" };
         var privateKey = new TextBox { Header = "Private key", AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap, Height = 96, Visibility = Visibility.Collapsed };
-        method.SelectionChanged += (_, _) =>
+        var passphrase = new PasswordBox { Header = "Key passphrase (if needed)", Visibility = Visibility.Collapsed };
+        var validation = new TextBlock { Foreground = Theme.Brush(static () => Theme.Danger), TextWrapping = TextWrapping.Wrap };
+        savedHost.SelectionChanged += (_, _) =>
+        {
+            var record = (savedHost.SelectedItem as ComboBoxItem)?.Tag as JsonNode;
+            address.Text = Format.Text(record, "hostname");
+            user.Text = Format.Text(record, "username", "root");
+            port.Value = record is null ? 22 : Format.Long(record, "port");
+            name.Text = Format.Text(record, "label", "server");
+            var keyId = Format.Text(record, "keyId", Format.Text(record, "identity", Format.Text(record, "credentialId")));
+            foreach (var option in savedKey.Items.OfType<ComboBoxItem>())
+                if (option.IsEnabled && Format.Text(option.Tag as JsonNode, "id") == keyId)
+                    savedKey.SelectedItem = option;
+        };
+        void ShowMethod()
         {
             password.Visibility = method.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
-            privateKey.Visibility = method.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
-        };
+            savedKey.Visibility = method.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+            privateKey.Visibility = method.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
+            passphrase.Visibility = method.SelectedIndex == 0 ? Visibility.Collapsed : Visibility.Visible;
+        }
+        method.SelectionChanged += (_, _) => ShowMethod();
+        ShowMethod();
         var first = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 430 };
         first.Children.Add(Copy("Connect to a Linux server you control. Setup will verify its identity and inspect it before installation."));
-        foreach (var field in new UIElement[] { address, user, port, name, method, password, privateKey }) first.Children.Add(field);
+        foreach (var field in new UIElement[] { savedHost, address, user, port, name, method, savedKey, password, privateKey, passphrase, validation })
+            first.Children.Add(field);
         first.Children.Add(Copy("Your credential is used for this connection and is not saved by setup."));
-        if (!await ConfirmAsync(owner, "Set up a Linux host · 1 of 5", first, "Probe SSH identity")) return false;
+        string SelectedPem() => method.SelectedIndex == 1 && savedKey.SelectedItem is ComboBoxItem item
+            ? SshSecrets.Get(Format.Text(item.Tag as JsonNode, "secretRef")) ?? ""
+            : privateKey.Text.Trim();
+        var entry = new ContentDialog { Title = "Set up a Linux host · 1 of 5",
+            Content = new ScrollViewer { Content = first, MaxHeight = 520 },
+            PrimaryButtonText = "Probe SSH identity", CloseButtonText = L10n.Text("common.cancel"),
+            DefaultButton = ContentDialogButton.Primary };
+        entry.PrimaryButtonClick += (_, click) =>
+        {
+            if (address.Text.Trim().Length > 0 && user.Text.Trim().Length > 0 && name.Text.Trim().Length > 0 &&
+                double.IsFinite(port.Value) && port.Value is >= 1 and <= 65535 &&
+                (method.SelectedIndex == 0 ? password.Password.Length > 0 : SelectedPem().Length > 0)) return;
+            validation.Text = "Enter an address, user, name, valid port and credential.";
+            click.Cancel = true;
+        };
+        if (await ShowAsync(owner, entry) != ContentDialogResult.Primary) return false;
         var hostname = address.Text.Trim();
         var username = user.Text.Trim();
         var label = name.Text.Trim();
         var sshPort = double.IsFinite(port.Value) && port.Value is >= 1 and <= 65535
             ? (int)port.Value : 0;
-        if (hostname.Length == 0 || username.Length == 0 || label.Length == 0 ||
-            sshPort == 0 ||
-            (method.SelectedIndex == 0 ? password.Password.Length == 0 : privateKey.Text.Trim().Length == 0))
-        {
-            await MessageAsync(owner, "Server and sign in", "Enter an address, user, name, valid port and credential, then try again.");
-            return false;
-        }
         var auth = method.SelectedIndex == 0
             ? new JsonObject { ["kind"] = "password", ["password"] = password.Password }
-            : new JsonObject { ["kind"] = "privateKey", ["pem"] = privateKey.Text.Trim() };
+            : new JsonObject { ["kind"] = "privateKey", ["pem"] = SelectedPem() };
+        if (method.SelectedIndex != 0 && passphrase.Password.Length > 0) auth["passphrase"] = passphrase.Password;
         // Probe sends no credential. A fresh host record is not stored until
         // the user compares the server's fingerprint and confirms it.
         var endpoint = new JsonObject { ["hostname"] = hostname, ["username"] = username,
@@ -74,11 +117,20 @@ internal static class LinuxHostSetupDialog
         identity.Children.Add(new TextBlock { Text = $"{hostname}:{sshPort}", IsTextSelectionEnabled = true });
         identity.Children.Add(new TextBlock { Text = fingerprint, FontFamily = Fonts.Mono,
             TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+        var existing = (savedHost.SelectedItem as ComboBoxItem)?.Tag as JsonObject;
+        if (existing?["hostKeys"] is JsonArray oldKeys && oldKeys.Count > 0 &&
+            !oldKeys.Any(key => key?.ToString() == fingerprint))
+            identity.Children.Add(new TextBlock { Text = "This fingerprint differs from the saved host. Verify the server before replacing its trusted key.",
+                TextWrapping = TextWrapping.Wrap, Foreground = Theme.Brush(static () => Theme.Danger) });
         if (!await ConfirmAsync(owner, "Verify identity · 2 of 5", identity, "Trust this server")) return false;
         await RequireSameAccountAsync(accountScope);
-        var host = new JsonObject { ["id"] = "", ["label"] = label, ["hostname"] = hostname,
-            ["port"] = sshPort, ["username"] = username, ["initialDirectory"] = "~",
-            ["hostKeys"] = new JsonArray { JsonValue.Create(fingerprint) } };
+        var host = existing is null ? new JsonObject { ["id"] = "", ["initialDirectory"] = "~" }
+            : (JsonObject)existing.DeepClone();
+        host["label"] = label;
+        host["hostname"] = hostname;
+        host["port"] = sshPort;
+        host["username"] = username;
+        host["hostKeys"] = new JsonArray { JsonValue.Create(fingerprint) };
         var saved = await SshVaultSync.WriteAsync("ssh.host.save", host);
         var hostId = Format.Text(saved, "id");
         if (hostId.Length == 0) throw new InvalidOperationException("The SSH host was not saved.");
