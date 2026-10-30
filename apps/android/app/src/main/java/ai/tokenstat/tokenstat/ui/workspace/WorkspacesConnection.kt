@@ -31,6 +31,7 @@ class WorkspacesConnectionState {
         knownHosts = peers
         hostSnapshots.keys.retainAll(peers)
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
+        mutableStaleHosts.value = mutableStaleHosts.value.intersect(peers)
         backgroundAttempts.keys.retainAll(peers)
         backgroundNextAt.keys.retainAll(peers)
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value.intersect(peers)
@@ -44,6 +45,7 @@ class WorkspacesConnectionState {
         val folders: JsonArray,
         val sessions: JsonArray,
         val chats: JsonArray,
+        val loadedAtMs: Long,
     )
 
     // Keep loaded work under its peer key when navigation focuses another
@@ -52,6 +54,8 @@ class WorkspacesConnectionState {
     private val hostSnapshots = mutableMapOf<String, HostSnapshot>()
     private val mutableConnectedHosts = MutableStateFlow<Set<String>>(emptySet())
     val connectedHosts: StateFlow<Set<String>> = mutableConnectedHosts.asStateFlow()
+    private val mutableStaleHosts = MutableStateFlow<Set<String>>(emptySet())
+    val staleHosts: StateFlow<Set<String>> = mutableStaleHosts.asStateFlow()
     fun foldersFor(peer: String): JsonArray = hostSnapshots[peer]?.folders ?: JsonArray(emptyList())
     fun sessionsFor(peer: String): JsonArray = hostSnapshots[peer]?.sessions ?: JsonArray(emptyList())
     fun chatsFor(peer: String): JsonArray = hostSnapshots[peer]?.chats ?: JsonArray(emptyList())
@@ -61,35 +65,48 @@ class WorkspacesConnectionState {
     val backgroundConnecting: StateFlow<Set<String>> = mutableBackgroundConnecting.asStateFlow()
 
     fun beginBackground(peer: String, owner: String, nowMs: Long = System.currentTimeMillis()): Boolean {
-        if (accountOwner != owner || (knownHosts != null && peer !in knownHosts.orEmpty()) || peer in hostSnapshots ||
+        if (accountOwner != owner || (knownHosts != null && peer !in knownHosts.orEmpty()) ||
+            peer == mutableConnectedPeer.value || peer == mutableConnectingPeer.value ||
+            hostSnapshots[peer]?.let { nowMs - it.loadedAtMs < 60_000L } == true ||
             peer in mutableBackgroundConnecting.value ||
             nowMs < (backgroundNextAt[peer] ?: 0L)) return false
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value + peer
         return true
     }
 
-    fun finishBackground(peer: String, owner: String, success: Boolean, nowMs: Long = System.currentTimeMillis()) {
+    fun finishBackground(peer: String, owner: String, success: Boolean, nowMs: Long = System.currentTimeMillis(), cancelled: Boolean = false) {
         if (accountOwner != owner) return
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
         if (success) {
             backgroundAttempts.remove(peer)
             backgroundNextAt.remove(peer)
-        } else {
+            mutableStaleHosts.value = mutableStaleHosts.value - peer
+        } else if (!cancelled && peer != mutableConnectedPeer.value && peer != mutableConnectingPeer.value) {
             val failures = (backgroundAttempts[peer] ?: 0) + 1
             backgroundAttempts[peer] = failures
             backgroundNextAt[peer] = nowMs + minOf(60_000L, 2_000L shl minOf(failures - 1, 5))
+            if (peer in hostSnapshots) mutableStaleHosts.value = mutableStaleHosts.value + peer
         }
     }
 
-    fun publishBackground(peer: String, owner: String, folders: JsonArray, sessions: JsonArray, chats: JsonArray): Boolean {
+    fun publishBackground(peer: String, owner: String, folders: JsonArray, sessions: JsonArray, chats: JsonArray,
+                          nowMs: Long = System.currentTimeMillis()): Boolean {
         if (accountOwner != owner || (knownHosts != null && peer !in knownHosts.orEmpty()) ||
             peer !in mutableBackgroundConnecting.value) return false
         // A foreground dial owns the visible lists. Background results never
         // overwrite that selected host, even when the two requests overlap.
         if (mutableConnectedPeer.value == peer || mutableConnectingPeer.value == peer) return false
-        hostSnapshots[peer] = HostSnapshot(folders, sessions, filteredChats(chats))
+        hostSnapshots[peer] = HostSnapshot(folders, sessions, filteredChats(chats), nowMs)
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
+        mutableStaleHosts.value = mutableStaleHosts.value - peer
         return true
+    }
+
+    fun dropBackgroundHost(peer: String, owner: String) {
+        if (accountOwner != owner || peer !in mutableBackgroundConnecting.value) return
+        hostSnapshots.remove(peer)
+        mutableConnectedHosts.value = hostSnapshots.keys.toSet()
+        mutableStaleHosts.value = mutableStaleHosts.value - peer
     }
 
     private val mutableConnectingPeer = MutableStateFlow<String?>(null)
@@ -172,6 +189,7 @@ class WorkspacesConnectionState {
         if (allowed == false) {
             mutableHost.value?.str("publicIdentity")?.let { hostSnapshots.remove(it) }
             mutableConnectedHosts.value = hostSnapshots.keys.toSet()
+            mutableStaleHosts.value = mutableStaleHosts.value.intersect(hostSnapshots.keys)
         }
     }
 
@@ -204,8 +222,9 @@ class WorkspacesConnectionState {
 
     private fun saveSelectedSnapshot() {
         val peer = mutableConnectedPeer.value ?: return
-        hostSnapshots[peer] = HostSnapshot(mutableFolders.value, mutableSessions.value, mutableChats.value)
+        hostSnapshots[peer] = HostSnapshot(mutableFolders.value, mutableSessions.value, mutableChats.value, System.currentTimeMillis())
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
+        mutableStaleHosts.value = mutableStaleHosts.value - peer
     }
 
     fun clearLists() {
@@ -225,7 +244,10 @@ class WorkspacesConnectionState {
     /// What Disconnect does on every client: forget the session. The tunnel
     /// underneath is the host's to reap, exactly like iOS.
     fun disconnect() {
-        mutableConnectedPeer.value?.let { hostSnapshots.remove(it) }
+        mutableConnectedPeer.value?.let {
+            hostSnapshots.remove(it)
+            mutableStaleHosts.value = mutableStaleHosts.value - it
+        }
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
         connectionTicket++
         mutableConnectingPeer.value = null
@@ -240,6 +262,7 @@ class WorkspacesConnectionState {
     fun disconnectHost(peer: String) {
         hostSnapshots.remove(peer)
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
+        mutableStaleHosts.value = mutableStaleHosts.value - peer
         mutableBackgroundConnecting.value = mutableBackgroundConnecting.value - peer
         backgroundAttempts.remove(peer)
         backgroundNextAt.remove(peer)
@@ -248,6 +271,7 @@ class WorkspacesConnectionState {
 
     fun clearAll() {
         hostSnapshots.clear()
+        mutableStaleHosts.value = emptySet()
         backgroundAttempts.clear()
         backgroundNextAt.clear()
         mutableBackgroundConnecting.value = emptySet()

@@ -747,8 +747,8 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     // The selected host's warmup above owns one slot. Load the other saved
     // hosts in at most three more slots, without changing the selected host or
     // its visible lists. One sleeping or denied host cannot hold up the rest.
-    LaunchedEffect(warmOwner, warmMachines, state.canRemote) {
-        if (!state.canRemote || warmOwner.isBlank()) return@LaunchedEffect
+    ForegroundEffect(warmOwner, warmMachines, state.canRemote) {
+        if (!state.canRemote || warmOwner.isBlank()) return@ForegroundEffect
         val machines = warmMachines?.filterIsInstance<JsonObject>().orEmpty()
         val thisId = state.account?.string("thisMachineId")
         val byPeer = machines.mapNotNull { machine ->
@@ -767,6 +767,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 val machine = byPeer[peer] ?: return@withPermit
                 if (!warmSession.beginBackground(peer, warmOwner)) return@withPermit
                 var published = false
+                var cancelled = false
                 try {
                     fun current() = HomeStores.pinIdentity(model.state.value.account) == warmOwner &&
                         model.state.value.canRemote && warmStore.isAutoConnectEnabled(peer)
@@ -778,7 +779,15 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                                 model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
                                 model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
                             }
-                            if (check?.bool("allowed") != true || !current()) break
+                            if (check?.bool("allowed") != true || !current()) {
+                                if (current() && check?.bool("allowed") == false) {
+                                    warmSession.dropBackgroundHost(peer, warmOwner)
+                                    ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                                        context, peer, JsonArray(emptyList()), ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                                    )
+                                }
+                                break
+                            }
                             val folders = model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
                                 ?: JsonArray(emptyList())
                             val sessions = runCatching {
@@ -796,13 +805,14 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                             }
                             break
                         } catch (error: CancellationException) {
+                            cancelled = true
                             throw error
                         } catch (error: Exception) {
                             android.util.Log.w("ts-workspaces", "saved host background connect failed", error)
                         }
                     }
                 } finally {
-                    warmSession.finishBackground(peer, warmOwner, published)
+                    warmSession.finishBackground(peer, warmOwner, published, cancelled = cancelled)
                 }
             }
         }
@@ -3221,6 +3231,7 @@ private fun WorkspacesScreen(
     val storedHost by session.host.collectAsStateWithLifecycle()
     val connectedPeer by session.connectedPeer.collectAsStateWithLifecycle()
     val retainedHosts by session.connectedHosts.collectAsStateWithLifecycle()
+    val staleHosts by session.staleHosts.collectAsStateWithLifecycle()
     var newChatRepository by rememberSaveable(navigationOwner, connectedPeer) { mutableStateOf<String?>(null) }
     val newChatOwner = ai.tokenstat.tokenstat.ui.workspace.newChatDraftOwner(newChatAccount, connectedPeer, newChatRepository)
     val newChatDraft = remember(newChatOwner, newChatDraftRevision) { model.chatComposers.snapshot(newChatOwner) }
@@ -3737,6 +3748,7 @@ private fun WorkspacesScreen(
             dialledHost = host,
             connectedPeer = connectedPeer,
             retainedHosts = retainedHosts,
+            staleHosts = staleHosts,
             otherHostWork = hosts.mapNotNull { machine ->
                 val peer = machine.string("publicIdentity") ?: return@mapNotNull null
                 if (peer !in retainedHosts || peer == connectedPeer ||
@@ -3974,6 +3986,7 @@ private fun WorkspaceList(
     dialledHost: JsonObject?,
     connectedPeer: String?,
     retainedHosts: Set<String>,
+    staleHosts: Set<String>,
     otherHostWork: List<OtherHostWork>,
     connectingPeer: String?,
     loadingFolders: Boolean,
@@ -4090,6 +4103,7 @@ private fun WorkspaceList(
                 name = name,
                 connected = connectedPeer == peer,
                 available = peer in retainedHosts && connectedPeer != peer,
+                stale = peer in staleHosts,
                 connecting = connectingPeer == peer,
                 autoConnect = autoConnect(peer),
                 onConnect = { onConnect(machine) },

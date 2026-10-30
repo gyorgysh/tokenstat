@@ -874,6 +874,7 @@
   "android.hostworkspaces.move_down.40bb50da": "Move down",
   "android.hostworkspaces.move_up.c66feb5e": "Move up",
   "android.hostworkspaces.needs_approval.0c66fee1": "· Needs approval",
+  "android.hostworkspaces.needs_refresh.5b783f2d": "Needs refresh",
   "android.hostworkspaces.noise_xx_handshake_x25519_keys_chacha20_po.233e27b7": "Noise XX handshake, X25519 keys, ChaCha20-Poly1305. Compare the words with the other device to be sure.",
   "android.hostworkspaces.not_a_git_repo.86308fef": "Not a git repo",
   "android.hostworkspaces.only_computers_will_show.dcb66766": "Only computers will show",

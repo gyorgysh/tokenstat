@@ -396,6 +396,7 @@ fun HostCard(
     name: String,
     connected: Boolean,
     available: Boolean = false,
+    stale: Boolean = false,
     connecting: Boolean,
     autoConnect: Boolean,
     onConnect: () -> Unit,
@@ -444,6 +445,13 @@ fun HostCard(
                         onClick = onConnect,
                     )
                 }
+            }
+            if (stale) {
+                Text(
+                    L10n.text("android.hostworkspaces.needs_refresh.5b783f2d"),
+                    style = TsType.caption,
+                    color = colors.textSecondary,
+                )
             }
             // Opening the device used to hide behind a bare chevron, so the
             // card never said it could be entered. It says so now, as its
