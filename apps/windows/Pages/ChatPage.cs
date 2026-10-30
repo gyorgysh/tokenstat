@@ -1260,7 +1260,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Tool => $"{item.Id}|{item.Verb}|{item.Target}|{item.Running}|{item.Failed}|{item.Duration}|{item.Detail}|{CardExpanded(item)}",
         ItemKind.Edit => $"{item.Id}|{item.Path}|{item.Added}|{item.Removed}|{item.Patch}|{item.Running}|{item.Failed}|{item.Duration}|{CardExpanded(item)}",
         ItemKind.Approval => $"{item.Id}|{item.Pending}|{item.Approval?.ToJsonString()}",
-        ItemKind.Attachment => $"{item.Id}|{item.Name}|{item.MediaType}|{item.Size}",
+        ItemKind.Attachment => $"{item.Id}|{item.Name}|{item.MediaType}|{item.Size}|{_modelPreviews.Contains(ImageOwner() + "/" + item.Id)}",
         ItemKind.Gallery => $"{item.Id}|{string.Join(";", item.Images?.Select(image => image.Id + ":" + image.Name + ":" + image.Size) ?? [])}",
         ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}",
         ItemKind.Failed => $"{item.Id}|{item.Text}",
@@ -1699,7 +1699,32 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             });
         }
         body.Children.Add(text);
+        var modelKey = ImageOwner() + "/" + item.Id;
+        var isModel = ChatModelView.CanPreview(item.Name);
+        if (isModel)
+        {
+            var preview = ActionIconGlyph.Button(L10n.Text("windows.chatmodel.preview"), ActionIcon.Preview, async (_, _) =>
+            {
+                try
+                {
+                    var path = await ImageFileAsync(item, true);
+                    if (path is null || modelKey != ImageOwner() + "/" + item.Id) return;
+                    _modelPreviews.Add(modelKey);
+                    RebuildTranscript();
+                }
+                catch (Exception error) { Banner(error.Message); }
+            });
+            preview.IsEnabled = item.Size <= AttachmentCap;
+            body.Children.Add(preview);
+        }
         body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.download"), ActionIcon.Download, async (_, _) => await DownloadFileAsync(item)));
+        if (isModel && _modelPreviews.Contains(modelKey) && _imageFiles.TryGetValue(modelKey, out var file) && File.Exists(file))
+        {
+            var stack = new StackPanel { Spacing = Theme.SpaceS };
+            stack.Children.Add(new ChatModelView(file, item.Name));
+            stack.Children.Add(body);
+            return Card(L10n.Text("windows.chatpage.attachment.040d2b36"), stack);
+        }
         return Card(L10n.Text("windows.chatpage.attachment.040d2b36"), body);
     }
 

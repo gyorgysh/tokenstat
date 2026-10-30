@@ -1,4 +1,5 @@
 {
+  "windows.chatmodel.preview": "Preview 3D",
   "windows.harnessconfig.title": "Configure {0}",
   "windows.harnessconfig.subtitle": "Model, effort and compaction for the next session. Saved into this tool’s own config.",
   "windows.harnessconfig.installation": "Installation",

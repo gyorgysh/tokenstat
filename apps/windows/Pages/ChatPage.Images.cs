@@ -18,6 +18,7 @@ internal sealed partial class ChatPage
 {
     private readonly SemaphoreSlim _imageSlots = new(2);
     private readonly Dictionary<string, string> _imageFiles = new();
+    private readonly HashSet<string> _modelPreviews = [];
     private readonly Dictionary<string, Task<string?>> _imageFlights = new();
     private readonly HashSet<Image> _imageViews = [];
     private CancellationTokenSource _imageCancellation = new();
@@ -49,6 +50,7 @@ internal sealed partial class ChatPage
         _imageViews.Clear();
         foreach (var path in _imageFiles.Values) DeleteImageFile(path);
         _imageFiles.Clear();
+        _modelPreviews.Clear();
         _imageFlights.Clear();
     }
     private static void DeleteImageFile(string path)
