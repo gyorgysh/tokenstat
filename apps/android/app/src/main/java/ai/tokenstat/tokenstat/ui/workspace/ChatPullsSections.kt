@@ -3439,26 +3439,19 @@ internal fun ChatComposer(
                         modifier = Modifier.weight(1f),
                     )
                     Text(attachmentSize(attachment.bytes), style = TsType.caption2, color = colors.textSecondary)
-                    IconButton(onClick = { onRemove(attachment) }, modifier = Modifier.size(24.dp)) {
+                    IconButton(onClick = { onRemove(attachment) }) {
                         Icon(
                             ActionIcon.Dismiss.vector,
                             L10n.text("android.chatpullssections.remove_0.dfbfd0da", "${attachment.name}"),
                             tint = colors.textSecondary,
-                            modifier = Modifier.size(15.dp),
+                            modifier = Modifier.size(18.dp),
                         )
                     }
                 }
             }
-            OutlinedTextField(
-                draft,
-                onDraft,
-                Modifier.fillMaxWidth().then(fieldModifier),
-                placeholder = { Text(hint) },
-                maxLines = if (expanded) 18 else 5,
-            )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 IconButton(onClick = onPick, enabled = !sending && attachmentEnabled) {
@@ -3492,7 +3485,13 @@ internal fun ChatComposer(
                         }
                     }
                 }
-                Spacer(Modifier.weight(1f))
+                OutlinedTextField(
+                    draft,
+                    onDraft,
+                    Modifier.weight(1f).then(fieldModifier),
+                    placeholder = { Text(hint, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    maxLines = if (expanded) 18 else 5,
+                )
                 if (sending) {
                     IconButton(onClick = onStop) {
                         Icon(ActionIcon.Stop.vector, L10n.text("common.stop"), tint = colors.danger)
