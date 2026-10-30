@@ -912,6 +912,9 @@ final class WorkspacesModel {
     /// Peers that have answered a workspace list at least once this session.
     /// The ones that never do are dialled far less often. See `loadRemote`.
     private var remotePeerEverAnswered: Set<String> = []
+    /// A different account must never inherit an in-memory Disconnect or a
+    /// folder snapshot, even when both accounts happen to list the same peer.
+    private var remoteOwnerScope: WorkReference.Scope?
     /// Peers the user explicitly disconnected. Their folders stay out of the
     /// sidebar until Connect is chosen again; without this the peer sweep
     /// would re-dial an approved, reachable machine on its next pass and the
@@ -920,17 +923,29 @@ final class WorkspacesModel {
     /// Per-peer auto-connect, on by default. The same preference the phone
     /// keeps: an explicit Connect turns it back on, the toggle in the folder
     /// header turns it off, and the peer sweep honours it.
-    static func autoConnectKey(for peerKey: String) -> String {
-        "workspace.autoconnect.\(peerKey)"
+    static func autoConnectKey(for peerKey: String) -> String? {
+        guard let scope = WorkSessionContext.shared.scope else { return nil }
+        let owner = [scope.kind.rawValue, scope.origin, scope.identity]
+            .map(WorkReferenceKey.encode).joined(separator: "|")
+        return "workspace.autoconnect.v2.\(owner).\(WorkReferenceKey.encode(peerKey))"
     }
     static func isAutoConnectEnabled(for peerKey: String) -> Bool {
-        guard UserDefaults.standard.object(forKey: autoConnectKey(for: peerKey)) != nil else {
-            return true
-        }
-        return UserDefaults.standard.bool(forKey: autoConnectKey(for: peerKey))
+        guard let key = autoConnectKey(for: peerKey) else { return false }
+        return UserDefaults.standard.object(forKey: key) as? Bool ?? true
     }
     static func setAutoConnect(_ on: Bool, for peerKey: String) {
-        UserDefaults.standard.set(on, forKey: autoConnectKey(for: peerKey))
+        guard let key = autoConnectKey(for: peerKey) else { return }
+        UserDefaults.standard.set(on, forKey: key)
+    }
+    private static func migrateLegacyAutoConnect(peers: [Peer]) {
+        for peer in peers {
+            let legacy = "workspace.autoconnect.\(peer.key)"
+            guard let key = autoConnectKey(for: peer.key),
+                  UserDefaults.standard.object(forKey: key) == nil,
+                  let old = UserDefaults.standard.object(forKey: legacy) as? Bool else { continue }
+            UserDefaults.standard.set(old, forKey: key)
+            UserDefaults.standard.removeObject(forKey: legacy)
+        }
     }
     /// Hosts we have already asked to open their work this session, so a
     /// refusal is not re-asked on every peer sweep.
@@ -1012,6 +1027,19 @@ final class WorkspacesModel {
     /// failure is remembered rather than raised, and its last known folders
     /// stay listed.
     func loadRemote() async {
+        let scope = WorkSessionContext.shared.scope
+        if remoteOwnerScope != scope {
+            remoteOwnerScope = scope
+            remoteFolders.removeAll()
+            remotePeerFailures.removeAll()
+            remotePeerNextDial.removeAll()
+            remotePeerEverAnswered.removeAll()
+            suppressedPeers.removeAll()
+            askedWorkspace.removeAll()
+            summaries = summaries.filter { !$0.key.hasPrefix("remote:") }
+            publishFolders()
+        }
+        guard scope != nil else { return }
         let ecosystemLease = EcosystemPublisher.lease
         nextRemoteLoad &+= 1
         let generation = nextRemoteLoad
@@ -1024,7 +1052,9 @@ final class WorkspacesModel {
             let peers = try await Bridge.peers().filter {
                 $0.trust == .approved && ($0.address?.isEmpty == false || tunnelOn)
             }
-            guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease else { return }
+            guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
+                  WorkSessionContext.shared.scope == scope else { return }
+            Self.migrateLegacyAutoConnect(peers: peers)
             // Stage into locals across the per-peer awaits below. Mutating the
             // shared dictionaries before each dial lets an older sweep resume
             // after a newer one and publish stale folders over live ones.
@@ -1050,6 +1080,7 @@ final class WorkspacesModel {
                 }
             }
             for peer in peers {
+                guard WorkSessionContext.shared.scope == scope else { return }
                 if suppressedPeers.contains(peer.key) {
                     continue
                 }
@@ -1062,7 +1093,8 @@ final class WorkspacesModel {
                 if let nextDial = stagedNextDial[peer.key], Date() < nextDial { continue }
                 do {
                     let fetched = try await Bridge.remoteWorkspaces(peer: peer)
-                    guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease else { return }
+                    guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
+                          WorkSessionContext.shared.scope == scope else { return }
                     // Disconnect lands while a dial is in flight. Taking the
                     // answer anyway restored the folders and re-posted
                     // didConnect, which unsuppressed the peer: Disconnect
@@ -1081,7 +1113,8 @@ final class WorkspacesModel {
                     // has. Best effort: a host too old to answer leaves the
                     // badges off, which is what they were before this existed.
                     if let counts = try? await Bridge.remoteWorkspaceSummaries(peer: peer) {
-                        guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease else { return }
+                        guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
+                              WorkSessionContext.shared.scope == scope else { return }
                         for summary in counts { stagedSummaries[summary.id] = summary }
                     }
                     stagedNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
@@ -1091,7 +1124,8 @@ final class WorkspacesModel {
                         didConnectKeys.append(peer.key)
                     }
                 } catch {
-                    guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease else { return }
+                    guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
+                          WorkSessionContext.shared.scope == scope else { return }
                     let text = error.localizedDescription
                     if Self.isWorkspaceRefusal(text) {
                         // Reached a host that has not let this device in. The
@@ -1142,7 +1176,8 @@ final class WorkspacesModel {
                     }
                 }
             }
-            guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease else { return }
+            guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
+                  WorkSessionContext.shared.scope == scope else { return }
             // Re-validate before publishing: an older sweep resuming after a
             // newer one must not delete folders the newer sweep just went live
             // with, so suppressed keys are enforced again on the staged copy.
@@ -1267,6 +1302,7 @@ final class WorkspacesModel {
     /// twice, which is seconds to a minute of the machine still looking
     /// reachable after somebody asked to disconnect.
     func disconnect(peer key: String) {
+        Self.setAutoConnect(false, for: key)
         suppressedPeers.insert(key)
         remoteFolders.removeValue(forKey: key)
         remotePeerNextDial.removeValue(forKey: key)

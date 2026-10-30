@@ -190,6 +190,8 @@ jobs:
           python3 scripts/check-chat-projection.py
           python3 scripts/check-workspace-refresh.py
           python3 scripts/check-workspace-loading.py
+          python3 scripts/check-mac-host-preferences.py
+          python3 scripts/check-client-host-preferences.py
           python3 scripts/check-tunnel-recovery.py
           python3 scripts/check-chat-polling.py
           python3 scripts/check-chat-loading.py

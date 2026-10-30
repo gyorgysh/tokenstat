@@ -405,7 +405,12 @@ struct RootView: View {
             .onChange(of: placeSettled) { _, _ in openEcosystemDestination(); resolvePendingDesktopOpen() }
             .onChange(of: workspaces.isLoading) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: workspaces.hasLoadedDirectory) { _, _ in resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
-            .onChange(of: WorkSessionContext.shared.scope) { _, _ in openEcosystemDestination(); resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
+            .onChange(of: WorkSessionContext.shared.scope) { _, _ in
+                openEcosystemDestination()
+                resolvePendingSimulatorAttach()
+                resolvePendingDesktopOpen()
+                Task { await workspaces.loadRemote() }
+            }
             .onChange(of: WorkSessionContext.shared.localHostIdentity) { _, _ in resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: route) { _, _ in resolvePendingSimulatorAttach() }
             .alert(L10n.text("apple.desktop_actions.unavailable_title"), isPresented: Binding(
