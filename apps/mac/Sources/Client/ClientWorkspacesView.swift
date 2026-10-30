@@ -650,6 +650,11 @@ struct ClientWorkspacesView: View {
                         !model.loadedHostKeys.contains(host.peerKey)) || host.online == false)
                 }
             }
+            if model.staleHostKeys.contains(host.peerKey) {
+                Text(L10n.text("apple.clientworkspacesview.needs_refresh.5b783f2d"))
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+            }
             // Opening the device used to hide behind a bare chevron, so the
             // card never said it could be entered. It says so now, as its own
             // row. The card tap stays for the same action.
@@ -734,10 +739,12 @@ final class ClientWorkspacesModel {
         let folders: [WorkspaceFolder]
         let sessions: [PtySessionInfo]
         let chats: [ChatRecentConversation]
+        let loadedAt: Date
     }
 
     @ObservationIgnored private var hostSnapshots: [String: HostSnapshot] = [:]
     private(set) var loadedHostKeys: Set<String> = []
+    private(set) var staleHostKeys: Set<String> = []
     @ObservationIgnored private var backgroundSweep: Task<Void, Never>?
     @ObservationIgnored private var backgroundFailures: [String: Int] = [:]
     @ObservationIgnored private var nextBackgroundAttempt: [String: Date] = [:]
@@ -825,6 +832,7 @@ final class ClientWorkspacesModel {
         let available = Set(nextHosts.map(\.peerKey))
         for peer in hostSnapshots.keys.filter({ !available.contains($0) }) {
             hostSnapshots.removeValue(forKey: peer)
+            staleHostKeys.remove(peer)
             publishEcosystem([], peer: peer, host: "", lease: EcosystemPublisher.lease)
         }
         loadedHostKeys = Set(hostSnapshots.keys)
@@ -1016,13 +1024,13 @@ final class ClientWorkspacesModel {
     /// Keep saved computers ready behind the currently selected one. The
     /// foreground dial owns one slot; this sweep uses at most three more.
     /// Each peer retains its own loaded lists and retry clock.
-    private func warmRememberedHosts() {
+    private func warmRememberedHosts(forceRefresh: Bool = false) {
         guard !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope,
               backgroundSweep == nil else { return }
         let candidates = rememberedHosts.filter { host in
             host.peerKey != lastConnectedHost && host.peerKey != connectedKey &&
                 host.online != false && isAutoConnectEnabled(for: host.peerKey) &&
-                hostSnapshots[host.peerKey] == nil &&
+                (forceRefresh || hostSnapshots[host.peerKey].map { Date().timeIntervalSince($0.loadedAt) > 60 } ?? true) &&
                 Date() >= (nextBackgroundAttempt[host.peerKey] ?? .distantPast)
         }
         guard !candidates.isEmpty else { return }
@@ -1048,7 +1056,8 @@ final class ClientWorkspacesModel {
             !Task.isCancelled && !retired && scope != nil && scope == ownerScope &&
                 scope == WorkSessionContext.shared.scope && lease == EcosystemPublisher.lease &&
                 hosts.contains(where: { $0.peerKey == host.peerKey }) &&
-                isAutoConnectEnabled(for: host.peerKey) && hostSnapshots[host.peerKey] == nil
+                isAutoConnectEnabled(for: host.peerKey) &&
+                connectedKey != host.peerKey && isConnecting != host.peerKey && chosenPeer != host.peerKey
         }
         guard current() else { return }
         let delays: [UInt64] = [0, 1, 2, 4]
@@ -1062,7 +1071,11 @@ final class ClientWorkspacesModel {
                 guard current() else { return }
                 let allowed = try await Bridge.workspaceAccessAllowed(peer: peer.key)
                 guard current() else { return }
-                if !allowed { noteBackgroundFailure(host.peerKey); return }
+                if !allowed {
+                    dropHostSnapshot(host.peerKey)
+                    noteBackgroundFailure(host.peerKey)
+                    return
+                }
                 async let loadedFolders = Bridge.remoteWorkspaces(peer: peer)
                 async let loadedSessions = try? ClientRemote.ptyList(peer: peer.key)
                 async let loadedChats = try? ClientRemote.recentChats(peer: peer.key)
@@ -1070,8 +1083,9 @@ final class ClientWorkspacesModel {
                 let newSessions = await loadedSessions ?? []
                 let newChats = await loadedChats ?? []
                 guard current() else { return }
-                hostSnapshots[host.peerKey] = HostSnapshot(folders: newFolders, sessions: newSessions, chats: newChats)
+                hostSnapshots[host.peerKey] = HostSnapshot(folders: newFolders, sessions: newSessions, chats: newChats, loadedAt: .now)
                 loadedHostKeys = Set(hostSnapshots.keys)
+                staleHostKeys.remove(host.peerKey)
                 publishEcosystem(newFolders, peer: host.peerKey, host: host.name, lease: lease)
                 backgroundFailures.removeValue(forKey: host.peerKey)
                 nextBackgroundAttempt.removeValue(forKey: host.peerKey)
@@ -1089,6 +1103,7 @@ final class ClientWorkspacesModel {
         let failures = (backgroundFailures[peer] ?? 0) + 1
         backgroundFailures[peer] = failures
         nextBackgroundAttempt[peer] = Date().addingTimeInterval(min(60, Double(2 << min(failures - 1, 5))))
+        if hostSnapshots[peer] != nil { staleHostKeys.insert(peer) }
     }
 
     /// Redial the current host after a path change. Keeps the connected
@@ -1102,6 +1117,7 @@ final class ClientWorkspacesModel {
         let now = Date()
         if now.timeIntervalSince(lastRecoverAt) < 1.5 { return }
         lastRecoverAt = now
+        warmRememberedHosts(forceRefresh: true)
         await refresh(account: account)
         guard let key = connectedKey,
               let host = hosts.first(where: { $0.peerKey == key })
@@ -1183,6 +1199,7 @@ final class ClientWorkspacesModel {
                 let allowed = try await Bridge.workspaceAccessAllowed(peer: peer.key)
                 guard stillCurrent() else { return }
                 if !allowed {
+                    dropHostSnapshot(host.peerKey)
                     _ = try? await Bridge.askWorkspaceAccess(peer: host.peerKey)
                     guard stillCurrent() else { return }
                     // Its own state, not `infoMessage`. Waiting on a person at
@@ -1192,7 +1209,7 @@ final class ClientWorkspacesModel {
                     awaitingAccessHost = host.name
                     infoMessage = nil
                     errorMessage = nil
-                    if !recovering {
+                    if !recovering || connectedKey == host.peerKey {
                         connectedKey = nil
                         folders = []
                         sessions = []
@@ -1214,8 +1231,9 @@ final class ClientWorkspacesModel {
                 let nextSessions = newSessions ?? [], nextChats = newChats ?? []
                 if sessions != nextSessions { sessions = nextSessions }
                 if recentChats != nextChats { recentChats = nextChats }
-                hostSnapshots[host.peerKey] = HostSnapshot(folders: newFolders, sessions: nextSessions, chats: nextChats)
+                hostSnapshots[host.peerKey] = HostSnapshot(folders: newFolders, sessions: nextSessions, chats: nextChats, loadedAt: .now)
                 loadedHostKeys = Set(hostSnapshots.keys)
+                staleHostKeys.remove(host.peerKey)
                 connectedKey = host.peerKey
                 #if os(iOS)
                 let overviewPeers = hosts.map(\.peerKey)
@@ -1340,6 +1358,7 @@ final class ClientWorkspacesModel {
         disconnect(manual: false)
         hostSnapshots.removeAll()
         loadedHostKeys = []
+        staleHostKeys = []
     }
 
     func disconnect(manual: Bool = true) {
@@ -1350,6 +1369,7 @@ final class ClientWorkspacesModel {
             setAutoConnect(false, for: peer)
             hostSnapshots.removeValue(forKey: peer)
             loadedHostKeys = Set(hostSnapshots.keys)
+            staleHostKeys.remove(peer)
             publishEcosystem([], peer: peer, host: "", lease: EcosystemPublisher.lease)
         }
         remoteRefresh?.task.cancel()
@@ -1370,19 +1390,24 @@ final class ClientWorkspacesModel {
 
     func disconnectHost(_ peer: String) {
         setAutoConnect(false, for: peer)
-        hostSnapshots.removeValue(forKey: peer)
-        loadedHostKeys = Set(hostSnapshots.keys)
-        publishEcosystem([], peer: peer, host: "", lease: EcosystemPublisher.lease)
-        if activeTerminal?.peer == peer {
-            activeTerminal?.stop()
-            activeTerminal = nil
-        }
+        dropHostSnapshot(peer)
         if connectedKey == peer {
             disconnect(manual: false)
         } else if isConnecting == peer || pendingPeer == peer {
             remoteLoadGeneration = UUID()
             if pendingPeer == peer { pendingPeer = nil }
             if chosenPeer == peer { chosenPeer = nil }
+        }
+    }
+
+    private func dropHostSnapshot(_ peer: String) {
+        hostSnapshots.removeValue(forKey: peer)
+        loadedHostKeys = Set(hostSnapshots.keys)
+        staleHostKeys.remove(peer)
+        publishEcosystem([], peer: peer, host: "", lease: EcosystemPublisher.lease)
+        if activeTerminal?.peer == peer {
+            activeTerminal?.stop()
+            activeTerminal = nil
         }
     }
 
@@ -1481,8 +1506,9 @@ final class ClientWorkspacesModel {
         }
         if let newSessions, sessions != newSessions { sessions = newSessions }
         if let newChats, recentChats != newChats { recentChats = newChats }
-        hostSnapshots[peerKey] = HostSnapshot(folders: folders, sessions: sessions, chats: recentChats)
+        hostSnapshots[peerKey] = HostSnapshot(folders: folders, sessions: sessions, chats: recentChats, loadedAt: .now)
         loadedHostKeys = Set(hostSnapshots.keys)
+        staleHostKeys.remove(peerKey)
         #if os(iOS)
         let overviewPeers = hosts.map(\.peerKey)
         let overviewNames = Dictionary(hosts.map { ($0.peerKey, $0.name) }, uniquingKeysWith: { first, _ in first })
