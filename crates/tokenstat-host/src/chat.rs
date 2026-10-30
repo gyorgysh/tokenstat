@@ -13789,6 +13789,24 @@ mod tests {
             crate::base64::decode(&fetched.data).unwrap(),
             b"hello from the agent"
         );
+        let model = output_dir.join("scene.glb");
+        fs::write(&model, b"glTF model bytes").unwrap();
+        store.record_response_attachments(
+            "chat-test",
+            "codex",
+            &format!("[scene.glb](<{}>)", model.display()),
+            &output_dir,
+        );
+        let (events, _) = store.events("chat-test", 0).unwrap();
+        let model_event = events.last().unwrap().pointer("/event").unwrap();
+        assert_eq!(model_event["name"], "scene.glb");
+        assert_eq!(model_event["mediaType"], "model/gltf-binary");
+        let model_id = model_event["id"].as_str().unwrap();
+        assert_eq!(
+            crate::base64::decode(&store.attachment_data("chat-test", model_id).unwrap().data)
+                .unwrap(),
+            b"glTF model bytes"
+        );
     }
 
     #[test]
