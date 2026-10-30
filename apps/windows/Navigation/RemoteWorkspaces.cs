@@ -297,6 +297,14 @@ internal static class RemoteWorkspaces
             }
             if (IsWorkspaceRefusal(text))
             {
+                bool removed;
+                lock (Gate)
+                {
+                    if (account != AppServices.AccountGeneration)
+                        return AccountChangedResult();
+                    removed = FoldersByPeer.Remove(peerKey);
+                }
+                if (removed) Changed?.Invoke();
                 try
                 {
                     await CallOnPeerAsync(peerKey, "workspace.access.ask");
@@ -546,8 +554,8 @@ internal static class RemoteWorkspaces
                     // Reached a host that has not let this device in. Ask
                     // once per session, then back off like any refusal, so
                     // a machine whose owner said no is not asked twice a
-                    // minute for the rest of the session. Its folders stay:
-                    // the host is reachable, it has simply not said yes.
+                    // minute for the rest of the session. A revoked grant
+                    // must remove folders cached under the old grant.
                     if (AskedWorkspace.Add(key))
                     {
                         var askKey = key;
@@ -563,10 +571,15 @@ internal static class RemoteWorkspaces
                         });
                     }
                     Failures[key] = Failures.TryGetValue(key, out var refusals) ? refusals + 1 : 1;
+                    if (FoldersByPeer.Remove(key))
+                    {
+                        Connected.Remove(key);
+                        changed = true;
+                    }
                     var neverOpened = !EverAnswered.Contains(key);
                     NextDial[key] = now + (neverOpened && Failures[key] >= BackOffAfter
                         ? ColdRetryAfter : RetryAfter);
-                    return false;
+                    return changed;
                 }
                 var failures = Failures.TryGetValue(key, out var n) ? n + 1 : 1;
                 Failures[key] = failures;

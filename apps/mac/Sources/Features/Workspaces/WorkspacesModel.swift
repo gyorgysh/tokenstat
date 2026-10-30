@@ -1234,11 +1234,22 @@ final class WorkspacesModel {
                         if askedWorkspace.insert(peer.key).inserted {
                             _ = try? await Bridge.askWorkspaceAccess(peer: peer.key)
                         }
+                        guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
+                              WorkSessionContext.shared.scope == scope else { return }
+                        // A previous grant may have been revoked. Remove its
+                        // cached work now rather than leaving clickable rows
+                        // from a host that just refused this device.
+                        if stagedFolders.removeValue(forKey: peer.key) != nil {
+                            stagedSummaries = stagedSummaries.filter {
+                                !$0.key.hasPrefix("remote:\(peer.key):")
+                            }
+                            EcosystemPublisher.publish(projects: [], lease: ecosystemLease,
+                                replacing: .peer(peer.key))
+                            unreachableKeys.append(peer.key)
+                        }
                         // Counted like any other refusal, so a machine whose
                         // owner said no is asked every ten minutes rather than
-                        // twice a minute for the rest of the session. Its
-                        // folders stay: the host is reachable, it has simply
-                        // not said yes.
+                        // twice a minute for the rest of the session.
                         let refusals = (stagedFailures[peer.key] ?? 0) + 1
                         stagedFailures[peer.key] = refusals
                         let neverOpened = !stagedEverAnswered.contains(peer.key)
@@ -1417,6 +1428,7 @@ final class WorkspacesModel {
     func reconnect(peer key: String) {
         suppressedPeers.remove(key)
         Self.setAutoConnect(true, for: key)
+        askedWorkspace.remove(key)
         // Clear the backoff too. Somebody pressing Connect is asking now, and
         // a peer that had been dialled down to the slow rate would otherwise
         // sit out most of the next ten minutes before being tried.
