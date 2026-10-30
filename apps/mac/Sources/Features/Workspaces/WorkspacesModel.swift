@@ -912,6 +912,27 @@ final class WorkspacesModel {
     /// Peers that have answered a workspace list at least once this session.
     /// The ones that never do are dialled far less often. See `loadRemote`.
     private var remotePeerEverAnswered: Set<String> = []
+    private struct RemoteFetch: Sendable {
+        let peer: Peer
+        let folders: [WorkspaceFolder]?
+        let summaries: [WorkspaceSummary]?
+        let failure: String?
+    }
+
+    private struct RemoteFetchError: Error, LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    private static func fetchRemote(_ peer: Peer) async -> RemoteFetch {
+        do {
+            let folders = try await Bridge.remoteWorkspaces(peer: peer)
+            let summaries = try? await Bridge.remoteWorkspaceSummaries(peer: peer)
+            return RemoteFetch(peer: peer, folders: folders, summaries: summaries, failure: nil)
+        } catch {
+            return RemoteFetch(peer: peer, folders: nil, summaries: nil, failure: error.localizedDescription)
+        }
+    }
     /// A different account must never inherit an in-memory Disconnect or a
     /// folder snapshot, even when both accounts happen to list the same peer.
     private var remoteOwnerScope: WorkReference.Scope?
@@ -1079,6 +1100,34 @@ final class WorkspacesModel {
                     stagedSummaries = stagedSummaries.filter { !$0.key.hasPrefix("remote:\(key):") }
                 }
             }
+            let candidates = peers.filter { peer in
+                !suppressedPeers.contains(peer.key)
+                    && Self.isAutoConnectEnabled(for: peer.key)
+                    && (stagedNextDial[peer.key].map { Date() >= $0 } ?? true)
+            }
+            let results = await withTaskGroup(of: RemoteFetch.self, returning: [String: RemoteFetch].self) { group in
+                var remaining = candidates.makeIterator()
+                for _ in 0..<min(4, candidates.count) {
+                    if let peer = remaining.next() {
+                        group.addTask { await Self.fetchRemote(peer) }
+                    }
+                }
+                var fetched: [String: RemoteFetch] = [:]
+                while let result = await group.next() {
+                    if generation != nextRemoteLoad || EcosystemPublisher.lease != ecosystemLease
+                        || WorkSessionContext.shared.scope != scope {
+                        group.cancelAll()
+                        break
+                    }
+                    fetched[result.peer.key] = result
+                    if let peer = remaining.next() {
+                        group.addTask { await Self.fetchRemote(peer) }
+                    }
+                }
+                return fetched
+            }
+            guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
+                  WorkSessionContext.shared.scope == scope else { return }
             for peer in peers {
                 guard WorkSessionContext.shared.scope == scope else { return }
                 if suppressedPeers.contains(peer.key) {
@@ -1092,7 +1141,10 @@ final class WorkspacesModel {
                 }
                 if let nextDial = stagedNextDial[peer.key], Date() < nextDial { continue }
                 do {
-                    let fetched = try await Bridge.remoteWorkspaces(peer: peer)
+                    guard let result = results[peer.key] else { continue }
+                    guard let fetched = result.folders else {
+                        throw RemoteFetchError(message: result.failure ?? "Remote workspace unavailable")
+                    }
                     guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
                           WorkSessionContext.shared.scope == scope else { return }
                     // Disconnect lands while a dial is in flight. Taking the
@@ -1112,7 +1164,7 @@ final class WorkspacesModel {
                     // One call for every badge on every folder that machine
                     // has. Best effort: a host too old to answer leaves the
                     // badges off, which is what they were before this existed.
-                    if let counts = try? await Bridge.remoteWorkspaceSummaries(peer: peer) {
+                    if let counts = result.summaries {
                         guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
                               WorkSessionContext.shared.scope == scope else { return }
                         for summary in counts { stagedSummaries[summary.id] = summary }
