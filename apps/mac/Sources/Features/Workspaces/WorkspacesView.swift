@@ -116,17 +116,23 @@ struct WorkspacesView: View {
     /// machine is actually used and there was no way back from it. The
     /// auto-connect switch lives on Devices, beside the connection itself.
     private func remoteMachine(_ folder: WorkspaceFolder, peer: String) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+        let stale = model.isRemoteStale(peer)
+        return VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "laptopcomputer")
                     .foregroundStyle(Theme.accent)
                 Text(folder.machineLabel ?? L10n.text("apple.workspacesview.remote_machine.d9dd1af3"))
                     .font(Theme.fit(12, weight: .medium))
+                if stale {
+                    Text("Offline · saved folders")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.warning)
+                }
                 Spacer(minLength: 0)
                 // A headless server has no display layer. Offering a viewer
                 // for it only ends in the viewer's own error, so the button
                 // stays off the header entirely.
-                if !(ownerHeadless[peer] ?? false) {
+                if !stale && !(ownerHeadless[peer] ?? false) {
                     Button(L10n.text("apple.workspacesview.view_screen.56dea3b5"), .preview) {
                         openWindow(value: RemoteScreenTarget(
                             peer: peer,
@@ -144,11 +150,12 @@ struct WorkspacesView: View {
                 .fixedSize()
                 .help(L10n.text("apple.workspacesview.stops_showing_this_computer_s_folders_in_t.fae41fce"))
             }
-            HostStatsBar(peer: peer, online: true)
+            HostStatsBar(peer: peer, online: !stale)
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.bottom, Theme.Space.s)
-        .task(id: peer) {
+        .task(id: "\(peer)-\(!stale)") {
+            guard !stale else { return }
             // An older host that cannot answer leaves the button where it
             // was rather than hiding a viewer that works.
             if let headless = try? await Bridge.peerHeadless(peer) {

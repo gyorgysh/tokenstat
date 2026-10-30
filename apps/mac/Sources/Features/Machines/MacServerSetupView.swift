@@ -43,6 +43,8 @@ struct MacServerSetupView: View {
                 Spacer()
                 Button("Close", systemImage: "xmark") { dismiss() }
                     .labelStyle(.iconOnly)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(.rect)
                     .accessibilityLabel("Close setup")
             }
             .padding(Theme.Space.l)
@@ -67,16 +69,17 @@ struct MacServerSetupView: View {
             HStack(spacing: Theme.Space.m) {
                 if step != .address {
                     Button("Back") { step = Step(rawValue: step.rawValue - 1) ?? .address }
-                        .buttonStyle(SecondaryButtonStyle())
+                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
                         .disabled(setup.working)
                 }
                 Spacer()
                 if setup.working {
                     ProgressView().controlSize(.small)
                     Button("Stop") { setup.cancelWork() }
-                        .buttonStyle(SecondaryButtonStyle())
+                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 } else {
                     primaryAction
+                        .buttonStyle(AccentButtonStyle(comfortable: true))
                 }
             }
             .padding(Theme.Space.l)

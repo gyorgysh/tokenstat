@@ -909,6 +909,11 @@ final class WorkspacesModel {
     /// last-known folders stay; a machine that keeps failing is gone, and its
     /// folders must not linger in the sidebar pretending to be reachable.
     private var remotePeerFailures: [String: Int] = [:]
+    /// The peer missed a refresh, but its saved folders remain visible until
+    /// the next failed attempt. Keep that state explicit in the workbench.
+    func isRemoteStale(_ peer: String) -> Bool {
+        remoteFolders[peer] != nil && (remotePeerFailures[peer] ?? 0) > 0
+    }
     /// Peers that have answered a workspace list at least once this session.
     /// The ones that never do are dialled far less often. See `loadRemote`.
     private var remotePeerEverAnswered: Set<String> = []
@@ -1209,11 +1214,10 @@ final class WorkspacesModel {
                     // didConnect, which unsuppressed the peer: Disconnect
                     // lasted until the dial came back.
                     guard !suppressedPeers.contains(peer.key) else { continue }
-                    // Newly answering, not routinely re-fetched. Posting on
-                    // every success re-ran `reconnect` from RootView, which
-                    // unsuppresses and spawns an immediate re-sweep: both
-                    // Disconnect and auto-connect-off lasted one sweep.
-                    let newlySeen = stagedFolders[peer.key] == nil
+                    // Newly answering or recovering from an offline mark,
+                    // not routinely re-fetched. Posting on every success
+                    // re-ran `reconnect` from RootView and undid Disconnect.
+                    let newlySeen = stagedFolders[peer.key] == nil || (stagedFailures[peer.key] ?? 0) > 0
                     EcosystemPublisher.publish(projects: fetched.filter(\.exists).map {
                         EcosystemProject(id: $0.id, name: $0.name, host: $0.machineLabel ?? "Computer")
                     }, lease: ecosystemLease, replacing: .peer(peer.key))
@@ -1276,6 +1280,13 @@ final class WorkspacesModel {
                     }
                     let failures = (stagedFailures[peer.key] ?? 0) + 1
                     stagedFailures[peer.key] = failures
+                    if failures == 1 && stagedFolders[peer.key] != nil {
+                        // Keep the folders visible with an offline label,
+                        // but stop offering their shortcuts as live work.
+                        EcosystemPublisher.publish(projects: [], lease: ecosystemLease,
+                            replacing: .peer(peer.key))
+                        unreachableKeys.append(peer.key)
+                    }
                     // A machine that answered before is worth asking again
                     // soon: it is probably asleep and will be back. One that
                     // has never answered at all is usually a phone or a tablet,

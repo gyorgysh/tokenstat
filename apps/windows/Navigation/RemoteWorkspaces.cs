@@ -66,6 +66,7 @@ internal static class RemoteWorkspaces
     private static readonly HashSet<string> EverAnswered = new(StringComparer.Ordinal);
     private static readonly HashSet<string> AskedWorkspace = new(StringComparer.Ordinal);
     private static readonly HashSet<string> Connected = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> Stale = new(StringComparer.Ordinal);
     // A remote.call cannot be cancelled after it has reached the daemon.
     // Each host revision fences its answer against a newer local decision.
     private static readonly Dictionary<string, long> Revisions = new(StringComparer.Ordinal);
@@ -86,6 +87,7 @@ internal static class RemoteWorkspaces
             EverAnswered.Clear();
             AskedWorkspace.Clear();
             Connected.Clear();
+            Stale.Clear();
             Revisions.Clear();
             _accountScope = null;
         }
@@ -225,6 +227,12 @@ internal static class RemoteWorkspaces
         }
     }
 
+    /// <summary>A cached folder is retained, but its host missed a refresh.</summary>
+    public static bool IsStale(string peerKey)
+    {
+        lock (Gate) return Stale.Contains(peerKey);
+    }
+
     public static IReadOnlyList<RemoteFolder> CachedFolders()
     {
         lock (Gate)
@@ -293,6 +301,7 @@ internal static class RemoteWorkspaces
                 EverAnswered.Add(peerKey);
                 FoldersByPeer[peerKey] = folders;
                 Connected.Add(peerKey);
+                Stale.Remove(peerKey);
                 // Keep the preference write with the publication. A
                 // Disconnect between these two steps used to re-enable a
                 // host that the person had just disconnected.
@@ -405,6 +414,7 @@ internal static class RemoteWorkspaces
             NextDial.Remove(peerKey);
             Failures.Remove(peerKey);
             Connected.Remove(peerKey);
+            Stale.Remove(peerKey);
             AutoConnect.Set(_accountScope, peerKey, false);
         }
         // A manual Disconnect must survive restart. An explicit Connect or
@@ -511,6 +521,7 @@ internal static class RemoteWorkspaces
                     FoldersByPeer.Remove(key);
                     Failures.Remove(key);
                     Connected.Remove(key);
+                    Stale.Remove(key);
                     changed = true;
                 }
             }
@@ -570,11 +581,9 @@ internal static class RemoteWorkspaces
                 NextDial[key] = now + RefreshAfter;
                 Failures[key] = 0;
                 EverAnswered.Add(key);
-                if (newlySeen)
-                {
-                    Connected.Add(key);
-                }
-                if (newlySeen || !same)
+                var recovered = Connected.Add(key);
+                Stale.Remove(key);
+                if (recovered || !same)
                 {
                     changed = true;
                 }
@@ -613,6 +622,7 @@ internal static class RemoteWorkspaces
                     if (FoldersByPeer.Remove(key))
                     {
                         Connected.Remove(key);
+                        Stale.Remove(key);
                         changed = true;
                     }
                     var neverOpened = !EverAnswered.Contains(key);
@@ -630,9 +640,16 @@ internal static class RemoteWorkspaces
                 var neverAnswered = !EverAnswered.Contains(key);
                 NextDial[key] = now + (neverAnswered && failures >= BackOffAfter
                     ? ColdRetryAfter : RetryAfter);
+                if (FoldersByPeer.ContainsKey(key) && failures < DropAfter)
+                {
+                    var becameStale = Stale.Add(key);
+                    var disconnected = Connected.Remove(key);
+                    if (becameStale || disconnected) changed = true;
+                }
                 if (failures >= DropAfter && FoldersByPeer.Remove(key))
                 {
                     Connected.Remove(key);
+                    Stale.Remove(key);
                     changed = true;
                 }
             }

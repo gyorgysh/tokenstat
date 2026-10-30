@@ -68,7 +68,7 @@ struct MachinesView: View {
                         .buttonStyle(AccentButtonStyle(small: true))
                     #if os(macOS)
                     Button("Set up Linux host", .connect) { addingServer = true }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
                     #endif
                 }
                 .padding(Theme.Space.m)

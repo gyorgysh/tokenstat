@@ -676,16 +676,18 @@ public sealed partial class MainWindow : Window
         }
         foreach (var peer in RemoteWorkspaces.CachedFolders().GroupBy(folder => folder.PeerKey))
         {
+            var label = peer.First().MachineLabel;
+            var stale = RemoteWorkspaces.IsStale(peer.Key);
             var machine = new NavigationViewItem
             {
-                Content = peer.First().MachineLabel,
+                Content = stale ? label + " · Offline" : label,
                 Tag = "machine:" + peer.Key,
                 Icon = new SymbolIcon { Symbol = Symbol.Globe },
                 SelectsOnInvoked = false,
                 IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:machine:" + peer.Key, true),
             };
             TrackSidebarExpansion(machine);
-            ToolTipService.SetToolTip(machine, peer.First().MachineLabel);
+            ToolTipService.SetToolTip(machine, stale ? label + " · Offline; showing saved folders" : label);
             foreach (var folder in peer)
                 machine.MenuItems.Add(FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git));
             _nav.MenuItems.Add(NavigationRows.Reuse(_nav, machine));
@@ -1683,7 +1685,8 @@ public sealed partial class MainWindow : Window
         var array = listed as JsonArray
             ?? listed["folders"] as JsonArray
             ?? listed["workspaces"] as JsonArray;
-        var remote = RemoteWorkspaces.CachedFolders();
+        var remote = RemoteWorkspaces.CachedFolders()
+            .Where(folder => RemoteWorkspaces.IsConnected(folder.PeerKey)).ToArray();
         if ((array is null || array.Count == 0) && remote.Count == 0)
         {
             root.Children.Add(EmptyState.FirstProject(Buttons.Primary(L10n.Text("common.add_project"), ActionIcon.Create,
@@ -2446,7 +2449,9 @@ public sealed partial class MainWindow : Window
     private IReadOnlyList<NewChatRepository> NewChatRepositories() => _localFolders
         .Where(folder => Format.Text(folder, "id").Length > 0)
         .Select(folder => new NewChatRepository(Format.Text(folder, "id"), Format.Text(folder, "name"), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"), Format.Text(folder, "path")))
-        .Concat(RemoteWorkspaces.CachedFolders().Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.Path))).ToArray();
+        .Concat(RemoteWorkspaces.CachedFolders()
+            .Where(folder => RemoteWorkspaces.IsConnected(folder.PeerKey))
+            .Select(folder => new NewChatRepository(folder.Id, folder.Name, folder.MachineLabel, folder.Path))).ToArray();
 
     private void OpenNewChat(string? repository = null)
     {
