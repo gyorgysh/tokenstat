@@ -97,6 +97,10 @@ class WorkspacesConnectionState {
         })
     }
 
+    fun setFolders(folders: JsonArray) {
+        mutableFolders.value = folders
+    }
+
     fun clearLists() {
         mutableFolders.value = JsonArray(emptyList())
         mutableSessions.value = JsonArray(emptyList())

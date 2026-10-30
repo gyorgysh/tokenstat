@@ -78,6 +78,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -213,6 +214,7 @@ fun harnessIdForCommand(command: String): String? = when (command.replace('\\', 
 /// nothing worth saying. Port of `WorkspaceFolder.subtitle`.
 fun folderSubtitle(folder: JsonObject): String? {
     if ((folder["exists"] as? JsonPrimitive)?.booleanOrNull == false) return L10n.text("android.hostworkspaces.folder_missing.f06c68a6")
+    if (folder.bol("gitStatusPending") == true) return null
     val git = folder["git"] as? JsonObject ?: return L10n.text("android.hostworkspaces.not_a_git_repo.86308fef")
     if (git.bol("isRepo") != true) return L10n.text("android.hostworkspaces.not_a_git_repo.86308fef")
     val parts = mutableListOf<String>()
@@ -734,6 +736,13 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
                     )
                 }
             }
+        }
+        if (folder.bol("gitStatusPending") == true) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                color = colors.accent,
+                strokeWidth = 2.dp,
+            )
         }
         if (onRename != null) {
             Box {

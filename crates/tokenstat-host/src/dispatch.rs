@@ -1114,6 +1114,7 @@ fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
         added_at_ms: ws.added_at_ms,
         exists,
         git: exists.then(|| tokenstat_workspace::git::status(&ws.path)),
+        git_status_pending: None,
         team_organizations: Vec::new(),
     };
 
@@ -3194,9 +3195,14 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
         // Each arm takes the registry lock only long enough to copy the folder
         // it needs. Nothing below runs a subprocess with a guard in hand.
         //
-        // Git is read for each on every list: a status call is cheap, and a
-        // cached one that lies about a dirty tree is worse than none.
+        // Ordinary lists include fresh Git status. The explicit lightweight
+        // list omits it so a cold mobile client can show registered folders
+        // before the status scan finishes.
         "workspace.list" => {
+            let quick = serde_json::from_str::<Value>(params)
+                .ok()
+                .and_then(|value| value.get("includeGit").and_then(Value::as_bool))
+                == Some(false);
             let folders: Vec<tokenstat_workspace::Workspace> = crate::workspaces::read()
                 .workspaces
                 .iter()
@@ -3207,23 +3213,39 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             // capacity-aware: each description starts several Git processes,
             // so an older Intel machine needs room for its foreground work
             // while a newer Mac need not be held to the same fixed ceiling.
-            let dtos: Vec<WorkspaceDto> = folders
-                .chunks(workspace_status_workers())
-                .flat_map(|batch| {
-                    std::thread::scope(|scope| {
-                        let handles: Vec<_> = batch
-                            .iter()
-                            .map(|ws| scope.spawn(move || describe(ws)))
-                            .collect();
-                        handles
-                            .into_iter()
-                            // A panic reading one folder must not lose the
-                            // others, and there is nothing useful to say here.
-                            .filter_map(|h| h.join().ok())
-                            .collect::<Vec<_>>()
+            let dtos: Vec<WorkspaceDto> = if quick {
+                folders
+                    .iter()
+                    .map(|ws| WorkspaceDto {
+                        id: ws.id.clone(),
+                        path: ws.path.display().to_string(),
+                        name: ws.name.clone(),
+                        added_at_ms: ws.added_at_ms,
+                        exists: ws.exists(),
+                        git: None,
+                        git_status_pending: Some(true),
+                        team_organizations: Vec::new(),
                     })
-                })
-                .collect();
+                    .collect()
+            } else {
+                folders
+                    .chunks(workspace_status_workers())
+                    .flat_map(|batch| {
+                        std::thread::scope(|scope| {
+                            let handles: Vec<_> = batch
+                                .iter()
+                                .map(|ws| scope.spawn(move || describe(ws)))
+                                .collect();
+                            handles
+                                .into_iter()
+                                // A panic reading one folder must not lose the
+                                // others, and there is nothing useful to say here.
+                                .filter_map(|h| h.join().ok())
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                    .collect()
+            };
             // Read after the status cache, so sharing a folder shows at once
             // rather than when that folder's Git reading next expires.
             let shared = crate::teams::shared_workspace_organizations();

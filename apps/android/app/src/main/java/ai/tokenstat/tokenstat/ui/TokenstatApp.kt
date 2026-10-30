@@ -693,7 +693,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 warmSession.setConnected(last, true)
                 warmSession.setError(null)
                 warmSession.finishConnecting(ticket)
-                val folders = model.workspaceSection(last, "workspace.list", buildJsonObject {}) as? JsonArray
+                val folders = model.workspaceSection(last, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
                     ?: JsonArray(emptyList())
                 if (!current() || !warmStore.isAutoConnectEnabled(last)) return@launch
                 warmSession.setLists(folders, JsonArray(emptyList()), JsonArray(emptyList()))
@@ -714,6 +714,16 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     model.workspaceSection(last, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
                 }.getOrNull() ?: JsonArray(emptyList())
                 if (current()) warmSession.setLists(folders, sessions, chats)
+                if (folders.any { (it as? JsonObject)?.bool("gitStatusPending") == true }) {
+                    val fresh = runCatching {
+                        model.workspaceSection(last, "workspace.list", buildJsonObject {}) as? JsonArray
+                    }.getOrNull() ?: return@launch
+                    if (!current() || !warmStore.isAutoConnectEnabled(last)) return@launch
+                    warmSession.setFolders(fresh)
+                    ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                        context, last, fresh, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                    )
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -3268,8 +3278,12 @@ private fun WorkspacesScreen(
                 session.setLoadingFolders(true)
                 session.setConnected(peer, true)
                 session.finishConnecting(connectionTicket)
-                val loadedFolders = model.workspaces(peer)
+                val loadedFolders = model.workspaceSection(peer, "workspace.list", buildJsonObject { put("includeGit", false) }) as? JsonArray
+                    ?: JsonArray(emptyList())
                 if (!current()) return@runCatching
+                ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                    context, peer, loadedFolders, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                )
                 session.setLists(loadedFolders, JsonArray(emptyList()), JsonArray(emptyList()))
                 session.setLoadingFolders(false)
                 autoFailures = 0
@@ -3284,6 +3298,16 @@ private fun WorkspacesScreen(
                     model.workspaceSection(peer, "chat.recent", buildJsonObject { put("limit", 50) }) as? JsonArray
                 }.getOrNull() ?: JsonArray(emptyList())
                 if (current()) session.setLists(loadedFolders, loadedSessions, loadedChats)
+                if (loadedFolders.any { (it as? JsonObject)?.bool("gitStatusPending") == true }) {
+                    val fresh = runCatching {
+                        model.workspaceSection(peer, "workspace.list", buildJsonObject {}) as? JsonArray
+                    }.getOrNull() ?: return@runCatching
+                    if (!current()) return@runCatching
+                    session.setFolders(fresh)
+                    ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
+                        context, peer, fresh, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+                    )
+                }
             }.onFailure {
                 if (!current()) return@onFailure
                 // Leaving the screen mid-dial cancels the scope. That is not a

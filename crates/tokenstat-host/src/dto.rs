@@ -557,6 +557,11 @@ pub struct WorkspaceDto {
     /// Absent when the folder is missing, so a caller cannot mistake "we did
     /// not look" for "no changes".
     pub git: Option<tokenstat_workspace::GitStatus>,
+    /// A lightweight workspace.list response omits Git work so a client can
+    /// show folders immediately, then request a full status list in the
+    /// background. Absent on ordinary responses and older hosts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_status_pending: Option<bool>,
     /// Organizations this computer shares the folder with, by id. A client
     /// names them from its own Teams directory. Empty when nobody else sees
     /// the folder, and absent from older hosts, which read the same way.
@@ -866,6 +871,28 @@ impl CalendarDto {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn lightweight_workspace_list_marks_git_as_pending() {
+        let mut workspace = WorkspaceDto {
+            id: "folder".into(),
+            path: "/tmp/folder".into(),
+            name: "folder".into(),
+            added_at_ms: 1,
+            exists: true,
+            git: None,
+            git_status_pending: Some(true),
+            team_organizations: Vec::new(),
+        };
+        let quick = serde_json::to_value(&workspace).expect("quick folder serializes");
+        assert_eq!(quick["gitStatusPending"], true);
+        assert!(quick["git"].is_null());
+
+        workspace.git_status_pending = None;
+        let full = serde_json::to_value(&workspace).expect("full folder serializes");
+        assert!(full.get("gitStatusPending").is_none());
+    }
 
     /// The account call decodes `relayUsage` with `from_value(...).ok()`, so a
     /// strict struct turns one missing server key into a silently absent card.

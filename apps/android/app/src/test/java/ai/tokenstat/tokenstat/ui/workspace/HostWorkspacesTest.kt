@@ -55,6 +55,7 @@ class HostWorkspacesTest {
         assertEquals("main ⇡2 +11 −28", folderSubtitle(repo))
         assertEquals("Folder missing", folderSubtitle(buildJsonObject { put("exists", false) }))
         assertEquals("Not a git repo", folderSubtitle(buildJsonObject { put("exists", true) }))
+        assertNull(folderSubtitle(buildJsonObject { put("exists", true); put("gitStatusPending", true) }))
         assertNull(
             folderSubtitle(
                 buildJsonObject {
