@@ -746,6 +746,7 @@ final class ClientWorkspacesModel {
     private(set) var loadedHostKeys: Set<String> = []
     private(set) var staleHostKeys: Set<String> = []
     @ObservationIgnored private var backgroundSweep: Task<Void, Never>?
+    @ObservationIgnored private var refreshBackgroundAfterSweep = false
     @ObservationIgnored private var backgroundFailures: [String: Int] = [:]
     @ObservationIgnored private var nextBackgroundAttempt: [String: Date] = [:]
 
@@ -1025,8 +1026,11 @@ final class ClientWorkspacesModel {
     /// foreground dial owns one slot; this sweep uses at most three more.
     /// Each peer retains its own loaded lists and retry clock.
     private func warmRememberedHosts(forceRefresh: Bool = false) {
-        guard !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope,
-              backgroundSweep == nil else { return }
+        guard !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
+        if backgroundSweep != nil {
+            if forceRefresh { refreshBackgroundAfterSweep = true }
+            return
+        }
         let candidates = rememberedHosts.filter { host in
             host.peerKey != lastConnectedHost && host.peerKey != connectedKey &&
                 host.online != false && isAutoConnectEnabled(for: host.peerKey) &&
@@ -1046,6 +1050,10 @@ final class ClientWorkspacesModel {
                 }
             }
             self.backgroundSweep = nil
+            if self.refreshBackgroundAfterSweep {
+                self.refreshBackgroundAfterSweep = false
+                self.warmRememberedHosts(forceRefresh: true)
+            }
         }
     }
 
@@ -1113,11 +1121,11 @@ final class ClientWorkspacesModel {
         // An attempt already running is the recovery. Its ladder outlasts the
         // path change that woke this, so redialling on top of it only refreshes
         // the list twice. A queued explicit tap wins over the recovery too.
-        guard isConnecting == nil, pendingPeer == nil else { return }
         let now = Date()
         if now.timeIntervalSince(lastRecoverAt) < 1.5 { return }
         lastRecoverAt = now
         warmRememberedHosts(forceRefresh: true)
+        guard isConnecting == nil, pendingPeer == nil else { return }
         await refresh(account: account)
         guard let key = connectedKey,
               let host = hosts.first(where: { $0.peerKey == key })
@@ -1351,6 +1359,7 @@ final class ClientWorkspacesModel {
         refreshGeneration = UUID()
         backgroundSweep?.cancel()
         backgroundSweep = nil
+        refreshBackgroundAfterSweep = false
         remoteRefresh?.task.cancel()
         remoteRefresh = nil
         activeTerminal?.stop()
