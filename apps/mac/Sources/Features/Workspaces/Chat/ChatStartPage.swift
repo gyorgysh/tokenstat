@@ -87,7 +87,10 @@ struct ChatStartPage: View {
                 ScrollView {
                     VStack(spacing: 26) {
                         introduction
-                        if needsRepository {
+                        if requiresHostSelection, let hostPicker {
+                            HStack { hostPicker; Spacer(minLength: 0) }
+                                .chatStartCard()
+                        } else if needsRepository {
                             onboarding
                         } else {
                             composer
@@ -186,7 +189,8 @@ struct ChatStartPage: View {
                 .tracking(-0.4)
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
-            Text(needsRepository ? L10n.text("common.new_chat.empty") : L10n.text("common.new_chat.subtitle"))
+            Text(requiresHostSelection ? L10n.text("common.new_chat.choose_host") :
+                 needsRepository ? L10n.text("common.new_chat.empty") : L10n.text("common.new_chat.subtitle"))
                 .font(Theme.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
     }
@@ -198,7 +202,7 @@ struct ChatStartPage: View {
             // thing a send cannot happen without at the bottom of the card.
             HStack(spacing: 10) {
                 if let hostPicker { hostPicker }
-                repositoryPicker
+                if !requiresHostSelection { repositoryPicker }
                 Spacer(minLength: 0)
                 if catalogLoading { ProgressView().controlSize(.small) }
                 if catalogError != nil {

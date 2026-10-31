@@ -102,7 +102,7 @@ private fun newChatCopy(key: String): String { val resource = "common.new_chat.$
 @Composable
 fun NewChatScreen(
     model: AppViewModel, accountOwner: String?, accountScope: String?, initialSetup: NewChatSetup? = null, onSetup: (NewChatSetup?) -> Unit,
-    draft: String, staged: List<StagedAttachment>, onDraft: (String) -> Unit, hosts: List<JsonObject>, connectedPeer: String?, connecting: Boolean,
+    draft: String, staged: List<StagedAttachment>, onDraft: (String) -> Unit, hosts: List<JsonObject>, connectedPeer: String?, preferredPeer: String?, connecting: Boolean,
     folders: List<JsonObject>, selectedRepository: String?, onRepository: (String) -> Unit,
     onHost: (JsonObject) -> Unit, onAdd: () -> Unit, onSend: () -> Unit, onClose: () -> Unit, error: String? = null,
     onManageDevices: () -> Unit = {}, onSetupMachine: () -> Unit = onManageDevices,
@@ -114,12 +114,21 @@ fun NewChatScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var hostMenu by remember { mutableStateOf(false) }
-    var chosenPeer by rememberSaveable(accountOwner) { mutableStateOf<String?>(null) }
+    // The draft owner changes when a repository is chosen. Host selection
+    // belongs to the account and must survive that change.
+    var chosenPeer by rememberSaveable(accountScope) { mutableStateOf<String?>(null) }
     val effectivePeer = if (hosts.size > 1 && selectedRepository == null) {
         connectedPeer?.takeIf { it == chosenPeer }
     } else connectedPeer
-    LaunchedEffect(hosts.size, selectedRepository) {
-        if (hosts.size > 1 && selectedRepository == null && chosenPeer == null) hostMenu = true
+    LaunchedEffect(hosts, selectedRepository, preferredPeer, connectedPeer) {
+        if (selectedRepository != null || chosenPeer != null) return@LaunchedEffect
+        val preferred = hosts.firstOrNull {
+            it.newChatText("publicIdentity") == preferredPeer
+        }
+        if (preferred != null) {
+            chosenPeer = preferred.newChatText("publicIdentity")
+            if (connectedPeer != chosenPeer && !connecting) onHost(preferred)
+        }
     }
     val savedChoice = remember(context, accountOwner) { SharedPrefsLaunchChoice(context).read() }
     val currentOwner by rememberUpdatedState(accountOwner)
@@ -267,32 +276,29 @@ fun NewChatScreen(
                             onOpen = { hostMenu = true }, enabled = !connecting,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        // Lit until the choice is made, the way the Apple page lights
-                        // it: it is the one control on this page a send cannot
-                        // happen without.
-                        val litRepository = effectivePeer != null && !connecting && selected == null
-                        Box(Modifier.fillMaxWidth()) {
-                            TsPickerField(
-                                summary = selected?.newChatText("name") ?: newChatCopy("choose_repository"),
-                                onOpen = { repositoryMenu = true }, enabled = effectivePeer != null && !connecting,
-                                modifier = Modifier.fillMaxWidth().testTag("newChat.repository"),
-                            )
-                            // Keep the required choice visible without shrinking
-                            // its touch target or intercepting its tap.
-                            if (litRepository) Box(Modifier.matchParentSize().border(1.dp, colors.accent, RoundedCornerShape(Space.s)))
-                        }
-                        TextButton(onClick = onAdd, enabled = effectivePeer != null && !connecting,
-                            modifier = Modifier.align(Alignment.Start).heightIn(min = 48.dp)) {
-                            Icon(ActionIcon.Create.vector, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(newChatCopy("add_repository"))
+                        if (effectivePeer != null) {
+                            val litRepository = !connecting && selected == null
+                            Box(Modifier.fillMaxWidth()) {
+                                TsPickerField(
+                                    summary = selected?.newChatText("name") ?: newChatCopy("choose_repository"),
+                                    onOpen = { repositoryMenu = true }, enabled = !connecting,
+                                    modifier = Modifier.fillMaxWidth().testTag("newChat.repository"),
+                                )
+                                if (litRepository) Box(Modifier.matchParentSize().border(1.dp, colors.accent, RoundedCornerShape(Space.s)))
+                            }
+                            TextButton(onClick = onAdd, enabled = !connecting,
+                                modifier = Modifier.align(Alignment.Start).heightIn(min = 48.dp)) {
+                                Icon(ActionIcon.Create.vector, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(newChatCopy("add_repository"))
+                            }
                         }
                         if (effectivePeer == null) {
                             Text(newChatCopy("connect_host_message"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                         } else if (folders.isEmpty() && !connecting) {
                             Text(newChatCopy("empty"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                         }
-                        ChatComposer(chat = setup?.chat(), draft = draft, onDraft = onDraft, hint = newChatCopy("prompt"), sending = false,
+                        if (effectivePeer != null) ChatComposer(chat = setup?.chat(), draft = draft, onDraft = onDraft, hint = newChatCopy("prompt"), sending = false,
                             sendLabel = newChatCopy(if (draft.isBlank() && staged.isEmpty()) "open_chat" else "send"), staged = staged,
                             onPick = { pickerLease = inputLease; picker.launch(arrayOf("*/*")) },
                             onRemove = { attachment -> if (owns(accountOwner)) { val snapshot = model.chatComposers.snapshot(accountOwner); model.chatComposers.update(accountOwner, snapshot.copy(attachments = snapshot.attachments - attachment)) } },
@@ -304,7 +310,7 @@ fun NewChatScreen(
                         if (reading || connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         (attachError ?: error)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.danger) }
                         if (attachError == null && error == null && setupError == null) {
-                            blockReason?.let {
+                            blockReason?.takeIf { effectivePeer != null }?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary,
                                     textAlign = TextAlign.Center, modifier = Modifier.testTag("newChat.blocked"))
                             }

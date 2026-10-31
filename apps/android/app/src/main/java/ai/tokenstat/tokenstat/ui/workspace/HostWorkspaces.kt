@@ -529,6 +529,7 @@ fun HostCard(
 /** Several hosts share one short list; details stay in each row's menu. */
 @Composable
 fun CompactHostList(
+    model: AppViewModel,
     hosts: List<JsonObject>,
     currentPeer: String?,
     retainedHosts: Set<String>,
@@ -571,19 +572,22 @@ fun CompactHostList(
                     Column(Modifier.weight(1f)) {
                         Text(name, style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                             color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            when {
-                                online == false -> L10n.text("common.offline")
-                                busy -> L10n.text("android.hostworkspaces.connecting.72021eb7")
-                                connected -> L10n.text("common.chat.stats.connected")
-                                peer in accessDeniedHosts -> L10n.text("android.hostworkspaces.request_access.b06f1662")
-                                peer in staleHosts -> L10n.text("android.hostworkspaces.needs_refresh.5b783f2d")
-                                else -> L10n.text("common.connect")
-                            },
-                            style = TsType.caption,
-                            color = if (connected) colors.accent else colors.textSecondary,
-                            maxLines = 1,
-                        )
+                        if (connected) {
+                            CompactHostConnectionSummary(model, peer)
+                        } else {
+                            Text(
+                                when {
+                                    online == false -> L10n.text("common.offline")
+                                    busy -> L10n.text("android.hostworkspaces.connecting.72021eb7")
+                                    peer in accessDeniedHosts -> L10n.text("android.hostworkspaces.request_access.b06f1662")
+                                    peer in staleHosts -> L10n.text("android.hostworkspaces.needs_refresh.5b783f2d")
+                                    else -> L10n.text("common.connect")
+                                },
+                                style = TsType.caption,
+                                color = colors.textSecondary,
+                                maxLines = 1,
+                            )
+                        }
                     }
                     if (connected && machine.str("id") != null) {
                         Icon(Icons.Default.ChevronRight, contentDescription = null,
@@ -624,6 +628,45 @@ fun CompactHostList(
                 Text(if (expanded) L10n.text("android.tokenstatapp.show_less.94ea9b1d")
                     else L10n.text("android.tokenstatapp.show_more_0_more.c732a4ba", "${ordered.size - 3}"))
             }
+        }
+    }
+}
+
+/** A route is a live tunnel reading; the online dot only means presence. */
+@Composable
+private fun CompactHostConnectionSummary(model: AppViewModel, peer: String) {
+    val colors = LocalTsColors.current
+    var route by remember(peer) { mutableStateOf<String?>(null) }
+    var stats by remember(peer) { mutableStateOf<JsonObject?>(null) }
+    ForegroundEffect(peer) {
+        while (true) {
+            route = runCatching { model.peerRoute(peer) }.getOrNull() ?: route
+            runCatching { model.hostStats(peer) }.onSuccess { stats = it }
+            delay(20_000)
+        }
+    }
+    val charging = stats?.get("charging")?.jsonPrimitive?.booleanOrNull == true
+    val percent = stats?.get("percent")?.jsonPrimitive?.intOrNull
+    val power = stats?.get("power")?.jsonPrimitive?.contentOrNull
+    val powerLabel = when {
+        charging && percent != null -> L10n.text("android.hostworkspaces.charging_percent", "$percent")
+        charging -> L10n.text("android.hostworkspaces.charging")
+        power == "battery" && percent != null -> L10n.text("android.hostworkspaces.battery_percent", "$percent")
+        power == "battery" -> L10n.text("android.homelogic.on_battery.51d53044")
+        power == "ac" -> L10n.text("android.homelogic.plugged_in.edefc1f9")
+        else -> null
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            when (route) {
+                "direct" -> L10n.text("android.hostworkspaces.direct_route")
+                "relay" -> L10n.text("android.hostworkspaces.relay_route")
+                else -> L10n.text("common.chat.stats.connected")
+            }, style = TsType.caption, color = colors.accent, maxLines = 1,
+        )
+        if (powerLabel != null) {
+            Text("· $powerLabel", style = TsType.caption, color = colors.textSecondary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

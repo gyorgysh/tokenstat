@@ -100,10 +100,9 @@ struct ClientNewChatScreen: View {
                     await workspaces.connect(target)
                 }
                 chosenHostKey = requestedPeer
-            } else if workspaces.hosts.count > 1 {
+            } else if let preferred = defaultHost {
                 draft.repositoryID = nil
-            } else if workspaces.hosts.count == 1 {
-                await workspaces.autoConnectLastHost()
+                await choose(preferred, thenAdd: false)
             }
         }
         .onChange(of: WorkSessionContext.shared.generation) { _, generation in
@@ -173,6 +172,22 @@ struct ClientNewChatScreen: View {
         if let remote = account.account?.canRemote { return remote }
         let tier = account.account?.tier?.lowercased()
         return ["free", "supporter", "patron", "legend"].contains(tier)
+    }
+
+    /// A sole computer needs no extra choice. With several, use the last
+    /// connected one only while it is still retained or allowed to reconnect.
+    /// A manual disconnect with auto-connect off remains respected.
+    private var defaultHost: ClientHost? {
+        if workspaces.hosts.count == 1 {
+            return workspaces.hosts.first {
+                $0.online != false &&
+                (workspaces.loadedHostKeys.contains($0.peerKey) || workspaces.isAutoConnectEnabled(for: $0.peerKey))
+            }
+        }
+        guard let peer = workspaces.connectedKey ?? workspaces.lastConnectedHost,
+              let host = workspaces.hosts.first(where: { $0.peerKey == peer && $0.online != false }),
+              workspaces.loadedHostKeys.contains(peer) || workspaces.isAutoConnectEnabled(for: peer) else { return nil }
+        return host
     }
 
     private func isHeadlessHost(named host: String) -> Bool {

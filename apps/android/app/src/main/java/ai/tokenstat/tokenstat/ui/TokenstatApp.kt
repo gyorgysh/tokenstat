@@ -2137,14 +2137,17 @@ private fun DevicesScreen(
     val thisId = state.account?.string("thisMachineId")
     // Each host's share of spend, fetched once when the screen opens like
     // `ClientDevicesModel`: one request per device on the host's side.
-    var usageByMachine by remember { mutableStateOf<Map<String, DeviceUsage>>(emptyMap()) }
-    var usageError by remember { mutableStateOf<String?>(null) }
     val tierDays = deviceHistoryDays(state.account?.string("tier"))
+    var usageByMachine by remember(unsorted, tierDays) { mutableStateOf<Map<String, DeviceUsage>>(emptyMap()) }
+    var usageError by remember(unsorted, tierDays) { mutableStateOf<String?>(null) }
+    var usageLoading by remember(unsorted, tierDays) { mutableStateOf(true) }
     LaunchedEffect(unsorted, tierDays) {
+        usageLoading = true
         val ids = unsorted.mapNotNull { (it as? JsonObject)?.takeIf { m -> m.string("kind") != "client" }?.string("id") }
         if (ids.isEmpty()) {
             usageByMachine = emptyMap()
             usageError = null
+            usageLoading = false
             return@LaunchedEffect
         }
         runCatching {
@@ -2173,6 +2176,7 @@ private fun DevicesScreen(
             // where the devices should be.
             usageError = L10n.text("android.tokenstatapp.could_not_work_out_what_each_device_spent.5f9efc51")
         }
+        usageLoading = false
     }
     // This device first, then awake machines by spend, then everyone else by
     // recency: the same order the Apple devices list reads in.
@@ -2220,6 +2224,8 @@ private fun DevicesScreen(
             machine = selected,
             thisId = thisId,
             usage = selected.string("id")?.let { usageByMachine[it] },
+            usageLoading = usageLoading,
+            usageFailed = usageError != null,
             accountTotalMicros = usageByMachine.values.sumOf { it.valueMicros },
             onBack = { selectedId = null },
             onPlans = onPlans,
@@ -3964,7 +3970,13 @@ private fun WorkspacesScreen(
                 if (ProjectOwner.from(model.state.value.account, "unselected", "new-chat")?.accountScope == newChatAccount)
                     model.chatComposers.update(newChatOwner, model.chatComposers.snapshot(newChatOwner).copy(text = it))
             },
-            hosts = hosts, connectedPeer = connectedPeer, connecting = connectingPeer != null,
+            hosts = hosts, connectedPeer = connectedPeer,
+            preferredPeer = (connectedPeer ?: layoutStore.lastConnectedHost()?.takeIf { saved ->
+                hosts.any { it.string("publicIdentity") == saved }
+            }
+                ?: hosts.singleOrNull()?.string("publicIdentity"))?.takeIf { peer ->
+                peer in retainedHosts || layoutStore.isAutoConnectEnabled(peer)
+            }, connecting = connectingPeer != null,
             folders = folders.filterIsInstance<JsonObject>(), selectedRepository = newChatRepository,
             onRepository = { selectNewChatRepository(it) }, onHost = { machine -> newChatRepository = null; scope.launch { connect(machine) } },
             onManageDevices = onManageDevices,
@@ -4211,7 +4223,7 @@ private fun WorkspaceList(
         if (multiHost) {
             item {
                 CompactHostList(
-                    hosts, connectedPeer, retainedHosts, staleHosts, accessDeniedHosts, connectingPeer,
+                    model, hosts, connectedPeer, retainedHosts, staleHosts, accessDeniedHosts, connectingPeer,
                     autoConnect, onAutoConnect, onConnect, onDisconnect, onOpenDevice,
                 )
             }

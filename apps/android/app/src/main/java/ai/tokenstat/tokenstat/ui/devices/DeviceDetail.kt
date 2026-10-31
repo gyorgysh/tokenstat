@@ -110,6 +110,8 @@ fun DeviceDetailScreen(
     machine: JsonObject,
     thisId: String?,
     usage: DeviceUsage?,
+    usageLoading: Boolean,
+    usageFailed: Boolean,
     accountTotalMicros: Long,
     onBack: () -> Unit,
     onPlans: () -> Unit,
@@ -212,7 +214,8 @@ fun DeviceDetailScreen(
             Text(currentName, style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
         }
         if (isHost && !isThis) {
-            SpendCard(usage = usage, accountTotalMicros = accountTotalMicros)
+            SpendCard(usage = usage, loading = usageLoading, failed = usageFailed,
+                accountTotalMicros = accountTotalMicros)
         }
         // Reachability, live readings and the two ways in, as one header.
         // This device and keyless machines keep the split cards instead.
@@ -280,37 +283,32 @@ fun DeviceDetailScreen(
 private enum class FolderFlow { None, Choose, Clone }
 
 /// This device's share of spend: the figure, the window it covers, and the
-/// active days, events and account share under it. A share that has not
-/// been fetched reads "n/a", never zero: reporting zero for something
-/// unmeasured is inventing a number.
+/// active days, events and account share under it. Missing readings describe
+/// whether the request is pending, unavailable, or returned no events.
 @Composable
-private fun SpendCard(usage: DeviceUsage?, accountTotalMicros: Long) {
+private fun SpendCard(usage: DeviceUsage?, loading: Boolean, failed: Boolean, accountTotalMicros: Long) {
     val colors = LocalTsColors.current
     TsCard {
         Box(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    if (usage != null) money(usage.valueMicros) else L10n.text("android.devicedetail.n_a.a683c5c5"),
-                    style = TsType.numeric(26, FontWeight.SemiBold),
-                    color = colors.accent,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    if (usage != null) {
-                        L10n.text("android.devicedetail.at_api_list_price_0.32cb2c25", "${deviceWindowPhrase(usage.days)}")
-                    } else {
-                        L10n.text("android.devicedetail.this_device_s_share_has_not_been_fetched.6aa4e138")
-                    },
-                    style = TsType.caption,
-                    color = colors.textSecondary,
-                )
                 if (usage != null) {
+                    Text(money(usage.valueMicros), style = TsType.numeric(26, FontWeight.SemiBold),
+                        color = colors.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(L10n.text("android.devicedetail.at_api_list_price_0.32cb2c25", "${deviceWindowPhrase(usage.days)}"),
+                        style = TsType.caption, color = colors.textSecondary)
                     Text(
                         deviceSpendDetail(usage, accountTotalMicros),
                         style = TsType.caption,
                         color = colors.textSecondary,
                         modifier = Modifier.padding(top = 2.dp),
+                    )
+                } else {
+                    Text(
+                        when {
+                            loading -> L10n.text("android.devicedetail.loading_usage")
+                            failed -> L10n.text("android.devicedetail.usage_unavailable")
+                            else -> L10n.text("android.devicedetail.no_usage_recorded")
+                        }, style = TsType.body, color = colors.textSecondary,
                     )
                 }
             }

@@ -685,7 +685,7 @@ struct ClientWorkspacesView: View {
                             .accessibilityHidden(true)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: connected ? 78 : 64, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -715,7 +715,7 @@ struct ClientWorkspacesView: View {
                 Image(systemName: "ellipsis")
                     .font(ClientType.label.weight(.semibold))
                     .foregroundStyle(Theme.accent)
-                    .frame(width: 44, height: connected ? 78 : 64)
+                    .frame(width: 44, height: 64)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("\(host.name), \(L10n.text("apple.clientlaunchtile.more.d47d7cb0"))")
@@ -1025,29 +1025,20 @@ private struct ClientHostConnectionSummary: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Text(L10n.text("common.chat.stats.connected"))
-                    .foregroundStyle(Theme.accent)
-                    .fixedSize(horizontal: true, vertical: false)
-                if let routeLabel = shortRoute {
-                    Text("· \(routeLabel)")
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .accessibilityLabel(RemoteTrafficPeer.knownLabel(route) ?? routeLabel)
-                }
-            }
-            .font(ClientType.caption)
-            if let stats, let powerLabel {
-                Label(powerLabel,
-                      systemImage: HostStatsFormat.powerSymbol(stats))
-                    .font(ClientType.caption)
+        HStack(spacing: 4) {
+            Text(shortRoute ?? L10n.text("common.chat.stats.connected"))
+                .foregroundStyle(Theme.accent)
+            if let powerLabel {
+                Text("· \(powerLabel)")
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
             }
         }
+        .font(ClientType.caption)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([L10n.text("common.chat.stats.connected"), RemoteTrafficPeer.knownLabel(route), powerLabel]
+            .compactMap { $0 }.joined(separator: ", "))
         .task(id: peer) {
             while !Task.isCancelled {
                 route = await HostStatsFormat.loadRoute(for: peer)
