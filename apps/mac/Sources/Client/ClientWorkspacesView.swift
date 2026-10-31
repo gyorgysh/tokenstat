@@ -111,7 +111,14 @@ struct ClientWorkspacesView: View {
                     if let host = model.awaitingAccessHost {
                         ClientAwaitingAccessCard(
                             hostName: host,
-                            isHeadless: isHeadlessHost(named: host)
+                            peerKey: model.awaitingAccessPeerKey ?? "",
+                            isHeadless: isHeadlessHost(named: host),
+                            onGranted: {
+                                if let peer = model.awaitingAccessPeerKey,
+                                   let target = model.hosts.first(where: { $0.peerKey == peer }) {
+                                    Task { await model.connect(target) }
+                                }
+                            }
                         )
                     }
                     if let message = model.infoMessage {
@@ -1212,6 +1219,7 @@ final class ClientWorkspacesModel {
     /// is still standing. Named rather than a bool, because the card says
     /// which machine somebody has to walk to.
     private(set) var awaitingAccessHost: String?
+    private(set) var awaitingAccessPeerKey: String?
     /// The watch that connects on its own once the answer lands.
     ///
     /// The waiting card shows a picture that keeps moving, and a picture that
@@ -1623,6 +1631,7 @@ final class ClientWorkspacesModel {
                     // nothing will change until they act, and a line of grey
                     // caption is not enough to say so.
                     awaitingAccessHost = host.name
+                    awaitingAccessPeerKey = host.peerKey
                     infoMessage = nil
                     errorMessage = nil
                     if !recovering || connectedKey == host.peerKey {
@@ -1756,6 +1765,7 @@ final class ClientWorkspacesModel {
         accessWatch?.cancel()
         accessWatch = nil
         awaitingAccessHost = nil
+        awaitingAccessPeerKey = nil
     }
 
     /// A row spins while its host is dialling or queued for the dial. One
@@ -1921,6 +1931,7 @@ final class ClientWorkspacesModel {
             publishEcosystem([], peer: peerKey, host: "", lease: ecosystemLease)
             disconnect(manual: false)
             awaitingAccessHost = host?.name
+            awaitingAccessPeerKey = host?.peerKey
             if let host { watchForAccess(host) }
             return
         }

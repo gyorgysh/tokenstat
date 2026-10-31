@@ -452,8 +452,11 @@ enum ClientWireframe {
 /// keeps a picture moving so it reads as pending rather than as failed.
 struct ClientAwaitingAccessCard: View {
     let hostName: String
+    let peerKey: String
     var isHeadless: Bool = false
+    var onGranted: (() -> Void)?
     @State private var showHelp = false
+    @State private var showCode = false
 
     var body: some View {
         VStack(spacing: Theme.Space.s) {
@@ -468,8 +471,15 @@ struct ClientAwaitingAccessCard: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(L10n.text("apple.clientstates.how_to_approve.e0fc7247"), .help) {
-                showHelp = true
+            HStack(spacing: Theme.Space.m) {
+                Button(L10n.text("apple.clientstates.how_to_approve.e0fc7247"), .help) {
+                    showHelp = true
+                }
+                if !peerKey.isEmpty {
+                    Button(L10n.text("apple.clientstates.i_have_a_code.b090f9d2"), .pair) {
+                        showCode = true
+                    }
+                }
             }
             .font(ClientType.label.weight(.semibold))
             .tint(Theme.accent)
@@ -478,7 +488,12 @@ struct ClientAwaitingAccessCard: View {
         .padding(Theme.Space.l)
         .cardSurface()
         .sheet(isPresented: $showHelp) {
-            ClientAccessApprovalSheet(hostName: hostName, peerKey: "", isHeadless: isHeadless)
+            ClientAccessApprovalSheet(hostName: hostName, peerKey: peerKey, isHeadless: isHeadless, onGranted: onGranted)
+        }
+        .sheet(isPresented: $showCode) {
+            NavigationStack {
+                ClientAddThisDevice(peer: peerKey, hostName: hostName, onGranted: onGranted)
+            }
         }
     }
 }
@@ -663,9 +678,7 @@ struct ClientAccessApprovalSteps: View {
 /// the other machine, with copy buttons so no command is retyped.
 struct ClientAccessApprovalSheet: View {
     let hostName: String
-    /// Empty when the caller only wants the steps (the Workspaces waiting
-    /// card already asked on connect). Non-empty enables Request again and
-    /// the code-entry link.
+    /// The selected host key lets the device redeem its invite code here.
     let peerKey: String
     var isHeadless: Bool
     var requestNotice: String?
@@ -730,37 +743,6 @@ struct ClientAccessApprovalSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     ClientAccessApprovalSteps(hostName: hostName, isHeadless: isHeadless)
-                    if !peerKey.isEmpty {
-                        NavigationLink {
-                            ClientAddThisDevice(peer: peerKey, hostName: hostName) {
-                                onGranted?()
-                                dismiss()
-                            }
-                        } label: {
-                            HStack(spacing: Theme.Space.m) {
-                                ActionSeat(icon: .pair, size: 34)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(L10n.text("apple.clientstates.i_have_a_code.b090f9d2"))
-                                        .font(ClientType.label.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                    Text(L10n.text("apple.clientstates.enter_an_invite_code_from_that_machine_ins.a9c8d05d"))
-                                        .font(ClientType.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer(minLength: 0)
-                                Image(systemName: "chevron.right")
-                                    .font(Theme.caption.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .padding(Theme.Space.m)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border, lineWidth: 1)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
                 .padding(Theme.Space.m)
             }
@@ -774,6 +756,20 @@ struct ClientAccessApprovalSheet: View {
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: Theme.Space.s) {
+                    if !peerKey.isEmpty {
+                        NavigationLink {
+                            ClientAddThisDevice(peer: peerKey, hostName: hostName) {
+                                onGranted?()
+                                dismiss()
+                            }
+                        } label: {
+                            Label(L10n.text("apple.clientstates.i_have_a_code.b090f9d2"), systemImage: ActionIcon.pair.symbol)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .tint(Theme.accent)
+                    }
                     Button(copied ? L10n.text("apple.clientstates.copied.8d525e5f") : L10n.text("apple.clientstates.copy_approve_command.0605ab3a"), copied ? .done : .copy) {
                         UIPasteboard.general.string = approveCommand
                         copied = true

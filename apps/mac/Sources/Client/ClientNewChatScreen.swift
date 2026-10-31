@@ -9,6 +9,7 @@ struct ClientNewChatScreen: View {
     @Environment(AccountModel.self) private var account
     @State private var addingRepository = false
     @State private var choosingHost = false
+    @State private var showingAccessCode = false
     @State private var chosenHostKey: String?
     @State private var addAfterChoosingHost = false
     private var draft: ChatStartDraft { navigation.newChatDraft }
@@ -48,6 +49,10 @@ struct ClientNewChatScreen: View {
                                  ? L10n.text("apple.clientstates.ssh_in_and_run_the_approve_command_then_pi.d5ad392a")
                                  : L10n.text("apple.clientstates.open_tokenstat_on_that_computer_and_approv.50e33097"))
                                 .font(Theme.caption)
+                            Button(L10n.text("apple.clientstates.i_have_a_code.b090f9d2"), systemImage: ActionIcon.pair.symbol) {
+                                showingAccessCode = true
+                            }
+                            .tint(Theme.accent)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
@@ -70,6 +75,18 @@ struct ClientNewChatScreen: View {
                             .toolbar {
                                 ToolbarItem(placement: .cancellationAction) {
                                     Button(L10n.text("common.cancel")) { addingRepository = false }
+                                }
+                            }
+                        }
+                    }
+                }
+                .sheet(isPresented: $showingAccessCode) {
+                    if let peer = workspaces.awaitingAccessPeerKey,
+                       let waitingHost = workspaces.awaitingAccessHost {
+                        NavigationStack {
+                            ClientAddThisDevice(peer: peer, hostName: waitingHost) {
+                                if let target = workspaces.hosts.first(where: { $0.peerKey == peer }) {
+                                    Task { await workspaces.connect(target) }
                                 }
                             }
                         }

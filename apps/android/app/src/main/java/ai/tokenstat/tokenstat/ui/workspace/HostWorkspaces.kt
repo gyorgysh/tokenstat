@@ -79,6 +79,7 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -94,9 +95,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -110,6 +114,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -1112,9 +1118,16 @@ fun RequestAccessCard(
     requesting: Boolean,
     notice: String?,
     onRequest: () -> Unit,
+    onRedeem: suspend (String) -> String?,
 ) {
     val colors = LocalTsColors.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var enteringCode by remember(hostName) { mutableStateOf(false) }
+    var code by remember(hostName) { mutableStateOf("") }
+    var redeeming by remember(hostName) { mutableStateOf(false) }
+    var codeError by remember(hostName) { mutableStateOf<String?>(null) }
+    val normalizedCode = code.uppercase(Locale.ROOT).filter { it.isLetterOrDigit() }
     val approveCommand = "tokenstat host access approve"
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         EmptyState(
@@ -1131,6 +1144,11 @@ fun RequestAccessCard(
                 )
             },
         )
+        TextButton(onClick = { enteringCode = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Icon(ActionIcon.Approve.vector, null, tint = colors.accent, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(Space.xs))
+            Text(L10n.text("android.hostworkspaces.i_have_a_code"), color = colors.accent)
+        }
         if (headless) {
             TsCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -1168,6 +1186,43 @@ fun RequestAccessCard(
                 )
             }
         }
+    }
+    if (enteringCode) {
+        AlertDialog(
+            onDismissRequest = { if (!redeeming) enteringCode = false },
+            title = { Text(L10n.text("android.hostworkspaces.i_have_a_code")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Text(L10n.text("android.hostworkspaces.invite_code_help", hostName), color = colors.textSecondary)
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { code = it.uppercase(Locale.ROOT).filter { c -> c.isLetterOrDigit() }.take(8); codeError = null },
+                        label = { Text(L10n.text("android.hostworkspaces.invite_code")) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
+                        enabled = !redeeming,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    codeError?.let { Text(it, color = colors.warning, style = TsType.caption) }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        redeeming = true
+                        scope.launch {
+                            try {
+                                val error = onRedeem(normalizedCode)
+                                if (error == null) { enteringCode = false; code = "" }
+                                else codeError = error
+                            } finally { redeeming = false }
+                        }
+                    },
+                    enabled = normalizedCode.length == 8 && !redeeming,
+                ) { Text(L10n.text("android.hostworkspaces.use_this_code")) }
+            },
+            dismissButton = { TextButton(onClick = { enteringCode = false }, enabled = !redeeming) { Text(L10n.text("common.cancel")) } },
+        )
     }
 }
 

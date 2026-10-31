@@ -3934,6 +3934,23 @@ private fun WorkspacesScreen(
                         ?.let { connect(it, forceRefresh = true) }
                 }
             } },
+            onRedeemAccess = { peer, code ->
+                try {
+                    val answer = retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
+                        model.workspaceSection(peer, "workspace.access.redeem", buildJsonObject { put("code", code) }) as JsonObject
+                    }
+                    if (answer.bool("granted")) {
+                        session.setRequestNotice(null)
+                        hosts.firstOrNull { it.string("publicIdentity") == peer }
+                            ?.let { connect(it, forceRefresh = true) }
+                        null
+                    } else L10n.text("android.hostworkspaces.code_not_accepted")
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    error.message ?: L10n.text("android.hostworkspaces.code_not_accepted")
+                }
+            },
             onCustomize = { customizing = true },
             onOpenDevice = onOpenDevice,
             onSetup = onSetupWizard,
@@ -4146,6 +4163,7 @@ private fun WorkspaceList(
     onChooseFolder: () -> Unit,
     onClone: () -> Unit,
     onRequestAccess: (String) -> Unit,
+    onRedeemAccess: suspend (String, String) -> String?,
     onCustomize: () -> Unit,
     onOpenDevice: (String) -> Unit,
     onSetup: (() -> Unit)?,
@@ -4421,6 +4439,7 @@ private fun WorkspaceList(
                             DeviceCopy.isHeadlessPlatform(refused.string("label")),
                         requesting = requesting, notice = requestNotice,
                         onRequest = { onRequestAccess(refused.string("publicIdentity") ?: "") },
+                        onRedeem = { code -> onRedeemAccess(refused.string("publicIdentity") ?: "", code) },
                     ) }
                 }
             }
@@ -4490,6 +4509,7 @@ private fun WorkspaceList(
                         requesting = requesting,
                         notice = requestNotice,
                         onRequest = { onRequestAccess(refused.string("publicIdentity") ?: "") },
+                        onRedeem = { code -> onRedeemAccess(refused.string("publicIdentity") ?: "", code) },
                     )
                 }
                 return@LazyColumn
