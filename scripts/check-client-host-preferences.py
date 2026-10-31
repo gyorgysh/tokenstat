@@ -21,7 +21,9 @@ def member(signature):
 members = '\n'.join(member(signature) for signature in (
     '    private var hostPreferencePrefix:',
     '    private var lastConnectedHostKey:',
+    '    private var rememberedHostsKey:',
     '    var lastConnectedHost:',
+    '    private func rememberHost(_ peerKey:',
     '    private func autoConnectKey(for peerKey:',
     '    private func migrateLegacyHost()',
     '    func isAutoConnectEnabled(for peerKey:',
@@ -32,6 +34,7 @@ struct ClientHost { let peerKey: String }
 @MainActor final class Model {
     let ownerScope: WorkReference.Scope?
     var hosts: [ClientHost] = []
+    var backgroundTickets: [String: UUID] = [:]
     init(_ scope: WorkReference.Scope?) { ownerScope = scope }
 ''' + members + r'''
 }
@@ -49,8 +52,10 @@ struct ClientHost { let peerKey: String }
             defaults.removeObject(forKey: legacyHost)
             defaults.removeObject(forKey: legacyAuto)
             if let key = first.lastConnectedHostKey { defaults.removeObject(forKey: key) }
+            if let key = first.rememberedHostsKey { defaults.removeObject(forKey: key) }
             if let key = first.autoConnectKey(for: peer) { defaults.removeObject(forKey: key) }
             if let key = second.lastConnectedHostKey { defaults.removeObject(forKey: key) }
+            if let key = second.rememberedHostsKey { defaults.removeObject(forKey: key) }
             if let key = second.autoConnectKey(for: peer) { defaults.removeObject(forKey: key) }
         }
         defaults.set(peer, forKey: legacyHost)

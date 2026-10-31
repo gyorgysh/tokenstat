@@ -82,6 +82,23 @@ struct ClientWorkspacesView: View {
         )
     }
 
+    private var pendingClosePresented: Binding<Bool> {
+        Binding(
+            get: { pendingClose != nil },
+            set: { presented in
+                if !presented { pendingClose = nil }
+            }
+        )
+    }
+
+    private var pendingCloseMessage: String {
+        guard let peer = pendingClose?.peer,
+              let host = model.hosts.first(where: { $0.peerKey == peer }) else {
+            return L10n.text("apple.clientworkspacesview.stops_the_process_on_the_computer.c5651cd1")
+        }
+        return L10n.text("apple.clientworkspacesview.stops_the_process_on_0.7aa0b494", host.name)
+    }
+
     var body: some View {
         @Bindable var model = model
         ScrollView {
@@ -307,10 +324,7 @@ struct ClientWorkspacesView: View {
             }
             .confirmationDialog(
                 L10n.text("apple.clientworkspacesview.close_this_session.2b66ce2d"),
-                isPresented: Binding(
-                    get: { pendingClose != nil },
-                    set: { if !$0 { pendingClose = nil } }
-                ),
+                isPresented: pendingClosePresented,
                 titleVisibility: .visible
             ) {
                 Button(L10n.text("common.close"), role: .destructive) {
@@ -321,9 +335,7 @@ struct ClientWorkspacesView: View {
                 }
                 Button(L10n.text("apple.clientworkspacesview.keep_it.fdce5da2"), role: .cancel) { pendingClose = nil }
             } message: {
-                Text(model.hosts.first { $0.peerKey == pendingClose?.peer }.map {
-                    L10n.text("apple.clientworkspacesview.stops_the_process_on_0.7aa0b494", "\($0.name)")
-                } ?? L10n.text("apple.clientworkspacesview.stops_the_process_on_the_computer.c5651cd1"))
+                Text(pendingCloseMessage)
             }
     }
 

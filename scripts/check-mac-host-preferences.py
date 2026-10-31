@@ -31,6 +31,7 @@ struct Peer { let key: String }
     var scope: WorkReference.Scope?
 }
 @MainActor final class HostPrefs {
+    static var autoConnectRevisions: [String: UInt64] = [:]
     var suppressedPeers: Set<String> = []
     var remoteFolders: [String: [Int]] = [:]
     var remotePeerNextDial: [String: Date] = [:]

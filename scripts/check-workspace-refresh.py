@@ -24,6 +24,13 @@ struct Peer { let key: String }
 struct WorkspaceFolder: Equatable { let id: String }
 struct PtySessionInfo: Equatable { let id: String }
 struct ChatRecentConversation: Equatable { let id: String }
+struct HostSnapshot {
+    let folders: [WorkspaceFolder]
+    let sessions: [PtySessionInfo]
+    let chats: [ChatRecentConversation]
+    let loadedAt: Date
+}
+final class ClientTerminalSession { func stop() {} }
 enum ClientDeviceName { static let marketing = "Phone" }
 @MainActor final class WorkSessionContext { static let shared = WorkSessionContext(); var scope: String? = "A" }
 @MainActor enum EcosystemPublisher { static var lease: Int? = 1 }
@@ -36,6 +43,8 @@ enum ClientDeviceName { static let marketing = "Phone" }
     }
     static func identity(_ i: Int) { let held = identities[i]; identities[i] = nil; held?.resume(returning: .init(key: "self", label: "Phone")) }
     static func peers() async throws -> [Peer] { [.init(key: "host")] }
+    static func workspaceAccessAllowed(peer: String) async throws -> Bool { true }
+    static func askWorkspaceAccess(peer: String) async throws -> Bool { true }
     static func remoteWorkspaces(peer: Peer) async throws -> [WorkspaceFolder] {
         remoteCalls += 1; return try await withCheckedThrowingContinuation { folderWaiters.append($0) }
     }
@@ -51,6 +60,22 @@ enum ClientRemote {
     var hosts: [ClientHost] = [] { didSet { hostWrites += 1 } }; var hostWrites = 0
     var thisDeviceName: String?
     var connectedKey: String?, isConnecting: String?, chosenPeer: String?, pendingPeer: String?
+    var hostSnapshots: [String: HostSnapshot] = [:]
+    var loadedHostKeys: Set<String> = [], staleHostKeys: Set<String> = [], deniedHostKeys: Set<String> = []
+    var backgroundSweep: Task<Void, Never>?, refreshBackgroundAfterSweep = false
+    var backgroundTickets: [String: UUID] = [:]
+    var activeTerminal: ClientTerminalSession?
+    var errorMessage: String?, infoMessage: String?, awaitingAccessHost: String?
+    var lastConnectedHostKey: String? { nil }
+    func rememberHost(_ peer: String) {}
+    func setAutoConnect(_ on: Bool, for peer: String) {}
+    func stopWatchingForAccess() {}
+    func watchForAccess(_ host: ClientHost) {}
+    func dropHostSnapshot(_ peer: String) {
+        hostSnapshots.removeValue(forKey: peer)
+        loadedHostKeys = Set(hostSnapshots.keys)
+        staleHostKeys.remove(peer)
+    }
     var dialCount = 0
     func dial(_ host: ClientHost, recovering: Bool) async { dialCount += 1 }
     func disconnect(manual: Bool = true) { remoteLoadGeneration = UUID(); connectedKey = nil }
