@@ -44,6 +44,13 @@ struct ClientHostWorkspacesView: View {
             .platform
     }
 
+    // A first access request cannot ask the host whether it has a display:
+    // that RPC is itself behind the host's approval gate. Use the account
+    // platform (or a recognizable Linux host name) until the probe answers.
+    private var showsHeadlessInstructions: Bool {
+        isHeadless || isHeadlessPlatform(accountPlatform) || isHeadlessPlatform(hostName)
+    }
+
     var body: some View {
         @Bindable var model = model
         return ScrollView {
@@ -141,7 +148,7 @@ struct ClientHostWorkspacesView: View {
                         ClientAccessApprovalSheet(
                             hostName: hostName,
                             peerKey: peerKey,
-                            isHeadless: isHeadless,
+                            isHeadless: showsHeadlessInstructions,
                             requestNotice: model.requestNotice,
                             isRequesting: model.isRequesting,
                             onRequestAgain: { Task { await model.requestAccess(peerKey: peerKey) } },
@@ -157,7 +164,7 @@ struct ClientHostWorkspacesView: View {
                         let lower = message.lowercased()
                         if lower.contains("no_such_peer") || lower.contains("no direct address")
                             || lower.contains("peer_not_found") || lower.contains("no such peer") {
-                            if isHeadless {
+                            if showsHeadlessInstructions {
                                 HeadlessReachRecoveryCard(name: hostName) {
                                     Task { await model.connect(peerKey: peerKey, name: hostName) }
                                 }

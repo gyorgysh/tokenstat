@@ -461,17 +461,13 @@ struct ClientAwaitingAccessCard: View {
             Text(L10n.text("apple.clientstates.waiting_for_0.758c485c", "\(hostName)"))
                 .font(ClientType.sectionTitle)
                 .multilineTextAlignment(.center)
-            Text(L10n.text("apple.clientstates.open_tokenstat_on_that_computer_and_approv.50e33097"))
+            Text(isHeadless
+                 ? L10n.text("apple.clientstates.ssh_in_and_run_the_approve_command_then_pi.d5ad392a")
+                 : L10n.text("apple.clientstates.open_tokenstat_on_that_computer_and_approv.50e33097"))
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            if isHeadless {
-                Text(L10n.text("apple.clientstates.no_screen_on_that_machine_approve_over_ssh.decd9d2e"))
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
             Button(L10n.text("apple.clientstates.how_to_approve.e0fc7247"), .help) {
                 showHelp = true
             }
@@ -720,7 +716,7 @@ struct ClientAccessApprovalSheet: View {
                         .background(Theme.accentSoft.opacity(0.6), in: Capsule())
                     }
                     .frame(maxWidth: .infinity)
-                    if let requestNotice, !requestNotice.isEmpty {
+                    if let requestNotice, !requestNotice.isEmpty, !isHeadless {
                         Text(requestNotice)
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)

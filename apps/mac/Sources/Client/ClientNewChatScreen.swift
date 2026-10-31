@@ -162,7 +162,7 @@ struct ClientNewChatScreen: View {
         let machine = (account.account?.machines ?? []).first {
             ($0.label?.isEmpty == false ? $0.label : $0.machineID) == host
         }
-        return isHeadlessPlatform(machine?.platform)
+        return isHeadlessPlatform(machine?.platform) || isHeadlessPlatform(host)
     }
 
     private var hostPicker: some View {

@@ -349,7 +349,7 @@ struct ClientWorkspacesView: View {
         let platform = machines.first {
             ($0.label?.isEmpty == false ? $0.label : $0.machineID) == host
         }?.platform
-        return isHeadlessPlatform(platform)
+        return isHeadlessPlatform(platform) || isHeadlessPlatform(host)
     }
 
     /// A tap on a push. A terminal that needs the person opens here. Chat
