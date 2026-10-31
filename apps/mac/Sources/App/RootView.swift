@@ -338,7 +338,7 @@ struct RootView: View {
                 }
                 Task {
                     await BridgeLaunch.wait()
-                    await workspaces.loadRemote()
+                    await workspaces.load()
                 }
                 Task {
                     await BridgeLaunch.wait()
@@ -409,7 +409,9 @@ struct RootView: View {
                 openEcosystemDestination()
                 resolvePendingSimulatorAttach()
                 resolvePendingDesktopOpen()
-                Task { await workspaces.loadRemote() }
+                // A new account's peer list must not populate the sidebar
+                // before this Mac's folders have been read for that account.
+                Task { await workspaces.load() }
             }
             .onChange(of: WorkSessionContext.shared.localHostIdentity) { _, _ in resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
             .onChange(of: route) { _, _ in resolvePendingSimulatorAttach() }
@@ -791,7 +793,8 @@ struct RootView: View {
                 model.reload()
             }
             // After the heatmap is up, warm secondary surfaces so Machines /
-            // remote workspaces / agent tiles are a cache hit on first click.
+            // agent tiles are a cache hit on first click. The sidebar task
+            // loads remote work only after this Mac's folders are ready.
             // Never starts before archive ready, so Home keeps the host first.
             .task(id: home.isArchiveReady) {
                 await BridgeLaunch.wait()
@@ -908,13 +911,11 @@ struct RootView: View {
                         }
                     }
                     group.addTask { @MainActor in
-                        // Remote peers wait for the post-heatmap warm (or the 600ms
-                        // fallback below) so a cold Home does not compete with dials.
+                        // Remote peers wait for the local read and a short yield
+                        // so a cold Home does not compete with dials.
                         try? await Task.sleep(for: .milliseconds(600))
                         guard !Task.isCancelled else { return }
-                        if !home.isArchiveReady {
-                            await workspaces.loadRemote()
-                        }
+                        await workspaces.loadRemote()
                         // Other machines on their own slow schedule. Local folders
                         // refresh from the file watcher, which must not dial anybody.
                         await workspaces.watchPeers()
@@ -3369,11 +3370,6 @@ struct RootView: View {
         await ssh.ensureLoaded(vaultTier: SSHLibraryModel.paidTier(for: machines.vaultTier))
         guard !Task.isCancelled else { return }
         #endif
-
-        // Remote workspace groups for the sidebar. Local folders already
-        // loaded earlier; this is the peer dial pass.
-        await workspaces.loadRemote()
-        guard !Task.isCancelled else { return }
 
         #if os(macOS)
         // Agent tiles: absolute paths from the host's login PATH.
