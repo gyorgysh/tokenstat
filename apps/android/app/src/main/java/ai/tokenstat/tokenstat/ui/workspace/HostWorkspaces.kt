@@ -554,6 +554,7 @@ fun CompactHostList(
             )
             val online = (machine["online"] as? JsonPrimitive)?.booleanOrNull
             val connected = (peer in retainedHosts || peer == currentPeer) && peer !in staleHosts && online != false
+            val selectedForNewWork = connected && currentPeer == peer
             val busy = connectingPeer == peer
             var menuOpen by remember(peer) { mutableStateOf(false) }
             if (index > 0) HorizontalDivider(color = colors.border)
@@ -573,6 +574,7 @@ fun CompactHostList(
                             when {
                                 online == false -> L10n.text("common.offline")
                                 busy -> L10n.text("android.hostworkspaces.connecting.72021eb7")
+                                selectedForNewWork -> L10n.text("common.work_host_selected")
                                 connected -> L10n.text("common.chat.stats.connected")
                                 peer in accessDeniedHosts -> L10n.text("android.hostworkspaces.request_access.b06f1662")
                                 peer in staleHosts -> L10n.text("android.hostworkspaces.needs_refresh.5b783f2d")
@@ -583,9 +585,10 @@ fun CompactHostList(
                             maxLines = 1,
                         )
                     }
-                    Icon(if (connected && currentPeer == peer) Icons.Default.Check else Icons.Default.ChevronRight,
-                        contentDescription = null, tint = if (connected && currentPeer == peer) colors.accent else colors.textTertiary,
-                        modifier = Modifier.size(18.dp))
+                    if (!selectedForNewWork) {
+                        Icon(Icons.Default.ChevronRight, contentDescription = null,
+                            tint = colors.textTertiary, modifier = Modifier.size(18.dp))
+                    }
                 }
                 Box {
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {

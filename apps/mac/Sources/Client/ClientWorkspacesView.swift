@@ -672,6 +672,7 @@ struct ClientWorkspacesView: View {
     private func compactHostRow(_ host: ClientHost) -> some View {
         let connected = model.loadedHostKeys.contains(host.peerKey) &&
             !model.staleHostKeys.contains(host.peerKey) && host.online != false
+        let selectedForNewWork = connected && model.connectedKey == host.peerKey
         let busy = model.isBusy(with: host.peerKey)
         return HStack(spacing: 0) {
             Button {
@@ -696,6 +697,7 @@ struct ClientWorkspacesView: View {
                             .lineLimit(1)
                         Text(host.online == false ? L10n.text("common.offline") :
                             busy ? L10n.text("apple.clientworkspacesview.connecting.72021eb7") :
+                            selectedForNewWork ? L10n.text("common.work_host_selected") :
                             connected ? L10n.text("common.chat.stats.connected") :
                             model.deniedHostKeys.contains(host.peerKey) ? L10n.text("apple.clienthostworkspacesview.request_access.b06f1662") :
                             model.staleHostKeys.contains(host.peerKey) ? L10n.text("apple.clientworkspacesview.needs_refresh.5b783f2d") :
@@ -703,13 +705,10 @@ struct ClientWorkspacesView: View {
                             .font(ClientType.caption)
                             .foregroundStyle(connected ? Theme.accent : Color.secondary)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                     Spacer(minLength: Theme.Space.xs)
-                    if model.connectedKey == host.peerKey && connected {
-                        Image(systemName: "checkmark")
-                            .foregroundStyle(Theme.accent)
-                            .accessibilityHidden(true)
-                    } else if host.online != false {
+                    if host.online != false && !selectedForNewWork {
                         Image(systemName: "chevron.right")
                             .foregroundStyle(.tertiary)
                             .accessibilityHidden(true)
@@ -721,9 +720,9 @@ struct ClientWorkspacesView: View {
             .buttonStyle(.plain)
             .disabled(host.online == false || busy)
             .accessibilityHint(connected
-                ? (model.connectedKey == host.peerKey
-                    ? L10n.text("common.chat.stats.connected")
-                    : L10n.text("apple.accountview.view.dcc839a4"))
+                ? (selectedForNewWork
+                    ? L10n.text("common.work_host_selected_hint")
+                    : L10n.text("common.work_host_select_hint"))
                 : L10n.text("common.connect"))
 
             Menu {
