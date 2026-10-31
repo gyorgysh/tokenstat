@@ -4077,8 +4077,7 @@ mod tests {
             ChannelPurpose::Workspace,
             "no direct address",
         )
-        .err()
-        .expect("relay dial must be refused");
+        .expect_err("relay dial must be refused");
         assert!(failure.contains("Relay fallback is off"), "{failure}");
     }
 

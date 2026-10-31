@@ -73,6 +73,15 @@ struct ClientWorkspacesView: View {
         return ["free", "supporter", "patron", "legend"].contains(tier)
     }
 
+    private var workspaceDevicePresented: Binding<Bool> {
+        Binding(
+            get: { workspaceDevice != nil },
+            set: { presented in
+                if !presented { navigation.workspacesDeviceMachineID = nil }
+            }
+        )
+    }
+
     var body: some View {
         @Bindable var model = model
         ScrollView {
@@ -184,10 +193,7 @@ struct ClientWorkspacesView: View {
                 .padding(.bottom, 96)
             }
             .background(Theme.background)
-            .navigationDestination(isPresented: Binding(
-                get: { workspaceDevice != nil },
-                set: { if !$0 { navigation.workspacesDeviceMachineID = nil } }
-            )) {
+            .navigationDestination(isPresented: workspaceDevicePresented) {
                 if let machine = workspaceDevice {
                     ClientDeviceDetailView(
                         machine: machine,

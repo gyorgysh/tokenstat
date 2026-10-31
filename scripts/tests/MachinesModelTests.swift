@@ -4,7 +4,7 @@ import Foundation
 import Observation
 
 struct MachineIdentity { var key = "self"; var label = "My Mac"; var words = "two words" }
-struct Machine { var id: String; var machineID: String?; var publicIdentity: String?; var label: String?; var online: Bool?; var lastSeenAt: String?; var lastSyncAt: String?; var kind = "host"; var displayName: String { label ?? id } }
+struct Machine { var id: String; var machineID: String?; var publicIdentity: String?; var label: String?; var online: Bool?; var lastSeenAt: String?; var lastSyncAt: String?; var kind = "host"; var isHost: Bool { kind == "host" }; var displayName: String { label ?? id } }
 struct Account { var signedIn = true; var canRemote: Bool? = true; var tier: String? = "legend"; var vaultTierForSsh: String? = "legend"; var thisMachineID: String?; var machines: [Machine] = [] }
 struct Peer { enum Trust { case pending, approved, revoked }; var key: String; var label = "Other"; var fingerprint = "fingerprint"; var trust: Trust = .approved }
 struct Candidate { var kind: String; var priority: Int; var address: String }

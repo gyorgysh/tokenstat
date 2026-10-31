@@ -1687,7 +1687,7 @@ public sealed partial class MainWindow : Window
             ?? listed["workspaces"] as JsonArray;
         var remote = RemoteWorkspaces.CachedFolders()
             .Where(folder => RemoteWorkspaces.IsConnected(folder.PeerKey)).ToArray();
-        if ((array is null || array.Count == 0) && remote.Count == 0)
+        if ((array is null || array.Count == 0) && remote.Length == 0)
         {
             root.Children.Add(EmptyState.FirstProject(Buttons.Primary(L10n.Text("common.add_project"), ActionIcon.Create,
                 async (_, _) => { await AddWorkspaceAsync(); if (ReferenceEquals(_frame.Content, page)) await FillOverviewAsync(root, page); })));

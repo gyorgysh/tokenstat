@@ -41,11 +41,14 @@ internal sealed class ChatModelView : Grid
     private static Task<CoreWebView2Environment> EnvironmentAsync()
     {
         if (_environment is null || _environment.IsCanceled || _environment.IsFaulted)
-            _environment = CoreWebView2Environment.CreateWithOptionsAsync(null,
-            Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
-                "tokenstat", "ModelWebView"), new CoreWebView2EnvironmentOptions());
+            _environment = CreateEnvironmentAsync();
         return _environment;
     }
+
+    private static async Task<CoreWebView2Environment> CreateEnvironmentAsync() =>
+        await CoreWebView2Environment.CreateWithOptionsAsync(null,
+            Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
+                "tokenstat", "ModelWebView"), new CoreWebView2EnvironmentOptions());
 
     private async Task OpenAsync(long epoch)
     {
