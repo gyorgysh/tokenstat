@@ -61,6 +61,58 @@ fn closed_output_and_a_dropped_guard_cannot_release_a_still_running_writer() {
 }
 
 #[test]
+fn terminal_agents_share_one_checkout_until_both_exit() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut first = Guard::acquire_terminal(temp.path()).unwrap();
+    let first_info = first
+        .spawn_piped(&request(
+            temp.path(),
+            "echo ready > first.ready; while [ ! -f first.release ]; do sleep 0.02; done",
+        ))
+        .unwrap();
+    let _first_session = Session(first_info.id);
+    let first_process = first.process.as_ref().unwrap().clone();
+    wait_until("first terminal startup", || {
+        temp.path().join("first.ready").exists()
+    });
+
+    let mut second = Guard::acquire_terminal(temp.path()).unwrap();
+    let second_info = second
+        .spawn_piped(&request(
+            temp.path(),
+            "echo ready > second.ready; while [ ! -f second.release ]; do sleep 0.02; done",
+        ))
+        .unwrap();
+    let _second_session = Session(second_info.id);
+    let second_process = second.process.as_ref().unwrap().clone();
+    wait_until("second terminal startup", || {
+        temp.path().join("second.ready").exists()
+    });
+    drop(first);
+    drop(second);
+
+    assert!(matches!(Lease::acquire(temp.path()), Err(Error::Busy)));
+    std::fs::write(temp.path().join("first.release"), b"release").unwrap();
+    wait_until("first terminal exit", || first_process.completed());
+    assert!(matches!(Lease::acquire(temp.path()), Err(Error::Busy)));
+    std::fs::write(temp.path().join("second.release"), b"release").unwrap();
+    wait_until("second terminal exit", || second_process.completed());
+    wait_until("shared writer retirement", || {
+        Lease::acquire(temp.path()).is_ok()
+    });
+}
+
+#[test]
+fn terminal_cannot_join_a_background_writer() {
+    let temp = tempfile::tempdir().unwrap();
+    let _background = Guard::acquire(temp.path()).unwrap();
+    assert!(matches!(
+        Guard::acquire_terminal(temp.path()),
+        Err(Error::Busy)
+    ));
+}
+
+#[test]
 fn a_writer_cannot_launch_in_a_different_folder() {
     let temp = tempfile::tempdir().unwrap();
     let other = tempfile::tempdir().unwrap();

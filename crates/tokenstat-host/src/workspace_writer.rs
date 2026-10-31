@@ -7,8 +7,8 @@
 mod tests;
 
 use std::collections::HashMap;
-use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 use std::time::Duration;
 use tokenstat_pty::ProcessWitness;
 use tokenstat_workspace::writer::{Error, Lease};
@@ -19,6 +19,7 @@ struct Entry {
 }
 struct Registry {
     entries: Mutex<HashMap<String, Entry>>,
+    terminal_writers: Mutex<HashMap<PathBuf, Weak<Lease>>>,
     wake: Condvar,
 }
 static REGISTRY: OnceLock<Option<Arc<Registry>>> = OnceLock::new();
@@ -41,6 +42,7 @@ impl Registry {
     fn start() -> Option<Arc<Self>> {
         let registry = Arc::new(Self {
             entries: Mutex::new(HashMap::new()),
+            terminal_writers: Mutex::new(HashMap::new()),
             wake: Condvar::new(),
         });
         let worker = Arc::clone(&registry);
@@ -100,15 +102,46 @@ pub(crate) struct Guard {
 }
 impl Guard {
     pub fn acquire(path: &Path) -> Result<Self, Error> {
-        let registry = REGISTRY
-            .get_or_init(Registry::start)
-            .as_ref()
-            .ok_or(Error::Unavailable)?;
+        let registry = Self::registry()?;
         Ok(Self {
             writer: Arc::new(Lease::acquire(path)?),
-            registry: Arc::clone(registry),
+            registry,
             process: None,
         })
+    }
+    /// Interactive terminal agents may share one checkout lease. Their
+    /// processes still exclude background writers and managed Git operations until
+    /// the last terminal exits. Other managed work keeps `acquire` exclusive.
+    pub fn acquire_terminal(path: &Path) -> Result<Self, Error> {
+        let registry = Self::registry()?;
+        let path = path.canonicalize().map_err(|_| Error::Unavailable)?;
+        let writer = {
+            let mut writers = registry
+                .terminal_writers
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            writers.retain(|_, writer| writer.strong_count() > 0);
+            if let Some(writer) = writers.get(&path).and_then(Weak::upgrade) {
+                writer.ensure_for(&path)?;
+                writer
+            } else {
+                let writer = Arc::new(Lease::acquire(&path)?);
+                writers.insert(path, Arc::downgrade(&writer));
+                writer
+            }
+        };
+        Ok(Self {
+            writer,
+            registry,
+            process: None,
+        })
+    }
+    fn registry() -> Result<Arc<Registry>, Error> {
+        REGISTRY
+            .get_or_init(Registry::start)
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or(Error::Unavailable)
     }
     pub fn ensure_current(&self) -> Result<(), Error> {
         self.writer.ensure_current()

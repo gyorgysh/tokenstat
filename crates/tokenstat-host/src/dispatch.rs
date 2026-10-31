@@ -3687,7 +3687,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             let command = crate::launcher::spawn_command(&p.command);
             let mut writer = if crate::launcher::is_agent_command(&p.command) {
                 Some(
-                    crate::workspace_writer::Guard::acquire(&ws.path)
+                    crate::workspace_writer::Guard::acquire_terminal(&ws.path)
                         .map_err(|error| error.to_string())?,
                 )
             } else {
