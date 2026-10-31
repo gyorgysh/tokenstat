@@ -3374,7 +3374,7 @@ private fun WorkspacesScreen(
                 session.setRequestNotice(if (answer.bool("granted")) {
                     L10n.text("android.tokenstatapp.this_device_already_has_access_pull_to_ref.06b896c9")
                 } else {
-                    L10n.text("android.tokenstatapp.asked_on_that_computer_run_tokenstat_host.40af0490")
+                    ai.tokenstat.tokenstat.ui.workspace.REQUEST_ACCESS_PENDING_NOTICE
                 })
             }.onFailure {
                 if (it is CancellationException) throw it

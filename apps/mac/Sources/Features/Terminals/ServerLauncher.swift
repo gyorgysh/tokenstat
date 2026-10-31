@@ -28,7 +28,7 @@ struct ServerLauncher: View {
             if !library.launcherHosts.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(shownHosts.enumerated()), id: \.element.id) { index, host in
-                        if index > 0 { Divider().padding(.leading, Theme.Space.m) }
+                        if index > 0 { ThemeRule().padding(.leading, Theme.Space.m) }
                         Button { onOpen(host) } label: {
                             HStack(spacing: Theme.Space.s) {
                                 SSHHostPlatformMark(label: SSHHostPlatformCache.shared.label(for: host))
@@ -53,7 +53,7 @@ struct ServerLauncher: View {
                         .buttonStyle(.plain)
                     }
                     if library.launcherHosts.count > 2 {
-                        Divider()
+                        ThemeRule()
                         Button {
                             expanded.toggle()
                         } label: {

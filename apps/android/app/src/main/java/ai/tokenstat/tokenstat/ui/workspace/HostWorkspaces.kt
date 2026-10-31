@@ -1103,6 +1103,8 @@ fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit, g
 /// The screen a device sees until that computer lets it in. Opening the host
 /// is somebody saying they want in, so the asking happens without a second
 /// press; the button stays, for asking again once a request has gone stale.
+const val REQUEST_ACCESS_PENDING_NOTICE = "request_access_pending"
+
 @Composable
 fun RequestAccessCard(
     hostName: String,
@@ -1154,10 +1156,16 @@ fun RequestAccessCard(
             }
         }
         notice?.takeUnless {
-            headless && it == L10n.text("android.tokenstatapp.asked_on_that_computer_run_tokenstat_host.40af0490")
+            headless && it == REQUEST_ACCESS_PENDING_NOTICE
         }?.let {
             TsCard {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                Text(
+                    if (it == REQUEST_ACCESS_PENDING_NOTICE)
+                        L10n.text("android.tokenstatapp.asked_on_that_computer_run_tokenstat_host.40af0490")
+                    else it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
             }
         }
     }

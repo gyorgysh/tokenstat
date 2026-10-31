@@ -28,64 +28,42 @@ struct MacServerSetupView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: Theme.Space.m) {
-                Image(systemName: "server.rack")
-                    .font(Theme.title)
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 44, height: 44)
-                    .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Set up a Linux host").font(Theme.title.weight(.semibold))
-                    Text("\(step.rawValue + 1) of 5 · \(step.title)")
-                        .font(Theme.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Close", systemImage: "xmark") { dismiss() }
-                    .labelStyle(.iconOnly)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(.rect)
-                    .accessibilityLabel("Close setup")
-            }
-            .padding(Theme.Space.l)
-            ThemeRule()
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.l) {
-                    if let failure = setup.failure {
-                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                            Text(failure.explanation).font(Theme.callout.weight(.semibold))
-                            if let changed = failure.changed { Text(changed).font(Theme.caption) }
-                            if let details = failure.details { Text(details).font(Theme.caption).textSelection(.enabled) }
-                        }
-                        .foregroundStyle(Theme.danger)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        ThemedSheet(
+            title: "Set up a Linux host",
+            subtitle: "\(step.rawValue + 1) of 5 · \(step.title)",
+            icon: .device,
+            scrolls: true,
+            onClose: { dismiss() }
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                if let failure = setup.failure {
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text(failure.explanation).font(Theme.callout.weight(.semibold))
+                        if let changed = failure.changed { Text(changed).font(Theme.caption) }
+                        if let details = failure.details { Text(details).font(Theme.caption).textSelection(.enabled) }
                     }
-                    stepContent
+                    .foregroundStyle(Theme.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(Theme.Space.l)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                stepContent
             }
-            ThemeRule()
-            HStack(spacing: Theme.Space.m) {
-                if step != .address {
-                    Button("Back") { step = Step(rawValue: step.rawValue - 1) ?? .address }
-                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
-                        .disabled(setup.working)
-                }
-                Spacer()
-                if setup.working {
-                    ProgressView().controlSize(.small)
-                    Button("Stop") { setup.cancelWork() }
-                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
-                } else {
-                    primaryAction
-                        .buttonStyle(AccentButtonStyle(comfortable: true))
-                }
+        } actions: {
+            if step != .address {
+                Button("Back", .back) { step = Step(rawValue: step.rawValue - 1) ?? .address }
+                    .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                    .disabled(setup.working)
             }
-            .padding(Theme.Space.l)
+            Spacer()
+            if setup.working {
+                ProgressView().controlSize(.small)
+                Button("Stop", .stop) { setup.cancelWork() }
+                    .buttonStyle(SecondaryButtonStyle(comfortable: true))
+            } else {
+                primaryAction
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
+            }
         }
-        .frame(width: 680, height: 640)
-        .background(Theme.background)
+        .modalFrame(width: 680, height: 640)
         .task {
             await account.load()
             _ = await setup.prepare(library: library)
@@ -155,7 +133,7 @@ struct MacServerSetupView: View {
                     .font(Theme.caption).foregroundStyle(.secondary)
             }
         }
-        .textFieldStyle(.roundedBorder)
+        .textFieldStyle(.themed)
     }
 
     private var fingerprintStep: some View {
@@ -193,7 +171,7 @@ struct MacServerSetupView: View {
                 TextField("Name on your account", text: Binding(
                     get: { setup.machineName }, set: { setup.machineName = $0 }
                 ))
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.themed)
             }
         }
     }
@@ -236,7 +214,7 @@ struct MacServerSetupView: View {
     @ViewBuilder private var primaryAction: some View {
         switch step {
         case .address:
-            Button("Probe SSH identity") {
+            Button("Probe SSH identity", .security) {
                 Task {
                     await setup.probe(library: library)
                     if setup.fingerprint != nil { step = .fingerprint }
@@ -244,7 +222,7 @@ struct MacServerSetupView: View {
             }
             .disabled(!setup.prepared || setup.host.hostname.trimmingCharacters(in: .whitespaces).isEmpty)
         case .fingerprint:
-            Button("Trust this server") {
+            Button("Trust this server", .approve) {
                 Task {
                     await setup.trust(library: library)
                     if setup.trusted {
@@ -256,24 +234,24 @@ struct MacServerSetupView: View {
             .disabled(setup.fingerprint == nil)
         case .check:
             if setup.check?.ready == true {
-                Button("Continue to install") { step = .install }
+                Button("Continue to install", .next) { step = .install }
                     .disabled(setup.machineName.trimmingCharacters(in: .whitespaces).isEmpty)
             } else {
-                Button("Check again") { Task { await setup.inspect(library: library) } }
+                Button("Check again", .refresh) { Task { await setup.inspect(library: library) } }
             }
         case .install:
             if setup.terminal != nil {
-                Button("Verify host") { step = .verify }
+                Button("Verify host", .security) { step = .verify }
             } else {
-                Button("Start installation") { Task { await setup.install(library: library) } }
+                Button("Start installation", .run) { Task { await setup.install(library: library) } }
             }
         case .verify:
             if setup.finished != nil {
-                Button("Done") {
+                Button("Done", .done) {
                     if setup.completeSetup() { dismiss() }
                 }
             } else {
-                Button("Check connection") {
+                Button("Check connection", .connect) {
                     Task { await setup.waitForMachine(library: library, account: account) }
                 }
             }

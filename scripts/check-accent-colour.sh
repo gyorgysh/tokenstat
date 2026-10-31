@@ -48,6 +48,8 @@ ALLOWED = [
     ("Features/Automations/AutomationsView.swift", "Divider()"),
     ("Features/Todo/NotesView.swift", "Divider()"),
     ("Features/Machines/MachinesView.swift", "Divider()"),
+    # Native repository picker menu; a custom line would not be a menu separator.
+    ("Features/Workspaces/Chat/ChatStartPage.swift", "Divider()"),
 ]
 
 # These menus are mixed with app-owned panel content in these files.

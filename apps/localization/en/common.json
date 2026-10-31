@@ -291,8 +291,6 @@
   "common.new_chat.add_repository": "Add repository",
   "common.new_chat.send": "Send",
   "common.new_chat.choose_host": "Choose a computer",
-  "common.new_chat.connect_host_message": "Connect to a computer to see its repositories and start a conversation.",
-  "common.new_chat.connecting": "Connecting…",
   "common.new_chat.empty": "Add a repository to start a conversation.",
   "common.new_chat.preparing": "Starting your conversation…",
   "common.new_chat.step_repository_message": "Pick a folder with your code. Nothing in it changes until you send a message.",

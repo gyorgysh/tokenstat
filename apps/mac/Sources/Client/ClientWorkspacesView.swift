@@ -615,11 +615,11 @@ struct ClientWorkspacesView: View {
         let shown = expandedHostList ? ordered : Array(ordered.prefix(3))
         return VStack(spacing: 0) {
             ForEach(Array(shown.enumerated()), id: \.element.peerKey) { index, host in
-                if index > 0 { Divider().padding(.leading, Theme.Space.m) }
+                if index > 0 { ThemeRule().padding(.leading, Theme.Space.m) }
                 compactHostRow(host)
             }
             if ordered.count > 3 {
-                Divider()
+                ThemeRule()
                 Button {
                     expandedHostList.toggle()
                 } label: {
@@ -637,7 +637,7 @@ struct ClientWorkspacesView: View {
                 .foregroundStyle(Theme.accent)
             }
             if model.thisDeviceName != nil {
-                Divider().padding(.leading, Theme.Space.m)
+                ThemeRule().padding(.leading, Theme.Space.m)
                 thisDeviceRow
                     .frame(minHeight: 64)
             }
@@ -772,7 +772,7 @@ struct ClientWorkspacesView: View {
                 .padding(.horizontal, Theme.Space.m)
                 .frame(minHeight: 52)
                 if layout.allTasksVisible {
-                    Divider().padding(.leading, Theme.Space.m)
+                    ThemeRule().padding(.leading, Theme.Space.m)
                     ClientAllTasksLink(peer: peer, hostName: host.name)
                         .padding(.horizontal, Theme.Space.m)
                         .frame(minHeight: 52)
@@ -792,7 +792,7 @@ struct ClientWorkspacesView: View {
         case .folders:
             let folders = model.folders(for: peer)
             if !folders.isEmpty {
-                Divider().padding(.leading, Theme.Space.m)
+                ThemeRule().padding(.leading, Theme.Space.m)
                 groupedSectionTitle(.folders)
                 let visible = expandedHostFolders.contains(peer) ? folders : Array(folders.prefix(2))
                 ForEach(visible) { folder in
@@ -805,7 +805,7 @@ struct ClientWorkspacesView: View {
                     .modifier(ClientProjectRename(peer: peer, folder: folder,
                         onChanged: { await model.refresh(account: account.account) }))
                     if folder.id != visible.last?.id {
-                        Divider().padding(.leading, Theme.Space.m)
+                        ThemeRule().padding(.leading, Theme.Space.m)
                     }
                 }
                 if folders.count > 2 {
@@ -830,7 +830,7 @@ struct ClientWorkspacesView: View {
         case .recentChats:
             let chats = model.chats(for: peer)
             if !chats.isEmpty || !model.folders(for: peer).isEmpty {
-                Divider().padding(.leading, Theme.Space.m)
+                ThemeRule().padding(.leading, Theme.Space.m)
                 ClientRecentChatsSection(peer: peer, hostName: host.name,
                     folders: model.folders(for: peer), chats: chats,
                     onNewChat: { navigation.openNewChat(hostPeer: peer) }, grouped: true)
@@ -839,7 +839,7 @@ struct ClientWorkspacesView: View {
             let sessions = model.sessions(for: peer)
             let folders = model.folders(for: peer)
             if !sessions.isEmpty || !folders.isEmpty {
-                Divider().padding(.leading, Theme.Space.m)
+                ThemeRule().padding(.leading, Theme.Space.m)
                 HStack(spacing: Theme.Space.s) {
                     groupedSectionLabel(.sessions)
                     Spacer(minLength: Theme.Space.s)
@@ -865,7 +865,8 @@ struct ClientWorkspacesView: View {
                 if sessions.count > 2 {
                     Button(expandedHostSessions.contains(peer)
                         ? L10n.text("apple.clientrecentchats.show_less.94ea9b1d")
-                        : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(sessions.count - 2)")) {
+                        : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(sessions.count - 2)"),
+                        expandedHostSessions.contains(peer) ? .collapse : .reveal) {
                         if expandedHostSessions.contains(peer) {
                             expandedHostSessions.remove(peer)
                         } else {

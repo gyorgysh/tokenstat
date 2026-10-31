@@ -150,6 +150,8 @@ ALLOWED = [
     ("Design/Theme.swift", "withAnimation(.snappy(duration: 0.22)) { selection = option }"),
     ("Client/AvatarButton.swift", "Button(action: action)"),
     ("Client/ClientHostWorkspacesView.swift", "model.open(session, peer: peerKey)"),
+    # The session row already has its terminal/harness mark and disclosure.
+    ("Client/ClientWorkspacesView.swift", "model.openSession(session, peer: peer)"),
     # A conversation row: the whole card is the label, and the row already
     # carries the agent's mark. It is a button rather than a NavigationLink
     # because the thread opens in place, see ClientChatView.
