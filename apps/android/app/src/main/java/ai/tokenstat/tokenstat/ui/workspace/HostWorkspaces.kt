@@ -1127,7 +1127,7 @@ fun RequestAccessCard(
     var code by remember(hostName) { mutableStateOf("") }
     var redeeming by remember(hostName) { mutableStateOf(false) }
     var codeError by remember(hostName) { mutableStateOf<String?>(null) }
-    val normalizedCode = code.uppercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+    val normalizedCode = code.uppercase(Locale.ROOT).filter { it in 'A'..'Z' || it in '0'..'9' }
     val approveCommand = "tokenstat host access approve"
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         EmptyState(
@@ -1196,7 +1196,10 @@ fun RequestAccessCard(
                     Text(L10n.text("android.hostworkspaces.invite_code_help", hostName), color = colors.textSecondary)
                     OutlinedTextField(
                         value = code,
-                        onValueChange = { code = it.uppercase(Locale.ROOT).filter { c -> c.isLetterOrDigit() }.take(8); codeError = null },
+                        onValueChange = {
+                            code = it.uppercase(Locale.ROOT).filter { c -> c in 'A'..'Z' || c in '0'..'9' }.take(8)
+                            codeError = null
+                        },
                         label = { Text(L10n.text("android.hostworkspaces.invite_code")) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),

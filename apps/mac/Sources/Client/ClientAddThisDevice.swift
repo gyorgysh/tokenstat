@@ -35,7 +35,7 @@ struct ClientAddThisDevice: View {
     @State private var visible = false
 
     private var normalized: String {
-        code.uppercased().filter { $0.isLetter || $0.isNumber }
+        code.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 
     var body: some View {
