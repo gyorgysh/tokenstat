@@ -286,18 +286,19 @@ struct ClientWorkspacesEditor: View {
     }
 }
 
-/// Miniature stack for the editor preview.
+/// A miniature computer with its sections nested underneath. The saved order
+/// applies inside every connected computer, not across computers.
 private struct WorkspacesLayoutPreview: View {
     let sections: [WorkspacesSection]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Capsule()
-                .fill(Theme.accent.opacity(0.35))
-                .frame(width: 72, height: 8)
-                .padding(.bottom, 3)
-                .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 6) {
+            Label(L10n.text("apple.clientworkspacesview.computer.76ed42d2"),
+                  systemImage: "desktopcomputer")
+                .font(Theme.fixed(11, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(minHeight: 24)
             if sections.isEmpty {
                 Text(L10n.text("apple.clientworkspaceseditor.only_computers_will_show.dcb66766"))
                     .font(Theme.caption)
@@ -306,6 +307,10 @@ private struct WorkspacesLayoutPreview: View {
             } else {
                 ForEach(sections) { section in
                     HStack(spacing: 6) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .font(Theme.fixed(9, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 14)
                         Image(systemName: section.symbol)
                             .font(Theme.fixed(8, weight: .semibold))
                             .foregroundStyle(Theme.accent)
@@ -317,7 +322,7 @@ private struct WorkspacesLayoutPreview: View {
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 6)
-                    .frame(height: 20)
+                    .frame(height: 26)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         Theme.accentSoft,

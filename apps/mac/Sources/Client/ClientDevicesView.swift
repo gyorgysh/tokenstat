@@ -483,8 +483,9 @@ struct ClientDeviceDetailView: View {
                         online: machine.online,
                         reach: DeviceCopy.reach(machine, isThisDevice: isThisDevice)
                     )
-                    if let workspaces, workspaces.connectedKey == key {
-                        Button(L10n.text("common.disconnect"), .disconnect) { workspaces.disconnect() }
+                    if let workspaces, workspaces.loadedHostKeys.contains(key),
+                       !workspaces.staleHostKeys.contains(key) {
+                        Button(L10n.text("common.disconnect"), .disconnect) { workspaces.disconnectHost(key) }
                             .buttonStyle(SecondaryButtonStyle())
                             .accessibilityHint(L10n.text("apple.clientdevicesview.disconnects_this_device_from_the_computer.19cd3aac"))
                     }

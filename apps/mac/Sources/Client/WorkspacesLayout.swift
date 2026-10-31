@@ -73,11 +73,11 @@ enum WorkspacesPreset: String, CaseIterable, Identifiable, Codable, Sendable {
     var hidden: Set<WorkspacesSection> { [] }
 }
 
-/// How this device arranges Folders / Recent chats / All sessions once a host
-/// is connected.
+/// How this device arranges Folders / Recent chats / All sessions within each
+/// connected host.
 ///
 /// Device furniture, same idea as Home: a phone and an iPad keep their own
-/// order. The connected machine is one at a time; the layout is not per host.
+/// order. The same section order applies to each host's group.
 @MainActor @Observable
 final class WorkspacesLayout {
     static let shared = WorkspacesLayout()

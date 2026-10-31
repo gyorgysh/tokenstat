@@ -149,11 +149,12 @@ struct ClientRecentChatsSection: View {
     }
 
     var body: some View {
-        if !visible.isEmpty {
+        if !visible.isEmpty || (grouped && !folders.isEmpty) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack(alignment: .center) {
                     if grouped {
-                        Text(L10n.text("apple.clientrecentchats.recent_chats.2ccfecbc"))
+                        Label(L10n.text("apple.clientrecentchats.recent_chats.2ccfecbc"),
+                              systemImage: WorkspacesSection.recentChats.symbol)
                             .font(ClientType.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                     } else {
@@ -166,7 +167,8 @@ struct ClientRecentChatsSection: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 2)
+                .padding(.horizontal, grouped ? Theme.Space.m : 2)
+                .frame(minHeight: grouped ? 48 : 0)
 
                 ForEach(shown) { chat in
                     ClientOwnedNavigationLink {

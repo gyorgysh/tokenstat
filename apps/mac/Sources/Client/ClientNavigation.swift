@@ -100,9 +100,11 @@ final class ClientNavigationModel {
     var showingNewChat = false
     let newChatDraft = ChatStartDraft()
     var requestedNewChatRepositoryID: String?
-    func openNewChat(repositoryID: String? = nil) {
+    var requestedNewChatHostKey: String?
+    func openNewChat(repositoryID: String? = nil, hostPeer: String? = nil) {
         chooseNavigation()
         requestedNewChatRepositoryID = repositoryID
+        requestedNewChatHostKey = hostPeer
         newChatDraft.activate(scope: WorkSessionContext.shared.scope,
                               session: WorkSessionContext.shared.generation, repositoryID: repositoryID)
         showingNewChat = true
@@ -436,6 +438,7 @@ final class ClientNavigationModel {
         presentedTaskBoard = nil
         suggestedPrompt = nil
         deviceMachineID = nil
+        workspacesDeviceMachineID = nil
         workspacesPath = []
     }
 
@@ -471,6 +474,9 @@ final class ClientNavigationModel {
     /// value by the time the push happens. `ClientDevicesView` clears it when
     /// the push ends, so returning to Devices later lands on the list.
     var deviceMachineID: String?
+    /// A device opened from Repositories stays on that tab's navigation stack.
+    /// Back therefore returns to the same computer and work list.
+    var workspacesDeviceMachineID: String?
 
     /// Selecting a folder implies the workspace plane, so both move together.
     func open(folderID: String?, section: WorkspaceSection = .sessions) {
@@ -516,6 +522,12 @@ final class ClientNavigationModel {
         guard let machineID, !machineID.isEmpty else { return }
         deviceMachineID = machineID
         destination = .machines
+    }
+
+    func openWorkspaceDevice(machineID: String?) {
+        guard let machineID, !machineID.isEmpty else { return }
+        workspacesDeviceMachineID = machineID
+        destination = .workspaces
     }
 
     /// Open this conversation in its folder's chat section.

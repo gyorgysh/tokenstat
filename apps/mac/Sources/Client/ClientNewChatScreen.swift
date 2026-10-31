@@ -13,6 +13,7 @@ struct ClientNewChatScreen: View {
     @State private var addAfterChoosingHost = false
     private var draft: ChatStartDraft { navigation.newChatDraft }
     private var requestedPeer: String? {
+        if let host = navigation.requestedNewChatHostKey { return host }
         guard let repositoryID = navigation.requestedNewChatRepositoryID else { return nil }
         let parts = repositoryID.split(separator: ":", maxSplits: 2)
         return parts.count == 3 && parts[0] == "remote" ? String(parts[1]) : nil
@@ -75,6 +76,10 @@ struct ClientNewChatScreen: View {
         .task {
             draft.activate(scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation)
             await workspaces.refresh(account: account.account)
+            if navigation.requestedNewChatRepositoryID == nil,
+               navigation.requestedNewChatHostKey != nil || workspaces.hosts.count > 1 {
+                draft.repositoryID = nil
+            }
             if let requestedPeer, let target = workspaces.hosts.first(where: { $0.peerKey == requestedPeer }) {
                 if workspaces.loadedHostKeys.contains(requestedPeer),
                    !workspaces.staleHostKeys.contains(requestedPeer), target.online != false {
