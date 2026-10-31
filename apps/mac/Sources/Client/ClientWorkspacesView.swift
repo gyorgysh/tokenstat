@@ -1055,12 +1055,18 @@ private struct ClientHostConnectionSummary: View {
     }
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Text(shortRoute ?? L10n.text("common.chat.stats.connected"))
                 .foregroundStyle(Theme.accent)
-            if let powerLabel {
-                Text("· \(powerLabel)")
-                    .foregroundStyle(.secondary)
+            if powerLabel != nil {
+                Image(systemName: HostStatsFormat.powerSymbol(stats))
+                    .foregroundStyle(stats?.power == "battery" && stats?.charging != true && (stats?.percent ?? 100) < 20
+                        ? Theme.warning : Color.secondary)
+                    .accessibilityHidden(true)
+                if stats?.power == "battery", stats?.charging != true, let percent = stats?.percent {
+                    Text("\(percent)%")
+                        .foregroundStyle(percent < 20 ? Theme.warning : Color.secondary)
+                }
             }
         }
         .font(ClientType.caption)

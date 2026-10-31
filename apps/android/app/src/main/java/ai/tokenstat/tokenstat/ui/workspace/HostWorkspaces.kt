@@ -683,7 +683,7 @@ private fun CompactHostConnectionSummary(model: AppViewModel, peer: String) {
         power == "ac" -> L10n.text("android.hostworkspaces.ac_power")
         else -> null
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             when (route) {
                 "direct" -> L10n.text("android.hostworkspaces.direct_route")
@@ -692,8 +692,17 @@ private fun CompactHostConnectionSummary(model: AppViewModel, peer: String) {
             }, style = TsType.caption, color = colors.accent, maxLines = 1,
         )
         if (powerLabel != null) {
-            Text("· $powerLabel", style = TsType.caption, color = colors.textSecondary,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val powerColor = if (power == "battery" && !charging && percent != null && percent < 20)
+                colors.warning else colors.textSecondary
+            Icon(
+                powerIconVector(charging, percent, power),
+                contentDescription = powerLabel,
+                modifier = Modifier.size(14.dp),
+                tint = powerColor,
+            )
+            if (power == "battery" && !charging && percent != null) {
+                Text("$percent%", style = TsType.caption, color = powerColor, maxLines = 1)
+            }
         }
     }
 }
