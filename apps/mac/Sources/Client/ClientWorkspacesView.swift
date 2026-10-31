@@ -138,7 +138,7 @@ struct ClientWorkspacesView: View {
                         }
                     }
 
-                    thisDeviceRow
+                    if model.hosts.count <= 1 { thisDeviceRow }
                     ClientSecurityCard(
                         peerKey: model.hosts.count == 1 ? model.connectedKey : nil,
                         peerName: model.hosts.count == 1
@@ -578,9 +578,8 @@ struct ClientWorkspacesView: View {
     /// never drawn as offline: the app asking the question is running on it.
     @ViewBuilder
     private var thisDeviceRow: some View {
-        // Deliberately not a card. The host cards above open a device when
-        // tapped, and this row opens nothing, so wearing the same surface
-        // taught people it could be entered too.
+        // This row opens nothing. In the multi-host list it shares the host
+        // surface but keeps its own non-navigating appearance.
         if let name = model.thisDeviceName {
             HStack(spacing: Theme.Space.s) {
                 Circle()
@@ -636,6 +635,11 @@ struct ClientWorkspacesView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accent)
+            }
+            if model.thisDeviceName != nil {
+                Divider().padding(.leading, Theme.Space.m)
+                thisDeviceRow
+                    .frame(minHeight: 64)
             }
         }
         .cardSurface()
@@ -1020,7 +1024,7 @@ private struct ClientHostConnectionSummary: View {
             return stats.percent.map { L10n.text("apple.clientworkspacesview.battery_percent", "\($0)") }
                 ?? L10n.text("apple.hoststatsbar.on_battery.51d53044")
         }
-        if stats.power == "ac" { return L10n.text("apple.hoststatsbar.plugged_in.edefc1f9") }
+        if stats.power == "ac" { return L10n.text("apple.clientworkspacesview.ac_power") }
         return nil
     }
 

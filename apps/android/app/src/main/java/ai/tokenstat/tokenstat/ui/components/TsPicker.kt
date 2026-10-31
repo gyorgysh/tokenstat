@@ -475,6 +475,7 @@ fun TsPickerField(
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    maxLines: Int = 2,
 ) {
     val colors = LocalTsColors.current
     val shape = RoundedCornerShape(Space.s)
@@ -493,7 +494,7 @@ fun TsPickerField(
             summary,
             style = TsType.callout.copy(fontWeight = FontWeight.Medium),
             color = if (enabled) colors.textPrimary else colors.textTertiary,
-            maxLines = 2,
+            maxLines = maxLines,
             overflow = TextOverflow.MiddleEllipsis,
             modifier = Modifier.weight(1f, fill = false),
         )

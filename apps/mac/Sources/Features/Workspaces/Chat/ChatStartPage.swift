@@ -202,7 +202,7 @@ struct ChatStartPage: View {
             // thing a send cannot happen without at the bottom of the card.
             HStack(spacing: 10) {
                 if let hostPicker { hostPicker }
-                if !requiresHostSelection { repositoryPicker }
+                if !requiresHostSelection { repositoryPicker.frame(maxWidth: .infinity, alignment: .leading) }
                 Spacer(minLength: 0)
                 if catalogLoading { ProgressView().controlSize(.small) }
                 if catalogError != nil {
@@ -379,7 +379,7 @@ struct ChatStartPage: View {
                     .foregroundStyle(selected == nil ? Theme.accent : Color.secondary)
                 Text(selected?.name ?? L10n.text("common.new_chat.choose_repository"))
                     .font(Theme.font(12, weight: .medium))
-                    .lineLimit(1).truncationMode(.middle)
+                    .lineLimit(1).truncationMode(selected == nil ? .tail : .middle)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(Theme.fixed(8, weight: .semibold))
                     .foregroundStyle(.tertiary)

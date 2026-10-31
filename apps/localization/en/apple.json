@@ -2374,6 +2374,7 @@
   "apple.clientworkspacesview.charging": "Charging",
   "apple.clientworkspacesview.charging_percent": "Charging {0}%",
   "apple.clientworkspacesview.battery_percent": "Battery {0}%",
+  "apple.clientworkspacesview.ac_power": "AC power",
   "apple.clientworkspacesview.computers_on_your_account.232226fe": "Computers on your account",
   "apple.clientworkspacesview.connecting.72021eb7": "Connecting…",
   "apple.clientworkspacesview.customize_projects.00ab91c5": "Customize Repositories",

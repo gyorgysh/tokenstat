@@ -531,6 +531,7 @@ fun HostCard(
 fun CompactHostList(
     model: AppViewModel,
     hosts: List<JsonObject>,
+    thisMachine: JsonObject?,
     currentPeer: String?,
     retainedHosts: Set<String>,
     staleHosts: Set<String>,
@@ -547,7 +548,8 @@ fun CompactHostList(
     // Preserve account order while the asynchronous host dials finish.
     val ordered = hosts
     val shown = if (expanded) ordered else ordered.take(3)
-    TsCard {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(cardRadiusDp)).tsPanel()
+        .padding(horizontal = Space.m, vertical = Space.xs)) {
         shown.forEachIndexed { index, machine ->
             val peer = machine.str("publicIdentity").orEmpty()
             val name = ai.tokenstat.tokenstat.ui.logic.DeviceCopy.displayName(
@@ -629,6 +631,25 @@ fun CompactHostList(
                     else L10n.text("android.tokenstatapp.show_more_0_more.c732a4ba", "${ordered.size - 3}"))
             }
         }
+        if (thisMachine != null) {
+            HorizontalDivider(color = colors.border)
+            val name = ai.tokenstat.tokenstat.ui.logic.DeviceCopy.displayName(
+                thisMachine.str("label"), thisMachine.str("platform"), false,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                AwakeDot(online = true)
+                FeatureMark(name = "mark_device", tint = colors.accent, size = 22)
+                Column(Modifier.weight(1f)) {
+                    Text(name, style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
+                        color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(L10n.text("android.tokenstatapp.this_device.d052579c"), style = TsType.caption,
+                        color = colors.textSecondary)
+                }
+                Text(L10n.text("common.online"), style = TsType.caption, color = colors.accent)
+            }
+        }
     }
 }
 
@@ -653,7 +674,7 @@ private fun CompactHostConnectionSummary(model: AppViewModel, peer: String) {
         charging -> L10n.text("android.hostworkspaces.charging")
         power == "battery" && percent != null -> L10n.text("android.hostworkspaces.battery_percent", "$percent")
         power == "battery" -> L10n.text("android.homelogic.on_battery.51d53044")
-        power == "ac" -> L10n.text("android.homelogic.plugged_in.edefc1f9")
+        power == "ac" -> L10n.text("android.hostworkspaces.ac_power")
         else -> null
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -871,7 +892,7 @@ private fun SecurityKeyRow(
 /// One registered folder: its name, path, and git state. Port of
 /// `ClientFolderRow`.
 @Composable
-fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> Unit)? = null, peer: String? = null) {
+fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> Unit)? = null, peer: String? = null, grouped: Boolean = false) {
     val colors = LocalTsColors.current
     val git = folder["git"] as? JsonObject
     var actionsOpen by remember(folder.str("id"), folder.str("path")) { mutableStateOf(false) }
@@ -883,10 +904,10 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(cardRadiusDp))
-            .tsPanel()
+            .then(if (grouped) Modifier else Modifier.clip(RoundedCornerShape(cardRadiusDp)).tsPanel())
             .combinedClickable(onClick = onOpen, onLongClick = if (systemId == null) null else ({ systemActions = true }))
-            .padding(Space.m),
+            .heightIn(min = 56.dp)
+            .padding(horizontal = Space.m, vertical = if (grouped) Space.s else Space.m),
     ) {
         DropdownMenu(systemActions, onDismissRequest = { systemActions = false }) {
             DropdownMenuItem(text = { Text(stringResource(ai.tokenstat.tokenstat.R.string.system_pin_project)) }, onClick = {
@@ -971,7 +992,7 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
 /// One running session: the harness mark where the command names one, a
 /// terminal tile otherwise. Port of `ClientSessionRow`.
 @Composable
-fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen: () -> Unit) {
+fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen: () -> Unit, grouped: Boolean = false) {
     val colors = LocalTsColors.current
     val command = session.str("command").orEmpty()
     val harness = harnessIdForCommand(command)
@@ -982,10 +1003,10 @@ fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(cardRadiusDp))
-            .tsPanel()
+            .then(if (grouped) Modifier else Modifier.clip(RoundedCornerShape(cardRadiusDp)).tsPanel())
             .clickable { onOpen() }
-            .padding(Space.m),
+            .heightIn(min = 56.dp)
+            .padding(horizontal = Space.m, vertical = if (grouped) Space.s else Space.m),
     ) {
         if (harness != null) {
             HarnessMark(id = harness, size = ROW_MARK.dp)
@@ -1021,7 +1042,7 @@ fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen
 /// lives. Port of `ClientRecentChatRow`. This device keeps no read receipts,
 /// so the dot is attention only: unread tracking lives on the Apple client.
 @Composable
-fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit) {
+fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit, grouped: Boolean = false) {
     val colors = LocalTsColors.current
     val needsAttention = (chat["needsAttention"] as? JsonPrimitive)?.booleanOrNull == true
     val running = (chat["running"] as? JsonPrimitive)?.booleanOrNull == true
@@ -1030,10 +1051,10 @@ fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(cardRadiusDp))
-            .tsPanel()
+            .then(if (grouped) Modifier else Modifier.clip(RoundedCornerShape(cardRadiusDp)).tsPanel())
             .clickable { onOpen() }
-            .padding(Space.m),
+            .heightIn(min = 56.dp)
+            .padding(horizontal = Space.m, vertical = if (grouped) Space.s else Space.m),
     ) {
         Box {
             HarnessMark(id = chat.str("backend").orEmpty(), size = 28.dp)

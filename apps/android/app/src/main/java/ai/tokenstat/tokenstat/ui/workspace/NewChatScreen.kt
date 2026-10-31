@@ -102,7 +102,7 @@ private fun newChatCopy(key: String): String { val resource = "common.new_chat.$
 @Composable
 fun NewChatScreen(
     model: AppViewModel, accountOwner: String?, accountScope: String?, initialSetup: NewChatSetup? = null, onSetup: (NewChatSetup?) -> Unit,
-    draft: String, staged: List<StagedAttachment>, onDraft: (String) -> Unit, hosts: List<JsonObject>, connectedPeer: String?, preferredPeer: String?, connecting: Boolean,
+    draft: String, staged: List<StagedAttachment>, onDraft: (String) -> Unit, hosts: List<JsonObject>, connectedPeer: String?, preferredPeer: String?, requestedPeer: String?, connecting: Boolean,
     folders: List<JsonObject>, selectedRepository: String?, onRepository: (String) -> Unit,
     onHost: (JsonObject) -> Unit, onAdd: () -> Unit, onSend: () -> Unit, onClose: () -> Unit, error: String? = null,
     onManageDevices: () -> Unit = {}, onSetupMachine: () -> Unit = onManageDevices,
@@ -117,17 +117,22 @@ fun NewChatScreen(
     // The draft owner changes when a repository is chosen. Host selection
     // belongs to the account and must survive that change.
     var chosenPeer by rememberSaveable(accountScope) { mutableStateOf<String?>(null) }
+    var requestedAttempted by remember(accountScope, requestedPeer) { mutableStateOf(false) }
     val effectivePeer = if (hosts.size > 1 && selectedRepository == null) {
         connectedPeer?.takeIf { it == chosenPeer }
     } else connectedPeer
-    LaunchedEffect(hosts, selectedRepository, preferredPeer, connectedPeer) {
-        if (selectedRepository != null || chosenPeer != null) return@LaunchedEffect
+    LaunchedEffect(hosts, selectedRepository, preferredPeer, requestedPeer, connectedPeer, connecting) {
+        if (selectedRepository != null || requestedPeer == null && chosenPeer != null) return@LaunchedEffect
         val preferred = hosts.firstOrNull {
-            it.newChatText("publicIdentity") == preferredPeer
+            it.newChatText("publicIdentity") == (requestedPeer ?: preferredPeer)
         }
         if (preferred != null) {
-            chosenPeer = preferred.newChatText("publicIdentity")
-            if (connectedPeer != chosenPeer && !connecting) onHost(preferred)
+            if (chosenPeer != preferred.newChatText("publicIdentity")) chosenPeer = preferred.newChatText("publicIdentity")
+            if (connectedPeer != chosenPeer && !connecting &&
+                (requestedPeer == null || !requestedAttempted)) {
+                if (requestedPeer != null) requestedAttempted = true
+                onHost(preferred)
+            }
         }
     }
     val savedChoice = remember(context, accountOwner) { SharedPrefsLaunchChoice(context).read() }
@@ -271,9 +276,10 @@ fun NewChatScreen(
                         NoComputerConnected(onSetupMachine)
                     } else {
                         TsPickerField(
-                            summary = hosts.firstOrNull { it.newChatText("publicIdentity") == effectivePeer }
+                            summary = hosts.firstOrNull { it.newChatText("publicIdentity") == (effectivePeer ?: chosenPeer) }
                                 ?.newChatText("label")?.takeIf { it.isNotBlank() } ?: newChatCopy("choose_host"),
                             onOpen = { hostMenu = true }, enabled = !connecting,
+                            maxLines = 1,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         if (effectivePeer != null) {
@@ -282,6 +288,7 @@ fun NewChatScreen(
                                 TsPickerField(
                                     summary = selected?.newChatText("name") ?: newChatCopy("choose_repository"),
                                     onOpen = { repositoryMenu = true }, enabled = !connecting,
+                                    maxLines = 1,
                                     modifier = Modifier.fillMaxWidth().testTag("newChat.repository"),
                                 )
                                 if (litRepository) Box(Modifier.matchParentSize().border(1.dp, colors.accent, RoundedCornerShape(Space.s)))

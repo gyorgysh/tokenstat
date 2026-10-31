@@ -3273,6 +3273,7 @@ private fun WorkspacesScreen(
     val newChatDraftRevision by model.chatComposers.revision.collectAsStateWithLifecycle()
     val newChatFailure by model.chatComposers.failure.collectAsStateWithLifecycle()
     var newChatOpen by rememberSaveable(navigationOwner) { mutableStateOf(false) }
+    var newChatRequestedPeer by rememberSaveable(navigationOwner) { mutableStateOf<String?>(null) }
     var newChatRequest by remember(navigationOwner) { mutableStateOf<ai.tokenstat.tokenstat.ui.workspace.NewChatRequest?>(null) }
     // The host list the iOS model keeps: hosts only, without this phone
     // (by account id and by its own key, for records that predate kinds),
@@ -3912,8 +3913,19 @@ private fun WorkspacesScreen(
             },
             onSession = { openSession(it) },
             onChat = { openChat(it) },
-            onNewChat = { selectNewChatRepository(null); newChatOpen = true },
+            onNewChat = { newChatRequestedPeer = null; selectNewChatRepository(null); newChatOpen = true },
+            onNewChatForHost = { machine ->
+                newChatRequestedPeer = machine.string("publicIdentity")
+                selectNewChatRepository(null)
+                newChatOpen = true
+            },
             onNewSession = { choosingFor = "Sessions" },
+            onNewSessionForHost = { machine ->
+                if (session.activateConnectedHost(machine)) {
+                    choosingFor = "Sessions"
+                    scope.launch { connect(machine) }
+                }
+            },
             onChooseFolder = { picking = true },
             onClone = { cloning = true },
             onRequestAccess = { peer -> scope.launch {
@@ -3971,17 +3983,21 @@ private fun WorkspacesScreen(
                     model.chatComposers.update(newChatOwner, model.chatComposers.snapshot(newChatOwner).copy(text = it))
             },
             hosts = hosts, connectedPeer = connectedPeer,
-            preferredPeer = (connectedPeer ?: layoutStore.lastConnectedHost()?.takeIf { saved ->
+            preferredPeer = (newChatRequestedPeer ?: connectedPeer ?: layoutStore.lastConnectedHost()?.takeIf { saved ->
                 hosts.any { it.string("publicIdentity") == saved }
             }
                 ?: hosts.singleOrNull()?.string("publicIdentity"))?.takeIf { peer ->
                 peer in retainedHosts || layoutStore.isAutoConnectEnabled(peer)
-            }, connecting = connectingPeer != null,
+            }, requestedPeer = newChatRequestedPeer, connecting = connectingPeer != null,
             folders = folders.filterIsInstance<JsonObject>(), selectedRepository = newChatRepository,
-            onRepository = { selectNewChatRepository(it) }, onHost = { machine -> newChatRepository = null; scope.launch { connect(machine) } },
+            onRepository = { selectNewChatRepository(it) }, onHost = { machine ->
+                if (newChatRequestedPeer != machine.string("publicIdentity")) newChatRequestedPeer = null
+                newChatRepository = null
+                scope.launch { connect(machine) }
+            },
             onManageDevices = onManageDevices,
             onSetupMachine = { newChatOpen = false; onSetupWizard?.invoke() ?: onManageDevices() },
-            onAdd = { newChatAddScope = newChatAccount to connectedPeer; picking = true }, onClose = { newChatOpen = false }, error = newChatFailure?.takeIf { it.owner == newChatOwner }?.message ?: error,
+            onAdd = { newChatAddScope = newChatAccount to connectedPeer; picking = true }, onClose = { newChatOpen = false; newChatRequestedPeer = null }, error = newChatFailure?.takeIf { it.owner == newChatOwner }?.message ?: error,
             onSend = {
                 val peer = connectedPeer
                 val repository = folders.filterIsInstance<JsonObject>().firstOrNull { it.string("id") == newChatRepository }
@@ -4124,7 +4140,9 @@ private fun WorkspaceList(
     onSession: (JsonObject) -> Unit,
     onChat: (JsonObject) -> Unit,
     onNewChat: () -> Unit,
+    onNewChatForHost: (JsonObject) -> Unit,
     onNewSession: () -> Unit,
+    onNewSessionForHost: (JsonObject) -> Unit,
     onChooseFolder: () -> Unit,
     onClone: () -> Unit,
     onRequestAccess: (String) -> Unit,
@@ -4149,19 +4167,16 @@ private fun WorkspaceList(
     val chatRows = chats.mapNotNull { it as? JsonObject }
     val visibleSections = layoutOrder.filter { it !in layoutHidden }
     val multiHost = hosts.size > 1
-    val groupedFolders = if (multiHost && WorkSection.FOLDERS in visibleSections) hosts.mapNotNull { machine ->
+    val readyHostWork = if (multiHost) hosts.mapNotNull { machine ->
         val peer = machine.string("publicIdentity") ?: return@mapNotNull null
         if ((peer !in retainedHosts && peer != connectedPeer) || peer in staleHosts ||
             machine.get("online")?.jsonPrimitive?.booleanOrNull == false) return@mapNotNull null
-        val source = if (peer == connectedPeer) folderRows else
-            model.workspacesConnection.foldersFor(peer).filterIsInstance<JsonObject>()
-        val matching = source.filter { folder -> search.isBlank() ||
-            (folder.string("name") ?: "").contains(search, ignoreCase = true) ||
-            (folder.string("path") ?: "").contains(search, ignoreCase = true)
-        }
-        if (matching.isEmpty()) null else machine to matching
+        if (peer == connectedPeer) OtherHostWork(machine, folderRows, sessionRows, chatRows)
+        else otherHostWork.firstOrNull { it.machine.string("publicIdentity") == peer }
     } else emptyList()
     val expandedHostFolders = remember { mutableStateMapOf<String, Boolean>() }
+    val expandedHostChats = remember { mutableStateMapOf<String, Boolean>() }
+    val expandedHostSessions = remember { mutableStateMapOf<String, Boolean>() }
     var chatsExpanded by remember { mutableStateOf(false) }
     LazyColumn(modifier, contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -4223,7 +4238,7 @@ private fun WorkspaceList(
         if (multiHost) {
             item {
                 CompactHostList(
-                    model, hosts, connectedPeer, retainedHosts, staleHosts, accessDeniedHosts, connectingPeer,
+                    model, hosts, thisMachine, connectedPeer, retainedHosts, staleHosts, accessDeniedHosts, connectingPeer,
                     autoConnect, onAutoConnect, onConnect, onDisconnect, onOpenDevice,
                 )
             }
@@ -4248,38 +4263,13 @@ private fun WorkspaceList(
                 )
             }
         }
-        if (groupedFolders.isNotEmpty()) {
-            item { SectionTitle(L10n.text("common.projects"), "mark_archive") }
-            groupedFolders.forEach { (machine, hostFolders) ->
-                val peer = machine.string("publicIdentity") ?: return@forEach
-                item {
-                    Text(DeviceCopy.displayName(machine.string("label"), machine.string("platform"), true),
-                        style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
-                }
-                val shown = if (expandedHostFolders[peer] == true) hostFolders else hostFolders.take(2)
-                items(shown, key = { "$peer:${it.string("id")}" }) { folder ->
-                    WorkspaceFolderRow(folder = folder, peer = peer,
-                        onOpen = { if (peer == connectedPeer) onFolder(folder) else onOtherFolder(machine, folder) })
-                }
-                if (hostFolders.size > 2) {
-                    item {
-                        TextButton(onClick = { expandedHostFolders[peer] = expandedHostFolders[peer] != true },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                            Text(if (expandedHostFolders[peer] == true) L10n.text("android.tokenstatapp.show_less.94ea9b1d")
-                                else L10n.text("android.tokenstatapp.show_more_0_more.c732a4ba", "${hostFolders.size - 2}"))
-                        }
-                    }
-                }
-            }
-        }
-        // Deliberately not a card. The host cards above open a device when
-        // tapped, and this row opens nothing, so wearing the same surface
-        // taught people it could be entered too.
+        // The local device belongs immediately after the host list. With
+        // several hosts its row is inside CompactHostList's shared surface.
         thisMachine?.let { machine ->
             item {
                 val name = DeviceCopy.displayName(machine.string("label"), machine.string("platform"), false)
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Row(
+                    if (!multiHost) Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
                         modifier = Modifier.fillMaxWidth(),
@@ -4308,6 +4298,140 @@ private fun WorkspaceList(
                     )
                 }
             }
+        }
+        if (multiHost) {
+            if (readyHostWork.isNotEmpty() && visibleSections.isNotEmpty()) {
+                item { SectionTitle(L10n.text("android.tokenstatapp.work_by_computer"), "mark_archive") }
+            }
+            readyHostWork.forEach { work ->
+                val machine = work.machine
+                val peer = machine.string("publicIdentity") ?: return@forEach
+                val hostName = DeviceCopy.displayName(machine.string("label"), machine.string("platform"), true)
+                val matchingFolders = work.folders.filter { folder -> search.isBlank() ||
+                    (folder.string("name") ?: "").contains(search, ignoreCase = true) ||
+                    (folder.string("path") ?: "").contains(search, ignoreCase = true)
+                }
+                if (visibleSections.none { section -> when (section) {
+                    WorkSection.FOLDERS -> matchingFolders.isNotEmpty()
+                    WorkSection.RECENT_CHATS -> work.chats.isNotEmpty() || work.folders.isNotEmpty()
+                    WorkSection.SESSIONS -> work.sessions.isNotEmpty() || work.folders.isNotEmpty()
+                } }) return@forEach
+                item(key = "host-work:$peer") {
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(cardRadiusDp)).tsPanel()) {
+                        Row(verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Space.s),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = Space.m)) {
+                            FeatureMark(name = "mark_host", tint = colors.accent, size = 22)
+                            Text(hostName, style = TsType.subheadline.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        visibleSections.forEach { section ->
+                            val count = when (section) {
+                                WorkSection.FOLDERS -> matchingFolders.size
+                                WorkSection.RECENT_CHATS -> work.chats.size
+                                WorkSection.SESSIONS -> work.sessions.size
+                            }
+                            val show = count > 0 || (section != WorkSection.FOLDERS && work.folders.isNotEmpty())
+                            if (show) {
+                                HorizontalDivider(color = colors.border, modifier = Modifier.padding(start = Space.m))
+                                Row(verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(horizontal = Space.m)) {
+                                    Text(section.label, style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
+                                        color = colors.textSecondary, modifier = Modifier.weight(1f))
+                                    if (work.folders.isNotEmpty() && section == WorkSection.RECENT_CHATS) {
+                                        TextButton(onClick = { onNewChatForHost(machine) },
+                                            modifier = Modifier.heightIn(min = 44.dp)) {
+                                            Text(L10n.text("android.tokenstatapp.new_chat.db18382a"), style = TsType.caption, color = colors.accent)
+                                        }
+                                    }
+                                    if (work.folders.isNotEmpty() && section == WorkSection.SESSIONS) {
+                                        TextButton(onClick = { onNewSessionForHost(machine) },
+                                            modifier = Modifier.heightIn(min = 44.dp)) {
+                                            Text(L10n.text("android.tokenstatapp.new_terminal.fe544556"), style = TsType.caption, color = colors.accent)
+                                        }
+                                    }
+                                }
+                                when (section) {
+                                    WorkSection.FOLDERS -> {
+                                        val shown = if (expandedHostFolders[peer] == true) matchingFolders else matchingFolders.take(2)
+                                        shown.forEachIndexed { index, folder ->
+                                            if (index > 0) HorizontalDivider(color = colors.border,
+                                                modifier = Modifier.padding(start = Space.m))
+                                            WorkspaceFolderRow(folder = folder, peer = peer, grouped = true,
+                                                onOpen = { if (peer == connectedPeer) onFolder(folder) else onOtherFolder(machine, folder) },
+                                                onRename = if (peer == connectedPeer) ({ renamingProject = folder }) else null)
+                                        }
+                                        if (matchingFolders.size > 2) {
+                                            TextButton(onClick = { expandedHostFolders[peer] = expandedHostFolders[peer] != true },
+                                                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)) {
+                                                Text(if (expandedHostFolders[peer] == true) L10n.text("android.tokenstatapp.show_less.94ea9b1d")
+                                                    else L10n.text("android.tokenstatapp.show_more_0_more.c732a4ba", "${matchingFolders.size - 2}"))
+                                            }
+                                        }
+                                    }
+                                    WorkSection.RECENT_CHATS -> {
+                                        val shown = if (expandedHostChats[peer] == true) work.chats else work.chats.take(2)
+                                        shown.forEachIndexed { index, chat ->
+                                            if (index > 0) HorizontalDivider(color = colors.border,
+                                                modifier = Modifier.padding(start = Space.m))
+                                            val folderName = work.folders.firstOrNull { it.string("id") == chat.string("workspaceId") }
+                                                ?.string("name") ?: L10n.text("android.tokenstatapp.project.98595978")
+                                            WorkspaceChatRow(chat = chat, folderName = folderName, grouped = true,
+                                                onOpen = { if (peer == connectedPeer) onChat(chat) else onOtherChat(machine, chat) })
+                                        }
+                                        if (work.chats.size > 2) {
+                                            TextButton(onClick = { expandedHostChats[peer] = expandedHostChats[peer] != true },
+                                                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)) {
+                                                Text(if (expandedHostChats[peer] == true) L10n.text("android.tokenstatapp.show_less.94ea9b1d")
+                                                    else L10n.text("android.tokenstatapp.show_more_0_more.c732a4ba", "${work.chats.size - 2}"))
+                                            }
+                                        }
+                                    }
+                                    WorkSection.SESSIONS -> {
+                                        val shown = if (expandedHostSessions[peer] == true) work.sessions else work.sessions.take(2)
+                                        shown.forEachIndexed { index, info ->
+                                            if (index > 0) HorizontalDivider(color = colors.border,
+                                                modifier = Modifier.padding(start = Space.m))
+                                            val owner = info.string("workspaceId")?.let {
+                                                ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(client.account, peer, it)
+                                            }
+                                            WorkspaceSessionRow(info,
+                                                displayName = terminalNames.name(owner, info.string("id").orEmpty()), grouped = true,
+                                                onOpen = { if (peer == connectedPeer) onSession(info) else onOtherSession(machine, info) })
+                                        }
+                                        if (work.sessions.size > 2) {
+                                            TextButton(onClick = { expandedHostSessions[peer] = expandedHostSessions[peer] != true },
+                                                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)) {
+                                                Text(if (expandedHostSessions[peer] == true) L10n.text("android.tokenstatapp.show_less.94ea9b1d")
+                                                    else L10n.text("android.tokenstatapp.show_more_0_more.c732a4ba", "${work.sessions.size - 2}"))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (allowed == false) {
+                (dialledHost ?: connectedHost)?.let { refused ->
+                    item { RequestAccessCard(
+                        hostName = DeviceCopy.displayName(refused.string("label"), refused.string("platform"), true),
+                        headless = DeviceCopy.isHeadlessPlatform(refused.string("platform")) ||
+                            DeviceCopy.isHeadlessPlatform(refused.string("label")),
+                        requesting = requesting, notice = requestNotice,
+                        onRequest = { onRequestAccess(refused.string("publicIdentity") ?: "") },
+                    ) }
+                }
+            }
+            item {
+                TextButton(onClick = onCustomize, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Icon(ActionIcon.Layout.vector, null, tint = colors.accent, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(Space.xs))
+                    Text(L10n.text("android.tokenstatapp.customize_projects.00ab91c5"), color = colors.accent)
+                }
+            }
+            return@LazyColumn
         }
         for (work in otherHostWork) {
             val machine = work.machine

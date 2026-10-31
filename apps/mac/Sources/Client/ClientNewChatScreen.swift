@@ -93,6 +93,7 @@ struct ClientNewChatScreen: View {
                 draft.repositoryID = nil
             }
             if let requestedPeer, let target = workspaces.hosts.first(where: { $0.peerKey == requestedPeer }) {
+                chosenHostKey = requestedPeer
                 if workspaces.loadedHostKeys.contains(requestedPeer),
                    !workspaces.staleHostKeys.contains(requestedPeer), target.online != false {
                     workspaces.focusLoadedHost(target)
@@ -198,7 +199,8 @@ struct ClientNewChatScreen: View {
     }
 
     private var hostPicker: some View {
-        Menu {
+        let chosenName = workspaces.hosts.first { $0.peerKey == (chosenHostKey ?? requestedPeer) }?.name
+        return Menu {
             ForEach(workspaces.hosts, id: \.peerKey) { host in
                 Button(host.name, systemImage: "desktopcomputer") { Task { await choose(host, thenAdd: false) } }
             }
@@ -207,10 +209,15 @@ struct ClientNewChatScreen: View {
                 navigation.destination = .machines
             }
         } label: {
-            Label(host?.name ?? L10n.text("common.new_chat.choose_host"), systemImage: "desktopcomputer")
-                .font(Theme.caption).foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(minHeight: 44).contentShape(Rectangle())
+            HStack(spacing: 5) {
+                Image(systemName: "desktopcomputer")
+                Text(chosenName ?? host?.name ?? L10n.text("common.new_chat.choose_host"))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .font(Theme.caption).foregroundStyle(.secondary)
+            .frame(maxWidth: 132, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .accessibilityLabel(L10n.text("common.new_chat.choose_host"))
     }
@@ -224,6 +231,7 @@ struct ClientNewChatScreen: View {
         let scope = WorkSessionContext.shared.scope
         let generation = WorkSessionContext.shared.generation
         draft.repositoryID = nil
+        chosenHostKey = host.peerKey
         if workspaces.loadedHostKeys.contains(host.peerKey),
            !workspaces.staleHostKeys.contains(host.peerKey), host.online != false {
             workspaces.focusLoadedHost(host)
