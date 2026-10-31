@@ -1182,7 +1182,7 @@ final class WorkspacesModel {
                        Self.isAutoConnectEnabled(for: result.peer.key),
                        candidateRevisions[result.peer.key] == Self.autoConnectRevision(for: result.peer.key) {
                         let key = result.peer.key
-                        let newlySeen = stagedFolders[key] == nil
+                        let newlySeen = stagedFolders[key] == nil || (stagedFailures[key] ?? 0) > 0
                         stagedFolders[key] = listed
                         if let counts = result.summaries {
                             for summary in counts { stagedSummaries[summary.id] = summary }

@@ -1392,7 +1392,11 @@ final class ClientWorkspacesModel {
     /// the last peer that was connected is remembered on disk instead.
     func autoConnectLastHost() async {
         warmRememberedHosts()
-        guard connectedKey == nil, isConnecting == nil, pendingPeer == nil else { return }
+        // Approval is already pending on the host. A foreground/host-list
+        // refresh must not send another access request while the watch polls
+        // for the original answer (the host rate-limits repeated asks).
+        guard connectedKey == nil, isConnecting == nil, pendingPeer == nil,
+              awaitingAccessHost == nil else { return }
         guard let last = lastConnectedHost,
               chosenPeer == nil || chosenPeer == last,
               isAutoConnectEnabled(for: last),
