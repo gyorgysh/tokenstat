@@ -543,8 +543,8 @@ fun CompactHostList(
 ) {
     val colors = LocalTsColors.current
     var expanded by remember { mutableStateOf(false) }
-    val ordered = hosts.filter { it.str("publicIdentity") in retainedHosts } +
-        hosts.filter { it.str("publicIdentity") !in retainedHosts }
+    // Preserve account order while the asynchronous host dials finish.
+    val ordered = hosts
     val shown = if (expanded) ordered else ordered.take(3)
     TsCard {
         shown.forEachIndexed { index, machine ->

@@ -638,9 +638,9 @@ struct ClientWorkspacesView: View {
     /// are available, keep their state and controls in one scannable list so
     /// the projects can start immediately below it.
     private var compactHostList: some View {
-        let connected = model.hosts.filter { model.loadedHostKeys.contains($0.peerKey) }
-        let others = model.hosts.filter { !model.loadedHostKeys.contains($0.peerKey) }
-        let ordered = connected + others
+        // Keep account order while presence and reconnect results change.
+        // Moving a host to the top after a dial makes the rows jump under a tap.
+        let ordered = model.hosts
         let shown = expandedHostList ? ordered : Array(ordered.prefix(3))
         return VStack(spacing: 0) {
             ForEach(Array(shown.enumerated()), id: \.element.peerKey) { index, host in
