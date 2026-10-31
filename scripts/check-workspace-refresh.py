@@ -65,7 +65,7 @@ enum ClientRemote {
     var backgroundSweep: Task<Void, Never>?, refreshBackgroundAfterSweep = false
     var backgroundTickets: [String: UUID] = [:]
     var activeTerminal: ClientTerminalSession?
-    var errorMessage: String?, infoMessage: String?, awaitingAccessHost: String?
+    var errorMessage: String?, infoMessage: String?, awaitingAccessHost: String?, awaitingAccessPeerKey: String?
     var lastConnectedHostKey: String? { nil }
     func rememberHost(_ peer: String) {}
     func setAutoConnect(_ on: Bool, for peer: String) {}
