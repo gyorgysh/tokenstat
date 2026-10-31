@@ -14,6 +14,10 @@ struct ChatStartPage: View {
     var titlebarDragHeight: CGFloat = 0
     var hostPicker: AnyView? = nil
     var allowsSend = true
+    /// A mobile New Chat with known computers keeps the composer visible while
+    /// the person chooses its computer and repository in the same place.
+    var showsEmptyComposer = false
+    var requiresHostSelection = false
     /// The repository list is still being read, so an empty one says nothing
     /// yet and the page must not offer first-run help on the strength of it.
     var repositoriesLoading = false
@@ -63,7 +67,7 @@ struct ChatStartPage: View {
     /// Nothing to talk about yet. The page teaches the first steps instead
     /// of offering a composer that cannot send.
     private var needsRepository: Bool {
-        repositories.isEmpty && !repositoriesLoading && draft.text.isEmpty && draft.attachments.isEmpty
+        !showsEmptyComposer && repositories.isEmpty && !repositoriesLoading && draft.text.isEmpty && draft.attachments.isEmpty
     }
     private var showsStarters: Bool {
         selected != nil && !writing && draft.attachments.isEmpty && !draft.isSubmitting
@@ -264,6 +268,7 @@ struct ChatStartPage: View {
     /// leaves a first-time reader with nothing to aim at.
     private var blockReason: String? {
         if draft.isSubmitting { return nil }
+        if requiresHostSelection { return L10n.text("common.new_chat.choose_host") }
         if selected == nil { return L10n.text("common.new_chat.needs_repository") }
         if catalogLoading { return L10n.text("common.new_chat.finding_agents") }
         if backend == nil { return L10n.text("common.new_chat.needs_agent") }

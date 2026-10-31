@@ -39,6 +39,18 @@ struct ClientNewChatScreen: View {
                         Text(error).font(Theme.caption).foregroundStyle(Theme.danger).padding()
                     } else if let message = workspaces.infoMessage {
                         Text(message).font(Theme.caption).foregroundStyle(.secondary).padding()
+                    } else if let waitingHost = workspaces.awaitingAccessHost {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(L10n.text("apple.clientstates.waiting_for_0.758c485c", "\(waitingHost)"),
+                                  systemImage: "clock")
+                                .font(Theme.caption.weight(.semibold))
+                            Text(isHeadlessHost(named: waitingHost)
+                                 ? L10n.text("apple.clientstates.ssh_in_and_run_the_approve_command_then_pi.d5ad392a")
+                                 : L10n.text("apple.clientstates.open_tokenstat_on_that_computer_and_approv.50e33097"))
+                                .font(Theme.caption)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
                     }
                 }
                 .sheet(isPresented: $addingRepository) {
@@ -90,7 +102,6 @@ struct ClientNewChatScreen: View {
                 chosenHostKey = requestedPeer
             } else if workspaces.hosts.count > 1 {
                 draft.repositoryID = nil
-                choosingHost = true
             } else if workspaces.hosts.count == 1 {
                 await workspaces.autoConnectLastHost()
             }
@@ -126,32 +137,10 @@ struct ClientNewChatScreen: View {
                    message: L10n.text("apple.clientnewchatscreen.a_conversation_runs_an_agent_on_a_computer.3bed8f6c"),
                    actionTitle: L10n.text("apple.clientnewchatscreen.set_up_a_machine.43e10e13"),
                    icon: .connect, request: .machineSetup)
-        } else if host == nil, !workspaces.hosts.isEmpty, draft.text.isEmpty, draft.attachments.isEmpty {
-            ZStack {
-                Theme.background.ignoresSafeArea()
-                if workspaces.isConnecting != nil {
-                    ProgressView(L10n.text("common.new_chat.connecting"))
-                } else if let waitingHost = workspaces.awaitingAccessHost {
-                    VStack(spacing: Theme.Space.m) {
-                        ClientAwaitingAccessCard(hostName: waitingHost, isHeadless: isHeadlessHost(named: waitingHost))
-                        Button(L10n.text("common.new_chat.choose_host"), .connect) {
-                            addAfterChoosingHost = false; choosingHost = true
-                        }
-                    }.padding(.horizontal, 24)
-                } else {
-                    ClientEmptyState(
-                        kind: .nothingYet,
-                        title: L10n.text("common.new_chat.choose_host"),
-                        message: L10n.text("common.new_chat.connect_host_message"),
-                        actionTitle: L10n.text("common.new_chat.choose_host"),
-                        actionIcon: .connect,
-                        action: { addAfterChoosingHost = false; choosingHost = true }
-                    ).padding(.horizontal, 24)
-                }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ChatStartPage(draft: draft, repositories: workspaces.folders,
+            ChatStartPage(draft: draft, repositories: host == nil ? [] : workspaces.folders,
                           hostPicker: AnyView(hostPicker), allowsSend: workspaces.isConnecting == nil && host != nil,
+                          showsEmptyComposer: true, requiresHostSelection: host == nil,
                           repositoriesLoading: workspaces.isConnecting != nil,
                           onAdd: addRepository,
                           onSend: { Task { await send() } })
@@ -205,7 +194,8 @@ struct ClientNewChatScreen: View {
         } label: {
             Label(host?.name ?? L10n.text("common.new_chat.choose_host"), systemImage: "desktopcomputer")
                 .font(Theme.caption).foregroundStyle(.secondary)
-                .frame(minHeight: 32).contentShape(Rectangle())
+                .lineLimit(1)
+                .frame(minHeight: 44).contentShape(Rectangle())
         }
         .accessibilityLabel(L10n.text("common.new_chat.choose_host"))
     }

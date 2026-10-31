@@ -191,8 +191,6 @@ struct ClientWorkspacesView: View {
                 if let machine = workspaceDevice {
                     ClientDeviceDetailView(
                         machine: machine,
-                        usage: devices.usage(for: machine),
-                        accountTotal: devices.total,
                         isThisDevice: false,
                         onRenamed: { await account.load() }
                     )
@@ -667,16 +665,18 @@ struct ClientWorkspacesView: View {
                             .font(ClientType.label.weight(.medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
-                        Text(host.online == false ? L10n.text("common.offline") :
-                            busy ? L10n.text("apple.clientworkspacesview.connecting.72021eb7") :
-                            connected ? L10n.text("common.chat.stats.connected") :
-                            model.deniedHostKeys.contains(host.peerKey) ? L10n.text("apple.clienthostworkspacesview.request_access.b06f1662") :
-                            model.staleHostKeys.contains(host.peerKey) ? L10n.text("apple.clientworkspacesview.needs_refresh.5b783f2d") :
-                            L10n.text("apple.accountview.not_connected.0303e182"))
-                            .font(ClientType.caption)
-                            .foregroundStyle(connected ? Theme.accent : Color.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                        if connected {
+                            ClientHostConnectionSummary(peer: host.peerKey)
+                        } else {
+                            Text(host.online == false ? L10n.text("common.offline") :
+                                busy ? L10n.text("apple.clientworkspacesview.connecting.72021eb7") :
+                                model.deniedHostKeys.contains(host.peerKey) ? L10n.text("apple.clienthostworkspacesview.request_access.b06f1662") :
+                                model.staleHostKeys.contains(host.peerKey) ? L10n.text("apple.clientworkspacesview.needs_refresh.5b783f2d") :
+                                L10n.text("apple.accountview.not_connected.0303e182"))
+                                .font(ClientType.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
                     Spacer(minLength: Theme.Space.xs)
                     if connected && host.machineID != nil {
@@ -685,7 +685,7 @@ struct ClientWorkspacesView: View {
                             .accessibilityHidden(true)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: connected ? 78 : 64, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -715,7 +715,7 @@ struct ClientWorkspacesView: View {
                 Image(systemName: "ellipsis")
                     .font(ClientType.label.weight(.semibold))
                     .foregroundStyle(Theme.accent)
-                    .frame(width: 44, height: 64)
+                    .frame(width: 44, height: connected ? 78 : 64)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("\(host.name), \(L10n.text("apple.clientlaunchtile.more.d47d7cb0"))")
@@ -992,6 +992,73 @@ struct ClientWorkspacesView: View {
         // device and an Auto-connect toggle, and a parent `onTapGesture` fires
         // for taps on those controls too, pushing to Devices mid-action. The
         // explicit "Open device" row above is the way in.
+    }
+}
+
+/// The dot in a computer row means online presence. Connection route and
+/// power are named separately so the accent color is not mistaken for Direct.
+private struct ClientHostConnectionSummary: View {
+    let peer: String
+    @State private var route: String?
+    @State private var stats: HostStats?
+
+    private var shortRoute: String? {
+        switch route {
+        case "direct": L10n.text("apple.clientworkspacesview.direct_route")
+        case "relay": L10n.text("apple.clientworkspacesview.relay_route")
+        default: nil
+        }
+    }
+
+    private var powerLabel: String? {
+        guard let stats else { return nil }
+        if stats.charging == true {
+            return stats.percent.map { L10n.text("apple.clientworkspacesview.charging_percent", "\($0)") }
+                ?? L10n.text("apple.clientworkspacesview.charging")
+        }
+        if stats.power == "battery" {
+            return stats.percent.map { L10n.text("apple.clientworkspacesview.battery_percent", "\($0)") }
+                ?? L10n.text("apple.hoststatsbar.on_battery.51d53044")
+        }
+        if stats.power == "ac" { return L10n.text("apple.hoststatsbar.plugged_in.edefc1f9") }
+        return nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(L10n.text("common.chat.stats.connected"))
+                    .foregroundStyle(Theme.accent)
+                    .fixedSize(horizontal: true, vertical: false)
+                if let routeLabel = shortRoute {
+                    Text("· \(routeLabel)")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .accessibilityLabel(RemoteTrafficPeer.knownLabel(route) ?? routeLabel)
+                }
+            }
+            .font(ClientType.caption)
+            if let stats, let powerLabel {
+                Label(powerLabel,
+                      systemImage: HostStatsFormat.powerSymbol(stats))
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+        .task(id: peer) {
+            while !Task.isCancelled {
+                route = await HostStatsFormat.loadRoute(for: peer)
+                guard !Task.isCancelled else { return }
+                if let fresh = try? await Bridge.hostStats(peer: peer) {
+                    guard !Task.isCancelled else { return }
+                    stats = fresh
+                }
+                try? await Task.sleep(for: .seconds(20))
+            }
+        }
     }
 }
 

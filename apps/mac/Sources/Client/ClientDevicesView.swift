@@ -81,8 +81,6 @@ struct ClientDevicesView: View {
                         NavigationLink {
                             ClientDeviceDetailView(
                                 machine: machine,
-                                usage: model.usage(for: machine),
-                                accountTotal: model.total,
                                 isThisDevice: isThisDevice(machine),
                                 onRenamed: { await account.load() }
                             )
@@ -128,8 +126,6 @@ struct ClientDevicesView: View {
             if let machine = requestedMachine {
                 ClientDeviceDetailView(
                     machine: machine,
-                    usage: model.usage(for: machine),
-                    accountTotal: model.total,
                     isThisDevice: isThisDevice(machine),
                     onRenamed: { await account.load() }
                 )
@@ -438,9 +434,9 @@ private struct DeviceRow: View {
 /// reached.
 struct ClientDeviceDetailView: View {
     @Environment(ClientWorkspacesModel.self) private var workspaces: ClientWorkspacesModel?
+    @Environment(ClientDevicesModel.self) private var devices
+    @State private var usageRequested = false
     let machine: Machine
-    let usage: MachineUsage?
-    let accountTotal: Int64
     let isThisDevice: Bool
     /// Re-read the account after a rename, so the list behind this screen says
     /// the new name too.
@@ -465,6 +461,9 @@ struct ClientDeviceDetailView: View {
         updated.label = renamedTo.isEmpty ? nil : renamedTo
         return updated
     }
+
+    private var usage: MachineUsage? { devices.usage(for: machine) }
+    private var accountTotal: Int64 { devices.total }
 
     var body: some View {
         ScrollView {
@@ -518,6 +517,11 @@ struct ClientDeviceDetailView: View {
         .background(Theme.background)
         .navigationTitle(DeviceCopy.name(current))
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: machine.machineID) {
+            usageRequested = true
+            await devices.load(machines: account.account?.machines ?? [machine],
+                               days: DeviceHistory.days(for: account.account?.tier))
+        }
     }
 
     /// Hosts that are not this phone: the only place spend is a real figure.
@@ -527,20 +531,33 @@ struct ClientDeviceDetailView: View {
 
     private var spend: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(usage?.value.formatted ?? L10n.text("apple.clientdevicesview.n_a.a683c5c5"))
-                .font(ClientType.figure)
-                .foregroundStyle(Theme.accent)
-                .minimumScaleFactor(0.6)
-                .lineLimit(1)
-            Text(usage.map { L10n.text("apple.clientdevicesview.at_api_list_price_0.32cb2c25", "\(DeviceHistory.windowPhrase(days: $0.days))") }
-                ?? L10n.text("apple.clientdevicesview.this_device_s_share_has_not_been_fetched.6aa4e138"))
-                .font(ClientType.caption)
-                .foregroundStyle(.secondary)
             if let usage {
+                Text(usage.value.formatted)
+                    .font(ClientType.figure)
+                    .foregroundStyle(Theme.accent)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                Text(L10n.text("apple.clientdevicesview.at_api_list_price_0.32cb2c25", "\(DeviceHistory.windowPhrase(days: usage.days))"))
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
                 Text(detail(usage))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .padding(.top, 2)
+            } else if !usageRequested || devices.isLoading {
+                ProgressView(L10n.text("apple.clientdevicesview.loading_usage"))
+                    .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            } else if devices.errorMessage != nil {
+                Text(L10n.text("apple.clientdevicesview.usage_unavailable"))
+                    .font(ClientType.label.weight(.medium))
+                Button(L10n.text("common.retry"), .refresh) {
+                    Task { await devices.load(machines: account.account?.machines ?? [machine],
+                                              days: DeviceHistory.days(for: account.account?.tier), force: true) }
+                }
+            } else {
+                Text(L10n.text("apple.clientdevicesview.no_usage_recorded"))
+                    .font(ClientType.label.weight(.medium))
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
