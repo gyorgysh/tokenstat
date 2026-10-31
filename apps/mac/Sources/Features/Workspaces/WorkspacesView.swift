@@ -123,6 +123,7 @@ struct WorkspacesView: View {
             Text(folder.machineLabel ?? L10n.text("apple.workspacesview.remote_machine.d9dd1af3"))
                 .font(Theme.fit(12, weight: .medium))
                 .lineLimit(1)
+                .truncationMode(.middle)
             if stale {
                 Text("Offline · saved folders")
                     .font(Theme.caption)
@@ -155,22 +156,18 @@ struct WorkspacesView: View {
             HStack(spacing: Theme.Space.m) {
                 title.fixedSize()
                 HostStatsStrip(peer: peer, online: !stale, inline: true)
-                    .fixedSize()
+                    .fixedSize(horizontal: true, vertical: false)
                 Spacer(minLength: 0)
                 controls
             }
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                HStack {
-                    title
-                    Spacer(minLength: 0)
-                    controls
-                }
-                HostStatsStrip(peer: peer, online: !stale, inline: true)
-                    .frame(minHeight: 44, alignment: .leading)
+            HStack(spacing: Theme.Space.m) {
+                title
+                Spacer(minLength: 0)
+                controls
             }
         }
         .padding(.horizontal, Theme.Space.m)
-        .padding(.bottom, Theme.Space.s)
+        .frame(minHeight: 48)
         .task(id: "\(peer)-\(!stale)") {
             guard !stale else { return }
             // An older host that cannot answer leaves the button where it

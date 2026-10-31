@@ -357,7 +357,10 @@ struct HostStatsStrip: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // An inline strip participates in a toolbar-sized row. Giving it an
+        // infinite-width frame makes ViewThatFits treat even a wide Mac pane
+        // as too narrow and pushes the readings below the machine name.
+        .frame(maxWidth: inline ? nil : .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(voiceOverLabel)
         .task(id: "\(peer)-\(online)") {
