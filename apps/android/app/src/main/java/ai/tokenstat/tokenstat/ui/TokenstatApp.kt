@@ -3906,7 +3906,7 @@ private fun WorkspacesScreen(
             },
             onSession = { openSession(it) },
             onChat = { openChat(it) },
-            onNewChat = { newChatOpen = true },
+            onNewChat = { selectNewChatRepository(null); newChatOpen = true },
             onNewSession = { choosingFor = "Sessions" },
             onChooseFolder = { picking = true },
             onClone = { cloning = true },
