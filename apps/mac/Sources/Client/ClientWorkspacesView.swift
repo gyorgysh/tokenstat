@@ -1058,6 +1058,7 @@ private struct ClientHostConnectionSummary: View {
         HStack(spacing: 6) {
             Text(shortRoute ?? L10n.text("common.chat.stats.connected"))
                 .foregroundStyle(Theme.accent)
+                .frame(minWidth: 56, alignment: .leading)
             if powerLabel != nil {
                 Image(systemName: HostStatsFormat.powerSymbol(stats))
                     .foregroundStyle(stats?.power == "battery" && stats?.charging != true && (stats?.percent ?? 100) < 20
@@ -1066,6 +1067,12 @@ private struct ClientHostConnectionSummary: View {
                 if stats?.power == "battery", stats?.charging != true, let percent = stats?.percent {
                     Text("\(percent)%")
                         .foregroundStyle(percent < 20 ? Theme.warning : Color.secondary)
+                } else if stats?.charging == true {
+                    Text(L10n.text("apple.clientworkspacesview.charging"))
+                        .foregroundStyle(.secondary)
+                } else if stats?.power == "ac" {
+                    Text(L10n.text("apple.clientworkspacesview.ac_power"))
+                        .foregroundStyle(.secondary)
                 }
             }
         }

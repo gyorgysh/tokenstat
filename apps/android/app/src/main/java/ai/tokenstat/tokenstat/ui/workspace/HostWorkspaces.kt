@@ -57,6 +57,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -689,7 +690,8 @@ private fun CompactHostConnectionSummary(model: AppViewModel, peer: String) {
                 "direct" -> L10n.text("android.hostworkspaces.direct_route")
                 "relay" -> L10n.text("android.hostworkspaces.relay_route")
                 else -> L10n.text("common.chat.stats.connected")
-            }, style = TsType.caption, color = colors.accent, maxLines = 1,
+            }, modifier = Modifier.widthIn(min = 56.dp), style = TsType.caption,
+            color = colors.accent, maxLines = 1,
         )
         if (powerLabel != null) {
             val powerColor = if (power == "battery" && !charging && percent != null && percent < 20)
@@ -702,6 +704,12 @@ private fun CompactHostConnectionSummary(model: AppViewModel, peer: String) {
             )
             if (power == "battery" && !charging && percent != null) {
                 Text("$percent%", style = TsType.caption, color = powerColor, maxLines = 1)
+            } else if (charging) {
+                Text(L10n.text("android.hostworkspaces.charging"), style = TsType.caption,
+                    color = colors.textSecondary, maxLines = 1)
+            } else if (power == "ac") {
+                Text(L10n.text("android.hostworkspaces.ac_power"), style = TsType.caption,
+                    color = colors.textSecondary, maxLines = 1)
             }
         }
     }
