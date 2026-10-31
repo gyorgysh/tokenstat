@@ -874,16 +874,13 @@ struct MachinesView: View {
                                 .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(Theme.caption)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                                .lineLimit(1)
 
                         }
                         Spacer(minLength: 0)
                     }
-                    VStack(alignment: .trailing, spacing: Theme.Space.s) {
-                        autoConnectRow(machine, isSelf: isSelf)
-                        deviceActions(machine, isSelf: isSelf)
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
+                    deviceActions(machine, isSelf: isSelf)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(Theme.Space.m)
@@ -937,6 +934,18 @@ struct MachinesView: View {
             Spacer(minLength: 0)
             ToolbarMenuButton(help: L10n.text("apple.machinesview.manage_0.d77d63f8", "\(model.resolvedName(for: machine) ?? machine.displayName)")) {
                 Button(L10n.text("common.rename"), .edit) { renamingID = machine.machineID }
+                if machine.isHost, !isSelf, let peer = model.peer(for: machine) {
+                    Button {
+                        let enabled = WorkspacesModel.isAutoConnectEnabled(for: peer.key)
+                        model.setAutoConnect(!enabled, peer: peer, machine: machine)
+                    } label: {
+                        Label(
+                            L10n.text("apple.machinesview.auto_connect.45b6d201"),
+                            systemImage: WorkspacesModel.isAutoConnectEnabled(for: peer.key)
+                                ? "checkmark.circle.fill" : "circle"
+                        )
+                    }
+                }
                 if !isSelf {
                     if !machine.isHost, let peer = linkedPeer(for: machine) {
                         Divider()
@@ -953,32 +962,6 @@ struct MachinesView: View {
                 }
             }
             DeviceRowDisclosure()
-        }
-    }
-
-    /// Whether the sweep dials this machine on its own, beside the connection
-    /// itself rather than in a folder. Off stops the dialling and leaves a
-    /// live connection alone; only Disconnect drops it.
-    @ViewBuilder
-    private func autoConnectRow(_ machine: Machine, isSelf: Bool) -> some View {
-        if machine.isHost, !isSelf, let peer = model.peer(for: machine) {
-            HStack(spacing: 6) {
-                Text(L10n.text("apple.machinesview.auto_connect.45b6d201"))
-                    .font(Theme.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Toggle(
-                    L10n.text("apple.machinesview.auto_connect.45b6d201"),
-                    isOn: Binding(
-                        get: { WorkspacesModel.isAutoConnectEnabled(for: peer.key) },
-                        set: { model.setAutoConnect($0, peer: peer, machine: machine) }
-                    )
-                )
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
-            .accessibilityLabel(L10n.text("apple.machinesview.auto_connect_0.3bbf847e", "\(model.resolvedName(for: machine) ?? machine.displayName)"))
         }
     }
 

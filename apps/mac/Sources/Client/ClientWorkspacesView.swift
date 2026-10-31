@@ -29,6 +29,7 @@ struct ClientWorkspacesView: View {
     @State private var cloningFirstProject = false
     @State private var layout = WorkspacesLayout.shared
     @State private var expandedHostFolders: Set<String> = []
+    @State private var expandedHostList = false
     /// The folder handoff this view has already pushed, so a reconnect does
     /// not push it again after somebody backed out of it.
     @State private var handledFolderHandoff: String?
@@ -637,10 +638,32 @@ struct ClientWorkspacesView: View {
     /// are available, keep their state and controls in one scannable list so
     /// the projects can start immediately below it.
     private var compactHostList: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(model.hosts.enumerated()), id: \.element.peerKey) { index, host in
+        let connected = model.hosts.filter { model.loadedHostKeys.contains($0.peerKey) }
+        let others = model.hosts.filter { !model.loadedHostKeys.contains($0.peerKey) }
+        let ordered = connected + others
+        let shown = expandedHostList ? ordered : Array(ordered.prefix(3))
+        return VStack(spacing: 0) {
+            ForEach(Array(shown.enumerated()), id: \.element.peerKey) { index, host in
                 if index > 0 { Divider().padding(.leading, Theme.Space.m) }
                 compactHostRow(host)
+            }
+            if ordered.count > 3 {
+                Divider()
+                Button {
+                    expandedHostList.toggle()
+                } label: {
+                    Label(
+                        expandedHostList
+                            ? L10n.text("apple.clientrecentchats.show_less.94ea9b1d")
+                            : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(ordered.count - 3)"),
+                        systemImage: expandedHostList ? "chevron.up" : "chevron.down"
+                    )
+                    .font(ClientType.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
             }
         }
         .cardSurface()

@@ -143,6 +143,7 @@ import ai.tokenstat.tokenstat.ui.workspace.EmptyWorkspacesCard
 import ai.tokenstat.tokenstat.ui.workspace.FolderChooserDialog
 import ai.tokenstat.tokenstat.ui.workspace.FolderPickerScreen
 import ai.tokenstat.tokenstat.ui.workspace.HostCard
+import ai.tokenstat.tokenstat.ui.workspace.CompactHostList
 import ai.tokenstat.tokenstat.ui.workspace.RequestAccessCard
 import ai.tokenstat.tokenstat.ui.workspace.SecurityCard
 import ai.tokenstat.tokenstat.ui.workspace.WorkSection
@@ -4135,6 +4136,20 @@ private fun WorkspaceList(
     val sessionRows = sessions.mapNotNull { it as? JsonObject }
     val chatRows = chats.mapNotNull { it as? JsonObject }
     val visibleSections = layoutOrder.filter { it !in layoutHidden }
+    val multiHost = hosts.size > 1
+    val groupedFolders = if (multiHost && WorkSection.FOLDERS in visibleSections) hosts.mapNotNull { machine ->
+        val peer = machine.string("publicIdentity") ?: return@mapNotNull null
+        if ((peer !in retainedHosts && peer != connectedPeer) || peer in staleHosts ||
+            machine.get("online")?.jsonPrimitive?.booleanOrNull == false) return@mapNotNull null
+        val source = if (peer == connectedPeer) folderRows else
+            model.workspacesConnection.foldersFor(peer).filterIsInstance<JsonObject>()
+        val matching = source.filter { folder -> search.isBlank() ||
+            (folder.string("name") ?: "").contains(search, ignoreCase = true) ||
+            (folder.string("path") ?: "").contains(search, ignoreCase = true)
+        }
+        if (matching.isEmpty()) null else machine to matching
+    } else emptyList()
+    val expandedHostFolders = remember { mutableStateMapOf<String, Boolean>() }
     var chatsExpanded by remember { mutableStateOf(false) }
     LazyColumn(modifier, contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -4193,24 +4208,57 @@ private fun WorkspaceList(
                 SectionTitle(L10n.text("android.tokenstatapp.computers_on_your_account.232226fe"), "mark_host")
             }
         }
-        items(hosts) { machine ->
-            val peer = machine.string("publicIdentity") ?: ""
-            val name = DeviceCopy.displayName(machine.string("label"), machine.string("platform"), true)
-            HostCard(
-                model = model,
-                machine = machine,
-                name = name,
-                connected = connectedPeer == peer,
-                available = peer in retainedHosts && connectedPeer != peer,
-                stale = peer in staleHosts,
-                accessDenied = peer in accessDeniedHosts,
-                connecting = connectingPeer == peer,
-                autoConnect = autoConnect(peer),
-                onConnect = { onConnect(machine) },
-                onDisconnect = { onDisconnect(peer) },
-                onOpenDevice = machine.string("id")?.let { id -> { onOpenDevice(id) } },
-                onAutoConnect = { onAutoConnect(peer, it) },
-            )
+        if (multiHost) {
+            item {
+                CompactHostList(
+                    hosts, connectedPeer, retainedHosts, staleHosts, accessDeniedHosts, connectingPeer,
+                    autoConnect, onAutoConnect, onConnect, onDisconnect, onOpenDevice,
+                )
+            }
+        } else {
+            items(hosts) { machine ->
+                val peer = machine.string("publicIdentity") ?: ""
+                val name = DeviceCopy.displayName(machine.string("label"), machine.string("platform"), true)
+                HostCard(
+                    model = model,
+                    machine = machine,
+                    name = name,
+                    connected = connectedPeer == peer,
+                    available = peer in retainedHosts && connectedPeer != peer,
+                    stale = peer in staleHosts,
+                    accessDenied = peer in accessDeniedHosts,
+                    connecting = connectingPeer == peer,
+                    autoConnect = autoConnect(peer),
+                    onConnect = { onConnect(machine) },
+                    onDisconnect = { onDisconnect(peer) },
+                    onOpenDevice = machine.string("id")?.let { id -> { onOpenDevice(id) } },
+                    onAutoConnect = { onAutoConnect(peer, it) },
+                )
+            }
+        }
+        if (groupedFolders.isNotEmpty()) {
+            item { SectionTitle(L10n.text("common.projects"), "mark_archive") }
+            groupedFolders.forEach { (machine, hostFolders) ->
+                val peer = machine.string("publicIdentity") ?: return@forEach
+                item {
+                    Text(DeviceCopy.displayName(machine.string("label"), machine.string("platform"), true),
+                        style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
+                }
+                val shown = if (expandedHostFolders[peer] == true) hostFolders else hostFolders.take(2)
+                items(shown, key = { "$peer:${it.string("id")}" }) { folder ->
+                    WorkspaceFolderRow(folder = folder, peer = peer,
+                        onOpen = { if (peer == connectedPeer) onFolder(folder) else onOtherFolder(machine, folder) })
+                }
+                if (hostFolders.size > 2) {
+                    item {
+                        TextButton(onClick = { expandedHostFolders[peer] = expandedHostFolders[peer] != true },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                            Text(if (expandedHostFolders[peer] == true) L10n.text("android.tokenstatapp.show_less.94ea9b1d")
+                                else L10n.text("android.tokenstatapp.show_more_0_more.c732a4ba", "${hostFolders.size - 2}"))
+                        }
+                    }
+                }
+            }
         }
         // Deliberately not a card. The host cards above open a device when
         // tapped, and this row opens nothing, so wearing the same surface
@@ -4259,14 +4307,14 @@ private fun WorkspaceList(
             }.take(5)
             val otherChats = work.chats.take(5)
             val otherSessions = work.sessions.take(5)
-            if (shown.isEmpty() && otherChats.isEmpty() && otherSessions.isEmpty()) continue
+            if ((multiHost || shown.isEmpty()) && otherChats.isEmpty() && otherSessions.isEmpty()) continue
             item {
                 SectionTitle(
                     DeviceCopy.displayName(machine.string("label"), machine.string("platform"), true),
                     "mark_host",
                 )
             }
-            items(shown, key = { "$peer:${it.string("id")}" }) { folder ->
+            if (!multiHost) items(shown, key = { "$peer:${it.string("id")}" }) { folder ->
                 WorkspaceFolderRow(folder = folder, peer = peer, onOpen = { onOtherFolder(machine, folder) })
             }
             items(otherChats, key = { "$peer:chat:${it.string("id")}" }) { chat ->
@@ -4329,7 +4377,7 @@ private fun WorkspaceList(
             item { SkeletonRows(count = 3) }
             return@LazyColumn
         }
-        if (folderRows.isEmpty() && error == null) {
+        if (folderRows.isEmpty() && error == null && !multiHost) {
             item {
                 EmptyWorkspacesCard(hostName = hostName, onChooseFolder = onChooseFolder, onClone = onClone)
             }
@@ -4337,7 +4385,7 @@ private fun WorkspaceList(
         }
         visibleSections.forEach { section ->
             when (section) {
-                WorkSection.FOLDERS -> if (folderRows.isNotEmpty()) {
+                WorkSection.FOLDERS -> if (folderRows.isNotEmpty() && !multiHost) {
                     item {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,

@@ -76,6 +76,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -83,6 +84,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -519,6 +521,105 @@ fun HostCard(
                         onClick = onDisconnect,
                     )
                 }
+            }
+        }
+    }
+}
+
+/** Several hosts share one short list; details stay in each row's menu. */
+@Composable
+fun CompactHostList(
+    hosts: List<JsonObject>,
+    currentPeer: String?,
+    retainedHosts: Set<String>,
+    staleHosts: Set<String>,
+    accessDeniedHosts: Set<String>,
+    connectingPeer: String?,
+    autoConnect: (String) -> Boolean,
+    onAutoConnect: (String, Boolean) -> Unit,
+    onConnect: (JsonObject) -> Unit,
+    onDisconnect: (String) -> Unit,
+    onOpenDevice: (String) -> Unit,
+) {
+    val colors = LocalTsColors.current
+    var expanded by remember { mutableStateOf(false) }
+    val ordered = hosts.filter { it.str("publicIdentity") in retainedHosts } +
+        hosts.filter { it.str("publicIdentity") !in retainedHosts }
+    val shown = if (expanded) ordered else ordered.take(3)
+    TsCard {
+        shown.forEachIndexed { index, machine ->
+            val peer = machine.str("publicIdentity").orEmpty()
+            val name = ai.tokenstat.tokenstat.ui.logic.DeviceCopy.displayName(
+                machine.str("label"), machine.str("platform"), true,
+            )
+            val online = (machine["online"] as? JsonPrimitive)?.booleanOrNull
+            val connected = (peer in retainedHosts || peer == currentPeer) && peer !in staleHosts && online != false
+            val busy = connectingPeer == peer
+            var menuOpen by remember(peer) { mutableStateOf(false) }
+            if (index > 0) HorizontalDivider(color = colors.border)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp)
+                        .clickable(enabled = online != false && !busy && currentPeer != peer) { onConnect(machine) },
+                ) {
+                    AwakeDot(online = online)
+                    DeviceGlyph(name = name, label = machine.str("label"), platform = machine.str("platform"), isHost = true)
+                    Column(Modifier.weight(1f)) {
+                        Text(name, style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
+                            color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            when {
+                                online == false -> L10n.text("common.offline")
+                                busy -> L10n.text("android.hostworkspaces.connecting.72021eb7")
+                                connected -> L10n.text("common.chat.stats.connected")
+                                peer in accessDeniedHosts -> L10n.text("android.hostworkspaces.request_access.b06f1662")
+                                peer in staleHosts -> L10n.text("android.hostworkspaces.needs_refresh.5b783f2d")
+                                else -> L10n.text("common.connect")
+                            },
+                            style = TsType.caption,
+                            color = if (connected) colors.accent else colors.textSecondary,
+                            maxLines = 1,
+                        )
+                    }
+                    Icon(if (connected && currentPeer == peer) Icons.Default.Check else Icons.Default.ChevronRight,
+                        contentDescription = null, tint = if (connected && currentPeer == peer) colors.accent else colors.textTertiary,
+                        modifier = Modifier.size(18.dp))
+                }
+                Box {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Default.MoreVert,
+                            contentDescription = "$name, ${L10n.text("android.sshrows.more_actions.f8d46c25")}",
+                            tint = colors.accent)
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        machine.str("id")?.let { id ->
+                            DropdownMenuItem(
+                                text = { Text(L10n.text("android.hostworkspaces.open_device.021a82bd")) },
+                                onClick = { menuOpen = false; onOpenDevice(id) },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(L10n.text("android.hostworkspaces.auto_connect.45b6d201")) },
+                            trailingIcon = { if (autoConnect(peer)) Icon(Icons.Default.Check, null) },
+                            onClick = { menuOpen = false; onAutoConnect(peer, !autoConnect(peer)) },
+                        )
+                        if (connected) {
+                            DropdownMenuItem(
+                                text = { Text(L10n.text("common.disconnect")) },
+                                onClick = { menuOpen = false; onDisconnect(peer) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        if (ordered.size > 3) {
+            HorizontalDivider(color = colors.border)
+            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Text(if (expanded) L10n.text("android.tokenstatapp.show_less.94ea9b1d")
+                    else L10n.text("android.tokenstatapp.show_more_0_more.c732a4ba", "${ordered.size - 3}"))
             }
         }
     }
