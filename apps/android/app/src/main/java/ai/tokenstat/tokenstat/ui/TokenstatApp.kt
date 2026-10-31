@@ -4301,6 +4301,8 @@ private fun WorkspaceList(
                             refused.string("platform"),
                             true,
                         ),
+                        headless = DeviceCopy.isHeadlessPlatform(refused.string("platform")) ||
+                            DeviceCopy.isHeadlessPlatform(refused.string("label")),
                         requesting = requesting,
                         notice = requestNotice,
                         onRequest = { onRequestAccess(refused.string("publicIdentity") ?: "") },

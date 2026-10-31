@@ -860,6 +860,7 @@
   "android.hostworkspaces.0_has_not_let_this_device_in_yet.e161eb1e": "{0} has not let this device in yet",
   "android.hostworkspaces.a_connection_between_your_devices_is_encry.b8a28ce2": "A connection between your devices is encrypted on one and decrypted on the other, with keys that never leave them. The relay forwards the bytes and cannot read them, and neither can tokenstat. Your folders, terminals and agents are on your own computer.",
   "android.hostworkspaces.all_sessions.78648d4d": "All sessions",
+  "android.hostworkspaces.approve_linux_over_ssh": "SSH into {0} and run this command. Pick this device from the pending requests; this screen opens when it is approved.",
   "android.hostworkspaces.asking.0b832840": "Asking…",
   "android.hostworkspaces.auto_connect.45b6d201": "Auto-connect",
   "android.hostworkspaces.auto_connect_0.3bbf847e": "Auto-connect {0}",

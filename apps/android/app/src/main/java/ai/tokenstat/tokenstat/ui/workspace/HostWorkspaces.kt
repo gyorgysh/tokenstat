@@ -938,11 +938,14 @@ fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit) {
 @Composable
 fun RequestAccessCard(
     hostName: String,
+    headless: Boolean,
     requesting: Boolean,
     notice: String?,
     onRequest: () -> Unit,
 ) {
     val colors = LocalTsColors.current
+    val context = LocalContext.current
+    val approveCommand = "tokenstat host access approve"
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         EmptyState(
             icon = ActionIcon.Approve.vector,
@@ -958,7 +961,33 @@ fun RequestAccessCard(
                 )
             },
         )
-        notice?.let {
+        if (headless) {
+            TsCard {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Text(
+                        L10n.text("android.hostworkspaces.approve_linux_over_ssh", hostName),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textPrimary,
+                    )
+                    Text(approveCommand, style = MaterialTheme.typography.bodyMedium, color = colors.accent)
+                    TextButton(
+                        onClick = {
+                            context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(
+                                ClipData.newPlainText(approveCommand, approveCommand)
+                            )
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) {
+                        Icon(ActionIcon.Copy.vector, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(Space.xs))
+                        Text(L10n.text("android.setupwizard.copy_the_command.5a677843"))
+                    }
+                }
+            }
+        }
+        notice?.takeUnless {
+            headless && it == L10n.text("android.tokenstatapp.asked_on_that_computer_run_tokenstat_host.40af0490")
+        }?.let {
             TsCard {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
             }
