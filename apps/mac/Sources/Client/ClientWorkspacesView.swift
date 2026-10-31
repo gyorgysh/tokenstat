@@ -1060,27 +1060,40 @@ private struct ClientHostConnectionSummary: View {
                 .foregroundStyle(Theme.accent)
                 .frame(minWidth: 56, alignment: .leading)
             if powerLabel != nil {
-                Image(systemName: HostStatsFormat.powerSymbol(stats))
-                    .foregroundStyle(stats?.power == "battery" && stats?.charging != true && (stats?.percent ?? 100) < 20
-                        ? Theme.warning : Color.secondary)
-                    .accessibilityHidden(true)
-                if stats?.power == "battery", stats?.charging != true, let percent = stats?.percent {
-                    Text("\(percent)%")
-                        .foregroundStyle(percent < 20 ? Theme.warning : Color.secondary)
-                } else if stats?.charging == true {
-                    Text(L10n.text("apple.clientworkspacesview.charging"))
-                        .foregroundStyle(.secondary)
-                } else if stats?.power == "ac" {
-                    Text(L10n.text("apple.clientworkspacesview.ac_power"))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Image(systemName: HostStatsFormat.powerSymbol(stats))
+                        .foregroundStyle(stats?.power == "battery" && stats?.charging != true && (stats?.percent ?? 100) < 20
+                            ? Theme.warning : Color.secondary)
+                        .accessibilityHidden(true)
+                    if stats?.power == "battery", stats?.charging != true, let percent = stats?.percent {
+                        Text("\(percent)%")
+                            .foregroundStyle(percent < 20 ? Theme.warning : Color.secondary)
+                    } else if stats?.charging == true {
+                        Text(L10n.text("apple.clientworkspacesview.charging"))
+                            .foregroundStyle(.secondary)
+                    } else if stats?.power == "ac" {
+                        Text(L10n.text("apple.clientworkspacesview.ac_power"))
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .frame(minWidth: 84, alignment: .leading)
+            }
+            if let cpu = stats?.cpu, cpu.isFinite {
+                HStack(spacing: 4) {
+                    Image(systemName: "cpu")
+                        .accessibilityHidden(true)
+                    Text(HostStatsFormat.cpuLabel(cpu))
+                }
+                .foregroundStyle(.secondary)
             }
         }
         .font(ClientType.caption)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([L10n.text("common.chat.stats.connected"), RemoteTrafficPeer.knownLabel(route), powerLabel]
+        .accessibilityLabel([L10n.text("common.chat.stats.connected"), RemoteTrafficPeer.knownLabel(route), powerLabel,
+            stats?.cpu.flatMap { cpu in cpu.isFinite
+                ? L10n.text("apple.hoststatsbar.cpu_0.ceaa5d7d", HostStatsFormat.cpuLabel(cpu)) : nil }]
             .compactMap { $0 }.joined(separator: ", "))
         .task(id: peer) {
             while !Task.isCancelled {

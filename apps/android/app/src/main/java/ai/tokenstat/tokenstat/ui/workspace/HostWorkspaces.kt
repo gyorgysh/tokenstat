@@ -696,19 +696,32 @@ private fun CompactHostConnectionSummary(model: AppViewModel, peer: String) {
         if (powerLabel != null) {
             val powerColor = if (power == "battery" && !charging && percent != null && percent < 20)
                 colors.warning else colors.textSecondary
-            Icon(
-                powerIconVector(charging, percent, power),
-                contentDescription = powerLabel,
-                modifier = Modifier.size(14.dp),
-                tint = powerColor,
-            )
-            if (power == "battery" && !charging && percent != null) {
-                Text("$percent%", style = TsType.caption, color = powerColor, maxLines = 1)
-            } else if (charging) {
-                Text(L10n.text("android.hostworkspaces.charging"), style = TsType.caption,
-                    color = colors.textSecondary, maxLines = 1)
-            } else if (power == "ac") {
-                Text(L10n.text("android.hostworkspaces.ac_power"), style = TsType.caption,
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.widthIn(min = 84.dp)) {
+                Icon(
+                    powerIconVector(charging, percent, power),
+                    contentDescription = powerLabel,
+                    modifier = Modifier.size(14.dp),
+                    tint = powerColor,
+                )
+                if (power == "battery" && !charging && percent != null) {
+                    Text("$percent%", style = TsType.caption, color = powerColor, maxLines = 1)
+                } else if (charging) {
+                    Text(L10n.text("android.hostworkspaces.charging"), style = TsType.caption,
+                        color = colors.textSecondary, maxLines = 1)
+                } else if (power == "ac") {
+                    Text(L10n.text("android.hostworkspaces.ac_power"), style = TsType.caption,
+                        color = colors.textSecondary, maxLines = 1)
+                }
+            }
+        }
+        stats?.get("cpu")?.jsonPrimitive?.doubleOrNull?.takeIf { it.isFinite() }?.let { cpu ->
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Icon(Icons.Default.Memory,
+                    contentDescription = L10n.text("android.devicedetail.cpu.db9a4c7d"),
+                    modifier = Modifier.size(14.dp), tint = colors.textSecondary)
+                Text(HostStatsFormat.cpuLabel(cpu), style = TsType.caption,
                     color = colors.textSecondary, maxLines = 1)
             }
         }
