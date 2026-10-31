@@ -117,43 +117,57 @@ struct WorkspacesView: View {
     /// auto-connect switch lives on Devices, beside the connection itself.
     private func remoteMachine(_ folder: WorkspaceFolder, peer: String) -> some View {
         let stale = model.isRemoteStale(peer)
-        return VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            HStack(spacing: Theme.Space.s) {
-                Image(systemName: "laptopcomputer")
-                    .foregroundStyle(Theme.accent)
-                Text(folder.machineLabel ?? L10n.text("apple.workspacesview.remote_machine.d9dd1af3"))
-                    .font(Theme.fit(12, weight: .medium))
-                if stale {
-                    Text("Offline · saved folders")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.warning)
-                }
-                Spacer(minLength: 0)
-                // A headless server has no display layer. Offering a viewer
-                // for it only ends in the viewer's own error, so the button
-                // stays off the header entirely.
-                if !stale && !(ownerHeadless[peer] ?? false) {
-                    Button(L10n.text("apple.workspacesview.view_screen.56dea3b5"), .preview) {
-                        openWindow(value: RemoteScreenTarget(
-                            peer: peer,
-                            name: folder.machineLabel ?? L10n.text("apple.workspacesview.remote_machine.d9dd1af3"),
-                            tier: tier
-                        ))
-                    }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
-                    .fixedSize()
-                    .frame(minHeight: 44)
-                }
-                Button(L10n.text("common.disconnect"), .disconnect) {
-                    NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
+        let title = HStack(spacing: Theme.Space.s) {
+            Image(systemName: "laptopcomputer")
+                .foregroundStyle(Theme.accent)
+            Text(folder.machineLabel ?? L10n.text("apple.workspacesview.remote_machine.d9dd1af3"))
+                .font(Theme.fit(12, weight: .medium))
+                .lineLimit(1)
+            if stale {
+                Text("Offline · saved folders")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.warning)
+            }
+        }
+        let controls = HStack(spacing: Theme.Space.s) {
+            // A headless server has no display layer.
+            if !stale && !(ownerHeadless[peer] ?? false) {
+                Button(L10n.text("apple.workspacesview.view_screen.56dea3b5"), .preview) {
+                    openWindow(value: RemoteScreenTarget(
+                        peer: peer,
+                        name: folder.machineLabel ?? L10n.text("apple.workspacesview.remote_machine.d9dd1af3"),
+                        tier: tier
+                    ))
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .fixedSize()
                 .frame(minHeight: 44)
-                .help(L10n.text("apple.workspacesview.stops_showing_this_computer_s_folders_in_t.fae41fce"))
             }
-            HostStatsStrip(peer: peer, online: !stale)
-                .frame(minHeight: 44, alignment: .leading)
+            Button(L10n.text("common.disconnect"), .disconnect) {
+                NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
+            }
+            .buttonStyle(SecondaryButtonStyle(small: true))
+            .fixedSize()
+            .frame(minHeight: 44)
+            .help(L10n.text("apple.workspacesview.stops_showing_this_computer_s_folders_in_t.fae41fce"))
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.m) {
+                title.fixedSize()
+                HostStatsStrip(peer: peer, online: !stale, inline: true)
+                    .fixedSize()
+                Spacer(minLength: 0)
+                controls
+            }
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                HStack {
+                    title
+                    Spacer(minLength: 0)
+                    controls
+                }
+                HostStatsStrip(peer: peer, online: !stale, inline: true)
+                    .frame(minHeight: 44, alignment: .leading)
+            }
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.bottom, Theme.Space.s)

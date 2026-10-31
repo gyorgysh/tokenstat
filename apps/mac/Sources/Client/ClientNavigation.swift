@@ -99,8 +99,10 @@ final class ClientNavigationModel {
     }
     var showingNewChat = false
     let newChatDraft = ChatStartDraft()
+    var requestedNewChatRepositoryID: String?
     func openNewChat(repositoryID: String? = nil) {
         chooseNavigation()
+        requestedNewChatRepositoryID = repositoryID
         newChatDraft.activate(scope: WorkSessionContext.shared.scope,
                               session: WorkSessionContext.shared.generation, repositoryID: repositoryID)
         showingNewChat = true

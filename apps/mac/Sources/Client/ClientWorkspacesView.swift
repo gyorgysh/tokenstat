@@ -29,6 +29,7 @@ struct ClientWorkspacesView: View {
     @State private var cloningFirstProject = false
     @State private var layout = WorkspacesLayout.shared
     @State private var expandedHostFolders: Set<String> = []
+    @State private var expandedHostSessions: Set<String> = []
     @State private var expandedHostList = false
     /// The folder handoff this view has already pushed, so a reconnect does
     /// not push it again after somebody backed out of it.
@@ -36,6 +37,7 @@ struct ClientWorkspacesView: View {
     /// Which folder chooser is showing, if any. Same question as the device
     /// page: chats and sessions live inside folders.
     @State private var starting: WorkspaceSection?
+    @State private var startingOnHost: String?
     // Per-host, not global: each host card owns its row. A global key would
     // make every toggle move together, which is the extra card in the
     // screenshot. The rule itself lives on the model, because the iPad's
@@ -135,17 +137,15 @@ struct ClientWorkspacesView: View {
                         }
                     }
 
+                    thisDeviceRow
+                    ClientSecurityCard(
+                        peerKey: model.hosts.count == 1 ? model.connectedKey : nil,
+                        peerName: model.hosts.count == 1
+                            ? model.hosts.first { $0.peerKey == model.connectedKey }?.name : nil
+                    )
                     if model.hosts.count > 1 {
-                        multiHostFolders
+                        multiHostWork
                     } else {
-                        thisDeviceRow
-                        ClientSecurityCard(
-                            peerKey: model.connectedKey,
-                            peerName: model.hosts.first { $0.peerKey == model.connectedKey }?.name
-                        )
-                    }
-
-                    if model.connectedKey != nil {
                         if let peer = model.connectedKey,
                            let host = model.hosts.first(where: { $0.peerKey == peer }),
                            host.online != false {
@@ -168,7 +168,7 @@ struct ClientWorkspacesView: View {
                                 ClientAllTasksLink(peer: peer, hostName: host.name)
                                     .padding(Theme.Space.m).cardSurface()
                             }
-                            ForEach(model.hosts.count > 1 ? layout.sections.filter { $0 != .folders } : layout.sections) { section in
+                            ForEach(layout.sections) { section in
                                 workSection(section, peer: peer, host: host)
                             }
                             if layout.sections.isEmpty {
@@ -177,55 +177,6 @@ struct ClientWorkspacesView: View {
                             customizeWorkspacesButton
                         }
                     }
-                    ForEach(model.hosts.filter { model.loadedHostKeys.contains($0.peerKey) &&
-                        !model.staleHostKeys.contains($0.peerKey) &&
-                        $0.peerKey != model.connectedKey && $0.online != false }) { host in
-                        let hostFolders = model.folders(for: host.peerKey)
-                        let hostChats = model.chats(for: host.peerKey)
-                        let hostSessions = model.sessions(for: host.peerKey)
-                        if !hostFolders.isEmpty || !hostChats.isEmpty || !hostSessions.isEmpty {
-                            ClientSectionTitle(title: host.name, mark: "mark_host")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 2)
-                                .padding(.top, Theme.Space.s)
-                            if model.hosts.count == 1 && !hostFolders.isEmpty {
-                                ClientAdaptiveCards {
-                                    ForEach(Array(hostFolders.prefix(5))) { folder in
-                                        NavigationLink {
-                                            ClientWorkspaceDetailView(peer: host.peerKey, hostName: host.name, folder: folder)
-                                        } label: {
-                                            ClientFolderRow(folder: folder)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                            ClientRecentChatsSection(peer: host.peerKey, hostName: host.name,
-                                folders: hostFolders, chats: hostChats)
-                            if !hostSessions.isEmpty {
-                                ClientSectionTitle(title: L10n.text("apple.clientworkspacesview.all_sessions.78648d4d"), mark: "mark_terminal")
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                ForEach(Array(hostSessions.prefix(5))) { session in
-                                    Button {
-                                        model.openSession(session, peer: host.peerKey)
-                                    } label: {
-                                        ClientSessionRow(session: session,
-                                            displayName: SidebarTerminalNames.shared.name(peer: host.peerKey,
-                                                workspaceID: session.workspaceID, sessionID: session.id))
-                                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
-                    if model.hosts.count > 1 {
-                        thisDeviceRow
-                        ClientSecurityCard(
-                            peerKey: model.connectedKey,
-                            peerName: model.hosts.first { $0.peerKey == model.connectedKey }?.name
-                        )
-                    }
                 }
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.top, Theme.Space.s)
@@ -233,11 +184,11 @@ struct ClientWorkspacesView: View {
             }
             .background(Theme.background)
             .sheet(item: $starting) { section in
-                if let peer = model.connectedKey,
+                if let peer = startingOnHost ?? model.connectedKey,
                    let host = model.hosts.first(where: { $0.peerKey == peer }) {
                     ClientFolderChooserSheet(
                         hostName: host.name,
-                        folders: model.folders,
+                        folders: model.folders(for: peer),
                         title: section == .chat ? L10n.text("apple.clientworkspacesview.new_chat_in.510ac43f") : L10n.text("apple.clientworkspacesview.new_session_in.30d4568b")
                     ) { folder in
                         let raw = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
@@ -531,7 +482,10 @@ struct ClientWorkspacesView: View {
                     .font(ClientType.sectionTitle)
                 Spacer(minLength: Theme.Space.s)
                 if !model.folders.isEmpty {
-                    Button(L10n.text("apple.clientworkspacesview.new_terminal.fe544556"), .create) { starting = .sessions }
+                    Button(L10n.text("apple.clientworkspacesview.new_terminal.fe544556"), .create) {
+                        startingOnHost = nil
+                        starting = .sessions
+                    }
                         .font(ClientType.caption.weight(.semibold))
                 }
             }
@@ -672,14 +626,12 @@ struct ClientWorkspacesView: View {
     private func compactHostRow(_ host: ClientHost) -> some View {
         let connected = model.loadedHostKeys.contains(host.peerKey) &&
             !model.staleHostKeys.contains(host.peerKey) && host.online != false
-        let selectedForNewWork = connected && model.connectedKey == host.peerKey
         let busy = model.isBusy(with: host.peerKey)
         return HStack(spacing: 0) {
             Button {
-                guard host.online != false, model.connectedKey != host.peerKey else { return }
                 if connected {
-                    model.focusLoadedHost(host)
-                } else {
+                    if let machineID = host.machineID { navigation.openDevice(machineID: machineID) }
+                } else if host.online != false {
                     Task { await model.connect(host) }
                 }
             } label: {
@@ -697,7 +649,6 @@ struct ClientWorkspacesView: View {
                             .lineLimit(1)
                         Text(host.online == false ? L10n.text("common.offline") :
                             busy ? L10n.text("apple.clientworkspacesview.connecting.72021eb7") :
-                            selectedForNewWork ? L10n.text("common.work_host_selected") :
                             connected ? L10n.text("common.chat.stats.connected") :
                             model.deniedHostKeys.contains(host.peerKey) ? L10n.text("apple.clienthostworkspacesview.request_access.b06f1662") :
                             model.staleHostKeys.contains(host.peerKey) ? L10n.text("apple.clientworkspacesview.needs_refresh.5b783f2d") :
@@ -708,7 +659,7 @@ struct ClientWorkspacesView: View {
                             .minimumScaleFactor(0.8)
                     }
                     Spacer(minLength: Theme.Space.xs)
-                    if host.online != false && !selectedForNewWork {
+                    if connected && host.machineID != nil {
                         Image(systemName: "chevron.right")
                             .foregroundStyle(.tertiary)
                             .accessibilityHidden(true)
@@ -718,11 +669,9 @@ struct ClientWorkspacesView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(host.online == false || busy)
+            .disabled(busy || (connected && host.machineID == nil) || (!connected && host.online == false))
             .accessibilityHint(connected
-                ? (selectedForNewWork
-                    ? L10n.text("common.work_host_selected_hint")
-                    : L10n.text("common.work_host_select_hint"))
+                ? L10n.text("apple.clientworkspacesview.open_device.021a82bd")
                 : L10n.text("common.connect"))
 
             Menu {
@@ -755,63 +704,141 @@ struct ClientWorkspacesView: View {
         .padding(.trailing, Theme.Space.xs)
     }
 
-    private var multiHostFolders: some View {
-        Group {
-            if layout.sections.contains(.folders) {
-                let readyHosts = model.hosts.filter {
-                    model.loadedHostKeys.contains($0.peerKey) &&
-                    !model.staleHostKeys.contains($0.peerKey) && $0.online != false &&
-                    !model.folders(for: $0.peerKey).isEmpty
+    /// Keep each computer and its work together. A folder, chat or terminal
+    /// always carries the peer it belongs to; changing a hidden default host
+    /// is not needed to open any of them.
+    private var multiHostWork: some View {
+        let readyHosts = model.hosts.filter {
+            model.loadedHostKeys.contains($0.peerKey) &&
+            !model.staleHostKeys.contains($0.peerKey) && $0.online != false
+        }
+        return VStack(alignment: .leading, spacing: Theme.Space.m) {
+            if !readyHosts.isEmpty {
+                ClientSectionTitle(title: L10n.text("common.projects"), mark: "mark_archive")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 2)
+                ForEach(readyHosts) { host in
+                    multiHostGroup(host)
                 }
-                if !readyHosts.isEmpty {
-                    ClientSectionTitle(title: L10n.text("common.projects"), mark: "mark_archive")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 2)
-                        .padding(.top, Theme.Space.s)
-                    ForEach(readyHosts) { host in
-                        let folders = model.folders(for: host.peerKey)
-                        let expanded = expandedHostFolders.contains(host.peerKey)
-                        Text(host.name)
-                            .font(ClientType.caption.weight(.semibold))
+            }
+            if !layout.sections.isEmpty { customizeWorkspacesButton }
+        }
+    }
+
+    @ViewBuilder
+    private func multiHostGroup(_ host: ClientHost) -> some View {
+        let peer = host.peerKey
+        let folders = model.folders(for: peer)
+        let chats = model.chats(for: peer)
+        let sessions = model.sessions(for: peer)
+        let showsFolders = layout.sections.contains(.folders) && !folders.isEmpty
+        let showsChats = layout.sections.contains(.recentChats) && !chats.isEmpty
+        let showsSessions = layout.sections.contains(.sessions) && (!sessions.isEmpty || !folders.isEmpty)
+        if showsFolders || showsChats || showsSessions || layout.allTasksVisible {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: Theme.Space.s) {
+                    Image(systemName: ClientDeviceIcon.symbol(name: host.name, isHost: true))
+                        .foregroundStyle(Theme.accent)
+                    Text(host.name)
+                        .font(ClientType.label.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: Theme.Space.s)
+                    if showsFolders {
+                        Text("\(folders.count)")
+                            .font(ClientType.caption)
                             .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 2)
-                        ClientAdaptiveCards {
-                            ForEach(expanded ? folders : Array(folders.prefix(2))) { folder in
-                                NavigationLink {
-                                    ClientWorkspaceDetailView(peer: host.peerKey, hostName: host.name, folder: folder)
-                                } label: {
-                                    ClientFolderRow(folder: folder)
-                                }
-                                .buttonStyle(.plain)
-                                .modifier(ClientProjectRename(peer: host.peerKey, folder: folder,
-                                    onChanged: { await model.refresh(account: account.account) }))
-                            }
+                            .monospacedDigit()
+                    }
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .frame(minHeight: 52)
+                if layout.allTasksVisible {
+                    Divider().padding(.leading, Theme.Space.m)
+                    ClientAllTasksLink(peer: peer, hostName: host.name)
+                        .padding(.horizontal, Theme.Space.m)
+                        .frame(minHeight: 52)
+                }
+                if showsFolders {
+                    Divider().padding(.leading, Theme.Space.m)
+                    ForEach(expandedHostFolders.contains(peer) ? folders : Array(folders.prefix(2))) { folder in
+                        NavigationLink {
+                            ClientWorkspaceDetailView(peer: peer, hostName: host.name, folder: folder)
+                        } label: {
+                            ClientFolderRow(folder: folder, grouped: true)
                         }
-                        if folders.count > 2 {
-                            Button {
-                                if expanded {
-                                    expandedHostFolders.remove(host.peerKey)
-                                } else {
-                                    expandedHostFolders.insert(host.peerKey)
-                                }
-                            } label: {
-                                Label(
-                                    expanded
-                                        ? L10n.text("apple.clientrecentchats.show_less.94ea9b1d")
-                                        : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(folders.count - 2)"),
-                                    systemImage: expanded ? "chevron.up" : "chevron.down"
-                                )
+                        .buttonStyle(.plain)
+                        .modifier(ClientProjectRename(peer: peer, folder: folder,
+                            onChanged: { await model.refresh(account: account.account) }))
+                        if folder.id != (expandedHostFolders.contains(peer) ? folders : Array(folders.prefix(2))).last?.id {
+                            Divider().padding(.leading, Theme.Space.m)
+                        }
+                    }
+                    if folders.count > 2 {
+                        Button {
+                            if expandedHostFolders.contains(peer) {
+                                expandedHostFolders.remove(peer)
+                            } else {
+                                expandedHostFolders.insert(peer)
+                            }
+                        } label: {
+                            Label(expandedHostFolders.contains(peer)
+                                ? L10n.text("apple.clientrecentchats.show_less.94ea9b1d")
+                                : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(folders.count - 2)"),
+                                systemImage: expandedHostFolders.contains(peer) ? "chevron.up" : "chevron.down")
                                 .font(ClientType.caption.weight(.semibold))
                                 .frame(maxWidth: .infinity, minHeight: 44)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(Theme.accent)
                         }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.accent)
+                    }
+                }
+                if showsChats {
+                    Divider().padding(.leading, Theme.Space.m)
+                    ClientRecentChatsSection(peer: peer, hostName: host.name,
+                        folders: folders, chats: chats, grouped: true)
+                        .padding(.vertical, Theme.Space.s)
+                }
+                if showsSessions {
+                    Divider().padding(.leading, Theme.Space.m)
+                    HStack {
+                        Text(L10n.text("apple.clientworkspacesview.all_sessions.78648d4d"))
+                            .font(ClientType.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if !folders.isEmpty {
+                            Button(L10n.text("apple.clientworkspacesview.new_terminal.fe544556"), .create) {
+                                startingOnHost = peer
+                                starting = .sessions
+                            }
+                            .font(ClientType.caption.weight(.semibold))
+                            .frame(minHeight: 44)
+                        }
+                    }
+                    .padding(.horizontal, Theme.Space.m)
+                    ForEach(expandedHostSessions.contains(peer) ? sessions : Array(sessions.prefix(2))) { session in
+                        Button { model.openSession(session, peer: peer) } label: {
+                            ClientSessionRow(session: session, showsChevron: true,
+                                displayName: SidebarTerminalNames.shared.name(peer: peer,
+                                    workspaceID: session.workspaceID, sessionID: session.id), grouped: true)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if sessions.count > 2 {
+                        Button(expandedHostSessions.contains(peer)
+                            ? L10n.text("apple.clientrecentchats.show_less.94ea9b1d")
+                            : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(sessions.count - 2)")) {
+                            if expandedHostSessions.contains(peer) {
+                                expandedHostSessions.remove(peer)
+                            } else {
+                                expandedHostSessions.insert(peer)
+                            }
+                        }
+                        .font(ClientType.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
                     }
                 }
             }
+            .cardSurface()
         }
     }
 

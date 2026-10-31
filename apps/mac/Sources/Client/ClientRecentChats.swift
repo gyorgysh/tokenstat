@@ -115,6 +115,7 @@ struct ClientRecentChatsSection: View {
     /// beside the title. Chats live inside folders, so starting one means
     /// picking the folder first; the caller owns that sheet.
     var onNewChat: (() -> Void)? = nil
+    var grouped = false
 
     /// How many rows show before "Show more".
     private static let collapsedLimit = 5
@@ -144,14 +145,20 @@ struct ClientRecentChatsSection: View {
     }
 
     private var shown: [ChatRecentConversation] {
-        expanded ? visible : Array(visible.prefix(Self.collapsedLimit))
+        expanded ? visible : Array(visible.prefix(grouped ? 2 : Self.collapsedLimit))
     }
 
     var body: some View {
         if !visible.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack(alignment: .center) {
-                    ClientSectionTitle(title: L10n.text("apple.clientrecentchats.recent_chats.2ccfecbc"), mark: "mark_activity")
+                    if grouped {
+                        Text(L10n.text("apple.clientrecentchats.recent_chats.2ccfecbc"))
+                            .font(ClientType.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ClientSectionTitle(title: L10n.text("apple.clientrecentchats.recent_chats.2ccfecbc"), mark: "mark_activity")
+                    }
                     Spacer(minLength: Theme.Space.s)
                     if onNewChat != nil, !folders.isEmpty {
                         Button(L10n.text("apple.clientrecentchats.new_chat.db18382a"), .create) { onNewChat?() }
@@ -174,20 +181,21 @@ struct ClientRecentChatsSection: View {
                         ClientRecentChatRow(
                             chat: chat,
                             folderName: folderName(for: chat.workspaceID),
-                            unread: receipts.isUnread(peer: peer, chat: chat)
+                            unread: receipts.isUnread(peer: peer, chat: chat),
+                            grouped: grouped
                         )
                     }
                     .buttonStyle(.plain)
                 }
 
-                if visible.count > Self.collapsedLimit {
+                if visible.count > (grouped ? 2 : Self.collapsedLimit) {
                     Button {
                         expanded.toggle()
                     } label: {
                         Label(
                             expanded
                                 ? L10n.text("apple.clientrecentchats.show_less.94ea9b1d")
-                                : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(visible.count - Self.collapsedLimit)"),
+                                : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(visible.count - (grouped ? 2 : Self.collapsedLimit))"),
                             systemImage: expanded ? "chevron.up" : "chevron.down"
                         )
                         .font(ClientType.caption.weight(.semibold))
@@ -195,9 +203,6 @@ struct ClientRecentChatsSection: View {
                     .tint(Theme.accent)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 2)
-                    .accessibilityHint(expanded
-                        ? L10n.text("apple.clientrecentchats.shows_only_the_five_newest_chats.24f080fa")
-                        : L10n.text("apple.clientrecentchats.shows_every_recent_chat.6212a490"))
                 }
             }
         }
@@ -214,9 +219,10 @@ private struct ClientRecentChatRow: View {
     let chat: ChatRecentConversation
     let folderName: String
     let unread: Bool
+    var grouped = false
 
     var body: some View {
-        HStack(spacing: Theme.Space.s) {
+        let row = HStack(spacing: Theme.Space.s) {
             ZStack(alignment: .topTrailing) {
                 HarnessMark(id: chat.backend, size: 28)
                 if unread || chat.needsAttention {
@@ -258,9 +264,11 @@ private struct ClientRecentChatRow: View {
                 .font(Theme.font(12, weight: .semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
+        .padding(.horizontal, Theme.Space.m)
+        .frame(maxWidth: .infinity, minHeight: grouped ? 58 : 72, alignment: .leading)
+        Group {
+            if grouped { row } else { row.cardSurface() }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityValue(accessibilityValue)
     }

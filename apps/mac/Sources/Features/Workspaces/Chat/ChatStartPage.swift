@@ -50,6 +50,15 @@ struct ChatStartPage: View {
     private var adapterIdentity: AdapterIdentity { .init(owner: draft.owner, reference: draft.attachmentReference, agent: draft.agent) }
     private var backend: ChatBackend? { backends.first { $0.id == draft.agent?.backend && $0.installed != false } }
     private var selected: WorkspaceFolder? { repositories.first { $0.id == draft.repositoryID } }
+    private var remoteMachines: [(id: String, name: String)] {
+        var seen = Set<String>()
+        return repositories.compactMap { folder in
+            guard folder.isRemote else { return nil }
+            let id = folder.machineID ?? folder.machineLabel ?? folder.id
+            guard seen.insert(id).inserted else { return nil }
+            return (id, folder.machineLabel ?? L10n.text("apple.workspacesview.remote_machine.d9dd1af3"))
+        }
+    }
     private var writing: Bool { !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     /// Nothing to talk about yet. The page teaches the first steps instead
     /// of offering a composer that cannot send.
@@ -336,16 +345,27 @@ struct ChatStartPage: View {
     /// three unrelated widgets.
     private var repositoryPicker: some View {
         Menu {
-            ForEach(repositories) { repository in
-                Button { draft.repositoryID = repository.id } label: {
-                    Label(repository.machineLabel.map { "\(repository.name) · \($0)" } ?? repository.name,
-                          systemImage: repository.id == draft.repositoryID ? "checkmark" : "folder")
-                }.help(repository.path)
+            if repositories.contains(where: { !$0.isRemote }) {
+                Section(L10n.text("apple.rootview.this_computer.058bf37c")) {
+                    ForEach(repositories.filter { !$0.isRemote }) { repository in
+                        repositoryChoice(repository)
+                    }
+                }
             }
+            ForEach(remoteMachines, id: \.id) { machine in
+                Section {
+                    ForEach(repositories.filter { $0.isRemote && ($0.machineID ?? $0.machineLabel ?? $0.id) == machine.id }) { repository in
+                        repositoryChoice(repository)
+                    }
+                } header: {
+                    Label(machine.name, systemImage: "globe")
+                }
+            }
+            Divider()
             Button(L10n.text("common.new_chat.add_repository"), systemImage: "folder.badge.plus", action: onAdd)
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: "folder")
+                Image(systemName: selected?.isRemote == true ? "globe" : "folder")
                     .font(Theme.fixed(11, weight: .medium))
                     .foregroundStyle(selected == nil ? Theme.accent : Color.secondary)
                 Text(selected?.name ?? L10n.text("common.new_chat.choose_repository"))
@@ -377,6 +397,13 @@ struct ChatStartPage: View {
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityLabel(L10n.text("common.new_chat.repository"))
         .accessibilityValue(selected?.name ?? L10n.text("common.new_chat.choose_repository"))
+    }
+
+    private func repositoryChoice(_ repository: WorkspaceFolder) -> some View {
+        Button { draft.repositoryID = repository.id } label: {
+            Label(repository.name, systemImage: repository.id == draft.repositoryID ? "checkmark" : "folder")
+        }
+        .help(repository.path)
     }
 }
 

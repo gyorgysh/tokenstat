@@ -86,10 +86,11 @@ private enum ClientRowMark {
 /// mark, same split the Mac sidebar uses.
 struct ClientFolderRow: View {
     let folder: WorkspaceFolder
+    var grouped = false
     @Environment(TeamStore.self) private var teams
 
     var body: some View {
-        HStack(spacing: Theme.Space.s) {
+        let row = HStack(spacing: Theme.Space.s) {
             folderMark
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: Theme.Space.s) {
@@ -124,10 +125,10 @@ struct ClientFolderRow: View {
                 .font(Theme.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.Space.m)
+        .frame(maxWidth: .infinity, minHeight: grouped ? 58 : 72, alignment: .leading)
         .contentShape(.rect)
-        .cardSurface()
+        if grouped { row } else { row.cardSurface() }
     }
 
     private var folderMark: some View {
@@ -147,6 +148,7 @@ struct ClientSessionRow: View {
     let session: PtySessionInfo
     var showsChevron: Bool = false
     var displayName: String?
+    var grouped = false
 
     private var harness: String? { harnessID(forCommand: session.command) }
 
@@ -157,7 +159,7 @@ struct ClientSessionRow: View {
     }
 
     var body: some View {
-        HStack(spacing: Theme.Space.s) {
+        let row = HStack(spacing: Theme.Space.s) {
             leadingMark
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -177,10 +179,10 @@ struct ClientSessionRow: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.Space.m)
+        .frame(maxWidth: .infinity, minHeight: grouped ? 58 : 72, alignment: .leading)
         .contentShape(.rect)
-        .cardSurface()
+        if grouped { row } else { row.cardSurface() }
     }
 
     @ViewBuilder

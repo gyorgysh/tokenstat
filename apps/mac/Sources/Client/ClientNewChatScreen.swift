@@ -9,9 +9,19 @@ struct ClientNewChatScreen: View {
     @Environment(AccountModel.self) private var account
     @State private var addingRepository = false
     @State private var choosingHost = false
+    @State private var chosenHostKey: String?
     @State private var addAfterChoosingHost = false
     private var draft: ChatStartDraft { navigation.newChatDraft }
-    private var host: ClientHost? { workspaces.hosts.first { $0.peerKey == workspaces.connectedKey } }
+    private var requestedPeer: String? {
+        guard let repositoryID = navigation.requestedNewChatRepositoryID else { return nil }
+        let parts = repositoryID.split(separator: ":", maxSplits: 2)
+        return parts.count == 3 && parts[0] == "remote" ? String(parts[1]) : nil
+    }
+    private var host: ClientHost? {
+        let peer = chosenHostKey ?? requestedPeer ??
+            (workspaces.hosts.count == 1 ? workspaces.connectedKey : nil)
+        return workspaces.hosts.first { $0.peerKey == peer && $0.peerKey == workspaces.connectedKey }
+    }
 
     var body: some View {
         NavigationStack {
@@ -66,6 +76,19 @@ struct ClientNewChatScreen: View {
             draft.activate(scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation)
             await workspaces.refresh(account: account.account)
             await workspaces.autoConnectLastHost()
+            if workspaces.hosts.count > 1 && requestedPeer == nil {
+                draft.repositoryID = nil
+            }
+            if let requestedPeer, let target = workspaces.hosts.first(where: { $0.peerKey == requestedPeer }) {
+                if workspaces.loadedHostKeys.contains(requestedPeer) {
+                    workspaces.focusLoadedHost(target)
+                } else {
+                    await workspaces.connect(target)
+                }
+                chosenHostKey = requestedPeer
+            } else if workspaces.hosts.count > 1 && chosenHostKey == nil {
+                choosingHost = true
+            }
         }
         .onChange(of: WorkSessionContext.shared.generation) { _, generation in
             draft.activate(scope: WorkSessionContext.shared.scope, session: generation)
@@ -191,10 +214,15 @@ struct ClientNewChatScreen: View {
         let scope = WorkSessionContext.shared.scope
         let generation = WorkSessionContext.shared.generation
         draft.repositoryID = nil
-        await workspaces.connect(host)
+        if workspaces.loadedHostKeys.contains(host.peerKey) {
+            workspaces.focusLoadedHost(host)
+        } else {
+            await workspaces.connect(host)
+        }
         guard navigation.showingNewChat, scope == WorkSessionContext.shared.scope,
               generation == WorkSessionContext.shared.generation,
               workspaces.connectedKey == host.peerKey else { return }
+        chosenHostKey = host.peerKey
         if thenAdd { addingRepository = true }
     }
 

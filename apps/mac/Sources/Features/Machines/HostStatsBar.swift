@@ -333,30 +333,29 @@ extension View {
 struct HostStatsStrip: View {
     let peer: String
     var online: Bool = true
+    var inline: Bool = false
 
     @State private var stats: HostStats?
     @State private var failed = false
     @State private var route: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: Theme.Space.m) {
-                cell(icon: HostStatsFormat.powerSymbol(stats),
-                     text: HostStatsFormat.powerLabel(stats, failed: failed))
-                if let cpu = stats?.cpu {
-                    cell(icon: "cpu", text: HostStatsFormat.cpuLabel(cpu))
+        Group {
+            if inline {
+                HStack(spacing: Theme.Space.m) {
+                    readings
+                    ConnectionRouteMark(route: route)
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
                 }
-                if let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 {
-                    // Used of total, not used alone. One figure with nothing to
-                    // measure it against is a figure nobody can read: "24 GB" says
-                    // nothing until the 32 is beside it.
-                    cell(icon: "memorychip", text: HostStatsFormat.ramLabel(used: used, total: total))
-                        .help(HostStatsFormat.ramExplanation)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    readings
+                    ConnectionRouteMark(route: route)
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            ConnectionRouteMark(route: route)
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -369,6 +368,23 @@ struct HostStatsStrip: View {
             while !Task.isCancelled {
                 await refresh()
                 try? await Task.sleep(for: .milliseconds(2500))
+            }
+        }
+    }
+
+    private var readings: some View {
+        HStack(spacing: Theme.Space.m) {
+            cell(icon: HostStatsFormat.powerSymbol(stats),
+                 text: HostStatsFormat.powerLabel(stats, failed: failed))
+            if let cpu = stats?.cpu {
+                cell(icon: "cpu", text: HostStatsFormat.cpuLabel(cpu))
+            }
+            if let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 {
+                // Used of total, not used alone. One figure with nothing to
+                // measure it against is a figure nobody can read: "24 GB" says
+                // nothing until the 32 is beside it.
+                cell(icon: "memorychip", text: HostStatsFormat.ramLabel(used: used, total: total))
+                    .help(HostStatsFormat.ramExplanation)
             }
         }
     }
