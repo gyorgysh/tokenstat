@@ -713,7 +713,7 @@ struct ClientWorkspacesView: View {
             !model.staleHostKeys.contains($0.peerKey) && $0.online != false
         }
         return VStack(alignment: .leading, spacing: Theme.Space.m) {
-            if !readyHosts.isEmpty {
+            if !readyHosts.isEmpty && (!layout.sections.isEmpty || layout.allTasksVisible) {
                 ClientSectionTitle(title: L10n.text("common.projects"), mark: "mark_archive")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 2)
@@ -721,7 +721,8 @@ struct ClientWorkspacesView: View {
                     multiHostGroup(host)
                 }
             }
-            if !layout.sections.isEmpty { customizeWorkspacesButton }
+            if layout.sections.isEmpty && !layout.allTasksVisible { clearWorkspaces }
+            customizeWorkspacesButton
         }
     }
 
