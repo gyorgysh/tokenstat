@@ -10,6 +10,11 @@ struct ServerLauncher: View {
     let sessions: SSHSessionsModel
     let onOpen: (SSHHost) -> Void
     let onManage: () -> Void
+    @State private var expanded = false
+
+    private var shownHosts: [SSHHost] {
+        expanded ? library.launcherHosts : Array(library.launcherHosts.prefix(2))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -20,29 +25,54 @@ struct ServerLauncher: View {
                 Button(L10n.text("apple.serverlauncher.manage_servers"), .settings, action: onManage)
                     .font(Theme.caption).buttonStyle(.plain).foregroundStyle(Theme.accent)
             }
-            ForEach(library.launcherHosts) { host in
-                Button { onOpen(host) } label: {
-                    HStack(spacing: Theme.Space.s) {
-                        SSHHostPlatformMark(label: SSHHostPlatformCache.shared.label(for: host))
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(host.label).font(Theme.callout.weight(.medium))
-                                .foregroundStyle(.primary).lineLimit(1)
-                            Text(sessions.liveCount(for: host.id) > 0 ? L10n.text("apple.connectionmodel.connected.22965568") : L10n.text("apple.sshlibraryview.ssh.01c4d3c2"))
-                                .font(Theme.caption).foregroundStyle(.secondary)
+            if !library.launcherHosts.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(shownHosts.enumerated()), id: \.element.id) { index, host in
+                        if index > 0 { Divider().padding(.leading, Theme.Space.m) }
+                        Button { onOpen(host) } label: {
+                            HStack(spacing: Theme.Space.s) {
+                                SSHHostPlatformMark(label: SSHHostPlatformCache.shared.label(for: host))
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(host.label).font(Theme.callout.weight(.medium))
+                                        .foregroundStyle(.primary).lineLimit(1)
+                                    Text(sessions.liveCount(for: host.id) > 0
+                                         ? L10n.text("apple.connectionmodel.connected.22965568")
+                                         : L10n.text("apple.sshlibraryview.ssh.01c4d3c2"))
+                                        .font(Theme.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: Theme.Space.s)
+                                Image(systemName: "chevron.right")
+                                    .font(Theme.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal, Theme.Space.m)
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
-                        Spacer(minLength: Theme.Space.s)
-                        Label(sessions.liveCount(for: host.id) > 0 ? L10n.text("common.open") : L10n.text("common.connect"),
-                              systemImage: sessions.liveCount(for: host.id) > 0 ? "terminal" : "arrow.right")
-                            .font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent)
+                        .buttonStyle(.plain)
                     }
-                    .padding(Theme.Space.m)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
-                    .contentShape(RoundedRectangle(cornerRadius: 8))
+                    if library.launcherHosts.count > 2 {
+                        Divider()
+                        Button {
+                            expanded.toggle()
+                        } label: {
+                            Label(
+                                expanded
+                                    ? L10n.text("apple.clientrecentchats.show_less.94ea9b1d")
+                                    : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(library.launcherHosts.count - 2)"),
+                                systemImage: expanded ? "chevron.up" : "chevron.down"
+                            )
+                            .font(Theme.caption.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
             }
             if library.hosts.isEmpty {
                 Text(library.loaded ? L10n.text("apple.sshsectionview.no_servers_yet.7846930c") : L10n.text("apple.serverlauncher.loading_servers"))

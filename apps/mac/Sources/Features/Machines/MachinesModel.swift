@@ -177,19 +177,20 @@ final class MachinesModel {
         }?.label
     }
 
-    /// Current device, then online peers, then most recently active devices.
+    /// Keep a device in the same place while presence and connection status
+    /// refresh. Sorting by online/last seen made rows jump under the pointer
+    /// as a tunnel connected or a phone went idle.
     var listedAccountMachines: [Machine] {
-        accountMachines.sorted { presenceOrder($0) < presenceOrder($1) }
-    }
-
-    private func presenceOrder(_ machine: Machine) -> DevicePresenceOrder {
-        let current = (machine.machineID != nil && machine.machineID == account?.thisMachineID)
-            || (machine.publicIdentity != nil && machine.publicIdentity == identity?.key)
-        return DevicePresenceOrder(
-            isCurrent: current, online: machine.online == true,
-            lastActive: parseServerDate(machine.lastSeenAt) ?? parseServerDate(machine.lastSyncAt) ?? .distantPast,
-            name: machine.displayName, id: machine.id
-        )
+        accountMachines.sorted { lhs, rhs in
+            let lhsCurrent = isThisMachine(lhs)
+            let rhsCurrent = isThisMachine(rhs)
+            if lhsCurrent != rhsCurrent { return lhsCurrent }
+            if lhs.isHost != rhs.isHost { return lhs.isHost }
+            let lhsName = (resolvedName(for: lhs) ?? lhs.displayName).localizedLowercase
+            let rhsName = (resolvedName(for: rhs) ?? rhs.displayName).localizedLowercase
+            if lhsName != rhsName { return lhsName < rhsName }
+            return lhs.id < rhs.id
+        }
     }
 
     /// Phone / tablet / computer icon for a peer row. Uses the account machine

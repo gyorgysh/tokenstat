@@ -28,6 +28,7 @@ struct ClientWorkspacesView: View {
     @State private var addingFirstProject = false
     @State private var cloningFirstProject = false
     @State private var layout = WorkspacesLayout.shared
+    @State private var expandedHostFolders: Set<String> = []
     /// The folder handoff this view has already pushed, so a reconnect does
     /// not push it again after somebody backed out of it.
     @State private var handledFolderHandoff: String?
@@ -124,24 +125,31 @@ struct ClientWorkspacesView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 2)
 
-                        ForEach(model.hosts) { host in
-                            hostCard(host)
+                        if model.hosts.count > 1 {
+                            compactHostList
+                        } else {
+                            ForEach(model.hosts) { host in
+                                hostCard(host)
+                            }
                         }
                     }
 
-                    thisDeviceRow
-
-                    // What the connection is, on the screen that makes them.
-                    ClientSecurityCard(
-                        peerKey: model.connectedKey,
-                        peerName: model.hosts.first { $0.peerKey == model.connectedKey }?.name
-                    )
+                    if model.hosts.count > 1 {
+                        multiHostFolders
+                    } else {
+                        thisDeviceRow
+                        ClientSecurityCard(
+                            peerKey: model.connectedKey,
+                            peerName: model.hosts.first { $0.peerKey == model.connectedKey }?.name
+                        )
+                    }
 
                     if model.connectedKey != nil {
                         if let peer = model.connectedKey,
                            let host = model.hosts.first(where: { $0.peerKey == peer }),
                            host.online != false {
-                            if model.folders.isEmpty, model.isConnecting == nil, model.errorMessage == nil {
+                            if model.folders.isEmpty, model.hosts.count == 1,
+                               model.isConnecting == nil, model.errorMessage == nil {
                                 ClientEmptyState(
                                     kind: .nothingYet,
                                     title: L10n.text("common.projects.first_title"),
@@ -159,7 +167,7 @@ struct ClientWorkspacesView: View {
                                 ClientAllTasksLink(peer: peer, hostName: host.name)
                                     .padding(Theme.Space.m).cardSurface()
                             }
-                            ForEach(layout.sections) { section in
+                            ForEach(model.hosts.count > 1 ? layout.sections.filter { $0 != .folders } : layout.sections) { section in
                                 workSection(section, peer: peer, host: host)
                             }
                             if layout.sections.isEmpty {
@@ -179,7 +187,7 @@ struct ClientWorkspacesView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 2)
                                 .padding(.top, Theme.Space.s)
-                            if !hostFolders.isEmpty {
+                            if model.hosts.count == 1 && !hostFolders.isEmpty {
                                 ClientAdaptiveCards {
                                     ForEach(Array(hostFolders.prefix(5))) { folder in
                                         NavigationLink {
@@ -209,6 +217,13 @@ struct ClientWorkspacesView: View {
                                 }
                             }
                         }
+                    }
+                    if model.hosts.count > 1 {
+                        thisDeviceRow
+                        ClientSecurityCard(
+                            peerKey: model.connectedKey,
+                            peerName: model.hosts.first { $0.peerKey == model.connectedKey }?.name
+                        )
                     }
                 }
                 .padding(.horizontal, Theme.Space.m)
@@ -618,6 +633,166 @@ struct ClientWorkspacesView: View {
         }
     }
 
+    /// A device is a connection, not a page-sized card. When several hosts
+    /// are available, keep their state and controls in one scannable list so
+    /// the projects can start immediately below it.
+    private var compactHostList: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(model.hosts.enumerated()), id: \.element.peerKey) { index, host in
+                if index > 0 { Divider().padding(.leading, Theme.Space.m) }
+                compactHostRow(host)
+            }
+        }
+        .cardSurface()
+    }
+
+    private func compactHostRow(_ host: ClientHost) -> some View {
+        let connected = model.loadedHostKeys.contains(host.peerKey) &&
+            !model.staleHostKeys.contains(host.peerKey) && host.online != false
+        let busy = model.isBusy(with: host.peerKey)
+        return HStack(spacing: 0) {
+            Button {
+                guard host.online != false, model.connectedKey != host.peerKey else { return }
+                if connected {
+                    model.focusLoadedHost(host)
+                } else {
+                    Task { await model.connect(host) }
+                }
+            } label: {
+                HStack(spacing: Theme.Space.s) {
+                    Circle()
+                        .fill(host.online == false ? Color.secondary.opacity(0.35) : Theme.accent)
+                        .frame(width: 9, height: 9)
+                    Image(systemName: ClientDeviceIcon.symbol(name: host.name, isHost: true))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(host.name)
+                            .font(ClientType.label.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(host.online == false ? L10n.text("common.offline") :
+                            busy ? L10n.text("apple.clientworkspacesview.connecting.72021eb7") :
+                            connected ? L10n.text("common.chat.stats.connected") :
+                            model.deniedHostKeys.contains(host.peerKey) ? L10n.text("apple.clienthostworkspacesview.request_access.b06f1662") :
+                            model.staleHostKeys.contains(host.peerKey) ? L10n.text("apple.clientworkspacesview.needs_refresh.5b783f2d") :
+                            L10n.text("apple.accountview.not_connected.0303e182"))
+                            .font(ClientType.caption)
+                            .foregroundStyle(connected ? Theme.accent : Color.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: Theme.Space.xs)
+                    if model.connectedKey == host.peerKey && connected {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(Theme.accent)
+                            .accessibilityHidden(true)
+                    } else if host.online != false {
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(host.online == false || busy)
+            .accessibilityHint(connected
+                ? (model.connectedKey == host.peerKey
+                    ? L10n.text("common.chat.stats.connected")
+                    : L10n.text("apple.accountview.view.dcc839a4"))
+                : L10n.text("common.connect"))
+
+            Menu {
+                if let machineID = host.machineID {
+                    Button(L10n.text("apple.clientworkspacesview.open_device.021a82bd"), systemImage: "desktopcomputer") {
+                        navigation.openDevice(machineID: machineID)
+                    }
+                }
+                Button {
+                    model.setAutoConnect(!model.isAutoConnectEnabled(for: host.peerKey), for: host.peerKey)
+                } label: {
+                    Label(L10n.text("apple.clientworkspacesview.auto_connect.45b6d201"),
+                          systemImage: model.isAutoConnectEnabled(for: host.peerKey) ? "checkmark.circle.fill" : "circle")
+                }
+                if connected {
+                    Button(L10n.text("common.disconnect"), systemImage: "xmark.circle", role: .destructive) {
+                        model.disconnectHost(host.peerKey)
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(ClientType.label.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 44, height: 64)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("\(host.name), \(L10n.text("apple.clientlaunchtile.more.d47d7cb0"))")
+        }
+        .padding(.leading, Theme.Space.m)
+        .padding(.trailing, Theme.Space.xs)
+    }
+
+    private var multiHostFolders: some View {
+        Group {
+            if layout.sections.contains(.folders) {
+                let readyHosts = model.hosts.filter {
+                    model.loadedHostKeys.contains($0.peerKey) &&
+                    !model.staleHostKeys.contains($0.peerKey) && $0.online != false &&
+                    !model.folders(for: $0.peerKey).isEmpty
+                }
+                if !readyHosts.isEmpty {
+                    ClientSectionTitle(title: L10n.text("common.projects"), mark: "mark_archive")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 2)
+                        .padding(.top, Theme.Space.s)
+                    ForEach(readyHosts) { host in
+                        let folders = model.folders(for: host.peerKey)
+                        let expanded = expandedHostFolders.contains(host.peerKey)
+                        Text(host.name)
+                            .font(ClientType.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 2)
+                        ClientAdaptiveCards {
+                            ForEach(expanded ? folders : Array(folders.prefix(2))) { folder in
+                                NavigationLink {
+                                    ClientWorkspaceDetailView(peer: host.peerKey, hostName: host.name, folder: folder)
+                                } label: {
+                                    ClientFolderRow(folder: folder)
+                                }
+                                .buttonStyle(.plain)
+                                .modifier(ClientProjectRename(peer: host.peerKey, folder: folder,
+                                    onChanged: { await model.refresh(account: account.account) }))
+                            }
+                        }
+                        if folders.count > 2 {
+                            Button {
+                                if expanded {
+                                    expandedHostFolders.remove(host.peerKey)
+                                } else {
+                                    expandedHostFolders.insert(host.peerKey)
+                                }
+                            } label: {
+                                Label(
+                                    expanded
+                                        ? L10n.text("apple.clientrecentchats.show_less.94ea9b1d")
+                                        : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(folders.count - 2)"),
+                                    systemImage: expanded ? "chevron.up" : "chevron.down"
+                                )
+                                .font(ClientType.caption.weight(.semibold))
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Theme.accent)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func hostCard(_ host: ClientHost) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack {
@@ -911,6 +1086,25 @@ final class ClientWorkspacesModel {
             return
         }
         await dial(host, recovering: false)
+    }
+
+    /// Change the context for new chats and terminals without changing the
+    /// connection preference. A host can remain live with auto-connect off;
+    /// merely viewing its folders must not silently turn that switch on.
+    func focusLoadedHost(_ host: ClientHost) {
+        guard host.online != false, !staleHostKeys.contains(host.peerKey),
+              let snapshot = hostSnapshots[host.peerKey] else { return }
+        remoteLoadGeneration = UUID()
+        chosenPeer = host.peerKey
+        pendingPeer = nil
+        stopWatchingForAccess()
+        connectedKey = host.peerKey
+        folders = snapshot.folders
+        sessions = snapshot.sessions
+        recentChats = snapshot.chats
+        errorMessage = nil
+        infoMessage = nil
+        if let key = lastConnectedHostKey { UserDefaults.standard.set(host.peerKey, forKey: key) }
     }
 
     /// The auto path. Never queues and never preempts: while an explicit tap
