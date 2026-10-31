@@ -75,19 +75,19 @@ struct ClientNewChatScreen: View {
         .task {
             draft.activate(scope: WorkSessionContext.shared.scope, session: WorkSessionContext.shared.generation)
             await workspaces.refresh(account: account.account)
-            await workspaces.autoConnectLastHost()
-            if workspaces.hosts.count > 1 && requestedPeer == nil {
-                draft.repositoryID = nil
-            }
             if let requestedPeer, let target = workspaces.hosts.first(where: { $0.peerKey == requestedPeer }) {
-                if workspaces.loadedHostKeys.contains(requestedPeer) {
+                if workspaces.loadedHostKeys.contains(requestedPeer),
+                   !workspaces.staleHostKeys.contains(requestedPeer), target.online != false {
                     workspaces.focusLoadedHost(target)
                 } else {
                     await workspaces.connect(target)
                 }
                 chosenHostKey = requestedPeer
-            } else if workspaces.hosts.count > 1 && chosenHostKey == nil {
+            } else if workspaces.hosts.count > 1 {
+                draft.repositoryID = nil
                 choosingHost = true
+            } else if workspaces.hosts.count == 1 {
+                await workspaces.autoConnectLastHost()
             }
         }
         .onChange(of: WorkSessionContext.shared.generation) { _, generation in
@@ -214,7 +214,8 @@ struct ClientNewChatScreen: View {
         let scope = WorkSessionContext.shared.scope
         let generation = WorkSessionContext.shared.generation
         draft.repositoryID = nil
-        if workspaces.loadedHostKeys.contains(host.peerKey) {
+        if workspaces.loadedHostKeys.contains(host.peerKey),
+           !workspaces.staleHostKeys.contains(host.peerKey), host.online != false {
             workspaces.focusLoadedHost(host)
         } else {
             await workspaces.connect(host)
