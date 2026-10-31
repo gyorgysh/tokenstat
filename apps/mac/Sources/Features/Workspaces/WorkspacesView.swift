@@ -142,15 +142,18 @@ struct WorkspacesView: View {
                     }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .fixedSize()
+                    .frame(minHeight: 44)
                 }
                 Button(L10n.text("common.disconnect"), .disconnect) {
                     NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .fixedSize()
+                .frame(minHeight: 44)
                 .help(L10n.text("apple.workspacesview.stops_showing_this_computer_s_folders_in_t.fae41fce"))
             }
-            HostStatsBar(peer: peer, online: !stale)
+            HostStatsStrip(peer: peer, online: !stale)
+                .frame(minHeight: 44, alignment: .leading)
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.bottom, Theme.Space.s)

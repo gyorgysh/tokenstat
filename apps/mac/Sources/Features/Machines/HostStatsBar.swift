@@ -321,8 +321,6 @@ extension View {
     }
 }
 
-#if !os(macOS)
-
 /// The same readings as `HostStatsBar`, on a host row.
 ///
 /// A row in a list has little height to spend, so this drops the captions,
@@ -357,7 +355,7 @@ struct HostStatsStrip: View {
                 }
             }
             ConnectionRouteMark(route: route)
-                .font(ClientType.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -378,10 +376,10 @@ struct HostStatsStrip: View {
     private func cell(icon: String, text: String) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(ClientType.caption)
+                .font(Theme.caption)
                 .foregroundStyle(Theme.accent)
             Text(text)
-                .font(ClientType.caption)
+                .font(Theme.caption)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -416,5 +414,3 @@ struct HostStatsStrip: View {
         route = freshRoute
     }
 }
-
-#endif
