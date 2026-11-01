@@ -285,7 +285,7 @@ private fun gitChangeSummary(git: JsonObject, files: Int): String {
     val removed = (git["removed"] as? JsonPrimitive)?.intOrNull ?: 0
     // Untracked and binary changes have unknown line counts. A zero floor is
     // not a useful summary; say how many paths changed instead.
-    if (git.bol("partial") == true || (added == 0 && removed == 0)) {
+    if (added == 0 && removed == 0) {
         return if (files == 1) L10n.text("android.hostworkspaces.change_count.one", files.toString())
             else L10n.text("android.hostworkspaces.change_count.other", files.toString())
     }

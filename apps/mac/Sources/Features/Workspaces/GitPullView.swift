@@ -48,6 +48,7 @@ struct GitPullSheet: View {
     @State private var pulling = false
     @State private var settingUpLFS = false
     @State private var checkStartedAt = Date()
+    @State private var pullStartedAt = Date()
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -55,7 +56,15 @@ struct GitPullSheet: View {
         ThemedSheet(title: L10n.text("apple.gitpull.title"), subtitle: [folderName, hostName].filter { !$0.isEmpty }.joined(separator: " · "),
                     icon: .download, onClose: { dismiss() }) {
             ScrollView {
-                if review == nil && error == nil && outcome == nil {
+                if pulling, let review {
+                    GitSyncLoadingView(
+                        message: L10n.text("apple.gitpull.pulling_count", "\(review.incoming)"),
+                        detail: review.lfs == nil
+                            ? L10n.text("apple.gitpull.pulling_detail")
+                            : L10n.text("apple.gitpull.pulling_lfs_detail"),
+                        startedAt: pullStartedAt,
+                        isPulling: true)
+                } else if review == nil && error == nil && outcome == nil {
                     GitSyncLoadingView(message: L10n.text("apple.gitpull.checking"),
                                        detail: L10n.text("apple.gitpull.fetching_detail"),
                                        startedAt: checkStartedAt)
@@ -103,7 +112,11 @@ struct GitPullSheet: View {
                 }
             }
         } actions: {
-            if outcome?.ok == true || review?.state == .upToDate {
+            if pulling {
+                Button(L10n.text("apple.gitpull.pulling"), .download) {}
+                    .buttonStyle(AccentButtonStyle(comfortable: true))
+                    .disabled(true)
+            } else if outcome?.ok == true || review?.state == .upToDate {
                 Button(L10n.text("common.done"), .done) { dismiss() }
                     .buttonStyle(AccentButtonStyle(comfortable: true))
             } else if let review, review.state == .fastForward, outcome == nil {
@@ -160,6 +173,7 @@ struct GitPullSheet: View {
     }
 
     private func pull(_ reviewed: GitPullReview) async {
+        pullStartedAt = Date()
         working = true
         pulling = true
         defer { working = false; pulling = false }
@@ -198,6 +212,7 @@ struct GitSyncLoadingView: View {
     let message: String
     var detail: String? = nil
     var startedAt: Date? = nil
+    var isPulling = false
 
     var body: some View {
         VStack(spacing: Theme.Space.m) {
@@ -215,7 +230,9 @@ struct GitSyncLoadingView: View {
                 TimelineView(.periodic(from: startedAt, by: 1)) { context in
                     let seconds = max(0, Int(context.date.timeIntervalSince(startedAt)))
                     if seconds >= 8 {
-                        Text(L10n.text("apple.gitpull.elapsed", String(format: "%d:%02d", seconds / 60, seconds % 60)))
+                        let elapsed = String(format: "%d:%02d", seconds / 60, seconds % 60)
+                        Text(isPulling ? L10n.text("apple.gitpull.pulling_elapsed", elapsed)
+                             : L10n.text("apple.gitpull.elapsed", elapsed))
                             .font(Theme.caption.monospacedDigit())
                             .foregroundStyle(Theme.controlGlyph)
                     }
@@ -224,7 +241,7 @@ struct GitSyncLoadingView: View {
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
-        .frame(minHeight: 240)
+        .frame(minHeight: 210)
         .padding(.horizontal, Theme.Space.l)
     }
 }

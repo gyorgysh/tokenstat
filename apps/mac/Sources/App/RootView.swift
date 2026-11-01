@@ -4994,7 +4994,7 @@ private struct WorkspaceRow: View {
                     Text("⇣\(git.behind)").font(font).foregroundStyle(Theme.accent)
                 }
                 if !git.files.isEmpty {
-                    if git.partial || !git.hasLineChanges {
+                    if !git.hasLineChanges {
                         Text(git.compactChangeSummary).font(font).foregroundStyle(Theme.accent)
                     } else {
                         Text("+\(git.added)").font(font).foregroundStyle(Theme.diffAdded)

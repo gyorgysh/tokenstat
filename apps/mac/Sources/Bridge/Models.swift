@@ -2125,10 +2125,11 @@ struct GitStatus: Codable, Sendable, Hashable {
 
     var hasLineChanges: Bool { added > 0 || removed > 0 }
 
-    /// Use the number of changed paths when line totals are incomplete or
-    /// zero. An untracked folder must not read as "+0 −0".
+    /// Keep known line totals even when some paths have unknown counts. Use
+    /// the path count only when both totals are zero, as with an untracked
+    /// folder that would otherwise read as "+0 −0".
     var compactChangeSummary: String {
-        if partial || !hasLineChanges {
+        if !hasLineChanges {
             return files.count == 1
                 ? L10n.text("apple.git_status.change_count.one", files.count.formatted())
                 : L10n.text("apple.git_status.change_count.other", files.count.formatted())

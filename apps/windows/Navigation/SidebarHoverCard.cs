@@ -174,8 +174,8 @@ internal static class SidebarHoverCard
         var partial = Format.Flag(git, "partial");
         var hasLineCounts = addedCount > 0 || removedCount > 0;
         var fileCount = (git["files"] as JsonArray)?.Count ?? 0;
-        counts.Children.Add(new TextBlock { Text = Text(fileCount > 0 && (partial || !hasLineCounts) ? "changed_items" : "changed_files") + "  " + Number(fileCount), FontSize = 12, Foreground = Theme.Brush(static () => Theme.ControlGlyph) });
-        if (!partial && hasLineCounts)
+        counts.Children.Add(new TextBlock { Text = Text(fileCount > 0 && !hasLineCounts ? "changed_items" : "changed_files") + "  " + Number(fileCount), FontSize = 12, Foreground = Theme.Brush(static () => Theme.ControlGlyph) });
+        if (hasLineCounts)
         {
             var added = new TextBlock { Text = "+" + Number(addedCount), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Theme.Brush(static () => Theme.DiffAdded) };
             var removed = new TextBlock { Text = "−" + Number(removedCount), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Theme.Brush(static () => Theme.DiffRemoved) };
