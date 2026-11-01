@@ -2122,6 +2122,19 @@ struct GitStatus: Codable, Sendable, Hashable {
     var removed: UInt64
     /// True when some file's counts were unknown, so the totals are a floor.
     var partial: Bool
+
+    var hasLineChanges: Bool { added > 0 || removed > 0 }
+
+    /// Use the number of changed paths when line totals are incomplete or
+    /// zero. An untracked folder must not read as "+0 −0".
+    var compactChangeSummary: String {
+        if partial || !hasLineChanges {
+            return files.count == 1
+                ? L10n.text("apple.git_status.change_count.one", files.count.formatted())
+                : L10n.text("apple.git_status.change_count.other", files.count.formatted())
+        }
+        return "+\(added.formatted())" + (removed > 0 ? " −\(removed.formatted())" : "")
+    }
 }
 
 /// One branch offered by the workspace branch picker.
@@ -2641,9 +2654,7 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     /// `+120 −8`, or nil when there is nothing to say.
     var diffStat: String? {
         guard let git, git.isRepo, !git.files.isEmpty else { return nil }
-        let plus = "+\(git.added)"
-        let minus = git.removed > 0 ? " −\(git.removed)" : ""
-        return git.partial ? "\(plus)\(minus)+" : "\(plus)\(minus)"
+        return git.compactChangeSummary
     }
 
     /// One-line git summary for the sidebar: branch, ahead/behind, diff stat.

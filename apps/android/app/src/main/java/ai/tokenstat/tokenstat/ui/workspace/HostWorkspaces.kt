@@ -256,11 +256,7 @@ fun folderSubtitle(folder: JsonObject): String? {
     if (behind > 0) parts.add("⇣$behind")
     val files = (git["files"] as? JsonArray)?.size ?: 0
     if (files > 0) {
-        val added = (git["added"] as? JsonPrimitive)?.intOrNull ?: 0
-        val removed = (git["removed"] as? JsonPrimitive)?.intOrNull ?: 0
-        val partial = git.bol("partial") == true
-        val stat = "+$added" + (if (removed > 0) " −$removed" else "") + (if (partial) "+" else "")
-        parts.add(stat)
+        parts.add(gitChangeSummary(git, files))
     }
     return parts.joinToString(" ").takeIf { it.isNotEmpty() }
 }
@@ -279,12 +275,21 @@ fun folderGitStats(folder: JsonObject): String? {
     if (behind > 0) parts.add("⇣$behind")
     val files = (git["files"] as? JsonArray)?.size ?: 0
     if (files > 0) {
-        val added = (git["added"] as? JsonPrimitive)?.intOrNull ?: 0
-        val removed = (git["removed"] as? JsonPrimitive)?.intOrNull ?: 0
-        val partial = git.bol("partial") == true
-        parts.add("+$added" + (if (removed > 0) " −$removed" else "") + (if (partial) "+" else ""))
+        parts.add(gitChangeSummary(git, files))
     }
     return parts.joinToString(" ").takeIf { it.isNotEmpty() }
+}
+
+private fun gitChangeSummary(git: JsonObject, files: Int): String {
+    val added = (git["added"] as? JsonPrimitive)?.intOrNull ?: 0
+    val removed = (git["removed"] as? JsonPrimitive)?.intOrNull ?: 0
+    // Untracked and binary changes have unknown line counts. A zero floor is
+    // not a useful summary; say how many paths changed instead.
+    if (git.bol("partial") == true || (added == 0 && removed == 0)) {
+        return if (files == 1) L10n.text("android.hostworkspaces.change_count.one", files.toString())
+            else L10n.text("android.hostworkspaces.change_count.other", files.toString())
+    }
+    return "+$added" + (if (removed > 0) " −$removed" else "")
 }
 
 /// The power glyph for a stats reading: a bolt on the wall, a battery

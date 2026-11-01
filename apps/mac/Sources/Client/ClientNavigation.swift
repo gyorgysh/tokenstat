@@ -102,7 +102,9 @@ final class ClientNavigationModel {
     var requestedNewChatRepositoryID: String?
     var requestedNewChatHostKey: String?
     func openNewChat(repositoryID: String? = nil, hostPeer: String? = nil) {
-        chooseNavigation()
+        // New chat is a cover over the current route. Keep the folder and
+        // chat-list pushes so Close returns to the page that opened it.
+        // Sending the draft chooses its new destination separately.
         requestedNewChatRepositoryID = repositoryID
         requestedNewChatHostKey = hostPeer
         newChatDraft.activate(scope: WorkSessionContext.shared.scope,

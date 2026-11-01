@@ -47,6 +47,7 @@ struct GitPullSheet: View {
     @State private var working = false
     @State private var pulling = false
     @State private var settingUpLFS = false
+    @State private var checkStartedAt = Date()
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -54,46 +55,52 @@ struct GitPullSheet: View {
         ThemedSheet(title: L10n.text("apple.gitpull.title"), subtitle: [folderName, hostName].filter { !$0.isEmpty }.joined(separator: " · "),
                     icon: .download, onClose: { dismiss() }) {
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    if let review {
-                        VStack(alignment: .leading, spacing: Theme.Space.s) {
-                            Text(review.branchName).font(Theme.title3.weight(.semibold))
-                            Text(L10n.text("apple.gitpull.from", review.source))
-                                .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
+                if review == nil && error == nil && outcome == nil {
+                    GitSyncLoadingView(message: L10n.text("apple.gitpull.checking"),
+                                       detail: L10n.text("apple.gitpull.fetching_detail"),
+                                       startedAt: checkStartedAt)
+                } else {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        if let review {
+                            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                                Text(review.branchName).font(Theme.title3.weight(.semibold))
+                                Text(L10n.text("apple.gitpull.from", review.source))
+                                    .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
+                            }
+                            if let outcome {
+                                Text(outcome.message)
+                                    .font(Theme.callout)
+                                    .foregroundStyle(outcome.ok ? Theme.accent : Theme.danger)
+                                    .textSelection(.enabled)
+                            } else {
+                                Text(summary(review))
+                                    .font(Theme.callout)
+                                    .foregroundStyle(review.state == .diverged || review.state == .missing ? Theme.warning : .primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if let lfs = review.lfs {
+                                GitLFSSetupView(status: lfs, working: working, setup: setupLFS, check: check)
+                            }
                         }
-                        if let outcome {
-                            Text(outcome.message)
+                        if let error {
+                            Text(error)
                                 .font(Theme.callout)
-                                .foregroundStyle(outcome.ok ? Theme.accent : Theme.danger)
+                                .foregroundStyle(Theme.danger)
                                 .textSelection(.enabled)
-                        } else {
-                            Text(summary(review))
-                                .font(Theme.callout)
-                                .foregroundStyle(review.state == .diverged || review.state == .missing ? Theme.warning : .primary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if let lfs = review.lfs {
-                            GitLFSSetupView(status: lfs, working: working, setup: setupLFS, check: check)
+                        if working {
+                            ProgressView(settingUpLFS ? L10n.text("apple.gitlfs.setting_up")
+                                         : pulling ? L10n.text("apple.gitpull.pulling") : L10n.text("apple.gitpull.checking"))
+                                .font(Theme.callout)
                         }
-                    }
-                    if let error {
-                        Text(error)
-                            .font(Theme.callout)
-                            .foregroundStyle(Theme.danger)
-                            .textSelection(.enabled)
+                        Text(L10n.text("apple.gitpull.help"))
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.controlGlyph)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    if working {
-                        ProgressView(settingUpLFS ? L10n.text("apple.gitlfs.setting_up")
-                                     : pulling ? L10n.text("apple.gitpull.pulling") : L10n.text("apple.gitpull.checking"))
-                            .font(Theme.callout)
-                    }
-                    Text(L10n.text("apple.gitpull.help"))
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.controlGlyph)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         } actions: {
             if outcome?.ok == true || review?.state == .upToDate {
@@ -137,6 +144,7 @@ struct GitPullSheet: View {
     }
 
     private func check() async {
+        checkStartedAt = Date()
         working = true
         defer { working = false }
         error = nil
@@ -181,6 +189,43 @@ struct GitPullSheet: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+/// A pending remote check fills the sheet's content area instead of leaving
+/// a spinner stranded at the upper-left corner of an otherwise empty sheet.
+struct GitSyncLoadingView: View {
+    let message: String
+    var detail: String? = nil
+    var startedAt: Date? = nil
+
+    var body: some View {
+        VStack(spacing: Theme.Space.m) {
+            ProgressView()
+                .controlSize(.large)
+            Text(message)
+                .font(Theme.callout.weight(.medium))
+            if let detail {
+                Text(detail)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.controlGlyph)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let startedAt {
+                TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                    let seconds = max(0, Int(context.date.timeIntervalSince(startedAt)))
+                    if seconds >= 8 {
+                        Text(L10n.text("apple.gitpull.elapsed", String(format: "%d:%02d", seconds / 60, seconds % 60)))
+                            .font(Theme.caption.monospacedDigit())
+                            .foregroundStyle(Theme.controlGlyph)
+                    }
+                }
+            }
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 240)
+        .padding(.horizontal, Theme.Space.l)
     }
 }
 

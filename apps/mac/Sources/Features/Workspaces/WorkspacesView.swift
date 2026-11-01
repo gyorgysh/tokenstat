@@ -391,12 +391,14 @@ struct WorkspaceChangesView: View {
     private func summary(_ git: GitStatus) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: Theme.Space.s) {
-                Text("+\(git.added)")
-                    .font(Theme.numeric(13, weight: .medium))
-                    .foregroundStyle(Theme.success)
-                Text("−\(git.removed)")
-                    .font(Theme.numeric(13, weight: .medium))
-                    .foregroundStyle(Theme.danger)
+                if git.hasLineChanges {
+                    Text("+\(git.added)")
+                        .font(Theme.numeric(13, weight: .medium))
+                        .foregroundStyle(Theme.success)
+                    Text("−\(git.removed)")
+                        .font(Theme.numeric(13, weight: .medium))
+                        .foregroundStyle(Theme.danger)
+                }
                 Text((git.files.count == 1 ? L10n.text("apple.workspacesview.0_file_1.ac963029.one", "\(git.files.count)") : L10n.text("apple.workspacesview.0_file_1.ac963029.other", "\(git.files.count)")))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
@@ -404,7 +406,9 @@ struct WorkspaceChangesView: View {
             if git.partial {
                 // Untracked and binary files have no line counts, so saying
                 // "+120" flat would be a number nobody measured.
-                Text(L10n.text("apple.workspacesview.some_files_have_no_line_counts_so_these_to.9aa88eb4"))
+                Text(git.hasLineChanges
+                    ? L10n.text("apple.workspacesview.some_files_have_no_line_counts_so_these_to.9aa88eb4")
+                    : L10n.text("apple.git_status.line_counts_unavailable"))
                     .font(Theme.caption2)
                     .foregroundStyle(.tertiary)
             }

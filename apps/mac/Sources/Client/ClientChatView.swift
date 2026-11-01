@@ -303,13 +303,18 @@ private struct ClientChatContent: View {
                                 ChatDraftMark(reference: model.draftReference(for: chat.id, in: workspaceID),
                                               size: 10, scalesWithText: true)
                             }
-                            Text(rowDetail(chat)).font(ClientType.caption).foregroundStyle(.secondary).lineLimit(1)
+                            HStack(spacing: 4) {
+                                if ClientChatReadState.shared.isUnread(peer: peer, chat: chat) {
+                                    Text(L10n.text("apple.clientrecentchats.unread.1b9f384c"))
+                                        .foregroundStyle(Theme.accent)
+                                    Text("·").foregroundStyle(.tertiary)
+                                }
+                                Text(rowDetail(chat)).foregroundStyle(.secondary)
+                            }
+                            .font(ClientType.caption)
+                            .lineLimit(1)
                             if chat.running {
                                 Text(L10n.text("common.running")).font(ClientType.caption).foregroundStyle(Theme.accent)
-                            }
-                            if ClientChatReadState.shared.isUnread(peer: peer, chat: chat) {
-                                Text(L10n.text("apple.clientrecentchats.unread.1b9f384c"))
-                                    .font(ClientType.caption.weight(.semibold)).foregroundStyle(Theme.accent)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -530,7 +535,8 @@ private struct ClientChatContent: View {
     }
 
     private func row(_ chat: ChatConversation, draft: WorkReference?) -> some View {
-        HStack(spacing: Theme.Space.s) {
+        let unread = ClientChatReadState.shared.isUnread(peer: peer, chat: chat)
+        return HStack(spacing: Theme.Space.s) {
             HarnessMark(id: chat.backend, size: 28)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -538,11 +544,6 @@ private struct ClientChatContent: View {
                         Circle()
                             .fill(Theme.accent)
                             .frame(width: 7, height: 7)
-                    }
-                    if ClientChatReadState.shared.isUnread(peer: peer, chat: chat) {
-                        Text(L10n.text("apple.clientrecentchats.unread.1b9f384c"))
-                            .font(ClientType.caption.weight(.semibold))
-                            .foregroundStyle(Theme.accent)
                     }
                     Text(chat.title)
                         .font(ClientType.label.weight(.medium))
@@ -559,7 +560,14 @@ private struct ClientChatContent: View {
                     // somebody pauses typing in one of them.
                     ChatDraftMark(reference: draft, size: 10, scalesWithText: true)
                 }
-                Text(rowDetail(chat))
+                HStack(spacing: 4) {
+                    if unread {
+                        Text(L10n.text("apple.clientrecentchats.unread.1b9f384c"))
+                            .fontWeight(.semibold)
+                        Text("·").foregroundStyle(.tertiary)
+                    }
+                    Text(rowDetail(chat))
+                }
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.accent)
                     .lineLimit(1)

@@ -39,7 +39,9 @@ extension GitCommitTarget: GitPullService {
         await RemoteHostFeature.reviewedPull.isSupported(peer: peer)
     }
     func pullReview() async throws -> GitPullReview {
-        try await call("workspace.pullReview", [:], as: GitPullReview.self)
+        // Review fetches the upstream branch. A quiet fetch on a large or
+        // slow remote can exceed the ordinary 60-second host read budget.
+        try await call("workspace.pullReview", [:], patience: Bridge.Patience.long, as: GitPullReview.self)
     }
     func pull(_ review: GitPullReview) async throws -> GitPullOutcome {
         let reviewed = try JSONSerialization.jsonObject(with: JSONEncoder().encode(review))

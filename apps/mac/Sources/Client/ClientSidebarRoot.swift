@@ -581,14 +581,13 @@ struct ClientSidebarRoot: View {
                     Text("⇣\(git.behind)").font(font).foregroundStyle(Theme.accent)
                 }
                 if !git.files.isEmpty {
-                    Text("+\(git.added)").font(font).foregroundStyle(Theme.diffAdded)
-                    if git.removed > 0 {
-                        Text("−\(git.removed)").font(font).foregroundStyle(Theme.diffRemoved)
-                    }
-                    // A floor rather than a total when a file could not be
-                    // counted, said the way the rest of the app says it.
-                    if git.partial {
-                        Text("+").font(font).foregroundStyle(.tertiary)
+                    if git.partial || !git.hasLineChanges {
+                        Text(git.compactChangeSummary).font(font).foregroundStyle(Theme.accent)
+                    } else {
+                        Text("+\(git.added)").font(font).foregroundStyle(Theme.diffAdded)
+                        if git.removed > 0 {
+                            Text("−\(git.removed)").font(font).foregroundStyle(Theme.diffRemoved)
+                        }
                     }
                 }
                 Spacer(minLength: 0)

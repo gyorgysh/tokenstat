@@ -66,47 +66,51 @@ struct GitPushView: View {
         ThemedSheet(title: L10n.text("apple.gitpushview.push_branch.97deb7c0"), subtitle: [folderName, hostName].filter { !$0.isEmpty }.joined(separator: " · "),
                     icon: .upload, onClose: { dismiss() }) {
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    if let review = session.review ?? session.draft.submitted?.review ?? session.outcome?.review {
-                        VStack(alignment: .leading, spacing: Theme.Space.s) {
-                            Text(review.branchName).font(Theme.title3.weight(.semibold))
-                            Text(L10n.text("apple.gitpushview.to_0.e7bc111d", "\(review.destination)")).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
-                            Text(String(review.head.prefix(10))).font(Theme.monoText(12, relativeTo: .caption)).foregroundStyle(Theme.controlGlyph)
+                if session.review == nil && session.draft.submitted == nil && session.outcome == nil && session.errorMessage == nil {
+                    GitSyncLoadingView(message: L10n.text("apple.gitpushview.checking_the_branch.3733503a"))
+                } else {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        if let review = session.review ?? session.draft.submitted?.review ?? session.outcome?.review {
+                            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                                Text(review.branchName).font(Theme.title3.weight(.semibold))
+                                Text(L10n.text("apple.gitpushview.to_0.e7bc111d", "\(review.destination)")).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
+                                Text(String(review.head.prefix(10))).font(Theme.monoText(12, relativeTo: .caption)).foregroundStyle(Theme.controlGlyph)
+                            }
+                            if review.upToDate {
+                                Text(L10n.text("apple.gitpushview.this_branch_is_up_to_date.01b49ce3")).font(Theme.callout).foregroundStyle(Theme.accent)
+                            } else if review.outgoing == 0 {
+                                Text(L10n.text("apple.gitpushview.no_outgoing_commits_the_remote_branch_is_a.7072ceca")).font(Theme.callout)
+                            } else if review.remoteHead == nil {
+                                Text(L10n.text("apple.gitpushview.publish_this_branch_to_0.e623bfa9", "\(review.remote)")).font(Theme.callout)
+                            } else if let count = review.outgoing {
+                                Text(L10n.text("apple.gitpushview.0_1_to_push.190b18e2", "\(count)", "\(count == 1 ? L10n.text("apple.gitpushview.commit.9505cacb") : "commits")")).font(Theme.callout)
+                            } else {
+                                Text(L10n.text("apple.gitpushview.the_computer_will_check_whether_the_remote.2c0a07ce")).font(Theme.callout)
+                            }
+                            if review.setUpstream {
+                                Text(L10n.text("apple.gitpushview.this_will_also_set_the_branch_s_tracking_d.95dfeac0")).font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+                            }
+                            if let lfs = review.lfs {
+                                GitLFSSetupView(status: lfs, working: session.working,
+                                                setup: { await session.setupLFS() }, check: { await session.prepare() })
+                            }
                         }
-                        if review.upToDate {
-                            Text(L10n.text("apple.gitpushview.this_branch_is_up_to_date.01b49ce3")).font(Theme.callout).foregroundStyle(Theme.accent)
-                        } else if review.outgoing == 0 {
-                            Text(L10n.text("apple.gitpushview.no_outgoing_commits_the_remote_branch_is_a.7072ceca")).font(Theme.callout)
-                        } else if review.remoteHead == nil {
-                            Text(L10n.text("apple.gitpushview.publish_this_branch_to_0.e623bfa9", "\(review.remote)")).font(Theme.callout)
-                        } else if let count = review.outgoing {
-                            Text(L10n.text("apple.gitpushview.0_1_to_push.190b18e2", "\(count)", "\(count == 1 ? L10n.text("apple.gitpushview.commit.9505cacb") : "commits")")).font(Theme.callout)
-                        } else {
-                            Text(L10n.text("apple.gitpushview.the_computer_will_check_whether_the_remote.2c0a07ce")).font(Theme.callout)
+                        if let outcome = session.outcome {
+                            Text(outcome.message).font(Theme.callout)
+                                .foregroundStyle(outcome.succeeded ? Theme.accent : Theme.danger)
+                                .textSelection(.enabled)
                         }
-                        if review.setUpstream {
-                            Text(L10n.text("apple.gitpushview.this_will_also_set_the_branch_s_tracking_d.95dfeac0")).font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+                        if let error = session.errorMessage {
+                            Text(error).font(Theme.callout).foregroundStyle(Theme.danger).textSelection(.enabled)
                         }
-                        if let lfs = review.lfs {
-                            GitLFSSetupView(status: lfs, working: session.working,
-                                            setup: { await session.setupLFS() }, check: { await session.prepare() })
+                        if session.working {
+                            ProgressView(session.settingUpLFS ? L10n.text("apple.gitlfs.setting_up")
+                                         : session.draft.submitted == nil ? L10n.text("apple.gitpushview.checking_the_branch.3733503a")
+                                         : L10n.text("apple.gitpushview.checking_push.00fa6ce0"))
+                                .font(Theme.callout)
                         }
-                    }
-                    if let outcome = session.outcome {
-                        Text(outcome.message).font(Theme.callout)
-                            .foregroundStyle(outcome.succeeded ? Theme.accent : Theme.danger)
-                            .textSelection(.enabled)
-                    }
-                    if let error = session.errorMessage {
-                        Text(error).font(Theme.callout).foregroundStyle(Theme.danger).textSelection(.enabled)
-                    }
-                    if session.working {
-                        ProgressView(session.settingUpLFS ? L10n.text("apple.gitlfs.setting_up")
-                                     : session.draft.submitted == nil ? L10n.text("apple.gitpushview.checking_the_branch.3733503a")
-                                     : L10n.text("apple.gitpushview.checking_push.00fa6ce0"))
-                            .font(Theme.callout)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         } actions: {
             if session.draft.submitted != nil {

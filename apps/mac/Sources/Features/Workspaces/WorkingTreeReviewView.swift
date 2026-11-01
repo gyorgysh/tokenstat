@@ -96,8 +96,10 @@ struct WorkingTreeReviewView: View {
             }
             if let git = folder.git {
                 HStack(spacing: Theme.Space.s) {
-                    Text("+\(git.added)").foregroundStyle(Theme.success)
-                    Text("−\(git.removed)").foregroundStyle(Theme.danger)
+                    if git.hasLineChanges {
+                        Text("+\(git.added)").foregroundStyle(Theme.success)
+                        Text("−\(git.removed)").foregroundStyle(Theme.danger)
+                    }
                     Text((files.count == 1 ? L10n.text("apple.workingtreereviewview.0_file_1.ac963029.one", "\(files.count)") : L10n.text("apple.workingtreereviewview.0_file_1.ac963029.other", "\(files.count)")))
                         .foregroundStyle(.secondary)
                     Spacer()

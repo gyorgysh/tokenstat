@@ -866,6 +866,8 @@
   "android.hostworkspaces.asking.0b832840": "Asking…",
   "android.hostworkspaces.auto_connect.45b6d201": "Auto-connect",
   "android.hostworkspaces.auto_connect_0.3bbf847e": "Auto-connect {0}",
+  "android.hostworkspaces.change_count.one": "{0} change",
+  "android.hostworkspaces.change_count.other": "{0} changes",
   "android.hostworkspaces.chat.460b3a7d": "Chat",
   "android.hostworkspaces.chats_opened_recently.0953f969": "Chats opened recently",
   "android.hostworkspaces.code_not_accepted": "That code was not accepted. Check it on the computer and try again.",

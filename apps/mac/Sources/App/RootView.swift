@@ -4994,9 +4994,13 @@ private struct WorkspaceRow: View {
                     Text("⇣\(git.behind)").font(font).foregroundStyle(Theme.accent)
                 }
                 if !git.files.isEmpty {
-                    Text("+\(git.added)\(git.partial ? "+" : "")").font(font).foregroundStyle(Theme.diffAdded)
-                    if git.removed > 0 {
-                        Text("−\(git.removed)").font(font).foregroundStyle(Theme.diffRemoved)
+                    if git.partial || !git.hasLineChanges {
+                        Text(git.compactChangeSummary).font(font).foregroundStyle(Theme.accent)
+                    } else {
+                        Text("+\(git.added)").font(font).foregroundStyle(Theme.diffAdded)
+                        if git.removed > 0 {
+                            Text("−\(git.removed)").font(font).foregroundStyle(Theme.diffRemoved)
+                        }
                     }
                 }
             }

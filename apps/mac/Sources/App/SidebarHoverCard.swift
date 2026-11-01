@@ -88,11 +88,11 @@ private struct SidebarGitDetail: View {
             }
             .accessibilityLabel(L10n.text("apple.rootview.branch.52656e81") + ": " + (git.branch ?? "Detached HEAD"))
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                Text(L10n.text("apple.rootview.changed_files.5d4041aa"))
+                Text(L10n.text("apple.git_status.changed_items"))
                     .font(Theme.fit(12)).foregroundStyle(.secondary)
                 Text(git.files.count.formatted()).font(Theme.numeric(12))
                 Spacer(minLength: Theme.Space.s)
-                if !git.files.isEmpty {
+                if git.hasLineChanges {
                     HStack(spacing: 8) {
                         Text("+\(git.added.formatted())").foregroundStyle(Theme.diffAdded)
                         Text("−\(git.removed.formatted())").foregroundStyle(Theme.diffRemoved)
@@ -102,7 +102,9 @@ private struct SidebarGitDetail: View {
                 }
             }
             if git.partial {
-                Text(L10n.text("apple.sidebarhovercard.partial_line_counts"))
+                Text(git.hasLineChanges
+                    ? L10n.text("apple.sidebarhovercard.partial_line_counts")
+                    : L10n.text("apple.git_status.line_counts_unavailable"))
                     .font(Theme.caption).foregroundStyle(.secondary)
             }
             if git.ahead > 0 || git.behind > 0 {

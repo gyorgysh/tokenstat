@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -90,6 +91,16 @@ fn count(dir: &Path, range: &str) -> Result<u64, String> {
         .map_err(|_| "Git did not report a commit count.".to_string())
 }
 
+// A reviewed pull is interactive. Let a large fetch continue while bytes are
+// arriving, but do not leave the dialog waiting forever on a stalled HTTPS
+// connection. Git's HTTP transport applies these limits to each transfer.
+fn network_command(dir: &Path, args: &[&str]) -> Command {
+    let mut git = command(dir, args);
+    git.env("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
+        .env("GIT_HTTP_LOW_SPEED_TIME", "20");
+    git
+}
+
 /// Fetch the current branch's upstream and say what a pull would do.
 ///
 /// This is the one place a fetch runs, and it runs because a person asked to
@@ -133,7 +144,7 @@ pub fn review(dir: &Path) -> Result<Review, String> {
             .to_string()
     })?;
     // Exit code 2 is "no such ref", whatever language git speaks.
-    let listed = command(
+    let listed = network_command(
         dir,
         &[
             "ls-remote",
@@ -165,7 +176,7 @@ pub fn review(dir: &Path) -> Result<Review, String> {
     }
     // No tags, no submodules, and only this one branch: the fetch brings in
     // what the review is about and nothing else.
-    let fetched = command(
+    let fetched = network_command(
         dir,
         &[
             "fetch",
