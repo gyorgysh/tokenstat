@@ -396,7 +396,7 @@ jobs:
 
       - name: Build the universal Mac app
         run: |
-          xcodebuild -project apps/mac/Tokenstat.xcodeproj \
+          xcodebuild -skipPackagePluginValidation -project apps/mac/Tokenstat.xcodeproj \
             -scheme Tokenstat \
             -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=NO build
@@ -444,7 +444,7 @@ jobs:
 
       - name: Build the app for the simulator
         run: |
-          xcodebuild -project apps/mac/Tokenstat.xcodeproj \
+          xcodebuild -skipPackagePluginValidation -project apps/mac/Tokenstat.xcodeproj \
             -scheme Tokenstat \
             -destination 'generic/platform=iOS Simulator' \
             build

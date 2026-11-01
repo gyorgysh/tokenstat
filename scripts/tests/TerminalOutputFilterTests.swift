@@ -23,8 +23,8 @@ import SwiftTerm
         let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 800, height: 500))
         var nativeFilter = TerminalOutputFilter()
         for byte in input { view.feed(byteArray: nativeFilter.filter([byte][...])[...]) }
-        precondition(view.getTerminal().rows > 5)
+        precondition(view.terminalDimensions.rows > 5)
 #endif
-        print("PASS: terminal resize crash sequence blocked across every chunk boundary; colors and queries preserved")
+        print("PASS: embedded terminal resize commands blocked across every chunk boundary; colors and queries preserved")
     }
 }

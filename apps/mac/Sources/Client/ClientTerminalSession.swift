@@ -378,9 +378,8 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         if !chunk.bytes.isEmpty {
             offset = chunk.nextOffset
             hasOutput = true
-            // Same filter as the Mac pane, for the same reason: this build's
-            // SwiftTerm mistakes the kitty keyboard announcement for a cursor
-            // restore. See `TerminalOutputFilter`.
+            // Share the Mac pane's embedded geometry and legacy keyboard
+            // policy. See `TerminalOutputFilter`.
             let bytes = outputFilter.filter([UInt8](chunk.bytes)[...])
             let slice = 24 * 1024
             var start = 0
@@ -436,7 +435,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         view.nativeForegroundColor = uiColor(foreground)
         view.font = AppFonts.terminal(size: 12)
         view.optionAsMetaKey = true
-        view.getTerminal().changeHistorySize(4_000)
+        view.changeScrollback(4_000)
         view.terminalDelegate = delegate
         // Soft keyboard: TerminalView is a UIKeyInput scroll view.
         view.isUserInteractionEnabled = true
@@ -500,11 +499,8 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     /// The visible screen as plain text. Empty until the view exists, and it
     /// never creates one: the sheet that reads it does not own the mount.
     func screenText() -> String {
-        guard let terminal = terminalView?.getTerminal() else { return "" }
-        let dims = terminal.getDims()
-        let top = terminal.getTopVisibleRow()
-        return terminal.getText(start: Position(col: 0, row: top),
-                                end: Position(col: max(0, dims.cols), row: top + max(0, dims.rows)))
+        guard let view = terminalView else { return "" }
+        return view.visibleTextSnapshot()
     }
 
     /// Put the keyboard away, or bring it back, without ending the session.

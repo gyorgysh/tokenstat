@@ -9,36 +9,31 @@
 import AppKit
 import SwiftTerm
 
-/// A `TerminalView` that keeps a drag selection across streaming output.
-///
-/// SwiftTerm clears the selection on every `feed` and linefeed while
-/// `allowMouseReporting` is true, even when `mouseMode` is still off. That
-/// flag stays false here until the guest enables mouse mode, so normal-buffer
-/// programs can be selected without the highlight vanishing on each chunk.
-/// Mouse-aware TUIs still receive SGR through `TerminalMouseForwarder`.
+/// Terminal input policy shared by the host-backed Mac terminal surfaces.
+/// Mouse gestures remain owned by the app's modal-aware forwarding monitors.
 class TerminalSelectionView: TerminalView {
     private var modifiedArrowMonitor: Any?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        try? setUseMetal(true)
         allowMouseReporting = false
         installModifiedArrowMonitor()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        try? setUseMetal(true)
         allowMouseReporting = false
         installModifiedArrowMonitor()
     }
-
-    override func linefeed(source: Terminal) {}
 
     deinit {
         if let modifiedArrowMonitor { NSEvent.removeMonitor(modifiedArrowMonitor) }
     }
 
-    // SwiftTerm's keyDown override is not open. Intercept only this focused
-    // view's shifted arrows before AppKit turns them into selection commands.
+    // Keep the app's legacy modified-arrow encoding consistent with its
+    // mobile key bar, scoped to this focused terminal and no modal owner.
     private func installModifiedArrowMonitor() {
         modifiedArrowMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, let window = self.window, window.firstResponder === self,
@@ -63,27 +58,38 @@ class TerminalSelectionView: TerminalView {
 }
 
 extension TerminalView {
-    /// Feed output without wiping a drag selection unless the guest asked for
-    /// mouse events. Syncs both before and after, because a chunk can turn
-    /// mouse mode on mid-stream.
+    /// Metal draws inside a child view. Resolve its terminal without treating
+    /// the scrollbar or an unrelated overlay as terminal input.
+    static func inputSurface(containing hit: NSView?) -> TerminalView? {
+        var current = hit
+        while let view = current {
+            if view is NSScroller { return nil }
+            if let terminal = view as? TerminalView { return terminal }
+            current = view.superview
+        }
+        return nil
+    }
+
+    /// Keep native mouse handling synchronized with the guest's copied mode.
+    /// A chunk may enable reporting, so refresh the policy after parsing too.
     func feedOutput(_ bytes: ArraySlice<UInt8>) {
-        allowMouseReporting = terminal.mouseMode != .off
+        allowMouseReporting = (terminalInputStateSnapshot()?.mouseMode ?? .off) != .off
         feed(byteArray: bytes)
-        allowMouseReporting = terminal.mouseMode != .off
+        allowMouseReporting = (terminalInputStateSnapshot()?.mouseMode ?? .off) != .off
     }
 
     /// Same policy as `feedOutput(_:)` for a text chunk.
     func feedOutput(_ text: String) {
-        allowMouseReporting = terminal.mouseMode != .off
+        allowMouseReporting = (terminalInputStateSnapshot()?.mouseMode ?? .off) != .off
         feed(text: text)
-        allowMouseReporting = terminal.mouseMode != .off
+        allowMouseReporting = (terminalInputStateSnapshot()?.mouseMode ?? .off) != .off
     }
 }
 #else
 import UIKit
 import SwiftTerm
 
-/// SwiftTerm handles plain arrows; shifted arrows need their modifier bytes.
+/// Shares the app key bar's legacy modified-arrow policy and held viewport.
 class ClientTerminalInputView: TerminalView {
     private lazy var arrowResponder = ClientTerminalArrowResponder(view: self)
     private var readingOffset: CGFloat?
@@ -91,7 +97,7 @@ class ClientTerminalInputView: TerminalView {
     private var movingViewport = false
     private var draggingViewport = false
     private var firstRetainedRow = 0
-    private var activeBuffer: ObjectIdentifier?
+    private var alternateBuffer = false
 
     var onReadingChanged: (Bool) -> Void = { _ in }
     var scrollMode = false {
@@ -104,18 +110,20 @@ class ClientTerminalInputView: TerminalView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        try? setUseMetal(true)
         delegate = self
         configureScrolling()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        try? setUseMetal(true)
         delegate = self
         configureScrolling()
     }
 
     private var lineHeight: CGFloat {
-        getOptimalFrameSize().height / CGFloat(max(1, getTerminal().rows))
+        getOptimalFrameSize().height / CGFloat(max(1, terminalDimensions.rows))
     }
     private var bottomOffset: CGFloat { max(0, contentSize.height - bounds.height) }
 
@@ -150,63 +158,31 @@ class ClientTerminalInputView: TerminalView {
         }
     }
 
-    override func mouseModeChanged(source: Terminal) {
+    nonisolated override func mouseModeChanged(source: Terminal) {
         super.mouseModeChanged(source: source)
-        configureScrolling()
+        DispatchQueue.main.async { [weak self] in self?.configureScrolling() }
     }
 
-    private func updateRetainedRows(source: Terminal) {
-        let buffer = ObjectIdentifier(source.buffer)
-        if activeBuffer != buffer {
-            activeBuffer = buffer
-            firstRetainedRow = 0
-            setReadingOffset(nil)
-        }
-        guard !source.isCurrentBufferAlternate else { return }
-        if source.getTopVisibleRow() == 0 && source.getScrollInvariantLine(row: source.rows) == nil {
-            firstRetainedRow = 0
-            setReadingOffset(nil)
-            return
-        }
-        let previous = firstRetainedRow
-        // Normally advances by one when the bounded scrollback drops a line.
-        // A reset can replace every line, so never scan beyond the history cap.
-        var checked = 0
-        while source.getScrollInvariantLine(row: firstRetainedRow) == nil && checked <= 4_000 + source.rows {
-            firstRetainedRow += 1
-            checked += 1
-        }
-        if checked > 4_000 + source.rows { firstRetainedRow = 0 }
-        if let held = readingOffset {
-            readingOffset = max(0, held - CGFloat(firstRetainedRow - previous) * lineHeight)
-        }
-    }
-
-    override func scrolled(source: Terminal, yDisp: Int) {
-        updateRetainedRows(source: source)
-        let wasUpdating = updatingTerminal
-        updatingTerminal = true
-        defer { updatingTerminal = wasUpdating }
-        super.scrolled(source: source, yDisp: yDisp)
-        if readingOffset == nil { followLatest() }
-    }
-
-    override func bufferActivated(source: Terminal) {
-        updateRetainedRows(source: source)
-        let wasUpdating = updatingTerminal
-        updatingTerminal = true
-        defer { updatingTerminal = wasUpdating }
+    nonisolated override func bufferActivated(source: Terminal) {
         super.bufferActivated(source: source)
-        if readingOffset == nil { followLatest() }
+        // RIS can replace a short history before any rows were trimmed.
+        // A fresh buffer must release our held position as well as the view's.
+        DispatchQueue.main.async { [weak self] in self?.followLatest() }
     }
 
-    override func sizeChanged(source: Terminal) {
-        // Use the same protected update for SwiftTerm's deferred resize path.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.terminalDelegate?.sizeChanged(source: self, newCols: source.cols, newRows: source.rows)
-            self.scrolled(source: source, yDisp: source.getTopVisibleRow())
+    private func updateRetainedRows() {
+        // Copy only the live screen, never the 4,000-row history. Its absolute
+        // top row lets us account for lines discarded at the scrollback cap.
+        guard let snapshot = terminalContentSnapshot(region: .history(maximumScrollbackRows: 0)) else { return }
+        let alternate = snapshot.inputState.isAlternateBuffer
+        let retained = alternate ? 0 : max(0, snapshot.liveTopRow - 4_000)
+        if alternateBuffer != alternate || retained < firstRetainedRow {
+            setReadingOffset(nil)
+        } else if let held = readingOffset {
+            readingOffset = max(0, held - CGFloat(retained - firstRetainedRow) * lineHeight)
         }
+        alternateBuffer = alternate
+        firstRetainedRow = retained
     }
 
     override func layoutSubviews() {
@@ -246,7 +222,8 @@ class ClientTerminalInputView: TerminalView {
         super.feed(byteArray: bytes)
         // Cursor-only redraws and erase-scrollback commands need the same
         // policy as linefeeds, including while a finger is still dragging.
-        scrolled(source: getTerminal(), yDisp: getTerminal().getTopVisibleRow())
+        updateRetainedRows()
+        if readingOffset == nil { followLatest() }
     }
 
     // SwiftTerm rejects unknown selectors in its non-open canPerformAction.
@@ -308,3 +285,35 @@ private final class ClientTerminalArrowResponder: UIResponder {
     }
 }
 #endif
+
+// Copied text and caret geometry shared by local, remote and SSH terminals.
+extension TerminalView {
+    func visibleTextSnapshot() -> String {
+        Self.logicalText(terminalStateSnapshot().visibleRows.map { ($0.text, $0.isWrapped) })
+    }
+
+    func tailTextSnapshot(lines: Int) -> String {
+        let count = max(1, lines)
+        guard let snapshot = terminalContentSnapshot(
+            region: .history(maximumScrollbackRows: max(0, count - terminalDimensions.rows))) else { return "" }
+        return Self.logicalText(snapshot.rows.suffix(count).map { ($0.text, $0.isWrapped) })
+    }
+
+    private static func logicalText(_ rows: [(text: String, wrapped: Bool)]) -> String {
+        var result = ""
+        for (index, row) in rows.enumerated() {
+            if index > 0 && !row.wrapped { result += "\n" }
+            result += row.text
+        }
+        return result
+    }
+
+    var terminalCursorAnchor: (point: CGPoint, lineHeight: CGFloat)? {
+        let state = terminalStateSnapshot()
+        let height = getOptimalFrameSize().height / CGFloat(max(1, state.dimensions.rows))
+        // The caret may be a narrow bar or underline, so its size is not the
+        // cell size. Its actual x position excludes any reserved scrollbar.
+        guard caretFrame.height > 0, height > 0 else { return nil }
+        return (CGPoint(x: caretFrame.minX, y: CGFloat(state.cursor.row) * height), height)
+    }
+}

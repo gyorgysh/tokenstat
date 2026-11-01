@@ -109,7 +109,7 @@ echo "Generating the Xcode project"
 echo "Building Debug Tokenstat ($ARCH)"
 mkdir -p "$DERIVED"
 LOG="$DERIVED/build-mac-quick.log"
-if ! xcodebuild \
+if ! xcodebuild -skipPackagePluginValidation \
     -project "$PROJECT" \
     -scheme Tokenstat \
     -configuration Debug \

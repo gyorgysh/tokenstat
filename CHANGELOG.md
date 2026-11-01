@@ -9,6 +9,16 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.10.0] - Unreleased
+
+### Improved
+
+- Apple terminals use the newer SwiftTerm engine and Metal rendering when available, while preserving the app's keyboard shortcuts, scrollback reading position and independent terminal sessions.
+
+### Fixed
+
+- The relay preference switch uses the app accent color on iPhone and iPad.
+
 ## [1.9.0] - 2026-11-01
 
 ### Added

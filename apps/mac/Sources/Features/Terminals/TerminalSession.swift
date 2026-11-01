@@ -492,7 +492,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         // and the agent CLIs are written assuming it.
         view.optionAsMetaKey = true
         // SwiftTerm defaults to 500 lines, which a build log passes in seconds.
-        view.terminal.changeHistorySize(scrollbackLines)
+        view.changeScrollback(scrollbackLines)
         view.terminalDelegate = session
         // Files dropped on the pane are typed as paths. The view needs the
         // session rather than the delegate protocol, because a drop is a write
@@ -1009,32 +1009,14 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
 
     /// Hand output to the terminal view.
     ///
-    /// `view.feed`, never `view.terminal.feed`. They look interchangeable and
-    /// are not: the emulator's own `feed` updates the buffer and stops there,
-    /// while the view's wraps it in `feedPrepare`/`feedFinish`, and it is
-    /// `feedFinish` that asks for a repaint. Feeding the emulator directly
-    /// leaves a terminal that takes input, runs the command, and shows nothing
-    /// until an unrelated click or resize happens to invalidate the view.
+    /// Feed through the view so SwiftTerm owns parser locking, copied state
+    /// and render invalidation. Never retain its mutable Terminal or Buffer.
     private func feedToView(_ bytes: Data, sessionID: String) async {
-        // In slices, with a turn of the run loop between them.
-        //
-        // Parsing is main-thread work and it is not cheap: measured against
-        // this emulator, plain lines run about 60 MB/s and a full-screen TUI
-        // repaint about 12, so half a megabyte of an agent redrawing itself is
-        // ~40 ms of main thread in one uninterruptible block. Feeding a whole
-        // poll's worth at once means a keystroke waits out that block, then the
-        // next one, for as long as the output lasts. Sliced, the same total
-        // work is the same total work, but the run loop gets between the
-        // pieces and a key press is handled within a slice rather than within
-        // a chunk. The parser is a state machine that already survives a
-        // sequence cut in half by a read boundary, so this changes nothing
-        // about what is drawn.
+        // Bound each synchronous parse on the UI actor and yield between
+        // slices, so a large catch-up cannot monopolize input handling.
         let slice = isCatchingUp ? Self.feedSliceCatchUp : Self.feedSlice
-        // One sequence never reaches the emulator. See `TerminalOutputFilter`:
-        // this build's SwiftTerm reads the kitty keyboard announcement as a
-        // cursor restore, which puts a live agent's composer in the corner.
-        // Stateful across chunks, and `pumpFeed` is the only caller, so the
-        // stream arrives here in order and whole.
+        // Enforce the shared geometry and legacy keyboard policy. Filtering
+        // stays ordered and stateful across transport chunks.
         let all = outputFilter.filter([UInt8](bytes)[...])
         guard !all.isEmpty else { return }
         var start = 0
@@ -1479,26 +1461,13 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// it, and a second parent would SIGWINCH the agent.
     func followSnapshot(lines: Int = 48) -> String {
         guard let loaded = terminalViewIfLoaded else { return "" }
-        let terminal = loaded.getTerminal()
-        let dims = terminal.getDims()
-        let top = terminal.getTopVisibleRow()
-        let startRow = max(0, top + dims.rows - max(1, lines))
-        let endRow = top + max(0, dims.rows)
-        let start = Position(col: 0, row: startRow)
-        let end = Position(col: max(0, dims.cols), row: endRow)
-        return terminal.getText(start: start, end: end)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return loaded.tailTextSnapshot(lines: lines).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The terminal's visible screen as plain text, for VoiceOver.
     var visibleTerminalText: String {
         guard TerminalPreferences.exposesToVoiceOver else { return "" }
-        let terminal = view.getTerminal()
-        let dims = terminal.getDims()
-        let top = terminal.getTopVisibleRow()
-        let start = Position(col: 0, row: top)
-        let end = Position(col: max(0, dims.cols), row: top + max(0, dims.rows))
-        return terminal.getText(start: start, end: end)
+        return view.visibleTextSnapshot()
     }
 
     private var lastAccessibilityValueAt: Date?
@@ -1608,7 +1577,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     func paste(text: String) {
         guard !text.isEmpty else { return }
         wake()
-        let bracketed = terminalViewIfLoaded?.getTerminal().bracketedPasteMode ?? false
+        let bracketed = terminalViewIfLoaded?.terminalInputStateSnapshot()?.bracketedPasteMode ?? false
         var bytes: [UInt8] = []
         if bracketed { bytes += EscapeSequences.bracketedPasteStart }
         bytes += Array(text.utf8)
@@ -1700,8 +1669,8 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// when it is, the throttled path already refreshes it four times a second.
     nonisolated func scrolled(source: TerminalView, position: Double) {
         guard TerminalPreferences.exposesToVoiceOver else { return }
-        // SwiftTerm calls this on the main thread: from the feed, which runs
-        // there, or from a user scroll.
+        // SwiftTerm delivers view delegate notifications from its main-actor
+        // frame effects, including after parsing on another thread.
         MainActor.assumeIsolated { publishAccessibilityValue() }
     }
 

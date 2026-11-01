@@ -110,7 +110,7 @@ esac
 # place that can staple a notarization ticket to it.
 echo "Building Tokenstat.app $VERSION (Swift $SWIFT_MODE)"
 xcode_started=$SECONDS
-if ! xcodebuild \
+if ! xcodebuild -skipPackagePluginValidation \
     -project "$ROOT/apps/mac/Tokenstat.xcodeproj" \
     -scheme Tokenstat \
     -configuration Release \

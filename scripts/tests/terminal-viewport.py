@@ -41,11 +41,15 @@ with tempfile.TemporaryDirectory(prefix="tokenstat-terminal-viewport-") as direc
                     str(root / "scripts/tests/terminal-viewport.swift"), str(work / "Keys.swift"),
                     str(work / "TerminalSelectionView.swift"), str(products / "SwiftTerm.o"),
                     "-o", str(app / "ViewportCheck")], check=True)
+    # SwiftPM resources include the Metal shader source used by the renderer.
+    import shutil
+    for resource in products.glob("SwiftTerm*.bundle"):
+        shutil.copytree(resource, app / resource.name)
     bundle = "ai.tokenstat.viewport-check"
     (app / "Info.plist").write_bytes(plistlib.dumps({
         "CFBundleExecutable": "ViewportCheck", "CFBundleIdentifier": bundle,
         "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "CFBundleShortVersionString": "1",
-        "UILaunchScreen": {},
+        "UILaunchScreen": {}, "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False, "UISceneConfigurations": {}},
     }))
     subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
     subprocess.run(["xcrun", "simctl", "terminate", args.device, bundle], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -62,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix="tokenstat-terminal-viewport-") as direc
             raise SystemExit("Terminal viewport harness did not complete.")
         report = result.read_text()
         print(report, end="")
-        if "FAIL " in report or report.count("PASS ") != 11:
+        if "FAIL " in report or report.count("PASS ") != 19:
             raise SystemExit(1)
     finally:
         subprocess.run(["xcrun", "simctl", "terminate", args.device, bundle], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

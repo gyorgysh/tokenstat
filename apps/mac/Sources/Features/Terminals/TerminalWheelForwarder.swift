@@ -11,17 +11,9 @@ import SwiftTerm
 
 /// Sends the wheel to full-screen programs that asked for mouse reporting.
 ///
-/// SwiftTerm always scrolls its own scrollback on a wheel event. That is right
-/// for a shell and wrong for everything else: a full-screen program runs in the
-/// alternate buffer, which has no scrollback by design, so the wheel does
-/// nothing at all and an agent CLI's own output cannot be scrolled back. Every
-/// terminal worth using forwards the wheel as a mouse event once the program
-/// has asked for mouse reporting, and lets the program scroll itself.
-///
-/// This is a local event monitor rather than a `TerminalView` subclass because
-/// SwiftTerm declares `scrollWheel` `public override` and not `open`, so it
-/// cannot be overridden from here. The monitor sees the event first and returns
-/// nil when it has dealt with it, which keeps it away from SwiftTerm.
+/// The app owns SGR forwarding for full-screen agent CLIs. Shell scrollback
+/// remains native. A local monitor sees the event before SwiftUI, observes
+/// modal ownership, and consumes an event only when it forwards it.
 @MainActor
 enum TerminalWheelForwarder {
     /// Wheel up and wheel down in xterm's Cb encoding.
@@ -67,15 +59,15 @@ enum TerminalWheelForwarder {
                 && candidate.convert(candidate.bounds, to: nil).contains(point)
         }
         guard overTerminal,
-              let view = window.contentView?.hitTest(point) as? TerminalView,
-              let terminal = view.terminal
+              let view = TerminalView.inputSurface(containing: window.contentView?.hitTest(point)),
+              let terminal = view.terminalInputStateSnapshot()
         else { return event }
 
         // Only when a program is both full screen and listening. In the normal
         // buffer the scrollback is the right answer and the user wants it, so
         // the event goes on to SwiftTerm untouched.
         guard terminal.mouseMode != .off,
-              terminal.isCurrentBufferAlternate
+              terminal.isAlternateBuffer
         else { return event }
 
         let flags = TerminalMouse.sgrButton(
@@ -86,9 +78,7 @@ enum TerminalWheelForwarder {
         // One wheel event covers several lines. Clamped, because a trackpad
         // flick reports a delta that would send a hundred events at once.
         let lines = Int(min(5, max(1, abs(event.deltaY).rounded())))
-        // SGR, not SwiftTerm's last-write protocol. A program that enabled
-        // both 1006 and 1015 is left on urxvt inside SwiftTerm, and Grok
-        // does not read that encoding.
+        // Keep the established SGR wire format for host-backed agent CLIs.
         if let session = (view as? TerminalDropView)?.session {
             for _ in 0 ..< lines {
                 session.sendBytes(
@@ -102,7 +92,7 @@ enum TerminalWheelForwarder {
             }
         } else {
             for _ in 0 ..< lines {
-                terminal.sendEvent(buttonFlags: flags, x: position.col, y: position.row)
+                view.send(data: TerminalMouse.sgr(button: flags, col: position.col + 1, row: position.row + 1, release: false)[...])
             }
         }
         return nil

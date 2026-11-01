@@ -156,8 +156,8 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// for the wrong grid until something forces a repaint: rows leak out as
     /// scrollback, the rest stays black. A same-size SIGWINCH only repaints.
     private func reassertSize() {
-        guard reader.canInput, let terminal = terminalView?.getTerminal() else { return }
-        queueResize(rows: terminal.rows, cols: terminal.cols)
+        guard reader.canInput, let size = terminalView?.terminalDimensions else { return }
+        queueResize(rows: size.rows, cols: size.cols)
     }
 
     private func queueResize(rows: Int, cols: Int) {
@@ -218,7 +218,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         #endif
         TerminalPalette.paint(dark: dark, to: made)
         made.optionAsMetaKey = true
-        made.getTerminal().changeHistorySize(4_000)
+        made.changeScrollback(4_000)
         made.terminalDelegate = self
         #if !os(macOS)
         made.scrollMode = scrolls
@@ -346,10 +346,10 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// into one is ever sent anywhere to be matched against.
     private var suggestionsWelcome: Bool {
         guard reader.canInput, lineEchoes, !lineSilent else { return false }
-        guard let terminal = terminalView?.getTerminal() else { return false }
+        guard let terminal = terminalView?.terminalInputStateSnapshot() else { return false }
         // A full-screen program owns every cell, and the palette would be
         // drawn over somebody's editor.
-        return !terminal.isCurrentBufferAlternate
+        return !terminal.isAlternateBuffer
     }
 
     /// Ask the host what to offer, once the typing pauses.
@@ -435,23 +435,10 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// Where the cursor is on screen, in the terminal's own coordinates with
     /// the origin at its top-left, and how tall one line is.
     ///
-    /// The cell size comes from the emulator in device pixels, so it is
-    /// divided by the same scale factor SwiftTerm multiplied by. Missing
-    /// either means the view is not on a screen yet, and the palette waits.
+    /// Use the caret's point-sized cell geometry, excluding the reserved
+    /// scrollbar width from the terminal's optimal frame size.
     private var cursorAnchor: (point: CGPoint, lineHeight: CGFloat)? {
-        guard let terminalView else { return nil }
-        let terminal = terminalView.getTerminal()
-        guard let cell = terminalView.cellSizeInPixels(source: terminal) else { return nil }
-        #if os(macOS)
-        let scale = terminalView.window?.backingScaleFactor ?? 1
-        #else
-        let scale = terminalView.window?.contentScaleFactor ?? 1
-        #endif
-        guard scale > 0, cell.width > 0, cell.height > 0 else { return nil }
-        let width = CGFloat(cell.width) / scale
-        let height = CGFloat(cell.height) / scale
-        let cursor = terminal.getCursorLocation()
-        return (CGPoint(x: CGFloat(cursor.x) * width, y: CGFloat(cursor.y) * height), height)
+        terminalView?.terminalCursorAnchor
     }
 
     private func placePalette() {
@@ -787,13 +774,14 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
 
     /// Whether the cursor is somewhere a guess can be appended and taken back.
     private var canPredict: Bool {
-        guard let terminal = terminalView?.getTerminal() else { return false }
+        guard let terminal = terminalView?.terminalInputStateSnapshot() else { return false }
         // A full-screen program owns every cell on the screen, and a letter
         // typed into one is as likely to be a command as a character.
-        guard !terminal.isCurrentBufferAlternate else { return false }
+        guard !terminal.isAlternateBuffer else { return false }
         // One column of headroom, so a guess can never be the character that
         // wraps the line: a backspace at column zero does not go back up.
-        return terminal.getCursorLocation().x + 2 < terminal.cols
+        guard let view = terminalView else { return false }
+        return view.terminalStateSnapshot().cursor.col + 2 < terminal.dimensions.cols
     }
 
     #if os(macOS)

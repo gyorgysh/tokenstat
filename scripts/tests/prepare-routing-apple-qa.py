@@ -4,7 +4,8 @@
 
 Requires a disposable routing host's target/routing-qa/native-fixture.json and
 an iOS simulator FFI slice. No QA entry point or transport enters shipping builds.
-Run xcodegen with the emitted spec, then xcodebuild test on one booted simulator.
+Run xcodegen with the emitted spec, then xcodebuild
+-skipPackagePluginValidation test on one booted simulator.
 """
 import argparse
 import json
@@ -46,7 +47,7 @@ sources = [
 ]
 project = {
     "name": "RoutingQA", "options": {"deploymentTarget": {"iOS": "17.0", "macOS": "14.0"}},
-    "packages": {"SwiftTerm": {"url": "https://github.com/migueldeicaza/SwiftTerm.git", "exactVersion": "1.11.2"}},
+    "packages": {"SwiftTerm": {"url": "https://github.com/migueldeicaza/SwiftTerm.git", "exactVersion": "1.99.2"}},
     "settings": {"base": {"SWIFT_VERSION": "5.0", "CODE_SIGNING_ALLOWED": "NO",
                           "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "DEBUG WORKBENCH_QA"}},
     "targets": {

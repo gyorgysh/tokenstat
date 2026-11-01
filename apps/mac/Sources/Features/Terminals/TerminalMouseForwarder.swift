@@ -11,18 +11,9 @@ import SwiftTerm
 
 /// Sends clicks to programs that asked for mouse reporting.
 ///
-/// Three things stack against SwiftTerm doing this on its own:
-///
-/// - `mouseDown` is `public override`, not `open`, so this module cannot
-///   wrap it.
-/// - The protocol field is last-write-wins. A program that enables SGR
-///   (`1006`) and then urxvt (`1015`) is left on urxvt. xterm prefers SGR
-///   when both are set, and Grok (every modern TUI) speaks SGR.
-/// - SwiftUI can swallow the click before the `NSView` sees it.
-///
-/// A local monitor sees the event first. When the program is listening we
-/// send SGR ourselves and keep the event away from SwiftTerm so it cannot
-/// send a second encoding.
+/// The app's event monitor owns each gesture from press to release, including
+/// across SwiftUI hit testing and modal transitions. Keep the established SGR
+/// encoding for the host-backed agent CLIs and prevent duplicate native reports.
 ///
 /// Two rules keep that from wedging the window, and both are the reason this
 /// is not a one-line hit test:
@@ -112,13 +103,13 @@ enum TerminalMouseForwarder {
               window.attachedSheet == nil,
               NSApp.modalWindow == nil,
               window.isKeyWindow,
-              let view = window.contentView?.hitTest(event.locationInWindow) as? TerminalDropView,
-              let terminal = view.terminal,
+              let view = TerminalView.inputSurface(containing: window.contentView?.hitTest(event.locationInWindow)) as? TerminalDropView,
+              let terminal = view.terminalInputStateSnapshot(),
               // Guest mouse mode is the authority. SwiftTerm's
               // allowMouseReporting stays false while mode is off so a drag
               // selection survives feed, and must not gate SGR once mode is on.
               terminal.mouseMode != .off,
-              terminal.isCurrentBufferAlternate,
+              terminal.isAlternateBuffer,
               view.session != nil
         else { return nil }
         return view
@@ -139,7 +130,7 @@ enum TerminalMouseForwarder {
         isUp: Bool,
         isDrag: Bool
     ) {
-        guard let terminal = view.terminal, let session = view.session else { return }
+        guard let terminal = view.terminalInputStateSnapshot(), let session = view.session else { return }
 
         switch terminal.mouseMode {
         case .off:
@@ -203,10 +194,10 @@ enum TerminalMouse {
     static func gridPosition(
         of event: NSEvent,
         in view: TerminalView,
-        terminal: Terminal
+        terminal: TerminalInputStateSnapshot
     ) -> (col: Int, row: Int) {
-        let cols = max(1, terminal.cols)
-        let rows = max(1, terminal.rows)
+        let cols = max(1, terminal.dimensions.cols)
+        let rows = max(1, terminal.dimensions.rows)
         let bounds = view.bounds
         guard bounds.width > 0, bounds.height > 0 else { return (0, 0) }
         let point = view.convert(event.locationInWindow, from: nil)

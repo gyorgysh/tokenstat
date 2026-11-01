@@ -285,18 +285,10 @@ final class TerminalStackView: NSView {
         needsFullPaint = false
         for sub in subviews where !sub.isHidden {
             // `setNeedsDisplay` alone only asks AppKit to composite whatever
-            // SwiftTerm last marked dirty. After a view has been hidden or
-            // re-parented, that range can be empty even though the backing
-            // surface was discarded. Mark the emulator's whole grid dirty
-            // first, then ask AppKit to draw it. This is deliberately local:
-            // it redraws the buffer we already have and does not resize the
-            // pty or wait for the process to emit another byte.
+            // Request a fresh frame after reparenting, including GPU-backed
+            // surfaces. The copied terminal state and the pty size stay intact.
             guard let terminalView = sub as? TerminalView else { continue }
-            let terminal = terminalView.getTerminal()
-            if terminal.rows > 0 {
-                terminal.refresh(startRow: 0, endRow: terminal.rows - 1)
-            }
-            terminalView.setNeedsDisplay(terminalView.bounds)
+            terminalView.requestRedraw()
         }
     }
 

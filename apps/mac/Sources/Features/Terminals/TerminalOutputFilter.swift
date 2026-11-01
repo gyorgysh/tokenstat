@@ -7,30 +7,14 @@
 
 import Foundation
 
-/// Output on its way from a program to the emulator, with unsupported protocol commands removed.
+/// Keeps embedded-pane geometry and the app's legacy input encoding policy.
 ///
-/// **`CSI = 1 ; 1 u` is the kitty keyboard protocol, not a cursor restore.**
-/// SwiftTerm 1.11.2 dispatches every CSI ending in `u` to `cmdRestoreCursor`
-/// without looking at the private prefix that came before the parameters, so a
-/// program announcing the kitty protocol has its cursor thrown to the last
-/// saved position, which on a fresh screen is the top-left corner.
-///
-/// Antigravity 1.1.15 sends it after every redraw, and draws its composer with
-/// relative cursor moves. One teleport and everything it prints afterwards
-/// lands in the wrong place: keystrokes pile up in the corner over the banner
-/// while the prompt stays empty. It is unusable, and it looks like the terminal
-/// dropped the keys rather than misplaced them.
-///
-/// Dropping the announcement is right rather than merely convenient. We do not
-/// implement the protocol, a program that sets it without asking gets the
-/// terminal it was given, and the same programs read ordinary keys perfectly
-/// well. Plain `CSI u`, which really is a cursor restore, stays intact.
-/// Window resize requests are also removed to avoid SwiftTerm's overloaded
-/// enum-case trap; the app controls the geometry of embedded terminal panes.
-///
-/// Stateful because a sequence can be cut in half by a read boundary: a
-/// partial escape is held back and completed by the next chunk, which is what
-/// the emulator's own parser does with the same stream.
+/// SwiftTerm now supports Kitty keyboard negotiation, but our mobile key bar
+/// and app event monitors still send legacy key sequences. Suppress negotiation
+/// until all those input sources use the same encoder. A bare CSI u remains a
+/// cursor restore. Window resize requests are ignored because pane layout owns
+/// geometry; size queries and other terminal output pass through unchanged.
+/// Escape sequences may span transport reads, so filtering is stateful.
 struct TerminalOutputFilter {
     private enum State {
         case text
@@ -108,11 +92,7 @@ struct TerminalOutputFilter {
         return out
     }
 
-    /// SwiftTerm 1.11.2's macOS window-command switch handles only the
-    /// single-argument overload of resizeTo. CSI 8;rows;cols t reaches the
-    /// other enum case and traps. Embedded terminals follow their pane's
-    /// geometry, so applications must not resize the containing window.
-    /// Keep size queries (14/16/18 t) intact.
+    /// Embedded applications may query size but cannot resize the app window.
     private func isWindowResize(_ sequence: [UInt8]) -> Bool {
         guard sequence.last == UInt8(ascii: "t"), sequence.count >= 7 else { return false }
         let body = sequence.dropFirst(2).dropLast()

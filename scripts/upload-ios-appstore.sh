@@ -811,7 +811,7 @@ rm -rf "$ROOT/$ARCHIVE_REL" "$ROOT/$EXPORT_REL"
 mkdir -p "$ROOT/dist/ios"
 
 echo "archiving"
-if ! run_redacted "$ARCHIVE_LOG" xcodebuild archive \
+if ! run_redacted "$ARCHIVE_LOG" xcodebuild archive -skipPackagePluginValidation \
     -jobs 2 \
     -project "$ROOT/apps/mac/Tokenstat.xcodeproj" \
     -scheme Tokenstat \

@@ -22,28 +22,19 @@ options:
   groupSortPosition: top
 
 packages:
-  # The terminal emulator. MIT licensed, from wezterm's author. It renders an
-  # arbitrary byte stream rather than owning a process, which is exactly what a
-  # view fed from the host's pty.read needs.
-  #
-  # Pinned to 1.11.2, the last release before the Metal renderer landed. 1.12+
-  # swaps the terminal's renderer, which is a change worth measuring on its
-  # own rather than taking as a side effect of a version bump, so the pin
-  # stays until the app ships and somebody measures it.
-  #
-  # The pin was originally about the toolchain: 1.12+ compiles a .metal
-  # shader, and that compiler is a separate Xcode component. The app now
-  # carries a shader of its own, so every build already fetches it through
-  # `scripts/ensure-metal-toolchain.sh`, and that half of the reason is gone.
+  # Pin the tested terminal API and renderer together. SwiftTerm 1.99 uses
+  # copied view snapshots and owns the parser lock; do not retain Terminal
+  # or Buffer references from a view. Its reviewed build-info/terminfo plugin
+  # is enabled by the command-line build scripts and CI.
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm.git
-    exactVersion: 1.11.2
+    exactVersion: 1.99.2
 
 settings:
   base:
     SWIFT_VERSION: "5.0"
     SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge/Tokenstat-Bridging-Header.h
-    MARKETING_VERSION: "1.9.0"
+    MARKETING_VERSION: "1.10.0"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -292,7 +283,8 @@ settings:
     # mobile reconnect choices and the latest shared client fixes. 210 brings
     # the saved host connection forward to Home on iOS. 211 includes the
     # multi-computer release polish and reviewed Git pull progress.
-    CURRENT_PROJECT_VERSION: "211"
+    # 212 is spent on the 1.9.0 relay tint fix. 213 begins 1.10.0.
+    CURRENT_PROJECT_VERSION: "213"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

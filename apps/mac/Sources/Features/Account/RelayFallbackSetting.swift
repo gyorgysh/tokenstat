@@ -45,6 +45,7 @@ struct RelayFallbackSetting: View {
                     }
                 }
             ))
+            .tint(Theme.accent)
             .disabled(isSaving)
             .frame(minHeight: 44)
             Text(L10n.text("common.relay_fallback_detail"))
