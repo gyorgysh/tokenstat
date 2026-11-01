@@ -27,6 +27,7 @@ internal static class SidebarHoverCard
         "context" => L10n.Text("windows.sidebarhovercard.context"),
         "last_activity" => L10n.Text("windows.sidebarhovercard.last_activity"),
         "changed_files" => L10n.Text("windows.sidebarhovercard.changed_files"),
+        "changed_items" => L10n.Text("windows.sidebarhovercard.changed_items"),
         "upstream" => L10n.Text("windows.sidebarhovercard.upstream"),
         "detached_head" => L10n.Text("windows.sidebarhovercard.detached_head"),
         "partial_counts" => L10n.Text("windows.sidebarhovercard.partial_counts"),
@@ -168,11 +169,20 @@ internal static class SidebarHoverCard
         var counts = new Grid { ColumnSpacing = 8 };
         counts.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         counts.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); counts.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        counts.Children.Add(new TextBlock { Text = Text("changed_files") + "  " + Number((git["files"] as JsonArray)?.Count ?? 0), FontSize = 12, Foreground = Theme.Brush(static () => Theme.ControlGlyph) });
-        var added = new TextBlock { Text = "+" + Number(Format.Number(git, "added")), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Theme.Brush(static () => Theme.DiffAdded) };
-        var removed = new TextBlock { Text = "−" + Number(Format.Number(git, "removed")), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Theme.Brush(static () => Theme.DiffRemoved) };
-        Grid.SetColumn(added, 1); counts.Children.Add(added); Grid.SetColumn(removed, 2); counts.Children.Add(removed); body.Children.Add(counts);
-        if (Format.Flag(git, "partial")) body.Children.Add(new TextBlock { Text = Text("partial_counts"), FontSize = 11, Foreground = Theme.Brush(static () => Theme.ControlGlyph), TextWrapping = TextWrapping.Wrap });
+        var addedCount = Format.Number(git, "added");
+        var removedCount = Format.Number(git, "removed");
+        var partial = Format.Flag(git, "partial");
+        var hasLineCounts = addedCount > 0 || removedCount > 0;
+        var fileCount = (git["files"] as JsonArray)?.Count ?? 0;
+        counts.Children.Add(new TextBlock { Text = Text(fileCount > 0 && (partial || !hasLineCounts) ? "changed_items" : "changed_files") + "  " + Number(fileCount), FontSize = 12, Foreground = Theme.Brush(static () => Theme.ControlGlyph) });
+        if (!partial && hasLineCounts)
+        {
+            var added = new TextBlock { Text = "+" + Number(addedCount), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Theme.Brush(static () => Theme.DiffAdded) };
+            var removed = new TextBlock { Text = "−" + Number(removedCount), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Theme.Brush(static () => Theme.DiffRemoved) };
+            Grid.SetColumn(added, 1); counts.Children.Add(added); Grid.SetColumn(removed, 2); counts.Children.Add(removed);
+        }
+        body.Children.Add(counts);
+        if (partial) body.Children.Add(new TextBlock { Text = Text("partial_counts"), FontSize = 11, Foreground = Theme.Brush(static () => Theme.ControlGlyph), TextWrapping = TextWrapping.Wrap });
         if (Format.Number(git, "ahead") > 0 || Format.Number(git, "behind") > 0) body.Children.Add(FieldRow(new(Text("upstream"), "↑ " + Number(Format.Number(git, "ahead")) + "  ↓ " + Number(Format.Number(git, "behind")), true)));
         return new Border { Background = Theme.AccentSoftBrush, BorderBrush = Theme.AccentBrush, BorderThickness = new Thickness(0.5), CornerRadius = new CornerRadius(8), Padding = new Thickness(8), Child = body };
     }

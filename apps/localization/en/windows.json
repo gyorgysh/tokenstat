@@ -1558,6 +1558,7 @@
   "windows.serverlauncher.servers": "Servers",
   "windows.sidebarhovercard.cached_tokens": "Cached tokens",
   "windows.sidebarhovercard.changed_files": "Changed files",
+  "windows.sidebarhovercard.changed_items": "Changed items",
   "windows.sidebarhovercard.context": "Context",
   "windows.sidebarhovercard.detached_head": "Detached HEAD",
   "windows.sidebarhovercard.last_activity": "Last activity",
