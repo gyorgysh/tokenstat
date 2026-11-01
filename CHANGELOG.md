@@ -9,20 +9,36 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
-## [1.9.0]
+## [1.9.0] - 2026-11-01
+
+### Added
+
+- Work with several computers at once on Mac, Windows, iPhone, iPad and Android. Repositories, chats and terminal sessions stay grouped under their computer. Approved computers can reconnect independently, and unavailable work is marked until it refreshes.
+- Choose the computer and repository when starting a chat, including a remote working folder. Mobile repository views group work by computer and keep your chosen section order. A waiting connection offers an approval-code entry without a trip through Devices.
+- Set a device to use direct connections only for remote work, without disabling account sync. Connection labels distinguish Direct from Relay; compact computer status includes power and CPU information when available.
+- Preview supported 3D model attachments in chat on Apple devices, Android and Windows. The bundled viewer works offline, lets you orbit, zoom and reset the model, and keeps the original file available to download. Windows model viewing remains a review feature.
+- Set up a headless Linux computer from the Mac or Windows client, with SSH and approval guidance in the connection flow.
 
 ### Improved
 
 - iPhone and iPad Home can return directly to the latest conversation in a repository. Repository chats are easier to switch, with a persistent list on wider layouts and a conversation picker on a compact iPhone.
-- On an open iPhone Duo or iPad, chat can sit beside a resizable browser, changed-file review, or terminal. The Changes pane opens file diffs beside the conversation; Terminal can reattach a running repository session or start a chosen installed tool.
-- Pull requests open from a faster, clearer overview, with paged lists, richer review details and visible partial check results. Previously loaded data stays available while a background refresh runs or the connection fails.
-- Pull request lists have clearer status and people filters, including All for a mixed-state timeline, readable contributor rows, and a detail header that keeps the full title and branch names visible. Long descriptions open with Read more.
+- On an open iPhone Duo or iPad, chat can sit beside a resizable browser, changed-file review or terminal. The Changes pane opens file diffs beside the conversation; Terminal can reattach a running repository session or start a chosen installed tool.
+- Pull requests have paged lists, clearer status and people filters, richer review details and visible partial check results. Previously loaded data stays available during a refresh or connection failure; long descriptions open with Read more.
+- Android Home, chat setup, repository browsing and pull request controls are closer to their iPhone counterparts. New chat remembers an eligible computer, and computer and repository pickers stay usable on narrow screens.
 - Home keeps Continue focused on the latest project and conversation. Chat, pull request and Mac workbench controls have larger touch targets, and the Duo split divider responds more smoothly while resizing.
+- Git Pull shows the reviewed commit count and an elapsed working state for large repositories and Git LFS transfers. Repository summaries keep useful added and removed line totals, using a changed-item count when Git has no line totals to report.
 
 ### Fixed
 
+- Claude and Codex can run in separate interactive terminal sessions in the same checkout without closing one another.
+- Closing a new chat returns to the repository chat list that opened it. Repository navigation also returns to the section and computer you came from.
 - Switching chats on an open iPhone Duo no longer pulls the global sidebar over the conversation.
-- Pull request and chat refreshes cannot apply late results from another account or replace a newer selection.
+- Pull request, chat and multi-computer refreshes cannot apply late results from another account, a disconnected computer or an older selection.
+- Large Git Pull reviews no longer stop at the ordinary one-minute request timeout. The Mac opens its own repositories before slower remote computer lists arrive.
+
+### Security
+
+- Updated SSH dependencies to address reported security alerts.
 
 ## [1.8.0] - 2026-10-28
 
