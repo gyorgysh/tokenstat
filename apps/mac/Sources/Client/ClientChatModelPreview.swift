@@ -36,9 +36,14 @@ struct ClientChatModelPreview: View {
             } else {
                 Group {
                     if let scene {
+                        #if os(iOS)
+                        ModelSceneSurface(scene: scene, camera: camera)
+                            .accessibilityLabel(name)
+                        #else
                         SceneView(scene: scene, pointOfView: camera,
                             options: [.allowsCameraControl, .autoenablesDefaultLighting])
                             .accessibilityLabel(name)
+                        #endif
                     } else if failed {
                         Label(L10n.text("apple.clientchatmodelpreview.unavailable"), systemImage: "cube")
                             .font(Theme.caption)
@@ -112,3 +117,27 @@ struct ClientChatModelPreview: View {
 private struct ModelSceneBox: @unchecked Sendable {
     let scene: SCNScene
 }
+
+#if os(iOS)
+/// SceneView's camera control, with the chat's scroll kept off the model.
+/// SwiftUI's SceneView gives no way to reach its gestures.
+private struct ModelSceneSurface: UIViewRepresentable {
+    let scene: SCNScene
+    let camera: SCNNode?
+
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.allowsCameraControl = true
+        view.autoenablesDefaultLighting = true
+        view.backgroundColor = .clear
+        ModelTouchClaim.attach(to: view)
+        return view
+    }
+
+    func updateUIView(_ view: SCNView, context: Context) {
+        guard view.scene !== scene else { return }
+        view.scene = scene
+        view.pointOfView = camera
+    }
+}
+#endif

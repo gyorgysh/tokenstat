@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
+import android.view.MotionEvent
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -137,6 +138,15 @@ private class ModelWebSurface(context: Context) : WebView(context) {
                 }
             }
         }
+    }
+
+    // The chat list scrolls on a vertical drag and took one that started on
+    // the model, so the model only turned sideways and the page moved
+    // instead. A touch that lands here belongs to the model until it lifts.
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) parent?.requestDisallowInterceptTouchEvent(true)
+        return super.onTouchEvent(event)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {

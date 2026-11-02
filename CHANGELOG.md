@@ -9,6 +9,13 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.10.1] - Unreleased
+
+### Fixed
+
+- Dragging a 3D model in chat turns the model on iPhone, iPad and Android instead of scrolling the conversation.
+- Asking a computer for access shows the waiting card right under your computers, above Work by computer, on iPhone, iPad and Android.
+
 ## [1.10.0] - 2026-11-02
 
 ### Improved

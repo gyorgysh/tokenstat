@@ -99,123 +99,137 @@ struct ClientWorkspacesView: View {
         return L10n.text("apple.clientworkspacesview.stops_the_process_on_0.7aa0b494", host.name)
     }
 
+    private static let accessCardID = "awaiting-access"
+
     var body: some View {
         @Bindable var model = model
-        ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    if let message = model.errorMessage {
-                        ClientErrorCard(message: message) {
-                            Task { await model.refresh(account: account.account) }
+        ScrollViewReader { scroller in
+            ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        if let message = model.errorMessage {
+                            ClientErrorCard(message: message) {
+                                Task { await model.refresh(account: account.account) }
+                            }
                         }
-                    }
-                    if let host = model.awaitingAccessHost {
-                        ClientAwaitingAccessCard(
-                            hostName: host,
-                            peerKey: model.awaitingAccessPeerKey ?? "",
-                            isHeadless: isHeadlessHost(named: host),
-                            onGranted: {
-                                if let peer = model.awaitingAccessPeerKey,
-                                   let target = model.hosts.first(where: { $0.peerKey == peer }) {
-                                    Task { await model.connect(target) }
+                        if let message = model.infoMessage {
+                            HStack(alignment: .top, spacing: Theme.Space.s) {
+                                Image(systemName: "info.circle.fill")
+                                    .foregroundStyle(Theme.accent)
+                                Text(message)
+                                    .font(ClientType.body)
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(Theme.Space.m)
+                            .cardSurface()
+                        }
+
+                        if !remoteAllowed, account.signedIn {
+                            ClientEmptyState(
+                                kind: .needsAccount,
+                                title: L10n.text("apple.clientworkspacesview.remote_is_on_patron.d25dea13"),
+                                message: L10n.text("apple.clientworkspacesview.this_device_already_shares_the_account_and.b2e29485"),
+                                actionTitle: L10n.text("common.refresh"),
+                                actionIcon: .refresh,
+                                action: { Task { await account.load() } },
+                                art: .remoteGate
+                            )
+                        } else if model.hosts.isEmpty {
+                            // Not "no hosts". The hole is a machine, and the thing
+                            // that fills it is one button away rather than three
+                            // sentences of instructions about another computer.
+                            ClientEmptyState(
+                                kind: .nothingYet,
+                                title: L10n.text("apple.clientworkspacesview.no_machine_yet.3ea83dc9"),
+                                message: L10n.text("apple.clientworkspacesview.tokenstat_runs_agents_on_a_machine_that_st.93fe9732"),
+                                actionTitle: L10n.text("apple.clientworkspacesview.set_up_a_machine.43e10e13"),
+                                actionIcon: .connect,
+                                action: { setup.open() },
+                                art: .connect
+                            )
+                        } else {
+                            ClientSectionTitle(title: L10n.text("apple.clientworkspacesview.computers_on_your_account.232226fe"), mark: "mark_host")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 2)
+
+                            if model.hosts.count > 1 {
+                                compactHostList
+                            } else {
+                                ForEach(model.hosts) { host in
+                                    hostCard(host)
                                 }
                             }
-                        )
-                    }
-                    if let message = model.infoMessage {
-                        HStack(alignment: .top, spacing: Theme.Space.s) {
-                            Image(systemName: "info.circle.fill")
-                                .foregroundStyle(Theme.accent)
-                            Text(message)
-                                .font(ClientType.body)
-                                .foregroundStyle(.primary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .padding(Theme.Space.m)
-                        .cardSurface()
-                    }
 
-                    if !remoteAllowed, account.signedIn {
-                        ClientEmptyState(
-                            kind: .needsAccount,
-                            title: L10n.text("apple.clientworkspacesview.remote_is_on_patron.d25dea13"),
-                            message: L10n.text("apple.clientworkspacesview.this_device_already_shares_the_account_and.b2e29485"),
-                            actionTitle: L10n.text("common.refresh"),
-                            actionIcon: .refresh,
-                            action: { Task { await account.load() } },
-                            art: .remoteGate
+                        if model.hosts.count <= 1 { thisDeviceRow }
+                        ClientSecurityCard(
+                            peerKey: model.hosts.count == 1 ? model.connectedKey : nil,
+                            peerName: model.hosts.count == 1
+                                ? model.hosts.first { $0.peerKey == model.connectedKey }?.name : nil
                         )
-                    } else if model.hosts.isEmpty {
-                        // Not "no hosts". The hole is a machine, and the thing
-                        // that fills it is one button away rather than three
-                        // sentences of instructions about another computer.
-                        ClientEmptyState(
-                            kind: .nothingYet,
-                            title: L10n.text("apple.clientworkspacesview.no_machine_yet.3ea83dc9"),
-                            message: L10n.text("apple.clientworkspacesview.tokenstat_runs_agents_on_a_machine_that_st.93fe9732"),
-                            actionTitle: L10n.text("apple.clientworkspacesview.set_up_a_machine.43e10e13"),
-                            actionIcon: .connect,
-                            action: { setup.open() },
-                            art: .connect
-                        )
-                    } else {
-                        ClientSectionTitle(title: L10n.text("apple.clientworkspacesview.computers_on_your_account.232226fe"), mark: "mark_host")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 2)
-
+                        // Under the computer that was tapped and above the work
+                        // lists. At the top of the page it sat out of view of the
+                        // row that asked, and nothing said a request had gone.
+                        if let host = model.awaitingAccessHost {
+                            ClientAwaitingAccessCard(
+                                hostName: host,
+                                peerKey: model.awaitingAccessPeerKey ?? "",
+                                isHeadless: isHeadlessHost(named: host),
+                                onGranted: {
+                                    if let peer = model.awaitingAccessPeerKey,
+                                       let target = model.hosts.first(where: { $0.peerKey == peer }) {
+                                        Task { await model.connect(target) }
+                                    }
+                                }
+                            )
+                            .id(Self.accessCardID)
+                        }
                         if model.hosts.count > 1 {
-                            compactHostList
+                            multiHostWork
                         } else {
-                            ForEach(model.hosts) { host in
-                                hostCard(host)
+                            if let peer = model.connectedKey,
+                               let host = model.hosts.first(where: { $0.peerKey == peer }),
+                               host.online != false {
+                                if model.folders.isEmpty, model.hosts.count == 1,
+                                   model.isConnecting == nil, model.errorMessage == nil {
+                                    ClientEmptyState(
+                                        kind: .nothingYet,
+                                        title: L10n.text("common.projects.first_title"),
+                                        message: L10n.text("common.projects.remote_first_message", host.name),
+                                        actionTitle: L10n.text("common.add_project"),
+                                        actionIcon: .create,
+                                        action: { addingFirstProject = true },
+                                        art: .projects,
+                                        secondaryActionTitle: L10n.text("apple.clienthostworkspacesview.clone_a_repository.749e5d4d"),
+                                        secondaryActionIcon: .download,
+                                        secondaryAction: { cloningFirstProject = true }
+                                    )
+                                }
+                                if layout.allTasksVisible {
+                                    ClientAllTasksLink(peer: peer, hostName: host.name)
+                                        .padding(Theme.Space.m).cardSurface()
+                                }
+                                ForEach(layout.sections) { section in
+                                    workSection(section, peer: peer, host: host)
+                                }
+                                if layout.sections.isEmpty {
+                                    clearWorkspaces
+                                }
+                                customizeWorkspacesButton
                             }
                         }
                     }
-
-                    if model.hosts.count <= 1 { thisDeviceRow }
-                    ClientSecurityCard(
-                        peerKey: model.hosts.count == 1 ? model.connectedKey : nil,
-                        peerName: model.hosts.count == 1
-                            ? model.hosts.first { $0.peerKey == model.connectedKey }?.name : nil
-                    )
-                    if model.hosts.count > 1 {
-                        multiHostWork
-                    } else {
-                        if let peer = model.connectedKey,
-                           let host = model.hosts.first(where: { $0.peerKey == peer }),
-                           host.online != false {
-                            if model.folders.isEmpty, model.hosts.count == 1,
-                               model.isConnecting == nil, model.errorMessage == nil {
-                                ClientEmptyState(
-                                    kind: .nothingYet,
-                                    title: L10n.text("common.projects.first_title"),
-                                    message: L10n.text("common.projects.remote_first_message", host.name),
-                                    actionTitle: L10n.text("common.add_project"),
-                                    actionIcon: .create,
-                                    action: { addingFirstProject = true },
-                                    art: .projects,
-                                    secondaryActionTitle: L10n.text("apple.clienthostworkspacesview.clone_a_repository.749e5d4d"),
-                                    secondaryActionIcon: .download,
-                                    secondaryAction: { cloningFirstProject = true }
-                                )
-                            }
-                            if layout.allTasksVisible {
-                                ClientAllTasksLink(peer: peer, hostName: host.name)
-                                    .padding(Theme.Space.m).cardSurface()
-                            }
-                            ForEach(layout.sections) { section in
-                                workSection(section, peer: peer, host: host)
-                            }
-                            if layout.sections.isEmpty {
-                                clearWorkspaces
-                            }
-                            customizeWorkspacesButton
-                        }
-                    }
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.top, Theme.Space.s)
+                    .padding(.bottom, 96)
                 }
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.top, Theme.Space.s)
-                .padding(.bottom, 96)
-            }
+                // Asking can start from a row far down a long list. Bring the
+                // card that says what happens next into view.
+                .onChange(of: model.awaitingAccessHost) { _, host in
+                    guard host != nil else { return }
+                    withAnimation { scroller.scrollTo(Self.accessCardID) }
+                }
+        }
             .background(Theme.background)
             .navigationDestination(isPresented: workspaceDevicePresented) {
                 if let machine = workspaceDevice {

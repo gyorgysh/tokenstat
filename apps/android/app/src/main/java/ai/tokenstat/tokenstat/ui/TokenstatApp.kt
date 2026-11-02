@@ -4318,6 +4318,21 @@ private fun WorkspaceList(
             }
         }
         if (multiHost) {
+            // Under the computer that was tapped and above the work lists.
+            // After every computer's work it was off screen, so asking looked
+            // like it had done nothing.
+            if (allowed == false) {
+                (dialledHost ?: connectedHost)?.let { refused ->
+                    item { RequestAccessCard(
+                        hostName = DeviceCopy.displayName(refused.string("label"), refused.string("platform"), true),
+                        headless = DeviceCopy.isHeadlessPlatform(refused.string("platform")) ||
+                            DeviceCopy.isHeadlessPlatform(refused.string("label")),
+                        requesting = requesting, notice = requestNotice,
+                        onRequest = { onRequestAccess(refused.string("publicIdentity") ?: "") },
+                        onRedeem = { code -> onRedeemAccess(refused.string("publicIdentity") ?: "", code) },
+                    ) }
+                }
+            }
             if (readyHostWork.isNotEmpty() && visibleSections.isNotEmpty()) {
                 item { SectionTitle(L10n.text("android.tokenstatapp.work_by_computer"), "mark_archive") }
             }
@@ -4429,18 +4444,6 @@ private fun WorkspaceList(
                             }
                         }
                     }
-                }
-            }
-            if (allowed == false) {
-                (dialledHost ?: connectedHost)?.let { refused ->
-                    item { RequestAccessCard(
-                        hostName = DeviceCopy.displayName(refused.string("label"), refused.string("platform"), true),
-                        headless = DeviceCopy.isHeadlessPlatform(refused.string("platform")) ||
-                            DeviceCopy.isHeadlessPlatform(refused.string("label")),
-                        requesting = requesting, notice = requestNotice,
-                        onRequest = { onRequestAccess(refused.string("publicIdentity") ?: "") },
-                        onRedeem = { code -> onRedeemAccess(refused.string("publicIdentity") ?: "", code) },
-                    ) }
                 }
             }
             item {
