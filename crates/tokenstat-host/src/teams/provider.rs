@@ -1542,6 +1542,35 @@ mod tests {
         }
     }
 
+    /// Run a fake CLI the test just wrote, retrying briefly on ETXTBSY.
+    ///
+    /// Another test thread can fork while this one still holds the script open
+    /// for writing. The child keeps that descriptor until it execs, and Linux
+    /// refuses to exec a file open for writing ("Text file busy").
+    #[cfg(unix)]
+    fn run_fake(program: &Program) -> std::process::Output {
+        let mut delay = std::time::Duration::from_millis(10);
+        for _ in 0..10 {
+            let result = std::process::Command::new(&program.executable)
+                .args(&program.args)
+                .env_clear()
+                .envs(&program.env)
+                .current_dir(&program.folder)
+                .stdin(std::process::Stdio::from(
+                    fs::File::open(&program.input).unwrap(),
+                ))
+                .output();
+            match result {
+                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                    std::thread::sleep(delay);
+                    delay = (delay * 2).min(std::time::Duration::from_millis(200));
+                }
+                result => return result.unwrap(),
+            }
+        }
+        panic!("{} stayed busy", program.executable.display());
+    }
+
     #[cfg(unix)]
     #[test]
     fn fake_clis_receive_rebuilt_repair_prompts_without_personal_state() {
@@ -1554,16 +1583,7 @@ mod tests {
             )
             .unwrap();
             fs::set_permissions(&program.executable, fs::Permissions::from_mode(0o700)).unwrap();
-            let initial = std::process::Command::new(&program.executable)
-                .args(&program.args)
-                .env_clear()
-                .envs(&program.env)
-                .current_dir(&program.folder)
-                .stdin(std::process::Stdio::from(
-                    fs::File::open(&program.input).unwrap(),
-                ))
-                .output()
-                .unwrap();
+            let initial = run_fake(&program);
             assert!(initial.status.success());
             assert!(
                 String::from_utf8(initial.stdout)
@@ -1579,16 +1599,7 @@ mod tests {
                 "Resolve the exact fictional conflict.",
             )
             .unwrap();
-            let repair = std::process::Command::new(&program.executable)
-                .args(&program.args)
-                .env_clear()
-                .envs(&program.env)
-                .current_dir(&program.folder)
-                .stdin(std::process::Stdio::from(
-                    fs::File::open(&program.input).unwrap(),
-                ))
-                .output()
-                .unwrap();
+            let repair = run_fake(&program);
             assert!(repair.status.success());
             let text = String::from_utf8(repair.stdout).unwrap();
             assert!(text.contains("Resolve the exact fictional conflict."));
