@@ -12,7 +12,7 @@
 //! fresh socket per session and fighting with its own listener over the key.
 //! The relay sees encrypted channel bytes and nothing more.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
@@ -267,7 +267,7 @@ pub struct ChannelState {
 }
 
 struct ChannelInner {
-    buffer: Vec<u8>,
+    buffer: VecDeque<u8>,
     opened: bool,
     eof: bool,
     error: Option<String>,
@@ -279,7 +279,7 @@ impl ChannelState {
             id,
             team: None,
             inner: Mutex::new(ChannelInner {
-                buffer: Vec::new(),
+                buffer: VecDeque::new(),
                 opened: false,
                 eof: false,
                 error: None,
@@ -768,10 +768,7 @@ impl Read for ChannelTransport {
                 };
             }
             if !inner.buffer.is_empty() {
-                let count = output.len().min(inner.buffer.len());
-                output[..count].copy_from_slice(&inner.buffer[..count]);
-                inner.buffer.drain(..count);
-                return Ok(count);
+                return inner.buffer.read(output);
             }
             if inner.eof {
                 return Ok(0);
@@ -1373,7 +1370,7 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
                         if inner.buffer.len().saturating_add(payload.len()) > limit {
                             inner.error = Some(String::from("channel buffer overflow"));
                         } else {
-                            inner.buffer.extend_from_slice(payload);
+                            inner.buffer.extend(payload);
                         }
                     }
                     CH_CLOSE => inner.eof = true,
@@ -1574,6 +1571,60 @@ mod tests {
         transport.close();
         assert!(waiting.join().unwrap());
         assert_eq!(transport.read(&mut bytes).unwrap(), 0);
+    }
+
+    #[test]
+    fn channel_partial_reads_and_refills_preserve_order_through_eof() {
+        let session = inert_session();
+        let state = Arc::new(ChannelState::new(98));
+        session.channels.lock().unwrap().insert(98, state.clone());
+        let mut transport = ChannelTransport::new(session.clone(), state.clone());
+        let data: Vec<u8> = (0..12 * 1024 * 1024)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        let enqueue_elapsed = std::cell::Cell::new(Duration::ZERO);
+        let enqueue = |data: &[u8]| {
+            for chunk in data.chunks(65536) {
+                let mut frame = vec![CH_DATA];
+                frame.extend_from_slice(&98u32.to_be_bytes());
+                frame.extend_from_slice(chunk);
+                let start = Instant::now();
+                dispatch_frame(&session, &frame);
+                enqueue_elapsed.set(enqueue_elapsed.get() + start.elapsed());
+            }
+        };
+        enqueue(&data[..8 * 1024 * 1024]);
+        let mut offset = 0;
+        let mut elapsed = Duration::ZERO;
+        let mut output = vec![0; 65535];
+        let sizes = [2, 20, 2, 65535]; // Noise framing and payload reads.
+        let mut step = 0;
+        let mut drain_to = |end: usize| {
+            while offset < end {
+                let count = sizes[step % sizes.len()].min(end - offset);
+                let start = Instant::now();
+                let received = transport.read(&mut output[..count]).unwrap();
+                elapsed += start.elapsed();
+                assert!(received > 0 && received <= count);
+                assert_eq!(&output[..received], &data[offset..offset + received]);
+                offset += received;
+                step += 1;
+            }
+        };
+        drain_to(4 * 1024 * 1024);
+        assert_eq!(state.inner.lock().unwrap().buffer.len(), 4 * 1024 * 1024);
+        // Refill before draining the remainder, exercising a wrapped queue.
+        enqueue(&data[8 * 1024 * 1024..]);
+        assert_eq!(state.inner.lock().unwrap().buffer.len(), 8 * 1024 * 1024);
+        let mut close = vec![CH_CLOSE];
+        close.extend_from_slice(&98u32.to_be_bytes());
+        dispatch_frame(&session, &close);
+        drain_to(data.len());
+        assert_eq!(transport.read(&mut output).unwrap(), 0);
+        eprintln!(
+            "relay buffer: 12 MiB enqueue {:?}, fragmented reads {elapsed:?}",
+            enqueue_elapsed.get()
+        );
     }
 
     #[test]
