@@ -26,8 +26,10 @@
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
 #[cfg(feature = "local-host")]
+use std::net::Ipv6Addr;
+#[cfg(feature = "local-host")]
 use std::net::UdpSocket;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::thread;
