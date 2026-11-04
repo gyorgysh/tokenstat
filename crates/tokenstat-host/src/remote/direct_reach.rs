@@ -164,6 +164,14 @@ enum Failure {
 struct Pinhole {
     gateway: Box<igd_next::Gateway>,
     id: u16,
+    /// The IPv6 listener port it was opened for. A pinhole outlives nothing:
+    /// once that listener is gone or moved, the hole is closed, so it never
+    /// lets traffic through to whatever binds the port next.
+    port: u16,
+}
+
+fn listening6() -> u16 {
+    super::direct_port6().load(Ordering::Acquire) as u16
 }
 
 fn supervise(generation: usize, port: u16) {
@@ -178,6 +186,10 @@ fn supervise(generation: usize, port: u16) {
 
     while current(generation) {
         let now = Instant::now();
+        let port6 = listening6();
+        if pinholes.iter().any(|pinhole| pinhole.port != port6) {
+            close_pinholes(&mut pinholes);
+        }
         if checked_at.is_none_or(|at| now.duration_since(at) >= ROUTE_CHECK) {
             checked_at = Some(now);
             let fresh = route();
@@ -214,7 +226,7 @@ fn supervise(generation: usize, port: u16) {
                 }
             }
             if pinholes.is_empty() {
-                pinholes = open_pinholes(seen, lease.as_ref(), port);
+                pinholes = open_pinholes(seen, lease.as_ref());
             }
         }
 
@@ -232,14 +244,19 @@ fn supervise(generation: usize, port: u16) {
                 publish(generation, None);
                 retry_at = Instant::now();
             }
+            let port6 = listening6();
             pinholes.retain(|pinhole| {
+                if pinhole.port != port6 {
+                    let _ = pinhole.gateway.remove_pinhole(pinhole.id);
+                    return false;
+                }
                 pinhole
                     .gateway
                     .update_pinhole(pinhole.id, LEASE_SECS)
                     .is_ok()
             });
             if pinholes.is_empty() {
-                pinholes = open_pinholes(seen, lease.as_ref(), port);
+                pinholes = open_pinholes(seen, lease.as_ref());
             }
         }
 
@@ -487,7 +504,13 @@ fn upnp_map(route: Route, port: u16) -> Result<Lease, Failure> {
 /// translation, only permission, and a home router usually refuses inbound by
 /// default, which is what kept a phone on a cellular network from reaching a
 /// host directly over IPv6.
-fn open_pinholes(route: Option<Route>, lease: Option<&Lease>, port: u16) -> Vec<Pinhole> {
+fn open_pinholes(route: Option<Route>, lease: Option<&Lease>) -> Vec<Pinhole> {
+    // Only for a live IPv6 listener. Without one, the port number belongs to
+    // nothing of ours on IPv6, and a hole would expose whatever held it.
+    let port = listening6();
+    if port == 0 {
+        return Vec::new();
+    }
     let addresses = local_ipv6_addresses();
     if addresses.is_empty() {
         return Vec::new();
@@ -499,8 +522,6 @@ fn open_pinholes(route: Option<Route>, lease: Option<&Lease>, port: u16) -> Vec<
     let Some(gateway) = gateway else {
         return Vec::new();
     };
-    let v6_port = super::direct_port6().load(Ordering::Acquire) as u16;
-    let port = if v6_port == 0 { port } else { v6_port };
     addresses
         .into_iter()
         .take(MAX_PINHOLES)
@@ -515,6 +536,7 @@ fn open_pinholes(route: Option<Route>, lease: Option<&Lease>, port: u16) -> Vec<
                 .map(|id| Pinhole {
                     gateway: Box::new(gateway.clone()),
                     id,
+                    port,
                 })
         })
         .collect()

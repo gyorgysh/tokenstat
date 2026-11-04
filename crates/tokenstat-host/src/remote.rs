@@ -407,6 +407,8 @@ fn start_direct_if_enabled() {
                     // its candidates.
                     server6 = None;
                     direct_port6().store(0, Ordering::Release);
+                    // Close its firewall pinholes now, not at the next check.
+                    direct_reach::nudge();
                     true
                 }
             };
