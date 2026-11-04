@@ -182,12 +182,12 @@ internal suspend fun uploadChatFile(
             RandomAccessFile(file, "r").use { input ->
                 while (offset < size) {
                     coroutineContext.ensureActive()
-                    val bytes =
+                    val (encoded, count) =
                         withContext(Dispatchers.IO) {
                             input.seek(offset)
-                            ByteArray(minOf(FILE_CHUNK.toLong(), size - offset).toInt()).also {
-                                input.readFully(it)
-                            }
+                            val bytes = ByteArray(minOf(FILE_CHUNK.toLong(), size - offset).toInt())
+                            input.readFully(bytes)
+                            Base64.encodeToString(bytes, Base64.NO_WRAP) to bytes.size
                         }
                     suspend fun send() =
                         call(
@@ -196,7 +196,7 @@ internal suspend fun uploadChatFile(
                                 put("id", chat)
                                 put("transferId", transfer)
                                 put("offset", offset)
-                                put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
+                                put("data", encoded)
                                 put("allowRelay", allowRelay)
                             },
                         )
@@ -216,7 +216,7 @@ internal suspend fun uploadChatFile(
                             allowRelay = true
                             send()
                         }
-                    check(result.number("offset") == offset + bytes.size) {
+                    check(result.number("offset") == offset + count) {
                         "Invalid file transfer response"
                     }
                     offset = result.number("offset")
@@ -291,8 +291,11 @@ internal suspend fun downloadChatFile(
             }
         val encoded = result.text("data")
         require(encoded.length <= minOf(16L * 1024 * 1024 + 4, ((byteLimit + 2) / 3) * 4))
-        val bytes = Base64.decode(encoded, Base64.DEFAULT)
-        require(bytes.size <= minOf(12L * 1024 * 1024, byteLimit))
+        val bytes = withContext(Dispatchers.IO) {
+            Base64.decode(encoded, Base64.DEFAULT).also {
+                require(it.size <= minOf(12L * 1024 * 1024, byteLimit))
+            }
+        }
         val name =
             File((result["attachment"] as? JsonObject)?.text("name").orEmpty()).name.takeIf {
                 it.isNotBlank() && it != "." && it != ".."
@@ -342,8 +345,10 @@ internal suspend fun downloadChatFile(
                     target.inputStream().use { input ->
                         val buffer = ByteArray(FILE_CHUNK)
                         while (true) {
+                            coroutineContext.ensureActive()
                             val count = input.read(buffer)
                             if (count < 0) break
+                            require(offset + count <= size)
                             hash.update(buffer, 0, count)
                             offset += count
                         }
@@ -387,17 +392,21 @@ internal suspend fun downloadChatFile(
                         }
                     val encoded = chunk.text("data")
                     require(encoded.length <= 699052)
-                    val bytes = Base64.decode(encoded, Base64.DEFAULT)
-                    require(
-                        bytes.isNotEmpty() &&
-                            bytes.size <= FILE_CHUNK &&
-                            chunk.number("offset") == offset &&
-                            chunk.number("nextOffset") == offset + bytes.size &&
-                            offset + bytes.size <= size
-                    )
-                    withContext(Dispatchers.IO) { output.write(bytes) }
-                    hash.update(bytes)
-                    offset += bytes.size
+                    val count = withContext(Dispatchers.IO) {
+                        coroutineContext.ensureActive()
+                        val bytes = Base64.decode(encoded, Base64.DEFAULT)
+                        require(
+                            bytes.isNotEmpty() &&
+                                bytes.size <= FILE_CHUNK &&
+                                chunk.number("offset") == offset &&
+                                chunk.number("nextOffset") == offset + bytes.size &&
+                                offset + bytes.size <= size
+                        )
+                        output.write(bytes)
+                        hash.update(bytes)
+                        bytes.size
+                    }
+                    offset += count
                     progress(offset.toFloat() / size)
                 }
             }

@@ -88,7 +88,8 @@ class RemoteEmptyStateTest {
                     NewChatScreen(
                         model = model, accountOwner = null, accountScope = null, onSetup = {},
                         draft = "", staged = emptyList(), onDraft = {}, hosts = emptyList(),
-                        connectedPeer = null, connecting = false, folders = emptyList(),
+                        connectedPeer = null, preferredPeer = null, requestedPeer = null,
+                        connecting = false, folders = emptyList(),
                         selectedRepository = null, onRepository = {}, onHost = {}, onAdd = {},
                         onSend = {}, onClose = {}, onSetupMachine = { opens.incrementAndGet() },
                     )
