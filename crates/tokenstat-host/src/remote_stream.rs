@@ -149,7 +149,9 @@ pub(crate) fn open(kind: StreamKind) -> Result<String, String> {
         };
         match kind {
             StreamKind::Proxy { host, port } => pump_proxy(connection, &host, port, access),
-            StreamKind::PtySubscribe { session } => pump_pty_subscribe(connection, &session),
+            StreamKind::PtySubscribe { session } => {
+                pump_pty_subscribe(connection, &session, StreamAccess::Workspace)
+            }
             StreamKind::Screen {
                 id,
                 peer,
@@ -362,12 +364,12 @@ struct PtyFrame {
 /// memory accounting and its `dropped` counter travels with each frame, so no
 /// ack channel is needed in this version; the read half is kept only so the
 /// connection's close is observed.
-fn pump_pty_subscribe(connection: Connection, session: &str) {
+fn pump_pty_subscribe(connection: Connection, session: &str, access: StreamAccess) {
     // This pump only runs on the machine that owns the pty: a remote peer
     // attached to a terminal here. That is the keep-awake case. The
     // assertion drops when the stream ends, even if the app is closed.
     let _hold = crate::keep_awake::StreamHold::acquire();
-    let (reader, writer) = StreamAccess::Workspace.split(connection);
+    let (reader, writer) = access.split(connection);
     // The channel is bidirectional: output flows this way (pushed below),
     // keystrokes flow the other way, straight into the pty. A keystroke is a
     // single frame over the persistent tunnel socket instead of a request and
@@ -395,6 +397,8 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
         "remote-stream:{session}:{}",
         NEXT_READER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
+    let mut output_closed = false;
+    let mut exited_at = None;
     loop {
         if writer.is_closed() {
             break;
@@ -403,6 +407,7 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
             .info(session)
             .map(|info| info.alive)
             .unwrap_or(false);
+        let mut sent = false;
         match tokenstat_pty::manager().read_for_stream(session, &reader_id, offset) {
             Ok(chunk) if !chunk.bytes.is_empty() => {
                 let frame = PtyFrame {
@@ -418,11 +423,19 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
                     break;
                 }
                 offset = chunk.next_offset;
+                sent = true;
             }
             Ok(_) if !alive => {
-                // The process is gone and the buffer is drained: a clean end.
-                let _ = writer.write(&[]);
-                break;
+                // Child exit can precede the pipe reader's final bytes. Wait
+                // for EOF, with a grace for descendants that keep stdout open.
+                let exited = exited_at.get_or_insert_with(std::time::Instant::now);
+                let drained = tokenstat_pty::manager()
+                    .output_end_offset(session)
+                    .is_ok_and(|end| end.is_some_and(|end| offset >= end));
+                if drained || exited.elapsed() >= Duration::from_secs(1) {
+                    let _ = writer.write(&[]);
+                    break;
+                }
             }
             Ok(_) => {}
             Err(error) => {
@@ -430,7 +443,27 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
                 break;
             }
         }
-        std::thread::sleep(Duration::from_millis(30));
+        if sent {
+            // The socket supplies backpressure. Drain existing chunks without
+            // a polling delay, then batch an active producer at frame cadence.
+            if tokenstat_pty::manager()
+                .info(session)
+                .is_ok_and(|info| info.total_bytes > offset)
+            {
+                continue;
+            }
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        // Wake on output after idle; keep disconnect and liveness checks bounded.
+        match tokenstat_pty::manager().wait_for_output(
+            session,
+            offset,
+            output_closed,
+            Duration::from_millis(400),
+        ) {
+            Ok(closed) => output_closed = closed,
+            Err(_) => break,
+        }
     }
     tokenstat_pty::manager().forget_reader(session, &reader_id);
     writer.close();
@@ -1266,6 +1299,186 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
         assert!(response.contains("Content-Type: text/plain; charset=utf-8"));
         assert!(response.ends_with("connection refused\n"));
+    }
+
+    #[cfg(unix)]
+    struct TerminalFixture(String);
+
+    #[cfg(unix)]
+    impl Drop for TerminalFixture {
+        fn drop(&mut self) {
+            let _ = tokenstat_pty::manager().close(&self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    fn terminal_fixture(script: &str, piped: bool) -> TerminalFixture {
+        let request = tokenstat_pty::Spawn {
+            command: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            cwd: std::env::temp_dir(),
+            workspace_id: None,
+            hidden: true,
+            rows: 24,
+            cols: 80,
+            no_color: true,
+            dark: None,
+            environment: Vec::new(),
+        };
+        let (info, _) = if piped {
+            tokenstat_pty::manager().spawn_piped_owned_checked(&request, || Ok(()))
+        } else {
+            tokenstat_pty::manager().spawn_owned(&request)
+        }
+        .expect("spawn fixture");
+        TerminalFixture(info.id)
+    }
+
+    #[cfg(unix)]
+    fn terminal_connection(
+        session: &str,
+    ) -> (tokenstat_remote::Connection, std::sync::mpsc::Receiver<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let responder = MachineIdentity::from_secret([31; 32]);
+        let initiator = MachineIdentity::from_secret([32; 32]);
+        let key = responder.public_key();
+        let session = session.to_owned();
+        let (done, completed) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            socket.set_nodelay(true).unwrap();
+            let connection = handshake_responder(Box::new(socket), &responder).unwrap();
+            super::pump_pty_subscribe(connection, &session, super::StreamAccess::Unchecked);
+            let _ = done.send(());
+        });
+        let socket = TcpStream::connect(address).unwrap();
+        socket.set_nodelay(true).unwrap();
+        let connection =
+            handshake_initiator(Box::new(socket), &initiator, Some(key), "terminal test").unwrap();
+        (connection, completed)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn terminal_subscription_drains_a_finished_backlog_without_losing_bytes() {
+        let fixture = terminal_fixture("dd if=/dev/zero bs=65536 count=64 2>/dev/null", true);
+        let manager = tokenstat_pty::manager();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while manager.output_end_offset(&fixture.0).unwrap().is_none()
+            || manager.info(&fixture.0).unwrap().alive
+        {
+            assert!(std::time::Instant::now() < deadline, "fixture finishes");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let (mut connection, completed) = terminal_connection(&fixture.0);
+        let start = std::time::Instant::now();
+        let mut offset = 0;
+        let mut frames = 0;
+        loop {
+            let message = connection
+                .receive_within(1 << 20, Duration::from_secs(5))
+                .unwrap();
+            if message.is_empty() {
+                break;
+            }
+            let frame: super::PtyFrame = serde_json::from_slice(&message).unwrap();
+            let bytes = crate::base64::decode(&frame.data).unwrap();
+            assert!(!bytes.is_empty() && bytes.iter().all(|&byte| byte == 0));
+            assert!(bytes.len() <= READ_CHUNK_BYTES);
+            assert_eq!(frame.dropped, 0);
+            offset += bytes.len() as u64;
+            assert_eq!(frame.next_offset, offset);
+            frames += 1;
+        }
+        assert_eq!(offset, 4 * 1024 * 1024);
+        assert_eq!(frames, 16);
+        eprintln!("terminal backlog: 4 MiB in {:?}", start.elapsed());
+        connection.close();
+        completed
+            .recv_timeout(Duration::from_secs(2))
+            .expect("pump stops after EOF");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn terminal_subscription_keeps_output_written_just_after_parent_exit() {
+        let fixture = terminal_fixture("(sleep 0.25; printf tail) & exit 0", true);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while tokenstat_pty::manager().info(&fixture.0).unwrap().alive {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let (mut connection, completed) = terminal_connection(&fixture.0);
+        let message = connection
+            .receive_within(1 << 20, Duration::from_secs(5))
+            .unwrap();
+        assert!(
+            !message.is_empty(),
+            "process exit cannot discard pending pipe output"
+        );
+        let frame: super::PtyFrame = serde_json::from_slice(&message).unwrap();
+        assert_eq!(crate::base64::decode(&frame.data).unwrap(), b"tail");
+        assert_eq!(frame.next_offset, 4);
+        assert!(
+            connection
+                .receive_within(1 << 20, Duration::from_secs(5))
+                .unwrap()
+                .is_empty()
+        );
+        connection.close();
+        completed.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn terminal_subscription_wakes_for_input_and_closes_while_idle() {
+        let fixture = terminal_fixture(
+            "stty -echo -onlcr; printf 'ready\\n'; while IFS= read -r line; do printf '%s\\n' \"$line\"; done",
+            false,
+        );
+        let (mut connection, completed) = terminal_connection(&fixture.0);
+        let ready = connection
+            .receive_within(1 << 20, Duration::from_secs(5))
+            .unwrap();
+        let ready: super::PtyFrame = serde_json::from_slice(&ready).unwrap();
+        assert_eq!(crate::base64::decode(&ready.data).unwrap(), b"ready\n");
+        let mut latencies = Vec::new();
+        let mut offset = ready.next_offset;
+        for index in 0..8 {
+            std::thread::sleep(Duration::from_millis(40));
+            let input = format!("ping-{index}\n");
+            let start = std::time::Instant::now();
+            connection.send(input.as_bytes()).unwrap();
+            let mut output = Vec::new();
+            while output.len() < input.len() {
+                let message = connection
+                    .receive_within(1 << 20, Duration::from_secs(5))
+                    .unwrap();
+                let frame: super::PtyFrame = serde_json::from_slice(&message).unwrap();
+                let bytes = crate::base64::decode(&frame.data).unwrap();
+                assert!(!bytes.is_empty());
+                offset += bytes.len() as u64;
+                assert_eq!(frame.next_offset, offset);
+                assert_eq!(frame.dropped, 0);
+                output.extend(bytes);
+            }
+            latencies.push(start.elapsed());
+            assert_eq!(output, input.as_bytes());
+        }
+        latencies.sort();
+        eprintln!(
+            "terminal idle echo median: {:?}",
+            latencies[latencies.len() / 2]
+        );
+        connection.close();
+        completed
+            .recv_timeout(Duration::from_secs(2))
+            .expect("idle disconnect stops the pump");
+        assert!(
+            tokenstat_pty::manager().info(&fixture.0).unwrap().alive,
+            "disconnect leaves the terminal running"
+        );
     }
 
     /// A local port on one machine bridged through a Noise connection to a
