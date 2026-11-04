@@ -429,11 +429,7 @@ impl Parser {
     }
 
     fn line(&mut self, raw: &str) -> Option<Piece> {
-        let cleaned = strip_ansi(raw)
-            .trim()
-            .trim_start_matches('\u{feff}')
-            .to_string();
-        let cleaned = without_stdin_notice(&cleaned);
+        let cleaned = clean_line(raw);
         if cleaned.is_empty() {
             return None;
         }
@@ -466,7 +462,7 @@ impl Parser {
                     return None;
                 }
             }
-            return Some(Piece::Block(cleaned));
+            return Some(Piece::Block(cleaned.into_owned()));
         }
         let value: serde_json::Value = serde_json::from_str(&cleaned).ok()?;
         match self.backend.as_str() {
@@ -482,11 +478,7 @@ impl Parser {
     }
 
     fn line_events(&mut self, raw: &str) -> Vec<Event> {
-        let cleaned = strip_ansi(raw)
-            .trim()
-            .trim_start_matches('\u{feff}')
-            .to_string();
-        let cleaned = without_stdin_notice(&cleaned);
+        let cleaned = clean_line(raw);
         if cleaned.is_empty() {
             return Vec::new();
         }
@@ -520,7 +512,9 @@ impl Parser {
             } else if let Some(text) = cli_refusal_text(&self.backend, &cleaned) {
                 vec![Event::Failed { text }]
             } else {
-                vec![Event::Text { delta: cleaned }]
+                vec![Event::Text {
+                    delta: cleaned.into_owned(),
+                }]
             };
             return self.take_events(events);
         }
@@ -963,6 +957,21 @@ impl Parser {
     }
 }
 
+// Structured records normally contain no literal terminal escapes. Borrow
+// those bytes through trimming and notice removal; scan and allocate only
+// when the CLI actually decorated the line.
+fn clean_line(raw: &str) -> std::borrow::Cow<'_, str> {
+    if !raw.as_bytes().contains(&0x1b) {
+        return std::borrow::Cow::Borrowed(without_stdin_notice(
+            raw.trim().trim_start_matches('\u{feff}'),
+        ));
+    }
+    let stripped = strip_ansi(raw);
+    std::borrow::Cow::Owned(
+        without_stdin_notice(stripped.trim().trim_start_matches('\u{feff}')).to_owned(),
+    )
+}
+
 /// A line with the CLIs' notices about standard input taken out.
 ///
 /// Run with input that is not a terminal, Codex says it is reading more input
@@ -970,23 +979,23 @@ impl Parser {
 /// started, not anything the agent said, and on Windows stderr shares the
 /// reply's pipe, so they arrived in the chat as text. Claude's warning has no
 /// newline after it, so whatever follows on the line is kept.
-fn without_stdin_notice(line: &str) -> String {
+fn without_stdin_notice(line: &str) -> &str {
     const CODEX: &str = "Reading additional input from stdin...";
     const CLAUDE: &str = "Warning: no stdin data received in";
     const CLAUDE_END: &str = "or wait longer.";
     if line == CODEX {
-        return String::new();
+        return "";
     }
     if let Some(rest) = line.strip_prefix(CODEX) {
-        return rest.trim().to_string();
+        return rest.trim();
     }
     if line.starts_with(CLAUDE) {
         return match line.find(CLAUDE_END) {
-            Some(at) => line[at + CLAUDE_END.len()..].trim().to_string(),
-            None => String::new(),
+            Some(at) => line[at + CLAUDE_END.len()..].trim(),
+            None => "",
         };
     }
-    line.to_string()
+    line
 }
 
 /// stderr shares the PTY with NDJSON. Codex's timestamped tracing records
@@ -3390,6 +3399,117 @@ mod tests {
     fn feed(backend: &str, raw: &str) -> String {
         let mut p = Parser::new(backend);
         p.push(raw.as_bytes())
+    }
+
+    #[test]
+    #[ignore = "manual parser throughput measurement across chat backends"]
+    fn benchmark_backend_transcript_parsing() {
+        let expected = "hello 🌍\n".repeat(16_384);
+        for (backend, value) in [
+            (
+                "claude",
+                json!({"type":"assistant","message":{"content":[{"type":"text","text":expected}]}}),
+            ),
+            (
+                "codex",
+                json!({"type":"item.completed","item":{"type":"agent_message","id":"reply","text":expected}}),
+            ),
+            (
+                "cursor",
+                json!({"type":"assistant","message":{"content":[{"type":"text","text":expected}]}}),
+            ),
+            ("grok", json!({"type":"text","data":expected})),
+            (
+                "muse",
+                json!({"payload_type":"run.output.delta","payload":{"text":expected}}),
+            ),
+            ("opencode", json!({"type":"text","part":{"text":expected}})),
+            ("opencode2", json!({"type":"text","part":{"text":expected}})),
+            (
+                "agy",
+                json!({"event":"step_update","step_update":{"step_type":"agent_response","text_delta":expected}}),
+            ),
+        ] {
+            let raw = format!("{value}\n");
+            let mut times = Vec::new();
+            for _ in 0..15 {
+                let mut parser = Parser::new(backend);
+                let start = std::time::Instant::now();
+                let events = parser.push_events(std::hint::black_box(raw.as_bytes()));
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+                let text: String = events
+                    .into_iter()
+                    .filter_map(|event| match event {
+                        Event::Text { delta } => Some(delta),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(text, expected);
+            }
+            times.sort_by(f64::total_cmp);
+            println!(
+                "{backend}: bytes={} median={:.3}ms max={:.3}ms",
+                raw.len(),
+                times[7],
+                times[14]
+            );
+        }
+    }
+
+    #[test]
+    fn inherited_cursor_goal_updates_survive_every_read_boundary() {
+        let mut inherited = crate::chat_inspection::Snapshot {
+            session_id: Some("session".into()),
+            ..Default::default()
+        };
+        inherited.observe("cursor", &json!({"type":"tool_call","subtype":"completed","tool_call":{"createGoalToolCall":{"args":{"objective":"Ship"},"result":{"success":{}}}}}));
+        let raw = format!(
+            "{}\n{}\n",
+            json!({"type":"system","subtype":"init","session_id":"session"}),
+            json!({"type":"tool_call","subtype":"completed","tool_call":{"updateGoalToolCall":{"args":{"status":3},"result":{"success":{"status":3}}}}})
+        );
+        for split in 0..=raw.len() {
+            let mut parser = Parser::new("cursor");
+            parser.inherit_goal(&inherited);
+            parser.push_events(&raw.as_bytes()[..split]);
+            parser.take_inspection();
+            parser.push_events(&raw.as_bytes()[split..]);
+            parser.finish_events();
+            assert_eq!(
+                parser.inspection.activity.goal.as_ref().unwrap().status,
+                "completed",
+                "split {split}"
+            );
+        }
+    }
+
+    #[test]
+    fn record_cleaning_preserves_json_escapes_and_cli_notice_handling() {
+        let raw = json!({"type":"text", "data":"Hi 🌍\n\u{1b}[31m literal reply"}).to_string();
+        for decorated in [
+            raw.clone(),
+            format!("  \u{feff}{raw} \r\n"),
+            format!("\u{1b}[31m{raw}\u{1b}[0m"),
+            format!("\u{1b}]0;private title\u{7}{raw}"),
+            format!("Reading additional input from stdin... {raw}"),
+            format!("Warning: no stdin data received in 3s, or wait longer.{raw}"),
+        ] {
+            assert_eq!(clean_line(&decorated), raw);
+            let mut parser = Parser::new("grok");
+            assert_eq!(
+                parser.push_events(format!("{decorated}\n").as_bytes()),
+                vec![Event::Text {
+                    delta: "Hi 🌍\n\u{1b}[31m literal reply".into()
+                }]
+            );
+        }
+        for notice in [
+            "Reading additional input from stdin...",
+            "Warning: no stdin data received in 3s",
+            "  \r\n",
+        ] {
+            assert!(clean_line(notice).is_empty());
+        }
     }
 
     #[test]

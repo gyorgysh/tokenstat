@@ -10794,7 +10794,13 @@ mod tests {
             let reply = store.inspection(id).unwrap();
             assert_eq!(reply["activity"]["goalReported"], reported);
             match expected {
-                Some(status) => assert_eq!(reply["activity"]["goal"]["status"], status),
+                Some(status) => assert_eq!(
+                    reply["activity"]["goal"]["status"],
+                    status,
+                    "revision={revision}; raw={:?}; inspection={:?}",
+                    fs::read_to_string(root.path().join(format!("raw-{revision}.ndjson"))),
+                    fs::read_to_string(store.root.join(id).join("inspection.json")),
+                ),
                 None => assert!(reply["activity"]["goal"].is_null()),
             }
             assert_eq!(reply["activity"]["planReported"], false);
