@@ -292,9 +292,10 @@ struct PickerOptionList<Value: Hashable>: View {
     var refresh: (() async -> Void)?
     /// What a section is currently set to, shown beside its heading.
     var sectionValue: ((String) -> String?)?
-    /// Optional quick filters for a picker with several independent settings.
-    /// The agent/model/effort picker uses these to make its three editable
-    /// dimensions obvious before somebody starts scrolling its long list.
+    /// Tabs for a picker that holds several independent settings, one per
+    /// section, each showing what it is set to. The agent/model/effort picker
+    /// uses these so the model and effort lists are visible before anybody
+    /// scrolls past the agents. Two or more turn them on.
     var sectionTabs: [String] = []
     var selectionSummary: String?
     var pick: (Value) -> Void
@@ -303,9 +304,9 @@ struct PickerOptionList<Value: Hashable>: View {
 
     @State private var query = ""
     @State private var refreshing = false
-    /// Empty means every section. It avoids inventing a fourth, fake section
-    /// solely to represent the All tab.
+    /// The tab somebody chose. Empty means the first one.
     @State private var selectedSection = ""
+    @State private var hoveredSection: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -317,7 +318,7 @@ struct PickerOptionList<Value: Hashable>: View {
                         .foregroundStyle(.secondary)
                 }
                 #endif
-                if let selectionSummary {
+                if let selectionSummary, !tabbed {
                     Text(selectionSummary)
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
@@ -330,16 +331,15 @@ struct PickerOptionList<Value: Hashable>: View {
                         refreshButton
                     }
                 }
-                if !sectionTabs.isEmpty {
+                if tabbed {
                     sectionFilter
                 }
             }
             .padding(Theme.Space.s)
             .onChange(of: sectionTabs) { _, tabs in
-                // The selected filter persists across choice changes. A hidden
-                // filter that no longer exists would show "Nothing matches"
-                // with no affordance, e.g. Effort selected then switching to
-                // an agent without Effort.
+                // The chosen tab persists across choice changes. One that no
+                // longer exists, Effort after switching to an agent without
+                // it, falls back to the first tab.
                 if !selectedSection.isEmpty, !tabs.contains(selectedSection) {
                     selectedSection = ""
                 }
@@ -364,7 +364,7 @@ struct PickerOptionList<Value: Hashable>: View {
                     LazyVStack(alignment: .leading, spacing: 2) {
                         ForEach(Array(sections.enumerated()), id: \.element.0) { index, group in
                             let (section, rows) = group
-                            if !section.isEmpty {
+                            if !section.isEmpty, activeSection.isEmpty {
                                 if index > 0 {
                                     ThemeRule().padding(.top, Theme.Space.xs)
                                 }
@@ -380,7 +380,7 @@ struct PickerOptionList<Value: Hashable>: View {
                     }
                     .padding(Theme.Space.s)
                 }
-                .id(selectedSection)
+                .id(activeSection)
                 .scrollDismissesKeyboard(.interactively)
             }
         }
@@ -424,54 +424,88 @@ struct PickerOptionList<Value: Hashable>: View {
         .help(L10n.text("apple.searchablepicker.ask_this_computer_to_read_the_agent_s_mode.a3d03fd8"))
     }
 
-    /// The group names stay visible while the list changes underneath them.
-    /// A search field alone told people they could search, not that Agent,
-    /// Model and Effort were separate things they could change.
+    /// One tab per setting, each with its current value under its name.
+    ///
+    /// This was a row of small "All / Agent / Model / Effort" pills, and people
+    /// did not see them: they read as decoration, so the agent list looked like
+    /// the whole panel and the models below it went unfound. A tab that says
+    /// "Model, opus" is both the summary and the way in, so the three settings
+    /// are visible at a glance. Typing searches every tab at once, and no tab
+    /// is marked while it does, because the list is no longer one of them.
     private var sectionFilter: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                sectionTab(title: L10n.text("apple.searchablepicker.all.a52ace42"), section: "")
-                ForEach(sectionTabs, id: \.self) { section in
-                    sectionTab(title: section, section: section)
-                }
+        HStack(spacing: 3) {
+            ForEach(sectionTabs, id: \.self) { section in
+                sectionTab(section)
             }
         }
+        .padding(3)
+        .background(Theme.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(L10n.text("apple.searchablepicker.filter_settings.4e47a723"))
     }
 
-    private func sectionTab(title: String, section: String) -> some View {
-        let selected = selectedSection == section
+    private func sectionTab(_ section: String) -> some View {
+        let selected = activeSection == section
+        let value = sectionValue?(section) ?? ""
         return Button {
             selectedSection = section
             query = ""
         } label: {
-            Text(title)
-                .font(Theme.caption.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Theme.accent : .secondary)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                #if !os(macOS)
-                .frame(minWidth: 54, minHeight: 44)
-                #endif
-                .background(
-                    selected ? Theme.accentSoft : Theme.background,
-                    in: Capsule()
-                )
-                .overlay {
-                    Capsule().strokeBorder(
-                        selected ? Theme.accent.opacity(0.35) : Theme.border,
-                        lineWidth: 1
-                    )
+            VStack(alignment: .leading, spacing: 1) {
+                Text(section.uppercased())
+                    .font(Theme.caption2.weight(.semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(selected ? Theme.accent : .secondary)
+                Text(value)
+                    .font(Theme.callout.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.vertical, 5)
+            #if !os(macOS)
+            .frame(minHeight: 44)
+            #endif
+            .background(
+                selected ? Theme.accentSoft
+                    : (hoveredSection == section ? Theme.rowHighlight : .clear),
+                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+            )
+            .overlay {
+                if selected {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1)
                 }
+            }
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title)
+        .onHover { inside in
+            if inside { hoveredSection = section } else if hoveredSection == section { hoveredSection = nil }
+        }
+        .accessibilityLabel(section)
+        .accessibilityValue(value)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var tabbed: Bool { sectionTabs.count > 1 }
+
+    /// The section the list shows, or empty for all of them: when there are no
+    /// tabs, and while a search is running across every tab.
+    private var activeSection: String {
+        guard tabbed, query.isEmpty else { return "" }
+        return sectionTabs.contains(selectedSection) ? selectedSection : sectionTabs[0]
     }
 
     private var filtered: [PickerChoice<Value>] {
         choices.filter {
-            $0.matches(query) && (selectedSection.isEmpty || $0.section == selectedSection)
+            $0.matches(query) && (activeSection.isEmpty || $0.section == activeSection)
         }
     }
 
@@ -501,7 +535,7 @@ struct PickerOptionList<Value: Hashable>: View {
             pick(exact.value)
             return
         }
-        if !selectedSection.isEmpty, let first = filtered.first {
+        if !activeSection.isEmpty, let first = filtered.first {
             pick(first.value)
             return
         }

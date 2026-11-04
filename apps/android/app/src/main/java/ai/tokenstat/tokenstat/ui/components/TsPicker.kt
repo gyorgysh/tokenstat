@@ -8,7 +8,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.Role
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -186,9 +184,10 @@ fun <T> TsPickerOptionList(
     onRefresh: (suspend () -> Unit)? = null,
     /// What a section is currently set to, shown beside its heading.
     sectionValue: ((String) -> String?)? = null,
-    /// Quick filters for a picker with several independent settings. The
-    /// agent/model/effort picker uses these to make its three editable
-    /// dimensions obvious before somebody starts scrolling its long list.
+    /// Tabs for a picker that holds several independent settings, one per
+    /// section, each showing what it is set to. The agent/model/effort picker
+    /// uses these so the model and effort lists are visible before anybody
+    /// scrolls past the agents. Two or more turn them on.
     sectionTabs: List<String> = emptyList(),
     selectionSummary: String? = null,
     enabled: Boolean = true,
@@ -199,15 +198,16 @@ fun <T> TsPickerOptionList(
     var query by remember { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }
     var refreshRequest by remember { mutableStateOf(0) }
-    // Empty means every section. It avoids inventing a fourth, fake section
-    // solely to represent the All tab.
+    // The tab somebody chose. Empty, or one that no longer exists (Effort
+    // after switching to an agent without it), means the first tab.
     var selectedSection by remember { mutableStateOf("") }
-
-    // The selected filter persists across choice changes. A hidden filter
-    // that no longer exists would show "Nothing matches" with no affordance,
-    // e.g. Effort selected then switching to an agent without Effort.
-    LaunchedEffect(sectionTabs) {
-        if (selectedSection.isNotEmpty() && selectedSection !in sectionTabs) selectedSection = ""
+    val tabbed = sectionTabs.size > 1
+    // The section the list shows, or empty for all of them: when there are
+    // no tabs, and while a search runs across every tab.
+    val activeSection = when {
+        !tabbed || query.isNotEmpty() -> ""
+        selectedSection in sectionTabs -> selectedSection
+        else -> sectionTabs.first()
     }
     LaunchedEffect(refreshRequest) {
         if (refreshRequest == 0) return@LaunchedEffect
@@ -220,7 +220,7 @@ fun <T> TsPickerOptionList(
         }
     }
 
-    val filtered = pickerFiltered(choices, query, selectedSection)
+    val filtered = pickerFiltered(choices, query, activeSection)
     Column(modifier) {
         Column(
             Modifier.fillMaxWidth().padding(Space.m),
@@ -229,7 +229,7 @@ fun <T> TsPickerOptionList(
             if (!caption.isNullOrEmpty()) {
                 Text(caption, style = TsType.caption, color = colors.textSecondary)
             }
-            if (selectionSummary != null) {
+            if (selectionSummary != null && !tabbed) {
                 Text(
                     selectionSummary,
                     style = TsType.callout,
@@ -249,7 +249,7 @@ fun <T> TsPickerOptionList(
                     onQueryChange = { query = it },
                     modifier = Modifier.weight(1f),
                     onSubmit = {
-                        if (enabled) pickerSubmitTarget(choices, query, selectedSection)?.let(pick)
+                        if (enabled) pickerSubmitTarget(choices, query, activeSection)?.let(pick)
                     },
                 )
                 if (onRefresh != null) {
@@ -265,20 +265,30 @@ fun <T> TsPickerOptionList(
                     )
                 }
             }
-            // The group names stay visible while the list changes underneath
-            // them. A search field alone told people they could search, not
-            // that Agent, Model and Effort were separate things to change.
-            if (sectionTabs.isNotEmpty()) {
+            // One tab per setting, with its current value under its name.
+            // This was a row of small All/Agent/Model/Effort pills that people
+            // did not notice, so the agent list read as the whole panel. A tab
+            // that says "Model, opus" is the summary and the way in at once.
+            // Typing searches every tab, and no tab is marked while it does.
+            if (tabbed) {
+                val outer = RoundedCornerShape(10.dp)
                 Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(outer)
+                        .background(colors.background)
+                        .border(1.dp, colors.border, outer)
+                        .padding(3.dp)
+                        .semantics { contentDescription = L10n.text("android.tspicker.filter_settings.4e47a723") },
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
-                    TsPickerSectionTab(L10n.text("android.tspicker.all.a52ace42"), selectedSection.isEmpty()) {
-                        selectedSection = ""
-                        query = ""
-                    }
                     sectionTabs.forEach { section ->
-                        TsPickerSectionTab(section, selectedSection == section) {
+                        TsPickerSectionTab(
+                            title = section,
+                            value = sectionValue?.invoke(section).orEmpty(),
+                            selected = activeSection == section,
+                            modifier = Modifier.weight(1f),
+                        ) {
                             selectedSection = section
                             query = ""
                         }
@@ -312,7 +322,7 @@ fun <T> TsPickerOptionList(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 pickerSections(filtered).forEachIndexed { index, (section, rows) ->
-                    if (section.isNotEmpty()) {
+                    if (section.isNotEmpty() && activeSection.isEmpty()) {
                         item(key = "section-$section") {
                             Column {
                                 if (index > 0) {
@@ -437,31 +447,44 @@ private fun TsPickerSectionHeading(title: String, value: String?) {
     }
 }
 
-/// One quick filter. Its own capsule rather than a `ChoiceChip`, because a
-/// solid accent fill here would outweigh the row the person came to change.
+/// One setting's tab: its name, and what it is set to underneath. Not a
+/// `TabRow`, because a solid indicator here would outweigh the row the person
+/// came to change.
 @Composable
-private fun TsPickerSectionTab(title: String, selected: Boolean, onSelect: () -> Unit) {
+private fun TsPickerSectionTab(
+    title: String,
+    value: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onSelect: () -> Unit,
+) {
     val colors = LocalTsColors.current
-    val shape = RoundedCornerShape(50)
-    Box(
-        Modifier
+    val shape = RoundedCornerShape(7.dp)
+    Column(
+        modifier
             .clip(shape)
-            .background(if (selected) colors.accentSoft else colors.background)
-            .border(1.dp, if (selected) colors.accent.copy(alpha = 0.35f) else colors.border, shape)
+            .background(if (selected) colors.accentSoft else Color.Transparent)
+            .border(1.dp, if (selected) colors.accent.copy(alpha = 0.35f) else Color.Transparent, shape)
             .selectable(selected = selected, role = Role.Tab, onClick = onSelect)
-            .widthIn(min = 54.dp)
             .heightIn(min = 44.dp)
-            .padding(horizontal = 9.dp),
-        contentAlignment = Alignment.Center,
+            .padding(horizontal = Space.s, vertical = 5.dp),
+        verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            title,
-            style = TsType.caption.copy(
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            ),
+            title.uppercase(),
+            style = TsType.caption2.copy(fontWeight = FontWeight.SemiBold),
             color = if (selected) colors.accent else colors.textSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            value,
+            style = TsType.callout.copy(
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            ),
+            color = if (selected) colors.textPrimary else colors.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.MiddleEllipsis,
         )
     }
 }
