@@ -14,28 +14,32 @@ const DECODE: [u8; 256] = {
 
 /// Standard base64 with padding (RFC 4648 section 4).
 pub fn encode(input: &[u8]) -> String {
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    for chunk in input.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
-        out.push(ALPHABET[(n >> 18) as usize & 63] as char);
-        out.push(ALPHABET[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            ALPHABET[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            ALPHABET[n as usize & 63] as char
-        } else {
-            '='
-        });
+    let mut out = Vec::with_capacity(input.len().div_ceil(3) * 4);
+    let mut chunks = input.chunks_exact(3);
+    for chunk in &mut chunks {
+        let n = ((chunk[0] as u32) << 16) | ((chunk[1] as u32) << 8) | chunk[2] as u32;
+        out.extend_from_slice(&[
+            ALPHABET[(n >> 18) as usize & 63],
+            ALPHABET[(n >> 12) as usize & 63],
+            ALPHABET[(n >> 6) as usize & 63],
+            ALPHABET[n as usize & 63],
+        ]);
     }
-    out
+    let tail = chunks.remainder();
+    if let Some(&first) = tail.first() {
+        let second = tail.get(1).copied().unwrap_or(0);
+        out.extend_from_slice(&[
+            ALPHABET[(first >> 2) as usize],
+            ALPHABET[(((first & 3) << 4) | (second >> 4)) as usize],
+            if tail.len() == 2 {
+                ALPHABET[((second & 15) << 2) as usize]
+            } else {
+                b'='
+            },
+            b'=',
+        ]);
+    }
+    String::from_utf8(out).expect("the base64 alphabet is ASCII")
 }
 
 /// Decode, rejecting anything that is not valid rather than guessing.
@@ -217,6 +221,43 @@ mod tests {
         }
         samples.sort_by(f64::total_cmp);
         println!("512 KiB decode median_ms={:.6}", samples[15]);
+    }
+
+    #[test]
+    fn every_short_tail_has_the_standard_encoding() {
+        for first in 0..=255u8 {
+            let single = encode(&[first]);
+            assert_eq!(single.len(), 4);
+            assert!(single.ends_with("=="));
+            assert_eq!(decode(&single).unwrap(), [first]);
+            for second in 0..=255u8 {
+                let encoded = encode(&[first, second]);
+                assert_eq!(encoded.len(), 4);
+                assert!(encoded.ends_with('='));
+                assert_eq!(decode(&encoded).unwrap(), [first, second]);
+                let with_prefix = [0xff, 0, 0x7f, first, second];
+                assert_eq!(encode(&with_prefix), "/wB/".to_owned() + &encoded);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "attachment chunk encoding benchmark"]
+    fn benchmark_attachment_chunk_encode() {
+        let bytes: Vec<u8> = (0..512 * 1024)
+            .map(|i| ((i * 197 + i / 13) % 256) as u8)
+            .collect();
+        assert_eq!(decode(&encode(&bytes)).unwrap(), bytes);
+        let mut samples = Vec::new();
+        for _ in 0..31 {
+            let start = std::time::Instant::now();
+            for _ in 0..10 {
+                std::hint::black_box(encode(std::hint::black_box(&bytes)));
+            }
+            samples.push(start.elapsed().as_secs_f64() * 100.0);
+        }
+        samples.sort_by(f64::total_cmp);
+        println!("512 KiB encode median_ms={:.6}", samples[15]);
     }
 
     #[test]
