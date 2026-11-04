@@ -87,7 +87,9 @@ if (modelBytes.length > 2 * 1024 * 1024) throw new Error("The model engine excee
 writeFileSync(new URL("runtime/model-engine.js", import.meta.url), modelBytes);
 writeFileSync(new URL("runtime/MODEL-LICENSE.txt", import.meta.url),
     "\n\n## Three.js 0.186.1 (MIT)\n" + modelNotices.text + "\n" +
-    readFileSync(new URL("node_modules/three/LICENSE", import.meta.url), "utf8"));
+    readFileSync(new URL("node_modules/three/LICENSE", import.meta.url), "utf8") +
+    "\n\n## fflate 0.8.2 (MIT)\n" +
+    readFileSync(new URL("licenses/fflate-LICENSE.txt", import.meta.url), "utf8"));
 console.log(`Bundled model engine: ${modelBytes.length} bytes`);
 
 // Reuse the app's existing interface face, including its redistribution notice.

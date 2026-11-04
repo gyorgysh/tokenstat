@@ -10,6 +10,7 @@ cd "$ROOT"
 cargo run --locked -q -p xtask -- notices "$OUT" tokenstat-ffi
 {
   cat "apps/charts/runtime/ENGINE-LICENSE.txt"
+  cat "apps/charts/runtime/MODEL-LICENSE.txt"
   printf '\n\n## xterm.js\n\nThe terminal emulator behind SSH and workspace shells.\n\n'
   cat "apps/android/app/src/main/assets/term/LICENSE-xterm.txt"
   printf '\n\n## Manrope\n\nBundled as the interface typeface.\n\n'
