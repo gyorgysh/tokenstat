@@ -200,10 +200,17 @@ enum MarkdownSanitizer {
         guard let expression = expression(pattern) else { return source }
         let string = source as NSString
         let matches = expression.matches(in: source, range: NSRange(location: 0, length: string.length))
-        let result = NSMutableString(string: source)
-        for match in matches.reversed() {
-            result.replaceCharacters(in: match.range, with: transform(match, string))
+        guard !matches.isEmpty else { return source }
+        // Preserve callback order: code-span replacement assigns identifiers.
+        let replacements = matches.reversed().map { transform($0, string) }
+        let result = NSMutableString()
+        var cursor = 0
+        for (match, replacement) in zip(matches, replacements.reversed()) {
+            result.append(string.substring(with: NSRange(location: cursor, length: match.range.location - cursor)))
+            result.append(replacement)
+            cursor = NSMaxRange(match.range)
         }
+        result.append(string.substring(from: cursor))
         return result as String
     }
 
