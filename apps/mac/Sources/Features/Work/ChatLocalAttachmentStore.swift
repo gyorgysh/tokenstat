@@ -285,6 +285,17 @@ actor ChatLocalAttachmentStore {
         guard file.external != true else { throw Failure.invalid }
         return file.data
     }
+    /// Render on the store actor while the original is protected from removal.
+    /// Large files stay on disk; previewing never exports a second full copy.
+    func preview(_ attachment: ChatAttachment, reference: WorkReference,
+                 render: @Sendable (Data?, URL?) -> Data?) throws -> Data? {
+        let metadata = try location(attachment.id, reference: reference)
+        let activity = OriginalFileCoordination.use(try originalAccess.get(), file: metadata)
+        defer { withExtendedLifetime(activity) {} }
+        let file = try load(attachment, reference: reference)
+        if file.external == true { return render(nil, metadata.appendingPathExtension("bytes")) }
+        return render(file.data, nil)
+    }
     func exportURL(_ attachment: ChatAttachment, reference: WorkReference) throws -> URL {
         let metadata = try location(attachment.id, reference: reference)
         let activity = OriginalFileCoordination.use(try originalAccess.get(), file: metadata)

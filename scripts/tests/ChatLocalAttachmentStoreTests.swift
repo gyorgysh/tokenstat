@@ -33,6 +33,23 @@ private final class CopyResults: @unchecked Sendable {
         assert(restored == bytes)
         let pastedBytes = Data(repeating: 0x5a, count: 13 * 1024 * 1024)
         let pasted = try await store.stage(data: pastedBytes, name: "pasted.png", mediaType: "image/png", reference: ref())
+        let preview = try await reopened.preview(pasted, reference: ref()) { data, file in
+            assert(data == nil && file != nil, "Large draft previews must use the original file")
+            assert(!Thread.isMainThread, "Image decoding must run off the UI thread")
+            return Data([42])
+        }
+        assert(preview == Data([42]))
+        let inlinePreview = try await reopened.preview(attachment, reference: ref()) { data, file in
+            assert(file == nil && data == bytes, "Small draft previews retain inline storage")
+            return Data([43])
+        }
+        assert(inlinePreview == Data([43]))
+        do {
+            _ = try await reopened.preview(pasted, reference: ref("other")) { _, _ in
+                assertionFailure("Preview crossed account ownership"); return nil
+            }
+            assertionFailure("Wrong owner previewed a draft")
+        } catch {}
         let pastedURL = try await reopened.exportURL(pasted, reference: ref())
         let restoredPaste = try Data(contentsOf: pastedURL)
         assert(restoredPaste == pastedBytes, "Large pasted bytes survive a store restart")

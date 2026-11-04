@@ -76,8 +76,9 @@ final class ChatModel {
               owner.session == WorkSessionContext.shared.generation, state.beginImport(reference) else { return }
         stagingAttachments = state.stagingAttachments
         var staged: ChatAttachment?
+        var preview: Data?
         defer {
-            state.finishImport(reference, attachment: staged, preview: ChatThumbnail.make(from: item.data))
+            state.finishImport(reference, attachment: staged, preview: preview)
             if landingDraft === state, currentReference == reference {
                 attachments = state.attachments; attachmentPreviews = state.previews
                 stagingAttachments = state.stagingAttachments
@@ -87,6 +88,7 @@ final class ChatModel {
         do {
             if let file = item.file { staged = try await ChatLocalAttachmentStore.shared.stage(file: file, name: item.name, mediaType: item.mediaType, reference: reference) }
             else { staged = try await ChatLocalAttachmentStore.shared.stage(data: item.data, name: item.name, mediaType: item.mediaType, reference: reference) }
+            if let staged { preview = try? await Self.draftPreview(staged, reference: reference) }
         } catch { if state.attachmentReference == reference { state.error = error.localizedDescription } }
     }
 
@@ -646,13 +648,16 @@ final class ChatModel {
             Task { [weak self] in
                 guard let self else { return }
                 for attachment in stored.attachments {
-                    let available = await ChatLocalAttachmentStore.shared.contains(attachment, reference: reference)
-                    let data = (attachment.size ?? 0) <= UInt64(ChatInbox.maxBytes) ? try? await ChatLocalAttachmentStore.shared.read(attachment, reference: reference) : nil
+                    let preview: Data?
+                    let available: Bool
+                    do {
+                        preview = try await Self.draftPreview(attachment, reference: reference)
+                        available = true
+                    } catch { preview = nil; available = false }
                     guard self.draftAttachmentLoadGeneration == attachmentLoadGeneration,
                           self.draftReference == reference, self.attachments.contains(attachment) else { return }
-                    if let data {
-                        if let preview = ChatThumbnail.make(from: data) { self.attachmentPreviews[attachment.id] = preview }
-                    } else if !available { self.missingDraftAttachments.insert(attachment.id) }
+                    if let preview { self.attachmentPreviews[attachment.id] = preview }
+                    else if !available { self.missingDraftAttachments.insert(attachment.id) }
                 }
             }
         }
@@ -2890,6 +2895,14 @@ final class ChatModel {
         return WorkSharedDraft(text: expected.text, attachmentIDs: files.map(\.id))
     }
 
+    private static func draftPreview(_ attachment: ChatAttachment, reference: WorkReference) async throws -> Data? {
+        try await ChatLocalAttachmentStore.shared.preview(attachment, reference: reference) { data, file in
+            if let file { return ChatThumbnail.make(from: file) }
+            if let data { return ChatThumbnail.make(from: data) }
+            return nil
+        }
+    }
+
     func attach(_ file: URL) async {
         guard let item = ChatInbox.item(from: file) else {
             error = L10n.text("apple.chatmodel.that_file_could_not_be_read.e9fe8433")
@@ -2935,6 +2948,7 @@ final class ChatModel {
             } else {
                 attachment = try await ChatLocalAttachmentStore.shared.stage(data: item.data, name: item.name, mediaType: item.mediaType, reference: reference)
             }
+            let preview = try? await Self.draftPreview(attachment, reference: reference)
             guard currentReference == reference, WorkCacheAccess.canRead(reference) else {
                 // Keep an import that completed after navigation in its own
                 // draft, alongside any writing saved while it was loading.
@@ -2943,9 +2957,7 @@ final class ChatModel {
                 return
             }
             attachments.append(attachment)
-            if let preview = ChatThumbnail.make(from: item.data) {
-                attachmentPreviews[attachment.id] = preview
-            }
+            if let preview { attachmentPreviews[attachment.id] = preview }
             saveDraftNow()
         } catch {
             if currentReference == reference {
