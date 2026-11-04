@@ -134,6 +134,7 @@ npm --prefix apps/charts run build
 npm --prefix apps/charts test
 apps/charts/node_modules/.bin/playwright install chromium webkit
 node apps/charts/tests/browser.mjs
+node apps/charts/tests/model-lifecycle.mjs
 python3 scripts/tests/check-chat-chart-fences.py
 ```
 

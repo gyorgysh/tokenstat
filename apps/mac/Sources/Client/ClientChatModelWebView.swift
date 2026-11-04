@@ -99,6 +99,7 @@ struct ClientChatModelWebView: ViewRepresentable {
         func dispose() {
             task?.cancel()
             bytes = nil
+            web?.evaluateJavaScript("window.TokenstatModel?.dispose()", completionHandler: nil)
             web = nil
         }
     }

@@ -28,11 +28,14 @@ let active = true;
 let initialPosition = null;
 let initialTarget = null;
 let renderPending = false;
+let renderFrame = null;
+let loadRevision = 0;
 
 function requestRender() {
     if (!active || renderPending) return;
     renderPending = true;
-    requestAnimationFrame(() => {
+    renderFrame = requestAnimationFrame(() => {
+        renderFrame = null;
         renderPending = false;
         if (!active) return;
         // Damping emits another change event until the orbit settles.
@@ -43,13 +46,14 @@ function requestRender() {
 controls.addEventListener("change", requestRender);
 
 reset.addEventListener("click", () => {
-    if (!initialPosition || !initialTarget) return;
+    if (!active || !initialPosition || !initialTarget) return;
     camera.position.copy(initialPosition);
     controls.target.copy(initialTarget);
     controls.update();
 });
 
 function resize() {
+    if (!active) return;
     const width = Math.max(1, canvas.clientWidth);
     const height = Math.max(1, canvas.clientHeight);
     renderer.setSize(width, height, false);
@@ -57,7 +61,8 @@ function resize() {
     camera.updateProjectionMatrix();
     requestRender();
 }
-new ResizeObserver(resize).observe(canvas);
+const resizeObserver = new ResizeObserver(resize);
+resizeObserver.observe(canvas);
 resize();
 
 function decode(base64) {
@@ -129,6 +134,8 @@ function frame(object) {
 }
 
 export async function load(base64, extension, background) {
+    if (!active) return false;
+    const revision = ++loadRevision;
     status.textContent = "Loading model…";
     status.hidden = false;
     reset.hidden = true;
@@ -137,6 +144,12 @@ export async function load(base64, extension, background) {
         scene.background = new THREE.Color(background);
         renderer.setClearColor(background);
         const next = await parse(decode(base64), extension.toLowerCase());
+        // Parsing GLTF textures can finish after the row closes or another
+        // model is selected. Release that result without touching the view.
+        if (!active || revision !== loadRevision) {
+            release(next);
+            return false;
+        }
         try { frame(next); }
         catch (error) { release(next); throw error; }
         if (model) { scene.remove(model); release(model); }
@@ -147,14 +160,28 @@ export async function load(base64, extension, background) {
         reset.hidden = false;
         return true;
     } catch (error) {
-        status.textContent = error?.message || "The model could not be previewed";
+        if (active && revision === loadRevision) {
+            status.textContent = error?.message || "The model could not be previewed";
+        }
         return false;
     }
 }
 
 export function dispose() {
+    if (!active) return;
     active = false;
+    loadRevision++;
+    resizeObserver.disconnect();
+    if (renderFrame !== null) cancelAnimationFrame(renderFrame);
+    renderFrame = null;
+    renderPending = false;
     controls.dispose();
+    if (model) scene.remove(model);
     release(model);
+    model = null;
+    initialPosition = null;
+    initialTarget = null;
     renderer.dispose();
 }
+
+window.addEventListener("pagehide", dispose, { once: true });
