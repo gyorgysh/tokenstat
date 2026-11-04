@@ -109,10 +109,12 @@ impl Guard {
             process: None,
         })
     }
-    /// Interactive terminal agents may share one checkout lease. Their
-    /// processes still exclude background writers and managed Git operations until
-    /// the last terminal exits. Other managed work keeps `acquire` exclusive.
-    pub fn acquire_terminal(path: &Path) -> Result<Self, Error> {
+    /// Interactive agents, a terminal or a chat turn a person sent, share one
+    /// checkout lease. A chat refused because a terminal agent is open in the
+    /// same folder left a person unable to start a chat at all. Their processes
+    /// still exclude background writers and managed Git operations until the
+    /// last one exits. Unattended work keeps `acquire` exclusive.
+    pub fn acquire_interactive(path: &Path) -> Result<Self, Error> {
         let registry = Self::registry()?;
         let path = path.canonicalize().map_err(|_| Error::Unavailable)?;
         let writer = {

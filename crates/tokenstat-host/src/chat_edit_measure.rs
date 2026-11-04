@@ -17,6 +17,10 @@
 //!
 //! The difference becomes the same `Edit` event every other agent sends
 //! itself. Everything here reads. Nothing writes to the folder or to git.
+//!
+//! A chat shares its checkout with terminal agents and other chats, so a file
+//! another agent changed during the turn is counted into this edit. The count
+//! is a courtesy, not an attribution, and nothing is billed on it.
 
 use std::collections::HashMap;
 use std::io::Read;

@@ -61,9 +61,9 @@ fn closed_output_and_a_dropped_guard_cannot_release_a_still_running_writer() {
 }
 
 #[test]
-fn terminal_agents_share_one_checkout_until_both_exit() {
+fn interactive_agents_share_one_checkout_until_both_exit() {
     let temp = tempfile::tempdir().unwrap();
-    let mut first = Guard::acquire_terminal(temp.path()).unwrap();
+    let mut first = Guard::acquire_interactive(temp.path()).unwrap();
     let first_info = first
         .spawn_piped(&request(
             temp.path(),
@@ -76,7 +76,7 @@ fn terminal_agents_share_one_checkout_until_both_exit() {
         temp.path().join("first.ready").exists()
     });
 
-    let mut second = Guard::acquire_terminal(temp.path()).unwrap();
+    let mut second = Guard::acquire_interactive(temp.path()).unwrap();
     let second_info = second
         .spawn_piped(&request(
             temp.path(),
@@ -103,11 +103,11 @@ fn terminal_agents_share_one_checkout_until_both_exit() {
 }
 
 #[test]
-fn terminal_cannot_join_a_background_writer() {
+fn interactive_agent_cannot_join_a_background_writer() {
     let temp = tempfile::tempdir().unwrap();
     let _background = Guard::acquire(temp.path()).unwrap();
     assert!(matches!(
-        Guard::acquire_terminal(temp.path()),
+        Guard::acquire_interactive(temp.path()),
         Err(Error::Busy)
     ));
 }
