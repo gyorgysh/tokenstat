@@ -1214,7 +1214,8 @@ private struct MarkdownParser {
     private static let maxTableColumns = 32
 
     private mutating func readTable() -> MarkdownBlock? {
-        guard index + 1 < lines.count else { return nil }
+        guard index + 1 < lines.count,
+              lines[index].utf8.contains(0x7c), lines[index + 1].utf8.contains(0x7c) else { return nil }
         var header = tableCells(lines[index])
         let separator = tableCells(lines[index + 1])
         guard header.count >= 2,
@@ -1297,12 +1298,18 @@ private struct MarkdownParser {
     private func startsBlock(at line: Int) -> Bool {
         guard line < lines.count else { return false }
         let value = lines[line]
+        // Plain prose cannot begin a block marker. Tables still need the
+        // normal parser when the line contains a pipe.
+        if let first = value.utf8.first,
+           (65...90).contains(first) || (97...122).contains(first),
+           !value.utf8.contains(0x7c) { return false }
         if fence(in: value) != nil || heading(value) || isRule(value)
             || quoteLine(value) != nil || listItem(value) != nil
         {
             return true
         }
-        guard line + 1 < lines.count else { return false }
+        guard line + 1 < lines.count,
+              value.utf8.contains(0x7c), lines[line + 1].utf8.contains(0x7c) else { return false }
         let header = tableCells(value)
         let separator = tableCells(lines[line + 1])
         return header.count >= 2 && separator.count == header.count && separator.allSatisfy(isTableSeparator)
@@ -1315,11 +1322,18 @@ private struct MarkdownParser {
     }
 
     private func isRule(_ line: String) -> Bool {
-        let compact = line.filter { !$0.isWhitespace }
-        guard compact.count >= 3, let first = compact.first, ["-", "*", "_"].contains(first) else {
-            return false
+        var marker: Character?
+        var count = 0
+        for character in line where !character.isWhitespace {
+            if let marker {
+                guard character == marker else { return false }
+            } else {
+                guard character == "-" || character == "*" || character == "_" else { return false }
+                marker = character
+            }
+            count += 1
         }
-        return compact.allSatisfy { $0 == first }
+        return count >= 3
     }
 
     private func quoteLine(_ line: String) -> String? {
@@ -1349,7 +1363,7 @@ private struct MarkdownParser {
         }
 
         var checked: Bool?
-        if text.count >= 4, text.first == "[", text.dropFirst(2).prefix(2) == "] " {
+        if text.first == "[", text.dropFirst(2).prefix(2) == "] " {
             let mark = text[text.index(after: text.startIndex)]
             if mark == " " || mark == "x" || mark == "X" {
                 checked = mark != " "

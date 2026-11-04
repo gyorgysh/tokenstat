@@ -34,7 +34,36 @@ assert(many.count == 200 && many.allSatisfy { $0.1 == json }, "The complete JSON
 assert(many.allSatisfy { $0.0 == "tokenstat-chart" }, "Every chart stays renderable, including fences after the fourth")
 let unfinished = code(Array(repeating: pending + "\n```", count: 4).joined(separator: "\n\n") + "\n\n" + pending)
 assert(unfinished.last?.0 == "tokenstat-chart-pending" && unfinished.last?.1 == json)
-print("Production Apple chart fences preserve every chart, including 200 complete fences and a streaming fifth chart")
+
+private func blocks(_ markdown: String) -> [MarkdownBlock] {
+    var parser = MarkdownParser(markdown)
+    return parser.blocks()
+}
+let paragraph = "A plain sentence with café 日本語 👩🏽‍💻.\nAnother sentence mentioning --- and # without starting a block."
+private let prose = blocks(paragraph)
+assert(prose.count == 1)
+if case let .paragraph(text) = prose[0].kind { assert(text == paragraph) } else { fatalError("Prose changed shape") }
+for rule in ["---", "* * *", "_\t_\t_", "-\u{a0}-\u{a0}-"] {
+    let parsed = blocks(rule)
+    assert(parsed.count == 1)
+    if case .rule = parsed[0].kind {} else { fatalError("Rule was lost: \(rule)") }
+}
+for notRule in ["--", "-*-", "A---", "___ text", "日本語", "-\u{301}--"] {
+    assert(!blocks(notRule).contains { if case .rule = $0.kind { true } else { false } })
+}
+private let tasks = blocks("- [x] Done\n- [ ] Pending\n- [X] Also done\n- [x]")
+if case let .list(items) = tasks[0].kind {
+    assert(items.map(\.checked) == [true, false, true, nil])
+    assert(items.map(\.text) == ["Done", "Pending", "Also done", "[x]"])
+} else { fatalError("Task list changed shape") }
+private let table = blocks("Name | Notes\n--- | ---\none | `a|b`\ntwo | a\\|b")
+if case let .table(header, rows, overflow) = table[0].kind {
+    assert(header == ["Name", "Notes"] && rows == [["one", "`a|b`"], ["two", "a\\|b"]] && overflow == 0)
+} else { fatalError("A table without outer pipes was lost") }
+for text in ["Name\\|Notes\n--- | ---", "Name `|` Notes\n--- | ---", "Name\n---"] {
+    assert(!blocks(text).contains { if case .table = $0.kind { true } else { false } })
+}
+print("Apple Markdown: prose, rules, task lists, escaped table cells and 200 complete/streaming chart fences passed")
 '''
 with tempfile.TemporaryDirectory(prefix='tokenstat-chart-parser-') as directory:
     work = pathlib.Path(directory)
