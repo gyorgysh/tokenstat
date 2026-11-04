@@ -302,7 +302,10 @@ const LEGACY_STARTER_NAMES: [&str; 48] = [
     "Sage", "Slate", "Sora", "Thistle", "Umber", "Vale", "Wren",
 ];
 
-const STARTER_BRIEF: &str = "Read the code before changing it. The call sites \
+// Let the CLI's own instructions guide new chats unless the person adds a brief.
+const STARTER_BRIEF: &str = "";
+
+const PREVIOUS_STARTER_BRIEF: &str = "Read the code before changing it. The call sites \
 and the tests around something say what it really does, which is not always \
 what a request assumes. Prefer the smallest complete change, and preserve work \
 that is already there. Treat edge cases and failures as seriously as the path \
@@ -311,11 +314,7 @@ proof: read what the tests actually assert. Do not stop at the edit. Finish \
 when the change is verified, and say plainly what you checked, what you did \
 not, and what the real tradeoffs were.";
 
-/// The brief every starter carried before it was sharpened.
-///
-/// Kept so a starter nobody has touched can be upgraded in place. An exact
-/// match means the text is ours and has never been edited, so replacing it
-/// takes nothing away from anybody.
+/// The first shipped starter brief, retained for migration.
 const LEGACY_STARTER_BRIEF: &str = "You understand the local context before \
 changing anything. Prefer the smallest complete change. Preserve existing \
 work. Explain real tradeoffs. Verify what you change.";
@@ -6200,17 +6199,27 @@ fn load_persona_index(root: &Path) -> PersonaIndex {
     } else {
         PersonaIndex::default()
     };
+    // Recognize old names while their shipped brief is still present.
+    migrate_starter_names(&mut index);
     for persona in &mut index.personas {
         if persona.seed == 0 {
             persona.seed = face_seed(&persona.id);
         }
-        // Only an exact match, so a brief somebody has written a single word
-        // into is left exactly as they left it.
-        if persona.system_prompt == LEGACY_STARTER_BRIEF {
+        // Leave edited and shared personas alone, including edits to the name.
+        // Existing conversations keep their copied brief.
+        if persona.workspace_id.is_some()
+            && persona.created_at_ms > 0
+            && persona.created_at_ms == persona.updated_at_ms
+            && (STARTER_NAMES.contains(&persona.name.as_str())
+                || LEGACY_STARTER_NAMES.contains(&persona.name.as_str()))
+            && matches!(
+                persona.system_prompt.as_str(),
+                PREVIOUS_STARTER_BRIEF | LEGACY_STARTER_BRIEF
+            )
+        {
             persona.system_prompt = STARTER_BRIEF.to_string();
         }
     }
-    migrate_starter_names(&mut index);
     index
 }
 
@@ -6223,7 +6232,10 @@ fn migrate_starter_names(index: &mut PersonaIndex) {
         // A saved edit or a custom brief belongs to the person who wrote it.
         if persona.created_at_ms <= 0
             || persona.created_at_ms != persona.updated_at_ms
-            || persona.system_prompt != STARTER_BRIEF
+            || !matches!(
+                persona.system_prompt.as_str(),
+                PREVIOUS_STARTER_BRIEF | LEGACY_STARTER_BRIEF
+            )
         {
             continue;
         }
@@ -14188,13 +14200,69 @@ mod tests {
     }
 
     #[test]
+    fn shipped_briefs_are_cleared_only_from_untouched_starters() {
+        for brief in [PREVIOUS_STARTER_BRIEF, LEGACY_STARTER_BRIEF] {
+            for bare_array in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let starter = Persona {
+                    id: "starter".into(),
+                    workspace_id: Some("workspace-a".into()),
+                    name: "Abby".into(),
+                    system_prompt: brief.into(),
+                    seed: 73,
+                    created_at_ms: 10,
+                    updated_at_ms: 10,
+                };
+                let mut edited = starter.clone();
+                edited.id = "edited".into();
+                edited.updated_at_ms = 20;
+                let mut custom = starter.clone();
+                custom.id = "custom".into();
+                custom.system_prompt = format!("{brief} Keep replies short.");
+                let mut shared = starter.clone();
+                shared.id = "shared".into();
+                shared.workspace_id = None;
+                let mut undated = starter.clone();
+                undated.id = "undated".into();
+                undated.created_at_ms = 0;
+                undated.updated_at_ms = 0;
+                let mut renamed = starter.clone();
+                renamed.id = "renamed".into();
+                renamed.name = "My assistant".into();
+                let mut blank = starter.clone();
+                blank.id = "blank".into();
+                blank.name = "Sage".into();
+                blank.system_prompt.clear();
+                let original = PersonaIndex {
+                    personas: vec![starter, edited, custom, shared, undated, renamed, blank],
+                    default_by_workspace: HashMap::new(),
+                };
+                let path = root.path().join("personas.json");
+                let bytes = if bare_array {
+                    serde_json::to_vec(&original.personas).unwrap()
+                } else {
+                    serde_json::to_vec(&original).unwrap()
+                };
+                fs::write(&path, bytes).unwrap();
+                let migrated = load_persona_index(root.path());
+                let mut expected = original.personas[0].clone();
+                expected.system_prompt.clear();
+                assert_eq!(migrated.personas[0], expected);
+                assert_eq!(migrated.personas[1..], original.personas[1..]);
+                fs::write(&path, serde_json::to_vec(&migrated).unwrap()).unwrap();
+                assert_eq!(load_persona_index(root.path()).personas, migrated.personas);
+            }
+        }
+    }
+
+    #[test]
     fn untouched_starter_names_migrate_without_rewriting_custom_personas() {
         let root = tempfile::tempdir().unwrap();
         let starter = |id: &str, name: &str| Persona {
             id: id.into(),
             workspace_id: Some("workspace-a".into()),
             name: name.into(),
-            system_prompt: STARTER_BRIEF.into(),
+            system_prompt: PREVIOUS_STARTER_BRIEF.into(),
             seed: 73,
             created_at_ms: 10,
             updated_at_ms: 10,
@@ -14206,7 +14274,8 @@ mod tests {
         edited_brief.system_prompt = "You review changes carefully.".into();
         let mut shared = starter("shared", "Sage");
         shared.workspace_id = None;
-        let collision = starter("custom-human-name", "Ruby");
+        let mut collision = starter("custom-human-name", "Ruby");
+        collision.system_prompt.clear();
         let mut legacy_brief = starter("legacy-brief", "Mica");
         legacy_brief.system_prompt = LEGACY_STARTER_BRIEF.into();
         let original = PersonaIndex {
@@ -14231,7 +14300,7 @@ mod tests {
         assert_ne!(first.name, collision.name);
         assert_eq!(first.id, untouched.id);
         assert_eq!(first.seed, untouched.seed);
-        assert_eq!(first.system_prompt, untouched.system_prompt);
+        assert!(first.system_prompt.is_empty());
         assert_eq!(migrated.default_by_workspace, original.default_by_workspace);
         assert_eq!(migrated.personas[1], edited_name);
         assert_eq!(migrated.personas[2], edited_brief);
@@ -14263,7 +14332,7 @@ mod tests {
         assert_eq!(first.name, second.name);
         assert_eq!(store.personas.lock().unwrap().personas.len(), 1);
         assert!(STARTER_NAMES.contains(&first.name.as_str()));
-        assert_eq!(first.system_prompt, STARTER_BRIEF);
+        assert!(first.system_prompt.is_empty());
         assert_eq!(first.workspace_id.as_deref(), Some("workspace-a"));
         let listed = store.personas("workspace-a").unwrap();
         assert_eq!(listed["defaultId"], first.id);
