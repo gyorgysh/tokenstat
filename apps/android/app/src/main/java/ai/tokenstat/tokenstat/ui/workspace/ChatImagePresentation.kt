@@ -7,8 +7,10 @@ internal const val CHAT_IMAGE_GALLERY_EDGE = 1280
 internal fun chatImageAutomaticPreviewAllowed(size: Long?, route: String?): Boolean =
     route == "direct" && size != null && size in 1..CHAT_IMAGE_PREVIEW_BYTES
 
+private val chatImageTypes = setOf("image/png", "image/jpeg", "image/webp", "image/gif", "image/avif", "image/heic", "image/heif", "image/bmp")
+
 internal fun ChatDisplayItem.Attachment.isImage(): Boolean =
-    mediaType?.substringBefore(';')?.trim()?.lowercase() in setOf("image/png", "image/jpeg", "image/webp", "image/gif", "image/avif", "image/heic", "image/heif", "image/bmp")
+    mediaType?.substringBefore(';')?.trim()?.lowercase() in chatImageTypes
 
 internal data class ChatImageRows(
     val rows: List<ChatDisplayItem>,
@@ -17,6 +19,15 @@ internal data class ChatImageRows(
 
 /** Only explicit, exact tool provenance moves an image beside a step. */
 internal fun chatImageRows(folded: List<ChatDisplayItem>, raw: List<ChatDisplayItem>): ChatImageRows {
+    val imageRows = folded.mapNotNull { (it as? ChatDisplayItem.Attachment)?.takeIf { image -> image.isImage() } }
+    if (imageRows.isEmpty()) return ChatImageRows(folded, emptyMap())
+    val visibleIds = folded.mapTo(HashSet()) { it.id }
+    val collapsedOwners = mutableMapOf<String, String>()
+    for (item in folded) {
+        if (item is ChatDisplayItem.Group && !item.group.open) {
+            for (member in item.group.memberIds) collapsedOwners.putIfAbsent(member, item.id)
+        }
+    }
     val toolsInTurn = mutableMapOf<Pair<String?, String>, String>()
     val imageTools = mutableMapOf<String, String>()
     raw.forEach { item ->
@@ -31,20 +42,21 @@ internal fun chatImageRows(folded: List<ChatDisplayItem>, raw: List<ChatDisplayI
     }
     val linked = linkedMapOf<String, MutableList<ChatDisplayItem.Attachment>>()
     val linkedIds = mutableSetOf<String>()
-    folded.filterIsInstance<ChatDisplayItem.Attachment>().filter { it.isImage() }.forEach { image ->
+    val linkedImages = mutableSetOf<Pair<String, String>>()
+    imageRows.forEach { image ->
         val toolId = imageTools[image.id] ?: return@forEach
-        val anchor = folded.firstOrNull { it.id == toolId }?.id
-            ?: folded.filterIsInstance<ChatDisplayItem.Group>().firstOrNull { !it.group.open && toolId in it.group.memberIds }?.id
-            ?: return@forEach
+        val anchor = if (toolId in visibleIds) toolId else collapsedOwners[toolId] ?: return@forEach
         val images = linked.getOrPut(anchor) { mutableListOf() }
-        if (images.none { it.attachmentId == image.attachmentId }) images.add(image)
+        if (linkedImages.add(anchor to image.attachmentId)) images.add(image)
         linkedIds.add(image.id)
     }
     val rows = mutableListOf<ChatDisplayItem>()
     val pending = mutableListOf<ChatDisplayItem.Attachment>()
+    val pendingIds = mutableSetOf<String>()
     fun flush() {
         if (pending.isNotEmpty()) rows.add(ChatDisplayItem.ImageGallery("images:${pending.first().attachmentId}", pending.toList()))
         pending.clear()
+        pendingIds.clear()
     }
     for (item in folded) {
         if (item.id in linkedIds) {
@@ -53,7 +65,7 @@ internal fun chatImageRows(folded: List<ChatDisplayItem>, raw: List<ChatDisplayI
         }
         if (item is ChatDisplayItem.Attachment && item.isImage()) {
             if (pending.isNotEmpty() && pending.first().backend != item.backend) flush()
-            if (pending.none { it.attachmentId == item.attachmentId }) pending.add(item)
+            if (pendingIds.add(item.attachmentId)) pending.add(item)
         } else { flush(); rows.add(item) }
     }
     flush()

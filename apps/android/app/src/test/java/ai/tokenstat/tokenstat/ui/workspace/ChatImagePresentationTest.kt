@@ -10,6 +10,52 @@ class ChatImagePresentationTest {
     private fun image(id: String, call: String? = null) = ChatDisplayItem.Attachment("attachment-$id", id, "$id.png", "image/png", 100, call)
     private fun tool(id: String) = ChatDisplayItem.Tool("tool-$id", ChatToolState(id, "Read", "image.png", false, false, null, 1, 2, emptyList()))
 
+    @Test fun duplicateImagesKeepTheirFirstCopyAndCanReappearAfterAGalleryBoundary() {
+        val first = image("same")
+        val duplicate = first.copy(id = "duplicate-row", name = "later-name.png")
+        val separator = ChatDisplayItem.Assistant("text", "Next image", "codex")
+        val raw = listOf(first, duplicate, separator, duplicate)
+        val rows = chatImageRows(raw, raw).rows
+        assertEquals(listOf(first), (rows[0] as ChatDisplayItem.ImageGallery).images)
+        assertEquals(listOf(duplicate), (rows[2] as ChatDisplayItem.ImageGallery).images)
+        val step = tool("read")
+        val linked = first.copy(callId = "read")
+        val linkedDuplicate = duplicate.copy(callId = "read")
+        val tools = listOf(step, linked, linkedDuplicate)
+        assertEquals(listOf(linked), chatImageRows(tools, tools).toolImages[step.id])
+    }
+
+    @Test fun aVisibleToolOwnsItsImagesBeforeAnyCollapsedGroup() {
+        val step = tool("read")
+        val linked = image("linked", "read")
+        val group = ChatDisplayItem.Group("group", ChatStepGroup(ChatStepGroup.Style.Explored, false, listOf(step.id)))
+        assertEquals(mapOf(step.id to listOf(linked)), chatImageRows(listOf(group, step, linked), listOf(step, linked)).toolImages)
+        val noImages = listOf(step, group)
+        assertEquals(ChatImageRows(noImages, emptyMap()), chatImageRows(noImages, listOf(step, linked)))
+    }
+
+    @Test fun largeImageTranscriptKeepsToolOwnershipAndOrder() {
+        val raw = (0 until 1000).flatMap { listOf(tool("step-$it"), image("image-$it", "step-$it")) }
+        for (detail in ChatDetail.entries) {
+            val folded = foldTranscript(raw, detail, false) { false }
+            val grouped = chatImageRows(folded, raw)
+            assertEquals(1000, grouped.toolImages.values.sumOf { it.size })
+            assertEquals(raw.filterIsInstance<ChatDisplayItem.Attachment>().map { it.attachmentId },
+                grouped.toolImages.values.flatten().map { it.attachmentId })
+        }
+        if (System.getenv("TOKENSTAT_BENCHMARK") == "1") {
+            val folded = foldTranscript(raw, ChatDetail.Compact, false) { false }
+            repeat(10) { chatImageRows(folded, raw) }
+            val times = (0 until 31).map {
+                val start = System.nanoTime()
+                val result = chatImageRows(folded, raw)
+                assertEquals(1000, result.toolImages.values.sumOf { it.size })
+                (System.nanoTime() - start) / 1_000_000.0
+            }.sorted()
+            println("1000 tool images grouping median_ms=${times[15]}")
+        }
+    }
+
     @Test fun consecutiveImagesShareBoundedRowsWithoutDroppingOverflow() {
         for (count in 1..20) {
             val raw = (0 until count).map { image("$it") }
