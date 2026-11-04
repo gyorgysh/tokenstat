@@ -9,6 +9,19 @@ Collect the complete, person-facing delta under the next version number, without
 a date until it is released. Add the release date when preparing that release,
 then begin the next version. Do not reconstruct release notes from commits at the end.
 
+## [1.11.0] - 2026-11-04
+
+### Improved
+
+- The agent, model and effort picker shows one tab per setting with its current value, so the model and effort lists are visible without scrolling past the agents. Typing searches every tab at once.
+- The direct connection to your computers now asks the router over PCP, NAT-PMP and UPnP, re-checks the route every half minute, and survives router reboots and address changes. It also listens on IPv6 and opens the IPv6 firewall where the router allows it, so a phone on a cellular network reaches home directly more often.
+- Moving the pointer across an empty new chat stirs a few dots into code, and a click on the empty page sends a ring of code outward. Still and silent with Reduce Motion on.
+
+### Fixed
+
+- A second computer no longer loses its direct connection when the router only maps the port number it is given: the listener moves to a free port instead of fighting over 7878.
+- A VPN no longer sends the router mapping to an address the router cannot reach. The mapping uses the address on the interface that reaches the router.
+
 ## [1.10.0] - 2026-11-02
 
 ### Improved

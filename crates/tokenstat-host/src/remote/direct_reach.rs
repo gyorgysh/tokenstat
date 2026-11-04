@@ -354,19 +354,24 @@ fn restart_listener() {
 
 fn acquire(route: Route, port: u16) -> Result<Lease, Failure> {
     if let Some(gateway) = route.gateway {
-        match pcp_map(gateway, route.local, port, port, LEASE_SECS, &pcp_nonce()) {
-            Ok((external, lifetime)) => {
+        let nonce = pcp_nonce();
+        match pcp_map(gateway, route.local, port, port, LEASE_SECS, &nonce) {
+            // A zero lifetime grants nothing, so the next method gets a turn
+            // instead of publishing a mapping that is already dead.
+            Ok((external, lifetime)) if lifetime > 0 => {
                 return Ok(Lease {
-                    method: Method::Pcp { nonce: pcp_nonce() },
+                    method: Method::Pcp { nonce },
                     route,
                     port,
                     external,
                     renew_after: renew_interval(lifetime),
                 });
             }
+            Ok(_) => {}
             Err(PcpError::OldVersion) => {
                 if let Some((external, lifetime)) =
                     natpmp_map(gateway, route.local, port, port, LEASE_SECS)
+                    && lifetime > 0
                 {
                     return Ok(Lease {
                         method: Method::NatPmp,
@@ -891,6 +896,18 @@ mod tests {
             })
         );
         assert_eq!(parse_pcp_reply(&reply, &[0u8; 12], 7878), None);
+        // A zero lifetime still parses. It grants nothing, so `acquire`
+        // rejects it instead of publishing a mapping that is already dead.
+        reply[4..8].copy_from_slice(&0u32.to_be_bytes());
+        reply[3] = 0;
+        assert_eq!(
+            parse_pcp_reply(&reply, &nonce, 7878),
+            Some(PcpReply::Mapped {
+                external: "203.0.113.9:40001".parse().unwrap(),
+                lifetime: 0,
+            })
+        );
+        reply[4..8].copy_from_slice(&1800u32.to_be_bytes());
         reply[3] = 2;
         assert_eq!(
             parse_pcp_reply(&reply, &nonce, 7878),

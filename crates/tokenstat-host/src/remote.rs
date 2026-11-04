@@ -1815,8 +1815,8 @@ pub(crate) fn direct_candidates() -> Vec<DirectCandidate> {
     Vec::new()
 }
 
-/// Active, non-loopback IPv4 interface addresses. The listener is IPv4 today,
-/// so advertising IPv6 before it owns an IPv6 socket would be a false promise.
+/// Active, non-loopback IPv4 interface addresses. The IPv6 listener is a
+/// separate socket with its own candidates below.
 #[cfg(all(feature = "local-host", unix))]
 fn local_ipv4_addresses() -> Vec<Ipv4Addr> {
     let mut found = BTreeSet::new();
