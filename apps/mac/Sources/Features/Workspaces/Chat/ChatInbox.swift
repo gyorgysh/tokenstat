@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import CryptoKit
+import Darwin
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
@@ -495,6 +496,7 @@ actor ChatAttachmentCache {
     private let previewDirectory: URL?
     private var generation: UInt64 = 0
     private var lastPruned = Date.distantPast
+    private var lastDirectoryCleanup = Date.distantPast
 
     init(
         directory: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
@@ -561,6 +563,7 @@ actor ChatAttachmentCache {
     }
 
     func readFile(reference: WorkReference, attachment: String, size _: UInt64?) -> URL? {
+        if Date().timeIntervalSince(lastPruned) > 60 { try? prune() }
         guard let root = file(reference: reference, attachment: attachment)?.appendingPathExtension("file"),
               let urls = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]), urls.count == 1,
               let url = urls.first, let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]),
@@ -578,6 +581,10 @@ actor ChatAttachmentCache {
         let destination = root.appendingPathComponent(source.lastPathComponent)
         if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
         try FileManager.default.moveItem(at: source, to: destination)
+        let sourceDirectory = source.deletingLastPathComponent().standardizedFileURL
+        if let sourceRoot = roots.first(where: { sourceDirectory.path.hasPrefix($0.standardizedFileURL.path + "/") }) {
+            removeEmptyDirectories([(sourceDirectory, sourceRoot)])
+        }
         // A resumed transfer can carry an old modification date. Retention
         // starts when the completed download enters this cache.
         try FileManager.default.setAttributes([.modificationDate: Date(), .posixPermissions: 0o600], ofItemAtPath: destination.path)
@@ -599,18 +606,36 @@ actor ChatAttachmentCache {
 
     func maintain() { try? prune() }
 
-    private func entries() -> [(URL, Date, Int)] {
-        roots.flatMap { root -> [(URL, Date, Int)] in
+    private func entries() -> [(URL, Date, Int, URL)] {
+        roots.flatMap { root -> [(URL, Date, Int, URL)] in
             guard let files = FileManager.default.enumerator(
                 at: root, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
                 options: [.skipsHiddenFiles]
             ) else { return [] }
-            return files.compactMap { entry -> (URL, Date, Int)? in
+            return files.compactMap { entry -> (URL, Date, Int, URL)? in
                 guard let url = entry as? URL,
                       let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]),
                       values.isRegularFile == true,
                       let date = values.contentModificationDate, let size = values.fileSize else { return nil }
-                return (url, date, size)
+                return (url, date, size, root)
+            }
+        }
+    }
+
+    private func removeEmptyDirectories(_ directories: [(URL, URL)]) {
+        let rootPaths = Set(roots.map { $0.standardizedFileURL.path })
+        for (directory, root) in directories {
+            var current = directory.standardizedFileURL
+            let prefix = root.standardizedFileURL.path + "/"
+            while current.path.hasPrefix(prefix), !rootPaths.contains(current.path) {
+                // rmdir refuses non-empty directories atomically. A cache or
+                // transfer writer can create a file while this pass runs.
+                let removed = current.withUnsafeFileSystemRepresentation { path -> Bool in
+                    guard let path else { return false }
+                    return Darwin.rmdir(path) == 0
+                }
+                guard removed == true else { break }
+                current.deleteLastPathComponent()
             }
         }
     }
@@ -625,14 +650,35 @@ actor ChatAttachmentCache {
         let files = entries().sorted { $0.1 < $1.1 }
         var total = files.reduce(0) { $0 + $1.2 }
         var failure: Error?
-        for (url, date, size) in files where total > budget || Date().timeIntervalSince(date) >= lifetime {
+        var emptyDirectories: [(URL, URL)] = []
+        for (url, date, size, root) in files where total > budget || Date().timeIntervalSince(date) >= lifetime {
             do {
                 try FileManager.default.removeItem(at: url)
                 total -= size
+                emptyDirectories.append((url.deletingLastPathComponent(), root))
             } catch {
                 failure = error
             }
         }
+        // Eviction cleans its own parents immediately. Sweep folders left by
+        // interrupted writes once an hour. Leave newly created folders alone,
+        // since a transfer may be about to open its file. Avoid another directory
+        // walk on every successful cache write.
+        if Date().timeIntervalSince(lastDirectoryCleanup) > 3600 {
+            for root in roots {
+                guard let directories = FileManager.default.enumerator(at: root,
+                    includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else { continue }
+                for case let directory as URL in directories {
+                    if let values = try? directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey]),
+                       values.isDirectory == true, values.isSymbolicLink != true,
+                       let modified = values.contentModificationDate, Date().timeIntervalSince(modified) > 3600 {
+                        emptyDirectories.append((directory, root))
+                    }
+                }
+            }
+            lastDirectoryCleanup = Date()
+        }
+        removeEmptyDirectories(emptyDirectories)
         lastPruned = Date()
         if let failure { throw failure }
     }

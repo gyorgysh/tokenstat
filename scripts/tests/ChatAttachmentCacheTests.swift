@@ -72,6 +72,49 @@ struct ChatAttachmentCacheTests {
             .map { try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0 }
         require(sizes.reduce(0, +) <= 8, "Disk budget")
 
+        let directoryRoot = root.appendingPathComponent("directory-cache")
+        let empty = directoryRoot.appendingPathComponent("stale.file/nested")
+        let occupied = directoryRoot.appendingPathComponent("occupied")
+        let outside = root.appendingPathComponent("outside-cache")
+        for folder in [empty, occupied, outside] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        try bytes.write(to: occupied.appendingPathComponent(".active"))
+        try FileManager.default.createSymbolicLink(at: directoryRoot.appendingPathComponent("outside-link"), withDestinationURL: outside)
+        for folder in [empty, empty.deletingLastPathComponent()] {
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7200)], ofItemAtPath: folder.path)
+        }
+        let startingTransfer = directoryRoot.appendingPathComponent("starting-transfer")
+        try FileManager.default.createDirectory(at: startingTransfer, withIntermediateDirectories: true)
+        let directoryCache = ChatAttachmentCache(directory: directoryRoot, budget: 1000)
+        await directoryCache.maintain()
+        require(!FileManager.default.fileExists(atPath: empty.deletingLastPathComponent().path), "Pruning removes old empty cache trees")
+        require(FileManager.default.fileExists(atPath: directoryRoot.path), "Pruning keeps the cache root")
+        require(FileManager.default.fileExists(atPath: startingTransfer.path), "A new transfer can open its file after creating its folder")
+        require(FileManager.default.fileExists(atPath: occupied.appendingPathComponent(".active").path), "An occupied directory is never removed")
+        require(FileManager.default.fileExists(atPath: outside.path), "Directory cleanup never follows symlinks outside the cache")
+        let incoming = root.appendingPathComponent("evicted.bin")
+        try bytes.write(to: incoming)
+        let evictionCache = ChatAttachmentCache(directory: directoryRoot, budget: 1)
+        do {
+            _ = try await evictionCache.writeFile(incoming, reference: reference(), attachment: "evicted", epoch: await evictionCache.epoch())
+            fatalError("A file larger than the cache budget cannot stay cached")
+        } catch {}
+        let remaining = try FileManager.default.contentsOfDirectory(at: directoryRoot, includingPropertiesForKeys: nil)
+        require(!remaining.contains { $0.pathExtension == "file" }, "File eviction also removes its empty wrapper directory")
+
+        let transfers = root.appendingPathComponent("transfer-cache")
+        let movedCache = ChatAttachmentCache(directory: root.appendingPathComponent("moved-cache"), previewDirectory: transfers)
+        await movedCache.maintain()
+        let transferFolder = transfers.appendingPathComponent("transfer-one")
+        try FileManager.default.createDirectory(at: transferFolder, withIntermediateDirectories: true)
+        let transferFile = transferFolder.appendingPathComponent("image.png")
+        try bytes.write(to: transferFile)
+        let moved = try await movedCache.writeFile(transferFile, reference: reference(), attachment: "moved", epoch: await movedCache.epoch())
+        require(FileManager.default.fileExists(atPath: moved.path), "Moving a download retains the completed file")
+        require(!FileManager.default.fileExists(atPath: transferFolder.path), "Completed transfers remove their empty temporary folder immediately")
+        require(FileManager.default.fileExists(atPath: transfers.path), "Transfer cleanup keeps its configured root")
+
         // File-backed originals use the same bounded inline preview as small
         // images. The decoder must not allocate the original pixel dimensions.
         let imageFile = root.appendingPathComponent("original.png")
