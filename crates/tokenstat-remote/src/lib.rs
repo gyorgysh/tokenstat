@@ -115,8 +115,20 @@ pub enum RemoteError {
     Tunnel(String),
 }
 
+/// A non-consuming input wait that can run outside the connection lock.
+pub type ReadReady = Box<dyn Fn(Duration) -> std::io::Result<bool> + Send + Sync>;
+
+#[cfg(any(unix, windows))]
+mod readiness;
+
 /// A bidirectional byte stream used by the authenticated connection.
 pub trait Transport: Read + Write + Send {
+    /// Optional independent input notification. Older/custom transports keep
+    /// the bounded polling path when no readiness handle is available.
+    fn read_ready(&self) -> Option<ReadReady> {
+        None
+    }
+
     /// Close the underlying stream or WebSocket.
     fn close(&mut self);
 
@@ -126,10 +138,9 @@ pub trait Transport: Read + Write + Send {
 
     /// Set the read timeout on the underlying socket.
     ///
-    /// A stream split into read and write halves shares one transport, and a
-    /// reader that blocks forever would starve the writer. A bounded read
-    /// timeout is what lets the reader give the lock back; a timed-out read
-    /// means "no data yet", never a failure.
+    /// Split streams use independent readiness notifications when available.
+    /// This bounds their fallback reads and races with another reader. A
+    /// timeout before any frame bytes means "no data yet", not a failure.
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()>;
 
     /// True when this is a multiplexed relay channel rather than a TCP socket.
@@ -143,6 +154,10 @@ pub trait Transport: Read + Write + Send {
 }
 
 impl<T: Transport + ?Sized> Transport for Box<T> {
+    fn read_ready(&self) -> Option<ReadReady> {
+        (**self).read_ready()
+    }
+
     fn close(&mut self) {
         (**self).close();
     }
@@ -161,6 +176,11 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
 }
 
 impl Transport for TcpStream {
+    #[cfg(any(unix, windows))]
+    fn read_ready(&self) -> Option<ReadReady> {
+        readiness::tcp(self)
+    }
+
     fn close(&mut self) {
         let _ = self.shutdown(std::net::Shutdown::Both);
     }
@@ -309,6 +329,7 @@ impl Connection {
             intro_label: _,
             relay,
         } = self;
+        let read_ready = stream.read_ready();
         let mut core = Core {
             noise,
             stream,
@@ -321,17 +342,16 @@ impl Connection {
         (
             StreamReader {
                 core: Arc::clone(&core),
+                read_ready,
             },
             StreamWriter { core },
         )
     }
 }
 
-/// How long the read half of a split stream waits for data before giving the
-/// writer the lock. Short enough that a write behind an idle reader is never
-/// visibly stalled. A timeout inside a partially arrived frame (the length
-/// header in, the body still coming) means the link is dying anyway; the next
-/// read fails loudly rather than silently corrupting anything.
+/// Bound reads on transports without independent readiness notifications,
+/// or when another reader consumed the bytes after notification. Once a frame
+/// starts, its longer stall budget applies and a failure ends the connection.
 const STREAM_READ_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// How long the rest of a message may take once its first frame has arrived.
@@ -368,6 +388,7 @@ impl Core {
 /// The read half of a split connection.
 pub struct StreamReader {
     core: Arc<Mutex<Core>>,
+    read_ready: Option<ReadReady>,
 }
 
 impl StreamReader {
@@ -376,6 +397,26 @@ impl StreamReader {
     /// sees either bytes, EOF, or a real failure.
     pub fn read(&self, max: usize) -> Result<Vec<u8>, RemoteError> {
         loop {
+            if let Some(wait) = &self.read_ready {
+                {
+                    let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+                    if !guard.permitted() {
+                        return Err(RemoteError::Closed);
+                    }
+                }
+                // An idle reader must not hold the encryption/transport lock:
+                // the other half can send output while this wait is parked.
+                // Recheck authorization and local close at least every 400 ms.
+                match wait(Duration::from_millis(400)) {
+                    Ok(false) => continue,
+                    Ok(true) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => {
+                        self.close();
+                        return Err(error.into());
+                    }
+                }
+            }
             let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
             if !guard.permitted() {
                 return Err(RemoteError::Closed);
@@ -1349,6 +1390,84 @@ mod tests {
         assert_eq!(reader.read(1 << 20).expect("read two"), b"second");
         writer.write(&[]).expect("end of stream");
         echo.join().expect("echo thread");
+    }
+
+    #[test]
+    fn an_idle_input_wait_releases_the_writer_and_rechecks_revocation() {
+        struct IdleTransport {
+            entered: std::sync::mpsc::Sender<()>,
+            release: Arc<(Mutex<bool>, std::sync::Condvar)>,
+        }
+        impl Read for IdleTransport {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                panic!("revocation must prevent reading queued input")
+            }
+        }
+        impl Write for IdleTransport {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl Transport for IdleTransport {
+            fn close(&mut self) {}
+            fn set_deadline(&mut self, _: Option<Duration>) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn set_read_timeout(&mut self, _: Option<Duration>) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn read_ready(&self) -> Option<ReadReady> {
+                let entered = self.entered.clone();
+                let release = Arc::clone(&self.release);
+                Some(Box::new(move |timeout| {
+                    let _ = entered.send(());
+                    let (lock, cond) = &*release;
+                    let (ready, _) = cond
+                        .wait_timeout_while(lock.lock().unwrap(), timeout, |released| !*released)
+                        .unwrap();
+                    Ok(*ready)
+                }))
+            }
+        }
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let allowed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let guard = Arc::clone(&allowed);
+        let (noise, _) = transport_pair();
+        let (reader, writer) = Connection {
+            stream: Box::new(IdleTransport {
+                entered,
+                release: Arc::clone(&release),
+            }),
+            noise,
+            peer: [0; 32],
+            intro_label: String::new(),
+            relay: false,
+        }
+        .split_authorized(move || guard.load(std::sync::atomic::Ordering::SeqCst));
+        let read = std::thread::spawn(move || reader.read(1024));
+        waiting
+            .recv_timeout(Duration::from_secs(2))
+            .expect("reader parked outside the lock");
+        let send = writer.clone();
+        let (sent, received) = std::sync::mpsc::channel();
+        let write = std::thread::spawn(move || {
+            let _ = sent.send(send.write(b"outbound"));
+        });
+        // The readiness wait is still parked. Sending must finish without it
+        // timing out or receiving any input from the peer.
+        let result = received.recv_timeout(Duration::from_millis(200));
+        allowed.store(false, std::sync::atomic::Ordering::SeqCst);
+        *release.0.lock().unwrap() = true;
+        release.1.notify_all();
+        write.join().unwrap();
+        assert!(matches!(read.join().unwrap(), Err(RemoteError::Closed)));
+        assert!(writer.is_closed());
+        assert!(matches!(writer.write(b"revoked"), Err(RemoteError::Closed)));
+        result.expect("writer runs during the idle wait").unwrap();
     }
 
     /// `Box<dyn Transport>` must forward `is_relay`. The trait default is

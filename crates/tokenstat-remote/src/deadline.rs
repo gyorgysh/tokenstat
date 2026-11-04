@@ -81,6 +81,10 @@ impl Write for HandshakeBudget {
     }
 }
 impl Transport for HandshakeBudget {
+    fn read_ready(&self) -> Option<crate::ReadReady> {
+        self.stream.read_ready()
+    }
+
     fn close(&mut self) {
         self.stream.close();
     }

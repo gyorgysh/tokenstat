@@ -844,6 +844,20 @@ impl Drop for ChannelTransport {
 }
 
 impl Transport for ChannelTransport {
+    fn read_ready(&self) -> Option<crate::ReadReady> {
+        let state = Arc::clone(&self.state);
+        Some(Box::new(move |timeout| {
+            let inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+            let (inner, _) = state
+                .cond
+                .wait_timeout_while(inner, timeout, |inner| {
+                    inner.buffer.is_empty() && !inner.eof && inner.error.is_none()
+                })
+                .unwrap_or_else(|e| e.into_inner());
+            Ok(!inner.buffer.is_empty() || inner.eof || inner.error.is_some())
+        }))
+    }
+
     fn close(&mut self) {
         if self.closed.swap(true, Ordering::Relaxed) {
             return;
@@ -1537,6 +1551,30 @@ fn tunnel_error(error: tungstenite::Error) -> RemoteError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_readiness_wakes_for_data_and_close_without_consuming_bytes() {
+        let session = inert_session();
+        let state = Arc::new(ChannelState::new(97));
+        session.channels.lock().unwrap().insert(97, state.clone());
+        let mut transport = ChannelTransport::new(session.clone(), state.clone());
+        let ready = transport.read_ready().unwrap();
+        assert!(!ready(Duration::from_millis(10)).unwrap());
+        let waiting = std::thread::spawn(move || ready(Duration::from_secs(2)).unwrap());
+        let mut frame = vec![CH_DATA];
+        frame.extend_from_slice(&97u32.to_be_bytes());
+        frame.extend_from_slice(b"hello");
+        dispatch_frame(&session, &frame);
+        assert!(waiting.join().unwrap());
+        let mut bytes = [0; 5];
+        transport.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"hello");
+        let ready = transport.read_ready().unwrap();
+        let waiting = std::thread::spawn(move || ready(Duration::from_secs(2)).unwrap());
+        transport.close();
+        assert!(waiting.join().unwrap());
+        assert_eq!(transport.read(&mut bytes).unwrap(), 0);
+    }
 
     #[test]
     fn ten_host_channels_keep_replies_and_failures_independent() {

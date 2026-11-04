@@ -3733,12 +3733,14 @@ dependencies = [
 name = "tokenstat-remote"
 version = "1.12.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "snow",
  "thiserror 2.0.21",
  "tokenstat-identity",
  "tungstenite",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
