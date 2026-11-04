@@ -265,6 +265,47 @@ class ChatTranscriptTest {
     }
 
     @Test
+    fun snippetAndClipKeepUnicodeCodePointsWhole() {
+        val line = "x".repeat(599) + "🌍" + " tail"
+        val expected = "x".repeat(599) + "…"
+        assertEquals(expected, ChatToolState.clip(line))
+        assertEquals(listOf("| first", "| $expected"), ChatToolState.makeSnippet("Shell", "first\n$line"))
+        assertEquals("x".repeat(598) + "🌍…", ChatToolState.clip("x".repeat(598) + "🌍 tail"))
+        assertEquals("🌍", ChatToolState.clip("🌍"))
+    }
+
+    @Test
+    fun patchCountsMatchLineBasedCountsAndKeepTheOriginalPatch() {
+        val random = kotlin.random.Random(471)
+        val choices = listOf("+new", "-old", " context", "+++ a/file", "--- b/file", "+", "-", "", "+🌍", "++", "---", "+++\r", "@@ hunk")
+        repeat(500) {
+            val patch = List(random.nextInt(1, 80)) { choices.random(random) }.joinToString(if (random.nextBoolean()) "\n" else "\r\n")
+            val lines = patch.split("\n").filter(ChatToolState::isDiffLine)
+            val state = ChatEditState("a.txt", 0, 0, patch, 1, false, false, 0, null).recountIfNeeded()
+            assertEquals(lines.count { it.startsWith('+') }.toLong(), state.added)
+            assertEquals(lines.count { it.startsWith('-') }.toLong(), state.removed)
+            assertEquals(patch, state.patch)
+        }
+    }
+
+    @Test
+    fun largePatchCountsStayBoundedByTheInputAndPreserveKnownCounts() {
+        val patch = ("+" + "x".repeat(70) + "\n-" + "y".repeat(70) + "\n").repeat(30_000)
+        val original = ChatEditState("a.txt", 0, 0, patch, 1, false, false, 0, null)
+        val times = List(15) {
+            val start = System.nanoTime()
+            val result = original.recountIfNeeded()
+            val elapsed = (System.nanoTime() - start) / 1_000_000.0
+            assertEquals(30_000L, result.added)
+            assertEquals(30_000L, result.removed)
+            assertTrue(result.patch === patch)
+            elapsed
+        }.sorted()
+        assertEquals(7L, original.copy(added = 7).recountIfNeeded().added)
+        println("Large diff recount: bytes=${patch.length} median=${times[7]}ms max=${times[14]}ms")
+    }
+
+    @Test
     fun diffLinesStayUnprefixedInSnippet() {
         val snippet = ChatToolState.makeSnippet("Diff", "+new\n context\n-old")
         assertEquals(listOf("+new", "|  context", "-old"), snippet)

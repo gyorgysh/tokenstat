@@ -122,8 +122,7 @@ data class ChatToolState(
                 if (count < SnippetLineCap) {
                     // Keep the complete detail for expansion, but do not
                     // allocate thousands of hidden lines just to draw sixty.
-                    val shown = detail.substring(start, minOf(end, start + SnippetColumnCap)) +
-                        if (end - start > SnippetColumnCap) "…" else ""
+                    val shown = clip(detail, start, end)
                     out.add(if (isDiff && isDiffLine(shown)) shown else "| $shown")
                 }
                 count++
@@ -148,8 +147,15 @@ data class ChatToolState(
         /// stack that grows to fit is the hang: the cap stops the line that
         /// is really a document.
         fun clip(line: String): String {
-            if (line.length <= SnippetColumnCap) return line
-            return line.take(SnippetColumnCap) + "…"
+            return clip(line, 0, line.length)
+        }
+
+        private fun clip(text: String, start: Int, end: Int): String {
+            if (end - start <= SnippetColumnCap) return text.substring(start, end)
+            var cut = start + SnippetColumnCap
+            // UTF-16 offsets can land between an emoji's surrogate halves.
+            if (text[cut - 1].isHighSurrogate() && text[cut].isLowSurrogate()) cut--
+            return text.substring(start, cut) + "…"
         }
 
         private const val SnippetLineCap = 60
@@ -209,10 +215,17 @@ data class ChatEditState(
         if (!(added == 0L && removed == 0L && patch.isNotEmpty())) return this
         var plus = 0L
         var minus = 0L
-        for (line in patch.split("\n")) {
-            if (!ChatToolState.isDiffLine(line)) continue
-            if (line.firstOrNull() == '+') plus += 1
-            if (line.firstOrNull() == '-') minus += 1
+        var start = 0
+        while (start < patch.length) {
+            // Count directly in the patch; expanded diffs can contain tens
+            // of thousands of lines that need no separate String objects.
+            when (patch[start]) {
+                '+' -> if (!patch.startsWith("+++ ", start)) plus++
+                '-' -> if (!patch.startsWith("--- ", start)) minus++
+            }
+            val newline = patch.indexOf('\n', start)
+            if (newline < 0) break
+            start = newline + 1
         }
         return copy(added = plus, removed = minus)
     }
