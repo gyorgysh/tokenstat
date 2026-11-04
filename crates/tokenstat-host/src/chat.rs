@@ -4899,7 +4899,7 @@ impl Store {
     }
 
     fn record_events(&self, id: &str, backend: &str, events: Vec<Event>) {
-        for event in events {
+        for event in coalesce_stream_deltas(events) {
             if let Event::Session { id: token } = &event {
                 let _ = self.set_resume(id, backend, token);
             }
@@ -5731,6 +5731,31 @@ impl Store {
             );
         }
     }
+}
+
+// One provider read can contain hundreds of token records. Persist adjacent
+// prose together so each token does not reopen and lock the transcript. This
+// adds no waiting and keeps every non-text event in its original position.
+fn coalesce_stream_deltas(events: Vec<Event>) -> Vec<Event> {
+    const MAX_DELTA_BYTES: usize = 64 * 1024;
+    let mut out = Vec::with_capacity(events.len().min(64));
+    for event in events {
+        let pair = match (out.last_mut(), &event) {
+            (Some(Event::Text { delta: previous }), Event::Text { delta })
+            | (Some(Event::Thinking { delta: previous }), Event::Thinking { delta }) => {
+                Some((previous, delta))
+            }
+            _ => None,
+        };
+        if let Some((previous, delta)) = pair
+            && previous.len().saturating_add(delta.len()) <= MAX_DELTA_BYTES
+        {
+            previous.push_str(delta);
+            continue;
+        }
+        out.push(event);
+    }
+    out
 }
 
 /// Consume large already-buffered tool/image output without one polling
@@ -7763,7 +7788,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(37));
             println!(
                 "{}",
-                json!({"type":"assistant","message":{"content":[{"type":"text","text":format!("latency:{}", now_ms())}]}})
+                json!({"type":"assistant","message":{"content":[{"type":"text","text":format!("latency:{}\n", now_ms())}]}})
             );
             std::io::stdout().flush().unwrap();
         }
@@ -7821,13 +7846,16 @@ mod tests {
         let (events, _) = store.events(id, 0).unwrap();
         let mut latencies: Vec<i64> = events
             .iter()
-            .filter_map(|record| {
-                let sent = record["event"]["delta"]
-                    .as_str()?
-                    .strip_prefix("latency:")?
-                    .parse::<i64>()
-                    .ok()?;
-                Some(record["atMs"].as_i64()? - sent)
+            .flat_map(|record| {
+                let at = record["atMs"].as_i64().unwrap();
+                record["event"]["delta"]
+                    .as_str()
+                    .unwrap_or("")
+                    .lines()
+                    .filter_map(move |line| {
+                        let sent = line.strip_prefix("latency:")?.parse::<i64>().ok()?;
+                        Some(at - sent)
+                    })
             })
             .collect();
         assert_eq!(
@@ -7844,6 +7872,116 @@ mod tests {
             latencies[39]
         );
         let _ = manager.close(&process.id);
+    }
+
+    #[test]
+    fn streamed_text_batches_preserve_content_and_event_boundaries() {
+        let text = |value: &str| Event::Text {
+            delta: value.into(),
+        };
+        let thinking = |value: &str| Event::Thinking {
+            delta: value.into(),
+        };
+        let boundaries = [
+            Event::Session {
+                id: "session".into(),
+            },
+            Event::ToolStart {
+                call_id: "tool".into(),
+                verb: "Read".into(),
+                target: "a.txt".into(),
+                input: json!({}),
+            },
+            Event::ToolEnd {
+                call_id: "tool".into(),
+                ok: false,
+                detail: Some("denied".into()),
+            },
+            Event::Edit {
+                call_id: "tool".into(),
+                path: "a.txt".into(),
+                added: 1,
+                removed: 0,
+                patch: "+ hi".into(),
+            },
+            Event::Attachment {
+                id: "file".into(),
+                name: "image.png".into(),
+                media_type: Some("image/png".into()),
+                size: 1,
+                call_id: None,
+            },
+            Event::Usage {
+                input: 1,
+                output: 2,
+                cache_read: 0,
+                cache_write: 0,
+                cost_usd: None,
+            },
+            Event::Failed {
+                text: "failure".into(),
+            },
+            Event::Done {
+                status: "ok".into(),
+                exit_code: Some(0),
+            },
+        ];
+        for boundary in boundaries {
+            assert_eq!(
+                coalesce_stream_deltas(vec![
+                    text("Hi"),
+                    text(" 🌍\n"),
+                    boundary.clone(),
+                    thinking("Why"),
+                    thinking("?"),
+                    text("Next")
+                ]),
+                vec![text("Hi 🌍\n"), boundary, thinking("Why?"), text("Next")]
+            );
+        }
+        let almost_full = "x".repeat(64 * 1024 - 1);
+        assert_eq!(
+            coalesce_stream_deltas(vec![text(&almost_full), text("🌍"), text("!")]),
+            vec![text(&almost_full), text("🌍!")]
+        );
+        let oversized = "x".repeat(64 * 1024 + 1);
+        assert_eq!(
+            coalesce_stream_deltas(vec![text(&oversized), text("!")]),
+            vec![text(&oversized), text("!")]
+        );
+        assert!(coalesce_stream_deltas(Vec::new()).is_empty());
+    }
+
+    #[test]
+    #[ignore = "manual streamed text persistence benchmark"]
+    fn benchmark_streaming_persistence() {
+        let mut elapsed = Vec::new();
+        for _ in 0..10 {
+            let root = tempfile::tempdir().unwrap();
+            let store = Store::at(root.path().join("chat"));
+            let id = "stream-persistence";
+            conversation_for_receipts(&store, id);
+            let events = (0..1000)
+                .map(|_| Event::Text {
+                    delta: "hello ".into(),
+                })
+                .collect();
+            let start = Instant::now();
+            store.record_events(id, "codex", events);
+            elapsed.push(start.elapsed().as_secs_f64() * 1000.0);
+            let data = fs::read_to_string(store.root.join(id).join("events.ndjson")).unwrap();
+            let text = data
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .filter_map(|record| record["event"]["delta"].as_str().map(str::to_owned))
+                .collect::<String>();
+            assert_eq!(text, "hello ".repeat(1000));
+        }
+        elapsed.sort_by(f64::total_cmp);
+        println!(
+            "1000 streamed text deltas: median={:.3}ms max={:.3}ms",
+            elapsed[5], elapsed[9]
+        );
     }
 
     #[test]
