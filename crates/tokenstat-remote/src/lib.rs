@@ -902,6 +902,16 @@ impl Server {
         })
     }
 
+    /// Serve on a listener the caller configured itself, such as an IPv6
+    /// socket that must not also claim the IPv4 port. The same rules as
+    /// [`Server::bind`] apply: nothing is served until `accept` approves it.
+    pub fn from_listener(listener: TcpListener, identity: &MachineIdentity) -> Self {
+        Self {
+            listener,
+            secret: identity.secret_bytes(),
+        }
+    }
+
     pub fn local_address(&self) -> Result<String, RemoteError> {
         Ok(self.listener.local_addr()?.to_string())
     }

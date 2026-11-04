@@ -81,7 +81,10 @@ getrandom = "0.4"
 x25519-dalek = { version = "3", default-features = false, features = ["static_secrets", "zeroize"] }
 snow = { version = "0.10", default-features = false, features = ["default-resolver", "use-curve25519", "use-chacha20poly1305", "use-blake2", "use-getrandom", "std"] }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
-igd-next = { version = "0.18", default-features = false, features = ["io_sync"] }
+igd-next = { version = "0.18", default-features = false, features = ["io_sync", "ipv6"] }
+# Already in the tree through tokio. Used directly to make the IPv6 direct
+# listener IPv6-only, so it never fights the IPv4 listener for the same port.
+socket2 = "0.6"
 russh = { version = "0.65.0", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util"] }
 rand = "0.10"

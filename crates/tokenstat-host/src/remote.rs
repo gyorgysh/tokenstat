@@ -27,7 +27,7 @@ use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
 #[cfg(feature = "local-host")]
 use std::net::UdpSocket;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::thread;
@@ -49,6 +49,8 @@ pub(crate) use team_connection::{
     AskMethod as TeamAskMethod, CommentInput as TeamCommentInput, Link as TeamConnection,
     ReadMethod as TeamReadMethod, ReadParams as TeamReadParams,
 };
+#[cfg(feature = "local-host")]
+mod direct_reach;
 mod tunnel_lifecycle;
 mod tunnel_runtime;
 
@@ -137,6 +139,14 @@ fn direct_running() -> &'static AtomicBool {
 /// candidate contract reports only a socket the accept loop actually owns.
 #[cfg(feature = "local-host")]
 fn direct_port() -> &'static AtomicUsize {
+    static PORT: AtomicUsize = AtomicUsize::new(0);
+    &PORT
+}
+
+/// Port held by the IPv6 direct listener, or zero when there is none. Usually
+/// the same number as the IPv4 one, but a separate socket that may differ.
+#[cfg(feature = "local-host")]
+fn direct_port6() -> &'static AtomicUsize {
     static PORT: AtomicUsize = AtomicUsize::new(0);
     &PORT
 }
@@ -338,13 +348,20 @@ fn start_direct_if_enabled() {
         // Keep 7878 for compatibility with old invites, but a port conflict is
         // not a reason to lose direct reach. Every new candidate includes the
         // actual port this listener obtained.
-        let server = match tokenstat_remote::Server::bind("0.0.0.0:7878", &identity) {
+        // A router that maps only same-numbered ports, with another host
+        // already on 7878, sets `avoid_default_port`. See `direct_reach`.
+        let preferred = if direct_reach::avoid_default_port().load(Ordering::Acquire) {
+            "0.0.0.0:0"
+        } else {
+            "0.0.0.0:7878"
+        };
+        let server = match tokenstat_remote::Server::bind(preferred, &identity) {
             Ok(value) => value,
             Err(preferred_error) => match tokenstat_remote::Server::bind("0.0.0.0:0", &identity) {
                 Ok(value) => value,
                 Err(fallback_error) => {
                     eprintln!(
-                        "remote: direct listener unavailable on 7878 ({preferred_error}) or a free port ({fallback_error})"
+                        "remote: direct listener unavailable on {preferred} ({preferred_error}) or a free port ({fallback_error})"
                     );
                     direct_running().store(false, Ordering::Release);
                     return;
@@ -358,35 +375,97 @@ fn start_direct_if_enabled() {
             .map_or(0, |address| usize::from(address.port()));
         direct_port().store(port, Ordering::Release);
         let _ = server.set_nonblocking(true);
+        // IPv6 is a second socket, IPv6-only, so it never contends with the
+        // IPv4 one for the port. Without it a host with a global IPv6 address
+        // could not be reached on it at all.
+        let mut server6 = bind_direct_ipv6(port as u16)
+            .or_else(|| bind_direct_ipv6(0))
+            .map(|listener| tokenstat_remote::Server::from_listener(listener, &identity))
+            .filter(|server| server.set_nonblocking(true).is_ok());
+        let port6 = server6
+            .as_ref()
+            .and_then(|server| server.local_address().ok())
+            .and_then(|address| address.parse::<SocketAddr>().ok())
+            .map_or(0, |address| usize::from(address.port()));
+        direct_port6().store(port6, Ordering::Release);
         direct_bound().store(true, Ordering::Release);
         let generation = direct_generation().fetch_add(1, Ordering::AcqRel) + 1;
         if port != 0 {
-            start_direct_mapping(generation, port as u16);
+            direct_reach::start(generation, port as u16);
         }
         while direct_running().load(Ordering::Acquire) {
-            match server.accept() {
-                Ok(Ok(connection)) => {
-                    if let Ok(session) = session_for_serving() {
-                        std::thread::spawn(move || serve_peer(connection, &session, Route::Direct));
-                    }
+            let idle4 = match accept_direct(&server) {
+                Accepted::Idle => true,
+                Accepted::Served => false,
+                Accepted::Failed => break,
+            };
+            let idle6 = match server6.as_ref().map(accept_direct) {
+                None | Some(Accepted::Idle) => true,
+                Some(Accepted::Served) => false,
+                Some(Accepted::Failed) => {
+                    // IPv4 keeps serving. Losing the IPv6 socket only drops
+                    // its candidates.
+                    server6 = None;
+                    direct_port6().store(0, Ordering::Release);
+                    true
                 }
-                Ok(Err(refused)) => report(&refused),
-                Err(tokenstat_remote::RemoteError::Io(error))
-                    if error.kind() == std::io::ErrorKind::WouldBlock =>
-                {
-                    std::thread::sleep(Duration::from_millis(100))
-                }
-                Err(error) => {
-                    eprintln!("remote: direct accept failed: {error}");
-                    break;
-                }
+            };
+            if idle4 && idle6 {
+                std::thread::sleep(Duration::from_millis(100));
             }
         }
         drop(server);
+        drop(server6);
         direct_bound().store(false, Ordering::Release);
+        direct_port6().store(0, Ordering::Release);
         direct_port().store(0, Ordering::Release);
         direct_running().store(false, Ordering::Release);
     });
+}
+
+#[cfg(feature = "local-host")]
+enum Accepted {
+    Idle,
+    Served,
+    Failed,
+}
+
+#[cfg(feature = "local-host")]
+fn accept_direct(server: &tokenstat_remote::Server) -> Accepted {
+    match server.accept() {
+        Ok(Ok(connection)) => {
+            if let Ok(session) = session_for_serving() {
+                std::thread::spawn(move || serve_peer(connection, &session, Route::Direct));
+            }
+            Accepted::Served
+        }
+        Ok(Err(refused)) => {
+            report(&refused);
+            Accepted::Served
+        }
+        Err(tokenstat_remote::RemoteError::Io(error))
+            if error.kind() == std::io::ErrorKind::WouldBlock =>
+        {
+            Accepted::Idle
+        }
+        Err(error) => {
+            eprintln!("remote: direct accept failed: {error}");
+            Accepted::Failed
+        }
+    }
+}
+
+#[cfg(feature = "local-host")]
+fn bind_direct_ipv6(port: u16) -> Option<std::net::TcpListener> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP)).ok()?;
+    socket.set_only_v6(true).ok()?;
+    #[cfg(unix)]
+    socket.set_reuse_address(true).ok()?;
+    let address = SocketAddr::from((Ipv6Addr::UNSPECIFIED, port));
+    socket.bind(&address.into()).ok()?;
+    socket.listen(128).ok()?;
+    Some(socket.into())
 }
 
 #[cfg(feature = "local-host")]
@@ -1708,6 +1787,17 @@ pub(crate) fn direct_candidates() -> Vec<DirectCandidate> {
         });
     }
 
+    let port6 = direct_port6().load(Ordering::Acquire) as u16;
+    if port6 != 0 {
+        candidates.extend(local_ipv6_addresses().into_iter().take(2).map(|address| {
+            DirectCandidate {
+                kind: "ipv6".into(),
+                address: SocketAddr::from((address, port6)).to_string(),
+                priority: 90,
+            }
+        }));
+    }
+
     if let Some(host) = local_mdns_hostname() {
         candidates.push(DirectCandidate {
             kind: "mdns".into(),
@@ -1786,115 +1876,58 @@ fn preferred_route_ipv4() -> Option<Ipv4Addr> {
     }
 }
 
-/// Ask an UPnP IGD router for a leased public TCP mapping. This is an
-/// optimisation under Remote Reach, never a replacement for authentication:
-/// the public socket still enters the same Noise responder and peer approval.
+/// Global unicast IPv6 addresses, the one on the default IPv6 route first.
+/// These need no address translation: a peer can dial them wherever the
+/// router's firewall lets it, which `direct_reach` asks for where it can.
 #[cfg(feature = "local-host")]
-fn start_direct_mapping(generation: usize, port: u16) {
-    const LEASE_SECS: u32 = 3_600;
-    const RENEW_AFTER: Duration = Duration::from_secs(1_800);
-    if let Err(error) = std::thread::Builder::new()
-        .name("direct-mapping".into())
-        .spawn(move || {
-            // The renewer is the only thing keeping this mapping honest; if
-            // it dies mid-renewal, advertising must stop along with it.
-            struct LiveLease(usize);
-            impl Drop for LiveLease {
-                fn drop(&mut self) {
-                    if let Ok(mut mapping) = direct_mapping().lock()
-                        && mapping
-                            .as_ref()
-                            .is_some_and(|mapping| mapping.generation == self.0)
-                    {
-                        *mapping = None;
+fn local_ipv6_addresses() -> Vec<Ipv6Addr> {
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut found: Vec<Ipv6Addr> = preferred_route_ipv6().into_iter().collect();
+    #[cfg(unix)]
+    unsafe {
+        let mut first: *mut libc::ifaddrs = std::ptr::null_mut();
+        if libc::getifaddrs(&mut first) == 0 {
+            let mut current = first;
+            while !current.is_null() {
+                let interface = &*current;
+                let flags = interface.ifa_flags as u32;
+                if !interface.ifa_addr.is_null()
+                    && flags & libc::IFF_UP as u32 != 0
+                    && flags & libc::IFF_LOOPBACK as u32 == 0
+                    && (*interface.ifa_addr).sa_family as i32 == libc::AF_INET6
+                {
+                    let address = &*(interface.ifa_addr as *const libc::sockaddr_in6);
+                    let ip = Ipv6Addr::from(address.sin6_addr.s6_addr);
+                    if usable_global_ipv6(ip) && !found.contains(&ip) {
+                        found.push(ip);
                     }
                 }
+                current = interface.ifa_next;
             }
-            let _lease = LiveLease(generation);
-            let Some(local_ip) = preferred_route_ipv4() else {
-                return;
-            };
-            let local = SocketAddr::from((local_ip, port));
-            let gateway = match igd_next::search_gateway(Default::default()) {
-                Ok(gateway) => gateway,
-                Err(_) => return,
-            };
-            let external = match gateway.get_any_address(
-                igd_next::PortMappingProtocol::TCP,
-                local,
-                LEASE_SECS,
-                "tokenstat direct connection",
-            ) {
-                Ok(address) if usable_public_address(address) => address,
-                Ok(address) => {
-                    let _ = gateway.remove_port(igd_next::PortMappingProtocol::TCP, address.port());
-                    return;
-                }
-                Err(_) => return,
-            };
-            if direct_generation().load(Ordering::Acquire) != generation
-                || !direct_running().load(Ordering::Acquire)
-            {
-                let _ = gateway.remove_port(igd_next::PortMappingProtocol::TCP, external.port());
-                return;
-            }
-            if let Ok(mut mapping) = direct_mapping().lock() {
-                *mapping = Some(DirectMapping {
-                    generation,
-                    address: external,
-                });
-            }
-
-            let mut renewed_at = Instant::now();
-            while direct_generation().load(Ordering::Acquire) == generation
-                && direct_running().load(Ordering::Acquire)
-            {
-                std::thread::sleep(Duration::from_secs(1));
-                if renewed_at.elapsed() < RENEW_AFTER {
-                    continue;
-                }
-                if gateway
-                    .add_port(
-                        igd_next::PortMappingProtocol::TCP,
-                        external.port(),
-                        local,
-                        LEASE_SECS,
-                        "tokenstat direct connection",
-                    )
-                    .is_err()
-                {
-                    break;
-                }
-                renewed_at = Instant::now();
-            }
-            if let Ok(mut mapping) = direct_mapping().lock()
-                && mapping
-                    .as_ref()
-                    .is_some_and(|mapping| mapping.generation == generation)
-            {
-                *mapping = None;
-            }
-            // A listener restart while this thread sat between one-second polls
-            // may have obtained the very same external port again. Give a
-            // replacement a moment to publish itself, then only take the lease
-            // down when nothing newer advertises that port.
-            if direct_generation().load(Ordering::Acquire) != generation {
-                std::thread::sleep(Duration::from_secs(3));
-            }
-            let reused = direct_mapping()
-                .lock()
-                .ok()
-                .and_then(|mapping| mapping.clone())
-                .is_some_and(|mapping| {
-                    mapping.generation != generation && mapping.address.port() == external.port()
-                });
-            if !reused {
-                let _ = gateway.remove_port(igd_next::PortMappingProtocol::TCP, external.port());
-            }
-        })
-    {
-        eprintln!("remote: could not start direct mapping: {error}");
+            libc::freeifaddrs(first);
+        }
     }
+    found
+}
+
+#[cfg(feature = "local-host")]
+fn preferred_route_ipv6() -> Option<Ipv6Addr> {
+    let socket = UdpSocket::bind((Ipv6Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect("[2606:4700:4700::1111]:443").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V6(address) if usable_global_ipv6(address) => Some(address),
+        _ => None,
+    }
+}
+
+/// 2000::/3 without documentation space and Teredo. Unique-local and
+/// link-local addresses are left to the IPv4 LAN candidates.
+#[cfg(feature = "local-host")]
+fn usable_global_ipv6(ip: Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    segments[0] & 0xe000 == 0x2000
+        && !(segments[0] == 0x2001 && segments[1] == 0x0db8)
+        && !(segments[0] == 0x2001 && segments[1] == 0)
 }
 
 #[cfg(feature = "local-host")]
@@ -3233,6 +3266,8 @@ fn nudge(params: &str) -> Result<Value, String> {
     // it earned while the network was down.
     clear_all_unreachable();
     begin_absence_grace();
+    #[cfg(feature = "local-host")]
+    direct_reach::nudge();
     // Client builds have no pty list cache. The stream stack that owns it
     // is compiled out with `local-host`.
     #[cfg(feature = "local-host")]
