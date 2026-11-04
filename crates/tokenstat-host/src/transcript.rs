@@ -153,6 +153,7 @@ pub struct Parser {
     /// last assistant payload so structured chat events can drop that summary
     /// copy while retaining result-only output from older CLI versions.
     last_claude_assistant: Option<String>,
+    streams: crate::transcript_stream::Streams,
     /// Cursor says every assistant message twice: word pieces, then the whole
     /// message again. A `result` says the whole turn again after that, and a
     /// stream that loses its connection resumes from a checkpoint and says
@@ -212,6 +213,7 @@ impl Parser {
             open_tools: Vec::new(),
             tool_inputs: HashMap::new(),
             last_claude_assistant: None,
+            streams: Default::default(),
             cursor_turn: String::new(),
             cursor_msg_starts: vec![0],
             cursor_run_start: 0,
@@ -522,7 +524,7 @@ impl Parser {
             };
             return self.take_events(events);
         }
-        let Ok(value) = serde_json::from_str(&cleaned) else {
+        let Ok(mut value) = serde_json::from_str(&cleaned) else {
             return Vec::new();
         };
         let now = crate::chat::now_ms();
@@ -535,7 +537,12 @@ impl Parser {
             }
             self.limit = Some(limit);
         }
-        let mut events = if self.backend == "muse" {
+        let claude_assistant = (self.backend == "claude" && value["type"] == "assistant")
+            .then(|| claude_assistant_text(&value))
+            .flatten();
+        let mut events = if let Some(events) = self.streams.observe(&self.backend, &mut value) {
+            events
+        } else if self.backend == "muse" {
             self.events_muse(&value)
         } else {
             events_for_value(&self.backend, &value)
@@ -546,7 +553,7 @@ impl Parser {
         if self.backend == "claude" {
             match value.get("type").and_then(Value::as_str) {
                 Some("assistant") => {
-                    if let Some(text) = claude_assistant_text(&value) {
+                    if let Some(text) = claude_assistant {
                         self.last_claude_assistant = Some(text);
                     }
                 }
@@ -1854,7 +1861,7 @@ fn events_codex(value: &Value) -> Vec<Event> {
 /// Codex can surface router/approval failures as a verbose agent message
 /// instead of a structured `error` event. Keep that failure out of the prose
 /// transcript so the corresponding tool row is visibly failed.
-fn codex_rejection(text: Option<&str>) -> Option<String> {
+pub(crate) fn codex_rejection(text: Option<&str>) -> Option<String> {
     let text = text?.trim();
     let lower = text.to_ascii_lowercase();
     if !(lower.contains("codex_core::tools::router")

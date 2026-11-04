@@ -307,6 +307,7 @@ pub(crate) fn agent_command_in(
                     // without this ("requires --verbose"); every run failed at
                     // launch until it was added.
                     "--verbose",
+                    "--include-partial-messages",
                     "--dangerously-skip-permissions",
                 ]
                 .map(str::to_string),
@@ -3201,6 +3202,7 @@ mod tests {
         // Regression: claude rejects stream-json print output without this.
         let claude = agent_command("claude", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
         assert!(claude.iter().any(|a| a == "--verbose"));
+        assert!(claude.iter().any(|a| a == "--include-partial-messages"));
         assert!(claude.iter().any(|a| a == "--dangerously-skip-permissions"));
         let agy = agent_command("agy", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
         assert!(agy.iter().any(|a| a == "--dangerously-skip-permissions"));

@@ -282,6 +282,8 @@ fn resumed_claude_background_results_do_not_complete_the_new_prompt() {
         r#"#!/usr/bin/env python3
 import sys,json,time
 def emit(v): print(json.dumps(v),flush=True)
+sys.stderr.write('diagnostic-only\n'*10000)
+sys.stderr.flush()
 for line in sys.stdin:
  m=json.loads(line)
  if m.get('type')=='control_request':
@@ -321,6 +323,33 @@ for line in sys.stdin:
     assert!(rows.iter().any(|row| row["type"] == "assistant"));
     assert_eq!(rows.iter().filter(|row| row["type"] == "result").count(), 1);
     assert_eq!(rows.last().unwrap()["num_turns"], 1);
+    assert!(
+        output.stderr.is_empty(),
+        "successful diagnostics must not leak into the wrapper PTY"
+    );
+}
+
+#[test]
+fn failed_native_agent_reports_only_a_bounded_diagnostic_tail() {
+    let root = tempfile::tempdir().unwrap();
+    let fake = root.path().join("fake-claude");
+    fs::write(&fake, "#!/usr/bin/env python3\nimport sys\nsys.stdin.readline()\nsys.stderr.write('x'*20000+'useful failure detail\\n')\nsys.stderr.flush()\n").unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.path().join("config.json");
+    fs::write(
+        &config,
+        json!({"backend":"claude","argv":[fake,"-p","test"]}).to_string(),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+        .args(["chat-live", config.to_str().unwrap()])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.len() < 9000);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("useful failure detail"));
 }
 
 #[test]

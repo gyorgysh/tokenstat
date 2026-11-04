@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import Foundation
+import Darwin
 
 struct ChatToolState: Equatable, Sendable {
     var callId: String
@@ -48,6 +49,36 @@ struct ChatToolState: Equatable, Sendable {
             } else {
                 out.append("| \(shown)")
             }
+        }
+        // Large tool logs are mostly omitted. Scan their contiguous bytes
+        // without advancing a Swift String index for every byte; create
+        // String indices only for the lines the row will actually display.
+        if let lineCount = detail.utf8.withContiguousStorageIfAvailable({ bytes -> Int in
+            guard let base = bytes.baseAddress else { return 1 }
+            var start = 0, search = 0, count = 1
+            while search < bytes.count,
+                  let found = memchr(base + search, 10, bytes.count - search) {
+                let end = base.distance(to: found.assumingMemoryBound(to: UInt8.self))
+                search = end + 1
+                if end > 0 && bytes[end - 1] == 13 { continue }
+                if out.count < Self.snippetLineCap {
+                    let lower = detail.utf8.index(detail.utf8.startIndex, offsetBy: start)
+                    let upper = detail.utf8.index(detail.utf8.startIndex, offsetBy: end)
+                    append(detail[lower..<upper])
+                }
+                count += 1
+                start = search
+            }
+            if out.count < Self.snippetLineCap {
+                let lower = detail.utf8.index(detail.utf8.startIndex, offsetBy: start)
+                append(detail[lower...])
+            }
+            return count
+        }) {
+            if lineCount > Self.snippetLineCap {
+                out.append(L10n.text("apple.chatmodel.0_more.8bfcca49", "\(lineCount - Self.snippetLineCap)"))
+            }
+            return out
         }
         // Count the omitted lines without materializing them. LF is the
         // existing Character separator; CRLF is one different Character.

@@ -236,6 +236,7 @@ struct Session {
     info: Mutex<SessionInfo>,
     buffer: Arc<Mutex<Buffer>>,
     buffer_space: Arc<Condvar>,
+    output_ready: Arc<Condvar>,
     /// Shared with the reader thread, which answers the terminal's own
     /// questions. See `wants_cursor_position`.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -530,6 +531,7 @@ impl Manager {
 
         let buffer = Arc::new(Mutex::new(Buffer::new()));
         let buffer_space = Arc::new(Condvar::new());
+        let output_ready = Arc::new(Condvar::new());
         let alive = Arc::new(AtomicBool::new(true));
         let output_closed = Arc::new(AtomicBool::new(false));
         let exit_code = Arc::new(AtomicI32::new(i32::MIN));
@@ -540,6 +542,7 @@ impl Manager {
         {
             let buffer = Arc::clone(&buffer);
             let buffer_space = Arc::clone(&buffer_space);
+            let output_ready = Arc::clone(&output_ready);
             let alive = Arc::clone(&alive);
             let output_closed = Arc::clone(&output_closed);
             let last_activity = Arc::clone(&last_activity);
@@ -582,6 +585,7 @@ impl Manager {
                                 .lock()
                                 .unwrap_or_else(PoisonError::into_inner)
                                 .push(bytes, dead);
+                            output_ready.notify_all();
                             *last_activity.lock().unwrap_or_else(PoisonError::into_inner) =
                                 Some(now_ms());
                         }
@@ -589,7 +593,10 @@ impl Manager {
                         Err(_) => break,
                     }
                 }
+                // Pair EOF with the same mutex used by output waiters.
+                let _buffer = buffer.lock().unwrap_or_else(PoisonError::into_inner);
                 output_closed.store(true, Ordering::SeqCst);
+                output_ready.notify_all();
                 buffer_space.notify_all();
             });
         }
@@ -615,6 +622,7 @@ impl Manager {
             info: Mutex::new(info.clone()),
             buffer,
             buffer_space,
+            output_ready,
             writer,
             master: Mutex::new(master),
             child: Mutex::new(child),
@@ -1054,6 +1062,28 @@ impl Manager {
         }
         let buffer = s.buffer.lock().unwrap_or_else(PoisonError::into_inner);
         Ok(Some(buffer.total))
+    }
+
+    /// Wait for unread bytes or newly observed EOF without polling the buffer.
+    /// Pass the EOF state returned by the previous wait (initially false).
+    /// Once observed, EOF no longer wakes the caller: a child may close stdout
+    /// and remain alive, so checking its deadline must not become a busy loop.
+    pub fn wait_for_output(
+        &self,
+        id: &str,
+        offset: u64,
+        closed: bool,
+        timeout: std::time::Duration,
+    ) -> Result<bool, PtyError> {
+        let s = self.get(id)?;
+        let buffer = s.buffer.lock().unwrap_or_else(PoisonError::into_inner);
+        let _wait = s
+            .output_ready
+            .wait_timeout_while(buffer, timeout, |buffer| {
+                buffer.total <= offset && s.output_closed.load(Ordering::SeqCst) == closed
+            })
+            .unwrap_or_else(PoisonError::into_inner);
+        Ok(s.output_closed.load(Ordering::SeqCst))
     }
 
     /// Forget a stream reader so it cannot hold the shared output window.
@@ -2794,6 +2824,49 @@ mod tests {
     /// A script that stays busy for roughly a minute without needing input.
     fn stay_busy(m: &Manager) -> SessionInfo {
         spawn(m, "sleep 60", "ping -n 61 127.0.0.1 > nul")
+    }
+
+    #[test]
+    fn output_wait_observes_buffered_bytes_and_eof_without_spinning() {
+        use std::time::{Duration, Instant};
+        let m = Manager::new();
+        let process = stay_busy(&m);
+        let session = m.get(&process.id).unwrap();
+        // Drive the reader's publication under its real mutex. Keeping a live
+        // child makes this independent of process-startup timing on CI.
+        let writer = Arc::clone(&session);
+        let publish = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            writer.buffer.lock().unwrap().push(b"hello", false);
+            writer.output_ready.notify_all();
+        });
+        assert!(
+            !m.wait_for_output(&process.id, 0, false, Duration::from_secs(5))
+                .unwrap()
+        );
+        publish.join().unwrap();
+        assert_eq!(m.read(&process.id, 0).unwrap().bytes, b"hello");
+        // Already buffered output cannot lose a notification sent before wait.
+        let started = Instant::now();
+        m.wait_for_output(&process.id, 0, false, Duration::from_secs(5))
+            .unwrap();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        {
+            let _buffer = session.buffer.lock().unwrap();
+            session.output_closed.store(true, Ordering::SeqCst);
+            session.output_ready.notify_all();
+        }
+        assert!(
+            m.wait_for_output(&process.id, 5, false, Duration::from_secs(5))
+                .unwrap()
+        );
+        let started = Instant::now();
+        assert!(
+            m.wait_for_output(&process.id, 5, true, Duration::from_millis(30))
+                .unwrap()
+        );
+        assert!(started.elapsed() >= Duration::from_millis(25));
+        m.close(&process.id).unwrap();
     }
 
     #[test]

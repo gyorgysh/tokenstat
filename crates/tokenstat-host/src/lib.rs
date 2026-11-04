@@ -162,6 +162,8 @@ pub use teams::install_sync as install_team_sync;
 mod todo;
 #[cfg(feature = "local-host")]
 pub(crate) mod transcript;
+#[cfg(feature = "local-host")]
+mod transcript_stream;
 pub mod vault;
 #[cfg(windows)]
 pub(crate) mod win32;

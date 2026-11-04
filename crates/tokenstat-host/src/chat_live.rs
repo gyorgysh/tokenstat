@@ -584,6 +584,37 @@ fn read_messages(child: &mut Child) -> Result<mpsc::Receiver<Result<Value, Strin
     Ok(rx)
 }
 
+/// Provider diagnostics are not assistant text. Keep a bounded tail for a
+/// failed turn rather than mixing stderr (including echoed tool scripts)
+/// into the structured transcript through the wrapper's PTY.
+fn read_diagnostics(child: &mut Child) -> (Arc<Mutex<Vec<u8>>>, mpsc::Receiver<()>) {
+    let tail = Arc::new(Mutex::new(Vec::new()));
+    let output = Arc::clone(&tail);
+    let stderr = child.stderr.take();
+    let (done, finished) = mpsc::channel();
+    std::thread::spawn(move || {
+        const CAP: usize = 8192;
+        if let Some(mut stderr) = stderr {
+            let mut bytes = [0u8; CAP];
+            loop {
+                match stderr.read(&mut bytes) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        let mut tail = output.lock().unwrap_or_else(PoisonError::into_inner);
+                        let drop = (tail.len() + count).saturating_sub(CAP);
+                        tail.drain(..drop);
+                        tail.extend_from_slice(&bytes[..count]);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => break,
+                }
+            }
+        }
+        let _ = done.send(());
+    });
+    (tail, finished)
+}
+
 impl Protocol {
     fn interrupt(&self, input: &mut impl Write, messages: &mpsc::Receiver<Result<Value, String>>) {
         if self.backend != "codex" || self.thread.is_empty() || self.turn.is_empty() {
@@ -813,9 +844,10 @@ pub fn run(path: &Path) -> Result<(), String> {
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| error.to_string())?;
+    let (diagnostics, diagnostics_finished) = read_diagnostics(&mut child);
     let result = (|| {
         let rx = read_messages(&mut child)?;
         let mut input = child.stdin.take().ok_or("missing agent input")?;
@@ -1187,7 +1219,17 @@ pub fn run(path: &Path) -> Result<(), String> {
         let _ = child.kill();
     }
     let _ = child.wait();
-    result
+    result.map_err(|error| {
+        let _ = diagnostics_finished.recv_timeout(Duration::from_millis(100));
+        let tail = diagnostics.lock().unwrap_or_else(PoisonError::into_inner);
+        let detail = String::from_utf8_lossy(&tail);
+        let detail = detail.trim();
+        if detail.is_empty() {
+            error
+        } else {
+            format!("{error}\n{detail}")
+        }
+    })
 }
 
 fn codex_goal_reply(message: &Value, thread: &str, goal_notified: bool) -> Option<Value> {
@@ -1202,12 +1244,21 @@ fn codex_goal_reply(message: &Value, thread: &str, goal_notified: bool) -> Optio
 
 fn codex_owned_item(message: &Value, thread: &str, turn: &str) -> Option<Value> {
     let method = message["method"].as_str()?;
-    if !matches!(method, "item/started" | "item/completed")
-        || turn.is_empty()
+    if !matches!(
+        method,
+        "item/started" | "item/completed" | "item/agentMessage/delta"
+    ) || turn.is_empty()
         || message["params"]["threadId"].as_str() != Some(thread)
         || (!turn.is_empty() && message["params"]["turnId"].as_str() != Some(turn))
     {
         return None;
+    }
+    if method == "item/agentMessage/delta" {
+        let params = &message["params"];
+        return Some(json!({"type":"item.delta","item":{
+            "type":"agent_message", "id":params["itemId"].as_str()?,
+            "text":params["delta"].as_str()?
+        }}));
     }
     let item = codex_item(&message["params"]["item"])?;
     Some(
@@ -1262,6 +1313,20 @@ fn codex_item(item: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_text_deltas_belong_to_the_active_thread_and_turn() {
+        let message = json!({"method":"item/agentMessage/delta","params":{
+            "threadId":"thread", "turnId":"turn", "itemId":"reply", "delta":" 🌍"
+        }});
+        assert_eq!(
+            codex_owned_item(&message, "thread", "turn").unwrap(),
+            json!({"type":"item.delta","item":{"type":"agent_message","id":"reply","text":" 🌍"}})
+        );
+        assert!(codex_owned_item(&message, "other", "turn").is_none());
+        assert!(codex_owned_item(&message, "thread", "other").is_none());
+        assert!(codex_owned_item(&message, "thread", "").is_none());
+    }
 
     #[test]
     fn capability_prewarming_and_first_use_share_one_probe() {

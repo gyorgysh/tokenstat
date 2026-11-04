@@ -69,6 +69,7 @@ const RAW_RETAIN: u64 = 4 * 1024 * 1024;
 /// Allow on it would report success while the tool had already been refused.
 const APPROVAL_TTL_MS: i64 = crate::chat_gate::GATE_DEADLINE_SECONDS as i64 * 1000;
 const POLL: Duration = Duration::from_millis(400);
+const STREAM_BATCH: Duration = Duration::from_millis(20);
 const DRAIN_BACKLOG_BYTES: u64 = 256 * 1024;
 const DRAIN_BURST_BYTES: usize = 4 * 1024 * 1024;
 const EXIT_STATUS_GRACE: Duration = Duration::from_secs(3);
@@ -4639,6 +4640,7 @@ impl Store {
         }
         let reader = format!("chat:{id}");
         let mut offset = 0;
+        let mut output_closed = false;
         let mut activity_tick: Option<Instant> = None;
         let mut eof_at: Option<Instant> = None;
         let mut assistant_text = String::new();
@@ -4766,7 +4768,16 @@ impl Store {
                 Ok(_) => {}
             }
             burst_bytes = 0;
-            std::thread::sleep(POLL);
+            // Bound publication work during fast streams, but wake promptly
+            // for the first output after an idle period. The timeout still
+            // checks Stop and budgets when the provider produces no output.
+            if received_bytes > 0 {
+                std::thread::sleep(STREAM_BATCH);
+            }
+            match manager.wait_for_output(pty, offset, output_closed, POLL) {
+                Ok(closed) => output_closed = closed,
+                Err(_) => break,
+            }
         }
         // One final read catches output written immediately before exit.
         if let Ok(chunk) = manager.read_for_stream(pty, &reader, offset)
@@ -7742,6 +7753,97 @@ mod tests {
         let mut output = std::io::stdout().lock();
         std::io::copy(&mut source, &mut output).unwrap();
         output.flush().unwrap();
+    }
+
+    #[test]
+    #[ignore = "child process for the streaming latency benchmark"]
+    fn streaming_latency_process_fixture() {
+        use std::io::Write;
+        for _ in 0..40 {
+            std::thread::sleep(Duration::from_millis(37));
+            println!(
+                "{}",
+                json!({"type":"assistant","message":{"content":[{"type":"text","text":format!("latency:{}", now_ms())}]}})
+            );
+            std::io::stdout().flush().unwrap();
+        }
+    }
+
+    /// cargo test -p tokenstat-host --lib benchmark_streaming_latency -- --ignored --nocapture
+    #[test]
+    #[ignore = "manual host output-to-transcript latency measurement"]
+    fn benchmark_streaming_latency() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        let id = "streaming-latency";
+        conversation_for_receipts(&store, id);
+        store
+            .edit_conversation(id, |chat| {
+                chat.backend = "claude".into();
+                chat.run_revision = Some(1);
+                chat.running = true;
+                Ok(())
+            })
+            .unwrap();
+        let manager = tokenstat_pty::manager();
+        let process = manager
+            .spawn(&tokenstat_pty::Spawn {
+                command: std::env::current_exe().unwrap().display().to_string(),
+                args: vec![
+                    "--ignored".into(),
+                    "--exact".into(),
+                    "chat::tests::streaming_latency_process_fixture".into(),
+                    "--nocapture".into(),
+                ],
+                cwd: root.path().into(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: vec![],
+            })
+            .unwrap();
+        Arc::clone(&store).drain(
+            id,
+            &crate::chat_inspection::Launch {
+                backend: "claude".into(),
+                requested_model: None,
+                revision: 1,
+                maintenance: false,
+            },
+            &process.id,
+            &root.path().join("raw.ndjson"),
+            &root.path().join("output"),
+            None,
+        );
+        let (events, _) = store.events(id, 0).unwrap();
+        let mut latencies: Vec<i64> = events
+            .iter()
+            .filter_map(|record| {
+                let sent = record["event"]["delta"]
+                    .as_str()?
+                    .strip_prefix("latency:")?
+                    .parse::<i64>()
+                    .ok()?;
+                Some(record["atMs"].as_i64()? - sent)
+            })
+            .collect();
+        assert_eq!(
+            latencies.len(),
+            40,
+            "every emitted sample must reach the transcript"
+        );
+        latencies.sort_unstable();
+        println!(
+            "streaming latency: samples={} median={}ms p95={}ms max={}ms",
+            latencies.len(),
+            latencies[20],
+            latencies[37],
+            latencies[39]
+        );
+        let _ = manager.close(&process.id);
     }
 
     #[test]
