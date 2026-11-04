@@ -2921,8 +2921,8 @@ final class ChatModel {
             error = L10n.text("apple.chatmodel.a_draft_can_include_up_to_20_files_remove.14221a45")
             return
         }
-        if item.data.count > ChatInbox.maxBytes {
-            error = L10n.text("apple.chatmodel.an_attachment_is_limited_to_12_mb.a0b63b0d")
+        if UInt64(item.data.count) > ChatFileIO.maximumBytes {
+            error = L10n.text("common.chat_files_too_large")
             return
         }
         if isCurrent { saveDraftNow() }
@@ -4609,7 +4609,8 @@ final class ChatModel {
               memoryGeneration == attachmentCacheGeneration, WorkCacheAccess.canSave(previewReference),
               userInitiated || ChatAttachmentDownloadPolicy.permitsAutomaticDownload(
                 size: attachment.size,
-                isLocalImage: targetPeer == nil && attachment.mediaType?.hasPrefix("image/") == true)
+                isLocalImage: targetPeer == nil && attachment.mediaType?.hasPrefix("image/") == true,
+                isImage: attachment.mediaType?.hasPrefix("image/") == true)
         else { return }
         do {
             let data: Data

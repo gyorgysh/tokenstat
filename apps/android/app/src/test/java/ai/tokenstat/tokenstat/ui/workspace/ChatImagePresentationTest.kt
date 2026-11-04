@@ -139,7 +139,9 @@ class ChatImagePresentationTest {
     }
 
     @Test fun previewsStayBoundedAndNeverSpendRelayAllowanceAutomatically() {
-        assertTrue(chatImageAutomaticPreviewAllowed(CHAT_IMAGE_PREVIEW_BYTES, "direct"))
+        assertTrue(chatImageAutomaticPreviewAllowed(12L * 1024 * 1024 + 1, "direct"))
+        assertTrue(chatImageAutomaticPreviewAllowed(250L * 1024 * 1024, "direct"))
+        assertFalse(chatImageAutomaticPreviewAllowed(250L * 1024 * 1024, "relay"))
         for (size in listOf(null, 0L, -1L, CHAT_IMAGE_PREVIEW_BYTES + 1)) assertFalse(chatImageAutomaticPreviewAllowed(size, "direct"))
         assertFalse(chatImageAutomaticPreviewAllowed(1, "relay"))
         assertFalse(chatImageAutomaticPreviewAllowed(1, null))

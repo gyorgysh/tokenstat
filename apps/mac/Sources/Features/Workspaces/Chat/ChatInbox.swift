@@ -452,13 +452,14 @@ enum ChatThumbnail {
 
 enum ChatAttachmentDownloadPolicy {
     static let automaticLimit: UInt64 = 5 * 1024 * 1024
+    static let automaticImageLimit: UInt64 = 250 * 1024 * 1024
 
-    static func permitsAutomaticDownload(size: UInt64?, isLocalImage: Bool = false) -> Bool {
+    static func permitsAutomaticDownload(size: UInt64?, isLocalImage: Bool = false, isImage: Bool = false) -> Bool {
         // The local host already owns these bytes. The download threshold
         // controls network transfers, not whether a local image is visible.
         if isLocalImage { return size != 0 }
         guard let size else { return false }
-        return size > 0 && size <= automaticLimit
+        return size > 0 && size <= (isImage ? automaticImageLimit : automaticLimit)
     }
 }
 

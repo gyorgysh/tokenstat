@@ -31,6 +31,18 @@ private final class CopyResults: @unchecked Sendable {
         let reopened = ChatLocalAttachmentStore(directory: root)
         let restored = try await reopened.read(attachment, reference: ref())
         assert(restored == bytes)
+        let pastedBytes = Data(repeating: 0x5a, count: 13 * 1024 * 1024)
+        let pasted = try await store.stage(data: pastedBytes, name: "pasted.png", mediaType: "image/png", reference: ref())
+        let pastedURL = try await reopened.exportURL(pasted, reference: ref())
+        let restoredPaste = try Data(contentsOf: pastedURL)
+        assert(restoredPaste == pastedBytes, "Large pasted bytes survive a store restart")
+        try FileManager.default.removeItem(at: pastedURL.deletingLastPathComponent())
+        do { _ = try await reopened.read(pasted, reference: ref()); assertionFailure("Large pasted files must remain file-backed") } catch {}
+        let metadata = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey]).filter { $0.pathExtension == "json" }
+        let smallMetadata = try metadata.allSatisfy { (try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) < 1024 }
+        assert(smallMetadata, "Large pastes must not expand into base64 metadata")
+        let pastedEntry = try await reopened.retained(in: ref().scope).files.first { $0.attachment.id == pasted.id }!
+        try await reopened.remove(pastedEntry, ifUnused: { true })
         // Landing originals use their own local-only namespace. Binding the
         // first repository and copying into a real conversation cannot consume
         // them, even if upload subsequently fails.

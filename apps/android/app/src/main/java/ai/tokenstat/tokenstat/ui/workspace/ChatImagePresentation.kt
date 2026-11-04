@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
-internal const val CHAT_IMAGE_PREVIEW_BYTES = 5L * 1024 * 1024
+internal const val CHAT_IMAGE_PREVIEW_BYTES = 250L * 1024 * 1024
 internal const val CHAT_IMAGE_GALLERY_EDGE = 1280
 
 internal fun chatImageAutomaticPreviewAllowed(size: Long?, route: String?): Boolean =

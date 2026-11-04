@@ -790,9 +790,16 @@ mod tests {
     }
     #[test]
     fn large_file_round_trip_uses_only_one_chunk_at_a_time() {
+        file_round_trip(40);
+    }
+    #[test]
+    #[ignore = "250 MiB transfer; run explicitly when checking attachment limits"]
+    fn attachment_250_mib_round_trip() {
+        file_round_trip(500);
+    }
+    fn file_round_trip(count: u64) {
         let (_temp, store) = fixture();
         let chunk = vec![0x5a; CHUNK_BYTES];
-        let count = 40u64;
         let mut hash = Sha256::new();
         for _ in 0..count {
             hash.update(&chunk);

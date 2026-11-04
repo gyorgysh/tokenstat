@@ -44,7 +44,22 @@ actor ChatLocalAttachmentStore {
         return directory.appendingPathComponent(digest + ".json")
     }
     func stage(data: Data, name: String, mediaType: String?, reference: WorkReference) throws -> ChatAttachment {
-        guard !data.isEmpty, data.count <= Self.maximumBytes else { throw Failure.invalid }
+        guard !data.isEmpty, UInt64(data.count) <= ChatFileIO.maximumBytes else { throw Failure.invalid }
+        if data.count > Self.maximumBytes {
+            // Pasteboard bytes use the same file-backed storage and chunked
+            // upload as large file imports, without base64 JSON expansion.
+            _ = try originalAccess.get()
+            let temporary = directory.appendingPathComponent("import-" + UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            let source = temporary.appendingPathComponent("original")
+            #if os(macOS)
+            try data.write(to: source, options: .atomic)
+            #else
+            try data.write(to: source, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            #endif
+            return try stage(file: source, name: name, mediaType: mediaType, reference: reference)
+        }
         let attachment = ChatAttachment(id: "local-draft:" + UUID().uuidString, name: name, mediaType: mediaType, size: UInt64(data.count))
         var owner = reference
         owner.anchor = nil

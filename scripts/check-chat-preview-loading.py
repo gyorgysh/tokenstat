@@ -62,7 +62,7 @@ actor ChatAttachmentCache {
     }
 }
 enum ChatInbox { static let maxBytes = 6 * 1024 * 1024 }
-enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: UInt64?, isLocalImage: Bool) -> Bool { true } }
+enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: UInt64?, isLocalImage: Bool, isImage: Bool) -> Bool { true } }
 enum RemoteHostFeature { case chatRecovery; func isSupported(peer: String?) async -> Bool { true } }
 @MainActor enum Bridge {
     static var beforeProgress: (() -> Void)?

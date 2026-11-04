@@ -38,6 +38,14 @@ import Darwin
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
+        let largeFile = directory.appendingPathComponent("large.tiff")
+        try portrait.write(to: largeFile)
+        let largeWriter = try FileHandle(forWritingTo: largeFile)
+        try largeWriter.truncate(atOffset: 250 * 1024 * 1024)
+        try largeWriter.close()
+        let largeImage = await cache.image(data: nil, file: largeFile, maxPixel: 40)!
+        precondition(max(largeImage.width, largeImage.height) == 40, "A 250 MiB file still uses display-sized decoding")
+        try FileManager.default.removeItem(at: largeFile)
         let file = directory.appendingPathComponent("same-path.tiff")
         precondition(ChatImageFileIdentity(directory) == nil)
         let fifo = directory.appendingPathComponent("not-an-image.fifo")

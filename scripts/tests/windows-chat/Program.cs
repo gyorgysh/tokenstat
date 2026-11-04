@@ -130,8 +130,8 @@ try {
     File.Delete(stagedPath);
 } finally { File.Delete(stagedPath); }
 const long imageFileMaximum = 256L * 1024 * 1024;
-Check(ChatImagePolicy.DownloadLimit(false, true, imageFileMaximum) == 5L * 1024 * 1024,
-    "automatic remote image previews use the separate 5 MiB policy");
+Check(ChatImagePolicy.DownloadLimit(false, true, imageFileMaximum) == 250L * 1024 * 1024,
+    "automatic remote image previews allow 250 MiB");
 Check(ChatImagePolicy.DownloadLimit(false, false, imageFileMaximum) == imageFileMaximum
     && ChatImagePolicy.DownloadLimit(true, true, imageFileMaximum) == imageFileMaximum
     && ChatImagePolicy.DownloadLimit(true, false, imageFileMaximum) == imageFileMaximum,

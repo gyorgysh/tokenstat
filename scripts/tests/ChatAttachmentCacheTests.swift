@@ -154,7 +154,11 @@ struct ChatAttachmentCacheTests {
         }
 
         require(ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 5_242_880), "5 MiB automatic")
-        require(!ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 5_242_881), "Above 5 MiB manual")
+        require(!ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 5_242_881), "Large non-image files still require an explicit download")
+        for size: UInt64 in [12 * 1024 * 1024 + 1, 250 * 1024 * 1024] {
+            require(ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: size, isImage: true), "Large remote images load automatically")
+        }
+        require(!ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 250 * 1024 * 1024 + 1, isImage: true), "Remote previews retain a bounded file size")
         require(ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 200_000_000, isLocalImage: true), "Local images bypass network threshold")
         require(ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: nil, isLocalImage: true), "Local images with unknown size can load")
         require(!ChatAttachmentDownloadPolicy.permitsAutomaticDownload(size: 0, isLocalImage: true), "Empty local image is not fetched")
