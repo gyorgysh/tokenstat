@@ -7,15 +7,47 @@ import SwiftUI
 /// update, so following the mouse invalidates no view at all. Presence eases
 /// in and out on the frame clock, so the lens grows and fades rather than
 /// snapping on when the pointer arrives.
+///
+/// It also keeps how much the pointer has been moving lately, which turns a
+/// few dots near it into code, and the last few clicks, each of which sends
+/// a ring of code outward through the grid.
 @MainActor final class ChatStartPointer {
+    /// One frame's worth of pointer, in the backdrop's space.
+    struct Sample {
+        /// (x, y, presence).
+        var lens: SIMD3<Float>
+        /// How much the pointer is moving, 0 to 1.
+        var stir: Float
+        /// Each (x, y, age in seconds, strength). Strength 0 is an empty slot.
+        var ripples: [SIMD4<Float>]
+    }
+
     /// The pointer's position in the backdrop, nil once it has left.
-    var target: CGPoint?
+    var target: CGPoint? {
+        didSet {
+            guard let oldValue, let target else { return }
+            // Points travelled, so a small flick stirs a little and a sweep
+            // across the page stirs a lot.
+            stirring = min(1, stirring + hypot(target.x - oldValue.x, target.y - oldValue.y) / 140)
+        }
+    }
     private var point = CGPoint.zero
     private var presence = 0.0
+    private var stirring = 0.0
+    private var stir = 0.0
     private var sampledAt: Double?
+    private var ripples: [(point: CGPoint, at: Double)] = []
+    /// The shader's ring dies out by then.
+    private static let rippleLife = 1.8
 
-    /// (x, y, presence), eased towards the target at the moment of drawing.
-    func sample(at now: Double) -> SIMD3<Float> {
+    /// Sends a ring outward from `point`, in the backdrop's space.
+    func ripple(at point: CGPoint, now: Double = Date().timeIntervalSinceReferenceDate) {
+        ripples.append((point, now))
+        if ripples.count > 3 { ripples.removeFirst(ripples.count - 3) }
+    }
+
+    /// Eased towards the target at the moment of drawing.
+    func sample(at now: Double) -> Sample {
         let elapsed = sampledAt.map { min(0.25, max(0, now - $0)) } ?? 0
         sampledAt = now
         let follow = 1 - exp(-elapsed / 0.12)
@@ -24,7 +56,18 @@ import SwiftUI
             point.y += (target.y - point.y) * (presence < 0.01 ? 1 : follow)
         }
         presence += ((target == nil ? 0 : 1) - presence) * (1 - exp(-elapsed / 0.35))
-        return SIMD3(Float(point.x), Float(point.y), Float(presence))
+        // Rises quickly while the pointer moves, then lets go over about a
+        // second once it rests, so the code fades back into dots.
+        stir += (stirring - stir) * (1 - exp(-elapsed / 0.10))
+        stirring *= exp(-elapsed / 0.45)
+        if stir < 0.002 { stir = 0 }
+        ripples.removeAll { now - $0.at > Self.rippleLife }
+        var slots = ripples.map {
+            SIMD4(Float($0.point.x), Float($0.point.y), Float(max(0, now - $0.at)), 1)
+        }
+        while slots.count < 3 { slots.append(.zero) }
+        return Sample(lens: SIMD3(Float(point.x), Float(point.y), Float(presence)),
+                      stir: Float(stir), ripples: slots)
     }
 }
 
@@ -52,14 +95,22 @@ enum ChatStartGlassField {
     static let lightGain = 1.3
     #endif
 
+    /// `pointer` is already in the pane's own space. `glyphClock` runs on
+    /// wall time, so the code flickers even while the waves hold still.
     static func shader(size: CGSize, time: Double, lift: Bool, dark: Bool, moving: Bool,
-                       pointer: SIMD3<Float>, focus: UnitPoint) -> Shader {
-        Shader(function: ShaderLibrary.default.chatStartField, arguments: [
+                       pointer: ChatStartPointer.Sample, glyphClock: Double, focus: UnitPoint) -> Shader {
+        let lens = pointer.lens
+        let ripples = pointer.ripples
+        return Shader(function: ShaderLibrary.default.chatStartField, arguments: [
             .float2(size),
             .float4(Float(time), lift ? 1 : 0, dark ? 1 : 0, moving ? 1 : 0),
-            .float4(pointer.x, pointer.y, pointer.z, 0),
+            .float4(lens.x, lens.y, lens.z, 0),
             .float2(Float(focus.x), Float(focus.y)),
             .color(Theme.accent),
+            .float4(pointer.stir, Float(glyphClock.truncatingRemainder(dividingBy: 1000)), 0, 0),
+            .float4(ripples[0].x, ripples[0].y, ripples[0].z, ripples[0].w),
+            .float4(ripples[1].x, ripples[1].y, ripples[1].z, ripples[1].w),
+            .float4(ripples[2].x, ripples[2].y, ripples[2].z, ripples[2].w),
         ])
     }
 }
@@ -133,14 +184,12 @@ struct ChatStartBackdrop: View {
                         // The pointer arrives in the page's space, and the
                         // backdrop reaches past the page into any safe area.
                         let origin = pane.frame(in: .named(Self.space)).origin
-                        let sample = pointer.sample(at: now)
+                        let sample = Self.local(pointer.sample(at: now), origin: origin)
                         Rectangle()
                             .fill(Color.white.opacity(0.001))
                             .colorEffect(ChatStartGlassField.shader(
                                 size: pane.size, time: time, lift: lift || sending, dark: colorScheme == .dark,
-                                moving: moving,
-                                pointer: SIMD3(sample.x - Float(origin.x), sample.y - Float(origin.y), sample.z),
-                                focus: focus))
+                                moving: moving, pointer: sample, glyphClock: now, focus: focus))
                     }
                 }
                 .opacity(shown ? 1 : 0)
@@ -157,6 +206,15 @@ struct ChatStartBackdrop: View {
             lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
         }
         #endif
+    }
+
+    /// Moves a pointer sample from the page's space into the pane's.
+    private static func local(_ sample: ChatStartPointer.Sample, origin: CGPoint) -> ChatStartPointer.Sample {
+        let shift = SIMD2(Float(origin.x), Float(origin.y))
+        var moved = sample
+        moved.lens = SIMD3(sample.lens.x - shift.x, sample.lens.y - shift.y, sample.lens.z)
+        moved.ripples = sample.ripples.map { SIMD4($0.x - shift.x, $0.y - shift.y, $0.z, $0.w) }
+        return moved
     }
 
     private var keyLight: some View {

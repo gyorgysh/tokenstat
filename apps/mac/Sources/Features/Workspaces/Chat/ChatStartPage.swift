@@ -110,6 +110,13 @@ struct ChatStartPage: View {
                     // Centre the content with a small upward optical bias.
                     .padding(.bottom, 48 + min(96, pane.size.height * 0.07))
                     .frame(maxWidth: .infinity, minHeight: pane.size.height, alignment: .center)
+                    // A click on the empty page sends a ring of code out
+                    // through the grid. The composer's own controls sit on
+                    // top and keep their clicks. Reduce Motion has no ring.
+                    .contentShape(Rectangle())
+                    .onTapGesture(coordinateSpace: .named(ChatStartBackdrop.space)) { point in
+                        if !reduceMotion { pointer.ripple(at: point) }
+                    }
                 }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: showsStarters)
                 .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.1), value: needsRepository)
