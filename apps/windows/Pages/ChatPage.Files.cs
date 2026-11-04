@@ -217,11 +217,17 @@ internal sealed partial class ChatPage
                 }
                 else
                 {
-                    var relay = Format.Flag(caps, "relay"); if (relay && !await ConfirmFileRelayAsync(item.Name, size, caps?["relayRemainingBytes"] is null ? null : Format.Long(caps, "relayRemainingBytes"))) throw new OperationCanceledException();
+                    var relay = false;
                     using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                     long offset = 0;
                     var prefix = new byte[FileChunkBytes];
                     while (true) { var read = await output.ReadAsync(prefix, cancel.Token); if (read == 0) break; hash.AppendData(prefix, 0, read); offset += read; }
+                    // A complete local file needs checksum verification, not relay bytes.
+                    if (offset < size && Format.Flag(caps, "relay"))
+                    {
+                        if (!await ConfirmFileRelayAsync(item.Name, size, caps?["relayRemainingBytes"] is null ? null : Format.Long(caps, "relayRemainingBytes")) || !Current()) throw new OperationCanceledException();
+                        relay = true;
+                    }
                     while (offset < size)
                     {
                         cancel.Token.ThrowIfCancellationRequested(); if (!Current()) throw new OperationCanceledException();

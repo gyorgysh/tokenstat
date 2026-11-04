@@ -157,15 +157,21 @@ extension Bridge {
         let info = try await chatInvoke(peer:peer,"chat.fileDownloadInfo",["id":id,"attachmentId":attachmentID],patience:Patience.long,expectedScope:scope,expectedGeneration:generation,as:ChatDownloadInfo.self)
         guard let size = info.attachment.size, size > 0, size <= min(capabilities.maxFileBytes, ChatFileIO.maximumBytes) else { throw CocoaError(.fileReadTooLarge) }
         var allowRelay = false
-        if capabilities.relay { guard await confirmRelay(capabilities.relayRemainingBytes) else { throw CancellationError() }; allowRelay = true }
         let owner = try JSONEncoder().encode(scope).base64EncodedString()
         let key = SHA256.hash(data: Data([owner, peer ?? "local", id, attachmentID, info.sha256].joined(separator:"|").utf8)).map { String(format:"%02x",$0) }.joined()
         try await ChatFileTransferClaims.shared.acquire(key)
         defer { Task { await ChatFileTransferClaims.shared.release(key) } }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tokenstat-chat-files/transfer-" + key, isDirectory:true)
-        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         let name = ChatFileStaging.sanitized(info.attachment.name)
         let file = directory.appendingPathComponent(name == "." || name == ".." || name.isEmpty ? "attachment" : name)
+        // A completed local file needs verification, but no relay bytes.
+        // Keep consent before opening a partial so declining preserves it.
+        let existingSize = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        if capabilities.relay && existingSize != Int(size) {
+            guard await confirmRelay(capabilities.relayRemainingBytes) else { throw CancellationError() }
+            allowRelay = true
+        }
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         if !FileManager.default.fileExists(atPath:file.path) {
             guard FileManager.default.createFile(atPath:file.path,contents:nil,attributes:[.posixPermissions:0o600]) else { throw CocoaError(.fileWriteUnknown) }
         }
@@ -176,7 +182,9 @@ extension Bridge {
             var hash = SHA256()
             let existing = try FileHandle(forReadingFrom:file)
             defer { try? existing.close() }
+            try Task.checkCancellation()
             while let data = try existing.read(upToCount:ChatFileIO.chunkBytes), !data.isEmpty {
+                try Task.checkCancellation()
                 offset += UInt64(data.count)
                 guard offset <= size else { throw CocoaError(.fileReadCorruptFile) }
                 hash.update(data:data)
