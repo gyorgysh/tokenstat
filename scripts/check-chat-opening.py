@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-"""Exercise production Mac opening methods against overlapping held replies."""
+"""Exercise production Apple opening methods against overlapping held replies."""
 from pathlib import Path
 import subprocess
 import sys
@@ -26,6 +26,9 @@ methods += '\n' + member('    private func forgetWindow(')
 methods += '\n' + member('    func reopenAtLatest(')
 if '    private func readOpeningEvents(' in source:
     methods += '\n' + member('    private func readOpeningEvents(')
+
+if '--mobile' in sys.argv:
+    methods = methods.replace('#if os(macOS)', '#if !MOBILE_HISTORY_CHECK')
 
 fixture = r'''import Foundation
 struct Event: Sendable { let seq: UInt64? }
@@ -224,10 +227,58 @@ METHODS
     }
 }
 '''.replace('METHODS', methods)
+if '--mobile' in sys.argv:
+    fixture = fixture[:fixture.index('@main struct Check')] + r'''@main struct Check {
+    @MainActor static func main() async {
+        let model = Model()
+        Bridge.tailFailure = true
+        let initial = Task { await model.openEvents(id: "A", generation: 1) }
+        await until { Bridge.replies.count == 1 }
+        Bridge.fail(0)
+        let initialAccepted = await initial.value
+        precondition(!initialAccepted && !model.liveWindowLoaded)
+        Bridge.tailFailure = false
+        Bridge.tailCalls = 0
+        var finished = false
+        let recovery = Task {
+            let result = await model.loadEvents(id: "A", reset: false, generation: 1, quiet: true)
+            finished = true
+            return result
+        }
+        await until { finished || Bridge.replies.count == 2 }
+        guard Bridge.replies.count == 2 && Bridge.tailCalls == 0 else {
+            print("FAIL: mobile recovery read from the archive start instead of reopening the newest page")
+            exit(1)
+        }
+        Bridge.finish(1, seq: 5000)
+        let recovered = await recovery.value
+        precondition(recovered && model.liveWindowLoaded && model.hasEarlier)
+        precondition(model.events.first?.seq == 5000 && model.earlierCursor == "earlier")
+        precondition(model.conversationUsage == 1 && model.windowReplacementTicket == nil)
+        // Older hosts still use the full read once paging is unavailable.
+        let legacy = Model()
+        legacy.pagingUnavailable = true
+        let calls = Bridge.tailCalls
+        let legacyRecovered = await legacy.loadEvents(id: "A", reset: false, generation: 1, quiet: true)
+        precondition(legacyRecovered && legacy.liveWindowLoaded && !legacy.hasEarlier)
+        precondition(Bridge.tailCalls == calls + 1 && Bridge.replies.count == 2)
+        // A reply held across navigation cannot fill the next conversation.
+        let switched = Model()
+        let stale = Task { await switched.loadEvents(id: "A", reset: false, generation: 1, quiet: true) }
+        await until { Bridge.replies.count == 3 }
+        switched.generation = 2; switched.selected?.id = "B"
+        Bridge.finish(2, seq: 90)
+        let staleAccepted = await stale.value
+        precondition(!staleAccepted && switched.events.isEmpty && !switched.liveWindowLoaded)
+        print("Mobile opening: bounded recovery, paging metadata, older hosts and navigation passed")
+    }
+}
+'''
 with tempfile.TemporaryDirectory(prefix='tokenstat-chat-opening-') as directory:
     work = Path(directory)
     check = work / 'Check.swift'; check.write_text(fixture)
     subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5',
+                    '-D', 'MOBILE_HISTORY_CHECK',
                     str(check), str(root / 'apps/mac/Sources/Features/Workspaces/Chat/ChatPolling.swift'),
                     '-o', str(work / 'check')], check=True)
     subprocess.run([str(work / 'check')], check=True, timeout=30)

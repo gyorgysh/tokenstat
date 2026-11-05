@@ -4310,7 +4310,6 @@ final class ChatModel {
                             onFreshEvents: (([ChatTimelineEvent]) -> Void)? = nil,
                             onMoreEvents: ((Bool) -> Void)? = nil) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
-        #if os(macOS)
         if !reset, !liveWindowLoaded {
             // An interrupted first open has no valid tail cursor. Retry the
             // bounded newest page instead of treating an unread chat as empty.
@@ -4318,7 +4317,6 @@ final class ChatModel {
             defer { if selectionGeneration == generation { openingConversation = false } }
             return await openEvents(id: id, generation: generation, quiet: quiet)
         }
-        #endif
         guard reset || windowReplacementTicket == nil else { return false }
         let replacement = reset ? beginWindowReplacement() : nil
         let requestedEpoch = eventsEpoch
