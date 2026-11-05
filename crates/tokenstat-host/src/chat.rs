@@ -31,7 +31,8 @@ pub(crate) mod sharing;
 #[path = "chat_steer.rs"]
 mod steering;
 
-const EVENTS_CAP: u64 = 1024 * 1024;
+#[cfg(test)]
+const LEGACY_EVENTS_CAP: u64 = 1024 * 1024;
 /// How many events one page carries when the client does not say.
 const PAGE_EVENTS: usize = 300;
 /// The most a client may ask for in one page. A client that wants more than
@@ -5232,7 +5233,6 @@ impl Store {
         id: &str,
         event: &StoredEvent,
     ) -> Result<(), String> {
-        use std::io::Read;
         let _guard = crate::work_handoff_store::transcript_lock(&self.root)?;
         let directory = self.verified_append_directory(id)?;
         let path = directory.join("events.ndjson");
@@ -5246,11 +5246,8 @@ impl Store {
         }
         let mut file = options.open(&path).map_err(|e| e.to_string())?;
         let metadata = file.metadata().map_err(|e| e.to_string())?;
-        if !metadata.is_file()
-            || metadata.len()
-                > PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64
-        {
-            return Err("conversation transcript is not a bounded regular file".into());
+        if !metadata.is_file() {
+            return Err("conversation transcript is not a regular file".into());
         }
         let end = metadata.len();
         let (base, tail) = read_back_checked(&path, end, 1, true)?;
@@ -5262,24 +5259,7 @@ impl Store {
         if encoded.len() as u64 > PAGE_RECORD_BYTES {
             return Err("conversation event exceeds the record limit".into());
         }
-        if end + encoded.len() as u64 > EVENTS_CAP {
-            let mut bytes = Vec::new();
-            (&mut file)
-                .take(PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64 + 1)
-                .read_to_end(&mut bytes)
-                .map_err(|e| e.to_string())?;
-            if bytes.len() as u64 != end {
-                return Err("conversation transcript changed while reading".into());
-            }
-            bytes.extend_from_slice(&encoded);
-            // Leave room for streamed deltas instead of rewriting on every
-            // token. A single readable large record is retained in full.
-            let cap = (EVENTS_CAP as usize * 3 / 4)
-                .max(encoded.len() + crate::work_transcript_identity::SUMMARY_BYTES);
-            let kept = crate::work_transcript_identity::retained(&bytes, cap)?;
-            drop(file);
-            replace_chat_file(&path, &kept)?;
-        } else if let Err(error) = file.write_all(&encoded) {
+        if let Err(error) = file.write_all(&encoded) {
             // An ordinary I/O failure must not leave half a JSON record.
             // A process crash is detected by the complete-tail check above.
             file.set_len(end).map_err(|e| e.to_string())?;
@@ -12575,7 +12555,7 @@ mod tests {
     }
 
     #[test]
-    fn transcript_retention_preserves_legacy_and_new_anchors_across_pages() {
+    fn legacy_compaction_preserves_anchors_and_still_resets_old_cursors() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         conversation_for_receipts(&store, "retention");
@@ -12616,6 +12596,7 @@ mod tests {
                     },
                 )
                 .unwrap();
+            simulate_legacy_retention(&path);
             let (rows, end) = store.events("retention", 0).unwrap();
             let first = rows[0]["seq"].as_u64().unwrap();
             let changed = first != previous_first;
@@ -12660,7 +12641,7 @@ mod tests {
                 fs::metadata(&path).unwrap().len(),
                 "transport offsets stay physical"
             );
-            assert!(end <= EVENTS_CAP);
+            assert!(end <= LEGACY_EVENTS_CAP);
         }
         assert!(trims >= 3, "exercise repeated compaction");
         assert!(
@@ -13186,7 +13167,7 @@ mod tests {
     }
 
     #[test]
-    fn retention_keeps_usage_from_evicted_turns() {
+    fn legacy_retention_keeps_usage_from_evicted_turns() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         conversation_for_receipts(&store, "usage-retention");
@@ -13219,6 +13200,7 @@ mod tests {
                 )
                 .unwrap();
         }
+        simulate_legacy_retention(&store.events_path("usage-retention"));
         let page = store.event_page("usage-retention", None, 300).unwrap();
         let mut cursor = page.cursor.clone();
         let mut saw_trimmed_origin = page.history_trimmed;
@@ -13238,11 +13220,11 @@ mod tests {
         assert_eq!(usage["turns"], 80);
         assert!((usage["cost"].as_f64().unwrap() - 0.8).abs() < 0.000001);
         let bytes = fs::read(store.events_path("usage-retention")).unwrap();
-        assert!(bytes.len() as u64 <= EVENTS_CAP);
+        assert!(bytes.len() as u64 <= LEGACY_EVENTS_CAP);
     }
 
     #[test]
-    fn a_maximum_record_can_be_followed_by_another_after_usage_retention() {
+    fn a_maximum_record_can_be_followed_by_another_without_trimming_history() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         conversation_for_receipts(&store, "maximum");
@@ -13306,7 +13288,8 @@ mod tests {
             page.events.last().unwrap()["text"],
             "After the large record"
         );
-        assert!(page.history_trimmed);
+        assert!(!page.history_trimmed);
+        assert!(fs::metadata(store.events_path("maximum")).unwrap().len() > PAGE_RECORD_BYTES);
     }
 
     #[test]
@@ -13328,7 +13311,7 @@ mod tests {
         fs::write(&path, b"").unwrap();
         let large = StoredEvent::User {
             steer: false,
-            text: "x".repeat(EVENTS_CAP as usize + 100),
+            text: "x".repeat(LEGACY_EVENTS_CAP as usize + 100),
             at_ms: 3,
         };
         store.append("bounded", &large).unwrap();
@@ -13343,9 +13326,13 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), before);
         store.append("bounded", &event).unwrap();
         let rows = records(&fs::read(&path).unwrap(), 0);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0]["text"], "next");
-        assert!(rows[0]["seq"].as_u64().unwrap() >= before.len() as u64);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0]["text"],
+            "x".repeat(LEGACY_EVENTS_CAP as usize + 100)
+        );
+        assert_eq!(rows[1]["text"], "next");
+        assert!(rows[1]["seq"].as_u64().unwrap() >= before.len() as u64);
     }
 
     #[test]
@@ -15834,5 +15821,145 @@ mod tests {
             start.elapsed().as_secs_f64() * 1000.0,
             exported.len()
         );
+    }
+
+    // Reproduce older hosts rewriting an archive; current writers keep it intact.
+    fn simulate_legacy_retention(path: &Path) {
+        let bytes = fs::read(path).unwrap();
+        if bytes.len() as u64 > LEGACY_EVENTS_CAP {
+            let kept = crate::work_transcript_identity::retained(
+                &bytes,
+                LEGACY_EVENTS_CAP as usize * 3 / 4,
+            )
+            .unwrap();
+            replace_chat_file(path, &kept).unwrap();
+        }
+    }
+    #[test]
+    fn large_tool_results_preserve_history_for_multiple_readers() {
+        let root = tempfile::tempdir().unwrap();
+        let writer = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&writer, "readers");
+        writer.save().unwrap();
+        writer
+            .append(
+                "readers",
+                &StoredEvent::User {
+                    text: "Please review this file".into(),
+                    at_ms: 1,
+                    steer: false,
+                },
+            )
+            .unwrap();
+        writer
+            .append(
+                "readers",
+                &StoredEvent::Agent {
+                    event: Event::Text {
+                        delta: "I will inspect the file.".into(),
+                    },
+                    at_ms: 2,
+                    backend: "claude".into(),
+                },
+            )
+            .unwrap();
+        writer
+            .append(
+                "readers",
+                &StoredEvent::Agent {
+                    event: Event::ToolStart {
+                        call_id: "read".into(),
+                        verb: "Read".into(),
+                        target: "large.txt".into(),
+                        input: json!({"padding":"x".repeat(600_000)}),
+                    },
+                    at_ms: 3,
+                    backend: "claude".into(),
+                },
+            )
+            .unwrap();
+        let readers = [
+            Store::load_at(writer.root.clone()),
+            Store::load_at(writer.root.clone()),
+        ];
+        let before = [
+            readers[0]
+                .event_page_positions("readers", None, 10, false)
+                .unwrap(),
+            readers[1]
+                .event_page_positions("readers", None, 10, true)
+                .unwrap(),
+        ];
+        writer
+            .append(
+                "readers",
+                &StoredEvent::Agent {
+                    event: Event::ToolEnd {
+                        call_id: "read".into(),
+                        ok: true,
+                        detail: Some("y".repeat(600_000)),
+                    },
+                    at_ms: 4,
+                    backend: "claude".into(),
+                },
+            )
+            .unwrap();
+        std::thread::scope(|scope| {
+            let checks: Vec<_> = readers
+                .iter()
+                .zip(before.iter())
+                .enumerate()
+                .map(|(index, (reader, before))| {
+                    scope.spawn(move || {
+                        let tail = reader
+                            .tail_events_positions(
+                                "readers",
+                                before.next_offset,
+                                Some(&before.tail_cursor),
+                                index != 0,
+                            )
+                            .unwrap();
+                        let reopened = reader
+                            .event_page_positions("readers", None, 10, index != 0)
+                            .unwrap();
+                        eprintln!(
+                            "reader {index}: reset={}, reopened rows={}, earlier={}, trimmed={}",
+                            tail.reset,
+                            reopened.events.len(),
+                            reopened.has_earlier,
+                            reopened.history_trimmed
+                        );
+                        assert!(
+                            !tail.reset,
+                            "Appending a tool result must not invalidate another viewer's history"
+                        );
+                        let mut all = reopened.events;
+                        let mut cursor = reopened.cursor;
+                        while let Some(position) = cursor {
+                            let page = reader
+                                .event_page_positions("readers", Some(&position), 10, index != 0)
+                                .unwrap();
+                            assert!(!page.history_trimmed);
+                            all.extend(page.events);
+                            cursor = page.cursor;
+                        }
+                        assert!(
+                            all.iter()
+                                .any(|row| row["text"] == "Please review this file"),
+                            "Original prompt was discarded"
+                        );
+                        assert!(
+                            all.iter()
+                                .any(|row| row["event"]["delta"] == "I will inspect the file."),
+                            "Original reply was discarded"
+                        );
+                        assert_eq!(all.len(), 4);
+                    })
+                })
+                .collect();
+            for check in checks {
+                check.join().unwrap();
+            }
+        });
     }
 }

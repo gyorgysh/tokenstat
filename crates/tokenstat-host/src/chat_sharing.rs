@@ -119,6 +119,22 @@ fn reparse_or_link(metadata: &fs::Metadata) -> bool {
     metadata.file_type().is_symlink()
 }
 fn read_private(path: &Path, limit: u64, allow_missing: bool) -> Result<Vec<u8>, DispatchError> {
+    read_private_bounded(path, limit, allow_missing, invalid)
+}
+
+fn sharing_history_too_large() -> DispatchError {
+    DispatchError::new(
+        "chat_history_too_large",
+        "This chat exceeds the 4 MiB sharing preview limit. Your saved messages have not been removed.",
+    )
+}
+
+fn read_private_bounded(
+    path: &Path,
+    limit: u64,
+    allow_missing: bool,
+    too_large: fn() -> DispatchError,
+) -> Result<Vec<u8>, DispatchError> {
     use std::io::Read;
     let mut options = OpenOptions::new();
     options.read(true);
@@ -140,15 +156,18 @@ fn read_private(path: &Path, limit: u64, allow_missing: bool) -> Result<Vec<u8>,
         Err(_) => return Err(invalid()),
     };
     let metadata = file.metadata().map_err(|_| invalid())?;
-    if !metadata.is_file() || reparse_or_link(&metadata) || metadata.len() > limit {
+    if !metadata.is_file() || reparse_or_link(&metadata) {
         return Err(invalid());
+    }
+    if metadata.len() > limit {
+        return Err(too_large());
     }
     let mut bytes = Vec::new();
     file.take(limit + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| invalid())?;
     if bytes.len() as u64 > limit {
-        return Err(invalid());
+        return Err(too_large());
     }
     Ok(bytes)
 }
@@ -602,7 +621,7 @@ impl Store {
                 Err(error) if error.kind()==std::io::ErrorKind::NotFound && chat.last_message_at_ms.is_none() => {}
                 _ => return Err(invalid()),
             }
-            let bytes = read_private(&directory.join("events.ndjson"), HISTORY_LIMIT, chat.last_message_at_ms.is_none())?;
+            let bytes = read_private_bounded(&directory.join("events.ndjson"), HISTORY_LIMIT, chat.last_message_at_ms.is_none(), sharing_history_too_large)?;
             operation(index, chat, &bytes)
         })
     }

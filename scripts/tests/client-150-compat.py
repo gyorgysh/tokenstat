@@ -172,7 +172,7 @@ def main():
                     transcript.parent.mkdir(parents=True, exist_ok=True)
                     positions, offset = [], 0
                     with transcript.open("wb") as output:
-                        for index in range(24):
+                        for index in range(48):
                             positions.append(offset)
                             row = {"kind": "user", "text": f"row-{index}:" + "x" * (128 * 1024),
                                    "at_ms": index + 1, "seq": index * 1_000_000}

@@ -2,6 +2,45 @@
 
 use super::*;
 
+#[test]
+fn long_private_history_is_preserved_when_it_exceeds_the_sharing_preview_limit() {
+    let (_root, store, chat) = fixture();
+    for at_ms in 0..12 {
+        store
+            .append(
+                &chat.id,
+                &StoredEvent::User {
+                    steer: false,
+                    text: format!("Message {at_ms} {}", "x".repeat(512 * 1024)),
+                    at_ms,
+                },
+            )
+            .unwrap();
+    }
+    let before = fs::read(store.events_path(&chat.id)).unwrap();
+    assert!(before.len() as u64 > HISTORY_LIMIT);
+    let error = store
+        .sharing_history(&chat.workspace_id, &chat.id)
+        .err()
+        .unwrap();
+    assert_eq!(error.code, "chat_history_too_large");
+    assert_eq!(fs::read(store.events_path(&chat.id)).unwrap(), before);
+    assert!(
+        store
+            .sharing_binding(&chat.workspace_id, &chat.id)
+            .unwrap()
+            .is_none()
+    );
+    let records = records(&before, 0);
+    assert_eq!(records.len(), 12);
+    assert!(
+        records[0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Message 0 ")
+    );
+}
+
 pub(super) fn fixture() -> (tempfile::TempDir, Store, Conversation) {
     let root = tempfile::tempdir().unwrap();
     fs::create_dir_all(root.path().join("chat")).unwrap();
