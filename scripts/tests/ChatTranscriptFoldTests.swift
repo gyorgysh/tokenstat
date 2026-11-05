@@ -2,6 +2,9 @@
 // Compile with ChatDisplayItem.swift ChatTranscriptFold.swift ChatQuestion.swift MuseToolPresentation.swift using swiftc -parse-as-library, then run.
 import Foundation
 
+// These tests verify row ownership, not translated display labels.
+enum L10n { static func text(_ key: String, _ arguments: String...) -> String { key } }
+
 // Two models from Bridge/Models.swift, cut to what a row needs.
 struct ChatAttachment: Hashable { var id: String }
 struct ChatApproval: Hashable { var id: String; var decision: String? }
@@ -268,6 +271,13 @@ struct ChatTranscriptFoldTests {
         require(ChatTranscriptFold.owner(of: "a1", in: standard) == nil, "a top-level row has no owner")
         require(ChatTranscriptFold.owner(of: "missing", in: standard) == nil, "an unknown row has no owner")
         require(ChatTranscriptFold.owner(of: "t2", in: fold(rows, .minimal)) == "g:t1", "a step in a work line")
+        var imageTool = tool("image-tool", "Read")
+        imageTool.imageRowIDs = ["image-result"]
+        let imageRows = [user("u1"), imageTool, tool("next-read", "Read"), say("a1")]
+        let closed = fold(imageRows, .standard)
+        require(ChatTranscriptFold.owner(of: "image-result", in: closed) == "g:image-tool",
+                "an image anchor must reveal its closed tool group")
+
     }
 
     static func countsMatchTheirMembers() {
