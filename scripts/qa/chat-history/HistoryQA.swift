@@ -175,6 +175,8 @@ private struct Fixture: Decodable {
 
     func start() async {
         guard !started else { return }; started = true
+        // Each fixture starts from the same presentation, independent of prior runs.
+        ChatDetailPreference.shared.level = .standard
         BridgeObserver.report = { [weak self] method, _, error in
             guard let error else { return }
             let message = error.localizedDescription
@@ -219,9 +221,10 @@ private struct Fixture: Decodable {
             case "hide": showing = false
             case "show": showing = true
             case "earlier": await model.loadEarlier()
-            case "search-folded-step":
+            case "fold-steps":
                 ChatDetailPreference.shared.level = .minimal
                 model.setAllGroups(open: false)
+            case "search-folded-step":
                 guard let row = model.displayItems.first(where: {
                     if case let .tool(tool) = $0.kind { return tool.callId == "qa-search-first" }
                     return false

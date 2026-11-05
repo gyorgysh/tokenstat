@@ -47,7 +47,10 @@ These checks do not establish WAN or relay UI behavior.
 
 Use `--search-only` to check that a search request opens the first step of a
 collapsed tool group and scrolls its text into view. It streams two completed
-tool steps followed by a long reply, then searches back to the first step.
+tool steps followed by a long reply, renders a change to Minimal detail, then
+searches back to the first step. Each app starts at Standard detail so saved
+QA preferences cannot change the test. Detail changes and search requests
+are separate viewport choices and must not be issued in the same action.
 This mode checks mounted-conversation search placement; it does not exercise
 the search sheet or substitute for the full reconnect run. Add `--desktop-only`
 for a Mac-only check.

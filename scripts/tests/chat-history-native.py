@@ -308,6 +308,9 @@ print(json.dumps({'events':len(result['result']['events'])}))
             await wait(lambda: all(state(role) and not state(role)["running"] for role in roles))
             await visible("search-finished")
             for role in roles:
+                # Render the detail change before requesting a different reading place.
+                # Both are explicit viewport choices; combining them makes them compete.
+                await native(role, "fold-steps")
                 await native(role, "search-folded-step", "quartz-search-target")
             prove("Search reveals the first folded tool step and visibly scrolls to it in each native view")
             atomic_json(run_root / "result.json", {"ok": True, "proofs": proofs, "states": {role: state(role) for role in roles}})
