@@ -111,6 +111,233 @@ for line in sys.stdin:
     assert_eq!(results, 1);
 }
 
+#[test]
+fn large_initial_prompt_does_not_block_provider_output() {
+    let root = tempfile::tempdir().unwrap();
+    let fake = root.path().join("fake-claude");
+    fs::write(&fake, r#"#!/usr/bin/env python3
+import sys,json,os,pathlib
+root=pathlib.Path(__file__).parent
+(root/'group').write_text(str(os.getpgrp()))
+def emit(value): print(json.dumps(value),flush=True)
+initialize=json.loads(sys.stdin.readline())
+emit({'type':'control_response','response':{'request_id':initialize['request_id'],'subtype':'success'}})
+# Startup diagnostics can fill stdout before the CLI reads its next input.
+for index in range(40):
+ emit({'type':'system','subtype':'status','index':index,'detail':'x'*(512*1024)})
+message=json.loads(sys.stdin.readline())
+assert message['type']=='user' and message['message']['content'][0]['text']=='p'*(1024*1024)
+(root/'prompt-read').write_text('once')
+emit({'type':'system','subtype':'init','session_id':'session'})
+emit({'type':'assistant','message':{'content':[{'type':'text','text':'Prompt received once.'}]}})
+emit({'type':'result','is_error':False})
+"#).unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.path().join("config.json");
+    fs::write(
+        &config,
+        json!({"backend":"claude","argv":[fake,"-p","p".repeat(1024*1024)]}).to_string(),
+    )
+    .unwrap();
+    let mut runner = Runner(
+        Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+            .args(["chat-live", config.to_str().unwrap()])
+            .stdin(Stdio::null())
+            .stdout(fs::File::create(root.path().join("output")).unwrap())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let until = Instant::now() + Duration::from_secs(5);
+    let mut status = None;
+    while Instant::now() < until {
+        status = runner.0.try_wait().unwrap();
+        if status.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if status.is_none() {
+        // The old writer blocks even the wrapper's signal handler. Retire
+        // only this fixture's still-owned provider group before failing.
+        let group: i32 = fs::read_to_string(root.path().join("group"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(group > 1 && group != unsafe { libc::getpgrp() });
+        unsafe {
+            libc::kill(-group, libc::SIGKILL);
+        }
+        panic!("Sending the initial prompt blocked provider output and turn completion");
+    }
+    assert!(status.unwrap().success());
+    assert_eq!(
+        fs::read_to_string(root.path().join("prompt-read")).unwrap(),
+        "once"
+    );
+    let output = fs::read_to_string(root.path().join("output")).unwrap();
+    let rows: Vec<Value> = output
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(
+        rows.iter().filter(|row| row["subtype"] == "status").count(),
+        40
+    );
+    assert_eq!(rows.iter().filter(|row| row["type"] == "result").count(), 1);
+}
+
+#[test]
+fn stop_remains_responsive_during_an_incomplete_steering_write() {
+    let root = tempfile::tempdir().unwrap();
+    let fake = root.path().join("fake-claude");
+    fs::write(&fake, r#"#!/usr/bin/env python3
+import sys,json,os,pathlib,time
+root=pathlib.Path(__file__).parent
+(root/'group').write_text(str(os.getpgrp()))
+def emit(value): print(json.dumps(value),flush=True)
+for line in sys.stdin:
+ message=json.loads(line)
+ if message.get('type')=='control_request':
+  emit({'type':'control_response','response':{'request_id':message['request_id'],'subtype':'success'}})
+ elif message.get('type')=='user':
+  emit({'type':'system','subtype':'init','session_id':'session'})
+  # Leave stdin open without reading the next message.
+  time.sleep(60)
+"#).unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.path().join("config.json");
+    fs::write(
+        &config,
+        json!({"backend":"claude","argv":[fake,"-p","literal prompt"]}).to_string(),
+    )
+    .unwrap();
+    let mut runner = Runner(
+        Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+            .args(["chat-live", config.to_str().unwrap()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    wait_for(|| root.path().join("ready.json").is_file());
+    let id = "00000000000040008000000000000001";
+    let request = root.path().join(format!("request-{id}.json"));
+    let response = root.path().join(format!("response-{id}.json"));
+    let temporary = request.with_extension("tmp");
+    fs::write(
+        &temporary,
+        json!({"id":id,"steer":"x".repeat(1024*1024),"expires":u64::MAX}).to_string(),
+    )
+    .unwrap();
+    fs::rename(temporary, &request).unwrap();
+    let until = Instant::now() + Duration::from_secs(2);
+    while request.exists() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let admitted = !request.exists();
+    let start = Instant::now();
+    fs::write(root.path().join("stop"), "").unwrap();
+    let mut status = None;
+    while start.elapsed() < Duration::from_secs(3) {
+        status = runner.0.try_wait().unwrap();
+        if status.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if status.is_none() {
+        let group: i32 = fs::read_to_string(root.path().join("group"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(group > 1 && group != unsafe { libc::getpgrp() });
+        unsafe {
+            libc::kill(-group, libc::SIGKILL);
+        }
+        panic!("An incomplete steering write blocked Stop");
+    }
+    assert!(admitted && !status.unwrap().success());
+    if let Ok(response) = fs::read(&response) {
+        let response: Value = serde_json::from_slice(&response).unwrap();
+        assert_ne!(
+            response["ok"], true,
+            "A partial write must not be reported as accepted"
+        );
+    }
+    println!("Stop during blocked steering input: {:?}", start.elapsed());
+}
+
+#[test]
+fn a_completed_turn_survives_an_unconfirmed_steering_write() {
+    let root = tempfile::tempdir().unwrap();
+    let fake = root.path().join("fake-claude");
+    fs::write(&fake, r#"#!/usr/bin/env python3
+import sys,json,pathlib,time,os
+root=pathlib.Path(__file__).parent
+(root/'group').write_text(str(os.getpgrp()))
+def emit(value): print(json.dumps(value),flush=True)
+for line in sys.stdin:
+ message=json.loads(line)
+ if message.get('type')=='control_request':
+  emit({'type':'control_response','response':{'request_id':message['request_id'],'subtype':'success'}})
+ elif message.get('type')=='user':
+  emit({'type':'system','subtype':'init','session_id':'session'})
+  while not (root/'finish').exists(): time.sleep(0.01)
+  emit({'type':'assistant','message':{'content':[{'type':'text','text':'Original work completed.'}]}})
+  emit({'type':'result','is_error':False})
+  break
+"#).unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.path().join("config.json");
+    fs::write(
+        &config,
+        json!({"backend":"claude","argv":[fake,"-p","literal prompt"]}).to_string(),
+    )
+    .unwrap();
+    let mut runner = Runner(
+        Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+            .args(["chat-live", config.to_str().unwrap()])
+            .stdin(Stdio::null())
+            .stdout(fs::File::create(root.path().join("output")).unwrap())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    wait_for(|| root.path().join("ready.json").is_file());
+    let id = "00000000000040008000000000000001";
+    let request = root.path().join(format!("request-{id}.json"));
+    let response = root.path().join(format!("response-{id}.json"));
+    let temporary = request.with_extension("tmp");
+    fs::write(
+        &temporary,
+        json!({"id":id,"steer":"x".repeat(1024*1024),"expires":u64::MAX}).to_string(),
+    )
+    .unwrap();
+    fs::rename(temporary, &request).unwrap();
+    let until = Instant::now() + Duration::from_secs(2);
+    while request.exists() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    fs::write(root.path().join("finish"), "").unwrap();
+    wait_for(|| runner.0.try_wait().unwrap().is_some());
+    assert!(
+        runner.0.wait().unwrap().success(),
+        "A failed steer must not discard the completed turn"
+    );
+    let response: Value = serde_json::from_slice(&fs::read(response).unwrap()).unwrap();
+    assert_eq!(response["ok"], false);
+    assert_eq!(response["unknown"], true);
+    let output = fs::read_to_string(root.path().join("output")).unwrap();
+    let rows: Vec<Value> = output
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(output.contains("Original work completed."));
+    assert_eq!(rows.iter().filter(|row| row["type"] == "result").count(), 1);
+}
+
 fn wait_for(mut ready: impl FnMut() -> bool) {
     let until = Instant::now() + Duration::from_secs(8);
     while !ready() {

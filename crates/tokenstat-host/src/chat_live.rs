@@ -13,6 +13,7 @@ use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex, Once, OnceLock, PoisonError, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+mod input;
 mod output;
 
 const INTERRUPT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -85,6 +86,14 @@ static STOPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 #[cfg(unix)]
 extern "C" fn stopped(_: libc::c_int) {
     STOPPED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn stop_requested(directory: &Path) -> bool {
+    #[cfg(unix)]
+    if STOPPED.load(std::sync::atomic::Ordering::SeqCst) {
+        return true;
+    }
+    directory.join("stop").is_file()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -348,8 +357,18 @@ struct Protocol {
     backend: String,
     thread: String,
     turn: String,
-    pending: HashMap<String, (PathBuf, bool)>,
+    pending: HashMap<String, Pending>,
     usage: Value,
+    deferred_result: Option<Value>,
+}
+
+struct Pending {
+    path: PathBuf,
+    steer: bool,
+    // The positive mailbox response has been posted.
+    accepted: bool,
+    // All input bytes and the flush completed, even if the echo is pending.
+    written: bool,
 }
 
 /// App-server totals are cumulative across resumed turns. Emit only the
@@ -622,12 +641,11 @@ fn read_diagnostics(child: &mut Child) -> (Arc<Mutex<Vec<u8>>>, mpsc::Receiver<(
 }
 
 impl Protocol {
-    fn interrupt(&self, input: &mut impl Write, messages: &output::Messages) {
+    fn interrupt(&self, input: &mut input::Input, messages: &output::Messages) {
         if self.backend != "codex" || self.thread.is_empty() || self.turn.is_empty() {
             return;
         }
-        if send(
-            input,
+        if input.send(
             &json!({"id":"interrupt","method":"turn/interrupt","params":{"threadId":self.thread,"turnId":self.turn}}),
         )
         .is_err()
@@ -662,7 +680,11 @@ impl Protocol {
         }
     }
 
-    fn controls(&mut self, directory: &Path, input: &mut impl Write) -> Result<(), String> {
+    fn controls(&mut self, directory: &Path, input: &mut input::Input) -> Result<(), String> {
+        if !input.ready_for_control() {
+            return Ok(());
+        }
+        let mut attempts = 0;
         for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -675,6 +697,10 @@ impl Protocol {
             if id.len() != 32 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
                 continue;
             }
+            if attempts == 8 || stop_requested(directory) || !input.ready_for_control() {
+                break;
+            }
+            attempts += 1;
             let request: Value = serde_json::from_slice(&read_control_file(&entry.path())?)
                 .map_err(|error| error.to_string())?;
             let response = directory.join(format!("response-{id}.json"));
@@ -718,7 +744,15 @@ impl Protocol {
                         json!({"id":id,"method":"turn/settings/update","params":{"threadId":self.thread,"turnId":self.turn,"serviceTier":if fast {"priority"} else {"default"}}})
                     }
                 };
-                if let Err(error) = send(input, &message) {
+                let queued = input.control(
+                    &message,
+                    id.into(),
+                    request["expires"].as_u64().unwrap_or(0),
+                );
+                if matches!(queued, Ok(false)) {
+                    break;
+                }
+                if let Err(error) = queued {
                     if steer.is_some() {
                         let _ = write_json(
                             &response,
@@ -729,23 +763,100 @@ impl Protocol {
                     }
                     return Err(error);
                 }
-                if steer.is_some() && self.backend == "claude" {
-                    // Claude echoes input only at its next safe boundary,
-                    // which may follow a long tool call. Acceptance means
-                    // the input queue took it, just like Codex's steer RPC.
-                    // Keep tracking the echo so a preceding result cannot
-                    // close the CLI before this input is consumed.
-                    let _ = write_json(&response, &json!({"ok":true}));
-                }
-                self.pending.insert(id.into(), (response, steer.is_some()));
+                self.pending.insert(
+                    id.into(),
+                    Pending {
+                        path: response,
+                        steer: steer.is_some(),
+                        accepted: false,
+                        written: false,
+                    },
+                );
             }
             fs::remove_file(entry.path()).map_err(|error| error.to_string())?;
         }
         Ok(())
     }
 
+    fn written(&mut self, input: &mut input::Input) -> Result<(), String> {
+        while let Some(completed) = input.take_completed() {
+            let pending = completed
+                .control
+                .as_deref()
+                .and_then(|id| self.pending.get_mut(id));
+            match completed.result {
+                Ok(()) => {
+                    if let Some(pending) = pending {
+                        pending.written = true;
+                        if !pending.steer || self.backend != "claude" {
+                            continue;
+                        }
+                        self.deferred_result = None;
+                        // Claude may echo input only after a long tool call.
+                        // Accept after the full write, then retain the echo
+                        // fence so an earlier result cannot close this turn.
+                        if !pending.accepted {
+                            pending.accepted =
+                                write_json(&pending.path, &json!({"ok":true})).is_ok();
+                        }
+                    }
+                }
+                Err(input::Failure::Expired) => {
+                    if let Some(id) = completed.control
+                        && let Some(pending) = self.pending.remove(&id)
+                    {
+                        let _ = write_json(
+                            &pending.path,
+                            &json!({"ok":false,"error":"The agent input request expired. Try again."}),
+                        );
+                    }
+                }
+                Err(input::Failure::Write(error)) => {
+                    if completed.control.is_some() {
+                        match pending.map(|pending| pending.steer) {
+                            Some(true) => {
+                                self.retire_unwritten(&error);
+                                continue;
+                            }
+                            None => continue,
+                            Some(false) => {}
+                        }
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn retire_unwritten(&mut self, error: &str) {
+        let ids: Vec<_> = self
+            .pending
+            .iter()
+            .filter(|(_, pending)| pending.steer && !pending.written)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            if let Some(pending) = self.pending.remove(&id) {
+                let _ = write_json(
+                    &pending.path,
+                    &json!({"ok":false,"unknown":true,"error":error}),
+                );
+            }
+        }
+    }
+
     fn acknowledge(&mut self, value: &Value) -> Result<bool, String> {
         let replay = self.backend == "claude" && value["type"] == "user";
+        if self.backend == "claude" && !replay && value["type"] != "control_response" {
+            return Ok(false);
+        }
+        if self.backend == "codex"
+            && (value["method"].is_string()
+                || (value.get("result").is_none() && value.get("error").is_none()))
+        {
+            return Ok(false);
+        }
         let response = if self.backend == "claude" && !replay {
             &value["response"]
         } else {
@@ -758,15 +869,31 @@ impl Protocol {
         } else {
             response["id"].as_str()
         };
-        let Some((path, steer)) = id.and_then(|id| {
-            self.pending.remove(&if replay {
-                id.replace('-', "")
-            } else {
-                id.to_string()
-            })
-        }) else {
+        let Some(id) = id else {
             return Ok(false);
         };
+        let id = if replay {
+            id.replace('-', "")
+        } else {
+            id.to_string()
+        };
+        if self.backend == "claude"
+            && self
+                .pending
+                .get(&id)
+                .is_some_and(|pending| pending.steer != replay)
+        {
+            return Ok(false);
+        }
+        let Some(pending) = self.pending.remove(&id) else {
+            return Ok(false);
+        };
+        let Pending {
+            path,
+            steer,
+            accepted,
+            ..
+        } = pending;
         let ok = if replay {
             steer
         } else if self.backend == "claude" {
@@ -785,6 +912,10 @@ impl Protocol {
                 "The active turn could not apply this speed setting."
             });
         if self.backend == "claude" && steer {
+            self.deferred_result = None;
+            if !accepted {
+                let _ = write_json(&path, &json!({"ok":true}));
+            }
             return Ok(true);
         }
         if steer {
@@ -856,20 +987,21 @@ pub fn run(path: &Path) -> Result<(), String> {
     let (diagnostics, diagnostics_finished) = read_diagnostics(&mut child);
     let result = (|| {
         let rx = read_messages(&mut child)?;
-        let mut input = child.stdin.take().ok_or("missing agent input")?;
+        let mut input = input::start(child.stdin.take().ok_or("missing agent input")?);
         let mut protocol = Protocol {
             backend: config.backend.clone(),
             thread: String::new(),
             turn: String::new(),
             pending: HashMap::new(),
             usage: Value::Null,
+            deferred_result: None,
         };
         let initialize = if config.backend == "codex" {
             json!({"id":"initialize","method":"initialize","params":{"clientInfo":{"name":"tokenstat","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}}})
         } else {
             json!({"type":"control_request","request_id":"initialize","request":{"subtype":"initialize"}})
         };
-        send(&mut input, &initialize)?;
+        input.send(&initialize)?;
         let startup_deadline = Instant::now() + Duration::from_secs(30);
         let mut initialized = false;
         let mut mcp_pages = 0;
@@ -877,18 +1009,26 @@ pub fn run(path: &Path) -> Result<(), String> {
         let mut codex_usage = CodexUsage::default();
         let mut started = false;
         loop {
-            let stop_requested = directory.join("stop").is_file();
-            #[cfg(unix)]
-            let stop_requested =
-                stop_requested || STOPPED.load(std::sync::atomic::Ordering::SeqCst);
-            if stop_requested {
+            if stop_requested(directory) {
                 protocol.interrupt(&mut input, &rx);
                 return Err("The turn was stopped.".into());
             }
+            protocol.written(&mut input)?;
             if !started && Instant::now() >= startup_deadline {
                 return Err("The agent did not initialize its live protocol.".into());
             }
-            let message = match rx.recv_timeout(Duration::from_millis(40)) {
+            let deferred = if protocol.pending.values().any(|pending| pending.steer) {
+                None
+            } else {
+                protocol.deferred_result.take()
+            };
+            let timeout = Duration::from_millis(if input.busy() { 5 } else { 40 });
+            let received = if let Some(message) = deferred {
+                Ok(Ok(message))
+            } else {
+                rx.recv_timeout(timeout)
+            };
+            let message = match received {
                 Ok(value) => value?,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if started {
@@ -897,7 +1037,22 @@ pub fn run(path: &Path) -> Result<(), String> {
                     continue;
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("The agent closed its protocol before completing the turn.".into());
+                    protocol.written(&mut input)?;
+                    if protocol.deferred_result.is_some() {
+                        input.cancel();
+                        protocol.retire_unwritten(
+                            "The agent closed its protocol before confirming steering delivery.",
+                        );
+                    }
+                    if !protocol.pending.values().any(|pending| pending.steer)
+                        && let Some(message) = protocol.deferred_result.take()
+                    {
+                        message
+                    } else {
+                        return Err(
+                            "The agent closed its protocol before completing the turn.".into()
+                        );
+                    }
                 }
             };
             if protocol.acknowledge(&message)? {
@@ -910,9 +1065,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                     if message["response"]["subtype"] != "success" {
                         return Err("Claude could not initialize its live protocol.".into());
                     }
-                    send(
-                        &mut input,
-                        &json!({"type":"user","session_id":"","message":{"role":"user","content":[{"type":"text","text":initial.as_str().ok_or("invalid Claude prompt")?}]},"parent_tool_use_id":null}),
+                    input.send(&json!({"type":"user","session_id":"","message":{"role":"user","content":[{"type":"text","text":initial.as_str().ok_or("invalid Claude prompt")?}]},"parent_tool_use_id":null}),
                     )?;
                     initialized = true;
                 } else if message["type"] == "result" {
@@ -922,9 +1075,19 @@ pub fn run(path: &Path) -> Result<(), String> {
                     // that is still waiting for its echo is the same case:
                     // emitting this result closes the turn, and an error
                     // result exits before the CLI has taken the new words.
-                    if message["origin"]["kind"] == "task-notification"
-                        || protocol.pending.values().any(|(_, steer)| *steer)
-                    {
+                    if message["origin"]["kind"] == "task-notification" {
+                        continue;
+                    }
+                    if protocol.pending.values().any(|pending| pending.steer) {
+                        if !protocol
+                            .pending
+                            .values()
+                            .any(|pending| pending.steer && pending.written)
+                            && protocol.deferred_result.is_none()
+                        {
+                            // Restore this result if the write is refused or fails.
+                            protocol.deferred_result = Some(message);
+                        }
                         continue;
                     }
                     emit(&message)?;
@@ -951,10 +1114,8 @@ pub fn run(path: &Path) -> Result<(), String> {
                         .unwrap_or("Codex initialization failed")
                         .into());
                 }
-                send(&mut input, &json!({"method":"initialized"}))?;
-                send(
-                    &mut input,
-                    &json!({"id":"thread","method":if setup["threadId"].is_string() {"thread/resume"} else {"thread/start"},"params":setup}),
+                input.send(&json!({"method":"initialized"}))?;
+                input.send(&json!({"id":"thread","method":if setup["threadId"].is_string() {"thread/resume"} else {"thread/start"},"params":setup}),
                 )?;
             } else if message["id"] == "thread" {
                 protocol.thread = message["result"]["thread"]["id"]
@@ -972,26 +1133,19 @@ pub fn run(path: &Path) -> Result<(), String> {
                 let compact = params["tokenstatCompact"] == true;
                 params.as_object_mut().unwrap().remove("tokenstatCompact");
                 params["threadId"] = json!(protocol.thread);
-                send(
-                    &mut input,
-                    &json!({"id":if compact {"compact"} else {"turn"},
+                input.send(&json!({"id":if compact {"compact"} else {"turn"},
                         "method":if compact {"thread/compact/start"} else {"turn/start"},
-                        "params":if compact {json!({"threadId":protocol.thread})} else {params}}),
-                )?;
+                        "params":if compact {json!({"threadId":protocol.thread})} else {params}}))?;
                 // Reuse this thread's connections. Inventory must never
                 // delay turn/start or start an unrelated agent session.
-                let _ = send(
-                    &mut input,
+                let _ = input.send(
                     &json!({"id":"inspection-mcp","method":"mcpServerStatus/list",
                     "params":{"threadId":protocol.thread,"limit":100}}),
                 );
                 // Read the existing session goal; this never creates or
                 // resumes a goal and must not delay the user's turn.
-                let _ = send(
-                    &mut input,
-                    &json!({"id":"inspection-goal","method":"thread/goal/get",
-                    "params":{"threadId":protocol.thread}}),
-                );
+                let _ = input.send(&json!({"id":"inspection-goal","method":"thread/goal/get",
+                    "params":{"threadId":protocol.thread}}));
             } else if message["id"] == "compact" {
                 if let Some(error) = message.get("error") {
                     return Err(error["message"]
@@ -1009,9 +1163,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                         )?;
                     }
                     if mcp_pages < 3 && message["result"]["nextCursor"].is_string() {
-                        let _ = send(
-                            &mut input,
-                            &json!({"id":"inspection-mcp","method":"mcpServerStatus/list",
+                        let _ = input.send(&json!({"id":"inspection-mcp","method":"mcpServerStatus/list",
                             "params":{"threadId":protocol.thread,"limit":100,"cursor":message["result"]["nextCursor"]}}),
                         );
                     }
@@ -1117,9 +1269,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                 }
                 // Match exec's subscription cleanup. Closing protocol stdin
                 // afterward shuts down the thread and flushes its rollout.
-                send(
-                    &mut input,
-                    &json!({"id":"shutdown","method":"thread/unsubscribe","params":{"threadId":protocol.thread}}),
+                input.send(&json!({"id":"shutdown","method":"thread/unsubscribe","params":{"threadId":protocol.thread}}),
                 )?;
                 let until = Instant::now() + Duration::from_secs(3);
                 while Instant::now() < until {
@@ -1189,9 +1339,7 @@ pub fn run(path: &Path) -> Result<(), String> {
             } else if message.get("id").is_some() && message["method"].is_string() {
                 // Match exec's noninteractive contract. Never silently grant a
                 // provider permission request or leave it parked indefinitely.
-                send(
-                    &mut input,
-                    &json!({"id":message["id"],"error":{"code":-32601,"message":"This headless turn uses tokenstat tool hooks; interactive requests are unavailable."}}),
+                input.send(&json!({"id":message["id"],"error":{"code":-32601,"message":"This headless turn uses tokenstat tool hooks; interactive requests are unavailable."}}),
                 )?;
             }
             if started {
@@ -1319,6 +1467,245 @@ fn codex_item(item: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn protocol(backend: &str) -> Protocol {
+        Protocol {
+            backend: backend.into(),
+            thread: "thread".into(),
+            turn: "turn".into(),
+            pending: HashMap::new(),
+            usage: Value::Null,
+            deferred_result: None,
+        }
+    }
+
+    #[test]
+    fn steering_acceptance_waits_for_write_or_echo_and_failed_writes_stay_unknown() {
+        struct HeldFlush {
+            entered: mpsc::Sender<()>,
+            release: mpsc::Receiver<()>,
+            fail: bool,
+        }
+        impl Write for HeldFlush {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.entered.send(()).unwrap();
+                self.release.recv().unwrap();
+                if self.fail {
+                    Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        for mode in ["written", "echo", "failure", "echo-failure"] {
+            let root = tempfile::tempdir().unwrap();
+            let id = "00000000000040008000000000000001";
+            fs::write(
+                root.path().join(format!("request-{id}.json")),
+                json!({"id":id,"steer":"extra context","expires":u64::MAX}).to_string(),
+            )
+            .unwrap();
+            let response = root.path().join(format!("response-{id}.json"));
+            let (entered, was_entered) = mpsc::channel();
+            let (release, released) = mpsc::channel();
+            let mut input = input::start(HeldFlush {
+                entered,
+                release: released,
+                fail: mode.ends_with("failure"),
+            });
+            let mut protocol = protocol("claude");
+            protocol.controls(root.path(), &mut input).unwrap();
+            was_entered.recv_timeout(Duration::from_secs(2)).unwrap();
+            protocol.written(&mut input).unwrap();
+            assert!(
+                !response.exists(),
+                "Enqueueing input must not acknowledge delivery"
+            );
+            let echo = json!({"type":"user","uuid":"00000000-0000-4000-8000-000000000001"});
+            if mode.starts_with("echo") {
+                assert!(protocol.acknowledge(&echo).unwrap());
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&fs::read(&response).unwrap()).unwrap()["ok"],
+                    true
+                );
+                fs::remove_file(&response).unwrap();
+            }
+            protocol.deferred_result = Some(json!({"type":"result","is_error":false}));
+            release.send(()).unwrap();
+            let until = Instant::now() + Duration::from_secs(2);
+            while input.busy() {
+                protocol.written(&mut input).unwrap();
+                assert!(Instant::now() < until);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if mode.starts_with("echo") {
+                assert!(
+                    !response.exists(),
+                    "A late write completion must not recreate an accepted response"
+                );
+                assert!(protocol.deferred_result.is_some());
+            } else {
+                let answer: Value = serde_json::from_slice(&fs::read(&response).unwrap()).unwrap();
+                assert_eq!(answer["ok"], mode != "failure");
+                if mode == "failure" {
+                    assert_eq!(answer["unknown"], true);
+                    assert!(protocol.pending.is_empty());
+                    assert!(
+                        protocol.deferred_result.is_some(),
+                        "A failed steer must retain the current turn's result"
+                    );
+                } else {
+                    assert!(protocol.deferred_result.is_none());
+                    fs::remove_file(&response).unwrap();
+                    assert!(protocol.acknowledge(&echo).unwrap());
+                    assert!(
+                        !response.exists(),
+                        "An echo must not recreate the consumed acceptance"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_expired_unwritten_steer_keeps_the_current_result() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("response.json");
+        let mut protocol = protocol("claude");
+        protocol.pending.insert(
+            "request".into(),
+            Pending {
+                path: path.clone(),
+                steer: true,
+                accepted: false,
+                written: false,
+            },
+        );
+        protocol.deferred_result = Some(json!({"type":"result","is_error":false}));
+        let mut input = input::start(std::io::sink());
+        assert!(
+            input
+                .control(&json!({"text":"expired"}), "request".into(), 0)
+                .unwrap()
+        );
+        let until = Instant::now() + Duration::from_secs(2);
+        while !path.exists() {
+            protocol.written(&mut input).unwrap();
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let answer: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(answer["ok"], false);
+        assert!(answer["unknown"].is_null());
+        assert!(protocol.pending.is_empty());
+        assert!(protocol.deferred_result.is_some());
+    }
+
+    #[test]
+    fn busy_input_leaves_later_mailbox_requests_for_the_next_poll() {
+        struct Held(mpsc::Sender<()>, mpsc::Receiver<()>);
+        impl Write for Held {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.0.send(()).unwrap();
+                self.1.recv().unwrap();
+                Ok(())
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let id = "00000000000040008000000000000001";
+        let request = root.path().join(format!("request-{id}.json"));
+        let response = root.path().join(format!("response-{id}.json"));
+        fs::write(
+            &request,
+            json!({"id":id,"steer":"x".repeat(1024*1024),"expires":0}).to_string(),
+        )
+        .unwrap();
+        let (entered, was_entered) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let mut input = input::start(Held(entered, released));
+        input.send(&json!({"first":true})).unwrap();
+        was_entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        let mut protocol = protocol("claude");
+        protocol.controls(root.path(), &mut input).unwrap();
+        assert!(
+            request.exists() && !response.exists(),
+            "Busy input must defer mailbox reads"
+        );
+        release.send(()).unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while input.busy() {
+            protocol.written(&mut input).unwrap();
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        protocol.controls(root.path(), &mut input).unwrap();
+        assert!(!request.exists());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(response).unwrap()).unwrap()["ok"],
+            false
+        );
+    }
+
+    #[test]
+    fn acknowledgements_must_match_the_control_kind() {
+        let id = "00000000000040008000000000000001";
+        let uuid = "00000000-0000-4000-8000-000000000001";
+        for (backend, steer, wrong) in [
+            (
+                "claude",
+                true,
+                json!({"type":"control_response","response":{"request_id":id,"subtype":"error"}}),
+            ),
+            ("claude", false, json!({"type":"user","uuid":uuid})),
+            (
+                "codex",
+                true,
+                json!({"id":id,"method":"approval/request","params":{}}),
+            ),
+            ("codex", false, json!({"id":id})),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("response.json");
+            let mut protocol = protocol(backend);
+            protocol.pending.insert(
+                id.into(),
+                Pending {
+                    path: path.clone(),
+                    steer,
+                    accepted: false,
+                    written: false,
+                },
+            );
+            assert!(
+                !protocol.acknowledge(&wrong).unwrap(),
+                "An unrelated message must not acknowledge queued input: {backend}/{steer}"
+            );
+            assert!(!path.exists() && protocol.pending.contains_key(id));
+            let right = if backend == "claude" {
+                if steer {
+                    json!({"type":"user","uuid":uuid})
+                } else {
+                    json!({"type":"control_response","response":{"request_id":id,"subtype":"success"}})
+                }
+            } else if steer {
+                json!({"id":id,"result":{"turnId":"turn"}})
+            } else {
+                json!({"id":id,"result":{"status":"applied"}})
+            };
+            assert!(protocol.acknowledge(&right).unwrap());
+            assert!(protocol.pending.is_empty());
+            assert_eq!(
+                serde_json::from_slice::<Value>(&fs::read(path).unwrap()).unwrap()["ok"],
+                true
+            );
+        }
+    }
 
     #[cfg(unix)]
     #[test]
@@ -1688,8 +2075,17 @@ mod tests {
                 backend: backend.into(),
                 thread: "thread".into(),
                 turn: "turn".into(),
-                pending: HashMap::from([("request".into(), (path.clone(), false))]),
+                pending: HashMap::from([(
+                    "request".into(),
+                    Pending {
+                        path: path.clone(),
+                        steer: false,
+                        accepted: false,
+                        written: false,
+                    },
+                )]),
                 usage: Value::Null,
+                deferred_result: None,
             };
             assert!(
                 !protocol
