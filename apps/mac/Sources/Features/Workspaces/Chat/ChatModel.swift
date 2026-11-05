@@ -562,7 +562,7 @@ final class ChatModel {
         guard WorkDestinationResolver.sameConversation(reference, currentReference),
               reference.scope == WorkSessionContext.shared.readingScope,
               let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) else { return false }
-        ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
+        ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date(), revealTarget: true), for: reference)
         readingRestorationPulse &+= 1
         return true
     }
@@ -1753,7 +1753,7 @@ final class ChatModel {
               !Task.isCancelled, generation == loadGeneration,
               reference.scope == WorkSessionContext.shared.readingScope else { return false }
         if let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) {
-            ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
+            ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date(), revealTarget: true), for: reference)
         }
         continuityScope = reference.scope
         adoptPeer(reference.hostIdentity == WorkSessionContext.shared.localHostIdentity ? nil : reference.hostIdentity)

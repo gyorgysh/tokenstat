@@ -220,7 +220,7 @@ struct ClientWorkSearchPresentation: View {
               account.signedIn, WorkAccessStore.shared.allowed(scope: scope, host: reference.hostIdentity) == true,
               account.account?.machines.contains(where: { $0.publicIdentity == reference.hostIdentity }) == true else { return false }
         if reference.kind == .conversation, let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) {
-            ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
+            ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date(), revealTarget: true), for: reference)
         }
         navigation.destination = .workspaces
         navigation.restoredRoute = WorkMobileRoute(scope: scope, tab: "workspaces", reference: reference,

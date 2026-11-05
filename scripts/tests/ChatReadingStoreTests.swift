@@ -21,6 +21,18 @@ import Foundation
             ChatReadingMark(eventID: event, offset: offset, updatedAt: when)
         }
 
+        // Search intent survives storage, while old marks retain header behavior.
+        let legacyBytes = try! JSONEncoder().encode(mark("tool-s42"))
+        assert(try! JSONDecoder().decode(ChatReadingMark.self, from: legacyBytes).revealTarget == false)
+        assert(!(String(data: legacyBytes, encoding: .utf8)!).contains("revealTarget"))
+        let search = ChatReadingMark(eventID: "tool-s42", offset: 0, updatedAt: Date(), revealTarget: true)
+        store.request(search, for: chat(id: "search"))
+        assert(store.takeRequest(for: chat(id: "search"))?.revealTarget == true)
+        assert(store.mark(for: chat(id: "search"))?.revealTarget == true)
+        struct OldMark: Decodable { let eventId: String; let offset: Double; let updatedAt: Date }
+        let oldReader = try! JSONDecoder().decode(OldMark.self, from: JSONEncoder().encode(search))
+        assert(oldReader.eventId == "tool-s42")
+
         // A place is kept per conversation, on one machine, under one account.
         store.remember(mark("s4096"), for: chat(id: "chat-a"))
         assert(store.mark(for: chat(id: "chat-a"))?.eventID == "s4096")

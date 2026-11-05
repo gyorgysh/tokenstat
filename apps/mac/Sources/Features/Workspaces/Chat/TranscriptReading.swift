@@ -130,7 +130,7 @@ enum TranscriptReading {
             // A kept row may be folded into a step group. Open it, so the
             // reader lands on the row itself, unless the mark was the closed
             // group's own header.
-            let visibleRow = model.readingRow(rowID)
+            let visibleRow = mark.revealTarget ? model.revealRow(rowID) : model.readingRow(rowID)
             let correction = placements > 0 ? correct?(visibleRow, mark) : nil
             switch correction {
             case .placed: measurements += 1

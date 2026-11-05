@@ -22,16 +22,19 @@ struct ChatReadingMark: Codable, Equatable, Sendable {
     /// Older records carry no value and read as zero.
     var within: Double
     var updatedAt: Date
+    /// Explicit search hits open a folded step, including the group's first one.
+    var revealTarget: Bool
 
-    init(eventID: String, offset: Double, updatedAt: Date, within: Double = 0) {
+    init(eventID: String, offset: Double, updatedAt: Date, within: Double = 0, revealTarget: Bool = false) {
         self.eventID = eventID
         self.offset = offset
         self.updatedAt = updatedAt
         self.within = within
+        self.revealTarget = revealTarget
     }
 
     enum CodingKeys: String, CodingKey {
-        case offset, updatedAt, within
+        case offset, updatedAt, within, revealTarget
         case eventID = "eventId"
     }
 
@@ -41,6 +44,7 @@ struct ChatReadingMark: Codable, Equatable, Sendable {
         offset = try values.decode(Double.self, forKey: .offset)
         updatedAt = try values.decode(Date.self, forKey: .updatedAt)
         within = try values.decodeIfPresent(Double.self, forKey: .within) ?? 0
+        revealTarget = try values.decodeIfPresent(Bool.self, forKey: .revealTarget) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -49,6 +53,7 @@ struct ChatReadingMark: Codable, Equatable, Sendable {
         try values.encode(offset, forKey: .offset)
         try values.encode(updatedAt, forKey: .updatedAt)
         try values.encode(within, forKey: .within)
+        if revealTarget { try values.encode(true, forKey: .revealTarget) }
     }
 
     /// Whether a row's name will still mean this row after a relaunch.

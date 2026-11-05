@@ -18,7 +18,14 @@ import SwiftUI
     var fetches = 0
     /// Rows asked to be opened out of a folded step group.
     var revealed: [String] = []
+    var closedHeader: String?
+    func revealRow(_ id: String) -> String {
+        closedHeader = nil
+        revealed.append(id)
+        return id
+    }
     func readingRow(_ id: String) -> String {
+        if closedHeader == id { return "g:" + id }
         revealed.append(id)
         return id
     }
@@ -212,6 +219,24 @@ struct ChatTimelineEvent {
         model.events = [.init(seq: 3, event: .init(kind: "thinking"))]
         assert(ChatReadingAnchor.resolve("g:think-s3", items: model.displayItems, events: model.events) == "think-s1")
         assert(ChatReadingAnchor.resolve("g:think-s9", items: model.displayItems, events: model.events) == nil)
+
+        // A search hit on a group's first member must reveal its content;
+        // a saved header position should keep the same group closed.
+        model.displayItems = [ChatModel.Row(id: "tool-s42")]
+        model.closedHeader = "tool-s42"
+        let headerMark = ChatReadingMark(eventID: "tool-s42", offset: 0, updatedAt: Date())
+        _ = await TranscriptReading.restore(headerMark, reference: reference,
+            model: model, follow: follow) { id, _ in assert(id == "g:tool-s42") }
+        let searchMark = ChatReadingMark(eventID: "tool-s42", offset: 0,
+            updatedAt: Date(), revealTarget: true)
+        _ = await TranscriptReading.restore(searchMark, reference: reference,
+            model: model, follow: follow) { id, _ in
+                guard id == "tool-s42" else {
+                    print("FAIL: search target stays hidden inside folded group")
+                    exit(1)
+                }
+            }
+        assert(model.closedHeader == nil)
 
         // Pages that never contain the row end at the start of the chat,
         // and the conversation opens at its latest turn instead of waiting.

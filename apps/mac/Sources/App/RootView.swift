@@ -3948,7 +3948,7 @@ struct RootView: View {
             // availability gate may otherwise decline this request silently.
             guard workAvailabilityMessage(reference) == nil else { return false }
             if let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) {
-                ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
+                ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date(), revealTarget: true), for: reference)
             }
             chat.restoreSearchReadingPosition(reference)
             openHomeWork(reference)
