@@ -71,8 +71,14 @@ extension Bridge {
         let access = file.startAccessingSecurityScopedResource()
         defer { if access { file.stopAccessingSecurityScopedResource() } }
         let (scope, generation) = await MainActor.run { (WorkSessionContext.shared.scope, WorkSessionContext.shared.generation) }
-        let (size, digest) = try await Task.detached { try ChatFileIO.hash(file) }.value
-        guard await RemoteHostFeature.chatRecovery.isSupported(peer: peer) else {
+        let hashing = Task.detached { try ChatFileIO.hash(file) }
+        let (size, digest) = try await withTaskCancellationHandler {
+            try await hashing.value
+        } onCancel: { hashing.cancel() }
+        try Task.checkCancellation()
+        let supportsChunks = await RemoteHostFeature.chatRecovery.isSupported(peer: peer)
+        try Task.checkCancellation()
+        guard supportsChunks else {
             guard size <= 12 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
             let input = try FileHandle(forReadingFrom: file)
             defer { try? input.close() }
@@ -86,25 +92,43 @@ extension Bridge {
                 return try await chatInvoke(peer:peer,"chat.attach",legacy,patience:Patience.long,expectedScope:scope,expectedGeneration:generation,as:ChatAttachment.self)
             }
         }
-        let capabilities = try await chatInvoke(peer: peer, "chat.fileCapabilities", ["id": id], expectedScope: scope, expectedGeneration: generation, as: ChatFileCapabilities.self)
-        guard size <= min(capabilities.maxFileBytes, ChatFileIO.maximumBytes) else { throw CocoaError(.fileReadTooLarge) }
         var allowRelay = false
-        if capabilities.relay { guard await confirmRelay(capabilities.relayRemainingBytes) else { throw CancellationError() }; allowRelay = true }
         var params: [String: Any] = ["id": id, "name": name ?? file.lastPathComponent, "size": size, "sha256": digest]
         if let mediaType { params["mediaType"] = mediaType }
         let owner = try JSONEncoder().encode(scope).base64EncodedString()
-        let journalKey = SHA256.hash(data: Data([owner, peer ?? "local", id, digest, name ?? file.lastPathComponent].joined(separator: "|").utf8)).map { String(format:"%02x",$0) }.joined()
+        let identity: [String?] = [owner, peer ?? "local", id, digest, name ?? file.lastPathComponent, mediaType]
+        let journalKey = SHA256.hash(data: try JSONEncoder().encode(identity)).map { String(format:"%02x",$0) }.joined()
         try await ChatFileTransferClaims.shared.acquire(journalKey)
         defer { Task { await ChatFileTransferClaims.shared.release(journalKey) } }
-        let upload: ChatUploadStatus
-        if let transfer = await ChatUploadJournal.shared.get(journalKey),
-            let status = try? await chatInvoke(peer:peer,"chat.fileUploadStatus",["id":id,"transferId":transfer],expectedScope:scope,expectedGeneration:generation,as:ChatUploadStatus.self) {
-            if status.finished == true, let attachment = status.attachment {
-                try await ChatUploadJournal.shared.set(journalKey, transfer:nil)
-                return attachment
+        var previous: ChatUploadStatus?
+        if let transfer = await ChatUploadJournal.shared.get(journalKey) {
+            do {
+                previous = try await chatInvoke(peer:peer,"chat.fileUploadStatus",["id":id,"transferId":transfer],expectedScope:scope,expectedGeneration:generation,as:ChatUploadStatus.self)
+            } catch is CancellationError { throw CancellationError() }
+            catch { try Task.checkCancellation() }
+        }
+        try Task.checkCancellation()
+        if let previous, previous.finished == true, let attachment = previous.attachment {
+            return attachment
+        }
+        if let previous, previous.offset > size { throw CocoaError(.fileReadCorruptFile) }
+        // Receipt checks and finishing already uploaded bytes need no payload
+        // channel, route size limit or relay consent.
+        var capabilities: ChatFileCapabilities?
+        if previous?.offset != size {
+            let available = try await chatInvoke(peer: peer, "chat.fileCapabilities", ["id": id], expectedScope: scope, expectedGeneration: generation, as: ChatFileCapabilities.self)
+            try Task.checkCancellation()
+            guard size <= available.maxFileBytes else { throw CocoaError(.fileReadTooLarge) }
+            guard available.chunkBytes > 0 else { throw CocoaError(.fileReadCorruptFile) }
+            capabilities = available
+            if available.relay {
+                guard await confirmRelay(available.relayRemainingBytes) else { throw CancellationError() }
+                allowRelay = true
             }
-            upload = status
-        } else {
+        }
+        try Task.checkCancellation()
+        let upload: ChatUploadStatus
+        if let previous { upload = previous } else {
             upload = try await chatInvoke(peer: peer, "chat.fileUploadStart", params, expectedScope: scope, expectedGeneration: generation, as: ChatUploadStatus.self)
             do { try await ChatUploadJournal.shared.set(journalKey, transfer:upload.transferId) }
             catch {
@@ -116,18 +140,18 @@ extension Bridge {
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
         var offset = upload.offset
-        guard offset <= size, capabilities.chunkBytes > 0 else { throw CocoaError(.fileReadCorruptFile) }
+        guard offset <= size else { throw CocoaError(.fileReadCorruptFile) }
         do {
             while offset < size {
                 try Task.checkCancellation()
                 try handle.seek(toOffset: offset)
-                guard let data = try handle.read(upToCount: min(Int(size - offset), min(capabilities.chunkBytes, ChatFileIO.chunkBytes))), !data.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+                guard let data = try handle.read(upToCount: min(Int(size - offset), min(capabilities?.chunkBytes ?? ChatFileIO.chunkBytes, ChatFileIO.chunkBytes))), !data.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
                 var request: [String: Any] = ["id":id,"transferId":upload.transferId,"offset":offset,"data":data.base64EncodedString(),"allowRelay":allowRelay]
                 let chunk: ChatChunk
                 do {
                     chunk = try await chatInvoke(peer: peer, "chat.fileUploadChunk", request, patience: Patience.long, expectedScope: scope, expectedGeneration: generation, as: ChatChunk.self)
                 } catch {
-                    guard !allowRelay, chatFileRelayRefusal(error), await confirmRelay(capabilities.relayRemainingBytes) else { throw error }
+                    guard !allowRelay, chatFileRelayRefusal(error), await confirmRelay(capabilities?.relayRemainingBytes) else { throw error }
                     allowRelay = true; request["allowRelay"] = true
                     chunk = try await chatInvoke(peer: peer, "chat.fileUploadChunk", request, patience: Patience.long, expectedScope: scope, expectedGeneration: generation, as: ChatChunk.self)
                 }
@@ -135,8 +159,10 @@ extension Bridge {
                 offset = chunk.offset
                 try await progress(Double(offset)/Double(size))
             }
+            try Task.checkCancellation()
             let attachment = try await chatInvoke(peer: peer, "chat.fileUploadFinish", ["id":id,"transferId":upload.transferId], patience: Patience.long, expectedScope: scope, expectedGeneration: generation, as: ChatAttachment.self)
-            try await ChatUploadJournal.shared.set(journalKey, transfer:nil)
+            // Keep the receipt until expiry: another attachment can fail
+            // before the message is sent, and its retry should reuse this one.
             return attachment
         } catch {
             struct Cancelled: Decodable, Sendable { let cancelled: Bool }
