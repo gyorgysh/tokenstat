@@ -18,6 +18,11 @@ struct ChatUsageTotals: Codable, Sendable, Equatable {}
 
 @main struct BridgeModelBoundsTests {
     static func main() throws {
+        let oldChunk = try JSONDecoder().decode(ChatEventChunk.self, from: Data(#"{"events":[],"nextOffset":10}"#.utf8))
+        precondition(!oldChunk.hasMore && !oldChunk.reset)
+        let nextChunk = try JSONDecoder().decode(ChatEventChunk.self, from: Data(#"{"events":[],"nextOffset":20,"hasMore":true,"tailCursor":"next"}"#.utf8))
+        let chunkRoundtrip = try JSONDecoder().decode(ChatEventChunk.self, from: JSONEncoder().encode(nextChunk))
+        precondition(chunkRoundtrip.hasMore && chunkRoundtrip.nextOffset == 20 && chunkRoundtrip.tailCursor == "next")
         let oldPTY = try JSONDecoder().decode(PtySessionInfo.self,
             from: Data(#"{"id":"pty-real","command":"claude","cwd":"/repo","rows":24,"cols":80,"alive":true,"totalBytes":0}"#.utf8))
         precondition(oldPTY.sessionIdentities == nil, "An older host does not invent a backend session ID")

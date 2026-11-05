@@ -3055,14 +3055,16 @@ struct ChatEventChunk: Codable, Sendable {
     var tailCursor: String?
 
     var reset: Bool
+    var hasMore: Bool
 
-    enum CodingKeys: String, CodingKey { case events, nextOffset, tailCursor, reset }
+    enum CodingKeys: String, CodingKey { case events, nextOffset, tailCursor, reset, hasMore }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         nextOffset = try c.decodeIfPresent(UInt64.self, forKey: .nextOffset) ?? 0
         tailCursor = try c.decodeIfPresent(String.self, forKey: .tailCursor)
         reset = try c.decodeIfPresent(Bool.self, forKey: .reset) ?? false
+        hasMore = try c.decodeIfPresent(Bool.self, forKey: .hasMore) ?? false
         // One ugly toolStart must not fail the whole poll. The host writes
         // `input` as an object on tools and as a count on usage.
         events = (try c.decodeIfPresent([FailableChatEvent].self, forKey: .events) ?? [])
@@ -3075,6 +3077,7 @@ struct ChatEventChunk: Codable, Sendable {
         try c.encode(nextOffset, forKey: .nextOffset)
         try c.encodeIfPresent(tailCursor, forKey: .tailCursor)
         try c.encode(reset, forKey: .reset)
+        try c.encode(hasMore, forKey: .hasMore)
     }
 }
 

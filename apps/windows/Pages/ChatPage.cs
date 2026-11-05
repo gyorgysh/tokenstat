@@ -2494,11 +2494,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         var chatId = _openId;
         if (chatId is null) return;
+        var catchUp = false;
         while (!token.IsCancellationRequested && _openId == chatId)
         {
             try
             {
-                await Task.Delay(Busy() ? 400 : 2000, token);
+                await Task.Delay(catchUp ? 10 : Busy() ? 400 : 2000, token);
+                catchUp = false;
                 _ = RefreshInspectionAsync();
                 var wasBusy = Busy();
                 var historyGeneration = _historyGeneration;
@@ -2565,6 +2567,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 {
                     if (!await DrainQueueOnUiAsync(chatId)) return;
                 }
+                catchUp = historyGeneration == _historyGeneration && _history.HasMore;
             }
             catch (OperationCanceledException)
             {

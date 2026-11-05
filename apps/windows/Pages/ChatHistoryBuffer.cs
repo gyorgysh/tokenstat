@@ -11,6 +11,7 @@ internal sealed class ChatHistoryBuffer
     public string? Cursor { get; private set; }
     public string? TailCursor { get; private set; }
     public bool HasEarlier { get; private set; }
+    public bool HasMore { get; private set; }
     public JsonObject? Usage { get; private set; }
     public int Generation { get; private set; }
 
@@ -18,7 +19,7 @@ internal sealed class ChatHistoryBuffer
     {
         Generation++;
         Events = new(); Offset = 0;
-        Cursor = null; TailCursor = null; HasEarlier = false; Usage = null;
+        Cursor = null; TailCursor = null; HasEarlier = false; HasMore = false; Usage = null;
     }
 
     public bool ApplyPage(JsonNode page, bool replace)
@@ -28,6 +29,7 @@ internal sealed class ChatHistoryBuffer
         if (reset)
         {
             Generation++;
+            HasMore = false;
             Events = (JsonArray)rows.DeepClone();
             Offset = page["nextOffset"]?.GetValue<ulong>() ?? 0;
             TailCursor = page["tailCursor"]?.GetValue<string>();
@@ -57,7 +59,9 @@ internal sealed class ChatHistoryBuffer
             Usage["turns"] = Number(Usage, "turns") + 1;
             Usage["cost"] = (Usage["cost"]?.GetValue<double>() ?? 0) + (ev?["costUsd"]?.GetValue<double>() ?? 0);
         }
+        var previousOffset = Offset;
         Offset = chunk["nextOffset"]?.GetValue<ulong>() ?? Offset;
+        HasMore = chunk["hasMore"]?.GetValue<bool>() == true && Offset > previousOffset;
         TailCursor = chunk["tailCursor"]?.GetValue<string>();
         return true;
     }

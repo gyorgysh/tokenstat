@@ -526,12 +526,12 @@ fun ChatSection(
         put("id", id); put("limit", 160); put("stablePositions", true)
     }) as JsonObject
 
-    suspend fun loadEvents(id: String) {
+    suspend fun loadEvents(id: String): Boolean {
         try {
             val generation = history.generation
             if (!history.loaded) {
                 val page = newestPage(id)
-                if (openId != id || history.generation != generation) return
+                if (openId != id || history.generation != generation) return false
                 history.page(page, replace = true)
             } else {
                 val requestedOffset = history.offset
@@ -540,10 +540,10 @@ fun ChatSection(
                     history.tailCursor?.let { put("tailCursor", it) }
                     put("stablePositions", true)
                 }) as JsonObject
-                if (openId != id || history.generation != generation || history.offset != requestedOffset) return
+                if (openId != id || history.generation != generation || history.offset != requestedOffset) return false
                 if (!history.tail(chunk, generation, requestedOffset)) {
                     val page = newestPage(id)
-                    if (openId != id || history.generation != generation || history.offset != requestedOffset) return
+                    if (openId != id || history.generation != generation || history.offset != requestedOffset) return false
                     history.page(page, replace = true)
                 }
             }
@@ -551,11 +551,14 @@ fun ChatSection(
             hasEarlier = history.hasEarlier
             eventsError = null
             val answer = model.workspaceSection(peer, "chat.approvals", buildJsonObject { put("id", id) })
-            if (openId == id) approvals = (answer as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+            if (openId != id) return false
+            approvals = (answer as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+            return history.hasMore
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) {
             if (openId == id && eventsError == null) eventsError = TunnelCopy.display(
                 failure.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatpullssections.that_computer.2b209061") }) + L10n.text("android.chatpullssections.still_trying.c29f1b24")
+            return false
         }
     }
 
@@ -1352,7 +1355,7 @@ fun ChatSection(
         val id = openId ?: return@ForegroundEffect
         onChatOpened(id)
         while (true) {
-            loadEvents(id)
+            val catchUp = loadEvents(id)
             refreshChats()
             rememberLaunch(chats.firstOrNull { it.str("id") == id })
             // The turn that was in the way may have finished. Read the flag
@@ -1361,7 +1364,7 @@ fun ChatSection(
             if (hostReachable) drainQueue()
             val open = chats.firstOrNull { it.str("id") == id }
             kotlinx.coroutines.delay(
-                ChatSteer.pollDelayMillis(
+                if (catchUp) 10L else ChatSteer.pollDelayMillis(
                     open?.bol("running") == true,
                     ChatSteer.noteOf(open).isNotEmpty(),
                 ),

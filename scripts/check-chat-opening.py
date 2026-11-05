@@ -40,6 +40,7 @@ struct Page: Sendable {
     var cursor: String? = "earlier"; var hasEarlier = true; var historyTrimmed = false
     var usage: Int? = 1
     var reset = false
+    var hasMore = false
 }
 typealias ChatEventPage = Page
 struct Conversation { var id = "A"; var sendRevision: UInt64? = 1; var title = "Demo" }
@@ -49,6 +50,8 @@ enum ChatPaging { static let openPageEvents = 1500 }
     static var tailCalls = 0
     static var tailFailure = false
     static var tailReset = false
+    static var tailMore = false
+    static var tailOffset: UInt64 = 10
     static func chatEventPage(id: String, cursor: String?, limit: Int, peer: String?) async throws -> Page {
         try await withCheckedThrowingContinuation { replies.append($0) }
     }
@@ -59,7 +62,7 @@ enum ChatPaging { static let openPageEvents = 1500 }
     static func chatEvents(id: String, offset: UInt64, tailCursor: String?, peer: String?) async throws -> Page {
         tailCalls += 1
         if tailFailure { throw CocoaError(.fileReadUnknown) }
-        return .init(events: [], reset: tailReset)
+        return .init(events: [], nextOffset: tailOffset, reset: tailReset, hasMore: tailMore)
     }
     static func fail(_ index: Int) {
         let held = replies[index]; replies[index] = nil
@@ -205,6 +208,18 @@ METHODS
         Bridge.finish(8, seq: 6)
         await idleJump.value
         precondition(model.liveWindowLoaded && model.events.first?.seq == 6 && model.contextRevision == 7)
+        let continuation = Model()
+        continuation.liveWindowLoaded = true
+        continuation.offset = 10
+        Bridge.tailFailure = false; Bridge.tailReset = false; Bridge.tailMore = true
+        var more = false
+        let stalled = await continuation.loadEvents(id: "A", reset: false, generation: 1,
+            quiet: true, onMoreEvents: { more = $0 })
+        precondition(stalled && !more, "A continuation hint without cursor progress must not spin")
+        Bridge.tailOffset = 20
+        let advanced = await continuation.loadEvents(id: "A", reset: false, generation: 1,
+            quiet: true, onMoreEvents: { more = $0 })
+        precondition(advanced && more && continuation.offset == 20)
         print("Chat opening: cancellation, selection fence, bounded recovery, tails, safe send jumps and project context passed")
     }
 }

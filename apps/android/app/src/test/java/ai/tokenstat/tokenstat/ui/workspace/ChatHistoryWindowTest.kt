@@ -44,4 +44,19 @@ class ChatHistoryWindowTest {
         assertEquals(1000L, history.offset)
         assertEquals("tail-b", history.tailCursor)
     }
+    @Test fun catchupRequiresProgressAndStopsForOldHostsOrReplacement() {
+        val history = ChatHistoryWindow()
+        history.page(json("""{"events":[],"nextOffset":10}"""), true)
+        assertTrue(history.tail(json("""{"events":[{"id":"one"}],"nextOffset":20,"hasMore":true}"""), history.generation, 10))
+        assertTrue(history.hasMore)
+        assertTrue(history.tail(json("""{"events":[],"nextOffset":20,"hasMore":true}"""), history.generation, 20))
+        assertFalse(history.hasMore)
+        assertTrue(history.tail(json("""{"events":[{"id":"two"}],"nextOffset":30}"""), history.generation, 20))
+        assertFalse(history.hasMore)
+        assertTrue(history.tail(json("""{"events":[],"nextOffset":40,"hasMore":true}"""), history.generation, 30))
+        assertTrue(history.hasMore)
+        history.page(json("""{"events":[],"nextOffset":5}"""), true)
+        assertFalse(history.hasMore)
+    }
+
 }

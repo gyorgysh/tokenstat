@@ -17,11 +17,13 @@ internal class ChatHistoryWindow {
     var cursor: String? = null; private set
     var tailCursor: String? = null; private set
     var hasEarlier = false; private set
+    var hasMore = false; private set
 
     fun page(answer: JsonObject, replace: Boolean = false) {
         val rows = (answer["events"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
         if (replace || answer["reset"]?.jsonPrimitive?.booleanOrNull == true) {
             generation++
+            hasMore = false
             events = rows
             offset = answer["nextOffset"]?.jsonPrimitive?.longOrNull ?: 0
             tailCursor = answer["tailCursor"]?.jsonPrimitive?.contentOrNull
@@ -37,6 +39,7 @@ internal class ChatHistoryWindow {
         val rows = (answer["events"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
         if (rows.isNotEmpty()) events = events + rows
         offset = answer["nextOffset"]?.jsonPrimitive?.longOrNull ?: offset
+        hasMore = answer["hasMore"]?.jsonPrimitive?.booleanOrNull == true && offset > expectedOffset
         tailCursor = answer["tailCursor"]?.jsonPrimitive?.contentOrNull
         return true
     }

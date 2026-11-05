@@ -165,6 +165,34 @@ def main():
                     page = call("chat.eventPage", {"id": chat["id"], "limit": 10})
                     require_fields(page, ["events", "nextOffset", "hasEarlier", "reset"], "chat.eventPage")
                     assert isinstance(page["events"], list) and page["events"] == tail["events"]
+                    # Older clients keep polling nextOffset and ignore newer
+                    # continuation hints. A bounded replay must still deliver
+                    # every row with the original physical position format.
+                    transcript = data / "chat" / chat["id"] / "events.ndjson"
+                    transcript.parent.mkdir(parents=True, exist_ok=True)
+                    positions, offset = [], 0
+                    with transcript.open("wb") as output:
+                        for index in range(24):
+                            positions.append(offset)
+                            row = {"kind": "user", "text": f"row-{index}:" + "x" * (128 * 1024),
+                                   "at_ms": index + 1, "seq": index * 1_000_000}
+                            encoded = (json.dumps(row, separators=(",", ":")) + "\n").encode()
+                            output.write(encoded)
+                            offset += len(encoded)
+                    seen, offset = [], 0
+                    for _ in range(30):
+                        tail = call("chat.events", {"id": chat["id"], "offset": offset})
+                        require_fields(tail, ["events", "nextOffset"], "chat.events")
+                        seen.extend(tail["events"])
+                        if tail["nextOffset"] == offset:
+                            break
+                        assert tail["nextOffset"] > offset
+                        offset = tail["nextOffset"]
+                    else:
+                        raise AssertionError("Legacy replay did not finish")
+                    assert [row["seq"] for row in seen] == positions
+                    assert all(row["text"].startswith(f"row-{index}:") for index, row in enumerate(seen))
+                    assert offset == transcript.stat().st_size
                     call("config.limitsSync", {"enabled": False, "skip": [
                         "codex", "claude_code", "cursor", "grok", "opencode", "antigravity",
                     ]})

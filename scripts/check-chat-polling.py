@@ -120,11 +120,12 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
     }
     var conversationUsage: Usage?, usageThrough: UInt64?
     var deliveringSteer: String?, deliveringSteerToken: UInt64?
+    var moreEvents = false
     let eventWire = Wire(); var fresh: [ChatTimelineEvent] = []
-    func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool, onFreshEvents: (([ChatTimelineEvent]) -> Void)?) async -> Bool {
+    func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool, onFreshEvents: (([ChatTimelineEvent]) -> Void)?, onMoreEvents: ((Bool) -> Void)?) async -> Bool {
         do { try await eventWire.read() } catch { return false }
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
-        onFreshEvents?(fresh); events += fresh; return true
+        onFreshEvents?(fresh); events += fresh; onMoreEvents?(moreEvents); return true
     }
     func selectionMatches(id: String, generation: UInt64) -> Bool { selectionGeneration == generation && selected?.id == id && currentReference?.scope == Context.shared.scope }
     func beginChatListRead(workspaceID: String, peer: String?) -> Int { 0 }
@@ -266,6 +267,26 @@ enum ChatAttachmentDownloadPolicy { static func permitsAutomaticDownload(size: U
         await until { Bridge.attachments.calls == 3 }; Bridge.attachments.finish(2); await download.value
         precondition(modern.responseAttachmentData.isEmpty && modern.responseAttachmentFiles["video"] != nil && !modern.fileTransferInFlight)
         try? FileManager.default.removeItem(at: modern.responseAttachmentFiles["video"]!)
+        // One tick drains available batches, with ownership and failure gates
+        // between replies rather than waiting for another polling interval.
+        let catchup = Model()
+        let statusIndex = Bridge.status.calls, approvalIndex = Bridge.approvals.calls
+        catchup.moreEvents = true
+        await catchup.poll(forceStatus: false)
+        await until { catchup.eventWire.calls == 1 && Bridge.status.calls > statusIndex && Bridge.approvals.calls > approvalIndex }
+        Bridge.status.finish(statusIndex); Bridge.approvals.finish(approvalIndex)
+        catchup.eventWire.finish(0)
+        await until { catchup.eventWire.calls == 2 }
+        catchup.eventWire.finish(1, fail: true)
+        for _ in 0..<100 { await Task.yield() }
+        precondition(catchup.eventWire.calls == 2, "Failed catch-up must wait for another tick")
+        await catchup.poll(forceStatus: false)
+        await until { catchup.eventWire.calls == 3 }
+        catchup.moreEvents = false
+        catchup.eventWire.finish(2)
+        for _ in 0..<100 { await Task.yield() }
+        precondition(catchup.eventWire.calls == 3, "Caught-up readers must stop draining")
+        catchup.cancelPollReads()
         print("ChatModel: held events allow metadata, terminal wake, scoped late replies, usage fences, cached descriptor scans, attachment retry")
     }
 }

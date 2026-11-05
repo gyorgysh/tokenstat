@@ -3105,15 +3105,17 @@ impl Store {
         }
     }
 
-    /// Everything written after `offset`, for live tailing.
-    ///
-    /// Only the region asked for is read. This runs on every poll of a
-    /// running turn, and reading the whole archive to hand back the last two
-    /// hundred bytes of it was work paid for four hundred milliseconds at a
-    /// time.
+    /// Complete history for host-side readers. Live wire polling uses bounded
+    /// `tail_events_positions` replies and advances through `next_offset`.
     pub fn events(&self, id: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
-        let chunk = self.tail_events(id, offset, None)?;
-        Ok((chunk.events, chunk.next_offset))
+        let _guard = self.transcript_guard()?;
+        let chat = self.get(id)?;
+        let path = self.events_path(id);
+        let end = transcript_len(&path, chat.last_message_at_ms.is_some())?;
+        let start = offset.min(end);
+        let bytes = read_region(&path, start, end)
+            .ok_or("conversation could not be read; retry without changing the history")?;
+        Ok((records(&bytes, start), end))
     }
 
     /// A live cursor binds the physical offset to the retained archive. After
@@ -3144,21 +3146,22 @@ impl Store {
         let first = archive_generation(&path)?;
         let reset = cursor.is_some_and(|raw| parse_cursor(raw, end, first) != Some(offset));
         let start = offset.min(end);
-        let events = if reset {
-            Vec::new()
+        let (events, next, has_more) = if reset {
+            (Vec::new(), end, false)
         } else {
-            records_with_positions(
-                &read_region(&path, start, end)
-                    .ok_or("conversation could not be read; retry without changing the history")?,
-                start,
-                stable,
+            let (bytes, next, has_more) = read_forward(&path, start, end)?;
+            (
+                records_with_positions(&bytes, start, stable),
+                next,
+                has_more,
             )
         };
         Ok(EventChunk {
             events,
-            next_offset: end,
-            tail_cursor: make_cursor(end, end, first),
+            next_offset: next,
+            tail_cursor: make_cursor(next, end, first),
             reset,
+            has_more,
         })
     }
 
@@ -6626,6 +6629,7 @@ pub struct EventChunk {
     pub next_offset: u64,
     pub tail_cursor: String,
     pub reset: bool,
+    pub has_more: bool,
 }
 
 /// One bounded page of a conversation's timeline.
@@ -7278,6 +7282,55 @@ fn alias(object: &mut serde_json::Map<String, Value>) {
             object.insert(to.into(), value);
         }
     }
+}
+
+/// Read the next batch at a physical record boundary. Leave a partial final
+/// record for the next poll; its bytes must not advance the client's cursor.
+fn read_forward(path: &Path, start: u64, end: u64) -> Result<(Vec<u8>, u64, bool), String> {
+    use std::io::{Read, Seek, SeekFrom};
+    if start >= end {
+        return Ok((Vec::new(), end, false));
+    }
+    let mut file = open_transcript(path)?.ok_or("conversation transcript is missing")?;
+    file.seek(SeekFrom::Start(start))
+        .map_err(|error| error.to_string())?;
+    let mut reader = BufReader::with_capacity(PAGE_CHUNK as usize, file.take(end - start));
+    let mut bytes = Vec::new();
+    let mut line = Vec::new();
+    let mut next = start;
+    let mut rows = 0;
+    while next < end {
+        if rows == PAGE_EVENTS_MAX || bytes.len() as u64 >= PAGE_BYTES {
+            return Ok((bytes, next, true));
+        }
+        line.clear();
+        let maximum = if bytes.is_empty() {
+            PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64
+        } else {
+            PAGE_BYTES - bytes.len() as u64
+        };
+        let count = reader
+            .by_ref()
+            .take(maximum + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|error| error.to_string())? as u64;
+        if count > maximum {
+            if bytes.is_empty() {
+                return Err("conversation record exceeds the reading limit".into());
+            }
+            return Ok((bytes, next, true));
+        }
+        if count == 0 || (!line.ends_with(b"\n") && next + count != end) {
+            return Err("conversation transcript changed while reading".into());
+        }
+        if !line.ends_with(b"\n") {
+            return Ok((bytes, next, false));
+        }
+        rows += usize::from(!line.iter().all(u8::is_ascii_whitespace));
+        next += count;
+        bytes.extend_from_slice(&line);
+    }
+    Ok((bytes, next, false))
 }
 
 /// Walk backwards from `end` until `limit` whole records are in hand.
@@ -12576,11 +12629,32 @@ mod tests {
             .unwrap();
         assert!(stable_page.events[0]["seq"].as_u64().unwrap() > legacy_page.start);
         assert_eq!(legacy_page.events[0]["text"], stable_page.events[0]["text"]);
-        let legacy_tail = store
+        let mut legacy_tail = store
             .tail_events_positions("retention", 0, None, false)
             .unwrap();
         assert_eq!(legacy_tail.events[0]["seq"], 0);
+        let mut legacy_rows = legacy_tail.events.clone();
+        while legacy_tail.has_more {
+            let next = store
+                .tail_events_positions(
+                    "retention",
+                    legacy_tail.next_offset,
+                    Some(&legacy_tail.tail_cursor),
+                    false,
+                )
+                .unwrap();
+            assert!(!next.reset && next.next_offset > legacy_tail.next_offset);
+            legacy_rows.extend(next.events.clone());
+            legacy_tail = next;
+        }
         assert_eq!(legacy_tail.next_offset, fs::metadata(&path).unwrap().len());
+        assert_eq!(
+            legacy_rows
+                .iter()
+                .map(|row| &row["text"])
+                .collect::<Vec<_>>(),
+            rows.iter().map(|row| &row["text"]).collect::<Vec<_>>()
+        );
         let snapshot = store.search_snapshot("workspace-a", "retention").unwrap();
         assert!(
             snapshot
@@ -15379,5 +15453,162 @@ mod tests {
         assert!(copy_fork_transcript(&source, &destination, "fork", None).is_err());
         assert_eq!(fs::read(&destination).unwrap(), b"existing contents");
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+    }
+    #[test]
+    fn tail_replays_long_history_in_bounded_batches_for_both_position_formats() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "long-tail");
+        let path = store.events_path("long-tail");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut file = fs::File::create(&path).unwrap();
+        let mut positions = Vec::new();
+        let mut end = 0;
+        for index in 0..24 {
+            positions.push(end);
+            let row = json!({"kind":"agent","backend":"claude","seq":index*1_000_000,
+                "event":{"kind":"text","delta":format!("{index}:{}", "x".repeat(128 * 1024))}});
+            let bytes = format!("{row}\n");
+            file.write_all(bytes.as_bytes()).unwrap();
+            end += bytes.len() as u64;
+        }
+        drop(file);
+        for stable in [false, true] {
+            let mut offset = 0;
+            let mut cursor = None;
+            let mut seen = 0;
+            let mut batches = 0;
+            while offset < end {
+                let chunk = store
+                    .tail_events_positions("long-tail", offset, cursor.as_deref(), stable)
+                    .unwrap();
+                assert!(!chunk.reset);
+                assert!(chunk.next_offset > offset);
+                assert!(chunk.next_offset - offset <= PAGE_BYTES);
+                assert!(chunk.events.len() <= PAGE_EVENTS_MAX);
+                for row in chunk.events {
+                    assert_eq!(
+                        row["seq"],
+                        if stable {
+                            seen as u64 * 1_000_000
+                        } else {
+                            positions[seen]
+                        }
+                    );
+                    assert!(
+                        row["event"]["delta"]
+                            .as_str()
+                            .unwrap()
+                            .starts_with(&format!("{seen}:"))
+                    );
+                    seen += 1;
+                }
+                offset = chunk.next_offset;
+                cursor = Some(chunk.tail_cursor);
+                batches += 1;
+            }
+            assert_eq!(seen, positions.len());
+            assert!(batches > 1);
+            let idle = store
+                .tail_events_positions("long-tail", offset, cursor.as_deref(), stable)
+                .unwrap();
+            assert!(idle.events.is_empty());
+            assert_eq!(idle.next_offset, end);
+            assert!(!idle.reset);
+        }
+    }
+    #[test]
+    fn tail_batches_keep_large_rows_and_wait_for_partial_records() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "tail-edges");
+        let path = store.events_path("tail-edges");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let large = format!(
+            "{}\n",
+            json!({"kind":"agent","event":{"kind":"text","delta":"x".repeat(2 * 1024 * 1024)}})
+        );
+        let small = "{\"kind\":\"user\",\"text\":\"next\"}\n";
+        fs::write(&path, format!("{large}{small}")).unwrap();
+        let first = store.tail_events("tail-edges", 0, None).unwrap();
+        assert_eq!(first.events.len(), 1);
+        assert_eq!(first.next_offset, large.len() as u64);
+        assert!(first.has_more);
+        let second = store
+            .tail_events("tail-edges", first.next_offset, Some(&first.tail_cursor))
+            .unwrap();
+        assert_eq!(second.events.len(), 1);
+        assert_eq!(second.events[0]["text"], "next");
+        assert!(!second.has_more);
+        fs::write(&path, format!("{small}{{\"kind\":\"user\",\"text\":\"par")).unwrap();
+        let first = store.tail_events("tail-edges", 0, None).unwrap();
+        assert_eq!(first.events.len(), 1);
+        assert_eq!(first.next_offset, small.len() as u64);
+        assert!(
+            !first.has_more,
+            "an incomplete write must not trigger a busy catch-up loop"
+        );
+        let waiting = store
+            .tail_events("tail-edges", first.next_offset, Some(&first.tail_cursor))
+            .unwrap();
+        assert!(waiting.events.is_empty());
+        assert_eq!(waiting.next_offset, first.next_offset);
+        assert!(!waiting.reset && !waiting.has_more);
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"tial\"}\n")
+            .unwrap();
+        let completed = store
+            .tail_events(
+                "tail-edges",
+                waiting.next_offset,
+                Some(&waiting.tail_cursor),
+            )
+            .unwrap();
+        assert_eq!(completed.events.len(), 1);
+        assert_eq!(completed.events[0]["text"], "partial");
+        assert!(!completed.reset && !completed.has_more);
+        fs::write(&path, vec![b'x'; PAGE_RECORD_BYTES as usize + 1024]).unwrap();
+        assert!(
+            store
+                .tail_events("tail-edges", 0, None)
+                .err()
+                .unwrap()
+                .contains("record exceeds")
+        );
+    }
+
+    #[test]
+    fn tail_row_limits_and_growing_cursors_do_not_skip_records() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "tail-growth");
+        let path = store.events_path("tail-growth");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let line = "{\"kind\":\"user\",\"text\":\"row\"}\n";
+        fs::write(&path, line.repeat(PAGE_EVENTS_MAX + 3)).unwrap();
+        let first = store.tail_events("tail-growth", 0, None).unwrap();
+        assert_eq!(first.events.len(), PAGE_EVENTS_MAX);
+        assert!(first.has_more);
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(line.as_bytes())
+            .unwrap();
+        let next = store
+            .tail_events("tail-growth", first.next_offset, Some(&first.tail_cursor))
+            .unwrap();
+        assert!(!next.reset && !next.has_more);
+        assert_eq!(next.events.len(), 4);
+        assert_eq!(next.events[0]["seq"], first.next_offset);
+        assert_eq!(next.next_offset, fs::metadata(&path).unwrap().len());
+        assert_eq!(
+            store.events("tail-growth", 0).unwrap().0.len(),
+            PAGE_EVENTS_MAX + 4,
+            "host-side full-history readers must not silently receive the first wire batch"
+        );
     }
 }

@@ -338,6 +338,15 @@ history.ApplyPage(Json("""{"reset":true,"events":[{"id":"replacement"}],"nextOff
 Check(history.Events.Count == 1 && history.Offset == 80 && history.Usage is null, "trim reset must replace history and totals");
 Check(!history.ApplyTail(Json("""{"events":[{"id":"stale"}],"nextOffset":1100}"""), generation), "late pre-reset replies must be ignored");
 Check(!history.ApplyTail(Json("""{"reset":true,"events":[],"nextOffset":0}"""), history.Generation), "reset tail must require a new page");
+history.ApplyTail(Json("""{"events":[],"nextOffset":90,"hasMore":true}"""), history.Generation);
+Check(history.HasMore, "advanced batches can catch up without waiting for a poll interval");
+history.ApplyTail(Json("""{"events":[],"nextOffset":90,"hasMore":true}"""), history.Generation);
+Check(!history.HasMore, "a stalled cursor must not spin");
+history.ApplyTail(Json("""{"events":[],"nextOffset":100}"""), history.Generation);
+Check(!history.HasMore, "old hosts without continuation hints keep normal polling");
+history.ApplyTail(Json("""{"events":[],"nextOffset":110,"hasMore":true}"""), history.Generation);
+history.ApplyPage(newest, true);
+Check(!history.HasMore, "replacement pages discard old catch-up state");
 history.Reset();
 Check(history.Events.Count == 0 && history.Cursor is null && history.Offset == 0, "changing conversation must release old history");
 Console.WriteLine("Windows chat paging: bounded opening, concurrent older/live reads, totals, archive resets and stale replies pass.");

@@ -3231,18 +3231,24 @@ final class ChatModel {
             guard let self, self.pollIsCurrent(owner), permitsPublication(),
                   let id = owner.reference.itemID else { return }
             let revision = self.eventsRevision
-            let success = await self.loadEvents(id: id, reset: false, generation: owner.generation,
-                quiet: true, onFreshEvents: { records in
-                    guard self.pollIsCurrent(owner), permitsPublication() else { return }
-                    if records.contains(where: { record in
-                        ["approval", "question", "answer", "answerWithdrawn"].contains(record.kind)
-                            || ["done", "failed"].contains(record.event?.kind ?? "")
-                    }) {
-                        _ = self.startStatusPoll(owner: owner, refresh: true)
-                        _ = self.startApprovalPoll(owner: owner, refresh: true)
-                    }
-                })
-            guard self.pollIsCurrent(owner), permitsPublication() else { return }
+            var success = false
+            while self.pollIsCurrent(owner), permitsPublication() {
+                var more = false
+                success = await self.loadEvents(id: id, reset: false, generation: owner.generation,
+                    quiet: true, onFreshEvents: { records in
+                        guard self.pollIsCurrent(owner), permitsPublication() else { return }
+                        if records.contains(where: { record in
+                            ["approval", "question", "answer", "answerWithdrawn"].contains(record.kind)
+                                || ["done", "failed"].contains(record.event?.kind ?? "")
+                        }) {
+                            _ = self.startStatusPoll(owner: owner, refresh: true)
+                            _ = self.startApprovalPoll(owner: owner, refresh: true)
+                        }
+                    }, onMoreEvents: { more = $0 })
+                guard self.pollIsCurrent(owner), permitsPublication() else { return }
+                if !success || !more { break }
+                await Task.yield()
+            }
             self.pollCadence.note(success: success, changed: self.eventsRevision != revision,
                                   now: ProcessInfo.processInfo.systemUptime)
         }
@@ -4298,7 +4304,8 @@ final class ChatModel {
 
     @discardableResult
     private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false,
-                            onFreshEvents: (([ChatTimelineEvent]) -> Void)? = nil) async -> Bool {
+                            onFreshEvents: (([ChatTimelineEvent]) -> Void)? = nil,
+                            onMoreEvents: ((Bool) -> Void)? = nil) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
         #if os(macOS)
         if !reset, !liveWindowLoaded {
@@ -4375,6 +4382,7 @@ final class ChatModel {
             reconcileOutgoing()
             tailCursor = chunk.tailCursor
             offset = chunk.nextOffset
+            onMoreEvents?(chunk.hasMore && chunk.nextOffset > requestedOffset)
             if let replacement { finishWindowReplacement(replacement) }
             settleNotifications()
             scheduleResponseAttachments(id: id, generation: generation)
