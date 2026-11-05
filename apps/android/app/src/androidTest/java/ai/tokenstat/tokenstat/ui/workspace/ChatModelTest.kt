@@ -9,11 +9,22 @@ import ai.tokenstat.tokenstat.ui.theme.TsTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pinch
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -34,17 +45,23 @@ import org.junit.runner.RunWith
 class ChatModelTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
     private lateinit var surface: ModelWebSurface
+    private lateinit var scroll: ScrollState
     private val results = CopyOnWriteArrayList<String?>()
     private val model = Base64.encodeToString(
         "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".toByteArray(), Base64.NO_WRAP)
 
     private fun mount() {
         compose.setContent {
-            AndroidView(factory = { context -> ModelWebSurface(context).also {
-                surface = it
-                it.onResult = { message -> results.add(message) }
-                it.render(model, "obj", "#08070d")
-            } }, modifier = Modifier.fillMaxWidth().height(320.dp), onRelease = { it.shutdown() })
+            scroll = rememberScrollState()
+            Column(Modifier.height(480.dp).verticalScroll(scroll)) {
+                AndroidView(factory = { context -> ModelWebSurface(context).also {
+                    surface = it
+                    it.onResult = { message -> results.add(message) }
+                    it.render(model, "obj", "#08070d")
+                } }, modifier = Modifier.fillMaxWidth().height(320.dp).testTag("model"), onRelease = { it.shutdown() })
+                Spacer(Modifier.fillMaxWidth().height(120.dp).testTag("chat-scroll-target"))
+                Spacer(Modifier.height(1000.dp))
+            }
         }
         compose.waitUntil(20_000) { results.isNotEmpty() }
         assertEquals(listOf<String?>(null), results.toList())
@@ -132,5 +149,74 @@ class ChatModelTest {
                 compose.onAllNodes(hasText("Error: Theme load failed")).fetchSemanticsNodes().isEmpty()
             }
         } finally { file.delete() }
+    }
+
+    private fun settledDraws(): Int {
+        var previous = -1
+        var stable = 0
+        compose.waitUntil(10_000) {
+            val current = js("window.draws").toInt()
+            stable = if (current == previous) stable + 1 else 0
+            previous = current
+            stable >= 10
+        }
+        return previous
+    }
+
+    private fun pixels(): IntArray {
+        val position = IntArray(2)
+        var width = 0
+        var height = 0
+        compose.runOnIdle {
+            surface.getLocationOnScreen(position)
+            width = surface.width
+            height = surface.height
+        }
+        val screenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        try {
+            return IntArray(width * height).also {
+                screenshot.getPixels(it, 0, width, position[0], position[1], width, height)
+            }
+        } finally { screenshot.recycle() }
+    }
+
+    @Test fun gesturesMoveTheModelWithoutScrollingChatAndDrawingStopsWhenIdle() {
+        mount()
+        js("""window.draws=0;
+            for (const Type of [WebGLRenderingContext, WebGL2RenderingContext]) {
+                for (const method of ['drawArrays','drawElements']) {
+                    const original=Type.prototype[method];
+                    Type.prototype[method]=function(...args){draws++;return original.apply(this,args)};
+                }
+            }""")
+        val initialDraws = settledDraws()
+        val initial = pixels()
+        compose.onNodeWithTag("model").performTouchInput {
+            swipe(center, center + Offset(80f, -100f), 600)
+        }
+        compose.waitUntil(5_000) { js("draws").toInt() > initialDraws }
+        val orbitDraws = settledDraws()
+        val orbited = pixels()
+        assertTrue("Orbit changes the rendered image", initial.indices.count { initial[it] != orbited[it] } > 100)
+        compose.runOnIdle { assertEquals("Orbit must not scroll chat", 0, scroll.value) }
+        compose.onNodeWithTag("model").performTouchInput {
+            pinch(center + Offset(-40f, 0f), center + Offset(40f, 0f),
+                center + Offset(-100f, 0f), center + Offset(100f, 0f), 600)
+        }
+        compose.waitUntil(5_000) { js("draws").toInt() > orbitDraws }
+        settledDraws()
+        val zoomed = pixels()
+        assertTrue("Pinch changes the rendered image", orbited.indices.count { orbited[it] != zoomed[it] } > 100)
+        compose.runOnIdle { assertEquals("Pinch must not scroll chat", 0, scroll.value) }
+        js("document.getElementById('reset').click()")
+        val idle = settledDraws()
+        val reset = pixels()
+        assertTrue("Reset returns the camera to its initial view", initial.indices.count { initial[it] != reset[it] } < initial.size / 100)
+        android.os.SystemClock.sleep(250)
+        assertEquals("An idle model should not keep drawing", idle, js("draws").toInt())
+        compose.onNodeWithTag("chat-scroll-target").performTouchInput {
+            swipe(center, center + Offset(0f, -100f), 600)
+        }
+        compose.waitUntil(5_000) { scroll.value > 0 }
     }
 }
