@@ -245,24 +245,21 @@ impl Journal {
         Ok(())
     }
     pub(super) fn observe_agent(&mut self, canonical: &[u8]) -> Result<bool, &'static str> {
+        self.observe_agent_reader(&mut std::io::Cursor::new(canonical))
+    }
+
+    pub(super) fn observe_agent_reader(
+        &mut self,
+        reader: &mut (impl Read + Seek),
+    ) -> Result<bool, &'static str> {
         let Some(pending) = &self.pending_agent else {
             return Ok(false);
         };
-        let before =
-            usize::try_from(pending.before_bytes).map_err(|_| "Invalid output position")?;
-        if canonical.len() == before && digest(canonical) == pending.before_digest {
-            return Ok(false);
-        }
         let bytes = batch_bytes(&pending.rows)?;
-        let end = before
-            .checked_add(bytes.len())
-            .ok_or("Invalid output position")?;
-        if canonical
-            .get(..before)
-            .is_none_or(|v| digest(v) != pending.before_digest)
-            || canonical.get(before..end) != Some(bytes.as_slice())
+        if !delivery_written(reader, pending.before_bytes, &pending.before_digest, &bytes)
+            .map_err(|_| "Output changed during delivery")?
         {
-            return Err("Output changed during delivery");
+            return Ok(false);
         }
         let first = &pending.rows[0];
         let proof = AgentProof {

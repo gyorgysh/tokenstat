@@ -302,3 +302,78 @@ fn invalid_actor_scope_and_oversized_records_fail_before_a_reservation() {
         assert_eq!(journal.encoded().unwrap(), before);
     }
 }
+
+#[test]
+fn streamed_delivery_checks_long_prefixes_and_exact_rows_with_bounded_reads() {
+    struct Chunked {
+        bytes: std::io::Cursor<Vec<u8>>,
+        fail_after: Option<u64>,
+    }
+    impl Read for Chunked {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            assert!(buffer.len() <= 64 * 1024);
+            if self
+                .fail_after
+                .is_some_and(|at| self.bytes.position() >= at)
+            {
+                return Err(std::io::Error::other("injected read failure"));
+            }
+            let count = buffer.len().min(4093);
+            self.bytes.read(&mut buffer[..count])
+        }
+    }
+    impl Seek for Chunked {
+        fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+            self.bytes.seek(position)
+        }
+    }
+    let prefix = vec![b'x'; 10 * 1024 * 1024 + 17];
+    let row = record().encoded().unwrap();
+    let expected_digest = digest(&prefix);
+    for case in 0..6 {
+        let mut bytes = prefix.clone();
+        if case != 0 {
+            bytes.extend_from_slice(&row);
+        }
+        if case == 1 {
+            bytes.extend_from_slice(b"later rows\n");
+        }
+        if case == 2 {
+            bytes[70_000] = b'y';
+        }
+        if case == 3 {
+            bytes[prefix.len() + 3] ^= 1;
+        }
+        if case == 4 {
+            bytes.truncate(prefix.len() + row.len() - 1);
+        }
+        let mut reader = Chunked {
+            bytes: std::io::Cursor::new(bytes),
+            fail_after: (case == 5).then_some(70_000),
+        };
+        let result = delivery_written(&mut reader, prefix.len() as u64, &expected_digest, &row);
+        match case {
+            0 => assert_eq!(result, Ok(false)),
+            1 => assert_eq!(result, Ok(true)),
+            _ => assert!(result.is_err(), "case {case}"),
+        }
+    }
+    let mut journal = Journal::new(source());
+    let pending = record();
+    let prefix = &prefix[..128 * 1024];
+    journal.reserve(pending.clone(), prefix).unwrap();
+    let before = journal.encoded().unwrap();
+    let mut reader = Chunked {
+        bytes: std::io::Cursor::new([prefix, row.as_slice()].concat()),
+        fail_after: Some(70_000),
+    };
+    assert!(journal.observe_reader(&mut reader).is_err());
+    assert_eq!(journal.encoded().unwrap(), before);
+    reader.fail_after = None;
+    assert!(journal.observe_reader(&mut reader).unwrap());
+    assert!(!journal.observe_reader(&mut reader).unwrap());
+    assert!(matches!(
+        journal.receipt(&pending).unwrap(),
+        Some(Receipt::Accepted { .. })
+    ));
+}

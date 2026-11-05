@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::io::{Read, Seek, SeekFrom};
 #[path = "journal/asks.rs"]
 mod asks;
 #[path = "segments.rs"]
@@ -29,6 +30,48 @@ pub(super) const MAX_JOURNAL_BYTES: u64 = 4 * 1024 * 1024;
 
 fn digest(bytes: &[u8]) -> String {
     tokenstat_identity::hex(&Sha256::digest(bytes))
+}
+
+/// Verify an append without retaining its entire earlier transcript. Callers
+/// hold the writer locks; a short read or changed prefix cannot settle a receipt.
+fn delivery_written(
+    reader: &mut (impl Read + Seek),
+    before: u64,
+    expected_digest: &str,
+    row: &[u8],
+) -> Result<bool, ()> {
+    let length = reader.seek(SeekFrom::End(0)).map_err(|_| ())?;
+    if before > length {
+        return Err(());
+    }
+    reader.seek(SeekFrom::Start(0)).map_err(|_| ())?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    let mut remaining = before;
+    while remaining > 0 {
+        let count = remaining.min(buffer.len() as u64) as usize;
+        reader.read_exact(&mut buffer[..count]).map_err(|_| ())?;
+        hash.update(&buffer[..count]);
+        remaining -= count as u64;
+    }
+    if tokenstat_identity::hex(&hash.finalize()) != expected_digest {
+        return Err(());
+    }
+    if before == length {
+        return Ok(false);
+    }
+    if row.len() as u64 > length - before {
+        return Err(());
+    }
+    for chunk in row.chunks(buffer.len()) {
+        reader
+            .read_exact(&mut buffer[..chunk.len()])
+            .map_err(|_| ())?;
+        if buffer[..chunk.len()] != *chunk {
+            return Err(());
+        }
+    }
+    Ok(true)
 }
 
 fn lower_hex(value: &str, length: usize) -> bool {
@@ -430,26 +473,28 @@ impl Journal {
     /// A read can settle an exact row already on disk. It cannot append text
     /// or turn an unresolved reservation into permission to replay a write.
     pub fn observe(&mut self, bytes: &[u8]) -> Result<bool, &'static str> {
-        let ask_changed = self.observe_ask(bytes)?;
-        let agent_changed = self.observe_agent(bytes)?;
+        self.observe_reader(&mut std::io::Cursor::new(bytes))
+    }
+
+    pub fn observe_reader(
+        &mut self,
+        reader: &mut (impl Read + Seek),
+    ) -> Result<bool, &'static str> {
+        let ask_changed = self.observe_ask(reader)?;
+        let agent_changed = self.observe_agent_reader(reader)?;
         let Some(pending) = &self.pending else {
             return Ok(ask_changed || agent_changed);
         };
-        let before =
-            usize::try_from(pending.before_bytes).map_err(|_| "comment position is invalid")?;
-        if before == bytes.len() && digest(bytes) == pending.before_digest {
-            return Ok(false);
-        }
         let record = pending.record.encoded()?;
-        let end = before
-            .checked_add(record.len())
-            .ok_or("comment position is invalid")?;
-        if bytes
-            .get(..before)
-            .is_none_or(|prefix| digest(prefix) != pending.before_digest)
-            || bytes.get(before..end) != Some(record.as_slice())
+        if !delivery_written(
+            reader,
+            pending.before_bytes,
+            &pending.before_digest,
+            &record,
+        )
+        .map_err(|_| "comment history changed during delivery")?
         {
-            return Err("comment history changed during delivery");
+            return Ok(false);
         }
         let key = pending.record.key()?;
         self.receipts.insert(

@@ -2418,47 +2418,15 @@ impl Store {
         let destination = safe_join(&self.root, &fork.id)?;
         fs::create_dir(&destination).map_err(|error| error.to_string())?;
         let result = (|| {
-            let bytes = read_fork_file(
+            let extra = usage_difference(&source_usage, &stored_usage)?;
+            copy_fork_transcript(
                 &source.join("events.ndjson"),
-                PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64,
-                true,
+                &destination.join("events.ndjson"),
+                &fork.id,
+                extra.as_ref(),
             )?;
-            if !bytes.is_empty() && !bytes.ends_with(b"\n") {
-                return Err("the transcript is incomplete and cannot be copied".into());
-            }
-            let mut copied = Vec::new();
-            for line in bytes
-                .split(|byte| *byte == b'\n')
-                .filter(|line| !line.is_empty())
-            {
-                let mut record: Value = serde_json::from_slice(line)
-                    .map_err(|_| "the transcript could not be verified for copying")?;
-                if record["kind"] == "agent" && record["event"]["kind"] == "session" {
-                    continue;
-                }
-                if record["kind"] == "approval" {
-                    let approval = &mut record["approval"];
-                    let original = approval["id"].as_str().ok_or("invalid stored approval")?;
-                    approval["id"] = json!(format!("{}-{original}", fork.id));
-                    approval["conversationId"] = json!(fork.id);
-                    approval["expiresAtMs"] = json!(0);
-                    if approval["decision"].is_null() {
-                        approval["decision"] = json!("deny");
-                    }
-                }
-                serde_json::to_writer(&mut copied, &record).map_err(|error| error.to_string())?;
-                copied.push(b'\n');
-            }
-            if let Some(extra) = usage_difference(&source_usage, &stored_usage)? {
-                let seq = crate::work_transcript_identity::next_sequence(&copied, 0)?;
-                let Value::Object(record) = json!({"kind":"retainedUsage", "usage":extra}) else {
-                    return Err("invalid copied usage".into());
-                };
-                copied.extend(crate::work_transcript_identity::encoded(record, seq)?);
-            }
-            replace_chat_file(&destination.join("events.ndjson"), &copied)?;
             fork.team_journal_initialized =
-                sharing::fork_journal(&source, &original, &destination, &fork, &bytes)?;
+                sharing::fork_journal(&source, &original, &destination, &fork)?;
             crate::chat_sessions::inherit(&source, &destination)?;
             copy_fork_files(&source.join("files"), &destination.join("files"))?;
             self.edit_index_locked(&lifecycle, false, |_, current| {
@@ -5893,6 +5861,77 @@ fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
     file.write_all(bytes).map_err(|e| e.to_string())
 }
 
+fn copy_fork_transcript(
+    source: &Path,
+    destination: &Path,
+    fork_id: &str,
+    extra: Option<&Value>,
+) -> Result<(), String> {
+    replace_chat_file_with(destination, |file| {
+        let mut writer = std::io::BufWriter::new(file);
+        let mut encoded = Vec::new();
+        let mut offset = 0u64;
+        let mut previous = None;
+        let mut next = 0;
+        if let Some(file) = open_transcript(source)? {
+            visit_transcript_lines(file, |line, _| {
+                if !line.ends_with(b"\n") {
+                    return Err("the transcript is incomplete and cannot be copied".into());
+                }
+                if line == b"\n" {
+                    return Ok(());
+                }
+                let mut record: Value = serde_json::from_slice(line)
+                    .map_err(|_| "the transcript could not be verified for copying")?;
+                if record["kind"] == "agent" && record["event"]["kind"] == "session" {
+                    return Ok(());
+                }
+                if record["kind"] == "approval" {
+                    let approval = &mut record["approval"];
+                    let original = approval["id"].as_str().ok_or("invalid stored approval")?;
+                    approval["id"] = json!(format!("{fork_id}-{original}"));
+                    approval["conversationId"] = json!(fork_id);
+                    approval["expiresAtMs"] = json!(0);
+                    if approval["decision"].is_null() {
+                        approval["decision"] = json!("deny");
+                    }
+                }
+                encoded.clear();
+                serde_json::to_writer(&mut encoded, &record).map_err(|error| error.to_string())?;
+                encoded.push(b'\n');
+                if extra.is_some() {
+                    let object = record
+                        .as_object()
+                        .ok_or("invalid copied transcript record")?;
+                    let seq = crate::work_transcript_identity::sequence(object, offset)?;
+                    if previous.is_some_and(|value| seq <= value) {
+                        return Err("conversation record positions are not ordered".into());
+                    }
+                    previous = Some(seq);
+                    next = seq
+                        .checked_add(encoded.len() as u64)
+                        .ok_or("conversation position is exhausted")?;
+                }
+                offset = offset
+                    .checked_add(encoded.len() as u64)
+                    .ok_or("conversation position is exhausted")?;
+                writer
+                    .write_all(&encoded)
+                    .map_err(|error| error.to_string())
+            })?;
+        }
+        if let Some(extra) = extra {
+            let Value::Object(record) = json!({"kind":"retainedUsage", "usage":extra}) else {
+                return Err("invalid copied usage".into());
+            };
+            writer
+                .write_all(&crate::work_transcript_identity::encoded(record, next)?)
+                .map_err(|error| error.to_string())?;
+        }
+        writer.flush().map_err(|error| error.to_string())
+    })
+}
+
 fn read_fork_file(path: &Path, maximum: u64, missing_is_empty: bool) -> Result<Vec<u8>, String> {
     use std::io::Read;
     match fs::symlink_metadata(path) {
@@ -7093,6 +7132,15 @@ impl Drop for ChatTemporary {
 }
 
 fn replace_chat_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    replace_chat_file_with(path, |file| {
+        file.write_all(bytes).map_err(|error| error.to_string())
+    })
+}
+
+fn replace_chat_file_with(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> Result<(), String>,
+) -> Result<(), String> {
     let directory = path.parent().ok_or("invalid chat events path")?;
     let temporary =
         ChatTemporary(directory.join(format!(".chat-{:032x}.tmp", rand::random::<u128>())));
@@ -7104,7 +7152,7 @@ fn replace_chat_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
     let mut file = options.open(&temporary.0).map_err(|e| e.to_string())?;
-    file.write_all(bytes).map_err(|e| e.to_string())?;
+    write(&mut file)?;
     file.sync_all().map_err(|e| e.to_string())?;
     drop(file);
     fs::rename(&temporary.0, path).map_err(|e| e.to_string())?;
@@ -15239,5 +15287,97 @@ mod tests {
         assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
         assert!(usage_totals(&path).is_err());
         assert!(visit_usage_repair_records(&path, true, |_| Ok(())).is_err());
+    }
+    #[test]
+    fn fork_preserves_long_history_and_recovered_usage() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "long-fork");
+        store
+            .edit_conversation("long-fork", |chat| {
+                chat.backend = "codex".into();
+                Ok(())
+            })
+            .unwrap();
+        let path = store.events_path("long-fork");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut file = fs::File::create(&path).unwrap();
+        let mut write = |record: Value| {
+            serde_json::to_writer(&mut file, &record).unwrap();
+            file.write_all(b"\n").unwrap();
+        };
+        write(json!({"kind":"user","text":"Keep the original prompt","at_ms":1,"seq":0}));
+        write(
+            json!({"kind":"agent","backend":"codex","event":{"kind":"session","id":"old-session"},"at_ms":2,"seq":100}),
+        );
+        for index in 0..20 {
+            write(
+                json!({"kind":"agent","backend":"codex","event":{"kind":"toolEnd","callId":format!("call-{index}"),"detail":"x".repeat(512 * 1024)},"at_ms":3+index,"seq":1000+index*1_000_000}),
+            );
+        }
+        write(
+            json!({"kind":"approval","approval":{"id":"old-approval","conversationId":"long-fork","expiresAtMs":999,"decision":null},"at_ms":30,"seq":21_000_000}),
+        );
+        drop(file);
+        let original = fs::read(&path).unwrap();
+        assert!(original.len() > 10 * 1024 * 1024);
+        let raw = path.parent().unwrap().join("raw");
+        fs::create_dir_all(&raw).unwrap();
+        fs::write(
+            raw.join("1.ndjson"),
+            r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":2}}"#,
+        )
+        .unwrap();
+        let fork = store.fork("long-fork").unwrap();
+        let mut rows = 0;
+        let mut tools = 0;
+        let mut approval = None;
+        let mut last = Value::Null;
+        visit_transcript_lines(
+            fs::File::open(store.events_path(&fork.id)).unwrap(),
+            |line, _| {
+                let row: Value = serde_json::from_slice(line).unwrap();
+                if rows == 0 {
+                    assert_eq!(row["text"], "Keep the original prompt");
+                }
+                assert_ne!(row["event"]["kind"], "session");
+                if row["event"]["kind"] == "toolEnd" {
+                    assert_eq!(row["event"]["detail"].as_str().unwrap().len(), 512 * 1024);
+                    tools += 1;
+                }
+                if row["kind"] == "approval" {
+                    approval = Some(row["approval"].clone());
+                }
+                rows += 1;
+                last = row;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!((rows, tools), (23, 20));
+        let approval = approval.unwrap();
+        assert_eq!(approval["conversationId"], fork.id);
+        assert_eq!(approval["id"], format!("{}-old-approval", fork.id));
+        assert_eq!(approval["decision"], "deny");
+        assert_eq!(approval["expiresAtMs"], 0);
+        assert_eq!(last["kind"], "retainedUsage");
+        assert!(last["seq"].as_u64().unwrap() > 21_000_000);
+        let usage = store.event_page(&fork.id, None, 1).unwrap().usage.unwrap();
+        assert_eq!(usage["input"], 10);
+        assert_eq!(usage["output"], 2);
+        assert_eq!(fs::read(path).unwrap(), original);
+    }
+    #[test]
+    fn streamed_fork_failure_keeps_the_destination_and_removes_temporary_files() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.ndjson");
+        let destination = root.path().join("destination.ndjson");
+        let row =
+            json!({"kind":"agent","event":{"kind":"toolEnd","detail":"x".repeat(512 * 1024)}});
+        fs::write(&source, format!("{row}\n{{incomplete")).unwrap();
+        fs::write(&destination, b"existing contents").unwrap();
+        assert!(copy_fork_transcript(&source, &destination, "fork", None).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), b"existing contents");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
     }
 }

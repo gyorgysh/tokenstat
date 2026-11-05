@@ -228,24 +228,18 @@ impl Journal {
         }
         Ok(())
     }
-    pub(super) fn observe_ask(&mut self, bytes: &[u8]) -> Result<bool, &'static str> {
+    pub(super) fn observe_ask(
+        &mut self,
+        reader: &mut (impl Read + Seek),
+    ) -> Result<bool, &'static str> {
         let Some(pending) = &self.pending_ask else {
             return Ok(false);
         };
-        let before = usize::try_from(pending.before_bytes).map_err(|_| "Invalid Ask position")?;
-        if before == bytes.len() && digest(bytes) == pending.before_digest {
-            return Ok(false);
-        }
         let row = pending.record.encoded()?;
-        let end = before
-            .checked_add(row.len())
-            .ok_or("Invalid Ask position")?;
-        if bytes
-            .get(..before)
-            .is_none_or(|prefix| digest(prefix) != pending.before_digest)
-            || bytes.get(before..end) != Some(row.as_slice())
+        if !delivery_written(reader, pending.before_bytes, &pending.before_digest, &row)
+            .map_err(|_| "Ask history changed during delivery")?
         {
-            return Err("Ask history changed during delivery");
+            return Ok(false);
         }
         let a = &pending.record.ask.attribution;
         let record_digest = digest(&row);

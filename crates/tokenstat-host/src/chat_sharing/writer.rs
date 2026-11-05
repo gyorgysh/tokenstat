@@ -79,6 +79,14 @@ pub(super) fn load(
     chat: &Conversation,
     bytes: &[u8],
 ) -> Result<Option<Journal>, DispatchError> {
+    load_observing(directory, chat, |journal| journal.observe(bytes))
+}
+
+fn load_observing(
+    directory: &Path,
+    chat: &Conversation,
+    observe: impl FnOnce(&mut Journal) -> Result<bool, &'static str>,
+) -> Result<Option<Journal>, DispatchError> {
     let path = directory.join(JOURNAL);
     match fs::symlink_metadata(&path) {
         Err(error)
@@ -95,7 +103,7 @@ pub(super) fn load(
     )
     .map_err(|_| unavailable())?;
     let chain = read_chain(directory)?;
-    let events_changed = journal.observe(bytes).map_err(|_| unavailable())?;
+    let events_changed = observe(&mut journal).map_err(|_| unavailable())?;
     let chain_changed = journal.observe_chain(&chain).map_err(|_| unavailable())?;
     if events_changed || chain_changed {
         save(&path, &journal)?;
@@ -132,10 +140,18 @@ pub(crate) fn fork_journal(
     original: &Conversation,
     destination: &Path,
     fork: &Conversation,
-    bytes: &[u8],
 ) -> Result<bool, String> {
     copy_tree(source_dir, destination)?;
-    if let Some(journal) = load(source_dir, original, bytes).map_err(|error| error.to_string())? {
+    let journal = load_observing(source_dir, original, |journal| {
+        match open_transcript(&source_dir.join("events.ndjson"))
+            .map_err(|_| "conversation transcript could not be read")?
+        {
+            Some(mut file) => journal.observe_reader(&mut file),
+            None => journal.observe(&[]),
+        }
+    })
+    .map_err(|error| error.to_string())?;
+    if let Some(journal) = journal {
         save(&destination.join(JOURNAL), &journal.forked(source(fork)))
             .map_err(|error| error.to_string())?;
         return Ok(true);

@@ -525,3 +525,79 @@ fn authority_retirement_after_reservation_never_appends_on_a_read() {
             .is_empty()
     );
 }
+
+#[test]
+fn a_long_private_fork_settles_written_comments_and_preserves_authorship() {
+    let (_root, store, chat, preview) = fixture();
+    let actor = principal("contributor", true, "fixture-member", 'a');
+    accepted(
+        &store
+            .team_comment(target(&chat, &preview), &actor, &input("first"), || Ok(()))
+            .unwrap(),
+    );
+    store
+        .clear_sharing(
+            &chat.workspace_id,
+            &chat.id,
+            actor.value().share_id.as_deref().unwrap(),
+        )
+        .unwrap();
+    let chat = store.get(&chat.id).unwrap();
+    let directory = store.root.join(&chat.id);
+    let path = directory.join("events.ndjson");
+    let prefix = fs::read(&path).unwrap();
+    let mut journal = load(&directory, &chat, &prefix).unwrap().unwrap();
+    let (scope, author) = context(&actor, true).unwrap();
+    let pending = Record::new(
+        crate::work_transcript_identity::next_sequence(&prefix, 0).unwrap(),
+        "A written comment awaiting its receipt".into(),
+        2,
+        Attribution {
+            scope,
+            actor: author,
+            client_message_id: "late-receipt".into(),
+            client_message_created_at_ms: 1,
+        },
+    );
+    journal.reserve(pending.clone(), &prefix).unwrap();
+    save(&directory.join(JOURNAL), &journal).unwrap();
+    let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+    file.write_all(&pending.encoded().unwrap()).unwrap();
+    for index in 0..20 {
+        let row = json!({"kind":"agent","backend":"claude","event":{"kind":"toolEnd","detail":"x".repeat(512 * 1024)},"seq":(index+1)*1_000_000,"at_ms":3+index});
+        serde_json::to_writer(&mut file, &row).unwrap();
+        file.write_all(b"\n").unwrap();
+    }
+    drop(file);
+    assert!(fs::metadata(&path).unwrap().len() > 10 * 1024 * 1024);
+    let fork = store.fork(&chat.id).unwrap();
+    assert!(fork.team_journal_initialized);
+    let fork_directory = store.root.join(&fork.id);
+    let copied = Journal::decode(
+        &fs::read(fork_directory.join(JOURNAL)).unwrap(),
+        &source(&fork),
+    )
+    .unwrap();
+    assert!(matches!(
+        copied.receipt(&pending).unwrap(),
+        Some(Receipt::Accepted { .. })
+    ));
+    let mut comments = 0;
+    visit_transcript_lines(
+        fs::File::open(fork_directory.join("events.ndjson")).unwrap(),
+        |line, _| {
+            let row: Value = serde_json::from_slice(line).unwrap();
+            if row.get("teamComment").is_some() {
+                let author = copied
+                    .author(&row, row["seq"].as_u64().unwrap())
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(author.person["id"], "fixture-member");
+                comments += 1;
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(comments, 2);
+}
