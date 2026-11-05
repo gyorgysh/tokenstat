@@ -14,6 +14,12 @@ while depth:
     end += 1
 method = source[start:end].replace('private async Task', 'public async Task', 1)
 method = method.replace('Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "file-downloads"', 'TestFiles.Root, "file-downloads"')
+start = source.index('    private static Task<long> ReadFileHashAsync(')
+end, depth = source.index('{', start) + 1, 1
+while depth:
+    depth += (source[end] == '{') - (source[end] == '}')
+    end += 1
+method += source[start:end]
 code = r'''
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;

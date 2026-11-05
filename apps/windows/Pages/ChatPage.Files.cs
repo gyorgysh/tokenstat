@@ -29,6 +29,29 @@ internal sealed partial class ChatPage
     }
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> FileClaims = new();
 
+    private static Task<long> ReadFileHashAsync(Stream stream, IncrementalHash hasher, long expectedSize, CancellationToken cancellation)
+    {
+        // Cached reads can complete synchronously. Keep the whole pass off
+        // the UI thread, including reads and hashing of resumed downloads.
+        return Task.Run(async () =>
+        {
+            var buffer = new byte[FileChunkBytes];
+            long count = 0;
+            while (true)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var read = await stream.ReadAsync(buffer, cancellation).ConfigureAwait(false);
+                cancellation.ThrowIfCancellationRequested();
+                if (read == 0) break;
+                count += read;
+                if (count > expectedSize) throw new IOException("The file changed while reading");
+                hasher.AppendData(buffer, 0, read);
+            }
+            if (count != expectedSize || stream.Length != expectedSize) throw new IOException("The file changed while reading");
+            return count;
+        }, cancellation);
+    }
+
     private async Task<bool> ConfirmFileRelayAsync(string name, long size, long? remaining = null)
     {
         var dialog = new ContentDialog
@@ -110,17 +133,7 @@ internal sealed partial class ChatPage
         {
             var expectedSize = stream.Length;
             using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var hashBuffer = new byte[FileChunkBytes];
-            long hashedBytes = 0;
-            while (true)
-            {
-                var count = await stream.ReadAsync(hashBuffer, cancel.Token);
-                if (count == 0) break;
-                hashedBytes += count;
-                if (hashedBytes > expectedSize) throw new IOException("The file changed while reading");
-                hasher.AppendData(hashBuffer, 0, count);
-            }
-            if (hashedBytes != expectedSize || stream.Length != expectedSize) throw new IOException("The file changed while reading");
+            await ReadFileHashAsync(stream, hasher, expectedSize, cancel.Token);
             var hash = Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant(); stream.Position = 0;
             cancel.Token.ThrowIfCancellationRequested();
             if (!current()) throw new OperationCanceledException();
@@ -285,9 +298,8 @@ internal sealed partial class ChatPage
                 {
                     var relay = false;
                     using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                    long offset = 0;
-                    var prefix = new byte[FileChunkBytes];
-                    while (true) { var read = await output.ReadAsync(prefix, cancel.Token); if (read == 0) break; hash.AppendData(prefix, 0, read); offset += read; }
+                    var offset = await ReadFileHashAsync(output, hash, output.Length, cancel.Token);
+                    cancel.Token.ThrowIfCancellationRequested(); if (!Current()) throw new OperationCanceledException();
                     // A complete local file needs checksum verification, not relay bytes.
                     if (offset < size && Format.Flag(caps, "relay"))
                     {
