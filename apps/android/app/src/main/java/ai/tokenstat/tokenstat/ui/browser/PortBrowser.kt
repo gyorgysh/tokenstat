@@ -36,10 +36,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,7 +55,12 @@ import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
 import java.io.ByteArrayInputStream
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.CancellationException
 
 /// Port-forwarded localhost on this phone, matching Apple
 /// `ClientBrowserScreen`.
@@ -73,23 +81,69 @@ fun PortBrowserScreen(
     HideTabBar()
     val context = LocalContext.current
     val store = remember(context) { BrowserHistoryStore(context) }
-    val active = remember(request) { booleanArrayOf(true) }
+    PortBrowserContent(request, onClose,
+        current = { request.owner != null && model.state.value.signedIn &&
+            ProjectOwner.from(model.state.value.account, request.peer, request.workspace) == request.owner },
+        acquire = { target, current -> model.acquireBrowserListener(request.peer, target, request.lease.accountScope, current) },
+        cleanupScope = model.viewModelScope,
+        record = { store.record(request.owner, it) })
+}
+
+@Composable
+internal fun PortBrowserContent(
+    request: BrowserOpenRequest,
+    onClose: () -> Unit,
+    current: () -> Boolean,
+    acquire: suspend (BrowserTarget, () -> Boolean) -> BrowserListenerPool.Lease?,
+    cleanupScope: CoroutineScope,
+    record: (BrowserTarget) -> Unit,
+    pool: BrowserListenerPool = BrowserListenerPool.Shared,
+) = key(request) {
+    PortBrowserView(request, onClose, current, acquire, cleanupScope, record, pool)
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PortBrowserView(
+    request: BrowserOpenRequest,
+    onClose: () -> Unit,
+    current: () -> Boolean,
+    acquire: suspend (BrowserTarget, () -> Boolean) -> BrowserListenerPool.Lease?,
+    cleanupScope: CoroutineScope,
+    record: (BrowserTarget) -> Unit,
+    pool: BrowserListenerPool = BrowserListenerPool.Shared,
+) {
+    val active = remember { AtomicBoolean(true) }
+    val ownsOwner by rememberUpdatedState(current)
     var progress by remember { mutableFloatStateOf(0f) }
     var address by remember(request) { mutableStateOf(request.target.url) }
     var shownHost by remember(request) { mutableStateOf(request.target.host) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var opening by remember { mutableStateOf(false) }
-    var view by remember { mutableStateOf<WebView?>(null) }
+    var view by remember { mutableStateOf<BrowserWebView?>(null) }
+    var crashed by remember { mutableStateOf(false) }
+    var recoveryUrl by remember { mutableStateOf<String?>(null) }
+    var pendingPage by remember { mutableStateOf(request.target.through(request.listenerUrl)) }
+    var navigation by remember { mutableLongStateOf(0L) }
 
-    fun ownsContext(): Boolean = active[0] && request.owner != null && model.state.value.signedIn &&
-        ProjectOwner.from(model.state.value.account, request.peer, request.workspace) == request.owner
+    fun ownsContext(): Boolean = active.get() && ownsOwner()
 
     val listeners = remember(request) {
-        BrowserListenerSession(request.target, request.lease, ::ownsContext,
-            acquire = { target, current -> model.acquireBrowserListener(request.peer, target, request.lease.accountScope, current) })
+        BrowserListenerSession(request.target, request.lease, ::ownsContext, acquire, pool)
     }
 
     fun original(url: String?): BrowserTarget? = listeners.original(url)
+
+    fun isCurrentView(candidate: WebView?): Boolean = candidate != null && view === candidate &&
+        view?.isAvailable == true && ownsContext()
+
+    fun openPage(url: String) {
+        pendingPage = url
+        recoveryUrl = null
+        progress = 0f
+        if (crashed) crashed = false else view?.loadUrl(url)
+    }
 
     fun navigate(url: String) {
         if (opening || !ownsContext()) return
@@ -98,26 +152,32 @@ fun PortBrowserScreen(
             loadError = L10n.text("android.portbrowser.that_address_cannot_open_here.5de454ec")
             return
         }
+        val ticket = ++navigation
         loadError = null
         val target = BrowserTarget.parse(value)
         if (target == null) {
             address = value
-            view?.loadUrl(value)
+            openPage(value)
             return
         }
         opening = true
         // Listener cleanup must also run if the screen leaves during the call.
-        model.viewModelScope.launch {
-            runCatching {
-                val forwarded = listeners.open(target) ?: return@runCatching
-                if (ownsContext()) {
-                    store.record(request.owner, target)
+        cleanupScope.launch {
+            try {
+                val forwarded = listeners.open(target) { ownsContext() && navigation == ticket } ?: return@launch
+                currentCoroutineContext().ensureActive()
+                if (ownsContext() && navigation == ticket) {
+                    record(target)
                     address = target.url
                     shownHost = target.host
-                    view?.loadUrl(forwarded)
+                    openPage(forwarded)
                 }
-            }.onFailure { loadError = it.message }
-            opening = false
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                if (ownsContext() && navigation == ticket) loadError = error.message
+            } finally {
+                if (ownsContext() && navigation == ticket) opening = false
+            }
         }
     }
 
@@ -134,9 +194,9 @@ fun PortBrowserScreen(
     BackHandler { if (listeners.isCurrent && view?.canGoBack() == true) view?.goBack() else onClose() }
     DisposableEffect(request) {
         onDispose {
-            active[0] = false
+            active.set(false)
             // Cleanup must outlive the composition that owns this screen.
-            model.viewModelScope.launch {
+            cleanupScope.launch {
                 listeners.close()
             }
         }
@@ -149,7 +209,7 @@ fun PortBrowserScreen(
             },
             actions = {
                 TextButton(enabled = !opening, onClick = {
-                    val actual = view?.url ?: address
+                    val actual = view?.url ?: recoveryUrl ?: address
                     navigate(original(actual)?.url ?: actual)
                 }) { Text(L10n.text("android.portbrowser.reload.bdc090ec")) }
                 TextButton(onClick = onClose) { Text(L10n.text("common.done")) }
@@ -182,15 +242,31 @@ fun PortBrowserScreen(
         if (progress in 0f..<1f) {
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
         }
-        AndroidView(
+        if (!crashed) AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
-                WebView(context).apply {
+                BrowserWebView(context).apply {
+                    onRendererGone = { failedUrl ->
+                        if (view === this && ownsContext()) {
+                            val lastPage = failedUrl?.takeIf(BrowserPolicy::allows) ?: pendingPage
+                            recoveryUrl = original(lastPage)?.url ?: lastPage ?: address
+                            navigation++
+                            opening = false
+                            progress = 1f
+                            view = null
+                            crashed = true
+                            loadError = L10n.text("android.portbrowser.the_page_failed_to_load.b7ee8af7")
+                        }
+                    }
                     settings.javaScriptEnabled = true
                     settings.allowFileAccess = false
                     settings.allowContentAccess = false
                     webViewClient = object : WebViewClient() {
+                        override fun onRenderProcessGone(v: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean =
+                            (v as BrowserWebView).rendererGone()
+
                         override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
+                            if (!isCurrentView(v)) return true
                             val target = request?.url?.toString()
                             return when (listeners.route(target, request?.isForMainFrame == true, request?.method)) {
                                 BrowserListenerSession.Route.Direct -> false
@@ -210,6 +286,7 @@ fun PortBrowserScreen(
                         @Deprecated("Legacy callback without frame or method; retained to refuse unclassified navigation.")
                         @Suppress("OVERRIDE_DEPRECATION")
                         override fun shouldOverrideUrlLoading(v: WebView?, url: String?): Boolean {
+                            if (!isCurrentView(v)) return true
                             // This callback carries neither method nor frame;
                             // an unmapped request cannot be replayed as GET.
                             val direct = listeners.route(url, false, null) == BrowserListenerSession.Route.Direct
@@ -218,6 +295,7 @@ fun PortBrowserScreen(
                         }
 
                         override fun shouldInterceptRequest(v: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                            if (!isCurrentView(v)) return blockedResponse()
                             val target = request?.url?.toString()
                             // WebView omits POST and resource loads from the
                             // override callback. This hook runs off the UI
@@ -226,21 +304,22 @@ fun PortBrowserScreen(
                                 BrowserListenerSession.Route.Direct -> null
                                 BrowserListenerSession.Route.Open -> {
                                     val canonical = original(target)!!
-                                    runCatching { listeners.replayResponse(canonical) }
-                                        .onFailure { failure -> v?.post { loadError = failure.message } }
+                                    runCatching { listeners.replayResponse(canonical) { isCurrentView(v) } }
+                                        .onFailure { failure -> v?.post { if (isCurrentView(v)) loadError = failure.message } }
                                         .getOrNull() ?: blockedResponse()
                                 }
                                 BrowserListenerSession.Route.Block -> {
-                                    v?.post { blockNavigation() }
+                                    v?.post { if (isCurrentView(v)) blockNavigation() }
                                     blockedResponse()
                                 }
                             }
                         }
 
                         override fun onPageCommitVisible(v: WebView?, url: String?) {
-                            if (!listeners.isCurrent) return
+                            if (!isCurrentView(v) || !listeners.isCurrent) return
+                            if (BrowserPolicy.allows(url)) pendingPage = url
                             val canonical = original(url)
-                            if (canonical != null) store.record(request.owner, canonical)
+                            if (canonical != null) record(canonical)
                             address = canonical?.url ?: url.orEmpty()
                             shownHost = canonical?.host ?: BrowserPolicy.title(url)
                         }
@@ -250,7 +329,7 @@ fun PortBrowserScreen(
                             request: WebResourceRequest?,
                             error: WebResourceError?,
                         ) {
-                            if (Build.VERSION.SDK_INT >= 23 && request?.isForMainFrame == true) {
+                            if (isCurrentView(v) && Build.VERSION.SDK_INT >= 23 && request?.isForMainFrame == true) {
                                 loadError = error?.description?.toString() ?: L10n.text("android.portbrowser.the_page_failed_to_load.b7ee8af7")
                             }
                         }
@@ -263,28 +342,28 @@ fun PortBrowserScreen(
                             description: String?,
                             failingUrl: String?,
                         ) {
-                            loadError = description ?: L10n.text("android.portbrowser.the_page_failed_to_load.b7ee8af7")
+                            if (isCurrentView(v)) loadError = description ?: L10n.text("android.portbrowser.the_page_failed_to_load.b7ee8af7")
                         }
 
                         override fun onReceivedSslError(v: WebView?, handler: SslErrorHandler?, error: SslError?) {
                             handler?.cancel()
-                            loadError = L10n.text("android.portbrowser.the_secure_connection_failed.7b74150f")
+                            if (isCurrentView(v)) loadError = L10n.text("android.portbrowser.the_secure_connection_failed.7b74150f")
                         }
                     }
                     webChromeClient = object : WebChromeClient() {
                         override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                            progress = newProgress / 100f
+                            if (isCurrentView(view)) progress = newProgress / 100f
                         }
                     }
                     view = this
-                    val forwarded = request.target.through(request.listenerUrl)
+                    val forwarded = pendingPage
                     if (listeners.isCurrent && forwarded != null && BrowserPolicy.allows(forwarded)) loadUrl(forwarded)
                     else loadError = L10n.text("android.portbrowser.that_address_cannot_open_here.5de454ec")
                 }
             },
             onRelease = {
                 if (view == it) view = null
-                it.destroy()
+                it.shutdown()
             },
         )
     }

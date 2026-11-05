@@ -7,8 +7,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
 
 /** Called on WebView's resource thread, after classifying a main-frame GET. */
-internal fun BrowserListenerSession.replayResponse(target: BrowserTarget): WebResourceResponse? {
-    val forwarded = runBlocking { open(target) } ?: return null
+internal fun BrowserListenerSession.replayResponse(target: BrowserTarget, currentRequest: () -> Boolean = { true }): WebResourceResponse? {
+    val forwarded = runBlocking { open(target, currentRequest) } ?: return null
     // Back has already selected its old entry when this document runs.
     // replace() refreshes that entry's temporary proxy without adding one.
     val destination = JsonPrimitive(forwarded).toString().replace("<", "\\u003c")

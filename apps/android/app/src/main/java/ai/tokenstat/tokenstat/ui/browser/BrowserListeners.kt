@@ -117,22 +117,30 @@ class BrowserListenerSession(
         mappings.firstOrNull { it.listenerUrl == lease.listenerUrl }?.original(url) != null
     } == true
 
-    suspend fun open(target: BrowserTarget): String? = gate.withLock {
-        if (!isCurrent) return@withLock null
+    suspend fun open(target: BrowserTarget, currentRequest: () -> Boolean = { true }): String? = gate.withLock {
+        fun wanted(): Boolean = isCurrent && currentRequest()
+        if (!wanted()) return@withLock null
         val old = live
+        suspend fun retireUnpublished(next: BrowserListenerPool.Lease) {
+            // A revoked request can leave a reused listener with its screen.
+            // A newly acquired lease still needs to be released.
+            if (next !== old || !isCurrent) {
+                if (live === next) live = null
+                pool.release(next)
+            }
+        }
         val endpoint = BrowserListenerPool.Endpoint(peer, target.host, target.port)
         val next = if (old != null && old.endpoint == endpoint) old else {
             live = null
             if (old != null) pool.release(old)
-            if (!isCurrent) return@withLock null
-            acquire(target) { isCurrent } ?: return@withLock null
+            if (!wanted()) return@withLock null
+            acquire(target) { wanted() } ?: return@withLock null
         }
-        if (!isCurrent) { pool.release(next); return@withLock null }
+        if (!wanted()) { retireUnpublished(next); return@withLock null }
         live = next
         mappings = listOf(BrowserBridge(target, next.listenerUrl)) + mappings.filter { it.listenerUrl != next.listenerUrl }
-        if (!isCurrent) {
-            live = null
-            pool.release(next)
+        if (!wanted()) {
+            retireUnpublished(next)
             return@withLock null
         }
         target.through(next.listenerUrl)

@@ -219,4 +219,58 @@ class BrowserListenersTest {
         assertTrue(failure is IllegalArgumentException)
         assertEquals(1, retires)
     }
+
+    @Test fun `a retired navigation waiting for the session gate cannot replace the current listener`() = runTest {
+        val pool = BrowserListenerPool()
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val listened = mutableListOf<Int>()
+        suspend fun acquire(target: BrowserTarget, current: () -> Boolean) = pool.acquire(
+            endpoint(target), "account-a", current, {
+                listened.add(target.port)
+                if (target.port == 3001) { started.complete(Unit); finish.await() }
+                "http://127.0.0.1:${49000 + target.port}/"
+            }, {})
+        val initial = acquire(first) { true }!!
+        val session = BrowserListenerSession(first, initial, { true }, ::acquire, pool)
+        val current = async { session.open(BrowserTarget.port(3001)!!) }
+        started.await()
+        var stillRequested = true
+        val retired = async { session.open(BrowserTarget.port(3002)!!) { stillRequested } }
+        testScheduler.runCurrent()
+        stillRequested = false
+        finish.complete(Unit)
+        val activeUrl = current.await()!!
+        assertNull(retired.await())
+        assertEquals(listOf(3000, 3001), listened)
+        assertTrue(session.isCurrentProxy(activeUrl))
+        session.close()
+    }
+
+    @Test fun `a navigation retired during acquisition releases its late listener and can recover`() = runTest {
+        val pool = BrowserListenerPool()
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val live = mutableSetOf<Int>()
+        suspend fun acquire(target: BrowserTarget, current: () -> Boolean) = pool.acquire(
+            endpoint(target), "account-a", current, {
+                if (target.port == 3001) { started.complete(Unit); finish.await() }
+                live.add(target.port)
+                "http://127.0.0.1:${49000 + target.port}/"
+            }, { live.remove(target.port); Unit })
+        val initial = acquire(first) { true }!!
+        val session = BrowserListenerSession(first, initial, { true }, ::acquire, pool)
+        var stillRequested = true
+        val pending = async { session.open(BrowserTarget.port(3001)!!) { stillRequested } }
+        started.await()
+        stillRequested = false
+        finish.complete(Unit)
+        assertNull(pending.await())
+        assertTrue(live.isEmpty())
+        val recovered = session.open(first)!!
+        assertTrue(session.isCurrentProxy(recovered))
+        assertEquals(setOf(3000), live)
+        session.close()
+        assertTrue(live.isEmpty())
+    }
 }
