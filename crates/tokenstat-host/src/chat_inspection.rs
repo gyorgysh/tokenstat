@@ -198,18 +198,21 @@ impl Snapshot {
                 .is_some_and(|v| v == "model_completed");
         let agy_init = backend == "agy" && value["event"] == "init";
         let grok_tools = backend == "grok" && kind == "available_commands";
+        // Claude result usage is a whole-turn total. Its last assistant
+        // message is the prompt footprint; never use the result total here.
+        let usage = match (backend, kind) {
+            ("claude", "assistant") | ("cursor", "assistant") => value.pointer("/message/usage"),
+            ("grok", "usage") => Some(value.get("usage").unwrap_or(value)),
+            ("opencode" | "opencode2", "step_finish") => value.pointer("/part/tokens"),
+            _ => None,
+        };
         let relevant = init
             || muse_model
             || agy_init
             || grok_tools
             || matches!(kind, "tokenstat.context" | "tokenstat.mcp")
-            || matches!(
-                (backend, kind),
-                ("claude" | "cursor", "assistant")
-                    | ("grok", "usage")
-                    | ("claude", "result")
-                    | ("opencode" | "opencode2", "step_finish")
-            );
+            || usage.is_some()
+            || (backend == "claude" && kind == "result");
         if !relevant {
             return activity_changed;
         }
@@ -309,14 +312,6 @@ impl Snapshot {
                 }
             }
         }
-        // Claude result usage is a whole-turn total. Its last assistant
-        // message is the prompt footprint; never use the result total here.
-        let usage = match (backend, kind) {
-            ("claude", "assistant") | ("cursor", "assistant") => value.pointer("/message/usage"),
-            ("grok", "usage") => Some(value.get("usage").unwrap_or(value)),
-            ("opencode" | "opencode2", "step_finish") => value.pointer("/part/tokens"),
-            _ => None,
-        };
         if let Some(usage) = usage
             && let Some(used) = prompt_tokens(
                 usage,

@@ -225,7 +225,74 @@ impl Activity {
     }
 
     pub fn observe(&mut self, backend: &str, value: &Value) -> bool {
+        // Text deltas cannot change activity. Avoid cloning the accumulated
+        // plan, agents and pending tool joins for each token. The handlers
+        // still validate the contents and ownership of relevant records.
+        let relevant = match backend {
+            "codex" => match value["type"].as_str() {
+                Some("tokenstat.activity") => true,
+                Some("item.started" | "item.updated" | "item.completed") => matches!(
+                    value["item"]["type"].as_str(),
+                    Some(
+                        "todo_list"
+                            | "collab_agent_tool_call"
+                            | "collab_tool_call"
+                            | "sub_agent_activity"
+                    )
+                ),
+                _ => false,
+            },
+            "claude" => match value["type"].as_str() {
+                Some("assistant" | "user") => {
+                    let assistant = value["type"] == "assistant";
+                    (!assistant || value["parent_tool_use_id"].is_null())
+                        && value
+                            .pointer("/message/content")
+                            .and_then(Value::as_array)
+                            .is_some_and(|blocks| {
+                                blocks.iter().take(CALLS).any(|block| {
+                                    block["type"]
+                                        == if assistant { "tool_use" } else { "tool_result" }
+                                })
+                            })
+                }
+                Some("system") => matches!(
+                    value["subtype"].as_str(),
+                    Some("task_started" | "task_progress" | "task_updated" | "task_notification")
+                ),
+                _ => false,
+            },
+            "cursor" => value["type"] == "tool_call",
+            "grok" => {
+                let update = value.pointer("/params/update").unwrap_or(value);
+                matches!(
+                    update["sessionUpdate"]
+                        .as_str()
+                        .or_else(|| update["type"].as_str()),
+                    Some("plan" | "subagent_spawned" | "subagent_finished")
+                )
+            }
+            "opencode" | "opencode2" => value["type"] == "tool_use",
+            "agy" => value["event"] == "step_update",
+            "muse" => {
+                matches!(
+                    value["payload_type"].as_str(),
+                    Some("todo.snapshot.updated" | "session.goal_control.applied")
+                ) || (value["payload_type"] == "runtime.session"
+                    && value["payload"]["event"]["kind"] == "todo_snapshot_updated")
+                    || value["payload"]["kind"] == "subagent_control"
+            }
+            _ => false,
+        };
+        if !relevant {
+            return false;
+        }
         let previous = self.clone();
+        self.apply(backend, value);
+        *self != previous
+    }
+
+    fn apply(&mut self, backend: &str, value: &Value) {
         match backend {
             "codex" => self.codex(value),
             "claude" => self.claude(value),
@@ -236,7 +303,6 @@ impl Activity {
             "muse" => self.muse(value),
             _ => {}
         }
-        *self != previous
     }
 
     fn plan(&mut self, values: &Value, text_key: &str, source: &str) {
@@ -1060,6 +1126,150 @@ pub(crate) fn codex_notification(value: &Value, thread: &str, turn: &str) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn populated_activity() -> Activity {
+        let mut activity = Activity::default();
+        let plan: Vec<_> = (0..32).map(|i| json!({"step":format!("Step {i}: {}", "review this change ".repeat(8)),"status":"pending"})).collect();
+        activity.observe(
+            "codex",
+            &json!({"type":"tokenstat.activity","kind":"plan","plan":plan}),
+        );
+        for i in 0..8 {
+            activity.observe("claude", &json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":format!("agent-{i}"),"name":"Agent","input":{"name":format!("worker-{i}"),"prompt":"Review the changes ".repeat(30),"run_in_background":true}}]}}));
+        }
+        activity
+    }
+
+    #[test]
+    fn activity_filter_preserves_updates_and_pending_tool_joins() {
+        let records = [
+            json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"text":"word"}}}),
+            json!({"type":"assistant","message":{"content":[{"type":"text","text":"word"}]}}),
+            json!({"type":"item.updated","item":{"type":"agent_message","text":"word"}}),
+            json!({"type":"item.started","item":{"type":"todo_list","items":[{"text":"ship","completed":false}]}}),
+            json!({"type":"item.completed","item":{"type":"collab_agent_tool_call","tool":"spawn_agent","receiver_thread_ids":["child"],"agentsStates":{"child":{"status":"running"}}}}),
+            json!({"type":"item.updated","item":{"type":"collab_tool_call","tool":"close_agent","agentsStates":{"child":{"status":"completed"}}}}),
+            json!({"type":"item.completed","item":{"type":"sub_agent_activity","agentThreadId":"child","kind":"completed"}}),
+            json!({"type":"tokenstat.activity","kind":"goal","goal":{"objective":"Ship","status":"active"}}),
+            json!({"type":"tokenstat.activity","kind":"goal","goal":null}),
+            json!({"type":"tokenstat.activity","kind":"plan","plan":[]}),
+            json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"todo","name":"TodoWrite","input":{"todos":[{"content":"ship","status":"pending"}]}}]}}),
+            json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"task","name":"TaskCreate","input":{"subject":"Ship"}}]}}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"todo","content":"done"}]}}),
+            json!({"type":"user","tool_use_result":{"task":{"id":"task-id","subject":"Ship","status":"pending"}},"message":{"content":[{"type":"tool_result","tool_use_id":"task","content":"created"}]}}),
+            json!({"type":"system","subtype":"task_started","task_type":"local_agent","task_id":"child","tool_use_id":"agent-0"}),
+            json!({"type":"system","subtype":"task_progress","task_id":"child"}),
+            json!({"type":"system","subtype":"task_updated","task_id":"child","patch":{"status":"running"}}),
+            json!({"type":"system","subtype":"task_notification","task_id":"child","status":"completed"}),
+            json!({"type":"tool_call","subtype":"started","call_id":"cursor-task","tool_call":{"taskToolCall":{"args":{"description":"review"}}}}),
+            json!({"type":"tool_call","subtype":"completed","tool_call":{"createGoalToolCall":{"args":{"objective":"Ship"},"result":{"success":{}}}}}),
+            json!({"type":"tool_call","subtype":"completed","tool_call":{"updateGoalToolCall":{"args":{"status":3},"result":{"success":{}}}}}),
+            json!({"params":{"update":{"sessionUpdate":"plan","entries":[{"content":"ship","status":"pending"}]}}}),
+            json!({"type":"subagent_spawned","subagent_id":"child","description":"review"}),
+            json!({"params":{"update":{"sessionUpdate":"subagent_finished","subagent_id":"child","status":"completed"}}}),
+            json!({"event":"step_update","step_update":{"subagent_info":{"subagents":[{"conversation_id":"child","role":"review"}]}}}),
+            json!({"payload_type":"todo.snapshot.updated","payload":{"items":[{"text":"ship","status":"pending"}]}}),
+            json!({"payload_type":"runtime.session","payload":{"event":{"kind":"todo_snapshot_updated","items":[]}}}),
+            json!({"payload_type":"session.goal_control.applied","payload":{"kind":"goal_control_applied","record":{"goal":{"objective":"Ship","status":"active"}}}}),
+            json!({"payload_type":"session.goal_control.applied","payload":{"kind":"goal_control_applied","record":{"action":"clear"}}}),
+            json!({"payload_type":"other","payload":{"kind":"subagent_control","record":{"kind":"spawn_accepted","subagent_id":"child","objective":"review"}}}),
+            json!({"payload":{"kind":"subagent_control","record":{"kind":"result_ready","subagent_id":"child"}}}),
+            json!({"type":"tool_use","part":{"tool":"todowrite","state":{"status":"completed","input":{"todos":[]}}}}),
+            json!({"type":"tool_use","tool":"task","callID":"child","state":{"status":"running","input":{"description":"review"}}}),
+        ];
+        for backend in [
+            "codex",
+            "claude",
+            "cursor",
+            "grok",
+            "agy",
+            "muse",
+            "opencode",
+            "opencode2",
+            "unknown",
+        ] {
+            for populated in [false, true] {
+                let mut observed = if populated {
+                    populated_activity()
+                } else {
+                    Activity::default()
+                };
+                for (index, record) in records.iter().enumerate() {
+                    // The unfiltered handler is the reference, including its
+                    // private pending calls and task list joins.
+                    let mut expected = observed.clone();
+                    expected.apply(backend, record);
+                    let changed = expected != observed;
+                    assert_eq!(
+                        observed.observe(backend, record),
+                        changed,
+                        "{backend} record {index}"
+                    );
+                    assert_eq!(observed, expected, "{backend} record {index}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "manual streaming metadata measurement"]
+    fn benchmark_streaming_activity_bookkeeping() {
+        let seed = populated_activity();
+        let records = [
+            (
+                "claude",
+                json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"word"}}}),
+            ),
+            (
+                "claude",
+                json!({"type":"assistant","message":{"content":[{"type":"text","text":"word"}]}}),
+            ),
+            (
+                "codex",
+                json!({"type":"item.delta","item_id":"reply","delta":"word"}),
+            ),
+            (
+                "cursor",
+                json!({"type":"assistant","message":{"content":[{"type":"text","text":"word"}]}}),
+            ),
+            (
+                "grok",
+                json!({"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"word"}}}}),
+            ),
+            (
+                "muse",
+                json!({"payload_type":"runtime.session","payload":{"event":{"kind":"text_delta","delta":"word"}}}),
+            ),
+            ("opencode", json!({"type":"text","part":{"text":"word"}})),
+            ("agy", json!({"event":"text_delta","text":"word"})),
+        ];
+        for (backend, record) in records {
+            let mut snapshot = crate::chat_inspection::Snapshot {
+                activity: seed.clone(),
+                tools: Some(
+                    (0..128)
+                        .map(|i| format!("mcp__fixture__tool_{i}"))
+                        .collect(),
+                ),
+                ..Default::default()
+            };
+            let mut times = Vec::new();
+            for _ in 0..11 {
+                let start = std::time::Instant::now();
+                for _ in 0..1000 {
+                    assert!(!std::hint::black_box(snapshot.observe(backend, &record)));
+                }
+                times.push(start.elapsed());
+            }
+            assert_eq!(snapshot.activity, seed);
+            times.sort();
+            eprintln!(
+                "metadata {backend} {}: 1000 records {:.3} ms",
+                record["type"],
+                times[5].as_secs_f64() * 1000.0
+            );
+        }
+    }
 
     #[test]
     fn goal_absence_is_distinct_from_zero_and_clear_is_reported() {
