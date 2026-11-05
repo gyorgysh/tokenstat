@@ -44,3 +44,10 @@ while following, including after reconnection. OCR matching ignores whitespace
 noise but still requires the marker's characters in the captured image.
 `cleanup.json` separately records whether the owned apps and simulator closed.
 These checks do not establish WAN or relay UI behavior.
+
+`account-server.cjs` provides the loopback account routes needed for native
+relay setup. It uses the website's account functions and the relay fixture's
+in-memory database. Run `node scripts/tests/chat-history-relay.cjs` to check
+its HTTP pairing, authentication, registration and token minting. This adapter
+is not yet connected to the native app runner; that runner still tests direct
+connections only.

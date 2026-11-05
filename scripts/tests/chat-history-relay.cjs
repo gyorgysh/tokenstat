@@ -38,16 +38,29 @@ async function main() {
   db.run("INSERT INTO users (id,tier,created_at) VALUES (?,'free',?)", bootstrapAccount, new Date().toISOString());
   const pairing = sync.createPairingCode(bootstrapAccount);
   assert.ok(pairing.code);
-  const redeemed = sync.redeemPairingCode(pairing.code, bootstrapMachine);
-  assert.equal(redeemed.status, 200);
-  const auth = sync.authToken({ headers: { authorization: `Bearer ${redeemed.body.token}` } });
-  assert.equal(auth.user?.id, bootstrapAccount);
-  assert.equal(sync.redeemPairingCode(pairing.code, bootstrapMachine).status, 400);
-  const registered = sync.registerMachine(auth.user.id, bootstrapMachine,
-    { publicIdentity: publicKey(63), label: "Native history bootstrap", kind: "client" });
-  assert.equal(registered.status, 200);
-  assert.equal(sync.mintTunnelToken(auth.user.id, bootstrapMachine).status, 200);
-  console.log("Disposable account pairing, authentication, registration and relay mint passed.");
+  const { createAccountServer } = require('../qa/chat-history/account-server.cjs');
+  const api = await createAccountServer(sync, bootstrapAccount);
+  try {
+    const call = async (method, route, body, token) => {
+      const response = await fetch(api.origin + route, { method,
+        headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(10000) });
+      return { status: response.status, body: await response.json() };
+    };
+    assert.equal((await call('GET', '/api/v1/schema')).status, 200);
+    assert.equal((await call('GET', '/api/v1/me')).status, 401);
+    const redeemed = await call('POST', '/api/v1/device/redeem', { code: pairing.code, machine: bootstrapMachine });
+    assert.equal(redeemed.status, 200);
+    const token = redeemed.body.token;
+    const auth = sync.authToken({ headers: { authorization: `Bearer ${token}` } });
+    assert.equal(auth.user?.id, bootstrapAccount);
+    assert.equal((await call('POST', '/api/v1/device/redeem', { code: pairing.code, machine: bootstrapMachine })).status, 400);
+    assert.equal((await call('GET', '/api/v1/me', null, token)).status, 200);
+    assert.equal((await call('PUT', '/api/v1/machines/me', { machine: bootstrapMachine,
+      public_identity: publicKey(63), label: 'Native history bootstrap', kind: 'client' }, token)).status, 200);
+    assert.equal((await call('POST', '/api/v1/tunnel/token', { machine: bootstrapMachine }, token)).status, 200);
+    console.log('Loopback account HTTP pairing, authentication, registration and relay mint passed.');
+  } finally { await api.close(); }
 
   const account = "u_chat_history_fixture";
   db.run("INSERT INTO users (id,tier,created_at) VALUES (?,'free',?)", account, new Date().toISOString());
