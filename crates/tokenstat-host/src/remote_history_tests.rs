@@ -5,6 +5,9 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+#[path = "remote_history_native.rs"]
+mod native;
+
 #[test]
 fn encrypted_history_readers_keep_independent_cursors_across_reconnect() {
     let mut child = Command::new(std::env::current_exe().unwrap())

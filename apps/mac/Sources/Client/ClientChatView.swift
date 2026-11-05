@@ -1746,83 +1746,84 @@ struct ClientChatThread: View {
         let spinning = TranscriptFollow.spinningRow(rows)
         return ScrollViewReader { proxy in
             ScrollView {
-                // Lazy on purpose. A long conversation is hundreds of rows of
-                // markdown, and a plain stack lays out and re-measures every
-                // one of them on every update, whether or not it is anywhere
-                // near the screen.
-                LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
-                    TranscriptEarlierHeader(model: model) {
-                        window.ask(force: true)
-                    }
-                    if hiddenAboveCount > 0 {
-                        Button(L10n.text("apple.clientchatview.show_0_earlier_messages.2e5e4ab9", "\(hiddenAboveCount)"), .history) {
-                            revealEarlier()
+                // Keep the bottom target measured even when a tall lazy row
+                // is offscreen. Following must reach a real frame, not walk
+                // toward an estimate until its correction budget runs out.
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
+                        TranscriptEarlierHeader(model: model) {
+                            window.ask(force: true)
                         }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .accessibilityLabel(L10n.text("apple.clientchatview.show_earlier_messages.b6badd18"))
-                    }
-                    ForEach(rows) { item in
-                        Group {
-                            if item.id == model.signInGateRowID, model.savedCopy == nil,
-                               let backend = model.backend(for: chat.backend) {
-                                ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
-                                                   recoveryFailureID: model.signInFailureID)
-                            } else {
-                                ClientChatEventRow(
-                                    item: item,
-                                    attachmentData: attachmentData(for: item),
-                                    defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
-                                    agentLabel: { backend in
-                                        model.backend(for: backend)?.label ?? backend.capitalized
-                                    },
-                                    isPending: pendingApproval(item),
-                                    resolve: { approval, choice in
-                                        let owner = model.currentReference
-                                        Task { await model.resolve(approval, choice: choice, owner: owner) }
-                                    },
-                                    attachmentFile: model.responseAttachmentFiles[attachmentID(for: item)],
-                                    imageResources: model.imageResources(for: item.imageAttachments),
-                                    openAttachmentFile: { attachment, url in previewFile = ChatPreviewedFile(id: attachment.id, url: url, name: attachment.name) },
-                                    attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
-                                    attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
-                                    downloadAttachment: { attachment in
-                                        Task { await model.downloadResponseAttachment(attachment) }
-                                    },
-                                    openAttachment: open(_:data:),
-                                    faceSeed: model.faceSeed,
-                                    isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
-                                    animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
-                                    expandsOutput: detail.level == .detailed,
-                                    compactTools: detail.level == .minimal,
-                                    toggleGroup: {
-                                        beginViewportChoice()
-                                        model.toggleGroup($0)
-                                    },
-                                    answerQuestion: { question, text in
-                                        Task { await model.answerQuestion(question, answer: text) }
-                                    },
-                                    answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
-                                    canAnswerQuestions: !model.isSharedSource && model.savedCopy == nil && !model.isShowingCachedTranscript,
-                                    reviewChanges: folder != nil && model.savedCopy == nil ? { _ in reviewingChanges = true } : nil
-                                )
-                                .equatable()
+                        if hiddenAboveCount > 0 {
+                            Button(L10n.text("apple.clientchatview.show_0_earlier_messages.2e5e4ab9", "\(hiddenAboveCount)"), .history) {
+                                revealEarlier()
                             }
+                            .buttonStyle(SecondaryButtonStyle(small: true))
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .accessibilityLabel(L10n.text("apple.clientchatview.show_earlier_messages.b6badd18"))
                         }
-                        // No geometry readers mid-fling: each one reports per
-                        // frame, and a fast scroll turns those reports into a
-                        // transaction per frame that placement never drains.
-                        // Readers return 0.35s after the last moved frame, via
-                        // `scrolling`, before any paging decision needs them.
-                        // Also wherever the reader has stopped above the
-                        // latest turn: that place is worth keeping. Never
-                        // mid-scroll, which is a report per row per frame.
-                        .clientTranscriptRowFrame(
-                            item.id,
-                            watched: (!follow.scrolling || (follow.settling && !follow.pinned))
-                                && ((model.hasEarlier && measuringRows) || !follow.atEnd),
-                            holdingReading: preservesReadingMark
-                        )
+                        ForEach(rows) { item in
+                            Group {
+                                if item.id == model.signInGateRowID, model.savedCopy == nil,
+                                   let backend = model.backend(for: chat.backend) {
+                                    ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
+                                                       recoveryFailureID: model.signInFailureID)
+                                } else {
+                                    ClientChatEventRow(
+                                        item: item,
+                                        attachmentData: attachmentData(for: item),
+                                        defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
+                                        agentLabel: { backend in
+                                            model.backend(for: backend)?.label ?? backend.capitalized
+                                        },
+                                        isPending: pendingApproval(item),
+                                        resolve: { approval, choice in
+                                            let owner = model.currentReference
+                                            Task { await model.resolve(approval, choice: choice, owner: owner) }
+                                        },
+                                        attachmentFile: model.responseAttachmentFiles[attachmentID(for: item)],
+                                        imageResources: model.imageResources(for: item.imageAttachments),
+                                        openAttachmentFile: { attachment, url in previewFile = ChatPreviewedFile(id: attachment.id, url: url, name: attachment.name) },
+                                        attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
+                                        attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
+                                        downloadAttachment: { attachment in
+                                            Task { await model.downloadResponseAttachment(attachment) }
+                                        },
+                                        openAttachment: open(_:data:),
+                                        faceSeed: model.faceSeed,
+                                        isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
+                                        animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
+                                        expandsOutput: detail.level == .detailed,
+                                        compactTools: detail.level == .minimal,
+                                        toggleGroup: {
+                                            beginViewportChoice()
+                                            model.toggleGroup($0)
+                                        },
+                                        answerQuestion: { question, text in
+                                            Task { await model.answerQuestion(question, answer: text) }
+                                        },
+                                        answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
+                                        canAnswerQuestions: !model.isSharedSource && model.savedCopy == nil && !model.isShowingCachedTranscript,
+                                        reviewChanges: folder != nil && model.savedCopy == nil ? { _ in reviewingChanges = true } : nil
+                                    )
+                                    .equatable()
+                                }
+                            }
+                            // No geometry readers mid-fling: each one reports per
+                            // frame, and a fast scroll turns those reports into a
+                            // transaction per frame that placement never drains.
+                            // Readers return 0.35s after the last moved frame, via
+                            // `scrolling`, before any paging decision needs them.
+                            // Also wherever the reader has stopped above the
+                            // latest turn: that place is worth keeping. Never
+                            // mid-scroll, which is a report per row per frame.
+                            .clientTranscriptRowFrame(
+                                item.id,
+                                watched: (!follow.scrolling || (follow.settling && !follow.pinned))
+                                    && ((model.hasEarlier && measuringRows) || !follow.atEnd),
+                                holdingReading: preservesReadingMark
+                            )
+                        }
                     }
                     if sliceOffset == 0 {
                         if !model.isShowingCachedTranscript {

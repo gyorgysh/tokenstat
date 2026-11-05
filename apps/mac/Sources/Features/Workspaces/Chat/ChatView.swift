@@ -632,33 +632,34 @@ struct ChatView: View {
         let spinning = TranscriptFollow.spinningRow(rows)
         ScrollViewReader { proxy in
             ScrollView {
-                // Lazy on purpose. A long conversation is hundreds of rows of
-                // markdown, and a plain stack lays out and re-measures every
-                // one of them on every update, whether or not it is anywhere
-                // near the screen.
-                LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
-                    #if !os(macOS)
-                    if !model.chats.isEmpty {
-                        conversationMenu
-                    }
-                    #endif
-                    if model.transcriptItems.isEmpty, !chat.running, !model.openingConversation {
-                        emptyConversation
-                    }
-                    TranscriptEarlierHeader(model: model) {
-                        if hiddenAboveCount > 0 { revealEarlier() }
-                        else { window.ask(force: true) }
-                    }
-                    if hiddenAboveCount > 0 {
-                        Button(L10n.text("apple.chatview.show_0_earlier_messages.2e5e4ab9", "\(hiddenAboveCount)"), .history) {
-                            revealEarlier()
+                // Keep the bottom target measured even when a tall lazy row
+                // is offscreen. Following must reach a real frame, not walk
+                // toward an estimate until its correction budget runs out.
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
+                        #if !os(macOS)
+                        if !model.chats.isEmpty {
+                            conversationMenu
                         }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .accessibilityLabel(L10n.text("apple.chatview.show_earlier_messages.b6badd18"))
-                    }
-                    ForEach(rows) { item in
-                        transcriptRow(item, chat: chat, spinning: spinning)
+                        #endif
+                        if model.transcriptItems.isEmpty, !chat.running, !model.openingConversation {
+                            emptyConversation
+                        }
+                        TranscriptEarlierHeader(model: model) {
+                            if hiddenAboveCount > 0 { revealEarlier() }
+                            else { window.ask(force: true) }
+                        }
+                        if hiddenAboveCount > 0 {
+                            Button(L10n.text("apple.chatview.show_0_earlier_messages.2e5e4ab9", "\(hiddenAboveCount)"), .history) {
+                                revealEarlier()
+                            }
+                            .buttonStyle(SecondaryButtonStyle(small: true))
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .accessibilityLabel(L10n.text("apple.chatview.show_earlier_messages.b6badd18"))
+                        }
+                        ForEach(rows) { item in
+                            transcriptRow(item, chat: chat, spinning: spinning)
+                        }
                     }
                     if sliceOffset == 0 {
                         if !model.isShowingCachedTranscript {
