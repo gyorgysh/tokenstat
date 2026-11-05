@@ -138,7 +138,6 @@ fn serve_fixture() {
                 } else {
                     RemoteSettings::default().tunnel_endpoint
                 },
-                ..RemoteSettings::default()
             })
             .unwrap(),
         );
@@ -186,7 +185,6 @@ fn serve_fixture() {
             .and_then(|r| r["relayEndpoint"].as_str())
             .map(str::to_owned)
             .unwrap_or_else(|| RemoteSettings::default().tunnel_endpoint),
-        ..RemoteSettings::default()
     })
     .unwrap();
     let server = tokenstat_remote::Server::bind(&listen, &host).unwrap();
@@ -227,14 +225,16 @@ fn serve_fixture() {
             });
         }
     });
-    std::thread::spawn(move || loop {
-        match server.accept() {
-            Ok(Ok(connection)) => {
-                let session = Arc::clone(&session);
-                std::thread::spawn(move || serve_peer(connection, &session, Route::Direct));
+    std::thread::spawn(move || {
+        loop {
+            match server.accept() {
+                Ok(Ok(connection)) => {
+                    let session = Arc::clone(&session);
+                    std::thread::spawn(move || serve_peer(connection, &session, Route::Direct));
+                }
+                Ok(Err(_)) => {}
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
             }
-            Ok(Err(_)) => {}
-            Err(_) => std::thread::sleep(Duration::from_millis(20)),
         }
     });
     let attempted = std::time::SystemTime::now()

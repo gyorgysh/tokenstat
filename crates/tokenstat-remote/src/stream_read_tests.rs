@@ -179,9 +179,7 @@ fn partial_input_does_not_block_outbound_frames() {
             assert_eq!(next.unwrap(), b"next message");
             assert!(end.unwrap().is_empty());
             sent_while_paused
-                .expect(&format!(
-                    "outbound blocked at cut {cut}, readiness={readiness}"
-                ))
+                .unwrap_or_else(|_| panic!("outbound blocked at cut {cut}, readiness={readiness}"))
                 .unwrap();
             // The opposite Noise direction remains valid despite yielding
             // between pieces of the incoming message.

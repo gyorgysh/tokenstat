@@ -200,6 +200,12 @@ jobs:
           python3 scripts/check-chat-empty-recovery.py
           python3 scripts/check-chat-send-context.py
           python3 scripts/check-chat-preview-loading.py
+          python3 scripts/check-chat-download-recovery.py
+          python3 scripts/check-chat-handoff-files.py
+          python3 scripts/check-chat-handoff-import.py
+          python3 scripts/check-chat-model-preview.py
+          python3 scripts/check-chat-upload-recovery.py
+          python3 scripts/check-handoff-sheet-import.py
           python3 scripts/check-chat-drop-routing.py
           python3 scripts/check-chat-activity-owner.py
           python3 scripts/check-chat-steer-submission.py
@@ -243,6 +249,14 @@ jobs:
         run: |
           python3 scripts/check-windows-chat-inspector.py
           python3 scripts/check-windows-chat-projection.py
+          python3 scripts/check-windows-chat-approvals.py
+          python3 scripts/check-windows-chat-images.py
+          python3 scripts/check-windows-chat-polling.py
+          python3 scripts/check-windows-chat-usage.py
+          python3 scripts/check-windows-download-recovery.py
+          python3 scripts/check-windows-file-hashing.py
+          python3 scripts/check-windows-model-preview.py
+          python3 scripts/check-windows-upload-recovery.py
 
   test:
     needs: checks
