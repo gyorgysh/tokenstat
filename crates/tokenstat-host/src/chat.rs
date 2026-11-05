@@ -7082,39 +7082,51 @@ fn read_back_checked(
     _strict: bool,
 ) -> Result<(u64, Vec<u8>), String> {
     let mut start = end;
-    let mut buffer: Vec<u8> = Vec::new();
+    let mut chunks = Vec::new();
+    let mut buffered = 0u64;
+    let mut whole = 0usize;
+    let mut partial_has_content = false;
     loop {
         if start == 0 {
             break;
         }
-        let whole = alignment(&buffer, start)
-            .map(|at| count_records(&buffer[at..]))
-            .unwrap_or(0);
         if whole >= limit {
             break;
         }
         // The weight bound only applies once there is something to hand
         // back. A single record longer than a page has to be read to its
         // beginning or it could never be shown at all.
-        if whole > 0 && buffer.len() as u64 >= PAGE_BYTES {
+        if whole > 0 && buffered >= PAGE_BYTES {
             break;
         }
         // One byte before a maximum-size row establishes its boundary when
         // the archive also contains a retained usage summary.
-        if buffer.len() as u64 > PAGE_RECORD_BYTES {
+        if buffered > PAGE_RECORD_BYTES {
             break;
         }
-        let chunk = PAGE_CHUNK
-            .min(start)
-            .min(PAGE_RECORD_BYTES + 1 - buffer.len() as u64);
+        let chunk = PAGE_CHUNK.min(start).min(PAGE_RECORD_BYTES + 1 - buffered);
         start -= chunk;
         let region = read_region(path, start, start + chunk);
         if region.is_none() {
             return Err("conversation changed or could not be read; retry search".into());
         }
-        let mut head = region.unwrap_or_default();
-        head.extend_from_slice(&buffer);
-        buffer = head;
+        let head = region.unwrap_or_default();
+        // Count newly completed rows while walking backwards. The partial
+        // row at the front is excluded until its preceding newline arrives.
+        for byte in head.iter().rev() {
+            if *byte == b'\n' {
+                whole += usize::from(partial_has_content);
+                partial_has_content = false;
+            } else if !byte.is_ascii_whitespace() {
+                partial_has_content = true;
+            }
+        }
+        buffered += head.len() as u64;
+        chunks.push(head);
+    }
+    let mut buffer = Vec::with_capacity(buffered as usize);
+    for chunk in chunks.into_iter().rev() {
+        buffer.extend_from_slice(&chunk);
     }
     // Everything before the first newline belongs to a record that began
     // earlier, unless the walk reached the beginning of the file.
