@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Tokenstat.Design;
@@ -312,7 +313,12 @@ internal sealed partial class ChatPage
         var owner = ImageOwner();
         var viewerRoot = XamlRoot;
         var image = new Image { Stretch = Stretch.Uniform };
-        var viewer = new ScrollViewer { Content = image, ZoomMode = ZoomMode.Enabled, MinZoomFactor = .1f, MaxZoomFactor = 5,
+        var surface = new Grid { Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        surface.Children.Add(image);
+        var swipe = new ChatImageSwipe();
+        Pointer? firstContact = null;
+        var viewer = new ScrollViewer { Content = surface, ZoomMode = ZoomMode.Enabled, MinZoomFactor = .1f, MaxZoomFactor = 5,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Height = Math.Clamp(XamlRoot.Size.Height - 240, 180, 620), HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center };
@@ -330,6 +336,7 @@ internal sealed partial class ChatPage
         Button? enlargeButton = null;
         void ResizeViewer()
         {
+            swipe.Invalidate();
             var width = Math.Max(240, viewerRoot.Size.Width - (enlarged ? 80 : 100));
             body.Width = enlarged ? width : Math.Min(1040, width);
             viewer.Height = Math.Max(120, Math.Min(enlarged ? double.MaxValue : 680, viewerRoot.Size.Height - (enlarged ? 220 : 280)));
@@ -352,6 +359,7 @@ internal sealed partial class ChatPage
         async Task Show(int next)
         {
             if (!Current() || next < 0 || next >= images.Length || (hasSelection && next == selected)) return;
+            swipe.Invalidate();
             hasSelection = true;
             selectionCancellation?.Cancel();
             var selection = CancellationTokenSource.CreateLinkedTokenSource(viewerCancellation.Token);
@@ -380,6 +388,75 @@ internal sealed partial class ChatPage
             catch (Exception error) { if (Current() && request == revision) count.Text = position + " · " + error.Message; }
             finally { if (selectionCancellation == selection) selectionCancellation = null; selection.Dispose(); }
         }
+        void ResetSwipe()
+        {
+            swipe.Reset();
+            var held = firstContact; firstContact = null;
+            if (held is not null) surface.ReleasePointerCapture(held);
+        }
+        bool ResumeNative(Pointer? contact)
+        {
+            if (contact?.IsInContact != true) return false;
+            try { return UIElement.TryStartDirectManipulation(contact); }
+            catch (ArgumentException) { return false; } // The contact can end before the native handoff.
+        }
+        void PointerPressed(object sender, PointerRoutedEventArgs args)
+        {
+            if (args.Pointer.PointerDeviceType != Microsoft.UI.Input.PointerDeviceType.Touch || !Current()) return;
+            var point = args.GetCurrentPoint(viewer).Position;
+            var start = swipe.Press(args.Pointer.PointerId, point.X, point.Y, viewer.ZoomFactor,
+                viewer.ActualWidth, revision, image.Source is not null);
+            if (start == ChatImageSwipe.Start.Observe) {
+                // Keep a fitted single-finger swipe on the UI thread. A
+                // second contact below resumes native pan/zoom for both.
+                surface.CancelDirectManipulations();
+                firstContact = args.Pointer;
+                if (!surface.CapturePointer(args.Pointer)) {
+                    swipe.Cancel(args.Pointer.PointerId); firstContact = null;
+                    ResumeNative(args.Pointer);
+                }
+            } else if (start == ChatImageSwipe.Start.HandOff) {
+                var held = firstContact; firstContact = null;
+                swipe.NativeStarted();
+                if (held is not null) surface.ReleasePointerCapture(held);
+                var accepted = ResumeNative(held);
+                accepted |= ResumeNative(args.Pointer);
+                if (!accepted) swipe.NativeFailed();
+            }
+        }
+        void PointerReleased(object sender, PointerRoutedEventArgs args)
+        {
+            if (args.Pointer.PointerDeviceType != Microsoft.UI.Input.PointerDeviceType.Touch) return;
+            var point = args.GetCurrentPoint(viewer).Position;
+            var direction = swipe.Release(args.Pointer.PointerId, point.X, point.Y, viewer.ZoomFactor, revision);
+            if (firstContact?.PointerId == args.Pointer.PointerId) {
+                firstContact = null; surface.ReleasePointerCapture(args.Pointer);
+            }
+            if (direction != 0 && Current()) _ = Show(selected + direction);
+        }
+        void PointerCancelled(object sender, PointerRoutedEventArgs args)
+        {
+            swipe.Cancel(args.Pointer.PointerId);
+            if (firstContact?.PointerId == args.Pointer.PointerId) firstContact = null;
+        }
+        void PointerCaptureLost(object sender, PointerRoutedEventArgs args)
+        {
+            if (firstContact?.PointerId != args.Pointer.PointerId) return;
+            firstContact = null; swipe.Cancel(args.Pointer.PointerId);
+        }
+        void ViewerWindowActivated(object sender, WindowActivatedEventArgs args)
+        {
+            if (args.WindowActivationState == WindowActivationState.Deactivated) ResetSwipe();
+        }
+        viewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(PointerPressed), true);
+        viewer.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(PointerReleased), true);
+        viewer.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(PointerCancelled), true);
+        viewer.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(PointerCaptureLost), true);
+        viewer.DirectManipulationStarted += (_, _) => swipe.NativeStarted();
+        viewer.DirectManipulationCompleted += (_, _) => { if (swipe.NativeCompleted()) firstContact = null; };
+        viewer.ViewChanged += (_, _) => { if (viewer.ZoomFactor > 1.001f) swipe.Invalidate(); };
+        var viewerWindow = App.CurrentWindow;
+        if (viewerWindow is not null) viewerWindow.Activated += ViewerWindowActivated;
         Button Action(string label, Action click)
         {
             var button = new Button { Content = label, MinHeight = 32, Padding = new Thickness(8, 4, 8, 4) };
@@ -402,6 +479,6 @@ internal sealed partial class ChatPage
             else if (args.Key == VirtualKey.Right && viewer.ZoomFactor <= 1.001f) { _ = Show(selected + 1); args.Handled = true; }
         };
         try { _ = Show(selected); await dialog.ShowAsync(); }
-        finally { viewerRoot.Changed -= ViewerRootChanged; viewerCancellation.Cancel(); revision++; image.Source = null; if (_imageDialog == dialog) { _imageDialog = null; _imageViewedFile = null; _imageConsent?.TrySetResult(false); _imageConsentHost = null; } }
+        finally { ResetSwipe(); if (viewerWindow is not null) viewerWindow.Activated -= ViewerWindowActivated; viewerRoot.Changed -= ViewerRootChanged; viewerCancellation.Cancel(); revision++; image.Source = null; if (_imageDialog == dialog) { _imageDialog = null; _imageViewedFile = null; _imageConsent?.TrySetResult(false); _imageConsentHost = null; } }
     }
 }

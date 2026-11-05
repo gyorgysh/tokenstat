@@ -139,6 +139,7 @@ Check(ChatImagePolicy.DownloadLimit(false, false, imageFileMaximum) == imageFile
     "local automatic previews and explicit viewer downloads retain the file-backed limit");
 Check(ChatImagePolicy.DownloadLimit(false, true, 1024) == 1024, "the remote preview policy cannot raise a smaller file limit");
 Console.WriteLine("Windows image preview policy: separate remote automatic limit and local/explicit file-backed limits pass.");
+ChatImageSwipeTests.Run(Check);
 var tripleLayout = ChatImageLayout.Measure([2, 1, 1.5], 1000);
 Check(tripleLayout.Tiles.Count == 3 && tripleLayout.Tiles.All(tile => tile.Y == 0)
     && Math.Abs(tripleLayout.Width - 640) < .001 && Math.Abs(tripleLayout.Tiles[0].Width / tripleLayout.Tiles[1].Width - 2) < .001,
