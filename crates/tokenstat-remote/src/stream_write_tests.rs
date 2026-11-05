@@ -1,6 +1,34 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 use super::*;
 
+#[cfg(windows)]
+#[test]
+fn split_tcp_uses_nonblocking_io_instead_of_winsock_timeouts() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (_server, _) = listener.accept().unwrap();
+    let mut probe = client.try_clone().unwrap();
+    // Bound a broken implementation so this regression cannot hang CI.
+    probe
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    let (noise, _) = super::tests::transport_pair();
+    let (_reader, writer) = Connection {
+        noise,
+        stream: Box::new(Box::new(client)),
+        peer: [0; 32],
+        intro_label: String::new(),
+        relay: false,
+    }
+    .split();
+    assert!(writer.short_writes);
+    assert_eq!(
+        probe.read(&mut [0]).unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert!(!writer.is_closed());
+}
+
 #[test]
 fn simultaneous_large_stream_writes_retain_partial_bytes() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

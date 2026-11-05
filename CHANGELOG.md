@@ -34,6 +34,7 @@ then begin the next version. Do not reconstruct release notes from commits at th
 - Shared drafts cannot replace local files still being added. Closing the handoff sheet or changing the draft stops an obsolete import.
 - Android terminals and the in-app browser reject late updates from closed or replaced views. A preview or terminal renderer crash shows a recoverable error without closing the rest of the app.
 - Direct-only connections retry sooner after a brief interruption. Windows approval buttons also reject stale replies after switching chats.
+- Windows direct connections handle large transfers in both directions without resetting the connection.
 
 ## [1.11.0] - 2026-11-04
 

@@ -127,6 +127,12 @@ mod readiness;
 
 /// A bidirectional byte stream used by the authenticated connection.
 pub trait Transport: Read + Write + Send {
+    /// Prepare split I/O without socket timeouts where they are destructive.
+    /// True means reads and writes now return WouldBlock instead of waiting.
+    fn prepare_nonblocking_stream(&mut self) -> std::io::Result<bool> {
+        Ok(false)
+    }
+
     /// Optional independent input notification. Older/custom transports keep
     /// the bounded polling path when no readiness handle is available.
     fn read_ready(&self) -> Option<ReadReady> {
@@ -166,6 +172,10 @@ pub trait Transport: Read + Write + Send {
 }
 
 impl<T: Transport + ?Sized> Transport for Box<T> {
+    fn prepare_nonblocking_stream(&mut self) -> std::io::Result<bool> {
+        (**self).prepare_nonblocking_stream()
+    }
+
     fn read_ready(&self) -> Option<ReadReady> {
         (**self).read_ready()
     }
@@ -192,6 +202,14 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
 }
 
 impl Transport for TcpStream {
+    #[cfg(windows)]
+    fn prepare_nonblocking_stream(&mut self) -> std::io::Result<bool> {
+        // A Winsock blocking timeout can leave the connection indeterminate.
+        // Split I/O already handles WouldBlock and waits outside Core.
+        self.set_nonblocking(true)?;
+        Ok(true)
+    }
+
     #[cfg(any(unix, windows))]
     fn read_ready(&self) -> Option<ReadReady> {
         readiness::tcp(self)
@@ -357,11 +375,20 @@ impl Connection {
             authorize: Arc::new(authorize),
             relay,
         };
-        let _ = core.stream.set_read_timeout(Some(STREAM_READ_TIMEOUT));
-        let short_writes = core
-            .stream
-            .set_write_timeout(Some(STREAM_WRITE_TIMEOUT))
-            .is_ok();
+        let short_writes = match core.stream.prepare_nonblocking_stream() {
+            Ok(true) => true,
+            Ok(false) => {
+                let _ = core.stream.set_read_timeout(Some(STREAM_READ_TIMEOUT));
+                core.stream
+                    .set_write_timeout(Some(STREAM_WRITE_TIMEOUT))
+                    .is_ok()
+            }
+            Err(_) => {
+                core.closed.store(true, Ordering::Relaxed);
+                core.stream.close();
+                false
+            }
+        };
         let core = Arc::new(Mutex::new(core));
         (
             StreamReader {

@@ -81,6 +81,10 @@ impl Write for HandshakeBudget {
     }
 }
 impl Transport for HandshakeBudget {
+    fn prepare_nonblocking_stream(&mut self) -> io::Result<bool> {
+        self.stream.prepare_nonblocking_stream()
+    }
+
     fn read_ready(&self) -> Option<crate::ReadReady> {
         self.stream.read_ready()
     }

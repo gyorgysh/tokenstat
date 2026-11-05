@@ -148,8 +148,17 @@ internal static class SidebarAdaptiveSmoke
                 await Task.Delay(20);
                 if (!parent.IsExpanded) throw new Exception("A reused project disclosure invokes its discarded candidate");
                 view.SelectedItem = parent.MenuItems[0];
-                if (!action.Focus(FocusState.Keyboard)) throw new Exception("A reused project's current action could not receive focus");
-                await Task.Delay(20);
+                // Native selection/layout can move focus after Focus returns.
+                // Reacquire it until the requested action actually retains it;
+                // still require the production binding to reveal that action.
+                for (var attempt = 0; attempt < 20; attempt++)
+                {
+                    host.UpdateLayout();
+                    if (!action.Focus(FocusState.Keyboard)) throw new Exception("A reused project's current action could not receive focus");
+                    await Task.Delay(20);
+                    if (action.FocusState != FocusState.Unfocused) break;
+                }
+                if (action.FocusState == FocusState.Unfocused) throw new Exception("A reused project's current action did not retain focus");
                 if (action.Opacity != 1) throw new Exception("A reused project did not reveal its current focused action");
                 GC.Collect();
                 view.IsPaneOpen = false;
