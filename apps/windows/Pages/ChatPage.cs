@@ -412,7 +412,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         var forwarded = parameters is null
             ? new JsonObject()
-            : (JsonObject)JsonNode.Parse(parameters.ToJsonString())!;
+            : (JsonObject)parameters.DeepClone();
         if (Format.Text(forwarded, "workspaceId") == _workspaceId)
         {
             forwarded["workspaceId"] = inner;
