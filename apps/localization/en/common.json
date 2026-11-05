@@ -824,5 +824,7 @@
   "common.chat_files_relay_usage_unknown": "Allowance details are unavailable. The server will check your allowance during the transfer.",
   "common.chat_files_relay_reporting": "Recent usage may take a moment to appear. Uploads, downloads and retries all count.",
   "common.chat_files_relay_usage_label": "Relay allowance used",
-  "common.chat_files_size_unknown": "Size unavailable"
+  "common.chat_files_size_unknown": "Size unavailable",
+  "common.chat.usage.title": "Usage",
+  "common.chat.usage.stale": "Last known usage"
 }

@@ -341,8 +341,7 @@ struct ChatComposerControls<Chrome: View>: View {
     /// Phones use the two-row arrangement directly; desktops fit the
     /// horizontal controls first, then use the same compact arrangement.
     var compact = false
-    /// A landscape phone needs its transcript more than a permanently open
-    /// second setup row. The same controls remain available in a sheet.
+    /// Phone composers keep setup controls in a sheet to leave room for chat.
     var condensed = false
     let chrome: Chrome
 

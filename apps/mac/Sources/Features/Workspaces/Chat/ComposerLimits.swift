@@ -15,6 +15,15 @@ import Foundation
 /// stay unit tested without compiling the app's model layer: callers pass
 /// the label, source and window checks as closures over the real readings.
 enum ComposerLimits {
+    /// A phone has room for one indicator. Keep the preferred window even
+    /// when its usage is zero; another window's larger percentage is not it.
+    static func compactRow<T>(rows: [(display: String, window: T)],
+                              label: (T) -> String, percent: (T) -> Double) -> (display: String, window: T)? {
+        let valid = rows.filter { percent($0.window).isFinite && percent($0.window) >= 0 }
+        return valid.first { tag(for: label($0.window)) == "5h" }
+            ?? valid.first { tag(for: label($0.window)) == "7d" }
+            ?? valid.first
+    }
     /// The badge tag for a vendor window label, or nil when the label is not
     /// one of the canonical three. Case-insensitive, and suffix-insensitive
     /// for qualified labels like `"Gemini models · 5-hour"`, because the

@@ -13,6 +13,8 @@ struct ComposerLimitsBadge: View {
     /// Canonical source matching runs against this, so "claude" meets the
     /// "claude_code" readings.
     let backend: String
+    var compact = false
+    var showUsage: (() -> Void)?
 
     @State private var readings = PlanLimitsStore.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -59,22 +61,38 @@ struct ComposerLimitsBadge: View {
                     ? ComposerLimits.codexHeadlineRows(
                         windows: provider.windows, label: \.label, scope: \.scope)
                     : rows
-                if !headline.isEmpty {
+                let compactRow = ComposerLimits.compactRow(rows: headline, label: \.label, percent: \.percent)
+                if !headline.isEmpty, !compact || compactRow != nil {
                     Button {
-                        showingDetail = true
+                        if let showUsage { showUsage() } else { showingDetail = true }
                     } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: ActionIcon.benchmarks.symbol)
-                                .font(Theme.font(10, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                                .accessibilityHidden(true)
-                            summary(for: headline)
+                        if compact, let row = compactRow {
+                            ZStack {
+                                Circle().stroke(Theme.rowHighlight, lineWidth: 3)
+                                Circle().trim(from: 0, to: row.window.fraction)
+                                    .stroke(provider.isStale ? Color.secondary : row.window.severity == .warning ? Theme.warning : row.window.severity.tint,
+                                            style: StrokeStyle(lineWidth: 3, lineCap: .round,
+                                                               dash: provider.isStale ? [2, 2] : []))
+                                    .rotationEffect(.degrees(-90))
+                            }
+                            .frame(width: 20, height: 20)
+                            .frame(width: 44, height: 44)
+                            .contentShape(.rect)
+                        } else {
+                            HStack(spacing: 5) {
+                                Image(systemName: ActionIcon.benchmarks.symbol)
+                                    .font(Theme.font(10, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                                    .accessibilityHidden(true)
+                                summary(for: headline)
+                            }
+                            .contentShape(.rect)
                         }
-                        .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                     .help(L10n.text("apple.composerlimitsbadge.how_much_of_the_0_subscription_is_left.9b6329e3", "\(harnessName(provider.source))"))
-                    .accessibilityLabel(L10n.text("apple.composerlimitsbadge.0_limits_1.5d5c8479", "\(harnessName(provider.source))", "\(summaryText(for: headline))"))
+                    .accessibilityLabel(L10n.text("apple.composerlimitsbadge.0_limits_1.5d5c8479", "\(harnessName(provider.source))", "\(summaryText(for: compact ? compactRow.map { [$0] } ?? [] : headline))"))
+                    .accessibilityValue(provider.isStale ? L10n.text("common.chat.usage.stale") : "")
                     .popover(isPresented: $showingDetail, arrowEdge: .bottom) {
                         ComposerLimitsDetail(
                             source: provider.source,
@@ -111,7 +129,7 @@ struct ComposerLimitsBadge: View {
                 Text(row.display)
                     .font(Theme.font(11))
                     .foregroundStyle(.secondary)
-                Text("\(Int(row.window.percent.rounded()))%")
+                Text("\(row.window.percent.formatted(.number.precision(.fractionLength(0))))%")
                     .font(Theme.numeric(11, weight: .semibold))
                     .foregroundStyle(row.window.severity.tint)
                     .contentTransition(.numericText())
@@ -122,7 +140,7 @@ struct ComposerLimitsBadge: View {
     }
 
     private func summaryText(for rows: [(display: String, window: UsageWindow)]) -> String {
-        rows.map { L10n.text("apple.composerlimitsbadge.0_1_percent.f674c60d", "\($0.display)", "\(Int($0.window.percent.rounded()))") }
+        rows.map { L10n.text("apple.composerlimitsbadge.0_1_percent.f674c60d", "\($0.display)", "\($0.window.percent.formatted(.number.precision(.fractionLength(0))))") }
             .joined(separator: ", ")
     }
 
@@ -131,11 +149,12 @@ struct ComposerLimitsBadge: View {
 
 /// The full windows behind the badge: bars, reset times, and the reading's
 /// age, with a way to ask the vendors again.
-private struct ComposerLimitsDetail: View {
+struct ComposerLimitsDetail: View {
     let source: String
     let providers: [ProviderLimits]
     var refreshing: Bool
     var refresh: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var provider: ProviderLimits? {
         providers.first(where: { $0.source == source })
@@ -184,28 +203,42 @@ private struct ComposerLimitsDetail: View {
                     .font(Theme.font(12))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: Theme.Space.xs)
-                Text("\(Int(window.percent.rounded()))%")
-                    .font(Theme.numeric(12, weight: .medium))
+                Text("\(window.percent.formatted(.number.precision(.fractionLength(0))))%")
+                    .font(Theme.font(12, weight: .medium).monospacedDigit())
                     .foregroundStyle(window.severity.tint)
                     .contentTransition(.numericText())
-                if let resets = window.resetsAt {
-                    Text(L10n.text("apple.composerlimitsbadge.resets_0.7a4480e9", "\(RelativeClock.phrase(for: resets))"))
-                        .font(Theme.font(11))
-                        .foregroundStyle(.tertiary)
+                    .fixedSize()
+                if !dynamicTypeSize.isAccessibilitySize, let resets = window.resetsAt {
+                    resetTime(resets)
                 }
+            }
+            if dynamicTypeSize.isAccessibilitySize, let resets = window.resetsAt {
+                resetTime(resets)
             }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Theme.rowHighlight)
                     Capsule()
                         .fill(window.severity.tint)
-                        .frame(width: max(2, proxy.size.width * window.fraction))
+                        .frame(width: proxy.size.width * window.fraction)
                 }
             }
             .frame(height: 6)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(L10n.text("apple.composerlimitsbadge.0_1_percent_used.bae57146", "\(tag)", "\(Int(window.percent.rounded()))"))
+        .accessibilityLabel(L10n.text("apple.composerlimitsbadge.0_1_percent_used.bae57146", "\(tag)", "\(window.percent.formatted(.number.precision(.fractionLength(0))))"))
+        .accessibilityValue(window.resetsAt.map {
+            L10n.text("common.chat_resets_at", "\(RelativeClock.phrase(for: $0))")
+        } ?? "")
+    }
+
+    private func resetTime(_ date: Date) -> some View {
+        Text(dynamicTypeSize.isAccessibilitySize
+             ? L10n.text("common.chat_resets_at", "\(RelativeClock.phrase(for: date))")
+             : L10n.text("apple.composerlimitsbadge.resets_0.7a4480e9", "\(RelativeClock.phrase(for: date))"))
+            .font(Theme.font(11))
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// When the numbers were read. A reading with no date is not a reading,

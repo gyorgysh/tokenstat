@@ -85,6 +85,7 @@ enum RemoteHostFeature { case steer; var minimumProtocol: Int { 1 } }
     var backendRefreshError: String? = nil
     var error: String? = nil
     var showingCommandStats = false
+    var showingUsageStats = false
     var showingActivity = false
     var activitySection: ChatActivitySection?
     var chatCommandSelection = 0
@@ -177,6 +178,13 @@ tests = '''
                            && readonly.showingCommandStats == (section == nil),
                            "Read-only commands must open their requested local inspection without sending a model turn")
                     assert(readonly.queuedSubmission == nil && readonly.stopped.isEmpty && !readonly.sending)
+                    assert(readonly.showingUsageStats == (name == "/usage"),
+                           "Only /usage opens the focused usage panel")
+                    readonly.showingCommandStats = false
+                    readonly.draft = name == "/usage" ? "/status" : "/usage"
+                    assert(readonly.consumeChatCommand() && readonly.showingCommandStats)
+                    assert(readonly.showingUsageStats == (name != "/usage"),
+                           "Switching commands cannot reuse the previous panel")
                 }
             }
         }

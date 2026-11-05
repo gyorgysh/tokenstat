@@ -94,6 +94,24 @@ struct ComposerLimitsTests {
         require(kept.map(\.display) == ["5h", "billing cycle"], "canonical first, named windows after")
         require(kept[1].window.percent == 93, "a named window keeps its own figure")
 
+        func compact(_ candidates: [(display: String, window: Window)]) -> Window? {
+            ComposerLimits.compactRow(rows: candidates, label: \.label, percent: \.percent)?.window
+        }
+        require(compact(rows([Window(label: "weekly", percent: 99), Window(label: "5-hour", percent: 0)]))?.percent == 0,
+                "an unused five-hour window takes priority over an almost exhausted week")
+        require(compact(rows([Window(label: "monthly", percent: 90), Window(label: "weekly", percent: 12)]))?.label == "weekly",
+                "the compact indicator falls back to the week")
+        require(compact(rows([Window(label: "billing cycle", percent: 2)]))?.percent == 2,
+                "a provider's named allowance remains available")
+        require(compact(headline(scoped))?.scope == "general", "the ring keeps the Codex account allowance")
+        require(compact(rows([Window(label: "5-hour", percent: .nan), Window(label: "weekly", percent: 9)]))?.percent == 9,
+                "an invalid preferred window does not hide a valid week")
+        require(compact(rows([Window(label: "5-hour", percent: .infinity), Window(label: "weekly", percent: -1)])) == nil,
+                "invalid readings do not become zero usage")
+        require(compact(rows([])) == nil, "missing readings leave no indicator")
+        require(compact(rows([Window(label: "5-hour", percent: 104)]))?.percent == 104,
+                "over-limit readings retain their value; drawing clamps separately")
+
         let providers = [
             Provider(source: "cursor", windows: [Window(label: "monthly", percent: 10)]),
             Provider(source: "claude_code", windows: [Window(label: "5-hour", percent: 26)]),

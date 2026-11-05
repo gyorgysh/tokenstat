@@ -50,6 +50,7 @@ struct ClientChatComposer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var compactHeight: Bool { verticalSizeClass == .compact }
 
@@ -149,9 +150,15 @@ struct ClientChatComposer: View {
             chat: chat,
             locked: setupLocked,
             compact: true,
-            condensed: compactHeight
+            condensed: compactHeight || horizontalSizeClass == .compact
         ) {
             HStack(spacing: Theme.Space.s) {
+                if !model.isSharedSource {
+                    ComposerLimitsBadge(backend: chat.backend, compact: true, showUsage: {
+                        model.showingUsageStats = true
+                        model.showingCommandStats = true
+                    })
+                }
                 // Show Hide only when the keyboard can be dismissed.
                 if focused {
                     Button(L10n.text("apple.clientchatcomposer.hide_keyboard.f6b0718e"), .hideKeyboard, action: hideKeyboard)

@@ -786,6 +786,7 @@ final class ChatModel {
     // MARK: Composer commands
 
     var showingCommandStats = false
+    var showingUsageStats = false
     var showingActivity = false
     var activitySection: ChatActivitySection?
     var activityRead: ChatActivityRead?
@@ -814,7 +815,9 @@ final class ChatModel {
         case .message, .compact: return false
         case .complete(let command): draft = command
         case .inspect:
-            let section = ChatActivitySection(command: draft.trimmingCharacters(in: .whitespacesAndNewlines))
+            let command = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            let section = ChatActivitySection(command: command)
+            showingUsageStats = command == "/usage"
             clearDraft()
             if let section { activitySection = section; showingActivity = true }
             else { showingCommandStats = true }

@@ -59,14 +59,18 @@ struct ChatSlashMenu: View {
         .onChange(of: model.draft) { _, _ in model.chatCommandSelection = 0; model.chatCommandsDismissed = false }
         .onChange(of: model.currentReference) { _, _ in model.chatCommandSelection = 0; model.chatCommandsDismissed = false; model.showingCommandStats = false }
         .sheet(isPresented: $model.showingCommandStats) {
-            ThemedSheet(title: L10n.text("common.chat.stats.overview"), subtitle: "", scrolls: true, fills: true, onClose: { model.showingCommandStats = false }) {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    ChatContextCard(model: model)
-                    Text(L10n.text("common.chat.commands")).font(Theme.callout.weight(.semibold))
-                    ForEach(ChatSlashCommand.all) { command in
-                        Text("\(command.id) · \(command.detail)").font(Theme.caption)
+            ThemedSheet(title: model.showingUsageStats ? L10n.text("common.chat.usage.title") : L10n.text("common.chat.stats.overview"), subtitle: "", scrolls: true, fills: true, onClose: { model.showingCommandStats = false }) {
+                if model.showingUsageStats {
+                    ChatUsageCard(model: model)
+                } else {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        ChatContextCard(model: model)
+                        Text(L10n.text("common.chat.commands")).font(Theme.callout.weight(.semibold))
+                        ForEach(ChatSlashCommand.all) { command in
+                            Text("\(command.id) · \(command.detail)").font(Theme.caption)
+                        }
+                        Text(L10n.text("common.chat.command.unsupported")).font(Theme.caption).foregroundStyle(.secondary)
                     }
-                    Text(L10n.text("common.chat.command.unsupported")).font(Theme.caption).foregroundStyle(.secondary)
                 }
             } actions: { EmptyView() }
             .modalFrame(width: 560, height: 700)
