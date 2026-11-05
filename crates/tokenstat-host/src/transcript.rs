@@ -3631,6 +3631,42 @@ mod tests {
         for (backend, raw) in fixtures {
             let mut parser = Parser::new(backend);
             let events = parser.push_events(raw.as_bytes());
+            let expected_text = match backend {
+                "claude" => "I found it.",
+                "codex" => "Working tree is clean.",
+                "grok" => "Looks good.",
+                "cursor" => "Changing line two.Done: 3 lines.",
+                "agy" => "Updated it.",
+                "opencode" => "Done.",
+                "opencode2" => "Read it.",
+                _ => unreachable!(),
+            };
+            let text: String = events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Text { delta } => Some(delta.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                text, expected_text,
+                "{backend} changed or repeated its reply"
+            );
+            // Pipes may split any record or deliver several at once. Compare
+            // every event field, including tool IDs, results and usage.
+            for width in [1, 2, 7, 64, 1024] {
+                let mut fragmented = Parser::new(backend);
+                let actual: Vec<_> = raw
+                    .as_bytes()
+                    .chunks(width)
+                    .flat_map(|chunk| fragmented.push_events(chunk))
+                    .collect();
+                assert_eq!(
+                    actual, events,
+                    "{backend} changed events at chunk width {width}"
+                );
+            }
+
             assert!(
                 events
                     .iter()
