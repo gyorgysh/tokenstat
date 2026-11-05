@@ -543,24 +543,46 @@ for line in sys.stdin:
         json!({"backend":"claude","argv":[fake,"-p","literal prompt"]}).to_string(),
     )
     .unwrap();
-    let mut samples = Vec::new();
-    for _ in 0..7 {
-        let start = Instant::now();
-        let status = Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
-            .args(["chat-live", config.to_str().unwrap()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .unwrap();
-        assert!(status.success());
-        samples.push(start.elapsed().as_secs_f64() * 1000.0);
+    let mut programs = vec![(
+        "current",
+        std::env::var_os("TOKENSTAT_FORWARDING_CANDIDATE")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| env!("CARGO_BIN_EXE_tokenstat-hostd").into()),
+    )];
+    if let Some(baseline) = std::env::var_os("TOKENSTAT_FORWARDING_BASELINE") {
+        programs.insert(0, ("baseline", baseline.into()));
     }
-    samples.sort_by(f64::total_cmp);
-    println!(
-        "Native provider forwarding: 30,000 assistant frames, median of 7 = {} ms",
-        samples[3]
-    );
+    let mut samples: std::collections::BTreeMap<&str, Vec<f64>> = Default::default();
+    for round in 0..7 {
+        // Alternate order so a before/after comparison shares the same load
+        // and neither executable always gets the first run of a pair.
+        if round > 0 {
+            programs.reverse();
+        }
+        for (label, program) in &programs {
+            let start = Instant::now();
+            let status = Command::new(program)
+                .args(["chat-live", config.to_str().unwrap()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "{label}");
+            samples
+                .entry(label)
+                .or_default()
+                .push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+    for (label, samples) in &samples {
+        let mut ordered = samples.clone();
+        ordered.sort_by(f64::total_cmp);
+        println!(
+            "Native provider forwarding ({label}): 30,000 assistant frames, median of 7 = {} ms; samples = {samples:?}",
+            ordered[3]
+        );
+    }
 }
 
 fn wait_for(mut ready: impl FnMut() -> bool) {
@@ -580,9 +602,26 @@ fn live_controls_apply_without_restarting_or_resending_a_turn() {
             let root = tempfile::tempdir().unwrap();
             let fake = root.path().join("fake-agent");
             fs::write(&fake, r##"#!/usr/bin/env python3
-import sys,json,os,uuid
+import sys,json,os,uuid,threading,time,pathlib
 backend=sys.argv[1]
-def emit(v): print(json.dumps(v),flush=True)
+write_lock=threading.Lock()
+stream_stop=threading.Event()
+stream=None
+def emit(v):
+ with write_lock: print(json.dumps(v),flush=True)
+def start_stream():
+ global stream
+ if not pathlib.Path(__file__).with_name('streaming').exists(): return
+ def run():
+  while not stream_stop.is_set():
+   for _ in range(5):
+    if backend=='claude': emit({'type':'assistant','message':{'content':[{'type':'text','text':'streamed-during-controls'}]}})
+    else: emit({'method':'item/agentMessage/delta','params':{'threadId':'session','turnId':'turn','itemId':'stream','delta':'streamed-during-controls'}})
+   time.sleep(0.001)
+ stream=threading.Thread(target=run,daemon=True);stream.start()
+def stop_stream():
+ stream_stop.set()
+ if stream is not None: stream.join()
 count=0
 pending=None
 for line in sys.stdin:
@@ -594,11 +633,13 @@ for line in sys.stdin:
     assert r['settings']['fastMode']==(count==0);count+=1
     if pending is not None: emit(pending);pending=None
     if count==2:
+     stop_stream()
      emit({'type':'assistant','message':{'content':[{'type':'text','text':'Completed once.'}]}})
      emit({'type':'result','subtype':'success','is_error':False});break
   elif m.get('type')=='user':
    if m['message']['content'][0]['text']=='literal prompt':
     emit({'type':'system','subtype':'init','session_id':'session'})
+    start_stream()
    else:
     text=m['message']['content'][0]['text']
     assert text.startswith('Additional context.')
@@ -621,6 +662,7 @@ for line in sys.stdin:
   elif method=='turn/start':
    assert p['input'][0]['text']=='literal prompt'
    emit({'id':m['id'],'result':{'turn':{'id':'turn'}}})
+   start_stream()
   elif method=='mcpServerStatus/list':
    assert p['threadId']=='session'
    emit({'id':m['id'],'result':{'data':[{'name':'godot-mcp','runtimeStatus':'connected','tools':{'scene':{'inputSchema':{'private':'secret'}}}}],'nextCursor':None}})
@@ -642,6 +684,7 @@ for line in sys.stdin:
    assert p['serviceTier']==('priority' if count==0 else 'default');count+=1
    emit({'id':m['id'],'result':{'status':'applied'}})
    if count==2:
+    stop_stream()
     emit({'method':'turn/plan/updated','params':{'threadId':'someone-else','turnId':'turn','plan':[{'step':'Wrong plan','status':'pending'}]}})
     emit({'method':'turn/plan/updated','params':{'threadId':'session','turnId':'turn','plan':[{'step':'Verify current work','status':'inProgress'}]}})
     emit({'method':'item/completed','params':{'threadId':'someone-else','turnId':'turn','item':{'id':'wrong','type':'agentMessage','text':'Foreign output'}}})
@@ -654,7 +697,11 @@ for line in sys.stdin:
    emit({'id':m['id'],'result':{}});break
   else:
    raise Exception('unexpected prompt or restart')
+stop_stream()
 "##).unwrap();
+            if with_image {
+                fs::write(root.path().join("streaming"), "").unwrap();
+            }
             fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
             // An argument-selecting shim keeps the production launch translator
             // under test: it does not learn a fake CLI-specific argv convention.
@@ -733,8 +780,17 @@ for line in sys.stdin:
             )
             .unwrap();
             fs::rename(request.with_extension("tmp"), request).unwrap();
+            let steer_started = Instant::now();
             let response = root.path().join(format!("response-{steer_id}.json"));
             wait_for(|| response.exists());
+            println!(
+                "{backend} image={with_image} steering response: {:?}",
+                steer_started.elapsed()
+            );
+            assert!(
+                steer_started.elapsed() < Duration::from_secs(2),
+                "Steering was starved by output"
+            );
             let accepted: Value = serde_json::from_slice(&fs::read(response).unwrap()).unwrap();
             assert_eq!(accepted["ok"], true, "{backend}: {accepted}");
             for (id, fast) in [("a".repeat(32), true), ("b".repeat(32), false)] {
@@ -745,8 +801,17 @@ for line in sys.stdin:
                 )
                 .unwrap();
                 fs::rename(request.with_extension("tmp"), request).unwrap();
+                let setting_started = Instant::now();
                 let response = root.path().join(format!("response-{id}.json"));
                 wait_for(|| response.exists());
+                println!(
+                    "{backend} image={with_image} speed response: {:?}",
+                    setting_started.elapsed()
+                );
+                assert!(
+                    setting_started.elapsed() < Duration::from_secs(2),
+                    "Speed change was starved by output"
+                );
                 let value: Value = serde_json::from_slice(&fs::read(response).unwrap()).unwrap();
                 assert_eq!(value["ok"], true, "{backend}: {value}");
             }
@@ -756,6 +821,12 @@ for line in sys.stdin:
                 "{backend} runner failed"
             );
             let output = fs::read_to_string(root.path().join("output")).unwrap();
+            if with_image {
+                assert!(
+                    output.contains("streamed-during-controls"),
+                    "{backend}: controls must be exercised during continuous output"
+                );
+            }
             assert_eq!(
                 output.matches("Completed once.").count(),
                 1,

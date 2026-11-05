@@ -3,7 +3,7 @@
 use super::input::{self, Completed, Failure, Input};
 use serde_json::Value;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -11,7 +11,7 @@ const STOP_FLUSH: Duration = Duration::from_millis(250);
 
 pub(super) struct Emitter {
     writer: Input,
-    directory: PathBuf,
+    stop: super::mailbox::Stop,
     stopped_at: Option<Instant>,
     failure: Option<String>,
 }
@@ -23,7 +23,7 @@ impl Emitter {
     ) -> Self {
         Self {
             writer: input::start_with(writer),
-            directory: directory.into(),
+            stop: super::mailbox::Stop::new(directory),
             stopped_at: None,
             failure: None,
         }
@@ -63,7 +63,7 @@ impl Emitter {
                 return self.fail("The turn output channel closed.".into());
             }
         }
-        if super::stop_requested(&self.directory)
+        if self.stop.requested()
             && self.stopped_at.get_or_insert_with(Instant::now).elapsed() >= STOP_FLUSH
         {
             return self.fail("The turn was stopped.".into());

@@ -15,6 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod emitter;
 mod input;
+mod mailbox;
 mod output;
 
 const INTERRUPT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -89,12 +90,19 @@ extern "C" fn stopped(_: libc::c_int) {
     STOPPED.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
-fn stop_requested(directory: &Path) -> bool {
+fn stop_signalled() -> bool {
     #[cfg(unix)]
-    if STOPPED.load(std::sync::atomic::Ordering::SeqCst) {
-        return true;
+    {
+        STOPPED.load(std::sync::atomic::Ordering::SeqCst)
     }
-    directory.join("stop").is_file()
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+fn stop_requested(directory: &Path) -> bool {
+    stop_signalled() || directory.join("stop").is_file()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1044,6 +1052,8 @@ pub fn run(path: &Path) -> Result<(), String> {
         }
     };
     let mut output = emitter::Emitter::new(|| std::io::stdout().lock(), directory);
+    let mut stop = mailbox::Stop::new(directory);
+    let mut controls = mailbox::Poll::new();
     let mut protocol = Protocol {
         backend: config.backend.clone(),
         thread: String::new(),
@@ -1067,7 +1077,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         let mut codex_usage = CodexUsage::default();
         let mut started = false;
         loop {
-            if stop_requested(directory) {
+            if stop.requested() {
                 return Err("The turn was stopped.".into());
             }
             protocol.written(&mut input)?;
@@ -1088,7 +1098,7 @@ pub fn run(path: &Path) -> Result<(), String> {
             let message = match received {
                 Ok(value) => value?,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if started {
+                    if started && input.ready_for_control() && controls.due() {
                         protocol.controls(directory, &mut input)?;
                     }
                     continue;
@@ -1346,7 +1356,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                 )?;
                 let until = Instant::now() + Duration::from_secs(3);
                 while Instant::now() < until {
-                    if stop_requested(directory) {
+                    if stop.requested() {
                         return Err("The turn was stopped.".into());
                     }
                     match rx.recv_timeout(Duration::from_millis(40)) {
@@ -1415,7 +1425,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                 input.send(&json!({"id":message["id"],"error":{"code":-32601,"message":"This headless turn uses tokenstat tool hooks; interactive requests are unavailable."}}),
                 )?;
             }
-            if started {
+            if started && input.ready_for_control() && controls.due() {
                 protocol.controls(directory, &mut input)?;
             }
         }
