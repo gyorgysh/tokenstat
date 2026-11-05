@@ -1802,6 +1802,7 @@
   "android.terminalkeyslogic.tab.90ddf196": "Tab",
   "android.terminalkeyslogic.tilde.66042131": "Tilde",
   "android.terminalkeyslogic.up_arrow.9d2e0b44": "Up arrow",
+  "android.terminalscreen.display_stopped": "The terminal display stopped. Reopen this session to continue.",
   "android.terminalscreen.close_this_session.2b66ce2d": "Close this session?",
   "android.terminalscreen.connection_lost_retrying.7bb52793": "Connection lost. Retrying…",
   "android.terminalscreen.end_session.f00b921f": "End session",

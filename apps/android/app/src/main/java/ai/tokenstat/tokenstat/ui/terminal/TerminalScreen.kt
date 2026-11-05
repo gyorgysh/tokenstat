@@ -152,6 +152,7 @@ fun TerminalScreen(
     }
     val displayName = sessionId?.let { names.name(nameOwner, it) }
     var confirmClose by remember { mutableStateOf(false) }
+    var rendererFailed by remember { mutableStateOf(false) }
     // The bar's Ctrl key reads the bridge, which is what spends the flag.
     var controlArmed by remember { mutableStateOf(false) }
     bridge.onControlChanged = { controlArmed = it }
@@ -286,10 +287,15 @@ fun TerminalScreen(
                 }
             }
         }
-        AndroidView(
+        if (rendererFailed) Text(
+            L10n.text("android.terminalscreen.display_stopped"),
+            color = LocalTsColors.current.danger,
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(Space.s),
+        ) else AndroidView(
             modifier = Modifier.weight(1f).fillMaxSize(),
             factory = { ctx ->
-                WebView(ctx).apply {
+                TerminalWebView(ctx, bridge).apply {
+                    onRendererGone = { rendererFailed = true }
                     // Match the space Compose gives this view, explicitly.
                     // `AndroidView` leaves a child on wrap-content, and a
                     // WebView measured that way lays its page out against a
@@ -333,6 +339,9 @@ fun TerminalScreen(
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
                     webChromeClient = TermChromeClient
                     webViewClient = object : WebViewClient() {
+                        override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean =
+                            (view as TerminalWebView).rendererGone()
+
                         override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean =
                             request.url.toString() != bridge.pageUrl()
 
@@ -391,8 +400,7 @@ fun TerminalScreen(
             },
             onRelease = { view ->
                 val id = sessionId
-                bridge.stopJobs()
-                bridge.alive = false
+                view.shutdown()
                 if (id != null && !bridge.killed) {
                     // Stop showing a session without stopping its process on
                     // the Mac (`pty.detach`). Close is what ends the process.
@@ -409,13 +417,9 @@ fun TerminalScreen(
                         }
                     }
                 }
-                view.removeJavascriptInterface("TermBridge")
-                bridge.webView = null
-                view.stopLoading()
-                view.destroy()
             },
         )
-        TerminalKeys(
+        if (!rendererFailed) TerminalKeys(
             onSend = { bytes -> bridge.sendBytes(bytes) },
             onToggleKeyboard = { bridge.toggleKeyboard() },
             scrolls = scrolls,
@@ -529,13 +533,15 @@ fun SshTerminalScreen(
     ReconcileKeyboard(keyboardUp) { keyboardUp = false; bridge.noteKeyboardHidden() }
     LaunchedEffect(dark) { bridge.pushTheme(dark) }
     var confirmEnd by remember { mutableStateOf(false) }
+    var rendererFailed by remember { mutableStateOf(false) }
     var showingSessionDetails by remember(sessionId) { mutableStateOf(false) }
     var filling by remember { mutableStateOf<JsonObject?>(null) }
     // On-connect commands, once the shell is there to hear them. The channel
     // is buffered, so this survives the page still loading.
-    LaunchedEffect(sessionId) {
-        if (startup.isNotEmpty()) {
+    LaunchedEffect(sessionId, rendererFailed) {
+        if (!rendererFailed && startup.isNotEmpty()) {
             delay(600)
+            if (!bridge.alive) return@LaunchedEffect
             startup.forEach { bridge.sendBytes(ai.tokenstat.tokenstat.ui.ssh.SnippetRun.runBytes(it)) }
             onStartupSent()
         }
@@ -593,10 +599,15 @@ fun SshTerminalScreen(
                 )
             }
         }
-        AndroidView(
+        if (rendererFailed) Text(
+            L10n.text("android.terminalscreen.display_stopped"),
+            color = LocalTsColors.current.danger,
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(Space.s),
+        ) else AndroidView(
             modifier = Modifier.weight(1f).fillMaxSize(),
             factory = { ctx ->
-                WebView(ctx).apply {
+                TerminalWebView(ctx, bridge).apply {
+                    onRendererGone = { rendererFailed = true }
                     // Match the space Compose gives this view, explicitly.
                     // `AndroidView` leaves a child on wrap-content, and a
                     // WebView measured that way lays its page out against a
@@ -640,6 +651,9 @@ fun SshTerminalScreen(
                     addJavascriptInterface(bridge.jsApi, "TermBridge")
                     webChromeClient = TermChromeClient
                     webViewClient = object : WebViewClient() {
+                        override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean =
+                            (view as TerminalWebView).rendererGone()
+
                         override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean =
                             request.url.toString() != bridge.pageUrl()
 
@@ -659,8 +673,7 @@ fun SshTerminalScreen(
                 }
             },
             onRelease = { view ->
-                bridge.stopJobs()
-                bridge.alive = false
+                view.shutdown()
                 // Done only stops watching. Only an ended session closes.
                 //
                 // The view model's scope for the same reason the pty detach
@@ -674,13 +687,9 @@ fun SshTerminalScreen(
                         }
                     }
                 }
-                view.removeJavascriptInterface("TermBridge")
-                bridge.webView = null
-                view.stopLoading()
-                view.destroy()
             },
         )
-        TerminalKeys(
+        if (!rendererFailed) TerminalKeys(
             onSend = { bytes -> bridge.sendBytes(bytes) },
             onToggleKeyboard = { bridge.toggleKeyboard() },
             scrolls = scrolls,
