@@ -27,6 +27,44 @@ class ChatFileTransferTest {
     private fun protocol() = buildJsonObject { put("protocolVersion", 34) }
     private fun capabilities() = buildJsonObject { put("maxFileBytes", FILE_MAX); put("relay", false) }
 
+    @Test fun legacyUploadPreservesBytesAndMediaTypeAcrossRelayRetry() = runBlocking {
+        val root = directory()
+        val bytes = ByteArray(128 * 1024 + 17) { (it * 37).toByte() }
+        val source = File(root, "picture.data").apply { writeBytes(bytes) }
+        var prompts = 0
+        var attempts = 0
+        var firstEncoding: String? = null
+        try {
+            val result = withContext(Dispatchers.Main) {
+                uploadChatFile(StagedAttachment(source.name, "", "image/png", bytes.size, source.path),
+                    "chat", "owner", call = { method, params ->
+                        onMain()
+                        when (method) {
+                            "protocol" -> buildJsonObject { put("protocolVersion", 33) }
+                            "chat.attach" -> {
+                                attempts++
+                                assertEquals(source.name, params["name"]!!.jsonPrimitive.content)
+                                assertEquals("image/png", params["mediaType"]!!.jsonPrimitive.content)
+                                val encoded = params["data"]!!.jsonPrimitive.content
+                                if (params["allowRelay"]!!.jsonPrimitive.boolean != true) {
+                                    firstEncoding = encoded
+                                    throw CoreFailure("relay_consent_required", "Relay consent required")
+                                }
+                                assertEquals(firstEncoding, encoded)
+                                withContext(Dispatchers.Default) { assertArrayEquals(bytes, Base64.decode(encoded, Base64.DEFAULT)) }
+                                buildJsonObject { put("id", "legacy-upload") }
+                            }
+                            else -> error("Unexpected request: $method")
+                        }
+                    }, confirm = { onMain(); prompts++; true }, progress = {})
+            }
+            assertEquals("legacy-upload", result["id"]!!.jsonPrimitive.content)
+            assertEquals(1, prompts)
+            assertEquals(2, attempts)
+            assertArrayEquals(bytes, source.readBytes())
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun legacyDownloadKeepsBytesAndCanRetryWithRelayConsent() = runBlocking {
         val root = directory()
         val bytes = ByteArray(128 * 1024 + 17) { (it * 37).toByte() }

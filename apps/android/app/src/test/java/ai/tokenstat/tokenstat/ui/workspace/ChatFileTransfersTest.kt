@@ -18,6 +18,38 @@ import org.junit.rules.TemporaryFolder
 class ChatFileTransfersTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun inlineDraftsKeepTheirMetadataAndRequireConsentOnlyOnRelay() = runBlocking {
+        val staged = StagedAttachment("image.png", "aGVsbG8=", "image/png", 5, null)
+        for (route in listOf("direct", "relay", "declined", "failed")) {
+            var requests = 0
+            var prompts = 0
+            try {
+                val result = uploadChatFile(staged, "chat", "owner", { method, params ->
+                    assertEquals("chat.attach", method)
+                    assertEquals("image.png", params["name"]!!.jsonPrimitive.content)
+                    assertEquals("image/png", params["mediaType"]!!.jsonPrimitive.content)
+                    assertEquals(staged.data, params["data"]!!.jsonPrimitive.content)
+                    requests++
+                    if (route == "failed") throw ai.tokenstat.tokenstat.core.CoreFailure("disconnected", "Offline")
+                    if (route != "direct" && params["allowRelay"]?.jsonPrimitive?.content != "true")
+                        throw ai.tokenstat.tokenstat.core.CoreFailure("relay_consent_required", "Relay")
+                    buildJsonObject { put("id", "uploaded") }
+                }, {
+                    prompts++
+                    assertEquals(null, it)
+                    route == "relay"
+                }, {})
+                assertTrue(route == "direct" || route == "relay")
+                assertEquals("uploaded", result["id"]!!.jsonPrimitive.content)
+            } catch (error: ai.tokenstat.tokenstat.core.CoreFailure) {
+                assertTrue(route == "declined" || route == "failed")
+                assertEquals(if (route == "declined") "relay_consent_required" else "disconnected", error.code)
+            }
+            assertEquals(if (route == "relay") 2 else 1, requests)
+            assertEquals(if (route == "relay" || route == "declined") 1 else 0, prompts)
+        }
+    }
+
     @Test fun decliningRelayPreservesTheDownloadedPrefix() = runBlocking {
         val directory = temporary.newFolder()
         val bytes = "already downloaded prefix".toByteArray()
@@ -88,12 +120,126 @@ class ChatFileTransfersTest {
     }
 
     @Test
+    fun relayRetryOnlyAsksWhenTheSavedUploadStillNeedsBytes() = runBlocking {
+        val source = temporary.newFile("resume.zip").apply { writeBytes(ByteArray(1000) { 42 }) }
+        val staged = StagedAttachment(source.name, "", "application/zip", 1000, source.path)
+        var relay = false
+        var finishFails = true
+        var cancelStatus = false
+        var cap = FILE_MAX
+        var offset = 1000L
+        var prompts = 0
+        var starts = 0
+        var finishes = 0
+        suspend fun call(method: String, params: JsonObject): JsonElement = when (method) {
+            "protocol" -> buildJsonObject { put("protocolVersion", 34) }
+            "chat.fileCapabilities" -> buildJsonObject { put("maxFileBytes", cap); put("relay", relay) }
+            "chat.fileUploadStart" -> {
+                starts++
+                buildJsonObject { put("transferId", "resume"); put("offset", 1000) }
+            }
+            "chat.fileUploadStatus" -> {
+                assertEquals("resume", params["transferId"]!!.jsonPrimitive.content)
+                if (cancelStatus) throw kotlinx.coroutines.CancellationException("Navigation changed")
+                buildJsonObject { put("transferId", "resume"); put("offset", offset) }
+            }
+            "chat.fileUploadFinish" -> {
+                finishes++
+                if (finishFails) throw ai.tokenstat.tokenstat.core.CoreFailure("disconnected", "Connection closed")
+                buildJsonObject { put("id", "finished"); put("name", source.name) }
+            }
+            else -> error("No file data or cancellation request was expected: $method")
+        }
+        try {
+            uploadChatFile(staged, "chat", "owner", ::call, { error("Direct") }, {})
+            error("Fixture must leave an unfinished receipt")
+        } catch (_: ai.tokenstat.tokenstat.core.CoreFailure) {}
+        val receipt = source.parentFile!!.listFiles()!!.single { it.name.endsWith(".upload") }
+        val saved = receipt.readText()
+        relay = true
+        finishFails = false
+        cancelStatus = true
+        try {
+            uploadChatFile(staged, "chat", "owner", ::call,
+                { error("A cancelled status read must not ask for consent") }, {})
+            error("Cancelled status read continued")
+        } catch (_: kotlinx.coroutines.CancellationException) {}
+        assertEquals(1, starts)
+        assertEquals(saved, receipt.readText())
+        cancelStatus = false
+        cap = 500
+        val result = uploadChatFile(staged, "chat", "owner", ::call,
+            { error("Finishing already uploaded bytes needs no consent") }, {})
+        assertEquals("finished", result["id"]!!.jsonPrimitive.content)
+
+        // A host can retain only a prefix after an interrupted upload. Refusing
+        // or dismissing its relay prompt must keep that upload available.
+        offset = 500
+        cap = FILE_MAX
+        repeat(2) { attempt ->
+            try {
+                uploadChatFile(staged, "chat", "owner", ::call, {
+                    prompts++
+                    if (attempt == 1) throw kotlinx.coroutines.CancellationException("Dismissed")
+                    false
+                }, {})
+                error("Declined upload continued")
+            } catch (_: IllegalStateException) {}
+            assertEquals(saved, receipt.readText())
+            assertEquals(1000L, source.length())
+        }
+        assertEquals(2, prompts)
+        assertEquals(1, starts)
+        assertEquals(2, finishes)
+    }
+
+    @Test
+    fun identicalBytesWithDifferentNamesOrMediaTypesStaySeparateAttachments() = runBlocking {
+        val source = temporary.newFile("original.zip").apply { writeBytes(ByteArray(1000) { 42 }) }
+        val staged = StagedAttachment(source.name, "", "application/zip", 1000, source.path)
+        val uploads = mutableMapOf<String, JsonObject>()
+        var starts = 0
+        suspend fun call(method: String, params: JsonObject): JsonElement = when (method) {
+            "protocol" -> buildJsonObject { put("protocolVersion", 34) }
+            "chat.fileCapabilities" -> buildJsonObject { put("maxFileBytes", FILE_MAX); put("relay", false) }
+            "chat.fileUploadStart" -> {
+                val transfer = "transfer-${++starts}"
+                uploads[transfer] = buildJsonObject {
+                    put("id", "file-$starts")
+                    put("name", params["name"]!!)
+                    put("mediaType", params["mediaType"]!!)
+                    put("size", 1000)
+                }
+                // All bytes already reached the host; only finish is pending.
+                buildJsonObject { put("transferId", transfer); put("offset", 1000) }
+            }
+            "chat.fileUploadFinish" -> uploads.getValue(params["transferId"]!!.jsonPrimitive.content)
+            "chat.fileUploadStatus" -> buildJsonObject {
+                put("finished", true)
+                put("attachment", uploads.getValue(params["transferId"]!!.jsonPrimitive.content))
+            }
+            else -> error("Unexpected request: $method")
+        }
+        for (file in listOf(staged, staged.copy(name = "renamed.zip"), staged.copy(mediaType = "application/octet-stream"))) {
+            repeat(2) {
+                val result = uploadChatFile(file, "chat", "owner", ::call,
+                    { error("No file bytes need relay consent") }, {})
+                assertEquals(file.name, result["name"]!!.jsonPrimitive.content)
+                assertEquals(file.mediaType, result["mediaType"]!!.jsonPrimitive.content)
+            }
+        }
+        assertEquals("Each distinct attachment starts once; exact retries reuse it", 3, starts)
+    }
+
+    @Test
     fun completedUploadSurvivesRetryWhenAnotherAttachmentRefusesTheMessage() = runBlocking {
         val source = temporary.newFile("original.zip").apply { writeBytes(ByteArray(1000) { 42 }) }
         val staged = StagedAttachment(source.name, "", "application/zip", 1000, source.path)
         var starts = 0
         var finishes = 0
         var statuses = 0
+        var capabilities = 0
+        var relay = false
         val attachment = buildJsonObject {
             put("id", "file-existing")
             put("name", source.name)
@@ -102,11 +248,15 @@ class ChatFileTransfersTest {
         suspend fun call(method: String, params: JsonObject): JsonElement =
             when (method) {
                 "protocol" -> buildJsonObject { put("protocolVersion", 34) }
-                "chat.fileCapabilities" ->
+                "chat.fileCapabilities" -> {
+                    capabilities++
                     buildJsonObject {
-                        put("maxFileBytes", FILE_MAX)
-                        put("relay", false)
+                        // After a direct upload, the next route can have a
+                        // smaller file limit. Reusing its receipt sends no data.
+                        put("maxFileBytes", if (relay) 500 else FILE_MAX)
+                        put("relay", relay)
                     }
+                }
                 "chat.fileUploadStart" -> {
                     starts++
                     // A previous setup acknowledgement was lost after the final
@@ -137,14 +287,16 @@ class ChatFileTransfersTest {
                     "chat-one",
                     "account-one",
                     ::call,
-                    { error("Direct transfer must not ask for relay") },
+                    { error("Direct or completed transfer must not ask for relay") },
                     {},
                 )
             assertEquals("file-existing", returned["id"]!!.jsonPrimitive.content)
+            relay = true
         }
         assertEquals(1, starts)
         assertEquals(1, finishes)
         assertEquals(2, statuses)
+        assertEquals("Completed retries do not discover another file channel", 1, capabilities)
         assertEquals(1000L, File(source.path).length())
     }
 }

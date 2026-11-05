@@ -32,18 +32,24 @@ internal suspend fun uploadChatFile(
     confirm: suspend (Long?) -> Boolean,
     progress: suspend (Float) -> Unit,
 ): JsonObject {
-    val file = attachment.filePath?.let(::File)
-    if (file == null)
-        return call(
-            "chat.attach",
-            buildJsonObject {
-                put("id", chat)
-                put("name", attachment.name)
-                put("data", attachment.data)
-                attachment.mediaType?.let { put("mediaType", it) }
-            },
-        )
-            as JsonObject
+    suspend fun legacy(encoded: String): JsonObject {
+        var relay = false
+        suspend fun send() = call("chat.attach", buildJsonObject {
+            put("id", chat)
+            put("name", attachment.name)
+            put("data", encoded)
+            attachment.mediaType?.let { put("mediaType", it) }
+            put("allowRelay", relay)
+        }) as JsonObject
+        return try {
+            send()
+        } catch (error: CoreFailure) {
+            if (error.code != "relay_consent_required" || !confirm(null)) throw error
+            relay = true
+            send()
+        }
+    }
+    val file = attachment.filePath?.let(::File) ?: return legacy(attachment.data)
     val protocol = call("protocol", buildJsonObject {}) as? JsonObject
     if ((HostContracts.protocolOf(protocol) ?: 0) < 34) {
         require(file.length() <= 12 * 1024 * 1024) { L10n.text("common.chat_route_unavailable") }
@@ -58,25 +64,7 @@ internal suspend fun uploadChatFile(
                     Base64.encodeToString(bytes, Base64.NO_WRAP)
                 }
             }
-        var relay = false
-        suspend fun send() =
-            call(
-                "chat.attach",
-                buildJsonObject {
-                    put("id", chat)
-                    put("name", attachment.name)
-                    put("data", encoded)
-                    put("allowRelay", relay)
-                },
-            )
-                as JsonObject
-        return try {
-            send()
-        } catch (error: CoreFailure) {
-            if (error.code != "relay_consent_required" || !confirm(null)) throw error
-            relay = true
-            send()
-        }
+        return legacy(encoded)
     }
     val size = file.length()
     require(size in 1..FILE_MAX.toLong()) { L10n.text("common.chat_files_too_large") }
@@ -98,20 +86,11 @@ internal suspend fun uploadChatFile(
             require(total == size)
             digest(digest.digest())
         }
-    val caps = call("chat.fileCapabilities", buildJsonObject { put("id", chat) }) as JsonObject
-    require(size in 1..minOf(FILE_MAX.toLong(), caps.number("maxFileBytes"))) {
-        L10n.text("common.chat_files_too_large")
-    }
     var allowRelay = false
-    if ((caps["relay"] as? JsonPrimitive)?.booleanOrNull == true) {
-        check(confirm((caps["relayRemainingBytes"] as? JsonPrimitive)?.longOrNull))
-        allowRelay = true
-    }
-    val key =
-        digest(
-            MessageDigest.getInstance("SHA-256")
-                .digest((owner + "|" + chat + "|" + hash).toByteArray())
-        )
+    // Equal bytes can still be different attachments. Encode the identity
+    // as JSON so separators in names cannot collide with another field.
+    val identity = JsonArray(listOf(owner, chat, hash, attachment.name, attachment.mediaType).map { JsonPrimitive(it) })
+    val key = digest(MessageDigest.getInstance("SHA-256").digest(identity.toString().toByteArray()))
     check(fileTransferClaims.add(key)) { L10n.text("common.chat_files_busy") }
     try {
         val receipt = File(file.parentFile, file.name + ".$key.upload")
@@ -137,12 +116,27 @@ internal suspend fun uploadChatFile(
                         )
                             as JsonObject
                     }
+                        .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
                         .getOrNull()
                 }
         if (previous?.get("finished")?.jsonPrimitive?.booleanOrNull == true) {
             // Keep the completed receipt until the host's staging expiry:
             // another attachment can fail before the message is queued.
             return previous["attachment"] as JsonObject
+        }
+        // A saved upload may already contain every byte. Only a transfer
+        // that still needs file data should ask to use relay allowance.
+        val previousOffset = previous?.number("offset")
+        require(previousOffset == null || previousOffset in 0..size)
+        val caps = if (previousOffset != size) {
+            call("chat.fileCapabilities", buildJsonObject { put("id", chat) }) as JsonObject
+        } else null
+        if (caps != null) {
+            require(size <= caps.number("maxFileBytes")) { L10n.text("common.chat_files_too_large") }
+            if ((caps["relay"] as? JsonPrimitive)?.booleanOrNull == true) {
+                check(confirm((caps["relayRemainingBytes"] as? JsonPrimitive)?.longOrNull))
+                allowRelay = true
+            }
         }
         val start =
             previous
@@ -209,7 +203,7 @@ internal suspend fun uploadChatFile(
                                 error.code != "relay_consent_required" ||
                                     allowRelay ||
                                     !confirm(
-                                        (caps["relayRemainingBytes"] as? JsonPrimitive)?.longOrNull
+                                        (caps?.get("relayRemainingBytes") as? JsonPrimitive)?.longOrNull
                                     )
                             )
                                 throw error
