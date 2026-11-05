@@ -11,6 +11,7 @@ import kotlinx.serialization.json.longOrNull
 /** Initial reads are bounded; polling only asks for bytes after the last reply. */
 internal class ChatHistoryWindow {
     var events: List<JsonObject> = emptyList(); private set
+    var usage: ChatUsageTotals? = null; private set
     var loaded = false; private set
     var generation = 0; private set
     var offset = 0L; private set
@@ -25,6 +26,7 @@ internal class ChatHistoryWindow {
             generation++
             hasMore = false
             events = rows
+            usage = ChatUsageTotals.decode(answer["usage"] as? JsonObject)
             offset = answer["nextOffset"]?.jsonPrimitive?.longOrNull ?: 0
             tailCursor = answer["tailCursor"]?.jsonPrimitive?.contentOrNull
         } else events = rows + events
@@ -37,7 +39,10 @@ internal class ChatHistoryWindow {
         if (expectedGeneration != generation || expectedOffset != offset ||
             answer["reset"]?.jsonPrimitive?.booleanOrNull == true) return false
         val rows = (answer["events"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
-        if (rows.isNotEmpty()) events = events + rows
+        if (rows.isNotEmpty()) {
+            events = events + rows
+            usage = usage?.tail(rows)
+        }
         offset = answer["nextOffset"]?.jsonPrimitive?.longOrNull ?: offset
         hasMore = answer["hasMore"]?.jsonPrimitive?.booleanOrNull == true && offset > expectedOffset
         tailCursor = answer["tailCursor"]?.jsonPrimitive?.contentOrNull

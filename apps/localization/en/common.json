@@ -826,5 +826,8 @@
   "common.chat_files_relay_usage_label": "Relay allowance used",
   "common.chat_files_size_unknown": "Size unavailable",
   "common.chat.usage.title": "Usage",
-  "common.chat.usage.stale": "Last known usage"
+  "common.chat.usage.stale": "Last known usage",
+  "common.chat.usage.allowance": "{0} · {1}: {2}% used",
+  "common.chat.usage.no_limits": "No limit readings for this agent.",
+  "common.chat.usage.no_totals": "No usage reported for this conversation."
 }

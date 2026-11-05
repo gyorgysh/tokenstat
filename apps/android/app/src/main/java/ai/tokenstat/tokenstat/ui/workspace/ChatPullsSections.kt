@@ -112,6 +112,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -219,6 +222,7 @@ fun ChatSection(
     var didOpenConversation by remember(workspace, openConversationOnAppear, conversationNonce) { mutableStateOf(false) }
     var events by remember(projectOwner, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
     val history = remember(projectOwner, openId) { ChatHistoryWindow() }
+    var usage by remember(projectOwner, openId) { mutableStateOf<ChatUsageTotals?>(null) }
     var hasEarlier by remember(projectOwner, openId) { mutableStateOf(false) }
     var loadingEarlier by remember(projectOwner, openId) { mutableStateOf(false) }
     var approvals by remember(projectOwner, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
@@ -269,6 +273,7 @@ fun ChatSection(
     var pendingRename by remember(projectOwner) { mutableStateOf<JsonObject?>(null) }
     var deleteAll by remember(projectOwner) { mutableStateOf(false) }
     var showingStats by remember(projectOwner, openId) { mutableStateOf(false) }
+    var showingUsage by remember(projectOwner, openId) { mutableStateOf(false) }
     var activitySection by remember(projectOwner, openId) { mutableStateOf<String?>(null) }
     var showingSetup by remember(projectOwner) { mutableStateOf(false) }
     // Agent, model and effort, one tap from the composer the way the iPhone
@@ -548,6 +553,7 @@ fun ChatSection(
                 }
             }
             events = history.events
+            usage = history.usage
             hasEarlier = history.hasEarlier
             eventsError = null
             val answer = model.workspaceSection(peer, "chat.approvals", buildJsonObject { put("id", id) })
@@ -574,6 +580,7 @@ fun ChatSection(
             if (openId != id || history.generation != generation) return
             history.page(page)
             events = history.events
+            usage = history.usage
             hasEarlier = history.hasEarlier
             eventsError = null
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -1118,6 +1125,7 @@ fun ChatSection(
             ChatCommandRules.Kind.INSPECT, ChatCommandRules.Kind.STOP -> {
                 if (action.kind == ChatCommandRules.Kind.STOP) stopChat(id) else {
                     activitySection = when (command) { "/goal" -> "goal"; "/plan" -> "plan"; "/subagents" -> "subagents"; else -> null }
+                    showingUsage = command == "/usage"
                     showingStats = true
                 }
                 if (openId == id && ownsProject() && draft.trim() == command) draft = ""
@@ -1938,9 +1946,14 @@ fun ChatSection(
             ChatGitStrip(model, peer, workspace, openChat, protocol, projectOwner, offline, sending || runningTurn) {
                 onOpenSection("Changes")
             }
-            ChatActivitySummary(chatActivityData(chatInspection.data, openChat)) { activitySection = "all"; showingStats = true }
+            ChatActivitySummary(chatActivityData(chatInspection.data, openChat)) { activitySection = "all"; showingUsage = false; showingStats = true }
             ChatComposer(
                 chat = chats.firstOrNull { it.str("id") == openId },
+                quota = {
+                    ChatQuotaBadge(rememberChatQuota(model, openChat?.str("backend").orEmpty())) {
+                        activitySection = null; showingUsage = true; showingStats = true
+                    }
+                },
                 draft = draft,
                 onDraft = { draft = it },
                 hint = if (noteForStep && openChat?.bol("nativeSteer") == true) L10n.text("common.chat.steer_placeholder") else ChatHint.hint(folderName, sending || runningTurn, note = noteForStep),
@@ -2147,7 +2160,7 @@ fun ChatSection(
         }
     }
     if (showingStats) {
-        chats.firstOrNull { it.str("id") == openId }?.let { chat -> ChatStatsDialog(model, peer, chat, chatInspection, activitySection) { showingStats = false } }
+        chats.firstOrNull { it.str("id") == openId }?.let { chat -> ChatStatsDialog(model, peer, chat, chatInspection, activitySection, usageOnly = showingUsage, fallbackUsage = usage) { showingStats = false } }
     }
     if (showingSetup) {
         val id = openId
@@ -3359,6 +3372,7 @@ internal fun ChatComposer(
     backends: List<JsonObject>,
     onAgent: () -> Unit,
     routing: @Composable () -> Unit = {},
+    quota: @Composable () -> Unit = {},
     /// What a new conversation would open in, for the moment before one is
     /// selected. See `LaunchDefaults`.
     launchMode: String,
@@ -3400,6 +3414,7 @@ internal fun ChatComposer(
     // brief. The toggle sits at the top right of the bar, away from send,
     // the way the iPhone composer grows its field.
     var expanded by remember { mutableStateOf(false) }
+    var setupExpanded by remember(chat?.str("id")) { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     TsCard(Modifier.fillMaxWidth()) {
@@ -3416,32 +3431,46 @@ internal fun ChatComposer(
                     onClick = onQueueWhenConnected,
                 )
             }
-            // Agent, model and effort in one line, which opens the picker
-            // holding exactly those three. The same field the iPhone puts in
-            // its composer: the settings that change what the next message
-            // does are one tap away, not behind the whole setup screen.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                TsPickerField(
-                    summary = chatAgentSummary(backends, chat),
-                    onOpen = onAgent,
-                    enabled = !sending,
-                    modifier = Modifier.weight(1f),
-                )
-                routing()
-                IconButton(onClick = { expanded = !expanded }) {
-                    Icon(
-                        if (expanded) ActionIcon.ExitFullScreen.vector else ActionIcon.EnterFullScreen.vector,
-                        if (expanded) L10n.text("android.chatpullssections.shrink_the_message_box.2430d33f") else L10n.text("android.chatpullssections.expand_the_message_box.c0441a94"),
-                        tint = colors.accent,
-                        modifier = Modifier.size(18.dp),
-                    )
+            // A phone uses the agent's mark; larger windows can keep the full model summary.
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val compactControls = maxWidth < 360.dp || LocalDensity.current.fontScale > 1.3f
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (compactControls) {
+                        IconButton(onClick = onAgent, enabled = !sending,
+                            modifier = Modifier.semantics { contentDescription = chatAgentSummary(backends, chat) }) {
+                            HarnessMark(chat?.str("backend").orEmpty(), size = 22.dp)
+                        }
+                        Spacer(Modifier.weight(1f))
+                    } else {
+                        TsPickerField(
+                            summary = chatAgentSummary(backends, chat),
+                            onOpen = onAgent,
+                            enabled = !sending,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    routing()
+                    quota()
+                    IconButton(onClick = { setupExpanded = !setupExpanded }, modifier = Modifier.semantics {
+                        stateDescription = L10n.text(if (setupExpanded) "common.collapse" else "common.expand")
+                    }) {
+                        Icon(ActionIcon.Settings.vector, L10n.text("common.settings"), tint = colors.accent, modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = { expanded = !expanded }) {
+                        Icon(
+                            if (expanded) ActionIcon.ExitFullScreen.vector else ActionIcon.EnterFullScreen.vector,
+                            if (expanded) L10n.text("android.chatpullssections.shrink_the_message_box.2430d33f") else L10n.text("android.chatpullssections.expand_the_message_box.c0441a94"),
+                            tint = colors.accent,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            if (setupExpanded) Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 ChatSegmented(
                     options = listOf("plan" to L10n.text("android.chatpullssections.plan.fa8ed0bd"), "execute" to L10n.text("android.chatpullssections.execute.e3a67d95")),
                     selected = mode,

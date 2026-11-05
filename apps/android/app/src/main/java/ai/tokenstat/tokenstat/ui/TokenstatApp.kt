@@ -5222,7 +5222,7 @@ private fun TotalTile(label: String, value: String, mark: String, modifier: Modi
 /// returns: `windows[{label, percent, resetsAtMs}]` under a `source`. The
 /// generic row card this replaces could not reach any of it.
 @Composable
-private fun LimitCard(reading: JsonObject) {
+internal fun LimitCard(reading: JsonObject) {
     val colors = LocalTsColors.current
     val windows = reading["windows"] as? JsonArray ?: JsonArray(emptyList())
     val stale = reading.bool("stale")
@@ -5333,7 +5333,6 @@ private fun LimitGauge(value: JsonObject) {
             Box(
                 Modifier
                     .fillMaxWidth(animated)
-                    .widthIn(min = 3.dp)
                     .height(6.dp)
                     .clip(RoundedCornerShape(50))
                     .background(gauge),

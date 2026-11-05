@@ -36,6 +36,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.*
 import java.text.NumberFormat
@@ -72,32 +73,45 @@ internal fun chatCommands() = listOf(
     }
 }
 
-@Composable internal fun ChatStatsDialog(model: AppViewModel, peer: String, chat: JsonObject, inspection: ChatInspectionSnapshot? = null, activitySection: String? = null, onDismiss: () -> Unit) {
+@Composable internal fun ChatStatsDialog(model: AppViewModel, peer: String, chat: JsonObject, inspection: ChatInspectionSnapshot? = null, activitySection: String? = null, usageOnly: Boolean = false, fallbackUsage: ChatUsageTotals? = null, onDismiss: () -> Unit) {
     val account by model.state.collectAsStateWithLifecycle()
     val snapshot = inspection ?: rememberChatInspection(model, peer, chat, account.account)
+    val quota = if (usageOnly) rememberChatQuota(model, chat.str("backend").orEmpty()) else null
+    val scope = rememberCoroutineScope()
+    var refreshing by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(shape = RoundedCornerShape(20.dp), color = LocalTsColors.current.background,
             modifier = Modifier.fillMaxWidth(.94f).fillMaxHeight(.86f)) {
             Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(L10n.text(if (activitySection != null) "common.chat.activity.title" else "common.chat.stats.overview"), Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Text(L10n.text(if (usageOnly) "common.chat.usage.title" else if (activitySection != null) "common.chat.activity.title" else "common.chat.stats.overview"), Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                     TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
                 }
-                if (activitySection != null) {
-                    ChatActivityPanel(snapshot.data, chat, activitySection, initiallyExpanded = true, loaded = snapshot.loaded)
-                } else ChatStatsPanel(model, peer, chat, snapshot)
-                StatsDisclosure(L10n.text("common.session_identity.title")) {
-                    ChatSessionIdentifiers(chat.str("id").orEmpty(), snapshot.data, chat.str("backend"))
-                }
-                StatsDisclosure(L10n.text("common.chat.commands")) {
-                    chatCommands().forEach { (command, detail) -> Text("$command · $detail", style = MaterialTheme.typography.bodySmall) }
+                if (usageOnly) {
+                    TextButton(enabled = !refreshing, onClick = {
+                        scope.launch {
+                            refreshing = true
+                            try { model.refreshLimits(force = true) } finally { refreshing = false }
+                        }
+                    }) { Text(L10n.text("common.refresh")) }
+                    ChatUsagePanel(quota, snapshot, fallbackUsage)
+                } else {
+                    if (activitySection != null) {
+                        ChatActivityPanel(snapshot.data, chat, activitySection, initiallyExpanded = true, loaded = snapshot.loaded)
+                    } else ChatStatsPanel(model, peer, chat, snapshot)
+                    StatsDisclosure(L10n.text("common.session_identity.title")) {
+                        ChatSessionIdentifiers(chat.str("id").orEmpty(), snapshot.data, chat.str("backend"))
+                    }
+                    StatsDisclosure(L10n.text("common.chat.commands")) {
+                        chatCommands().forEach { (command, detail) -> Text("$command · $detail", style = MaterialTheme.typography.bodySmall) }
+                    }
                 }
             }
         }
     }
 }
 
-internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Boolean)
+internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Boolean, val stale: Boolean = false)
 
 @Composable internal fun ChatSessionIdentifiers(chatId: String, inspection: JsonObject?, backend: String?) {
     SessionIdentifierRow(L10n.text("common.session_identity.conversation"), chatId)
@@ -152,7 +166,7 @@ internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Bo
         }
     }
     val current = if (!enabled || !liveLease) inspection?.let { JsonObject(it + ("currentRun" to JsonPrimitive(false))) } else inspection
-    return ChatInspectionSnapshot(current, loaded)
+    return ChatInspectionSnapshot(current, loaded, stale = inspection != null && (!enabled || !liveLease))
 }
 
 @Composable internal fun ChatStatsPanel(model: AppViewModel, peer: String, chat: JsonObject, inspection: ChatInspectionSnapshot? = null, activitySection: String? = null) {
