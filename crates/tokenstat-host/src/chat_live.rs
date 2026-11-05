@@ -13,6 +13,8 @@ use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex, Once, OnceLock, PoisonError, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+mod output;
+
 const INTERRUPT_TIMEOUT: Duration = Duration::from_secs(3);
 const EXIT_TIMEOUT: Duration = Duration::from_secs(3);
 const STOP_TIMEOUT: Duration = Duration::from_secs(8);
@@ -545,7 +547,7 @@ fn codex_mcp_inventory(servers: &[Value]) -> Value {
     json!({"type":"tokenstat.mcp", "servers":servers, "inventoryPartial":inventory_partial})
 }
 
-fn read_message(reader: &mut impl BufRead, cap: u64) -> Result<Option<Value>, String> {
+fn read_message(reader: &mut impl BufRead, cap: u64) -> Result<Option<(Value, usize)>, String> {
     let mut line = String::new();
     let length = reader
         .take(cap + 1)
@@ -558,30 +560,34 @@ fn read_message(reader: &mut impl BufRead, cap: u64) -> Result<Option<Value>, St
         return Err("agent protocol message is too large".into());
     }
     serde_json::from_str(&line)
-        .map(Some)
+        .map(|value| Some((value, length)))
         .map_err(|error| error.to_string())
 }
 
-fn read_messages(child: &mut Child) -> Result<mpsc::Receiver<Result<Value, String>>, String> {
+fn read_messages(child: &mut Child) -> Result<output::Messages, String> {
     let output = child.stdout.take().ok_or("missing agent output")?;
-    let (tx, rx) = mpsc::sync_channel(32);
+    Ok(read_messages_from(output))
+}
+
+fn read_messages_from(output: impl Read + Send + 'static) -> output::Messages {
+    let (tx, rx) = output::channel();
     std::thread::spawn(move || {
         let mut reader = BufReader::new(output);
         loop {
-            let value = match read_message(&mut reader, 16 * 1024 * 1024) {
-                Ok(Some(value)) => Ok(value),
+            let (value, bytes) = match read_message(&mut reader, 16 * 1024 * 1024) {
+                Ok(Some((value, bytes))) => (Ok(value), bytes),
                 Ok(None) => break,
                 Err(error) => {
-                    let _ = tx.send(Err(error));
+                    let _ = tx.send(Err(error), 0);
                     break;
                 }
             };
-            if tx.send(value).is_err() {
+            if !tx.send(value, bytes) {
                 break;
             }
         }
     });
-    Ok(rx)
+    rx
 }
 
 /// Provider diagnostics are not assistant text. Keep a bounded tail for a
@@ -616,7 +622,7 @@ fn read_diagnostics(child: &mut Child) -> (Arc<Mutex<Vec<u8>>>, mpsc::Receiver<(
 }
 
 impl Protocol {
-    fn interrupt(&self, input: &mut impl Write, messages: &mpsc::Receiver<Result<Value, String>>) {
+    fn interrupt(&self, input: &mut impl Write, messages: &output::Messages) {
         if self.backend != "codex" || self.thread.is_empty() || self.turn.is_empty() {
             return;
         }
@@ -1314,6 +1320,116 @@ fn codex_item(item: &Value) -> Option<Value> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "manual provider queue memory and throughput measurement"]
+    fn protocol_output_backpressure_measurement() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Records {
+            bytes: Vec<u8>,
+            left: usize,
+            offset: usize,
+            completed: Arc<AtomicUsize>,
+            finished: mpsc::Sender<()>,
+        }
+        impl Read for Records {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                if self.left == 0 {
+                    return Ok(0);
+                }
+                let count = buffer.len().min(self.bytes.len() - self.offset);
+                buffer[..count].copy_from_slice(&self.bytes[self.offset..self.offset + count]);
+                self.offset += count;
+                if self.offset == self.bytes.len() {
+                    self.offset = 0;
+                    self.left -= 1;
+                    self.completed.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok(count)
+            }
+        }
+        impl Drop for Records {
+            fn drop(&mut self) {
+                let _ = self.finished.send(());
+            }
+        }
+        fn peak_kib() -> u64 {
+            let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+            // SAFETY: getrusage initializes the provided rusage on success.
+            assert_eq!(
+                unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) },
+                0
+            );
+            let peak = unsafe { usage.assume_init() }.ru_maxrss as u64;
+            if cfg!(target_os = "macos") {
+                peak / 1024
+            } else {
+                peak
+            }
+        }
+        let completed = Arc::new(AtomicUsize::new(0));
+        let (finished, was_finished) = mpsc::channel();
+        let bytes = format!("{{\"data\":\"{}\"}}\n", "x".repeat(4 * 1024 * 1024)).into_bytes();
+        let before = peak_kib();
+        let receiver = read_messages_from(Records {
+            bytes,
+            left: 40,
+            offset: 0,
+            completed: Arc::clone(&completed),
+            finished,
+        });
+        let start = Instant::now();
+        let mut last = 0;
+        let mut changed = start;
+        while start.elapsed() < Duration::from_secs(10) {
+            let count = completed.load(Ordering::SeqCst);
+            if count != last {
+                last = count;
+                changed = Instant::now();
+            }
+            if count >= 2 && changed.elapsed() >= Duration::from_millis(300) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        println!(
+            "Provider queue: {last} complete 4 MiB frames read without consumption; peak {before} -> {} KiB",
+            peak_kib()
+        );
+        drop(receiver);
+        was_finished
+            .recv_timeout(Duration::from_secs(2))
+            .expect("Dropping the receiver must release the blocked drainer");
+
+        let mut timings = Vec::new();
+        for _ in 0..7 {
+            let (finished, _) = mpsc::channel();
+            let receiver = read_messages_from(Records {
+                bytes: b"{\"type\":\"delta\",\"text\":\"small streaming message\"}\n".to_vec(),
+                left: 30_000,
+                offset: 0,
+                completed: Arc::new(AtomicUsize::new(0)),
+                finished,
+            });
+            let start = Instant::now();
+            for _ in 0..30_000 {
+                assert_eq!(
+                    receiver
+                        .recv_timeout(Duration::from_secs(2))
+                        .unwrap()
+                        .unwrap()["type"],
+                    "delta"
+                );
+            }
+            timings.push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+        timings.sort_by(f64::total_cmp);
+        println!(
+            "Provider queue: 30,000 small streamed messages, median of 7 = {} ms",
+            timings[3]
+        );
+    }
+
     #[test]
     fn codex_text_deltas_belong_to_the_active_thread_and_turn() {
         let message = json!({"method":"item/agentMessage/delta","params":{
@@ -1478,6 +1594,22 @@ mod tests {
         assert!(read_message(&mut reader, 32).unwrap().is_some());
         assert!(read_message(&mut reader, 32).unwrap().is_some());
         assert!(read_message(&mut reader, 32).unwrap().is_none());
+    }
+
+    #[test]
+    fn protocol_queue_weights_use_utf8_frame_bytes() {
+        let line = "{\"text\":\"🌍 café\"}\n";
+        let mut reader = std::io::Cursor::new(line.as_bytes());
+        let (value, bytes) = read_message(&mut reader, line.len() as u64)
+            .unwrap()
+            .unwrap();
+        assert_eq!(value["text"], "🌍 café");
+        assert_eq!(bytes, line.len());
+        assert!(
+            read_message(&mut reader, line.len() as u64)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

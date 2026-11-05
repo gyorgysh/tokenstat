@@ -11,12 +11,104 @@ use std::time::{Duration, Instant};
 struct Runner(Child);
 impl Drop for Runner {
     fn drop(&mut self) {
+        if self.0.try_wait().is_ok_and(|status| status.is_some()) {
+            return;
+        }
         // Exercise the same signal the PTY manager uses for Stop.
         unsafe {
             libc::kill(self.0.id() as libc::pid_t, libc::SIGHUP);
         }
         let _ = self.0.wait();
     }
+}
+
+#[test]
+fn large_native_messages_remain_ordered_after_output_backpressure() {
+    use std::io::Read;
+    let root = tempfile::tempdir().unwrap();
+    let fake = root.path().join("fake-claude");
+    fs::write(&fake, r#"#!/usr/bin/env python3
+import sys,json
+def emit(value): print(json.dumps(value,ensure_ascii=False),flush=True)
+for line in sys.stdin:
+ message=json.loads(line)
+ if message.get('type')=='control_request':
+  emit({'type':'control_response','response':{'request_id':message['request_id'],'subtype':'success'}})
+ elif message.get('type')=='user':
+  emit({'type':'system','subtype':'init','session_id':'session'})
+  for index in range(21):
+   text=f'part:{index}:🙂:'+'x'*(9*1024*1024 if index==0 else 512*1024)
+   emit({'type':'assistant','message':{'content':[{'type':'text','text':text}]}})
+  emit({'type':'result','is_error':False})
+  break
+"#).unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.path().join("config.json");
+    fs::write(
+        &config,
+        json!({"backend":"claude","argv":[fake,"-p","literal prompt"]}).to_string(),
+    )
+    .unwrap();
+    let mut runner = Runner(
+        Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+            .args(["chat-live", config.to_str().unwrap()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    wait_for(|| root.path().join("ready.json").exists());
+    // Hold the real output pipe so the provider reader has to queue messages.
+    std::thread::sleep(Duration::from_millis(200));
+    let mut stdout = runner.0.stdout.take().unwrap();
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).unwrap();
+        bytes
+    });
+    let mut status = None;
+    wait_for(|| {
+        status = runner.0.try_wait().unwrap();
+        status.is_some()
+    });
+    let mut diagnostics = String::new();
+    runner
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut diagnostics)
+        .unwrap();
+    assert!(status.unwrap().success(), "{diagnostics}");
+    let bytes = reader.join().unwrap();
+    let output = std::str::from_utf8(&bytes).unwrap();
+    let mut seen = 0;
+    let mut results = 0;
+    for line in output.lines() {
+        let message: Value = serde_json::from_str(line).unwrap();
+        if message["type"] == "assistant" {
+            let text = message["message"]["content"][0]["text"].as_str().unwrap();
+            let prefix = format!("part:{seen}:🙂:");
+            let payload = text
+                .strip_prefix(&prefix)
+                .expect("Provider messages changed order");
+            assert_eq!(
+                payload.len(),
+                if seen == 0 {
+                    9 * 1024 * 1024
+                } else {
+                    512 * 1024
+                }
+            );
+            assert!(payload.bytes().all(|byte| byte == b'x'));
+            seen += 1;
+        } else if message["type"] == "result" {
+            results += 1;
+        }
+    }
+    assert_eq!(seen, 21);
+    assert_eq!(results, 1);
 }
 
 fn wait_for(mut ready: impl FnMut() -> bool) {
