@@ -345,16 +345,19 @@ internal sealed partial class ChatPage
         ResizeViewer();
         _imageDialog = dialog;
         var revision = 0;
+        var hasSelection = false;
         CancellationTokenSource? selectionCancellation = null;
         string? currentFile = null;
         bool Current() => owner == ImageOwner() && _imageDialog == dialog && IsLoaded;
         async Task Show(int next)
         {
+            if (!Current() || next < 0 || next >= images.Length || (hasSelection && next == selected)) return;
+            hasSelection = true;
             selectionCancellation?.Cancel();
             var selection = CancellationTokenSource.CreateLinkedTokenSource(viewerCancellation.Token);
             selectionCancellation = selection;
             _imageViewerRevision++;
-            selected = Math.Clamp(next, 0, images.Length - 1);
+            selected = next;
             var item = images[selected]; var request = ++revision;
             currentFile = null; _imageViewedFile = null; image.Source = null;
             var position = L10n.Text("common.chat.images.position", (selected + 1).ToString(), images.Length.ToString());
@@ -395,8 +398,8 @@ internal sealed partial class ChatPage
         Action(L10n.Text("common.save"), () => { if (currentFile is string file && Current()) _ = SaveImageFileAsync(file, images[selected], owner); });
         dialog.PreviewKeyDown += (_, args) => {
             if (args.Key == VirtualKey.Escape) { dialog.Hide(); args.Handled = true; }
-            else if (args.Key == VirtualKey.Left) { _ = Show(selected - 1); args.Handled = true; }
-            else if (args.Key == VirtualKey.Right) { _ = Show(selected + 1); args.Handled = true; }
+            else if (args.Key == VirtualKey.Left && viewer.ZoomFactor <= 1.001f) { _ = Show(selected - 1); args.Handled = true; }
+            else if (args.Key == VirtualKey.Right && viewer.ZoomFactor <= 1.001f) { _ = Show(selected + 1); args.Handled = true; }
         };
         try { _ = Show(selected); await dialog.ShowAsync(); }
         finally { viewerRoot.Changed -= ViewerRootChanged; viewerCancellation.Cancel(); revision++; image.Source = null; if (_imageDialog == dialog) { _imageDialog = null; _imageViewedFile = null; _imageConsent?.TrySetResult(false); _imageConsentHost = null; } }
