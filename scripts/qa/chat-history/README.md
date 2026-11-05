@@ -58,7 +58,9 @@ for a Mac-only check.
 `account-server.cjs` provides the loopback account routes needed for native
 relay setup. It uses the website's account functions and the relay fixture's
 in-memory database. Run `node scripts/tests/chat-history-relay.cjs` to check
-its HTTP pairing, authentication, registration and token minting. This adapter
+its HTTP pairing, device-code approval, authentication, registration and token
+minting. The controller service approves device codes against its disposable
+account, so native QA apps can use their normal device login calls. This adapter
 is not yet connected to the native app runner; that runner still tests direct
 connections only.
 

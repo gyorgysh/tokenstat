@@ -2,7 +2,7 @@
 // Loopback-only adapter for the native fixture's in-memory account service.
 const http = require('node:http');
 
-async function createAccountServer(sync, account) {
+async function createAccountServer(sync, account, { approveDeviceCodes = false } = {}) {
   const server = http.createServer(async (request, response) => {
     const send = (status, body) => {
       response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -21,6 +21,22 @@ async function createAccountServer(sync, account) {
         chunks.push(chunk);
       }
       const input = bytes ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+      if (route === 'POST /api/v1/device/code') {
+        const origin = `http://127.0.0.1:${server.address().port}`;
+        const result = sync.createDeviceCode(input.machine, origin, input.kind);
+        if (result.error) return send(result.error.status, result.error);
+        // Only the disposable native service opts in. No approval route is
+        // exposed; the production account function still binds the device.
+        if (approveDeviceCodes) {
+          const failure = sync.approveDeviceCode(account, result.body.user_code);
+          if (failure) return send(400, { error: failure });
+        }
+        return send(200, result.body);
+      }
+      if (route === 'POST /api/v1/device/token') {
+        const result = sync.pollDeviceToken(input.device_code);
+        return send(result.status, result.body);
+      }
       if (route === 'POST /api/v1/device/redeem') {
         const result = sync.redeemPairingCode(input.code, input.machine);
         return send(result.status, result.body);

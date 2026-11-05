@@ -39,7 +39,7 @@ async function serveNative(root) {
   const account = 'u_native_history_fixture';
   db.run("INSERT INTO users (id,tier,created_at) VALUES (?,'free',?)", account, new Date().toISOString());
   const { createAccountServer } = require('../qa/chat-history/account-server.cjs');
-  const api = await createAccountServer(sync, account);
+  const api = await createAccountServer(sync, account, { approveDeviceCodes: true });
   const relay = createTunnelServer({ port: 0, authenticate: makeAuthenticator({ db }),
     recheckEntitlement: makeEntitlementRecheck({ db }), logger: { info() {}, log() {}, error() {}, warn() {} } });
   try {
@@ -95,6 +95,19 @@ async function main() {
     assert.equal((await call('PUT', '/api/v1/machines/me', { machine: bootstrapMachine,
       public_identity: publicKey(63), label: 'Native history bootstrap', kind: 'client' }, token)).status, 200);
     assert.equal((await call('POST', '/api/v1/tunnel/token', { machine: bootstrapMachine }, token)).status, 200);
+    assert.equal((await call('POST', '/api/v1/device/code', { machine: 'invalid' })).status, 400);
+    const device = await call('POST', '/api/v1/device/code', { machine: 'm_0123456789abcde4', kind: 'client' });
+    assert.equal(device.status, 200);
+    assert.equal(device.body.verification_uri, api.origin + '/link');
+    const pending = await call('POST', '/api/v1/device/token', { device_code: device.body.device_code });
+    assert.equal(pending.status, 428);
+    assert.equal(pending.body.error, 'authorization_pending');
+    assert.equal(sync.approveDeviceCode(bootstrapAccount, device.body.user_code), null);
+    const approved = await call('POST', '/api/v1/device/token', { device_code: device.body.device_code });
+    assert.equal(approved.status, 200);
+    assert.equal(sync.authToken({ headers: { authorization: `Bearer ${approved.body.token}` } }).user?.id, bootstrapAccount);
+    assert.equal((await call('POST', '/api/v1/device/token', { device_code: device.body.device_code })).status, 400);
+    console.log('Loopback device login: pending approval, account binding and single-use token passed.');
     console.log('Loopback account HTTP pairing, authentication, registration and relay mint passed.');
   } finally { await api.close(); }
 
